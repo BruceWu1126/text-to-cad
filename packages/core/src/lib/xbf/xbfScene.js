@@ -795,6 +795,7 @@ export function createXbfScene(THREE, document) {
       lastLook = next ? { ...next, authored: false } : null;
       if (regular) {
         lastLook.colorPower = lookSurface.colorPower;
+        lastLook.brdf = lookSurface.brdf;
         lastLook.materialSettings = { ...next.materialSettings, ...lookSurface.materialSettings };
       }
       surfaceStyle = next?.surface?.style === "hidden" || next?.surface?.style === "off" ? next.surface.style : "shaded";

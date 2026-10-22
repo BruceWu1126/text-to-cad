@@ -215,7 +215,10 @@ record (`render/look.py`) that the OCCT prototype (`render/occt.py`, its finishe
 `render/finish.py`) draws by too: one white directional key at radiance 4 travelling
 (-0.35, 0.55, -1), and one environment lighting every surface at 0.5, the viewer's neutral studio
 baked as a 512 x 256 Radiance image beside the record (`render/studio.hdr`); no ambient term, fill,
-shadow, exposure or tone curve: the sum is clamped and sRGB-encoded. A part without a material,
+shadow, exposure or tone curve: the sum is clamped and sRGB-encoded. Every surface answers that
+light as OCCT's PBR program does (the record's `brdf`, `occt`): single scattering, Schlick-GGX
+geometry, the roughness as given, which the viewer draws in place of three's own physical model
+(the bundled `@text-to-cad/core`'s `lib/viewer/surfaceBrdf.js`). A part without a material,
 and every fill (Parts), wears a plain dielectric finish (roughness 0.5) over its colour, linear,
 squared, which keeps the saturated colours of OCCT's old Phong look. A part with a material wears
 its finish in Solid and Shaded on both renderers, its colour as authored, reflecting that

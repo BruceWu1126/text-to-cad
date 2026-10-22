@@ -1,4 +1,5 @@
 import { syncMaterialClipPlanes } from "./clipPlane.js";
+import { useSurfaceBrdf } from "./surfaceBrdf.js";
 import { resolveMaterialFillBaseColor, shapeSourceColor } from "./surfaceMaterials.js";
 
 // The viewer's surface LOOK over a scene somebody else authored: the Display
@@ -16,9 +17,12 @@ import { resolveMaterialFillBaseColor, shapeSourceColor } from "./surfaceMateria
 //     authored: boolean,    true: keep each material's own finish, sidedness and
 //                           source colours (photographic Render)
 //     surface: { style: "shaded" | "flat", opacity },
-//     colorPower?: number } the colour of every surface without a finish of its own, and
+//     colorPower?: number,  the colour of every surface without a finish of its own, and
 //                           of every fill, linear, raised to this power (1: as written,
 //                           unless a scene's own look says otherwise: `lib/xbf/xbfLook.js`)
+//     brdf?: string }       the surface model the lit surfaces are drawn by (a name of
+//                           `surfaceBrdf.js`'s `SURFACE_BRDFS`); three's own when absent,
+//                           and in an authored look always
 //
 // A material marked `userData.cadAuthoredFinish` (a finish its file authored, which the
 // scene asks to keep) keeps it in the shaded looks too -- opaque, its source colour shown --
@@ -177,7 +181,8 @@ export function createSurfaceLook(THREE, root) {
           target.emissiveIntensity = clamp01(settings.emissiveIntensity);
         }
       }
-      const programChanged = ["map", "vertexColors", "side", "transparent"].some((key) => target[key] !== next[key]);
+      const brdfChanged = !flat && target !== lit && useSurfaceBrdf(THREE, target, look?.brdf ?? null);
+      const programChanged = brdfChanged || ["map", "vertexColors", "side", "transparent"].some((key) => target[key] !== next[key]);
       Object.assign(target, next);
       target.color.copy(color);
       // Clip takes the normal base hue, before selection/hover ink is applied.

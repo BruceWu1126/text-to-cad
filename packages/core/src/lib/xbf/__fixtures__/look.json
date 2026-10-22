@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "backdrop": "#f0f4f9",
   "lights": [
     {
@@ -22,6 +22,7 @@
     "roughness": 0.5,
     "ior": 1.5
   },
+  "brdf": "occt",
   "tone": "clamp",
   "exposure": 0.0,
   "fill": "#b6c4ce",

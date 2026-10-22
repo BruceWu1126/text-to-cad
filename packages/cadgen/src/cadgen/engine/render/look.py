@@ -23,10 +23,16 @@ part with a material is its colour as authored and its finish: metallic, roughne
 and alpha, which both renderers draw alike. What OCCT's raster has no term for, the viewer draws
 and OCCT approximates (``finish.py``): a clear coat (OCCT: the base's roughness eased toward the
 coat's), anisotropy (OCCT: none) and transmission (OCCT: opacity over the colour tinted by the
-transmission colour). OCCT 7.9's PBR program (``occt_phong-pbr``, read from the GLSL it compiles)
-per light: ``((1 - F) (1 - metallic) base / pi + D G F / 4) * intensity * max(0, N.L)`` (GGX ``D``,
-Schlick-GGX ``G`` with ``k = (r + 1)^2 / 8``, Schlick ``F``); and from the environment
-``ambient * ((1 - F_r) (1 - metallic) base * SH(N) + (F0 A + B) * prefiltered(R, r))``.
+transmission colour).
+
+**The surface model** (``brdf = "occt"``) is OCCT 7.9's PBR program (``occt_phong-pbr``, read from
+the GLSL it compiles), which the viewer draws too (core's ``lib/viewer/surfaceBrdf.js``): per light
+``((1 - F) (1 - metallic) base / pi + D G F / 4) * intensity * max(0, N.L)`` (GGX ``D`` of
+``alpha = r^2``, Schlick-GGX ``G = 1 / ((N.V (1 - k) + k) (N.L (1 - k) + k))`` with
+``k = (r + 1)^2 / 8``, Schlick ``F`` at V.H from ``F0 = mix(F0(ior), base, metallic)``); and from
+the environment ``ambient * ((1 - F_r) (1 - metallic) base * SH(N) + (F0 A + B) * prefiltered(R, r))``
+(``F_r`` Schlick at N.V toward ``max(1 - r, F0)``). Single scattering: no multiple-scattering
+energy is added back, as three's own physical model adds it.
 
 **The picture** is the linear sum clamped and sRGB-encoded (``tone = "clamp"``): OCCT's raster
 applies no tone curve and no exposure. Its Filmic curve (``Graphic3d_ToneMappingMethod_Filmic``) is
@@ -105,6 +111,7 @@ class Look:
     environment: Environment
     colour_power: float
     plain: Finish
+    brdf: str
     tone: str
     exposure: float
     fill: str
@@ -113,7 +120,7 @@ class Look:
     edge_width: float
     modes: tuple[Mode, ...]
     grid: Grid
-    version: int = field(default=2)
+    version: int = field(default=3)
 
     @property
     def environment_path(self) -> Path:
@@ -136,7 +143,7 @@ class Look:
             "environment": {"url": "/api/look/environment", "intensity": self.environment.intensity},
             "colourPower": self.colour_power,
             "plain": {"metallic": self.plain.metallic, "roughness": self.plain.roughness, "ior": self.plain.ior},
-            "tone": self.tone, "exposure": self.exposure, "fill": self.fill,
+            "brdf": self.brdf, "tone": self.tone, "exposure": self.exposure, "fill": self.fill,
             "palette": list(self.palette), "edges": {"colours": dict(self.edge_colours), "width": self.edge_width},
             "modes": {mode.name: {"faces": mode.faces, "edges": mode.edges, "opacity": mode.opacity,
                                   "palette": mode.palette} for mode in self.modes},
@@ -151,6 +158,7 @@ LOOK = Look(
     environment=Environment("studio.hdr", 0.5),
     colour_power=2.0,
     plain=Finish(metallic=0.0, roughness=0.5, ior=1.5),
+    brdf="occt",
     tone="clamp",
     exposure=0.0,
     fill="#b6c4ce",

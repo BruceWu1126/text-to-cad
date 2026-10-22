@@ -57,6 +57,7 @@ class LookTest(unittest.TestCase):
         self.assertEqual(LOOK.mode("xray").opacity, 0.22)
         self.assertEqual(LOOK.edge("feature"), "#253443")
         self.assertEqual(served["tone"], "clamp", "OCCT's raster applies no tone curve")
+        self.assertEqual(served["brdf"], "occt", "the surfaces answer light as OCCT's PBR program does")
 
 
 if __name__ == "__main__":

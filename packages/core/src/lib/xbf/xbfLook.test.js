@@ -28,15 +28,16 @@ function tinyRadiance() {
 test("the look as served: every field read, frozen; another version or a missing field refused by name", () => {
   const look = parseXbfLook(SERVED);
   assert.equal(Object.isFrozen(look), true);
-  assert.deepEqual([look.backdrop, look.colourPower, look.tone, look.exposure], ["#f0f4f9", 2, "clamp", 0]);
+  assert.deepEqual([look.backdrop, look.colourPower, look.brdf, look.tone, look.exposure], ["#f0f4f9", 2, "occt", "clamp", 0]);
   assert.deepEqual(look.lights.map(light => [light.name, light.direction, light.intensity]), [["key", [-0.35, 0.55, -1], 4]]);
   assert.deepEqual(look.environment, { url: "/api/look/environment", intensity: 0.5 });
   assert.deepEqual(look.plain, { metallic: 0, roughness: 0.5, ior: 1.5 });
   assert.deepEqual(look.modes.xray, { faces: "lit", edges: "all", opacity: 0.22, palette: false });
-  assert.throws(() => parseXbfLook({ ...SERVED, version: 1 }), /version 1; this viewer reads 2/);
+  assert.throws(() => parseXbfLook({ ...SERVED, version: 1 }), /version 1; this viewer reads 3/);
   assert.throws(() => parseXbfLook({ ...SERVED, lights: [] }), /no lights/);
   assert.throws(() => parseXbfLook({ ...SERVED, environment: null }), /no environment/);
   assert.throws(() => parseXbfLook({ ...SERVED, backdrop: "blue" }), /backdrop is a #rrggbb colour/);
+  assert.throws(() => parseXbfLook({ ...SERVED, brdf: "phong" }), /brdf is one of occt, not "phong"/);
 });
 
 test("the environment's image: RGBE decoded as the engine decodes it, the bottom row first, fetched with its look", async () => {
@@ -73,9 +74,10 @@ test("the rig: the key at the look's intensity, from where it comes; the image a
   assert.equal(xbfLookRig(parsed).environment, null, "a look read without its image lights with none");
 });
 
-test("a surface under the look: colours squared, nothing graded, the plain finish and no lift", () => {
+test("a surface under the look: colours squared, nothing graded, the plain finish and no lift, OCCT's surface model", () => {
   const surface = xbfLookSurface(parseXbfLook(SERVED));
   assert.equal(surface.colorPower, 2);
+  assert.equal(surface.brdf, "occt");
   assert.deepEqual({ ...surface.materialSettings }, { saturation: 1, contrast: 1, brightness: 1, tintStrength: 0, roughness: 0.5,
     metalness: 0, clearcoat: 0, clearcoatRoughness: 0, envMapIntensity: 1, emissiveIntensity: 0 });
 });

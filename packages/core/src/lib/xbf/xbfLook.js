@@ -1,3 +1,5 @@
+import { SURFACE_BRDFS } from "../viewer/surfaceBrdf.js";
+
 // The engine's look of the regular display modes (`GET /api/look` and its environment image,
 // `GET /api/look/environment`: `cadgen/engine/render/look.py`), and what an engine document's scene
 // draws by it in those modes: the rig a stage lights it with in place of the theme's
@@ -7,12 +9,14 @@
 //
 // The look is physically based, in the terms three's physical lights already use: its key is a
 // directional light of the look's intensity, its environment lights every surface at the look's
-// intensity, and the sum is clamped and sRGB-encoded with no tone curve. A part without a material
-// (and every fill) wears the look's plain finish over its colour raised to the look's power; a part
-// with one wears its own finish. The OCCT prototype draws the same record (`render/finish.py`).
+// intensity, every surface answers both by the look's surface model (`brdf`: OCCT's PBR program,
+// `../viewer/surfaceBrdf.js`), and the sum is clamped and sRGB-encoded with no tone curve. A part
+// without a material (and every fill) wears the look's plain finish over its colour raised to the
+// look's power; a part with one wears its own finish. The OCCT prototype draws the same record
+// (`render/finish.py`).
 
 const HEX = /^#[0-9a-f]{6}$/i;
-const LOOK_VERSION = 2;
+const LOOK_VERSION = 3;
 // The image's frame to three's: its rows run from +Z down, which three's equirectangular lookup
 // reads as +Y; turning the lookup a quarter about X sends each of the document's directions to its
 // texel (`scene.environmentRotation`).
@@ -27,6 +31,13 @@ function number(value, name) {
 function colour(value, name) {
   if (!HEX.test(String(value))) throw new Error(`the engine's look's ${name} is a #rrggbb colour, not ${JSON.stringify(value)}`);
   return String(value).toLowerCase();
+}
+
+function brdf(value) {
+  if (!Object.hasOwn(SURFACE_BRDFS, value)) {
+    throw new Error(`the engine's look's brdf is one of ${Object.keys(SURFACE_BRDFS).join(", ")}, not ${JSON.stringify(value)}`);
+  }
+  return value;
 }
 
 /**
@@ -104,6 +115,7 @@ export function parseXbfLook(json) {
     colourPower: number(json.colourPower, "colourPower"),
     plain: Object.freeze({ metallic: number(json.plain?.metallic, "plain.metallic"),
       roughness: number(json.plain?.roughness, "plain.roughness"), ior: number(json.plain?.ior, "plain.ior") }),
+    brdf: brdf(json.brdf),
     tone: String(json.tone || ""),
     exposure: number(json.exposure, "exposure"),
     fill: colour(json.fill, "fill"),
@@ -161,11 +173,12 @@ export function xbfLookRig(look) {
  * colour of a surface without a finish of its own, and of every fill, raised to the look's power,
  * every colour ungraded and untinted; and where no finish of the document's is kept (no material,
  * a fill, X-ray) the look's plain finish, with no clear coat and no lift. Every surface reflects
- * the rig's environment.
+ * the rig's environment and is drawn by the look's surface model.
  */
 export function xbfLookSurface(look) {
   return Object.freeze({
     colorPower: look.colourPower,
+    brdf: look.brdf,
     materialSettings: Object.freeze({
       saturation: 1, contrast: 1, brightness: 1, tintStrength: 0,
       roughness: look.plain.roughness, metalness: look.plain.metallic,

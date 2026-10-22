@@ -45,7 +45,9 @@ The stages keep ownership narrow:
   of the theme's lights, its environment the scene's (one PMREM per image and renderer, which every
   surface reflects, an authored finish in Solid and Shaded among them), its tone curve three's
   `CustomToneMapping` (`lib/viewer/sceneRig.js`, which the viewer's viewport puts up the same way);
-  every other scene keeps the theme's rig.
+  every other scene keeps the theme's rig. Such a scene's surface look may name a surface model
+  too (`brdf`, `lib/viewer/surfaceBrdf.js`): an engine document's lit surfaces answer light as
+  OCCT's PBR program does, which its look is defined by, in place of three's own physical model.
 - `captureModel` owns deterministic snapshot outputs without filesystem writes.
 
 The CAD skill's Python snapshot CLI remains responsible for job parsing, path

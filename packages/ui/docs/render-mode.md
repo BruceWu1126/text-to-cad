@@ -80,8 +80,9 @@ softbox environment; the other modes use neutral CAD lighting, but for an engine
 the look's environment and under its own tone curve. Authored finishes show in Solid and Shaded:
 a file's reflect a small neutral environment; an engine document's reflect its look's
 environment, the studio image its engine serves beside the look (`GET /api/look/environment`),
-which lights every surface of the document and which the engine's OCCT stills reflect too. X-ray
-and Parts draw a plain finish. Authored materials are read-only. Color
+which lights every surface of the document and which the engine's OCCT stills reflect too, and
+every surface of it answers light as OCCT's PBR program does (core's `lib/viewer/surfaceBrdf.js`,
+the look's `brdf`), not by three's own physical model. X-ray and Parts draw a plain finish. Authored materials are read-only. Color
 overrides are presentation settings, not edits to the model or its material
 assignments.
 
