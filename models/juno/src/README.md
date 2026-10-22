@@ -51,9 +51,10 @@ and every other link hangs from the pelvis. Soles stand at z = -874.6 as built.
 ## Motions
 
 The seven clips of the old `ANIMATION_JS` are motions of `juno`, with their old
-names, durations and loops: `danceLoop` 3.2 s, `handstandLoop` 4.6 s, `kickLoop`
-2.8 s, `jumpLoop` 1.8 s, `runLoop` 0.8 s, `strideLoop` 1.9 s and `walkLoop` 1.5 s,
-each `loop="loop"`. `lib/gaits.py` is the old module's gait functions in Python,
+names and durations: `danceLoop` 3.2 s, `handstandLoop` 4.6 s, `kickLoop`
+2.8 s, `jumpLoop` 1.8 s, `runLoop` 0.8 s, `strideLoop` 1.9 s and `walkLoop` 1.5 s.
+The old clips looped; a motion carries no loop (AP242 has none: a player repeats a
+clip), and each of these ends on the pose it starts from. `lib/gaits.py` is the old module's gait functions in Python,
 the IK included (the two-link leg IK, the run's toe pivot, the jump's reach clamp,
 the dance's kicked-out leg, the handstand's keyed folds and its press-hip
 bisection), with the published defaults the clips baked in (lift, swing and sway

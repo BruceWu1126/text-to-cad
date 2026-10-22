@@ -199,7 +199,7 @@ def juno():
     for name, pose in chain.named_poses_deg().items():
         configuration(robot, name, **pose)
     for name, (gait, duration) in gaits.CLIPS.items():
-        motion(robot, name, _over_time(name, gait, duration), duration=duration, loop="loop")
+        motion(robot, name, _over_time(name, gait, duration), duration=duration)
     return robot
 
 
