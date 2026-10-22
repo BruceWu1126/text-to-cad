@@ -149,11 +149,12 @@ share of a dark color than of a light one). It writes the clear's alpha, premult
 as three's clear is, so a half-transparent background keeps its gradient; at alpha 0 it
 is not drawn, and a caller that renders with `scene.background` taken away and a clear
 alpha of 0 (a thumbnail) gets nothing of it. The floor's mirrored draw leaves it out.
-The floor is independent of background alpha. Render's stands at authored
-Z=0 (`placement: "origin"`, `RENDER_FLOOR_PLACEMENT`, the Render recipe's backdrop
-default too); `placement: "lowest"` follows the current model minimum without moving
-geometry or lighting. Its double-sided plane uses one transparency pass,
-keeping geometry below the origin visible. Depth fitting includes the actual floor elevation;
+The floor is independent of background alpha. Render's stands at the model's
+lowest point (`placement: "lowest"`, `RENDER_FLOOR_PLACEMENT`, the Render recipe's
+backdrop default too, and the stills' Preview floor): it follows the current model
+minimum without moving geometry or lighting. `placement: "origin"` pins it to authored
+Z=0 instead. Its double-sided plane uses one transparency pass, keeping geometry below
+the origin visible. Depth fitting includes the actual floor elevation;
 orthographic views can use a signed near plane when the floor crosses the eye.
 
 Lighting quality is `preview` or `final`, mapping to standard/high scene policy.

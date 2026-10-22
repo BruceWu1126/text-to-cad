@@ -71,7 +71,7 @@ HORIZON = (0.70, 0.71, 0.73)
 # corners (a dark and a light colour's share) and above the horizon (studioBackdrop.js);
 BACKDROP = "#ffffff"
 BACKDROP_LIFT, BACKDROP_SHADE, BACKDROP_WALL = 0.07, (0.38, 0.1), 0.6
-# the floor at the document's Z=0, #e7e7e5 at 60%, full to 1.6 of the model's reach and gone at 6.
+# the floor at the model's lowest point, #e7e7e5 at 60%, full to 1.6 of the model's reach and gone at 6.
 # OCCT draws it unlit in the colour the viewer's Preview draws it (its #e7e7e5 lit by the studio and
 # tone-mapped), read off the viewer's own Preview pictures;
 FLOOR_COLOUR = "#ececea"
@@ -829,13 +829,20 @@ class Scene:
 
     def _studio_place(self) -> dict[str, Any]:
         """Where the viewer's studio puts its floor and its shadow (``updateGround``): the floor at
-        the document's Z=0, centred under the model at rest, its reach the larger of the model's
-        radius and its footprint's half-diagonal; the shadow's square ``reach`` of the model's
-        height past its footprint, occlusion reaching ``height`` of that height above the floor."""
+        the model's lowest point as it stands (Preview's default placement, core's
+        ``RENDER_FLOOR_PLACEMENT``), centred under the model at rest, its reach the larger of the
+        model's radius and its footprint's half-diagonal; the shadow's square ``reach`` of the
+        model's height past its footprint, occlusion reaching ``height`` of that height above the
+        floor."""
+        from cadgen.engine.render.explode import placed_box
+
         low, high = self.rest_bounds()
         span = high - low
         radius = float(np.linalg.norm(span)) / 2 or 1.0
-        floor = 0.0
+        # The lowest point of the parts' boxes where they stand now, as the viewer's scene measures
+        # its bounds (three's ``Box3.applyMatrix4``, ``placed_box``): a pose or Explode moves it.
+        floor = float(min(placed_box(self.boxes[i["prototype"]], self.placement(n))[0][2]
+                          for n, i in enumerate(self.structure["instances"]) if i["prototype"] in self.boxes))
         above = max(float(high[2]) - floor, radius * 0.05)
         half_span = float(max(span[0], span[1])) / 2
         return {"centre": ((low[0] + high[0]) / 2, (low[1] + high[1]) / 2), "z": floor, "radius": radius,

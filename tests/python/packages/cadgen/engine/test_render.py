@@ -348,6 +348,28 @@ class HeldTest(unittest.TestCase):
         with self.assertRaisesRegex(SnapshotRefused, "--pose: .*hinge"):
             self.draw(display={}, pose={"hinge": 400})
 
+    def test_preview_stands_its_floor_at_the_model_s_lowest_point(self) -> None:
+        """Preview's floor is under the model wherever it was authored (the viewer's default
+        placement, Lowest point): the bench's block reaches 15 below Z=0, and the floor is there,
+        not at the document's origin; a pose that moves the lowest point moves the floor with it."""
+        from cadgen.engine.render.explode import placed_box
+
+        def lowest(scene) -> float:
+            return min(placed_box(scene.boxes[i["prototype"]], scene.placement(n))[0][2]
+                       for n, i in enumerate(scene.structure["instances"]) if i["prototype"] in scene.boxes)
+
+        self.draw(display={}, preview=True)
+        scene = self.held.scenes[True]
+        rest = scene._studio_place()["z"]
+        self.assertAlmostEqual(rest, lowest(scene), places=6)
+        self.assertLessEqual(rest, -15.0 + 1e-6, "the block's underside, not the document's Z=0")
+        floors = {rest}
+        for hinge in (-90, 90):
+            self.draw(display={}, preview=True, pose={"hinge": hinge})
+            self.assertAlmostEqual(scene._studio_place()["z"], lowest(scene), places=6, msg=f"hinge {hinge}")
+            floors.add(round(scene._studio_place()["z"], 6))
+        self.assertGreater(len(floors), 1, "a pose that moves the lowest point moves the floor")
+
     def test_preview_keeps_its_studio_and_its_look_between_pictures(self) -> None:
         first = pixels(self.draw(display={}, preview=True)[0])
         scene = self.held.scenes[True]
