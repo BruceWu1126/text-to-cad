@@ -31,10 +31,10 @@ every pose and motion path.
 `links()` is the script's one `@memo` function: all 17 links (~1,650 kernel calls,
 ~3.8 s). The hand and each link model call it, so a build makes every link once:
 the first call runs it, or replays it when no edit reaches a builder, and every
-other call is a new placement of its result. Measured cold: 8.7 s with it, 12.5 s
+other call is a new placement of its result. Measured cold: 7.7 s with it, 11.1 s
 without it, when each link model builds its own link (those calls are misses, not
 memo hits). An edit to a builder runs it again (an edit of the thumb's tip radius:
-2.4 s, 18 misses), and every xbf is written again, its closure having changed; each
+2.2 s, 18 misses), and every xbf is written again, its closure having changed; each
 3MF keeps its bytes unless its mesh changed.
 
 ## Kinematics

@@ -41,8 +41,8 @@ changes the engine asks for:
   `DETAIL_BOLTS` is the constant `False` the vehicle always built with.
 - Three scripts became one, so the three models share one worker and its memo.
 
-Two `@memo` stages, measured (cold, the three models): 9.3 s with none, 6.7 s with
-the first, 6.1 s with both.
+Two `@memo` stages, measured (cold, the three models): 7.1 s with none, 5.7 s with
+the first, 5.0 s with both.
 
 - `engine_prototype()` (~400 kernel calls): every cluster calls it. Without the marker
   each of its calls is built again (its features are named apart, so its kernel calls
@@ -53,7 +53,7 @@ the first, 6.1 s with both.
   is a placement of the stack's (13 kernel calls of its own: the guide rods).
 
 An edit to one group (the nose attach block's height) misses 6 calls per vehicle and
-replays the engine; reverted, the files are the cold build's bytes.
+replays the engine (1.8 s); reverted, the files are the cold build's bytes.
 
 ## Not ported
 
