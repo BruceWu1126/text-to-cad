@@ -109,7 +109,7 @@ def _smoothstep(s: float) -> float:
 def clip_pose(clip: dict, t: float) -> list[float]:
     """The joint values (MATES order) at ``t`` seconds into ``clip``: the old page's sampling.
     Each segment eases with smoothstep unless the key it arrives at is marked linear, and a low
-    breathing drift rides on top, an integer number of cycles so the loop closes."""
+    breathing drift rides on top, an integer number of cycles so the clip ends where it starts."""
     duration = clip["duration"]
     t = t % duration
     keys = clip["keys"]
@@ -132,12 +132,13 @@ def add_poses(arm, kinematics):
 
 
 def add_clips(arm, kinematics):
-    """The three clips as motions of ``arm``, looping, with their old names and durations."""
+    """The three clips as motions of ``arm`` with their old names and durations (no loop: a
+    player repeats a clip, and each ends on the pose it starts from)."""
     for name, clip in beat_table(kinematics).items():
         def at(t, clip=clip):
             return dict(zip(MATES.values(), clip_pose(clip, t)))
 
-        motion(arm, name, at, duration=clip["duration"], loop="loop")
+        motion(arm, name, at, duration=clip["duration"])
     return arm
 
 

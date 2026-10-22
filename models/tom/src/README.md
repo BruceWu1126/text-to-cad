@@ -116,8 +116,9 @@ replays from the worker's memory (1 s), and a restarted daemon takes the file wh
   Their kinematics functions stay as data, the chain each revision layer derives the next
   one's mates from (`lib/current_arm_parts.configuration`), and `tom`'s final mates are the
   joints. A stage's own poses and limits are read by nothing but that chain.
-- Clips: the three clips are motions of `tom` with their old names and durations, each
-  looping as before: `showcase` 23.4 s, `wrist` 15.2 s and `approach` 28.65 s. Their beat
+- Clips: the three clips are motions of `tom` with their old names and durations (they
+  looped; a motion carries no loop, AP242 having none, and a player repeats a clip; each
+  ends on the pose it starts from): `showcase` 23.4 s, `wrist` 15.2 s and `approach` 28.65 s. Their beat
   table, control/ik/showcase.py's validated performances, is committed data again
   (`lib/showcase_keys.json`, unchanged), and `lib/tom_showcase.py` plays it as the old page
   did: a function of time over the seven joints (the table's URDF names map to the mates'
