@@ -1,0 +1,620 @@
+{
+ "name": "finger",
+ "path": "finger.xbf",
+ "version": "1-1",
+ "units": "mm",
+ "prototypes": [
+  {
+   "index": 0,
+   "key": "986af1e177de165f2e692dda4eee7f46",
+   "name": "base",
+   "color": null,
+   "faceNames": {
+    "1": "f:finger.bone.1",
+    "2": "f:finger.bone.2",
+    "3": "f:finger.bone.3",
+    "4": "f:finger.bone.4",
+    "5": "f:finger.bone.5",
+    "6": "f:finger.bone.6"
+   },
+   "edgeNames": {
+    "1": "e:finger.bone.1",
+    "2": "e:finger.bone.2",
+    "3": "e:finger.bone.3",
+    "4": "e:finger.bone.4",
+    "5": "e:finger.bone.5",
+    "6": "e:finger.bone.6",
+    "7": "e:finger.bone.7",
+    "8": "e:finger.bone.8",
+    "9": "e:finger.bone.9",
+    "10": "e:finger.bone.10",
+    "11": "e:finger.bone.11",
+    "12": "e:finger.bone.12"
+   },
+   "vertexNames": {
+    "1": "v:finger.bone.1",
+    "2": "v:finger.bone.2",
+    "3": "v:finger.bone.3",
+    "4": "v:finger.bone.4",
+    "5": "v:finger.bone.5",
+    "6": "v:finger.bone.6",
+    "7": "v:finger.bone.7",
+    "8": "v:finger.bone.8"
+   },
+   "faceColors": {},
+   "material": null,
+   "faceMaterials": {}
+  },
+  {
+   "index": 1,
+   "key": "12670f5a3588f45c7fcea30c18f400c3",
+   "name": "proximal",
+   "color": null,
+   "faceNames": {
+    "1": "f:finger.bone.1",
+    "2": "f:finger.bone.2",
+    "3": "f:finger.bone.3",
+    "4": "f:finger.bone.4",
+    "5": "f:finger.bone.5",
+    "6": "f:finger.bone.6"
+   },
+   "edgeNames": {
+    "1": "e:finger.bone.1",
+    "2": "e:finger.bone.2",
+    "3": "e:finger.bone.3",
+    "4": "e:finger.bone.4",
+    "5": "e:finger.bone.5",
+    "6": "e:finger.bone.6",
+    "7": "e:finger.bone.7",
+    "8": "e:finger.bone.8",
+    "9": "e:finger.bone.9",
+    "10": "e:finger.bone.10",
+    "11": "e:finger.bone.11",
+    "12": "e:finger.bone.12"
+   },
+   "vertexNames": {
+    "1": "v:finger.bone.1",
+    "2": "v:finger.bone.2",
+    "3": "v:finger.bone.3",
+    "4": "v:finger.bone.4",
+    "5": "v:finger.bone.5",
+    "6": "v:finger.bone.6",
+    "7": "v:finger.bone.7",
+    "8": "v:finger.bone.8"
+   },
+   "faceColors": {},
+   "material": null,
+   "faceMaterials": {}
+  },
+  {
+   "index": 2,
+   "key": "3b7a6c23130867150bbb7d88c432969f",
+   "name": "middle",
+   "color": null,
+   "faceNames": {
+    "1": "f:finger.bone.1",
+    "2": "f:finger.bone.2",
+    "3": "f:finger.bone.3",
+    "4": "f:finger.bone.4",
+    "5": "f:finger.bone.5",
+    "6": "f:finger.bone.6"
+   },
+   "edgeNames": {
+    "1": "e:finger.bone.1",
+    "2": "e:finger.bone.2",
+    "3": "e:finger.bone.3",
+    "4": "e:finger.bone.4",
+    "5": "e:finger.bone.5",
+    "6": "e:finger.bone.6",
+    "7": "e:finger.bone.7",
+    "8": "e:finger.bone.8",
+    "9": "e:finger.bone.9",
+    "10": "e:finger.bone.10",
+    "11": "e:finger.bone.11",
+    "12": "e:finger.bone.12"
+   },
+   "vertexNames": {
+    "1": "v:finger.bone.1",
+    "2": "v:finger.bone.2",
+    "3": "v:finger.bone.3",
+    "4": "v:finger.bone.4",
+    "5": "v:finger.bone.5",
+    "6": "v:finger.bone.6",
+    "7": "v:finger.bone.7",
+    "8": "v:finger.bone.8"
+   },
+   "faceColors": {},
+   "material": null,
+   "faceMaterials": {}
+  },
+  {
+   "index": 3,
+   "key": "a9a8fe084622c85b386104b77f98b775",
+   "name": "distal",
+   "color": null,
+   "faceNames": {
+    "1": "f:finger.bone.1",
+    "2": "f:finger.bone.2",
+    "3": "f:finger.bone.3",
+    "4": "f:finger.bone.4",
+    "5": "f:finger.bone.5",
+    "6": "f:finger.bone.6"
+   },
+   "edgeNames": {
+    "1": "e:finger.bone.1",
+    "2": "e:finger.bone.2",
+    "3": "e:finger.bone.3",
+    "4": "e:finger.bone.4",
+    "5": "e:finger.bone.5",
+    "6": "e:finger.bone.6",
+    "7": "e:finger.bone.7",
+    "8": "e:finger.bone.8",
+    "9": "e:finger.bone.9",
+    "10": "e:finger.bone.10",
+    "11": "e:finger.bone.11",
+    "12": "e:finger.bone.12"
+   },
+   "vertexNames": {
+    "1": "v:finger.bone.1",
+    "2": "v:finger.bone.2",
+    "3": "v:finger.bone.3",
+    "4": "v:finger.bone.4",
+    "5": "v:finger.bone.5",
+    "6": "v:finger.bone.6",
+    "7": "v:finger.bone.7",
+    "8": "v:finger.bone.8"
+   },
+   "faceColors": {},
+   "material": null,
+   "faceMaterials": {}
+  }
+ ],
+ "instances": [
+  {
+   "prototype": 0,
+   "path": "finger/base",
+   "matrix": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    -30.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": null
+  },
+  {
+   "prototype": 1,
+   "path": "finger/proximal",
+   "matrix": [
+    1.0,
+    0.0,
+    2.4492935982947064e-16,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    -2.4492935982947064e-16,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": null
+  },
+  {
+   "prototype": 2,
+   "path": "finger/middle",
+   "matrix": [
+    1.0,
+    0.0,
+    4.898587196589413e-16,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    -4.898587196589413e-16,
+    0.0,
+    1.0,
+    0.0,
+    40.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": null
+  },
+  {
+   "prototype": 3,
+   "path": "finger/distal",
+   "matrix": [
+    1.0,
+    0.0,
+    7.347880794884119e-16,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    -7.347880794884119e-16,
+    0.0,
+    1.0,
+    0.0,
+    65.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": null
+  }
+ ],
+ "tree": {
+  "name": "finger",
+  "children": [
+   {
+    "name": "base",
+    "prototype": 0,
+    "instance": 0
+   },
+   {
+    "name": "proximal",
+    "prototype": 1,
+    "instance": 1
+   },
+   {
+    "name": "middle",
+    "prototype": 2,
+    "instance": 2
+   },
+   {
+    "name": "distal",
+    "prototype": 3,
+    "instance": 3
+   }
+  ]
+ },
+ "kinematics": {
+  "schema": "cadgen.kinematics/1",
+  "name": "finger",
+  "ground": 0,
+  "links": [
+   {
+    "name": "base",
+    "instances": [
+     0
+    ],
+    "matrix": [
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     -30.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   {
+    "name": "proximal",
+    "instances": [
+     1
+    ],
+    "matrix": [
+     1.0,
+     0.0,
+     2.4492935982947064e-16,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     -2.4492935982947064e-16,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   {
+    "name": "middle",
+    "instances": [
+     2
+    ],
+    "matrix": [
+     1.0,
+     0.0,
+     4.898587196589413e-16,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     -4.898587196589413e-16,
+     0.0,
+     1.0,
+     0.0,
+     40.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   {
+    "name": "distal",
+    "instances": [
+     3
+    ],
+    "matrix": [
+     1.0,
+     0.0,
+     7.347880794884119e-16,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     -7.347880794884119e-16,
+     0.0,
+     1.0,
+     0.0,
+     65.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  ],
+  "pairs": [
+   {
+    "label": "mcp",
+    "type": "revolute",
+    "links": [
+     0,
+     1
+    ],
+    "frames": [
+     [
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      30.0,
+      0.0,
+      0.0,
+      1.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "limits": [
+     [
+      0.0,
+      90.0
+     ]
+    ],
+    "units": [
+     "deg"
+    ]
+   },
+   {
+    "label": "pip",
+    "type": "revolute",
+    "links": [
+     1,
+     2
+    ],
+    "frames": [
+     [
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      40.0,
+      0.0,
+      -9.797174393178826e-15,
+      1.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "limits": [
+     [
+      0.0,
+      100.0
+     ]
+    ],
+    "units": [
+     "deg"
+    ]
+   },
+   {
+    "label": "dip",
+    "type": "revolute",
+    "links": [
+     2,
+     3
+    ],
+    "frames": [
+     [
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      25.0,
+      0.0,
+      -1.224646799147353e-14,
+      1.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "limits": [
+     [
+      0.0,
+      70.0
+     ]
+    ],
+    "units": [
+     "deg"
+    ]
+   }
+  ],
+  "asBuilt": {
+   "mcp": 0.0,
+   "pip": 0.0,
+   "dip": 0.0
+  },
+  "configurations": {},
+  "couplings": {
+   "curl": {
+    "range": [
+     0.0,
+     1.0
+    ],
+    "lock": false,
+    "terms": [
+     [
+      "mcp",
+      0,
+      90.0
+     ],
+     [
+      "pip",
+      0,
+      100.0
+     ],
+     [
+      "dip",
+      0,
+      70.0
+     ]
+    ]
+   }
+  },
+  "motions": {
+   "grip": {
+    "duration": 1.5,
+    "ease": "cubic",
+    "loop": "pingpong",
+    "keys": [
+     {
+      "t": 0.0,
+      "values": {
+       "mcp": 0.0,
+       "pip": 0.0,
+       "dip": 0.0
+      }
+     },
+     {
+      "t": 1.5,
+      "values": {
+       "mcp": 90.0,
+       "pip": 100.0,
+       "dip": 70.0
+      }
+     }
+    ]
+   }
+  },
+  "loop": null,
+  "warnings": []
+ }
+}
