@@ -817,13 +817,53 @@ class PictureTest(FixtureTest):
         with self.assertRaisesRegex(SnapshotRefused, r"is a drawing.*display.mode does not apply.*light or dark"):
             drawn("xray")
 
+    def test_a_drawings_quick_edit_is_drawn_back_in_its_window_with_its_ink(self) -> None:
+        """A drawing's Quick Edit view is the window on screen as a plan view: ``--job`` draws that window
+        with the ink on the sheet and Measure's dimensions over it, ``--camera authored`` the view the ink
+        was last drawn in, the same picture; a camera that is no plan view is refused by name."""
+        from cadgen.engine.formats.dxf import read_dxf
+        from cadgen.engine.snapshot import draw_pictures, job_pictures
+
+        path = self.folder / "plate.dxf"
+        x0, y0, x1, y1 = read_dxf(path).bounds
+        cx, cy, half = (x0 + x1) / 2, (y0 + y1) / 2, (y1 - y0) / 4  # the middle, zoomed in twice
+        plan = {"position": [cx, cy, 100], "target": [cx, cy, 0], "up": [0, 1, 0], "orthographicHalfHeight": half}
+        stroke = {"id": "m1", "kind": "stroke", "part": None, "points": [cx - half, cy, 0, cx + half, cy, 0],
+                  "color": "#ff00ff", "width": 20, "view": "view 1"}
+        words = {"id": "m2", "kind": "text", "part": None, "text": "here", "color": "#00a000", "view": "view 1",
+                 "points": [cx - half, cy + half / 2, 0, cx, cy + half / 2, 0, cx, cy, 0, cx - half, cy, 0]}
+        dimension = {"start": [cx - half, cy - half / 2, 0], "end": [cx + half, cy - half / 2, 0], "label": "40 mm",
+                     "color": "#0000ff"}
+        window = self.folder / "window.png"
+        packet = {"input": str(path), "annotation": {"units": "mm", "parts": {}, "marks": [stroke, words]},
+                  "measurements": [dimension],
+                  "jobs": [{"camera": plan, "outputs": [{"path": str(window), "label": "view 1", "width": 320,
+                                                         "height": 240}]}]}
+        [drawn] = draw_pictures(job_pictures(packet), daemon=False)
+        self.assertEqual((drawn["camera"], drawn["width"], drawn["height"]), ("plan", 320, 240))
+        found, whole = pixels(window.read_bytes()), pixels(self.draw(path)[0])
+        self.assertGreater(mismatch(found, whole), 0.05, "the window, not the whole drawing")
+        red, green, blue = found[..., 0], found[..., 1], found[..., 2]
+        for what, inked, at_least in (("the stroke", np.minimum(red, blue) - green > 120, 300),
+                                      ("the words", green - np.maximum(red, blue) > 60, 20),
+                                      ("the dimension", blue - np.maximum(red, green) > 60, 20)):
+            self.assertGreater(int(inked.sum()), at_least, what)
+        authored = self.folder / "authored.png"
+        snapshot(path, authored, camera="authored", daemon=False, annotation=packet["annotation"],
+                 annotation_source=packet, measurements=packet["measurements"])
+        self.assertLessEqual(mismatch(pixels(authored.read_bytes()), found), 0.001)
+        tilted = {**plan, "position": [cx + 10, cy, 100]}
+        for camera in ("top", tilted, {**plan, "orthographicHalfHeight": 0}):
+            with self.subTest(camera=camera), self.assertRaisesRegex(SnapshotRefused, "its camera is a plan view"):
+                job_pictures({**packet, "jobs": [{**packet["jobs"][0], "camera": camera}]})
+
     def test_what_a_kind_does_not_offer_is_refused_by_name_and_leaves_no_picture(self) -> None:
         out = self.folder / "stale.png"
         for path, options, why in (
                 (self.folder / "part.stl", {"pose": {"a": 1}}, "is a mesh and has none"),
                 (self.folder / "part.stl", {"display": {"mode": "parts"}}, "places 1 part"),
                 (self.folder / "plate.dxf", {"display": {"mode": "xray"}}, "is a drawing.*display.mode does not apply"),
-                (self.folder / "plate.dxf", {"camera": "iso"}, "is a drawing.*--camera does not apply"),
+                (self.folder / "plate.dxf", {"camera": "iso"}, "is a drawing, seen from above: its camera is a plan view"),
                 (self.folder / "kinematics.urdf", {"pose": {"lift": 200}}, "--pose: joint 'lift' at 200 is past its limits")):
             out.write_bytes(b"before")
             with self.subTest(path=path.name, options=options), self.assertRaisesRegex(SnapshotRefused, why):

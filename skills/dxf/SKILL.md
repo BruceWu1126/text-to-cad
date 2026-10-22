@@ -211,15 +211,23 @@ geometry it derives from, named `<name>.py`.
 from above, fitted with a margin, in the pens the file declares (an entity with no
 pen of its own takes the paper's ink), on light paper or, with
 `--display '{"appearance": "dark"}'`, dark. `--size-profile`, `--width` and
-`--height` size it; every other flag is refused by name, and what it does not draw
-(points, hatch patterns, images) is named in a warning. OUT is written exactly as
-given and must be a `.png`; check the exit status before reading it, since a
-refused or failed snapshot writes nothing.
+`--height` size it; `--camera` takes a plan view (below), `--annotation` ink on the
+sheet and `--measurements` dimensions; every other flag is refused by name, and what
+it does not draw (points, hatch patterns, images) is named in a warning. OUT is
+written exactly as given and must be a `.png`; check the exit status before reading
+it, since a refused or failed snapshot writes nothing.
 
 A Quick Edit prompt from a drawing carries a packet (inline JSON or a
-`.snapshot.json` path) whose view is a plan-view `camera` window and whose
-`annotation` marks are in drawing coordinates. Read both as data before editing:
-`cadgen snapshot` draws the whole drawing and takes neither.
+`.snapshot.json` path; save inline JSON to a file first) whose views are plan-view
+`camera` windows (`{"position": [x, y, d], "target": [x, y, 0], "up": [0, 1, 0],
+"orthographicHalfHeight": h}`, looking straight down) and whose `annotation` marks
+are in drawing coordinates, on the sheet. Draw what the person saw, each window with
+their ink and dimensions on it, before editing:
+
+```bash
+cadgen snapshot --job tmp/panel.snapshot.json                     # every view, into the paths its jobs name
+cadgen snapshot panel.dxf tmp/view.png --annotation tmp/panel.snapshot.json --camera authored
+```
 
 No CLI inspects an existing `.dxf`. For entity/layer checks read it with `ezdxf`
 directly (it arrives with build123d), and `validate_dxf_file` for the drawing

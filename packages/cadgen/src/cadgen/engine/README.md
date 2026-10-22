@@ -529,9 +529,15 @@ per file (read again when a file it read changes) or `--no-daemon` in this proce
 - **A drawing** (`.dxf`) is drawn as the viewer's DXF pane draws it: from above, fitted with its
   16 px margin, lines, arcs, polylines, splines, ellipses, solids, solid hatches, blocks and
   dimensions one pixel wide in their pens (ACI 7 the look's ink), words set in the platform's UI
-  face, on the light or dark paper (`display.appearance`, `render/look.py`'s `DRAWING`). Every
-  other flag is refused by name; what it does not draw (points, hatch patterns, images) is named
-  in a warning.
+  face, on the light or dark paper (`display.appearance`, `render/look.py`'s `DRAWING`). Its
+  camera is a plan view, the window a Quick Edit view of it names (`render/drawing.py`'s
+  `plan_view`: `{position, target, up, orthographicHalfHeight}` looking straight down at the sheet,
+  +Y up), drawn as that window -- given as `--camera`, as `authored` (the view the ink was last
+  drawn in), or as a job's view; `--annotation`'s ink lies on the sheet in drawing coordinates,
+  painted as the pane paints it (`paint_ink`: strokes round-capped as wide as the viewer drew them
+  against its height, areas filled, a text mark's words filling its box), and `--measurements`
+  Measure's dimensions over it. Every other flag is refused by name; what it does not draw
+  (points, hatch patterns, images) is named in a warning.
 
 `SRC` may be a script's model too
 (`SCRIPT.py::MODEL`, `cadgen.snapshot(model, ...)`, `Model.snapshot`): the model is built in its

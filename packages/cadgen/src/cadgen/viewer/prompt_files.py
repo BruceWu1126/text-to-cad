@@ -127,8 +127,8 @@ class PromptFiles:
             prefix = f"{_stem(name or input_path)}-{self._count}"
         labels: set[str] = set()
         jobs = []
-        # A drawing's view is its plan view, framed as the pane framed it (its camera); it has no
-        # 3D framing to pin and no view name to carry.
+        # A drawing's view is its plan view, framed as the pane framed it (its camera): it has no 3D
+        # framing to pin. Every view carries its label, by which a mark names the view it was drawn in.
         drawing = str(input_path).lower().endswith(".dxf")
         for index, view in enumerate(views):
             slug = _slug(view["label"].lower(), f"view-{index + 1}")
@@ -136,7 +136,7 @@ class PromptFiles:
                 slug = f"{slug}-{index + 1}"
             labels.add(slug)
             image = directory / f"{prefix}-{slug}.png"
-            output = {"path": str(image)} if drawing else {"path": str(image), "label": view["label"]}
+            output = {"path": str(image), "label": view["label"]}
             for key in ("width", "height"):
                 if key in view:
                     output[key] = view[key]
