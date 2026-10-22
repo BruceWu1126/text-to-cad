@@ -151,8 +151,9 @@ def hinge():
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a STEP read in a reader process, held by its bytes; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
-| `snapshot.py` | `cadgen xbf snapshot`: a document drawn by OCCT (`render/`), or a mesh file by the CAD Viewer's mesh renderers, into a PNG; a script's model drawn from its worker's memory |
-| `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document (`service.py`); the scene (`occt.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
+| `snapshot.py` | `cadgen xbf snapshot`: one dispatcher by suffix -- a document, a mesh file, a robot or a DXF drawn by OCCT (`render/`) into a PNG; a script's model drawn from its worker's memory |
+| `formats/` | the files the stills draw that are not documents, each read into a structure and part buffers: STL (numpy), 3MF (zip + XML), GLB (OCCT's glTF reader, textures and all), URDF/SDF/SRDF (XML, the viewer's forward kinematics), DXF (group codes, flattened as the viewer's pane draws it) |
+| `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document and per file (`service.py`); the scene (`occt.py`); a DXF drawn in the 2D look (`drawing.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, at most one per core alive (`Pool`), connect-or-start; a worker's memory cap |
 | `progress.py` | where a build is: the author's `report` and `track`, the engine's stages heard where they begin, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
@@ -400,7 +401,8 @@ moved apart as the viewer's Explode moves them, by an amount from 0 to 1; with a
 `hidden-line,exploded=0.6`), or the display object (`mode`, `grid`, `appearance`, `camera`,
 `clip`, `exploded`: `{"enabled", "amount"}`, 0.5 unless given); `--json` reports what was drawn
 and each stage's milliseconds (`serveMs`, `meshMs`, `sceneMs` when a scene is made, `presentMs`,
-`frameMs`, `drawMs`, `renderMs`, `totalMs`). `parts` and `exploded` for a document that places one
+`frameMs`, `drawMs`, `renderMs`, `totalMs`; a file no document: `readMs` its reader, `openMs` its
+render process opening it). `parts` and `exploded` for a document that places one
 part are refused by name before anything renders. `--annotation FILE` draws the viewer's annotation over the
 model -- each mark on the part it was drawn on, wherever the picture places that part -- from an
 annotation file or the Quick Edit packet that carries one (the `.snapshot.json` the viewer writes),
@@ -431,10 +433,38 @@ process. The context is a hidden window: Cocoa on macOS, an X server's (Xvfb on 
 screen) or OCCT's EGL on Linux, a hidden window on Windows; where none can be made the snapshot
 fails saying so. Nothing is written but OUT.
 
-`SRC` may also be a mesh file (`.glb`, `.stl`, `.3mf`): nothing meshes it; a headless browser opens
-cadgen's snapshot page (the package's built `_runtime/browser`, read as files), which reads its
-bytes and draws them with the mesh renderers the viewer's GLB and mesh tabs call (the bundle's
-`headlessScene.js` families); `--pose` is refused for it, a mesh has no mechanism. `SRC` may be a script's model too
+`SRC` may also be a file the viewer opens that is no document, each read by its reader
+(`formats/`) and drawn by OCCT in the same look, through the daemon by a render process of its own
+per file (read again when a file it read changes) or `--no-daemon` in this process:
+
+- **A mesh file** (`.stl`, `.3mf`, `.glb`) becomes a structure and part buffers as a document's are,
+  so the modes, the camera fit, the grid, clip, Explode, Preview and the annotation are a
+  document's. Each mesh carries the viewer's normals (creased at 30 degrees up to 10,000
+  triangles, else flat) and its feature edges (three's `EdgesGeometry` at 16 degrees: the folds,
+  the open rims), which Solid and the line modes draw. An STL is one part in the look's fill, its
+  numbers millimetres; a 3MF is its objects placed by its build in its unit, each triangle in its
+  colour group's or base material's colour (a slicer's generated default is none), a base
+  material's `pbmetallic` its finish; a GLB is read by OCCT's glTF reader into an XCAF document --
+  its node tree, its meshes, each primitive's material (with the extensions the engine writes:
+  IOR, transmission, clear coat, anisotropy, emissive strength) and its base colour texture,
+  drawn on its texture coordinates in the lit looks. `--pose` is refused: a mesh has no
+  mechanism.
+- **A robot** (`.urdf`, `.sdf`, `.srdf`) is its link visuals' meshes (STL, 3MF and GLB files; a
+  box, cylinder, sphere or capsule made and meshed by the kernel), each link's in one colour of
+  the Parts palette, placed by the viewer's forward kinematics (`lib/urdf/kinematics.js` and
+  `fourBarCoupling.js`, ported and held to a golden its own code made: mimic joints and four-bar
+  linkages followed) where the viewer opens the robot -- every control at zero, an SRDF's `home`
+  group state over that. `--pose` names an SRDF group state (`group/name`, or a name one group
+  has) or gives joint values (degrees, metres) over the opening pose; an unknown joint, a joint
+  that is no control and a value past its limits are refused by name.
+- **A drawing** (`.dxf`) is drawn as the viewer's DXF pane draws it: from above, fitted with its
+  16 px margin, lines, arcs, polylines, splines, ellipses, solids, solid hatches, blocks and
+  dimensions one pixel wide in their pens (ACI 7 the look's ink), words set in the platform's UI
+  face, on the light or dark paper (`display.appearance`, `render/look.py`'s `DRAWING`). Every
+  other flag is refused by name; what it does not draw (points, hatch patterns, images) is named
+  in a warning.
+
+`SRC` may be a script's model too
 (`SCRIPT.py::MODEL`, `cadgen.snapshot(model, ...)`, `Model.snapshot`): the model is built in its
 worker and drawn from the document that worker holds, served by a server of the worker's over its
 one mesh cache, whether or not the model declares an xbf; the build writes what the model

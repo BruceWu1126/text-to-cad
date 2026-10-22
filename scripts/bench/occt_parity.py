@@ -5,7 +5,7 @@ A manual measurement, never run in CI; what it writes goes under an ignored fold
 (``tmp/bench/occt-parity`` by default). Each document is drawn in every mode and camera
 asked for, twice: by OCCT's raster (``python -m cadgen.engine.render.occt``'s ``Scene``, the
 reference: ``engine/render/look.py`` is its look) and by the snapshot page the viewer's
-code draws (``cadgen xbf snapshot``'s page, the xbf family of ``headlessScene.js``), both from
+code draws (cadgen's snapshot page, the xbf family of ``headlessScene.js``, driven here), both from
 the engine daemon's meshes, at one size. Per picture pair it reports:
 
 - ``iou``: the silhouettes' intersection over union (a pixel is the model's where it is not the
@@ -239,24 +239,92 @@ def draw_occt(doc: Path, folder: Path, modes: list[str], cameras: list[str], siz
         held.close()
 
 
+# --- the viewer's side: its snapshot page, in a headless Chromium -------------------------------------
+# The page is cadgen's built browser runtime (``_runtime/browser``: render.html, snapshot-render.js),
+# read as files and routed to the page's origin; it reads the document from the engine daemon that
+# serves it. ``cadgen xbf snapshot`` drew mesh files this way before OCCT drew every kind; this
+# bench keeps the page for the viewer's side alone.
+
+PAGE_ORIGIN = "http://localhost"
+
+
+def _runtime() -> Path:
+    import os
+
+    override = os.environ.get("CADGEN_BROWSER_RUNTIME_DIR", "").strip()
+    folder = (Path(override).expanduser().resolve() if override
+              else Path(__file__).resolve().parents[2] / "packages/cadgen/src/cadgen/_runtime/browser")
+    missing = [name for name in ("render.html", "snapshot-render.js") if not (folder / name).is_file()]
+    if missing:
+        raise RuntimeError(f"the snapshot page in {folder} lacks {', '.join(missing)}: build it with "
+                           "scripts/bundle/bundle.sh (or name a built one with CADGEN_BROWSER_RUNTIME_DIR)")
+    return folder
+
+
+def _served(doc: Path) -> str:
+    """The document's API URL on the engine daemon, which serves and meshes it."""
+    from urllib.parse import parse_qs, urlparse
+    from urllib.request import Request, urlopen
+
+    from cadgen.engine.client import request
+
+    answer = request({"op": "serve", "path": str(doc)})
+    if not answer or "failed" in answer:
+        raise RuntimeError(f"the engine would not serve {doc.name}: {(answer or {}).get('failed', 'no daemon')}")
+    parsed = urlparse(answer["url"])
+    url = f"{parsed.scheme}://{parsed.netloc}/api/doc/{parse_qs(parsed.query)['doc'][0]}"
+    with urlopen(Request(f"{url}/mesh", method="POST"), timeout=900) as done:  # noqa: S310 - the engine, on loopback
+        done.read()
+    return url
+
+
+def _page(job: dict[str, Any], size: tuple[int, int]) -> dict[str, Any]:
+    """The snapshot page's answer to ``job`` (its PNGs as data URLs), in a headless Chromium."""
+    from urllib.parse import urlparse
+
+    from playwright.sync_api import sync_playwright
+
+    runtime = _runtime()
+    files = {"/render.html": runtime / "render.html", "/snapshot-render.js": runtime / "snapshot-render.js"}
+
+    def route(handle: Any) -> None:
+        found = files.get(urlparse(handle.request.url).path)
+        if found is None:
+            handle.fulfill(status=404, content_type="text/plain", body="not found")
+            return
+        kind = "text/html" if found.suffix == ".html" else "text/javascript"
+        handle.fulfill(status=200, content_type=kind, body=found.read_bytes(), headers={"cache-control": "no-store"})
+
+    args = ["--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,"
+            "PrivateNetworkAccessRespectPreflightResults,PrivateNetworkAccessChecks,LocalNetworkAccessChecks",
+            *(["--use-angle=metal"] if sys.platform == "darwin" else [])]
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, args=args)
+        try:
+            page = browser.new_context(viewport={"width": size[0], "height": size[1]}, device_scale_factor=1).new_page()
+            page.route(f"{PAGE_ORIGIN}/**", route)
+            page.goto(f"{PAGE_ORIGIN}/render.html", wait_until="load", timeout=300_000)
+            page.wait_for_function("typeof window.__snapshotRender === 'function'", timeout=300_000)
+            result = page.evaluate("(job) => window.__snapshotRender(job)", job)
+        finally:
+            browser.close()
+    if not isinstance(result, dict) or not result.get("ok"):
+        raise RuntimeError(str((result or {}).get("error") or "the snapshot page drew nothing"))
+    return result
+
+
 def draw_chromium(doc: Path, folder: Path, modes: list[str], cameras: list[str], size: tuple[int, int],
                   preview: bool = False) -> None:
-    from cadgen.engine import snapshot as snap
-
-    served = snap._Served(doc.resolve(), daemon=True)
-    try:
-        snap._get_json(f"{served.url}/mesh", method="POST")
-        for mode in [*modes, *(["preview"] if preview else [])]:
-            outputs = [{"path": str(folder / f"{mode}-{camera}-chromium.png"), "width": size[0], "height": size[1],
-                        "camera": camera} for camera in cameras]
-            job = {"kind": "xbf", "mode": "view", "display": {"mode": "solid" if mode == "preview" else mode},
-                   "outputs": outputs, "resolved": {"kind": "xbf", "url": served.url, "inputPath": str(doc)},
-                   **({"preview": True} if mode == "preview" else {})}
-            result, _timings = snap._render(job, snap._runtime(), size)
-            for output, drawn in zip(outputs, result["outputs"]):
-                Path(output["path"]).write_bytes(base64.b64decode(str(drawn["dataUrl"]).partition(",")[2]))
-    finally:
-        served.close()
+    url = _served(doc.resolve())
+    for mode in [*modes, *(["preview"] if preview else [])]:
+        outputs = [{"path": str(folder / f"{mode}-{camera}-chromium.png"), "width": size[0], "height": size[1],
+                    "camera": camera} for camera in cameras]
+        job = {"kind": "xbf", "mode": "view", "display": {"mode": "solid" if mode == "preview" else mode},
+               "outputs": outputs, "resolved": {"kind": "xbf", "url": url, "inputPath": str(doc)},
+               **({"preview": True} if mode == "preview" else {})}
+        result = _page(job, size)
+        for output, drawn in zip(outputs, result["outputs"]):
+            Path(output["path"]).write_bytes(base64.b64decode(str(drawn["dataUrl"]).partition(",")[2]))
 
 
 def sheet(folder: Path, name: str, rows: list[tuple[str, dict[str, float]]], out: Path) -> None:

@@ -1,7 +1,8 @@
 """`cadgen xbf snapshot`: a document drawn by OCCT (`engine/render`) into a PNG, its timings
 reported, and what an engine document's view does not offer refused by name before anything
-renders, with OUT untouched; a mesh file drawn by the viewer's mesh renderers. A page on this
-machine may read a served document; a page from anywhere else may not.
+renders, with OUT untouched; the document's own mesh exports drawn by OCCT too, read by their
+readers (`engine/formats`, and `test_formats.py` for every kind), in this process and through the
+daemon. A page on this machine may read a served document; a page from anywhere else may not.
 
 A test that draws a document makes an OpenGL context and is skipped, saying why, where none can be
 made (`test_render.py` says where that is); the refusals need none."""
@@ -226,15 +227,20 @@ class SnapshotTest(unittest.TestCase):
         backdrop = max(set(pixels), key=pixels.count)
         self.assertGreater(len([pixel for pixel in pixels if pixel != backdrop]), len(pixels) // 20)
 
-    def test_a_mesh_file_is_drawn_by_the_viewer_s_mesh_renderers(self) -> None:
+    def test_a_mesh_file_is_drawn_by_occt_as_its_document_is(self) -> None:
+        """The document's GLB, STL and 3MF, read by their readers and drawn by OCCT, frame as the
+        document does: the same parts where the document has them (the STL one part of all)."""
         from cadgen.engine.export import translate
 
-        for suffix in (".glb", ".stl", ".3mf"):
+        gl()
+        for suffix, parts in ((".glb", 2), (".stl", 1), (".3mf", 2)):
             mesh = self.folder / f"stand{suffix}"
             translate(self.document, None, mesh)
             out = self.folder / f"mesh-{suffix[1:]}.png"
             report = snapshot(mesh, out, camera=parse_camera("iso"), size=(240, 180), daemon=False)
-            self.assertEqual((report["width"], report["height"]), (240, 180), suffix)
+            self.assertEqual((report["width"], report["height"], report["renderer"], report["kind"]),
+                             (240, 180, "occt", suffix[1:]), suffix)
+            self.assertEqual((report["parts"], report["instances"]), (parts, 3 if parts > 1 else 1), suffix)
             self.drawn(out, (240, 180))
         with self.assertRaisesRegex(SnapshotRefused, "is a mesh and has none"):
             snapshot(self.folder / "stand.glb", self.folder / "posed.png", pose="raised", daemon=False)

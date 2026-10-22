@@ -1,10 +1,12 @@
 """cadgen's stills drawn by OCCT: an engine document drawn by OCCT's own OpenGL renderer from the
 engine's own meshes (the XBM buffers ``mesh.py`` writes and the daemon serves), never a mesh of
-OCCT's own. ``cadgen xbf snapshot`` draws every document through it.
+OCCT's own; a file no document (a mesh file, a robot) from the buffers its reader made
+(``formats/``), and a DXF as a drawing. ``cadgen xbf snapshot`` draws every kind through it.
 
 - ``service.py``: a document held and drawn (``Held``), the daemon's render process per served
-  document (``Renders``, ``python -m cadgen.engine.render.service``), and a document drawn in this
-  process (``draw_here``).
+  document and per file (``Renders``, ``python -m cadgen.engine.render.service``), and a document
+  drawn in this process (``draw_here``).
+- ``drawing.py``: a DXF drawn as the viewer's DXF pane draws it, in ``look.py``'s 2D look.
 - ``occt.py``: the scene -- the modes, the camera, clip, grid, overlays, Preview -- and the
   prototype's CLI (``python -m cadgen.engine.render.occt``); ``look.py`` the regular display modes'
   look, which ``occt.py`` draws by and ``serve.py`` serves to the viewer (``GET /api/look``);

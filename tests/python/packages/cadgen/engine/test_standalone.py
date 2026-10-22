@@ -16,12 +16,12 @@ from pathlib import Path
 ENGINE = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src" / "cadgen" / "engine"
 SRC = ENGINE.parent.parent
 # Law 3: what the engine imports besides itself and the standard library. Pillow is the renderer's
-# rasteriser (a dependency of the cadgen wheel already).
+# rasteriser (a dependency of the cadgen wheel already). OCCT draws every snapshot, of every kind,
+# so no module drives a browser.
 LIBRARIES = {"OCP", "build123d", "numpy", "PIL"}
-# By module, what one imports beyond those: the snapshot page's browser, which snapshot.py drives
-# for a mesh file (a GLB, STL or 3MF), the one picture OCCT does not draw; and ezdxf, build123d's
-# own DXF library, which the DXF export writes and checks a drawing with.
-BESIDES = {"snapshot.py": {"playwright"}, "export/dxf.py": {"ezdxf"}}
+# By module, what one imports beyond those: ezdxf, build123d's own DXF library, which the DXF
+# export writes and checks a drawing with.
+BESIDES = {"export/dxf.py": {"ezdxf"}}
 
 
 class StandaloneTest(unittest.TestCase):

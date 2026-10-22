@@ -744,5 +744,50 @@ class PictureTest(FixtureTest):
         self.assertEqual(out.read_bytes(), b"kept")
 
 
+class DaemonFileTest(unittest.TestCase):
+    """A file drawn through the daemon: a render process of its own reads it, warm from its second
+    picture, and reads it again when the file changes. Nothing is written but the pictures."""
+
+    def setUp(self) -> None:
+        import subprocess
+        import sys
+
+        gl()
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-formats-daemon-")).resolve()
+        self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
+        source = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
+        env = {**os.environ, "PYTHONPATH": str(source), "CADGEN_ENGINE_DIR": str(self.state), "CADGEN_ENGINE_IDLE": "60"}
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, self.state, ignore_errors=True)
+
+        def cli(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.folder, env=env,
+                                  capture_output=True, text=True, timeout=300)
+
+        self.cli = cli
+        self.addCleanup(cli, "stop")
+
+    def snapshot(self, out: str) -> dict:
+        done = self.cli("snapshot", "part.stl", out, "--width", "200", "--height", "150", "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout.strip().splitlines()[-1])
+
+    def test_a_file_is_read_by_a_render_process_of_its_own_and_again_when_it_changes(self) -> None:
+        write_stl(self.folder / "part.stl", box_soup((20, 10, 4)))
+        first = self.snapshot("first.png")
+        self.assertEqual((first["renderer"], first["kind"]), ("occt", "stl"))
+        self.assertIn("openMs", first["timings"])
+        warm = self.snapshot("warm.png")
+        self.assertEqual(warm["process"]["pid"], first["process"]["pid"])
+        self.assertFalse({"openMs", "sceneMs"} & set(warm["timings"]), warm["timings"])
+        write_stl(self.folder / "part.stl", np.concatenate([box_soup((20, 10, 4)), cylinder_soup(3, 12, at=(0, 0, 2))]))
+        changed = self.snapshot("changed.png")
+        self.assertEqual(changed["process"]["pid"], first["process"]["pid"])
+        self.assertIn("openMs", changed["timings"], "read again: the file changed")
+        self.assertNotEqual((self.folder / "changed.png").read_bytes(), (self.folder / "first.png").read_bytes())
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["changed.png", "first.png", "part.stl", "warm.png"])
+        self.assertEqual({path.suffix for path in self.state.iterdir()}, {".sock", ".lock"})
+
+
 if __name__ == "__main__":
     unittest.main()
