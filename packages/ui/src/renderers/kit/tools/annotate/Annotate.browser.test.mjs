@@ -7,7 +7,7 @@ import { serveXbfHarness } from '../../../harness/xbfScenario.mjs';
 // (`renderers/xbf`, which draws an .xbf and a STEP), over core's bracket fixture. They are kit
 // tools, so the scenario itself (`harness/annotateScenario.mjs`) knows nothing about the frame.
 
-test('the drawing tools put ink into the model that orbits with it, undo, redo, recolour and clear, and stay when they are left — where Select picks, haloes and deletes it', async (t) => {
+test('the drawing tools put ink into the model that orbits with it, undo, redo, recolour and clear, and stay when they are left — where Select picks, haloes and deletes it — and goes when the model updates', async (t) => {
   const harness = await serveXbfHarness(t);
   await runAnnotateScenario(await harness.open());
 });
