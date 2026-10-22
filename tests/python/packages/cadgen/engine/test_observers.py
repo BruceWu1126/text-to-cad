@@ -49,7 +49,7 @@ class ObserversTest(unittest.TestCase):
 
     def test_each_verb_tells_what_it_did_as_plain_facts(self) -> None:
         api = self.api
-        report = api.build(self.folder / "secret.py", daemon=False)
+        report = api.build_script(self.folder / "secret.py", daemon=False)  # a script builds as its decorators say
         self.assertEqual([model["ok"] for model in report.models], [True, False])
         api.export(self.folder / "XBF/secret_plate.xbf", self.folder / "out.step", self.folder / "out.3mf", daemon=False)
         with self.assertRaises(ValueError):  # refused by name

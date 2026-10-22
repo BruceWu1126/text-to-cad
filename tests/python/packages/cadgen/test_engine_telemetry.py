@@ -242,18 +242,19 @@ class ThroughTheDaemonTest(unittest.TestCase):
         """), encoding="utf-8")
         script = self.run_in("plate.py")
         self.assertEqual(script.returncode, 0, script.stderr)
-        command = self.run_in("-m", "cadgen.cli", "xbf", "build", "plate.py")
+        # A command asks for the script's model as an export does (``cadgen xbf build`` takes code alone).
+        command = self.run_in("-m", "cadgen.cli", "xbf", "export", "plate.py::plate", "plate.step")
         self.assertEqual(command.returncode, 0, command.stderr)
         self.assertEqual(self.run_in("dies.py").returncode, 1)
         spool = self.state / analytics.SPOOL
         first, second, third = [json.loads(line)["counts"] for line in spool.read_text(encoding="utf-8").splitlines()]
         self.assertEqual((first["builds"][0]["via"], first["builds"][0]["outcome"], first["features"], first["health"]),
                          ("script", "ok", ["assembly", "declared_mesh"], {"workers": 1}))
-        self.assertEqual((second["builds"][0]["via"], second["builds"][0]["outcome"], second.get("health")),
-                         ("command", "ok", None), "its worker was warm")
+        self.assertEqual((second["builds"][0]["kind"], second["builds"][0]["via"], second["builds"][0]["outcome"],
+                          second.get("health")), ("step", "command", "ok", None), "its worker was warm")
         self.assertEqual((third["builds"][0]["via"], third["builds"][0]["outcome"], third["health"], third["crashes"]),
                          ("script", "crashed", {"crashes": 1}, [analytics.died(3)]))
-        self.assertEqual({build["kind"] for counts in (first, second, third) for build in counts["builds"]}, {"xbf"})
+        self.assertEqual({build["kind"] for counts in (first, third) for build in counts["builds"]}, {"xbf"})
 
     def test_cadgen_observes_the_engine_once_its_verbs_are_imported_and_never_sooner(self) -> None:
         done = self.run_in("-c", "import sys, cadgen; print(any(name.startswith('cadgen.engine') for name in sys.modules)); "
