@@ -272,6 +272,7 @@ class Scene:
         source = AIS_Shape(self.parts[index].faces[group])
         from cadgen.engine.render.finish import face_material, linear
 
+        fill = isinstance(rgba, str)  # a fill (Parts) paints over a part's texture as over its colour
         own = None if isinstance(rgba, str) else self._material_of(index, group)
         if look in ("hidden", "xray") or (look == "pbr" and own is None):
             # Hidden line's faces hide what is behind them whatever their finish (the viewer's are
@@ -287,6 +288,10 @@ class Scene:
         source.SetColor(color)
         aspect = source.Attributes().ShadingAspect().Aspect()
         aspect.SetPolygonOffsets(Aspect_PolygonOffsetMode.Aspect_POM_Fill, 1.0, 1.0)
+        texture = self.parts[index].textures.get(group) if look in ("lit", "pbr") and not fill else None
+        if texture is not None:  # a GLB's base colour texture, over its material's colour
+            aspect.SetTextureSet(texture)
+            aspect.SetTextureMapOn(True)
         if look == "hidden":
             source.SetColor(_color(BACKGROUND))
             aspect.SetShadingModel(Graphic3d_TypeOfShadingModel.Graphic3d_TypeOfShadingModel_Unlit)
@@ -353,7 +358,7 @@ class Scene:
             rgba = instance.get("color") or self.prototypes[p].get("color")
             rgba = tuple(rgba) if rgba else None
             if mode == "parts":
-                rgba = PARTS[index % len(PARTS)]
+                rgba = PARTS[instance.get("palette", index) % len(PARTS)]
             if faces:
                 for group in part.faces:
                     color = rgba if group is None or mode == "parts" else group

@@ -1,37 +1,40 @@
-"""``cadgen xbf snapshot SRC OUT.png``: a picture of a document or a mesh file, drawn as the CAD
-Viewer draws it. SRC is an ``.xbf`` or a ``.step`` (a document), or a ``.glb``, ``.stl`` or
-``.3mf`` (a mesh file).
+"""``cadgen xbf snapshot SRC OUT.png``: a picture of a document or of a file the viewer opens,
+drawn by OCCT as the CAD Viewer draws it. One dispatcher by SRC's suffix:
 
-A document is served by the engine (the daemon, so its meshes are the ones the viewer and
-every build share, or ``--no-daemon`` a server in this process; a model's own document, which
-``Model.snapshot`` and ``cadgen.snapshot(model, ...)`` draw, from its worker's memory over its one
-mesh cache), meshed there, and drawn by OCCT from those meshes (``render/service.py``): through the
-daemon by the served document's render process, warm; with ``--no-daemon``, or a model's document
-in its worker, in that process. The modes, the camera fit, clip, grid and Preview are the viewer's,
-in the look the viewer's viewport resolves for the same display settings. The answer is PNG bytes,
+- ``.xbf``, ``.step``: a document, served by the engine (the daemon, so its meshes are the ones
+  the viewer and every build share, or ``--no-daemon`` a server in this process; a model's own
+  document, which ``Model.snapshot`` and ``cadgen.snapshot(model, ...)`` draw, from its worker's
+  memory over its one mesh cache), meshed there and drawn from those meshes (``render/service.py``).
+- ``.stl``, ``.3mf``, ``.glb``: a mesh file, read by its reader (``formats/``: numpy, zip and XML,
+  OCCT's glTF reader) into a structure and part buffers as a document's are, with the viewer's
+  feature edges, and drawn by the documents' own path; a GLB's base colour textures through OCCT.
+- ``.urdf``, ``.sdf``, ``.srdf``: a robot, its link meshes placed by the viewer's forward
+  kinematics (``formats/robot.py``), drawn as a document is; ``--pose`` poses it.
+- ``.dxf``: a drawing, from above, in its pens, in the viewer's 2D look (``render/drawing.py``).
+
+Through the daemon each file drawn gets a render process of its own, warm, read again when a file
+it read changes; ``--no-daemon`` draws in this process. Every kind is drawn in the engine's one
+look (``render/look.py``). The modes, the camera fit, clip, grid and Preview are the viewer's, in
+the look the viewer's viewport resolves for the same display settings. The answer is PNG bytes,
 which this writes to OUT.
 
-A mesh file is meshed by nobody: a headless browser opens the snapshot page of cadgen's browser
-runtime -- ``render.html`` and ``snapshot-render.js`` in the package's built ``_runtime/browser``,
-read as files, never imported -- which reads the file's bytes and draws them with the mesh renderers
-the viewer's GLB and mesh tabs call (``headlessScene.js``'s mesh families).
-
 The request is the snapshot contract's where it applies (``--display`` mode or JSON, ``--grid``,
-``--camera``, ``--preview``, ``clip``, the sizes, ``--json``), and what an engine document's view
-does not offer is refused by name before anything renders: ``parts`` and ``exploded`` for a document
-that places a single part. ``--display exploded=0.6`` (or ``display.exploded``) moves the parts
-apart as the viewer's Explode does, by its amount (0.5 unless one is given). ``--annotation FILE``
-draws the viewer's annotation over the model (its ink on the parts it was drawn on, wherever they
-stand): an annotation file, or the Quick Edit packet that carries one (a ``.snapshot.json``).
-``--measurements FILE`` draws Measure's dimensions. ``--camera authored`` draws the picture from the
-view the ink was drawn in, exactly (no fit): a mark names its view only by label ("view 1"), and
-the view -- its camera, size and projection -- is a job of the packet (``authored``). Nothing is
-written but OUT.
+``--camera``, ``--preview``, ``clip``, the sizes, ``--json``), and what a kind does not offer is
+refused by name before anything renders: ``parts`` and ``exploded`` for a file that places a single
+part, ``--pose`` for a mesh, and everything but ``appearance`` for a drawing. ``--display
+exploded=0.6`` (or ``display.exploded``) moves the parts apart as the viewer's Explode does, by its
+amount (0.5 unless one is given). ``--annotation FILE`` draws the viewer's annotation over the
+model (its ink on the parts it was drawn on, wherever they stand): an annotation file, or the Quick
+Edit packet that carries one (a ``.snapshot.json``). ``--measurements FILE`` draws Measure's
+dimensions. ``--camera authored`` draws the picture from the view the ink was drawn in, exactly
+(no fit): a mark names its view only by label ("view 1"), and the view -- its camera, size and
+projection -- is a job of the packet (``authored``). Nothing is written but OUT.
 
-``--pose`` draws the document's mechanism at a configuration (its name) or at joint and coupling
-values (a JSON object, the rest as built): each link placed by its pairs from the ground. An unknown
-configuration, joint or coupling, a value out of range and a mechanism that is not a tree are refused
-by name before anything renders.
+``--pose`` draws a document's mechanism at a configuration (its name) or at joint and coupling
+values (a JSON object, the rest as built): each link placed by its pairs from the ground; a robot's
+at a group state of its SRDF or at joint values (degrees, metres) over where the viewer opens it. An
+unknown configuration, joint or coupling, a value out of range and a mechanism that is not a tree are
+refused by name before anything renders.
 """
 
 from __future__ import annotations
@@ -46,17 +49,12 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, urlparse
-from urllib.request import Request, urlopen
 
 from cadgen.engine.atomic_replace import replace_atomic
 
 __all__ = ["SnapshotRefused", "Still", "add_parser", "authored", "draw", "options", "parse_annotation",
            "parse_measurements", "parse_pose", "run", "snapshot"]
 
-PAGE_ORIGIN = "http://localhost"
-PAGE_URL = f"{PAGE_ORIGIN}/render.html"
-RUNTIME = Path(__file__).resolve().parent.parent / "_runtime" / "browser"
 DISPLAY_MODES = ("solid", "shaded", "parts", "xray", "hidden-line", "wireframe")
 DISPLAY_KEYS = frozenset({"mode", "grid", "appearance", "camera", "clip", "exploded"})
 EXPLODED_KEYS = frozenset({"enabled", "amount"})
@@ -81,7 +79,6 @@ SIZE_PROFILES = {
 }
 DEFAULT_SIZE = SIZE_PROFILES["diagnostic"]
 MAX_SIDE = 8192
-TIMEOUT_MS = 300_000
 
 
 class SnapshotRefused(ValueError):
@@ -398,151 +395,13 @@ def parse_size(width: int | None, height: int | None, profile: str | None) -> tu
     return size
 
 
-# --- the engine ----------------------------------------------------------------------------
-# A document served for the snapshot page to read: no picture of the verb's is drawn so; the
-# page-against-OCCT comparisons (``render/compare.py`` and the parity bench) are.
-
-
-def _get_json(url: str, *, method: str = "GET", timeout: float = 600.0) -> Any:
-    with urlopen(Request(url, method=method), timeout=timeout) as answer:  # noqa: S310 - the engine, on loopback
-        return json.loads(answer.read())
-
-
-def _posed(served: "_Served", pose: Any) -> tuple[str, dict[str, Any]]:
-    """The served document at ``pose``: its URL and the pose's values. What the pose names
-    wrong is refused by name, in the engine's words, before anything renders."""
-    from urllib.error import HTTPError
-
-    body = json.dumps({"pose": pose}).encode()
-    request = Request(f"{served.url}/pose", data=body, method="POST", headers={"Content-Type": "application/json"})
-    try:
-        with urlopen(request, timeout=600.0) as answer:  # noqa: S310 - the engine, on loopback
-            found = json.loads(answer.read())
-    except HTTPError as error:
-        if error.code != 400:
-            raise
-        raise SnapshotRefused(f"--pose: {json.loads(error.read() or b'{}').get('error') or error}") from None
-    return f"{served.origin}/api/doc/{found['id']}", {"values": found["values"], "configuration": found["configuration"]}
-
-
-class _Served:
-    """The document as an engine serves it: its API URL, and how to let go of a server this
-    process started."""
-
-    def __init__(self, path: Path, *, daemon: bool, source: Any = None) -> None:
-        self.server = None
-        if source is not None:
-            # A build's document, held in this process: served from memory by a server of its
-            # own over the process's one mesh cache, so what the build meshed is drawn as it is.
-            from cadgen.engine.serve import MESHES, Server
-
-            self.server = Server(port=0, mesh_mode="inline", cache=MESHES)
-            self.server.start()
-            shapes = {prototype["key"]: source.shape_data(prototype["key"])
-                      for prototype in source.structure["prototypes"]}
-            origin, ident = self.server.url, self.server.put(path, source.structure, shapes)
-        elif daemon:
-            from cadgen.engine.client import request
-
-            answer = request({"op": "serve", "path": str(path)})
-            if not answer or "failed" in answer:
-                raise RuntimeError(f"the engine would not serve {path.name}: {(answer or {}).get('failed', 'no daemon')}")
-            parsed = urlparse(answer["url"])
-            origin, ident = f"{parsed.scheme}://{parsed.netloc}", parse_qs(parsed.query)["doc"][0]
-        else:
-            from cadgen.engine.serve import Server
-
-            self.server = Server(port=0)
-            self.server.start()
-            origin, ident = self.server.url, self.server.add(path)
-        self.origin = origin
-        self.url = f"{origin}/api/doc/{ident}"
-
-    def close(self) -> None:
-        if self.server is not None:
-            self.server.stop()
-
-
-# --- the page ------------------------------------------------------------------------------
-
-
-def _runtime() -> Path:
-    override = os.environ.get("CADGEN_BROWSER_RUNTIME_DIR", "").strip()
-    folder = Path(override).expanduser().resolve() if override else RUNTIME
-    missing = [name for name in ("render.html", "snapshot-render.js") if not (folder / name).is_file()]
-    if missing:
-        raise RuntimeError(f"cadgen's snapshot browser runtime in {folder} lacks {', '.join(missing)}: "
-                           "build it with scripts/bundle/bundle.sh (a wheel carries it)")
-    return folder
-
-
-def _launch(playwright: Any) -> Any:
-    args = [
-        # The page (http://localhost, routed to the runtime's files) reads the engine on another
-        # loopback origin: keep Private Network Access's checks off, as cadgen's snapshot does.
-        "--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,"
-        "PrivateNetworkAccessRespectPreflightResults,PrivateNetworkAccessChecks,LocalNetworkAccessChecks",
-        # The real GPU on macOS; elsewhere the platform's default.
-        *(["--use-angle=metal"] if sys.platform == "darwin" else []),
-    ]
-    try:
-        return playwright.chromium.launch(headless=True, args=args)
-    except Exception as error:  # noqa: BLE001 - Playwright raises its own Error for a missing browser
-        if "Executable doesn't exist" not in str(error):
-            raise
-    import subprocess
-
-    print("cadgen: downloading the snapshot browser (once)...", file=sys.stderr)
-    subprocess.run([sys.executable, "-m", "playwright", "install", "--only-shell", "chromium"], check=True,
-                   stdout=sys.stderr)
-    return playwright.chromium.launch(headless=True, args=args)
-
-
-def _render(job: dict[str, Any], runtime: Path, size: tuple[int, int],
-            extra: dict[str, Path] | None = None) -> tuple[dict[str, Any], dict[str, int]]:
-    from playwright.sync_api import sync_playwright
-
-    timings: dict[str, int] = {}
-    started = time.perf_counter()
-    files = {"/render.html": runtime / "render.html", "/snapshot-render.js": runtime / "snapshot-render.js",
-             **(extra or {})}
-
-    def route(handle: Any) -> None:
-        path = urlparse(handle.request.url).path
-        found = files.get(path)
-        if found is None:
-            handle.fulfill(status=404, content_type="text/plain", body="not found")
-            return
-        kind = ("text/html" if path.endswith(".html") else "text/javascript" if path.endswith(".js")
-                else "application/octet-stream")
-        handle.fulfill(status=200, content_type=kind, body=found.read_bytes(), headers={"cache-control": "no-store"})
-
-    with sync_playwright() as playwright:
-        browser = _launch(playwright)
-        try:
-            context = browser.new_context(viewport={"width": size[0], "height": size[1]}, device_scale_factor=1)
-            page = context.new_page()
-            page.route(f"{PAGE_ORIGIN}/**", route)
-            page.goto(PAGE_URL, wait_until="load", timeout=TIMEOUT_MS)
-            page.wait_for_function("typeof window.__snapshotRender === 'function'", timeout=TIMEOUT_MS)
-            timings["browserMs"] = round((time.perf_counter() - started) * 1000)
-            clock = time.perf_counter()
-            result = page.evaluate("(job) => window.__snapshotRender(job)", job)
-            timings["pageMs"] = round((time.perf_counter() - clock) * 1000)
-        finally:
-            browser.close()
-    if not isinstance(result, dict) or not result.get("ok"):
-        message = result.get("error") if isinstance(result, dict) else ""
-        raise RuntimeError(str(message or "the snapshot page drew nothing"))
-    return result, timings
-
-
 # --- the verb ------------------------------------------------------------------------------
 
 
 DOCUMENTS = (".xbf", ".step", ".stp")
-# A mesh file and the family the snapshot page draws it with (``headlessScene.js``).
-MESH_KINDS = {".glb": "glb", ".stl": "stl", ".3mf": "3mf"}
+# The files no document, each read by its reader (``formats.KINDS``): meshes, robots, a drawing.
+FILES = (".stl", ".3mf", ".glb", ".urdf", ".sdf", ".srdf", ".dxf")
+MESHES = (".stl", ".3mf", ".glb")
 
 
 @dataclass
@@ -587,53 +446,6 @@ def refusals(still: Still, structure: dict[str, Any], name: str) -> None:
                               "Remove display.exploded.")
 
 
-def _job(kind: str, url: str, document: Path, out: Path, still: Still) -> dict[str, Any]:
-    """The snapshot page's render job for ``still``."""
-    output: dict[str, Any] = {"path": str(out), "width": still.size[0], "height": still.size[1]}
-    if still.camera is not None:
-        output["camera"] = still.camera
-    job: dict[str, Any] = {"kind": kind, "mode": "view", "display": still.display, "outputs": [output],
-                           "resolved": {"kind": kind, "url": url, "inputPath": str(document)}}
-    if still.preview:
-        job["preview"] = True
-    if still.exact:
-        job["output"] = {"padding": 0, "tightFrame": False}  # the camera as it was, as a prompt's view replays
-    if still.annotation is not None:
-        job["annotation"] = still.annotation
-    if still.measurements:
-        job["measurements"] = still.measurements
-    return job
-
-
-def _mesh_file(document: Path, out: Path, still: Still, started: float) -> dict[str, Any]:
-    """A GLB, STL or 3MF drawn by the shared mesh renderers of the snapshot page: the page
-    reads the file's bytes as the viewer's mesh renderer does, no engine in between."""
-    kind = MESH_KINDS[document.suffix.lower()]
-    route = f"/file/{quote(document.name)}"
-    result, timings = _render(_job(kind, route, document, out, still), _runtime(), still.size, {route: document})
-    drawn = _png(result, out, timings)
-    timings["totalMs"] = round((time.perf_counter() - started) * 1000)
-    return {"ok": True, "document": str(document), "output": str(out), "width": drawn.get("width"),
-            "height": drawn.get("height"), "camera": drawn.get("camera"), "projection": drawn.get("projection"),
-            "displayMode": still.display.get("mode", "solid"), "preview": still.preview, "pose": None,
-            "exploded": exploded_amount(still.display) or None, "renderer": "chromium",
-            "bytes": out.stat().st_size, "timings": timings}
-
-
-def _png(result: dict[str, Any], out: Path, timings: dict[str, Any]) -> dict[str, Any]:
-    """The page's picture written to ``out``: beside it first, then moved over it."""
-    stages = result.get("stageTimings") or {}
-    for name in ("loadSourceMs", "buildModelMs", "prepareViewportMs", "captureMs"):
-        if name in stages:
-            timings[name] = stages[name]
-    drawn = (result.get("outputs") or [{}])[0]
-    head, _sep, data = str(drawn.get("dataUrl") or "").partition(",")
-    if not head.startswith("data:image/png;base64"):
-        raise RuntimeError("the snapshot page returned no PNG")
-    write_png(out, base64.b64decode(data))
-    return drawn
-
-
 def write_png(out: Path, data: bytes) -> None:
     """The one file a snapshot writes: beside ``out`` first, then moved over it."""
     temporary = out.with_name(f".{out.stem}.{os.getpid()}.tmp.png")
@@ -670,11 +482,12 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
              preview: bool = False, size: tuple[int, int] | None = None, daemon: bool = True,
              pose: Any = None, source: Any = None, annotation: dict[str, Any] | None = None,
              measurements: list[dict[str, Any]] | None = None, annotation_source: Any = None) -> dict[str, Any]:
-    """Draw ``document`` -- an ``.xbf`` or a ``.step`` the engine serves and meshes, or a mesh
-    file (``.glb``, ``.stl``, ``.3mf``) the page reads itself -- into ``out`` (a ``.png``);
-    returns what was drawn and how long each stage took. ``pose``: a configuration's name or
-    ``{joint: value}``, the engine placing each link by its pairs from the ground; None draws
-    the document as built; a mesh has no mechanism to pose. ``source``: the document is a
+    """Draw ``document`` -- an ``.xbf`` or a ``.step`` the engine serves and meshes, or a file its
+    reader reads (``FILES``: a mesh, a robot, a drawing) -- into ``out`` (a ``.png``); returns what
+    was drawn and how long each stage took. ``pose``: a configuration's name (a robot's group
+    state) or ``{joint: value}``, the engine placing each link by its pairs from the ground (a
+    robot's by its joints from its root); None draws the document as built (a robot where the
+    viewer opens it); a mesh has no mechanism to pose. ``source``: the document is a
     build's, held in this process (``draw``). ``annotation`` (``parse_annotation``'s) and
     ``measurements`` are drawn over the model; ``camera`` ``authored`` is the view the ink was
     drawn in, read from the Quick Edit packet ``annotation_source`` is (or is beside: ``authored``),
@@ -684,8 +497,9 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
     started = time.perf_counter()
     document, out = Path(document).resolve(), Path(out).resolve()
     suffix = document.suffix.lower()
-    if suffix not in DOCUMENTS and suffix not in MESH_KINDS:
-        raise SnapshotRefused(f"{document.name} is neither a document (.xbf, .step) nor a mesh (.glb, .stl, .3mf)")
+    if suffix not in DOCUMENTS and suffix not in FILES:
+        raise SnapshotRefused(f"{document.name} is neither a document (.xbf, .step) nor a file the stills draw "
+                              f"({', '.join(FILES)})")
     if source is None and not document.is_file():
         raise SnapshotRefused(f"no document {document}")
     if out.suffix.lower() != ".png":
@@ -696,23 +510,18 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
         display["camera"] = dict(view.lens)  # the view's projection
     size = size or (view.size if view is not None and view.size else DEFAULT_SIZE)
     still = Still(display, framed, exact, preview, tuple(size), pose, annotation, measurements)
-    if suffix in MESH_KINDS:
-        if pose is not None:
-            raise SnapshotRefused(f"--pose poses a document's mechanism; {document.name} is a mesh and has none")
-        if exploded_amount(still.display) and suffix != ".glb":
-            raise SnapshotRefused(f"display.exploded moves a model's parts apart; {document.name} is one mesh. "
-                                  "Remove display.exploded.")
+    if suffix in MESHES and pose is not None:
+        raise SnapshotRefused(f"--pose poses a document's mechanism; {document.name} is a mesh and has none")
     if not out.parent.is_dir():
         out.parent.mkdir(parents=True, exist_ok=True)
-    if suffix in MESH_KINDS:
-        return _mesh_file(document, out, still, started)
     return _occt(document, out, still, daemon, source, started)
 
 
 def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, started: float) -> dict[str, Any]:
-    """A document drawn by OCCT from the engine's meshes (``render/service.py``): by the daemon's
-    render process for the document, warm, or in this process (``--no-daemon``, a model's own
-    document from its worker's memory). The answer is the PNG's bytes; this writes the one file."""
+    """A document drawn by OCCT from the engine's meshes, or a file from what its reader read
+    (``render/service.py``): by the daemon's render process for it, warm, or in this process
+    (``--no-daemon``, a model's own document from its worker's memory). The answer is the PNG's
+    bytes; this writes the one file."""
     if daemon and source is None:
         from cadgen.engine.client import request
 
@@ -725,10 +534,16 @@ def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, st
             raise RuntimeError(answer["failed"])
         data, report = base64.b64decode(answer["png"]), answer["report"]
     else:
+        from cadgen.engine.formats import FormatError
         from cadgen.engine.render.service import draw_here
 
-        data, report = draw_here(document, still, source=source)
+        try:
+            data, report = draw_here(document, still, source=source)
+        except FormatError as error:
+            raise SnapshotRefused(str(error)) from None
     _warn(report.get("unmeshed") or {})
+    for warning in report.get("warnings") or []:
+        print(f"warning: {document.name}: {warning}", file=sys.stderr)
     write_png(out, data)
     report["timings"]["totalMs"] = round((time.perf_counter() - started) * 1000)
     return {"ok": True, "document": str(document), "output": str(out), **report, "bytes": out.stat().st_size}
@@ -745,14 +560,16 @@ def _warn(unmeshed: dict[str, list[int]]) -> dict[str, list[int]]:
 
 def add_parser(verbs: Any) -> argparse.ArgumentParser:
     """The ``snapshot`` verb of ``cadgen xbf``."""
-    parser = verbs.add_parser("snapshot", help="draw a document as the CAD Viewer does, into a PNG")
-    parser.add_argument("document", metavar="SRC", help="a document (.xbf, .step), a mesh file (.glb, .stl, .3mf), or "
+    parser = verbs.add_parser("snapshot", help="draw a document or a file the viewer opens as the CAD Viewer does, "
+                                               "into a PNG")
+    parser.add_argument("document", metavar="SRC", help="a document (.xbf, .step), a mesh file (.glb, .stl, .3mf), a "
+                                                        "robot (.urdf, .sdf, .srdf), a drawing (.dxf), or "
                                                         "SCRIPT.py::MODEL (built first, drawn from its worker)")
     parser.add_argument("out", metavar="OUT.png", help="the .png to write")
     parser.add_argument("--display", help="a mode (solid, shaded, parts, xray, hidden-line, wireframe), exploded=AMOUNT "
                                           "(the parts moved apart, 0 to 1; with a mode: hidden-line,exploded=0.6), or "
                                           "the display JSON object (mode, grid, appearance, camera, clip, exploded), or "
-                                          "a JSON file of it")
+                                          "a JSON file of it; a drawing takes appearance (light, dark) alone")
     parser.add_argument("--grid", action="store_true", help="draw the measuring grid")
     parser.add_argument("--camera", help="a preset (iso, front, back, left, right, top, bottom), azimuth:elevation, "
                                          "a camera JSON object, or authored: the view --annotation's ink was drawn "
@@ -761,9 +578,9 @@ def add_parser(verbs: Any) -> argparse.ArgumentParser:
     parser.add_argument("--width", type=int)
     parser.add_argument("--height", type=int)
     parser.add_argument("--size-profile", choices=sorted(SIZE_PROFILES))
-    parser.add_argument("--pose", help="a configuration's name, or joint and coupling values as JSON "
-                                       "('{\"elbow\": 45}', '{\"curl\": 0.6}'): the mechanism posed there; as built "
-                                       "without it")
+    parser.add_argument("--pose", help="a configuration's name (a robot's SRDF group state), or joint and coupling "
+                                       "values as JSON ('{\"elbow\": 45}', '{\"curl\": 0.6}'; degrees, metres): the "
+                                       "mechanism posed there; as built without it (a robot where the viewer opens it)")
     parser.add_argument("--annotation", metavar="FILE", help="the viewer's annotation file, or the Quick Edit packet "
                                                               "(.snapshot.json) that carries it: its ink drawn over the "
                                                               "model, on the parts it was drawn on")

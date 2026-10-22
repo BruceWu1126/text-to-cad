@@ -74,7 +74,7 @@ def cap_colour(scene: Any, index: int, clip: dict[str, Any]) -> tuple[float, flo
 
     instance = scene.structure["instances"][index]
     if scene.mode == "parts":
-        rgba: Any = PARTS[index % len(PARTS)]
+        rgba: Any = PARTS[instance.get("palette", index) % len(PARTS)]
     else:
         rgba = instance.get("color") or scene.prototypes[instance["prototype"]].get("color") or LOOK.fill
     power = 1.0 if scene.preview else LOOK.colour_power
