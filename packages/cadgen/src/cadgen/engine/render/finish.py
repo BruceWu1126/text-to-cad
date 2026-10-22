@@ -1,7 +1,9 @@
 """PROTOTYPE: the regular display modes on OCCT's PBR raster, as the look (``look.py``) draws them.
 
 ``occt.py`` asks this module for its rig and its faces' materials; the viewer draws the same
-record through three's physical materials (core's ``lib/xbf/xbfLook.js``).
+record through three's physical materials (core's ``lib/xbf/xbfLook.js``). Preview draws a part
+with a material in the same material (under its own studio's light), so a material looks one
+material in every look.
 
 - **The environment** is the look's image (``studio.hdr``: equirectangular, the document's frame,
   decoded as three's HDRLoader decodes it), sampled onto a cube map's six faces in OpenGL's face

@@ -27,7 +27,8 @@ The flags are ``cadgen xbf snapshot``'s where it has them, and mean what the vie
   Measure's dimensions painted over the frame in screen space (``overlay.py``).
 - ``--preview``: physically based raster (PBR, an image-based environment, a key light with
   shadows on a floor that runs past the frame, the backdrop the floor's own colour as drawn, so
-  the two meet without an edge); ``--path-trace N``: OCCT's path tracer, N samples.
+  the two meet without an edge), a part with a material in the material the modes draw it in
+  (``finish.py``); ``--path-trace N``: OCCT's path tracer, N samples.
 """
 
 from __future__ import annotations
@@ -252,20 +253,18 @@ class Scene:
         from OCP.Graphic3d import Graphic3d_TypeOfShadingModel
 
         source = AIS_Shape(self.parts[index].faces[group])
-        if look in ("pbr", "hidden"):
-            # Preview's own material; Hidden line's faces hide what is behind them whatever their
-            # finish (the viewer's are depth alone), so they are opaque.
-            material, color = self._material(rgba, look)
-        else:  # the regular modes: the look's finish of the part's material (``finish.py``)
-            from cadgen.engine.render.finish import face_material, linear
+        from cadgen.engine.render.finish import face_material, linear
 
+        own = None if isinstance(rgba, str) else self._material_of(index, group)
+        if look == "hidden" or (look == "pbr" and own is None):
+            # Hidden line's faces hide what is behind them whatever their finish (the viewer's are
+            # depth alone), so they are opaque; Preview's surface without a material is its own.
+            material, color = self._material(rgba, look)
+        else:  # the part's material as the look draws it (``finish.py``): in Preview as in the modes
             if isinstance(rgba, str):  # a fill (Parts) keeps the part's opacity, as the viewer's does
-                own = self.prototypes[index].get("color") or ()
-                rgba = (*linear(rgba), float(own[3]) if len(own) > 3 else 1.0)
-                material = None
-            else:
-                material = self._material_of(index, group)
-            material, color = face_material(rgba, material, plain=look == "xray")
+                part = self.prototypes[index].get("color") or ()
+                rgba = (*linear(rgba), float(part[3]) if len(part) > 3 else 1.0)
+            material, color = face_material(rgba, own, plain=look == "xray")
         source.SetMaterial(material)
         source.SetColor(color)
         aspect = source.Attributes().ShadingAspect().Aspect()
