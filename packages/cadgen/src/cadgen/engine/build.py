@@ -475,7 +475,7 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
                 body_script, _, function = body_name.rpartition("::")
                 retention["fallbacks"].setdefault(f"{Path(body_script).name}::{function}", []).extend(
                     f"reads {_shown(Path(path), Path(body_script).parent) if path else 'a file'} through {call}: "
-                    "it runs on every build; use read_step/read_xbf/read_mesh" for call, path in reads)
+                    "its body is never retained (any edit runs it whole); use read_step/read_xbf/read_mesh" for call, path in reads)
             # Each call a body ran uncached (``memo._ran_uncached``), which keeps it from being retained:
             # an OCCT maker no key names, or a build123d call given what no keyed call made.
             for body_name, counts in run.uncached.items():

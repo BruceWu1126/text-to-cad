@@ -328,23 +328,48 @@ class ReadsTest(unittest.TestCase):
         self.assertEqual(self.built("enclosure")["cache"]["changed"], ["../scans/pcb.stl changed"])
         self.assertEqual(self.size("enclosure"), (66.0, 36.0, 6.0))
 
-    def test_a_file_read_past_the_engine_runs_its_body_on_every_build(self) -> None:
+    def test_a_file_read_past_the_engine_is_an_input_by_its_bytes_and_its_body_never_retained(self) -> None:
         from cadgen.engine import previous
 
         for name, call, path in (("by_import_stl", "build123d's import_stl", "scans/pcb.stl"),
                                  ("by_import_step", "build123d's import_step", "part.step"),
                                  ("by_occt", "OCCT's BRepTools.Read_s", "part.brep")):
-            for _build in range(2):
+            for status in ("run", "loaded"):
                 report = self.built(name)
-                self.assertEqual(report["bodies"], {f"reads.py::{name}": "run"}, name)
+                self.assertEqual(report["bodies"], {f"reads.py::{name}": status}, name)
+                if status == "loaded":
+                    break
                 self.assertEqual(report["retention"]["fallbacks"], {f"reads.py::{name}": [
-                    f"reads {path} through {call}: it runs on every build; use read_step/read_xbf/read_mesh"]})
+                    f"reads {path} through {call}: its body is never retained (any edit runs it whole); use read_step/read_xbf/read_mesh"]})
                 # The report is the build's, its memo tally whole: `python model.py` prints it.
                 self.assertIn("misses", report["memo"], name)
                 self.assertTrue(cli._describe(report, 1.0, None).startswith(f"built reads.py::{name} in"), name)
-            # No key: a restart builds it too.
+            # The file is an input all the same, by its bytes: the closure keeps its key, and a
+            # restart with nothing changed takes the document.
             _writer, record = previous.scan(self.folder / f"XBF/{name}.xbf")
-            self.assertIsNone(json.loads(record)["key"], name)
+            closure = json.loads(record)
+            self.assertIsNotNone(closure["key"], name)
+            self.assertIn(f"../{path}", [row[1] for row in closure["inputs"]], name)
+            self.restart()
+            self.assertEqual(self.built(name)["cache"], {"used": True, "from": "file"}, name)
+
+    def test_a_model_reading_its_inputs_beside_it_restarts_from_its_file_wherever_it_is_copied(self) -> None:
+        # tom reads vendor parts past the engine (import_brep) from beside its sources: copied
+        # elsewhere with them, a restart with nothing changed takes the document, and an edited
+        # input builds it.
+        self.built("by_occt")
+        moved = Path(tempfile.mkdtemp(prefix="engine-reads-moved-")).resolve() / "copy"
+        self.addCleanup(shutil.rmtree, moved.parent, ignore_errors=True)
+        shutil.copytree(self.folder, moved)
+        self.restart()
+        (report,) = engine_build.build(moved / "reads.py", ["by_occt"], cwd=moved)
+        self.assertEqual(report["cache"], {"used": True, "from": "file"}, report)
+        import build123d as bd
+
+        bd.export_brep(bd.Box(12, 10, 10), str(moved / "part.brep"))
+        self.restart()
+        (report,) = engine_build.build(moved / "reads.py", ["by_occt"], cwd=moved)
+        self.assertEqual(report["cache"]["changed"], ["../part.brep changed"])
 
     def test_a_model_sized_by_import_stl_builds_again_when_the_stl_changes(self) -> None:
         """The probe: a model sized from cube.stl by build123d's import_stl kept its 40 mm box

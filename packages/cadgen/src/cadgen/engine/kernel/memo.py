@@ -21,9 +21,10 @@ file the engine reads for a model (``wrap_function``: ``read_step``, ``read_xbf`
 ``import_stl``: operations keyed by the file's bytes too) and the readers a model may drive
 itself (``_READER_TARGETS``: OCCT's, patched in place on their classes, and build123d's
 ``Mesher.read``) read their file in C or C++, where the audit hook on Python's ``open`` hears
-nothing. A body that calls one is not kept, and its key says it cannot say all it read
-(``_bypassed``): it runs on every build, its closure has no key, and the build names the call
-and the file (``_Run.bypassed``).
+nothing. A body that calls one is not kept (``_bypassed``): it runs on every build, and the
+build names the call and the file (``_Run.bypassed``). The file is one of its inputs all the same,
+held to its bytes as a file it opened itself is, so its closure keeps a key: a restart with nothing
+changed takes its document, and one after the file changed builds it.
 
 **Keys.** A call is keyed by its operation, every setting it runs with, its
 canonical parameters and the keys of the shapes it was given. The settings are what
@@ -550,12 +551,25 @@ def _library_file(name: str) -> bool:
 
 def _bypassed(state: "_Run", call: str, path: str | None) -> None:
     """The running body read ``path`` through ``call``, a reader past the engine's (see the
-    module): it is not kept and its key cannot say all it read, so it runs on every build
-    (``keyed`` false: its closure has no key), and the build names the call and the file."""
+    module): it is not kept, so it runs on every build, and the build names the call and the
+    file. A regular file it read is one of its inputs as a file it opened itself is
+    (``_audited``): held to its bytes when it returns, so its closure keeps a key and a restart
+    with nothing changed takes its document; a file read again after it changed builds again.
+    A read of what is no regular file leaves the body with no key (``keyed`` false)."""
     if not state.bodies:
         return
+    import stat as stat_module
+
     log = state.bodies[-1]
-    log.retainable = log.keyed = False
+    log.retainable = False
+    try:
+        found = os.stat(path) if path is not None else None
+    except OSError:
+        found = None
+    if found is not None and stat_module.S_ISREG(found.st_mode):
+        log.reads.setdefault(os.path.abspath(path), (found.st_size, found.st_mtime_ns))
+    else:
+        log.keyed = False
     if (call, path) not in log.bypassed:
         log.bypassed.append((call, path))
 

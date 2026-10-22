@@ -1227,9 +1227,12 @@ in C or C++, where the hook on `open` hears nothing: build123d's importers (`imp
 (`STEPControl_Reader.ReadFile`, `STEPCAFControl_Reader.ReadFile` and `.Perform`, IGES's
 readers, `RWStl.ReadFile_s`, `StlAPI`, `BRepTools.Read_s` and `BinTools.Read_s` given a
 path, `RWMesh_CafReader.Perform`: glTF's and OBJ's; `kernel/memo.py`, `_READER_TARGETS`).
-A body that calls one runs on every build, its closure holds no key (a restart builds it),
-and `retention.fallbacks` names the call: `reads ../scans/pcb.stl through build123d's
-import_stl: it runs on every build; use read_step/read_xbf/read_mesh`. What the engine
+A body that calls one is never retained, so any edit runs it whole, and `retention.fallbacks`
+names the call: `reads ../scans/pcb.stl through build123d's import_stl: its body is never retained
+(any edit runs it whole); use read_step/read_xbf/read_mesh`. The file it named is one of its
+inputs all the same, held to its bytes (a read of what is no regular file leaves its closure with no
+key): a build with nothing changed takes its document, after a restart too, and one after the file
+changed builds it. What the engine
 cannot see is the author's: the clock, environment variables, randomness, a file only
 tested for (`Path.exists`, `os.stat`: an open is heard, a lookup is not), a folder listed
 (`glob`, `os.listdir`: a file added to it is not heard), and a file a C library opens for
