@@ -630,6 +630,41 @@ class RobotTest(FixtureTest):
         door = np.array(swung["instances"][1]["matrix"]).reshape(4, 4).T
         np.testing.assert_allclose(door[:3, 3], (800, 0, 500), atol=1e-6)  # turned about z through the joint: the door's frame
 
+    def test_a_package_mesh_is_found_in_the_package_the_description_is_in(self) -> None:
+        """``package://NAME/...`` (#611): the package's folder is the nearest above the description named
+        NAME, or holding a ``package.xml`` that names it; no such folder, or a path out of it, is refused."""
+        from cadgen.engine.formats.robot import RobotError
+
+        def described(package: Path, uri: str, kind: str = "urdf") -> Path:
+            path = package / kind / f"arm.{kind}"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            mesh = f'<mesh filename="{uri}" scale="0.001 0.001 0.001"/>'
+            path.write_text(f'<robot name="arm"><link name="base"><visual><geometry>{mesh}</geometry></visual></link></robot>'
+                            if kind == "urdf" else
+                            f'<sdf version="1.9"><model name="arm"><link name="base"><visual name="shell"><geometry><mesh>'
+                            f'<uri>{uri}</uri><scale>0.001 0.001 0.001</scale></mesh></geometry></visual></link></model></sdf>',
+                            encoding="utf-8")
+            return path
+
+        workspace = self.folder / "ros_ws" / "src"
+        for folder, manifest in (("arm_description", None), ("arm-description-main", "arm_description")):
+            package = workspace / folder
+            (package / "meshes").mkdir(parents=True)
+            mesh = write_stl(package / "meshes" / "base.stl", box_soup((40, 20, 10)))
+            if manifest:
+                (package / "package.xml").write_text(f"<package format='3'><name>{manifest}</name></package>",
+                                                     encoding="utf-8")
+            for kind in ("urdf", "sdf"):
+                with self.subTest(package=folder, kind=kind):
+                    found = formats.read(described(package, "package://arm_description/meshes/base.stl", kind))
+                    self.assertIn(str(mesh.resolve()), found.files)  # read there, and read again when it changes
+                    self.assertEqual([prototype["name"] for prototype in found.structure["prototypes"]], ["base"])
+        lone = workspace / "loose"
+        for uri, said in (("package://gripper/meshes/base.stl", "no folder named 'gripper'"),
+                          ("package://arm_description/../../loose/base.stl", "climbs out of its package")):
+            with self.subTest(uri=uri), self.assertRaisesRegex(RobotError, said):
+                formats.read(described(lone if "gripper" in uri else workspace / "arm_description", uri))
+
 
 # --- DXF -------------------------------------------------------------------------------------------
 

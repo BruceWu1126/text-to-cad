@@ -476,7 +476,9 @@ per file (read again when a file it read changes) or `--no-daemon` in this proce
   IOR, transmission, clear coat, anisotropy, emissive strength) and its base colour texture,
   drawn on its texture coordinates in the lit looks. `--pose` is refused: a mesh has no
   mechanism.
-- **A robot** (`.urdf`, `.sdf`, `.srdf`) is its link visuals' meshes (STL, 3MF and GLB files; a
+- **A robot** (`.urdf`, `.sdf`, `.srdf`) is its link visuals' meshes (STL, 3MF and GLB files, a
+  `package://NAME/...` one in the ROS package the description is in: the nearest folder above it
+  named NAME or holding a `package.xml` that names it, as the viewer finds it too; a
   box, cylinder, sphere or capsule made and meshed by the kernel), each link's in one colour of
   the Parts palette, placed by the viewer's forward kinematics (`lib/urdf/kinematics.js` and
   `fourBarCoupling.js`, ported and held to a golden its own code made: mimic joints and four-bar

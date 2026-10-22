@@ -106,9 +106,12 @@ linkages followed, and drawn in one colour of the Parts palette.
 
 A visual is a `box`, `cylinder` or `sphere`, which cadgen meshes itself, or a mesh
 file beside the description: an STL or a 3MF (its numbers scaled by the mesh's
-`scale`, which must be even) or a GLB (metres). A mesh in another format (`.dae`,
-`.obj`), a `package://` or remote URI, or a missing file is refused by name, and a
-link mesh that cannot be loaded fails the snapshot rather than leaving the link out.
+`scale`, which must be even) or a GLB (metres). A `package://NAME/...` mesh is found
+in the ROS package the description is in: the nearest folder above the `.urdf` named
+NAME, or holding a `package.xml` that names it, so keep the description inside its
+package folder. A mesh in another format (`.dae`, `.obj`), a remote URI, a package no
+folder above the description is, or a missing file is refused by name, and a link mesh
+that cannot be loaded fails the snapshot rather than leaving the link out.
 
 A normal snapshot uses Solid mode and Light appearance. `--display` takes any of the
 viewer's display modes (`parts`, `xray`, `hidden-line`, `wireframe`, ...),

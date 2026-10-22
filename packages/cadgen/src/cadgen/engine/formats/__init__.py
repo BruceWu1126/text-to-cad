@@ -23,11 +23,12 @@ import hashlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import numpy as np
 
-from cadgen.engine.mesh import Mesh
+if TYPE_CHECKING:  # a reader's module loads no kernel until it reads (the viewer resolves a robot's meshes here)
+    from cadgen.engine.mesh import Mesh
 
 __all__ = ["DRAWING", "Foreign", "FormatError", "KINDS", "MESHES", "Part", "Placed", "ROBOTS", "assemble", "files_of",
            "read", "stale"]

@@ -566,7 +566,7 @@ class Refusals(_Workspace):
         (self.root / "meshes" / "a.dae").write_bytes(b"<COLLADA/>")
         cases = [
             ('<mesh filename="meshes/a.dae"/>', "a .dae the viewer cannot draw: export the link as one of .3mf, .glb, .stl"),
-            ('<mesh filename="package://robot/meshes/a.stl"/>', "a package this cannot resolve"),
+            ('<mesh filename="package://gripper_description/meshes/a.stl"/>', "no folder named 'gripper_description'"),
             ('<mesh filename="https://example.test/a.stl"/>', "which is not a local file"),
             ('<mesh filename="meshes/gone.stl"/>', "references missing mesh file"),
         ]
@@ -580,6 +580,25 @@ class Refusals(_Workspace):
         self.assertEqual((visual["mesh"]["format"], visual["mesh"]["path"], visual["label"]), ("stl", str((self.root / "meshes" / "a.stl").resolve()), "a.stl"))
         self.assertEqual(visual["placement"][0], 0.001, "the mesh scale is in the placement")
         self.assertEqual(payload["links"][0]["visuals"][0]["path"], visual["mesh"]["path"])
+
+    def test_a_package_mesh_is_the_file_in_the_package_the_description_is_in(self) -> None:
+        """#611: ``package://NAME/...`` is found where the stills find it (``cadgen.engine.formats.robot``):
+        in the nearest folder above the description named NAME, or holding a package.xml that names it."""
+        for folder, manifest in (("arm_description", ""), ("arm-description-main", "arm_description")):
+            mesh = self.root / folder / "meshes" / "base.stl"
+            mesh.parent.mkdir(parents=True)
+            mesh.write_bytes(b"solid a\nendsolid a\n")
+            if manifest:
+                self.write(f"{folder}/package.xml", f"<package format='3'><name>{manifest}</name></package>")
+            uri = "package://arm_description/meshes/base.stl"
+            for path in (self.write(f"{folder}/urdf/arm.urdf", f'<robot name="arm"><link name="base"><visual><geometry>'
+                                                                f'<mesh filename="{uri}"/></geometry></visual></link></robot>'),
+                         self.write(f"{folder}/sdf/arm.sdf", f'<sdf version="1.9"><model name="arm"><link name="base">'
+                                                              f'<visual name="v"><geometry><mesh><uri>{uri}</uri></mesh></geometry>'
+                                                              '</visual></link></model></sdf>')):
+                with self.subTest(package=folder, kind=path.suffix):
+                    [visual] = read_robot_description(path)["visuals"]
+                    self.assertEqual((visual["mesh"]["format"], visual["mesh"]["path"]), ("stl", str(mesh.resolve())))
 
     def test_a_mesh_lands_in_metres_as_its_format_defines_it(self) -> None:
         # One 0.05 x 0.22 x 0.05 m box, written as each format holds it: an STL in metres with no
