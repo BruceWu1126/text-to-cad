@@ -232,6 +232,8 @@ function XbfSurface({ view, data }) {
     // A prompt's annotation is in the scene's coordinates: the document's millimetres.
     annotationUnits: scene?.units?.unit || "mm"
   });
+  // A measurement taken, deleted or cleared is a step of the view's one history, with the ink's.
+  measure.history.current = shell.frame.history;
   shellRef.current = shell;
   useDeclinedSelectReference(document);
   const ensureSelect = useCallback(() => { if (shellRef.current?.toolMode !== XBF_TOOL.SELECT) shellRef.current?.selectTool(XBF_TOOL.SELECT); }, []);
