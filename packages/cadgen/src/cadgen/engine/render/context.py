@@ -106,7 +106,7 @@ def pool() -> Iterator[None]:
 
 
 def _darwin_window(width: int, height: int) -> Any:
-    from OCP.Cocoa import Cocoa_Window
+    from OCP.Cocoa import Cocoa_Window  # pyrefly: ignore[missing-import] - macOS's OCP alone
 
     _cocoa_application()
     return Cocoa_Window("cadgen", 0, 0, width, height)
@@ -117,7 +117,7 @@ def _darwin_window(width: int, height: int) -> Any:
 
 def _has_xlib() -> bool:
     try:
-        import OCP.Xw  # noqa: F401
+        import OCP.Xw  # noqa: F401  # pyrefly: ignore[missing-import] - an OCP built with Xlib alone
     except ImportError:
         return False
     return True
@@ -131,7 +131,7 @@ def _linux_window(connection: Any, width: int, height: int) -> Any:
         window.SetSize(width, height)
         window.SetVirtual(True)
         return window
-    from OCP.Xw import Xw_Window
+    from OCP.Xw import Xw_Window  # pyrefly: ignore[missing-import] - an OCP built with Xlib alone
 
     window = Xw_Window(connection, "cadgen", 0, 0, width, height)
     window.SetVirtual(True)  # never mapped: nothing appears on the display
@@ -145,7 +145,7 @@ def _windows_window(width: int, height: int) -> Any:
     import ctypes
     from ctypes import wintypes
 
-    from OCP.WNT import WNT_Window
+    from OCP.WNT import WNT_Window  # pyrefly: ignore[missing-import] - Windows's OCP alone
 
     user32 = ctypes.windll.user32
     user32.CreateWindowExW.restype = wintypes.HWND
