@@ -1,10 +1,9 @@
 """Imported parts: STEP files read back as models, through `read_step`.
 
-The port of `electronics_enclosure_base_drawing.py`, whose one kernel call read
-the STEP that `electronics_enclosure_base.py` writes beside it and drew it. The
-engine has no drawing decorator, so what is kept is the read: the enclosure's
-STEP as a document of its own, and the mating fixture's STEP (an assembly) the
-same way, which exercises the names and colours an imported tree keeps.
+The read the old `electronics_enclosure_base_drawing.py` made (the drawing reads
+the enclosure's xbf now): the STEP that `electronics_enclosure_base.py` exported,
+as a document of its own, and the mating fixture's STEP (an assembly) the same
+way, which exercises the names and colours an imported tree keeps.
 Both are fixed inputs committed in `../STEP/`, exported once from the two
 source models; no model writes them.
 """
