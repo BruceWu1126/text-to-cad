@@ -325,7 +325,7 @@ class Reader:
         if root not in path.split(os.pathsep):
             env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
-        return subprocess.Popen([sys.executable, "-m", "cadgen.engine.reader"], stdin=subprocess.PIPE,
+        return subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.reader"], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, env=env)
 
     def read(self, path: str) -> tuple[dict[str, Any], bytes]:

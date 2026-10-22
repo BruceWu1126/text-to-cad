@@ -97,7 +97,7 @@ same pipe, even while a build runs."""
             env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["CADGEN_ENGINE_WORKER"] = "1"
-        self.process = subprocess.Popen([sys.executable, "-m", "cadgen.engine.worker"], stdin=subprocess.PIPE,
+        self.process = subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.worker"], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
                                         cwd=cwd or str(Path(script).parent))
         self.lock = threading.Lock()
