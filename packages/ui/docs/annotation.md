@@ -2,7 +2,7 @@
 
 Annotate is the CAD viewer's own ink, with no drawing SDK behind it. A view has one
 annotation: its marks are projected into the model in 3D, so they stay where they
-were drawn from every angle. The STEP renderer is the one that offers Annotate
+were drawn from every angle. Every viewer renderer offers Annotate
 ([Annotate](cad-renderer.md#annotate)).
 
 ## Pieces

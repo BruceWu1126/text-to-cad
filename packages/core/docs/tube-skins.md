@@ -1,20 +1,19 @@
 # Tube skins
 
-A flexible swept body — a tendon, a hose, a valve spring — bends in a clip through
-`.deform_tube()`. cadgen works out where it is; this package only plays it, as a
-glTF player plays a skin. Nothing here compiles a path, projects a vertex or
+A flexible swept body — a tendon, a hose, a valve spring — bent in a STEP model's clip
+through `.deform_tube()`. cadgen worked out where it was; this package only plays it, as
+a glTF player plays a skin. Nothing here compiles a path, projects a vertex or
 refines a mesh.
 
-## What cadgen hands over
+## What cadgen handed over
 
-The bake (`cadgen/_internal/animation_bake.py`) keeps a tube track's keys as
-centerlines in the sidecar's `animation` section. cadgen turns them into a
-**skins payload** (`cadgen/_internal/tube_skin_payload.py`), cached in its
-store; a snapshot job carries its URL in `resolved.tubeSkinsUrl`. (The CAD Viewer
-served it to the STEP renderer as `GET /__cad/tube-skins`; it opens a STEP through
-the cadgen engine now, whose documents carry motions, never clips, and the route
-is gone with that renderer's path.) The payload
-is GLB-framed; its JSON says what each array is:
+cadgen's STEP pipeline baked a tube track's keys as centerlines in the sidecar's
+`animation` section and turned them into a **skins payload**, which a host named
+for `loadSourceAnimation` (`tubeSkinsUrl`). That pipeline is gone: the CAD Viewer
+opens a STEP through the cadgen engine, whose documents carry motions, never clips,
+and nothing writes a payload now. The player below stays with the effects pass that
+carries it; the committed fixture (`src/common/fixtures/tube_skins`) is the one
+payload its tests read. The payload is GLB-framed; its JSON says what each array is:
 
 - a **binding** per occurrence a track bends: its component's mesh refined into
   bands along the rest centerline and bound to the track's joints, in the
@@ -59,6 +58,6 @@ material coordinates, which ride with each vertex however the tube bends.
 
 ## Exported files
 
-An animated GLB carries the same skin (`cadgen/_internal/glb_animation.py`):
-joints as nodes keyed LINEAR, the bound mesh with `JOINTS_0`/`WEIGHTS_0`, so any
-glTF player draws what the viewer draws.
+An animated GLB cadgen exported carried the same skin: joints as nodes keyed LINEAR,
+the bound mesh with `JOINTS_0`/`WEIGHTS_0`, so any glTF player draws what the viewer
+drew.

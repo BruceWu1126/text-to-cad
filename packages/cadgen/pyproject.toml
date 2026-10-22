@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cadgen"
 version = "0.8.0"
-description = "STEP-first CAD artifact generation runtime: build123d STEP/GLB/topology generation, validation, and inspection for CAD agent skills."
+description = "CAD models as Python, built by a warm engine into documents (.xbf) and the STEP, GLB, STL, 3MF and DXF they declare, with the CAD Viewer and the tools that show and check them."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -98,6 +98,9 @@ cadgen = ["py.typed", "*.pyi", "_runtime/**/*"]
 # The viewer server's catalog ordering is ICU root collation, read from this table at
 # runtime; it ships beside the code that reads it.
 "cadgen.viewer" = ["collation.json"]
+# The engine's README is the mechanisms its laws constrain, and the page `cadgen serve` shows a
+# document in (cadgen.engine.serve reads it beside itself).
+"cadgen.engine" = ["README.md", "page/*"]
 # The engine's look lights the regular display modes with this environment image, which the
-# engine serves to the viewer and the OCCT prototype reads (cadgen.engine.render.look).
+# engine serves to the viewer and the OCCT stills read (cadgen.engine.render.look).
 "cadgen.engine.render" = ["studio.hdr"]

@@ -18,8 +18,8 @@ family and draws the navbar and the explorer. The catalog exposes CAD
 artifacts only, and the web app has no file-writing endpoints.
 Follow the [shared host contract](../../packages/ui/docs/viewer-host.md) when
 adding viewer features; browser effects belong in this app's adapters.
-The [shared Model tree](../../packages/ui/docs/cad-renderer.md#step-panels)
-owns expansion-based picking, lazy topology and isolation.
+The [shared Model tree](../../packages/ui/docs/cad-renderer.md#engine-document-panels)
+owns expansion-based picking and isolation.
 Web uses the same tree and file-row primitives as desktop; its HTTP adapter
 does not decide which model nodes are expanded or selectable.
 
@@ -254,19 +254,18 @@ it requires changing the source model or annotations. The viewer has no Material
 or Theme editor. These controls live in `@text-to-cad/ui`; see the UI package's
 Render and loading playbooks.
 
-Large assemblies load progressively, every part at cadgen's one display mesh,
-within memory budgets. Stored meshes render before selector tables are read. The
+A STEP or an `.xbf` loads its structure, then its parts, each at the mesh the cadgen engine
+made of it, and a new version fetches only the parts it changed (the shared
+[loading](../../packages/ui/docs/loading.md) playbook). The
 viewport carries opening/update status, centred at its top (a progress icon on
-mobile), and the Preview label there while a build's preview revision is on screen
-(the shared [loading](../../packages/ui/docs/loading.md#5-following-an-active-build)
-playbook); initial loading may also use the viewport overlay, and an error is a card over the viewport whose Details keep the complete
+mobile); initial loading may also use the viewport overlay, and an error is a card over the viewport whose Details keep the complete
 compiler output, whose Retry reloads only that file and whose Report Issue opens a
 new issue titled "Issue: ", labelled `bug`, filled in from the card. A failed update the
 model survives can be dismissed, leaving the previous version to inspect.
 
 The page reloads once its server is other code: it asks `/__cad/server` for its
 `identityToken` (cadgen's version and a digest of its Python and client) and
-reloads on a new one, picking up the client, and the store, that server serves. A
+reloads on a new one, picking up the client that server serves. A
 source-checkout backend (`autoReload: true`) restarts on Python code changes and is
 asked every 2 s, every 0.4 s while it is down; an installed one, which changes only
 when another install replaces it on its port, every 5 s and whenever the window

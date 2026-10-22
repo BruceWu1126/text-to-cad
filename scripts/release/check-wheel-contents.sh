@@ -66,6 +66,12 @@ REQUIRED=(
   "cadgen/engine/daemon.py"
   "cadgen/engine/worker.py"
   "cadgen/engine/cli.py"
+  # The engine's data: the page `cadgen serve` shows a document in, the environment image its
+  # look lights the display modes with, and its README (the mechanisms the package's laws name).
+  "cadgen/engine/README.md"
+  "cadgen/engine/page/index.html"
+  "cadgen/engine/page/viewer.js"
+  "cadgen/engine/render/studio.hdr"
   "cadgen/_runtime/browser/snapshot-render.js"
   "cadgen/_runtime/browser/render.html"
   "cadgen/_runtime/viewer/index.html"
@@ -110,6 +116,15 @@ for path in "${REQUIRED[@]}"; do
     missing="$missing  - $path"$'\n'
   fi
 done
+
+# The engine's test goldens (pictures and payloads its tests compare against) are the tests'
+# own and never ship: a wheel that carries one carries a fixture a user never reads.
+shipped_goldens="$(grep -E '^cadgen/engine/.*(golden|\.png$)' "$listing" || true)"
+if [ -n "$shipped_goldens" ]; then
+  echo "The cadgen wheel ships engine test goldens:" >&2
+  printf '%s\n' "$shipped_goldens" >&2
+  exit 1
+fi
 
 # A nested-glob failure usually loses MANY files at once rather than one, so report the
 # count too: it distinguishes "one file moved" from "package-data is not matching".

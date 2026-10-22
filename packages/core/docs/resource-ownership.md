@@ -1,8 +1,8 @@
 # Resource ownership and reuse
 
 How the shared render code owns, shares, reuses and releases the expensive
-things: component geometry, GPU buffers, BVH accelerators, decode
-workers and cache reservations. Workspace resource reads and their cache
+things: component geometry, GPU buffers, BVH accelerators and decode
+workers. Workspace resource reads and their cache
 generations are specified in [workspace services](workspace-resources.md).
 
 The one-sentence laws are in [the package README](../README.md#the-laws-that-live-here);
@@ -13,10 +13,9 @@ persistent cache identity or occurrence identity.**
 | § | Covers |
 |---|---|
 | [1](#1-shared-ownership-and-disposal) | More than one scene owner, and who disposes |
-| [2](#2-the-demand-boundary) | Selectors and raycast accelerators built only when asked for |
+| [2](#2-the-demand-boundary) | Raycast accelerators built only when a ray needs one |
 | [3](#3-reuse-without-changing-geometry) | Recomposition, instancing, culling, material pass keys |
-| [4](#4-decode-workers) | One request per worker, pool growth, reclamation, charges |
-| [5](#5-browser-mesh-store-admission) | Probe, admit, verify, adopt — and strict reads |
+| [4](#4-decode-workers) | The GLB and STL workers, leased by render sessions |
 
 ## 1. Shared ownership and disposal
 
@@ -41,26 +40,12 @@ the last release disposes shared GPU/BVH state.
   is disposed after its siblings. A GLB sibling restores the authored local transforms,
   bone transforms and morph weights captured at scene creation; the editor's current
   routine, explosion and selection overlays never become Preview's baseline.
-  A second STEP scene filled from the same published
-  mesh shares component geometry through the owner counts above.
 - `createCadWebGlRenderer` (`common/webglRenderer.js`) takes the `canvas` it draws
   on (an `OffscreenCanvas`), so one renderer, and one upload of each resource, can
   serve several views; disposing it and losing its context are its caller's.
 
 ## 2. The demand boundary
 
-Render-only loads do not construct selector topology until it is requested.
-Selector topology is cadgen's
-selector table (the part record's other object, read by its part and object:
-`partSelectorsPath`) joined to the component's stored mesh by ordinal
-(`lib/parts/selectorTable.js`):
-the ids, metrics, flags, adjacency, chains and tangent groups are the table's,
-and the join adds only each face's triangle range and each edge's segment
-range in the mesh on screen.
-
-- Unused components replace only display arrays. A component with active
-  topology replaces its selectors at the same part before publishing new
-  triangles.
 - Raycast accelerators may be deferred until a ray reaches a component's
   local bounds. The first ray uses exact stock intersection; surface builds
   enter a single worker queue in idle time and are shared by occurrences.
@@ -73,16 +58,6 @@ range in the mesh on screen.
   geometry's attributes, arrays, versions, groups, draw range and live
   ownership; the last geometry release cancels queued or active work.
 - Deformation runs before the bounds test.
-- The merged edge-pick `LineSegments` (`edgePickRaycast.js`) keeps its one
-  buffer and gains a table of boxes over contiguous 32-segment runs (and
-  1,024-segment groups), built on the first edge ray (O(segments), a tenth of
-  the index buffer) and keyed by the proxy's position array. A ray runs
-  three's own segment test over only the segments whose boxes (group, run,
-  then the segment's own) it passes within the pick threshold of, widened by
-  1e-4 of the ray's reach, far above three's rounding, so the hits and their
-  order are the full scan's. A sync whose proxy only grew (every earlier
-  index and position bit-identical) keeps the built boxes and boxes only the
-  appended segments; any other change builds afresh on the next edge ray.
 
 ## 3. Reuse without changing geometry
 
@@ -101,6 +76,14 @@ static delta requires the same last-applied render context and no dynamic
 pose, animation or clip. Changed components update their own records, while
 unchanged occurrence geometry and selectors retain their owners. Arbitrary
 mutable caller meshes keep normal reconciliation.
+
+Imported STEP products without faces keep their occurrence identity. A product
+that holds only wires has no triangles, so its mesh's box comes from its edges'
+polylines. One with no faces or edges meshes to empty arrays, a zero-size box at
+the origin and a positive minimum scale. Either way the same body validation
+applies. That box is only the body's metadata: only triangles are
+drawn, so composition gives an occurrence without them no bounds, and it
+cannot change the assembly's framing or hide the real parts.
 
 ### Selector composition
 
@@ -151,89 +134,12 @@ the shared surface material.
 
 ### Revision reuse
 
-Canonical geometry trees contain no producer selection. A runtime view
-names each component's part, cadgen's key for its display data under the view's
-producer, and render/selector reuse requires that part and its display mesh's
-object. Other snapshot source scopes remain isolated. Placement and appearance
-belong to each tree's occurrence composition. Every part is drawn at cadgen's
-one display tolerance, the same pair a mesh export that names none is written
-at; the page never names it.
+Canonical geometry trees contain no producer selection. Snapshot source scopes
+remain isolated. Placement and appearance belong to each tree's occurrence
+composition.
 
 ## 4. Decode workers
 
-Each decode worker runs one request at a time; excess requests wait on
-the client. Render sessions lease that shared scheduler. Releasing one owner
-never cancels another owner; the final release retires remaining work and
-workers. Idle pressure reclamation preserves active and queued consumers.
-
-- Aborting synchronous work replaces only its worker, preserving other
-  callers. A failed worker request reports an error instead of retrying its
-  decode and selector work on the UI thread. Inline execution is reserved for
-  environments where workers cannot start.
-- A pool starts with one isolate and grows only for ready concurrent requests,
-  or when a package load finds its first components cached: it starts the
-  isolates its lanes will decode on (`prewarmPartWorkerPool`, at most the
-  lanes' count), so their start overlaps the batch read of those bodies instead
-  of following it. Sequential topology reads reuse that isolate until the drain
-  becomes idle; they do not create a maximum-size pool for each component.
-- Pressure reclamation may release idle worker slots while active and queued
-  consumers keep their work. Each live slot retains its own highest completed
-  request estimate, including handled failures; reclamation or replacement
-  removes that slot's charge.
-- Memory estimates stay on the client. They do not enter worker messages or
-  cache keys, and RAM hits add no worker charge.
-
-## 5. Browser mesh-store admission
-
-cadgen writes every stored mesh; the browser only reads them. Reads start with
-a bounded probe of the parts' records. The client admits the encoded object and
-conservative decoded size before fetching a body, binds that fetch to the
-probed object digest and byte limit, then verifies the GLB body (its canonical
-JSON and tables) and content address before adoption.
-
-A package's open reads its cache in groups, as a snapshot does: one probe for a
-chunk of components and one TESB read for a batch of their bodies, each
-growing from the loader's first publish (eight components) to the server's
-bounds (256 keys, 32 MiB), in load order (`packageBatchReads.js`). A client
-whose transport caps one reply declares a lower ceiling for a batch's bytes
-(`createCadClient({ maxBatchBytes })`, which its cache reports as
-`batchMaxBytes`): the CAD app's tunnel declares 4 MiB, the most one of its
-replies carries. A ceiling never raises the server's bound
-(`tessBatchMaxBytes`), and a body larger than the ceiling is read alone, as
-every body once was; that transport carries it a range at a time and hands the
-provider the whole, which verifies its digest as it does any body's. A batch's
-framed bytes are charged to the Viewer envelope before it is read and released
-once its last component has taken its body; each component's decode is still
-admitted on its own before it runs, and an entry the batch could not read or
-verify is that component's strict-read miss alone. The parts the probe did not
-find resolve up to 64 to a `/__cad/parts` request, each the moment its own
-row is ready; each row carries the part's record, from the store the build
-filled (a part the store lacks is derived by one cadgen build-pool job for the
-request).
-
-A validated warm entry names its part, so rendering reads nothing else of it.
-`createHttpTessellationCacheProvider` takes an `origin` for hosts whose store is
-not on the page's own origin (the snapshot host). TESB body groups remain
-bounded at 32 MiB.
-
-Every read is strict: a missing or invalid body reports a typed miss
-(`TessellationCacheProbeMissError`), never a fallback. The loader releases that
-reservation and probes again or asks cadgen for the mesh under fresh cold-work
-admission; a topology read asks for a mesh it lacks the same way. **A lost mesh never silently turns a cheap decode into
-unbudgeted work in the page.**
-
-A client lazily owns one `createTessellationCache({provider})`, whose
-`createSession({signal})` method lends cancellable views to render sessions.
-No module-global provider can be swapped by another client. Closing a view aborts
-its reads; closing the client disposes the owner and aborts every view.
-Snapshot jobs dispose their own cache after their complete source is loaded.
-Decoded component meshes retain their existing page-wide content-addressed LRU;
-a cache view does not retain an additional geometry copy.
-
-Imported STEP products without faces keep their occurrence identity. A product
-that holds only wires has no triangles, so its mesh's box comes from its edges'
-polylines. One with no faces or edges meshes to empty arrays, a zero-size box at
-the origin and a positive minimum scale. Either way the same body validation
-applies. That box is only cache metadata: only triangles are
-drawn, so composition gives an occurrence without them no bounds, and it
-cannot change the assembly's framing or hide the real parts.
+The GLB and STL decode workers are one each, and render sessions lease them. Releasing
+one owner never cancels another owner's work; the final release retires the worker and
+its pending work.

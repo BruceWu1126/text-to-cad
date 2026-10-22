@@ -27,9 +27,8 @@ adapter can serve both apps, while desktop owns native runtime startup/recovery.
 See [workspace resources](../../core/docs/workspace-resources.md) for resource
 tickets and cache identity.
 
-A host passes no tolerance to the STEP renderer: it draws each part at the display mesh its
-part's record names, which cadgen derived at its display tolerance
-([the display mesh](loading.md#1-the-display-mesh)).
+A host passes no tolerance to a renderer: an engine document's parts (an `.xbf`'s, a STEP's)
+are drawn at the meshes the cadgen engine made of them.
 
 Apps create services for the workspace lifetime. File tabs borrow them, while
 mounted renderers own scenes, document controllers and temporary resource leases.
@@ -38,11 +37,7 @@ or admitted cache writes. Hosts dispose a service when its workspace closes.
 
 `FileViewer`'s optional `presentation.error` receives `message`, `missing`, and
 `reload`, which rereads only the file that produced the error; a callback from a
-departed file cannot reload its replacement. `CadViewer` uses the artifact-only
-build feed for a missing STEP too, so a failed first save shows **Save failed**
-without inventing a saved document. It reopens automatically only after a saved
-event and a catalog entry agree on that file's document hash. Without a matching
-job, and for other file types, the ordinary missing-file page remains.
+departed file cannot reload its replacement.
 
 ## Interface map and implementations
 
@@ -57,7 +52,7 @@ are for reading and maintaining the contracts.
 | `PromptContextPort` (`deliver`, `send`), bundles, references, delivery receipts and `formatPromptMessage` (the one message a Quick Edit is) | [Prompt types](../../core/src/prompt/types.ts) | `@text-to-cad/core/prompt` |
 | `CadWorkspaceService` (the catalog of the files on screen, `folder`, `search`), `createCadClient` (`{ origin, fetch, … }`), `isMissingFileError`, `CadResourceProvider`, worker tickets | [CAD service types](../../core/src/client/types.ts) | `@text-to-cad/core/client` |
 | `createHttpPromptFiles` (the viewer server's `PromptFiles`: `POST /__cad/prompt-files`, writes JSON and returns paths) | [Prompt files](../../core/src/client/promptFiles.js) | `@text-to-cad/core/client` |
-| `StepRendererOptions`, `CadLiveBinding` | [STEP registration](../src/renderers/step/index.ts) | `@text-to-cad/ui/renderers/step` |
+| `XbfRendererOptions` (an `.xbf` and a STEP), `LiveViewBinding`, `LiveViewController` | [Engine document registration](../src/renderers/xbf/index.ts) | `@text-to-cad/ui/renderers/xbf` |
 | `TabStore`, `TabRecordStorage`, `createTabStore`, `useTabViewerState` (the tab's one store: its settings, the view of the file on screen, and `FileViewer`'s state from both) | [Tab store](../src/tab-store/tabStore.ts), [the record](../src/tab-store/tabRecord.ts) | `@text-to-cad/ui/tab-store` |
 | `CadPreferenceSource`, `createCadPreferences` (the tab's settings as renderers read them) | [Viewer preferences](../src/renderers/workspace/preferences.ts) | `@text-to-cad/ui/renderers/workspace` |
 | `DxfRendererOptions` (2D drawings; declines every camera, display and selection command) | [DXF registration](../src/renderers/dxf/index.ts) | `@text-to-cad/ui/renderers/dxf` |
@@ -81,7 +76,7 @@ use the [explicit fake host](../src/host/testing/host.ts).
 
 ## A CAD renderer's controls
 
-The controls of a CAD renderer (STEP, GLB, mesh, robot) are its own, over the viewport: its
+The controls of a CAD renderer (an engine document's, GLB, mesh, robot) are its own, over the viewport: its
 tool strip, the tool in hand's sub-toolbar and its file sidebar, its view's controls (Display,
 Preview) drawn into the navbar's `navbarSlot` (`settings-ui.md#the-file-sidebar-and-the-tool-stack`); a
 DXF's are its own canvas's. Nothing a renderer does opens or closes the explorer (only the
@@ -95,7 +90,7 @@ beside the appearance and the home's layout.
 Preview is the shared shell's own state (`previewing`); there is no host
 prop for it and a host cannot start or observe it. It is a 3D view's alone, and each
 renderer says whether its view is one: it declares `previewable` to the shell
-(`useRendererShell`), as STEP, GLB, STL/3MF and URDF/SRDF/SDF do. A view that does
+(`useRendererShell`), as an engine document (an `.xbf`, a STEP), GLB, STL/3MF and URDF/SRDF/SDF do. A view that does
 not — a DXF's 2D drawing, which draws its own surface without the shell — has no
 Preview at all, no control and not a disabled one, and nothing that asks for it
 (a link or a host request, should either come to) takes it there: it keeps
@@ -188,10 +183,8 @@ home, launches it.
 Platform-agnostic UI can use DOM, canvas, React and renderer-owned workers.
 Filesystem access, transport selection, credentials, clipboard, persistent
 storage, page navigation and native process lifecycle remain host responsibilities.
-So do a transport's limits: a host whose channel caps one reply declares the
-most one batched read may ask for (`createCadClient({ maxBatchBytes })`), and the
-shared loader never asks for more; the host carries a longer body in parts (the
-CAD app's tunnel reads it a range at a time), and the loader sees it whole.
+So do a transport's limits: a host whose channel caps one reply carries a longer body
+in parts (the CAD app's tunnel reads it a range at a time), and the loader sees it whole.
 
 ## Prompt handoff
 
@@ -252,8 +245,8 @@ they do not transfer Promise or Blob values across native IPC.
 Quick Edit is the shared, host-neutral note to the agent
 ([the design system](settings-ui.md#quick-edit)), and its buttons are what the host can carry out.
 Copy, Queue and Send carry the words and references, with a snapshot packet captured
-at the press when the displayed revision matches the saved input. If a build preview
-is unsaved or the viewer retains a previous revision, Quick Edit keeps the note and
+at the press when the displayed revision matches the saved input. If the viewer
+retains a previous revision, Quick Edit keeps the note and
 references available and explicitly says they describe that displayed revision; the
 saved file may differ. It omits replay jobs rather than naming that saved file as the
 picture on screen. The packet, when available, includes the current view plus distinct drawn views
@@ -295,14 +288,12 @@ reaches the server through its tunnel.
 
 ## App-specific interfaces
 
-The optional CAD `live` binding receives a `CadLiveController` only while its
+The optional CAD `live` binding receives a `LiveViewController` only while its
 viewport is mounted. `readState()` returns a detached serializable snapshot of
 the actual resource/revision, current selections, camera, display and render
 mode. It reads the viewport camera directly, with its last camera snapshot as
 an unmount fallback. During a rebuild that retains a predecessor mesh, its
-displayed document revision remains in the snapshot until replacement, and while
-the picture is a build's preview revision the snapshot keeps the saved file's
-revision and says `preview: true` (a preview is never presented as the file). Apps
+displayed document revision remains in the snapshot until replacement. Apps
 own the binding registry and any IPC/tool transport;
 shared UI does not infer view state from a backend catalog or stored tab state.
 
@@ -549,8 +540,7 @@ A renderer's update status is its own: the CAD renderers show it centred under t
 strip and its sub-toolbar. The navbar carries none.
 
 
-A build preview and a retained predecessor are useful for a Quick Edit's note and references,
-but do not prove which bytes the file contains. While either is displayed, Quick Edit says so
-in the box and in its prompt context, and makes no replay packet. Once the matching saved
-revision is displayed, snapshot handoff resumes. Ordinary progressive component loading does
-not change this saved-document identity rule.
+A retained predecessor is useful for a Quick Edit's note and references, but does not prove
+which bytes the file contains. While one is displayed, Quick Edit says so in the box and in its
+prompt context, and makes no replay packet. Once the matching saved revision is displayed,
+snapshot handoff resumes.

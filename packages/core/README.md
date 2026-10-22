@@ -18,18 +18,17 @@ protocol relationship never imports Python or discovers an interpreter.
 ## The laws that live here
 
 - **Viewer three-input law**: a client renders from the file, what cadgen
-  resolved its sidecar (`<name>.step.json`) into, and the cache — never source,
-  never a build, and never the sidecar itself. The page reads no sidecar: cadgen
-  reads it, validates it against the document's digest, and serves what it MEANS
-  — the articulation of its kinematics (`cadgen.articulation`), the baked
-  animation keyframes, and per occurrence what its appearance resolves to
-  (material id and name, finish, base colour, opacity) — on the catalog entry
-  (`articulation`, `animation`, `display`), in a snapshot job (`resolved`), and
-  as static files beside a static package. A document ships no code, and no
+  resolved of it, and the bytes cadgen made — never source, never a build. A
+  document the cadgen engine serves (an `.xbf`, or a STEP, which opens as one) is
+  what the engine serves of it: its structure and one buffer per part
+  (`lib/xbf/xbfDocument.js`). A STEP render package on a static host (the docs
+  hero's) is its tree, each component's stored mesh, and what cadgen resolved the
+  document's sidecar (`<name>.step.json`) into, as static files beside it: the
+  articulation of its kinematics, the baked animation keyframes, and per occurrence
+  what its appearance resolves to (material id and name, finish, base colour,
+  opacity). The page reads no sidecar. A document ships no code, and no
   adjacent file is discovered or fetched. The code in this package must be
-  writable against exactly those inputs. An explicitly attached editing session
-  may provide an immutable preview tree and resolved kinematics instead; it must
-  not alias that tree to saved STEP bytes. Composition joins the tree's
+  writable against exactly those inputs. Composition joins the tree's
   occurrences to the display table by id (`applyOccurrenceDisplay`), carries
   material ids, names, finish and the folded opacity into mesh data, decides no
   precedence of its own, and never mutates the stored tree or component
@@ -44,27 +43,17 @@ protocol relationship never imports Python or discovers an interpreter.
   and a failed construction or disposal leaves ownership charged and retryable
   rather than released twice. Mechanism:
   [docs/resource-ownership.md](docs/resource-ownership.md) §1.
-- **Demand boundary**: a render-only load builds no selector topology, and no
-  raycast accelerator until a ray reaches a component's bounds.
-  Selectors are cadgen's per-component table joined to the mesh by ordinal:
-  the page composes `<occurrence token>/<element name>` and mints no fact of its own.
-  Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §2.
+- **Demand boundary**: no raycast accelerator is built until a ray reaches a
+  component's bounds. Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §2.
 - **Reuse never changes what is exact**: recomposition, instanced draws,
   frustum culling and material pass keys may all reuse previous work, but
   none may change exact geometry, persistent cache identity or occurrence
-  identity. Canonical geometry trees carry no producer selection;
-  reuse requires the same part and display-mesh object.
+  identity. Canonical geometry trees carry no producer selection.
   Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §3.
-- **Worker isolation**: each decode worker runs one request at a time;
-  excess requests wait on the client. A failed worker request reports an error
-  instead of retrying its decode on the UI thread, and memory
-  estimates stay on the client — never in worker messages, never in cache keys.
-  Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §4.
-- **Cache loss is never silent extra work**: a part read probes, admits,
-  verifies the GLB body and its content address, then adopts; a strict read
-  reports a typed miss rather than turning a cheap decoded-mesh request into
-  unbudgeted work in the page: cadgen derives what the store lacks. Mechanism:
-  [docs/resource-ownership.md](docs/resource-ownership.md) §5.
+- **Worker leases**: the GLB and STL decode workers are leased by render
+  sessions; releasing one owner never cancels another's work, and the last
+  release retires the worker and its pending work. Mechanism:
+  [docs/resource-ownership.md](docs/resource-ownership.md) §4.
 - **One view state, a mode and a grid**: `common/viewSettings.js` validates the
   display: a mode (Solid, Shaded, Parts, X-ray, Hidden line, Wireframe), each a look
   at its own defaults with nothing to set, the Grid switch, and what modes share
@@ -94,15 +83,17 @@ protocol relationship never imports Python or discovers an interpreter.
   records. A bending tube plays cadgen's [tube skins](docs/tube-skins.md):
   joints along its centerline, blended between keys, its mesh skinned to them
   in that same shared effects pass.
-- **One scene builder per file family, two callers**: a GLB, an STL or 3MF, and a
-  robot description (URDF, SRDF, SDF) are each drawn by ONE builder here
+- **One scene builder per file family, two callers**: a GLB, an STL or 3MF, a
+  robot description (URDF, SRDF, SDF) and an engine document (an `.xbf`, or a STEP,
+  which opens as one) are each drawn by ONE builder here
   (`lib/render/glbScene.js`, `lib/render/meshScene.js`, `lib/urdf/robotScene.js`, over
-  `lib/urdf/loadRobot.js` and `lib/urdf/robotParts.js`), which the viewer's renderer
+  `lib/urdf/loadRobot.js` and `lib/urdf/robotParts.js`, and `lib/xbf/xbfScene.js`, over
+  `lib/xbf/xbfDocument.js`), which the viewer's renderer
   for that family and the snapshot CLI's headless stage (`common/headlessScene.js`)
   both call; the look they wear is resolved in one place (`resolveSceneSurfaceLook`,
   `common/sceneSettings.js`) and a robot opens at one pose: the opening of the
   articulation cadgen resolved for it (`cadgen.robot_payload`, played by
-  `common/articulation.js` as a STEP model's kinematics are). A
+  `common/articulation.js`). A
   snapshot therefore cannot draw one of them differently from the viewer, and none is
   flattened into mesh data for a render. They are cut, exploded and measured the same
   way in both, too: Clip through `lib/viewer/sceneClip.js`, Explode through the scene's
@@ -110,15 +101,16 @@ protocol relationship never imports Python or discovers an interpreter.
   `lib/viewer/meshMeasure.js`, every number in the FILE's unit (`lib/viewer/sceneUnits.js`)
   and a mesh's measurement marked approximate. What a file's view offers is one rule,
   `viewFeaturesForKind` (`common/viewSettings.js`). `npm run check:boundaries` holds both callers
-  to the shared modules. A STEP document's scene is `buildModel`, shared the same way.
+  to the shared modules. A STEP render package's scene is `buildModel` (`common/cadScene.js`),
+  which the docs hero draws its static package with.
 - **Direct GLB stays native**: a direct GLB is its glTF scene graph (nodes, skins,
   morph targets, authored materials) with its translation, rotation, scale, skin and
   morph-weight tracks for a Three `AnimationMixer`, in the viewer and in a snapshot.
   Its documents are mutable, uncached, and explicitly disposed by their one owner; a
   bounded load-time pose sample supplies a stable framing estimate rather than
   resizing the stage during playback.
-- **No shipped bytes**: core neither meshes nor writes an export. cadgen meshes
-  every component with OCCT into its store and writes STL, 3MF and GLB itself;
+- **No shipped bytes**: core neither meshes nor writes an export. cadgen's engine
+  meshes every part with OCCT in its warm worker and writes STL, 3MF and GLB itself;
   core reads those meshes and draws them. The GLBs its tests and the UI's open
   are files cadgen wrote, and one compressed sample (`lib/render/fixtures`): no
   JS writes a GLB.
@@ -135,14 +127,15 @@ src/
                    #   cadScene (a STEP's scene build), renderMeshScene/
                    #   renderModel/renderOptions (stills), headlessRenderEntry
                    #   (the snapshot browser bundle's entrypoint), headlessScene
-                   #   (a GLB, mesh or robot job through its family builder),
+                   #   (a GLB, mesh, robot or engine document job through its
+                   #   family builder),
                    #   articulation (cadgen's articulation, played),
                    #   animationRuntime (clips), applySceneState (the one
                    #   effects pass), recordEffects (effects onto records),
                    #   source (render-source loading), sceneSettings (shared
                    #   CAD/Render contract), camera, themeSettings internals,
                    #   displaySettings
-  lib/             # subsystems: parts/ (part reads, decode + caches), selectors/
+  lib/             # subsystems: parts/ (a stored mesh's codec), selectors/
                    #   (ref runtime), assembly/ (package composition),
                    #   render/ (format mesh loaders; the GLB and mesh scene
                    #   builders), viewer/ (exploded view, part visual state,
@@ -153,8 +146,7 @@ src/
                    #   Canvas 2D, text by fillText:
                    #   fit/pan/zoom maths, batched Path2D, screen-width strokes),
                    #   cadRefs (the ref grammars: an .xbf's, parity-tested
-                   #   against engine/refs.py; a STEP's, against
-                   #   cad_ref_syntax.py)
+                   #   against engine/refs.py; a STEP's, by its own cases)
 scripts/           # chunk-ids.mjs (the pages' builds: a chunk's debug id) and
                    #   source-maps.mjs (the pages' builds: maps into the packages'
                    #   src/), beside the package's own build and test runners
@@ -163,11 +155,8 @@ docs/              # subsystem docs (the map below)
 
 Contract mirrors that must stay in lockstep (each has a sync test):
 `lib/cadRefs.js` ↔ `cadgen/engine/refs.py` (an `.xbf`'s refs: their parse and their
-canonical spelling) and ↔ `cadgen/cad_ref_syntax.py` (a STEP's), one fixture,
-`lib/cadRefs.parity.json`, for both;
-part keys and records, GLB bodies (their canonical JSON and tables)
-(`lib/parts/tessellationCache.js`, a reader only: cadgen is the one writer) ↔
-`cadgen/store/meshes.py` and `cadgen/store/parts.py`.
+canonical spelling), one fixture, `lib/cadRefs.parity.json`, which also holds a
+STEP's grammar's cases.
 
 Where the mechanism is written:
 
@@ -201,12 +190,9 @@ which names the code alone: PostHog keeps one map an id. That map leads into the
 packages' `src/`, not their `dist/`: the build loads their modules with the maps their own
 builds wrote (`@text-to-cad/core/source-maps`), and fails if a chunk's map still ends in
 compiled code. `dispose()` stops polling, aborts
-requests and disposes render sessions. The client lazily owns its mesh-store provider,
-which only reads; each render session borrows a cancellable view of it and owns
-its abort signal and worker leases. A host whose transport
-caps one reply passes `maxBatchBytes`: no batched read asks for more, nor ever
-more than the server's own bound; a longer body is the transport's to carry in
-parts, and the client sees it whole. Request
+requests and disposes render sessions. Each render session owns its abort signal and
+worker leases. A body longer than a host's transport carries in one reply is the
+transport's to carry in parts, and the client sees it whole. Request
 failures retain operation, URL, method, kind and HTTP status for host-owned
 error presentation.
 `serverInfo()` caches stable metadata; `serverInfo({ fresh: true })` performs
@@ -220,17 +206,10 @@ file's entry current as polling refreshes it. A cancelled or older request
 cannot overwrite a newer file revision. `folder(path)` lists one folder and
 `search(path, query)` finds the CAD files under it, for the explorer.
 
-`CadWorkspaceService` exposes typed part resolution, preview observation and
-a scoped `resources` provider. The build feed it observes names a build's
-**preview revision** the moment the result tree exists (`CadEditingPreview.preview`):
-the tree, whose view is read at `storeTreeUrl` exactly as a saved file's is, the
-part key of each component the store holds so far, and its annotations object,
-read with `previewAnnotations` — what the sidecar will carry, keyed by the tree's
-tokens. `failureStage` distinguishes a build failure from a failed save of a
-recorded result. `saveFailure` names that output and tree; live `saving` names
-the tree still owed. These facts are per output, so a failed mesh does not mark
-an already-saved STEP as failed. Nothing here aliases that tree to saved STEP
-bytes. Its HTTP adapter owns the protocol; renderers
+`CadWorkspaceService` exposes a scoped `resources` provider and, where its host serves
+the cadgen engine, where the page reads a document the engine serves
+(`engineDocument`: an `.xbf`, or a STEP, read through the viewer at
+`/__cad/xbf/api/doc/<id>` with the client's own fetch). Its HTTP adapter owns the protocol; renderers
 consume domain results and resource tickets. See [workspace services and resource
 transport](docs/workspace-resources.md) for worker transfer, nested dependencies,
 cache generations and the standalone static-HTTP default. No client reads model

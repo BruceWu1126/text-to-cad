@@ -243,7 +243,7 @@ context menu, and the Animation section's routine and Playback settings (`Playba
 filter is: the chevron's dropdown, headed "Selection filter", then **Select all** — ticked
 when every kind is, a dash (indeterminate) when some are; pressing it ticks every kind, or,
 with every kind ticked, none — then, after a rule, a checkbox per kind of thing Select picks,
-each with its glyph and each on its own. A STEP's (`SelectionModes.jsx`): **Parts** (a whole
+each with its glyph and each on its own. A STEP's and an `.xbf`'s (`XbfSelectionModes.jsx`): **Parts** (a whole
 cube; an assembly's only — a part file's filter offers none, and a press that reaches no face
 or edge picks the whole part), **Faces** (a faint cube, its top face filled), **Edges** (a
 faint cube, one edge heavy), **Position** (where the file has joints to move: its knobs),
@@ -258,7 +258,7 @@ each other: **Group edges** (the connected edges with a picked edge), shown whil
 ticked, and **Group faces** (the smoothly joined faces with a picked face), shown while Faces
 is; a hidden one keeps its choice for when it shows again.
 
-The geometry ticked is picked as one mode (`step/workbench/selectionFilter.js`'s
+The geometry ticked is picked as one mode (`xbf/xbfSelectionFilter.js`'s
 `selectGeometryMode`): Parts with Faces or Edges, a press takes the face or edge it lands on
 where the part's topology can be picked, and the part elsewhere; Parts alone, the part;
 Faces or Edges without Parts, that topology alone. The mode sets the model tree's shape:
@@ -267,12 +267,8 @@ was when they left it, with the owners of what is still selected kept open); Par
 opens every assembly and shuts every part; Faces or Edges without Parts open every assembly. A
 part is a leaf in every shape: nothing opens under it, and a face or edge picked in the
 viewport is revealed at its part's row. Outside the person's own shape the disclosure is
-locked (chevrons shown, not pressable) and Expand/Collapse leave the row menus. Under Faces
-or Edges a part's topology is asked for as its row comes on screen in the tree, never for a
-whole large assembly at once; a viewport press on a part not yet loaded loads that part and
-picks, and the model tree's heading says "Loading…" meanwhile. In a large assembly (more than 300
-rows of assemblies and parts, `LARGE_TREE_ROWS`) a part's row coming on screen asks for
-nothing: the pointer resting on the part in the viewport (150ms) or pressing it asks.
+locked (chevrons shown, not pressable) and Expand/Collapse leave the row menus. Every face and
+edge is to hand from the start: nothing waits on a part's topology.
 
 **Sub-toolbars** (`kit/tools/SubToolbar.jsx`): the tool in hand's controls, one row hung
 under the strip, centred, 8px below it, on the strip's surface, its buttons the strip's
@@ -382,8 +378,7 @@ Animation alone, their tiles bare in its top-left corner; the rest stay mounted,
 - **Filter.** A tree is headed by its filter ("Filter model", "Filter links": "Filter…"), in place of a title,
   always there, a tree row's 24px and 11px text, its icon over the rows' glyph column
   (`primitives/tree-filter.jsx`'s `TreeFilterInput`, `dense`), its X clearing it once something
-  is typed, Escape too. The model tree's filter is followed by "Loading…" while a part's faces load
-  and **Show all** while parts are hidden. Every tree's search is one ranked flat search
+  is typed, Escape too. The model tree's filter is followed by **Show all** while parts are hidden. Every tree's search is one ranked flat search
   (`kit/inspector/modelTreeSearch.js`).
 - **Size, each section's own.** A section's panel opens a tool panel's width
   (`TOOL_PANEL_WIDTH`, 164px) and as tall as its section, capped at the room under the toolbar.
@@ -679,11 +674,7 @@ volume; a run on one part, one row each. Its rows are the UI font at `text-tiny`
 tabular figures — no monospace. A click on a chip copies its references, each naming its file
 by absolute path; resting on it lights its picks; its X drops them.
 
-Viewport picks reach individual faces and edges. In an assembly, faces and edges load per part, when first
-needed: under a face or edge filter, a press on a part whose faces are not
-loaded loads that part alone and then picks what is under the pointer — one
-press, with "Loading…" in the model tree's heading meanwhile. Until
-then, hovering such a part lights the whole part.
+Viewport picks reach individual faces and edges, every one to hand from the start.
 Shift-click adds to a selection in the viewport; Shift, Ctrl or Cmd does in a
 tree (robots select several links this way). Double-click, or a row's Isolate,
 isolates a component or subassembly; double-click on empty space leaves
@@ -820,9 +811,7 @@ and the studio frame's picture has converged
 waiting for more components and lifts on the picture converged, a second later at the latest — fading from
 the finished picture (`kit/shell/previewCover.js`). A view the shell set moving, Orbit
 on or a routine playing, has nothing to wait for; a published component that lands starts the
-picture again and is waited for, never read as motion. Preview's scene takes components in grouped steps,
-after a quiet moment or every second while it streams (`step/workbench/settledValue.js`), so a
-burst of batches restarts the picture once or twice, not per batch. The navbar stays, so its menu and the explorer
+picture again and is waited for, never read as motion. The navbar stays, so its menu and the explorer
 still lead to other files; the tool strip, its sub-toolbar, the tool stack and their resize grips, Quick
 Edit, joint handles, cube and context menu are gone (`PreviewChrome`, hidden and inert).
 
@@ -852,11 +841,10 @@ routine in hand, a dropdown of the routines where there are two or more, then **
 **Pause**, the scrubber (`AnimationTimeControl`) and **Playback settings** (a cog: the routine's
 Speed, a submenu, then Loop and Autoplay). In the tools view a routine is a motion as a pose is
 (see [one motion at a time](#tools-and-lifecycle)): paused, its frame stays on the model. A
-routine opens at rest (a STEP's does not own the pose: `restingAnimationState`,
-`step/workbench/motionRestore.js`). Each view's routine is its own: entering Preview sets the
+routine opens at rest. Each view's routine is its own: entering Preview sets the
 tools view's untouched and starts its own at rest, playing only under Autoplay (off by default);
-leaving throws Preview's away, and the tools view's is as it was left. An update of the model that leaves its routines as they were neither stops nor rewinds
-one that is playing; a changed routine starts at rest. Speed and Loop are the file's, one set,
+leaving throws Preview's away, and the tools view's is as it was left. A new revision of the
+model starts its routine at rest. Speed and Loop are the file's, one set,
 chosen in Playback settings and kept in its view once chosen — until then the routine's own
 apply. Orbit's speed (1×) and Autoplay are the file's too, remembered between leaving and
 re-entering Preview and across a reload of the tab; whether it orbits is not kept. Another

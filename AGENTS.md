@@ -96,9 +96,9 @@ path, the rehearsal, and local/manual fallbacks.
 - `apps/mcp/`: the CAD app agent hosts render: tabs in Codex, cards in Claude Desktop (its server is `cadgen mcp`).
 - `packages/core`: `@text-to-cad/core`, shared CAD/runtime/client code without React.
 - `packages/ui`: `@text-to-cad/ui`, the shared FileViewer, renderers, controls and styles.
-- `packages/cadgen`: the published distribution — STEP/GLB/topology generation,
-  the skill CLI parsers, the CAD Viewer backend + client, and the browser
-  runtime it executes.
+- `packages/cadgen`: the published distribution — the engine (models built into
+  `.xbf` documents and the STEP, GLB, STL, 3MF and DXF they declare), the skill
+  CLI parsers, the CAD Viewer backend + client, and the browser runtime it serves.
 - `apps/docs/`: documentation site.
 - `apps/api/`: `api.texttocad.dev`, its own Vercel project: cadgen's version feed (read from PyPI) and the CAD app's consented analytics.
 - `tests/`: root-owned test suites for skills, packages, viewer services, and
@@ -114,8 +114,8 @@ path, the rehearsal, and local/manual fallbacks.
 - A README holds the laws; the mechanism each law constrains lives one link
   away, and the README names the link. Read the README, then follow the one
   link — not the tree. What exists:
-  - `packages/cadgen/`: `STORE.md` (the store contract — sectioned, with a
-    table of contents), `SNAPSHOTS.md` (snapshot `--debug` timings).
+  - `packages/cadgen/src/cadgen/engine/`: `README.md` (the engine's mechanisms:
+    models, the daemon, exports, the mesh, references, the build closure).
   - `packages/core/docs/`: `render-pipeline.md`, `resource-ownership.md`,
     `tube-skins.md`.
   - `packages/ui/docs/`: `settings-ui.md` (BINDING for any settings control),
@@ -145,16 +145,15 @@ path, the rehearsal, and local/manual fallbacks.
   pinned to `VERSION` (the release stamps every pin); no skill installs cadgen
   any other way (no `requirements.txt` naming it), because a second installation
   is a second daemon. Skills do not vendor it: a skill script is a thin entrypoint whose
-  parser and behaviour live in `cadgen.cli`. Playwright is a cadgen dependency and
-  the first snapshot fetches its headless browser, so no skill has a browser step. cadgen carries
-  the JavaScript it executes too (the snapshot browser bundle, the CAD Viewer
-  client), so a skill ships no runtime of its own. Not every
+  parser and behaviour live in `cadgen.cli`. The engine draws every snapshot with
+  OCCT, so no skill has a browser step. cadgen carries the JavaScript it serves too
+  (the CAD Viewer client, the CAD app page), so a skill ships no runtime of its own. Not every
   skill needs cadgen (bambu-labs, dfam-check, dfm, gcode, sendcutsend,
   step-parts are cadgen-free); do not add the dependency to a skill that never invokes it.
 - Keep samples and manual CAD/robot-description validation artifacts under
   `models/`. Automated tests must not read, build or import that sample corpus:
   generate small fixtures in fresh temporary directories or use tiny test-owned
-  fixtures, with their own cache stores and cleanup. Repo `tmp/` is fine.
+  fixtures, with their own engine daemon (`CADGEN_ENGINE_DIR`) and cleanup. Repo `tmp/` is fine.
   Enforced by `tests/python/global/test_tests_are_self_contained.py`.
 - Every test runs in CI. Each test file is reached by a runner under
   `scripts/test/`, every runner is called by a `test.yml` job on the changes that
@@ -177,8 +176,8 @@ path, the rehearsal, and local/manual fallbacks.
   interpreter; raising the declared minimum relaxes the check automatically.
 - Reserve `scripts/` for durable repo commands. Do not write temporary,
   one-off, or local-only helper scripts there; use `tmp/` or `/tmp` instead.
-- cadgen's packaged runtime (`_runtime/browser`, `_runtime/viewer`, and the
-  file tracer every build loads, `_runtime/native`) is BUILT, never committed:
+- cadgen's packaged runtime (`_runtime/browser`, `_runtime/viewer` and
+  `_runtime/mcp`) is BUILT, never committed:
   the whole directory is gitignored and ships only inside the wheel. Build it with the one bundle
   entry point, `scripts/bundle/bundle.sh`; `bundle.sh --check` builds it and
   asserts every required output. Call `scripts/bundle/cadgen-runtime.sh`
@@ -201,9 +200,9 @@ path, the rehearsal, and local/manual fallbacks.
   `packages/cadgen`), the React client's source is `apps/web/` and its build
   ships in the wheel at `cadgen/_runtime/viewer` (built, never committed; a
   checkout serves `apps/web/dist`). The CAD, DXF and robot-description skills document that verb directly.
-  Nothing in `cadgen.viewer` imports the CAD kernel at module scope — its kernel
-  actions, compiling a foreign STEP and deriving a part's display data, are jobs
-  of cadgen's build pool, a daemon worker's — never work a request's thread does.
+  Nothing in `cadgen.viewer` imports the CAD kernel at module scope — a STEP or
+  `.xbf` it shows is read and meshed by the engine's daemon (`viewer/xbf.py`),
+  never by a request's thread.
   Keep repo-level tooling in `scripts/`, not under `apps/web/`.
 - `packages/core` stays non-React. Shared FileViewer/renderers belong in
   `packages/ui`; host workflow state belongs in apps. Apps never import another
@@ -214,8 +213,8 @@ path, the rehearsal, and local/manual fallbacks.
   shared features use injected capabilities and named extension slots. Before
   extending these interfaces, read [the viewer host contract](packages/ui/docs/viewer-host.md).
 - `packages/cadgen` is the whole distribution, not just the Python: artifact
-  generation, the CLI parsers behind every skill command (`cadgen/cli`), the warm
-  build daemon (`cadgen/daemon`), and
+  generation, the CLI parsers behind every skill command (`cadgen/cli`), the
+  engine and its warm daemon (`cadgen/engine`), and
   the JS/SPA assets it executes (`cadgen/_runtime`, built by
   `scripts/bundle/cadgen-runtime.sh`). Skills consume it as an
   installed distribution.
@@ -274,7 +273,7 @@ when touching shared surfaces or before handoff:
 - Docs site: `npm --prefix apps/docs run check`
 - API (`api.texttocad.dev`): `npm --prefix apps/api test`
 - Targeted Python tests: `scripts/test/test-python.sh <changed test paths>` (each file
-  on a store of its own, on a build daemon of the run's own; `test-global.sh` for
+  on an engine daemon of its own; `test-global.sh` for
   `tests/python/global`)
 
 When a task changes what the bundlers consume, run `scripts/bundle/bundle.sh`
