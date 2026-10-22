@@ -24,10 +24,12 @@ bake reads.
 dielectric) over its colour, linear, raised to ``colour_power``: squared, which keeps the
 saturated colours of OCCT's Phong look, whose ASPECT material multiplied the colour by itself. A
 part with a material is its colour as authored and its finish: metallic, roughness, IOR, emission
-and alpha, which both renderers draw alike. What OCCT's raster has no term for, the viewer draws
-and OCCT approximates (``finish.py``): a clear coat (OCCT: the base's roughness eased toward the
-coat's), anisotropy (OCCT: none) and transmission (OCCT: opacity over the colour tinted by the
-transmission colour).
+and alpha, which both renderers draw alike. Anisotropy neither draws: OCCT's raster has no term for
+it, and the viewer draws OCCT's program (three's bent reflection turned a brushed plate's top, seen
+from above, from the studio's softbox to its dark wall). What else OCCT's raster has no term for,
+the viewer draws and OCCT approximates (``finish.py``): a clear coat (OCCT: the base's roughness
+eased toward the coat's) and transmission (OCCT: opacity over the colour tinted by the transmission
+colour).
 
 **The surface model** (``brdf = "occt"``) is OCCT 7.9's PBR program (``occt_phong-pbr``, read from
 the GLSL it compiles), which the viewer draws too (core's ``lib/viewer/surfaceBrdf.js``): per light

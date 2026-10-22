@@ -1,4 +1,5 @@
-// OCCT's PBR program as the viewer draws it (`surfaceBrdf.js`): its split-sum table OCCT's own.
+// OCCT's PBR program as the viewer draws it (`surfaceBrdf.js`): its split-sum table OCCT's own, and
+// its lobe isotropic whatever a material's anisotropy, as OCCT's program is.
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
@@ -28,15 +29,15 @@ test("the split-sum table is OCCT's", () => {
   assert.ok(Math.abs(THREE.DataUtils.fromHalfFloat(table.image.data[at + 1]) - bias) < 1e-3);
 });
 
-test("the program weighs the environment by OCCT's table", () => {
-  const material = new THREE.MeshPhysicalMaterial({ roughness: 0.35, metalness: 1 });
+test("the program draws OCCT's isotropic lobe and table, whatever a material's anisotropy", () => {
+  const material = new THREE.MeshPhysicalMaterial({ anisotropy: 0.3, roughness: 0.35, metalness: 1 });
   assert.equal(useSurfaceBrdf(THREE, material, "occt"), true);
   const shader = { fragmentShader: THREE.ShaderLib.physical.fragmentShader, uniforms: {} };
   material.onBeforeCompile(shader);
   const text = shader.fragmentShader;
   const occt = text.slice(text.indexOf("// OCCT 7.9's PBR program"), text.indexOf("#define RE_IndirectSpecular RE_IndirectSpecular_Occt"));
   assert.ok(occt.includes("RE_Direct_Occt") && occt.includes("RE_IndirectSpecular_Occt"));
-  assert.doesNotMatch(occt, /material\.dfg/, "not three's table");
+  assert.doesNotMatch(occt, /USE_ANISOTROPY|BRDF_GGX\(|material\.dfg/, "no anisotropic lobe, no bent reflection, not three's table");
   assert.match(occt, /texture2D\( occtEnvironmentTable, vec2\( dotNV, material\.roughness \) \)/);
   assert.equal(shader.uniforms.occtEnvironmentTable.value, occtEnvironmentTable(THREE));
 });

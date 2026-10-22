@@ -18,9 +18,12 @@
 //     `max(1 - r, F0)`: single scattering, three's multiple-scattering term not drawn. `A` and `B` are
 //     OCCT's own split-sum table (`occtEnvironmentTable`: its `GenerateEnvLUT`, Schlick-GGX at
 //     `k = r^2 / 2`), not three's (whose Smith term reflects some 10% more of a metal's environment);
-//     the environment is prefiltered by GGX, as OCCT bakes it (`ggxEnvironment.js`, the rig's).
-// What OCCT's raster has no term for stays three's, as the look has the viewer draw it: a clear
-// coat's layer, anisotropy's lobe and transmission.
+//     the environment is prefiltered by GGX, as OCCT bakes it (`ggxEnvironment.js`, the rig's);
+//   - the surface is isotropic, as OCCT's program is: an anisotropic material is drawn with its
+//     roughness alone (three bends an anisotropic surface's reflection toward its brushing, which
+//     turned a brushed plate's top seen from above from the studio's softbox to its dark wall).
+// What else OCCT's raster has no term for stays three's, as the look has the viewer draw it: a clear
+// coat's layer and transmission.
 
 import { radicalInverse } from "./ggxEnvironment.js";
 
@@ -45,15 +48,11 @@ void RE_Direct_Occt( const in IncidentLight directLight, const in vec3 geometryP
 	float dotVH = saturate( dot( geometryViewDir, halfDir ) );
 	vec3 f0 = material.specularColorBlended;
 	vec3 F = f0 + ( 1.0 - f0 ) * occtFresnel( dotVH );
-	#ifdef USE_ANISOTROPY
-		vec3 specular = BRDF_GGX( directLight.direction, geometryViewDir, geometryNormal, material );
-	#else
-		float dotNV = saturate( dot( geometryNormal, geometryViewDir ) );
-		float dotNH = saturate( dot( geometryNormal, halfDir ) );
-		float k = pow2( material.roughness + 1.0 ) * 0.125;
-		float G = 1.0 / ( ( dotNV * ( 1.0 - k ) + k ) * ( dotNL * ( 1.0 - k ) + k ) );
-		vec3 specular = D_GGX( pow2( material.roughness ), dotNH ) * G * F * 0.25;
-	#endif
+	float dotNV = saturate( dot( geometryNormal, geometryViewDir ) );
+	float dotNH = saturate( dot( geometryNormal, halfDir ) );
+	float k = pow2( material.roughness + 1.0 ) * 0.125;
+	float G = 1.0 / ( ( dotNV * ( 1.0 - k ) + k ) * ( dotNL * ( 1.0 - k ) + k ) );
+	vec3 specular = D_GGX( pow2( material.roughness ), dotNH ) * G * F * 0.25;
 	reflectedLight.directSpecular += irradiance * specular;
 	reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseContribution ) * ( 1.0 - F );
 }
@@ -63,8 +62,9 @@ void RE_IndirectSpecular_Occt( const in vec3 radiance, const in vec3 irradiance,
 		clearcoatSpecularIndirect += clearcoatRadiance * EnvironmentBRDF( geometryClearcoatNormal, geometryViewDir, material.clearcoatF0, material.clearcoatF90, material.clearcoatRoughness );
 	#endif
 	vec3 reflected = radiance;
-	#if defined( ENVMAP_TYPE_CUBE_UV ) && ! defined( USE_ANISOTROPY )
-		// The environment along the mirror direction itself (three bends it toward the normal).
+	#ifdef ENVMAP_TYPE_CUBE_UV
+		// The environment along the mirror direction itself (three bends it toward the normal, and an
+		// anisotropic surface's toward its brushing).
 		vec3 mirror = transformDirectionByInverseViewMatrix( reflect( - geometryViewDir, geometryNormal ), viewMatrix );
 		reflected = textureCubeUV( envMap, envMapRotation * mirror, material.roughness ).rgb * envMapIntensity;
 	#endif
