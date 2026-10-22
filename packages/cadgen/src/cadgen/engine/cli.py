@@ -2,7 +2,7 @@
 ordinary Python scripts call decorated models explicitly.
 
     python SCRIPT.py                                 the models the script explicitly calls
-    cadgen build SOURCE | - [--name N]               one model from source text (stdin with -), its files
+    cadgen build SOURCE | - [--model NAME] [--name N]  source text (stdin with -), an output required
         [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify]
         [--no-daemon]
     cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] [--no-daemon] [--json]
@@ -56,7 +56,7 @@ def _build_arguments(build: argparse.ArgumentParser) -> None:
 
 
 def _export_arguments(export: argparse.ArgumentParser) -> None:
-    export.add_argument("source", metavar="SRC", help="an .xbf, or a .step (read into a document first)")
+    export.add_argument("source", metavar="SRC", help="a model address (SCRIPT::NAME or code::NAME), an .xbf, or a .step")
     export.add_argument("destinations", nargs="+", metavar="DST",
                         help=".xbf (from a STEP, or with --part), .step, .glb, .stl, .3mf or .dxf (of a planar "
                              "document); or .cadz (from an xbf: it, its build closure's source files and its inputs, "
@@ -73,7 +73,7 @@ def _export_arguments(export: argparse.ArgumentParser) -> None:
 
 
 def _serve_arguments(serve: argparse.ArgumentParser) -> None:
-    serve.add_argument("document", help="an .xbf, or a STEP")
+    serve.add_argument("document", help="a model address (SCRIPT::NAME or code::NAME), an .xbf, or a STEP")
     serve.add_argument("--port", type=int, default=0)
     serve.add_argument("--three", help="the three.js package folder (default: the nearest node_modules/three)")
     serve.add_argument("--foreground", action="store_true", help="serve from this process until interrupted")
@@ -88,7 +88,7 @@ def _no_arguments(_parser: argparse.ArgumentParser) -> None:
 
 
 def _where_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("document", help="an .xbf")
+    parser.add_argument("document", help="a model address (SCRIPT::NAME or code::NAME), or an .xbf")
     parser.add_argument("ref", nargs="?", help="[FILE#][OWNER/]ELEMENT or [FILE#]OWNER (cadgen.engine.refs): OWNER a "
                                                "part's or an assembly's label, or its occurrence path (hand/finger.2); "
                                                "ELEMENT an element name (f:..., e:..., v:...) or face N (edge, vertex). "

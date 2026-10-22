@@ -67,7 +67,7 @@ ADAPTERS: dict[str, frozenset[str]] = {
     # The person's telemetry choice: status, on or off.
     "telemetry": frozenset({"action"}),
     # The engine's verbs (cadgen.engine.cli), each a command of its own.
-    "build": frozenset({"source", "name", "xbf", "step", "glb", "stl", "threemf", "dxf", "json", "verify",
+    "build": frozenset({"source", "model", "name", "xbf", "step", "glb", "stl", "threemf", "dxf", "json", "verify",
                         "no_daemon"}),
     "export": frozenset({"source", "destinations", "no_inputs", "pose", "part", "no_daemon", "json"}),
     "snapshot": SNAPSHOT,
@@ -195,9 +195,9 @@ class Manifest(unittest.TestCase):
             with self.subTest(verb=verb):
                 module = importlib.import_module(cli._COMMANDS[verb][0])
                 self.assertEqual(module.build_parser().prog, f"cadgen {verb}")
-        code, out, err = self._dispatch("export", "model.py::model", "out.step")
+        code, out, err = self._dispatch("build", "raise AssertionError('must not run')")
         self.assertEqual((code, out), (2, ""))
-        self.assertIn("cadgen export: model.py::model is no document: an export reads an .xbf or a .step", err)
+        self.assertIn("cadgen build: build requires an output: --model NAME", err)
 
     def test_a_format_snapshot_draws_its_own_files_alone(self):
         # `cadgen dxf snapshot` is the engine's snapshot for a .dxf: any other file is refused by

@@ -222,6 +222,22 @@ class DaemonTest(unittest.TestCase):
         self.assertIn("no live model", missing.stderr)
         self.assertEqual(json.loads(self.cli("status", "--json").stdout)["models"], [])
 
+    def test_snapshot_job_draws_a_memory_model_without_an_intermediate_document(self) -> None:
+        from tests.python.packages.cadgen.engine.test_snapshot import gl
+
+        gl()
+        built = self.cli("build", "import build123d as bd; result = bd.Box(1, 2, 3)", "--model", "bracket")
+        self.assertEqual(built.returncode, 0, built.stderr)
+        packet = {"input": "code::bracket", "jobs": [{"outputs": [
+            {"path": str(self.folder / "bracket.png"), "width": 200, "height": 150}]}]}
+        drawn = self.cli("snapshot", "--job", json.dumps(packet))
+        self.assertEqual(drawn.returncode, 0, drawn.stderr)
+        from PIL import Image
+
+        with Image.open(self.folder / "bracket.png") as picture:
+            self.assertEqual(picture.size, (200, 150))
+        self.assertEqual([path.name for path in self.folder.iterdir()], ["bracket.png"])
+
     def test_script_address_builds_only_the_selected_declaration(self) -> None:
         self.script.write_text("""from cadgen import model
 import build123d as bd
