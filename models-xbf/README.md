@@ -63,7 +63,7 @@ The migration a user makes, and nothing more:
   declared `@glb`; clips that move parts no joint moves (explodes, tours) are not
   ported.
 - A model is one output file: `@xbf` marks the dfm trays, the examples, the
-  moonwatch `case` and `movement`, `qdd_actuator`, `motorbike`, `tom`, and
+  moonwatch `case` and `movement`, `qdd_actuator`, `motorbike`, `tom`, `f14d`, and
   `hypercar`, `f1` and `w16` (each with its `@glb`), and `@dxf` the eight drawings, and
   nothing else. A big piece of a model -- a layer of an assembly, a stage of a
   derivation -- can be a `@memo` function: called in the model's body it is a
@@ -110,6 +110,7 @@ piece. Nested `@xbf` is never needed for caching.
 | `branding` | `logo_c`, `logo_cad`, `logo_texttocad` | plain models with the STEP each delivers (`@xbf` + `@step`), extruded from a JSON input the body reads (`profiles.json`, a change to which rebuilds them); colours by `srgb` |
 | `tests` | the three manual cases `models/tests/README.md` lists (`joint_playground.urdf`, no model and named nowhere, not ported) | manual-validation fixtures, never CI input: the Render floor, a 32-part rebuild during a load, and materials (a catalogue steel with `color=None`, a paint with its colour), a revolute and a prismatic joint, a configuration and a motion on 11 parts |
 | `w16` | 13 system files (`@memo` stages, 10-281 s cold each) + one model | a 2,575-occurrence (794-part) quad-turbo W16 whose museum cutaway is its own geometry; finishes as catalogue materials by colour (`color=None`); OCCT's fuzzy booleans run through build123d's, so the memo keys them; the crank train as 174 joints paired by label (prismatic pistons and valves; revolute crank, rods, cams, followers, pump, pulleys, rotors) and 618 rigid fastenings, the slider-crank and valve loops solved in Python: the `crank` motion, one 720-degree cycle, baked into the declared `@glb` |
+| `f14d` | 10 system files (9 `@memo` stages, 2.4-574 s cold each; `nozzles` a plain function) + one model | a 2,392-occurrence (903-part) F-14D: one lofted skin cut by the diverter slots and the cockpit opening (574 s of a 644 s cold build); instanced fastener, wick and perforation rows as placed prototypes; `lib` made a package (a namespace package is never imported afresh: see its README); colours only, no kinematics |
 
 Each model's `src/README.md` says what was ported and what was dropped.
 
