@@ -136,9 +136,5 @@ recovered `tom.step` (`cadgen export ... --part`), not the whole file: cold 165 
 
 Known engine gaps these surface: a shape that carries a build123d joint makes
 the compound holding it unkeyable, so a body that authors joints is never
-retained; a `bd.Text` sketch fused with another sketch runs uncached; a colour
-written to STEP and read back with `read_step` comes back sRGB-encoded; a STEP numbers
-its assembly occurrences (`NEXT_ASSEMBLY_USAGE_OCCURRENCE` ids) on from the process's
-earlier STEP writes, so a warm rebuild's declared STEP of an unchanged document is other
-bytes than the cold build's (branding's `logo_texttocad.step`: ids 19-27 after two
-rebuilds, 1-9 cold; the xbf is the same bytes).
+retained; a `bd.Text` sketch fused with another sketch runs uncached; and a colour
+written to STEP and read back with `read_step` comes back sRGB-encoded.

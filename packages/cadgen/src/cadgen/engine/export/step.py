@@ -13,7 +13,10 @@ time of writing: it is ``WRITTEN_STAMP`` instead, set on the model's header. And
 colour presentations (one per styled shape) to the model from a map keyed by shape, whose
 order is the shapes' addresses, another in every process: in the written file they are put
 back in the order of the shape representations they style, which the transfer numbered in the
-document's order (``_settle``). That is done to the file's last records, the presentations and
+document's order (``_settle``). The kernel numbers the assembly occurrences from a counter of the
+process's, on from every STEP it wrote before: they are numbered from 1 in the file's order
+instead, so a warm worker's STEP is the cold one's bytes. That is done to the file's
+last records, the presentations and
 what they alone refer to, as text: a model's millions of entities are never handed back to the
 kernel one by one, which costs a fraction of a millisecond a call through the bindings (a
 2.3-million-entity car took half an hour so).
@@ -86,19 +89,30 @@ _RECORD = re.compile(rb"(?m)^#(\d+)\s*=")
 _REFERENCE = re.compile(rb"#(\d+)")
 _QUOTED = re.compile(rb"'(?:[^']|'')*'")
 _PRESENTATION = b"MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION"
+# An assembly occurrence's id: its record's first argument, a quoted number.
+_OCCURRENCE = re.compile(rb"(NEXT_ASSEMBLY_USAGE_OCCURRENCE\s*\(\s*')\d*'")
 
 
 def _settle(path: Path) -> None:
     """The written file made a function of the document alone (see the module docstring): its
-    records from the first presentation on -- the presentations and what the transfer added
-    after them -- renumbered where they stand, each presentation by the numbers of its context
-    and of what its items style, followed by what it refers to there, depth first; then the
-    rest of those records in their order. Everything before them is the transfer's, in the
-    document's order, and refers to none of them."""
+    presentations in the document's order (``_presentations``) and its assembly occurrences
+    numbered as a fresh process numbers them (``_occurrences``); written again when either
+    changed it."""
     data = path.read_bytes()
+    settled = _occurrences(_presentations(data))
+    if settled != data:
+        path.write_bytes(settled)
+
+
+def _presentations(data: bytes) -> bytes:
+    """The file's records from the first presentation on -- the presentations and what the
+    transfer added after them -- renumbered where they stand, each presentation by the numbers
+    of its context and of what its items style, followed by what it refers to there, depth
+    first; then the rest of those records in their order. Everything before them is the
+    transfer's, in the document's order, and refers to none of them."""
     found = data.find(_PRESENTATION)
     if found < 0:
-        return
+        return data
     start = data.rfind(b"\n#", 0, found) + 1
     end = data.find(b"ENDSEC;", found)
     tail = data[start:end]
@@ -170,12 +184,17 @@ def _settle(path: Path) -> None:
         return b"".join(pieces)
 
     settled = b"".join(rewrite(records[number]) for number in sorted(placed, key=placed.__getitem__))
-    if settled != tail:
-        with open(path, "r+b") as file:
-            file.seek(start)
-            file.write(settled)
-            file.write(data[end:])
-            file.truncate()
+    return data[:start] + settled + data[end:]
+
+
+def _occurrences(data: bytes) -> bytes:
+    """Each assembly occurrence's id (``NEXT_ASSEMBLY_USAGE_OCCURRENCE``'s first argument) its
+    place among them in the file, from 1: the kernel numbers them from a counter of the
+    process's, on from every STEP it wrote before, so a warm worker's file would number them on
+    from its earlier exports where a fresh process's starts at 1. The file's order is the
+    transfer's, which is the document's, so the numbers are the same in every process."""
+    counter = iter(range(1, 1 << 62))
+    return _OCCURRENCE.sub(lambda match: match.group(1) + b"%d'" % next(counter), data)
 
 
 def _quiet(message: Any) -> None:

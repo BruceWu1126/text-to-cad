@@ -641,6 +641,31 @@ class StepTest(unittest.TestCase):
         self.assertEqual(sorted(looks), [*(f"part{i}" for i in range(6)), "peg0"])
         self.assertEqual(looks, built)
 
+    def test_a_step_written_again_in_one_process_is_a_fresh_process_s_bytes(self) -> None:
+        # The kernel numbers assembly occurrences on from every STEP the process wrote before: a
+        # warm worker's export is numbered as a fresh process's all the same.
+        import re
+        import subprocess
+        import sys
+
+        (self.folder / "kit.py").write_text(textwrap.dedent(KIT), encoding="utf-8")
+        (report,) = engine_build.build(self.folder / "kit.py", ["kit"], cwd=self.folder)
+        self.assertTrue(report["ok"], report)
+        xbf = self.folder / "XBF/kit.xbf"
+        here = []
+        for at in range(2):
+            out = self.folder / f"here-{at}.step"
+            translate(xbf, None, out)
+            here.append(out.read_bytes())
+        fresh = self.folder / "fresh.step"
+        done = subprocess.run([sys.executable, "-c", EXPORT, str(xbf), str(fresh)], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(here[0], here[1])
+        self.assertEqual(here[0], fresh.read_bytes())
+        ids = re.findall(rb"NEXT_ASSEMBLY_USAGE_OCCURRENCE\('(\d+)'", here[1])
+        self.assertEqual(ids, [b"%d" % number for number in range(1, len(ids) + 1)])
+        self.assertGreater(len(ids), 3)
+
     def test_the_presentations_are_settled_in_the_file_whatever_order_the_writer_left(self) -> None:
         # Two writes of one document whose presentations came out in either order, numbered
         # either way: the file's tail is renumbered where it stands, and what is quoted is text.
