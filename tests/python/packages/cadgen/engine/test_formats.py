@@ -1,9 +1,9 @@
 """The files no document that the stills draw (`engine/formats`): each kind read into what a
-renderer holds -- a mesh file's parts, colours, materials and placements -- and each drawn as its
-golden picture.
+renderer holds -- a mesh file's parts, colours, materials and placements; a GLB's node tree and
+textures through OCCT's glTF reader -- and each drawn as its golden picture.
 
 The fixtures are made here, small: a binary and an ASCII STL, a 3MF of colour groups, base
-materials and components.
+materials and components, a GLB of a node tree, two materials and a base colour texture.
 
 The pictures (`formats_golden/*.png`, 320x240, macOS) match as `test_render.py`'s do: at most 1.5%
 of the pixels more than 32 levels from every golden pixel within one pixel. A test that draws makes
@@ -146,6 +146,80 @@ def write_3mf(path: Path) -> Path:
     return path
 
 
+def write_glb(path: Path) -> Path:
+    """A node tree (``rig``, turned 45 degrees about glTF's z, holding ``box`` and ``plate``), a cube
+    with a base colour texture (a checker with a yellow band along its top rows), a red plate."""
+    from PIL import Image
+
+    def cube(size: float) -> tuple:
+        h = size / 2
+        quads = [((1, 0, 0), [(h, -h, -h), (h, h, -h), (h, h, h), (h, -h, h)]),
+                 ((-1, 0, 0), [(-h, h, -h), (-h, -h, -h), (-h, -h, h), (-h, h, h)]),
+                 ((0, 1, 0), [(h, h, -h), (-h, h, -h), (-h, h, h), (h, h, h)]),
+                 ((0, -1, 0), [(-h, -h, -h), (h, -h, -h), (h, -h, h), (-h, -h, h)]),
+                 ((0, 0, 1), [(-h, -h, h), (h, -h, h), (h, h, h), (-h, h, h)]),
+                 ((0, 0, -1), [(-h, h, -h), (h, h, -h), (h, -h, -h), (-h, -h, -h)])]
+        position, normal, uv, index = [], [], [], []
+        for direction, quad in quads:
+            base = len(position)
+            position += quad
+            normal += [direction] * 4
+            uv += [(0, 1), (1, 1), (1, 0), (0, 0)]
+            index += [base, base + 1, base + 2, base, base + 2, base + 3]
+        return (np.array(position, "f4"), np.array(normal, "f4"), np.array(uv, "f4"), np.array(index, "u2"))
+
+    plate = cube(1.0)
+    plate = (plate[0] * np.array([0.12, 0.08, 0.01], "f4"),) + plate[1:]
+    texture = np.zeros((64, 64, 3), np.uint8)
+    ys, xs = np.mgrid[0:64, 0:64]
+    texture[((xs // 16 + ys // 16) % 2).astype(bool)] = (230, 90, 40)
+    texture[~((xs // 16 + ys // 16) % 2).astype(bool)] = (40, 110, 220)
+    texture[:8] = (250, 220, 60)
+    picture = io.BytesIO()
+    Image.fromarray(texture).save(picture, "PNG")
+    blob, views, accessors = bytearray(), [], []
+
+    def view(data: bytes, target: int | None = None) -> int:
+        while len(blob) % 4:
+            blob.append(0)
+        views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": len(data), **({"target": target} if target else {})})
+        blob.extend(data)
+        return len(views) - 1
+
+    def accessor(array: np.ndarray, kind: str, component: int, target: int) -> int:
+        found = {"bufferView": view(array.tobytes(), target), "componentType": component, "count": len(array), "type": kind}
+        if kind == "VEC3":
+            found.update(min=array.min(0).tolist(), max=array.max(0).tolist())
+        accessors.append(found)
+        return len(accessors) - 1
+
+    meshes = []
+    for name, (position, normal, uv, index), material in (("box", cube(0.04), 0), ("plate", plate, 1)):
+        attributes = {"POSITION": accessor(position, "VEC3", 5126, 34962), "NORMAL": accessor(normal, "VEC3", 5126, 34962),
+                      "TEXCOORD_0": accessor(uv, "VEC2", 5126, 34962)}
+        meshes.append({"name": name, "primitives": [{"attributes": attributes, "material": material,
+                                                     "indices": accessor(index, "SCALAR", 5123, 34963)}]})
+    image = view(picture.getvalue())
+    gltf = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}],
+            "nodes": [{"name": "rig", "children": [1, 2], "rotation": [0, 0, 0.3826834, 0.9238795]},
+                      {"name": "box", "mesh": 0, "translation": [0, 0, 0.025]},
+                      {"name": "plate", "mesh": 1, "translation": [0, 0, -0.005]}],
+            "meshes": meshes, "accessors": accessors, "bufferViews": views,
+            "materials": [{"name": "checker", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "metallicFactor": 0,
+                                                                      "roughnessFactor": 0.6}},
+                          {"name": "red", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.1, 0.1, 1], "metallicFactor": 0,
+                                                                  "roughnessFactor": 0.5},
+                           "extensions": {"KHR_materials_clearcoat": {"clearcoatFactor": 1, "clearcoatRoughnessFactor": 0.1}}}],
+            "textures": [{"source": 0}], "images": [{"bufferView": image, "mimeType": "image/png"}],
+            "buffers": [{"byteLength": 0}]}
+    while len(blob) % 4:
+        blob.append(0)
+    gltf["buffers"][0]["byteLength"] = len(blob)
+    text = json.dumps(gltf).encode()
+    text += b" " * (-len(text) % 4)
+    body = struct.pack("<II", len(text), 0x4E4F534A) + text + struct.pack("<II", len(blob), 0x004E4942) + bytes(blob)
+    path.write_bytes(struct.pack("<III", 0x46546C67, 2, 12 + len(body)) + body)
+    return path
 
 
 class FixtureTest(unittest.TestCase):
@@ -238,6 +312,33 @@ class MeshFileTest(FixtureTest):
         self.assertAlmostEqual(float(np.ptp(mesh.positions[:, 0])), 60.0, places=4)
 
 
+# --- GLB -------------------------------------------------------------------------------------------
+
+
+class GlbTest(FixtureTest):
+    def test_a_glb_is_read_by_occt_with_its_tree_materials_and_texture(self) -> None:
+        found = formats.read(write_glb(self.folder / "rig.glb"))
+        structure = found.structure
+        self.assertEqual(structure["tree"]["name"], "rig")
+        self.assertEqual([child["name"] for child in structure["tree"]["children"]], ["box", "plate"])
+        box, plate = structure["prototypes"]
+        checker = next(iter(box["faceMaterials"].values()))
+        red = next(iter(plate["faceMaterials"].values()))
+        self.assertEqual((checker["name"], checker["roughness"]), ("checker", 0.6))
+        self.assertEqual((red["name"], red["color"][:3], red["coat"], red["coatRoughness"]), ("red", [0.8, 0.1, 0.1], 1.0, 0.1))
+        textured = found.shapes[box["key"]]
+        self.assertEqual(len(textured.textures), 1, "the checker's base colour texture, by its paint")
+        self.assertNotIn(plate["key"], found.shapes, "an untextured part is made as a document's is")
+        # glTF's y up and metres as z up and millimetres: the box 40 mm, its centre 25 mm along glTF z (-y).
+        matrix = np.array(structure["instances"][0]["matrix"]).reshape(4, 4).T
+        self.assertTrue(np.allclose(matrix[:3, :3] @ matrix[:3, :3].T, np.eye(3), atol=1e-9), "a rigid placement")
+        from cadgen.engine.mesh import Mesh
+
+        positions = Mesh.from_bytes(found.buffers[box["key"]]).positions @ matrix[:3, :3].T + matrix[:3, 3]
+        np.testing.assert_allclose(np.ptp(positions, 0).max(), 40 * math.sqrt(2), atol=1e-3)
+        np.testing.assert_allclose(positions.mean(0), (0, -25, 0), atol=1e-3)
+
+
 # --- pictures --------------------------------------------------------------------------------------
 
 
@@ -251,11 +352,13 @@ class PictureTest(FixtureTest):
         folder = cls.folder
         write_stl(folder / "part.stl", np.concatenate([box_soup((20, 10, 4)), cylinder_soup(3, 12, at=(0, 0, 2))]))
         write_3mf(folder / "kit.3mf")
+        write_glb(folder / "rig.glb")
         cls.rows = {
             "stl": (folder / "part.stl", {}),
             "stl-wireframe": (folder / "part.stl", {"display": {"mode": "wireframe"}}),
             "3mf": (folder / "kit.3mf", {}),
             "3mf-parts": (folder / "kit.3mf", {"display": {"mode": "parts", "grid": True}}),
+            "glb": (folder / "rig.glb", {}),
         }
 
     def draw(self, path: Path, **fields) -> tuple[bytes, dict]:
@@ -283,6 +386,16 @@ class PictureTest(FixtureTest):
         if not WRITE:
             self.assertEqual(sorted(path.stem for path in GOLDEN.glob("*.png")), sorted(self.rows))
 
+    def test_the_glb_texture_is_drawn_in_the_lit_looks_alone(self) -> None:
+        """The checker's texture in Solid; in Parts the cube one flat palette colour, no checker
+        under it (the texture is not modulated by the fill)."""
+        textured = pixels(self.draw(self.folder / "rig.glb")[0])
+        yellow = (np.abs(textured - np.array([250, 220, 60])).max(-1) < 70).sum()
+        self.assertGreater(yellow, 50, "the texture's yellow band")
+        parts = pixels(self.draw(self.folder / "rig.glb", display={"mode": "parts"})[0])
+        # The checker is orange and blue: in Parts, no pixel is far bluer than it is red.
+        blue = ((parts[..., 2] - parts[..., 0]) > 90).sum()
+        self.assertLess(blue, 5, "Parts paints over the texture")
 
     def test_what_a_kind_does_not_offer_is_refused_by_name_and_out_is_kept(self) -> None:
         out = self.folder / "kept.png"

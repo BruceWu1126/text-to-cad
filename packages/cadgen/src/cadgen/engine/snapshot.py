@@ -542,10 +542,10 @@ def _render(job: dict[str, Any], runtime: Path, size: tuple[int, int],
 
 DOCUMENTS = (".xbf", ".step", ".stp")
 # A mesh file and the family the snapshot page draws it with (``headlessScene.js``).
-MESH_KINDS = {".glb": "glb"}
+MESH_KINDS: dict[str, str] = {}
 # The files no document that OCCT draws, each read by its reader (``formats``).
-FILES = (".stl", ".3mf")
-MESHES = (".stl", ".3mf")
+FILES = (".stl", ".3mf", ".glb")
+MESHES = (".stl", ".3mf", ".glb")
 
 
 @dataclass

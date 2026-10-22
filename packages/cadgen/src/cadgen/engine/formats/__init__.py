@@ -8,6 +8,7 @@ Explode, Preview, the annotation and the size are theirs.
 | --- | --- | --- |
 | ``.stl`` | ``stl.py`` (numpy) | one part, its numbers as millimetres |
 | ``.3mf`` | ``threemf.py`` (zip + XML) | its objects placed by its build, each triangle's colour, its unit |
+| ``.glb`` | ``glb.py`` (OCCT's ``RWGltf_CafReader``) | its node tree, meshes, materials and textures |
 
 Nothing is written, nothing is cached on disk: a reader's answer lives in the process that drew
 it (the daemon's render process for the file keeps it, warm, until a file it read changes:
@@ -28,8 +29,8 @@ from cadgen.engine.mesh import Mesh
 __all__ = ["Foreign", "FormatError", "KINDS", "MESHES", "Part", "Placed", "assemble", "files_of",
            "read", "stale"]
 
-KINDS = {".stl": "stl", ".3mf": "3mf"}
-MESHES = (".stl", ".3mf")
+KINDS = {".stl": "stl", ".3mf": "3mf", ".glb": "glb"}
+MESHES = (".stl", ".3mf", ".glb")
 
 
 class FormatError(ValueError):
@@ -39,7 +40,8 @@ class FormatError(ValueError):
 @dataclass
 class Part:
     """A prototype: its name, its buffer (millimetres, its own frame), its colour (linear RGBA, or
-    None for the look's fill), its faces' colours and materials."""
+    None for the look's fill), its faces' colours and materials, and -- a GLB's -- each vertex's
+    texture coordinates and each paint's texture (an OCCT texture set, by the face group it paints)."""
 
     name: str
     mesh: Mesh
@@ -47,6 +49,8 @@ class Part:
     face_colors: dict[int, tuple] = field(default_factory=dict)
     material: dict[str, Any] | None = None
     face_materials: dict[int, dict[str, Any]] = field(default_factory=dict)
+    uvs: np.ndarray | None = None
+    textures: dict[Any, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -64,7 +68,7 @@ class Placed:
 @dataclass
 class Foreign:
     """A file read for the stills: what a renderer holds of it (``structure`` and ``buffers``, and
-    the shapes made for parts a buffer cannot carry), every file read with
+    the shapes made for parts a buffer cannot carry: a GLB's textured faces), every file read with
     its ``(mtime_ns, size)``, how it poses (a robot's forward kinematics: the structure at a pose)
     and what was not drawn as the file has it (``warnings``)."""
 
@@ -103,7 +107,10 @@ def assemble(kind: str, path: Path, name: str, parts: list[Part], placed: list[P
              files: dict[str, tuple[int, int]], *, pose: Callable | None = None,
              warnings: list[str] | None = None) -> Foreign:
     """The file as a renderer holds it: the structure ``Loaded.structure()`` would give a document
-    of these parts, instances and tree, and each part's buffer by a key of its bytes."""
+    of these parts, instances and tree, each part's buffer by a key of its bytes, and the shapes of
+    the parts a buffer does not carry whole (texture coordinates and textures)."""
+    from cadgen.engine.render.shapes import part_shapes
+
     buffers: dict[str, bytes] = {}
     prototypes = []
     shapes: dict[str, Any] = {}
@@ -118,6 +125,11 @@ def assemble(kind: str, path: Path, name: str, parts: list[Part], placed: list[P
             "material": part.material,
             "faceMaterials": {str(ordinal): value for ordinal, value in sorted(part.face_materials.items())},
         })
+        if part.uvs is not None:
+            groups = {int(ordinal): tuple(rgba) for ordinal, rgba in part.face_colors.items()}
+            made = part_shapes(part.mesh, groups, None, uvs=part.uvs)
+            made.textures = dict(part.textures)
+            shapes[key] = made
     instances = [{"prototype": item.part, "path": item.path, "matrix": _column_major(item.matrix),
                   "color": None if item.color is None else list(item.color),
                   **({} if item.palette is None else {"palette": item.palette})} for item in placed]
@@ -140,6 +152,10 @@ def read(path: Path) -> Any:
         from cadgen.engine.formats.meshes import stl_file
 
         return stl_file(path)
-    from cadgen.engine.formats.meshes import threemf_file
+    if suffix == ".3mf":
+        from cadgen.engine.formats.meshes import threemf_file
 
-    return threemf_file(path)
+        return threemf_file(path)
+    from cadgen.engine.formats.glb import glb_file
+
+    return glb_file(path)

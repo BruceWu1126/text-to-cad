@@ -10,6 +10,8 @@ is drawn as it is, an edge with a 3D polygon likewise.
 A part becomes one face per colour group (its faces of one colour merged into one
 triangulation) and one compound of edges per edge class (``feature``: feature, boundary and
 non-manifold edges, as the viewer groups them; ``tangent``; ``seam``), each edge one polyline.
+A mesh file's part may bring texture coordinates (a GLB's, ``formats/glb.py``): its faces' nodes
+carry them, and ``textures`` holds the texture each colour group is drawn with.
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ class PartShapes:
     edges: dict[str, Any] = field(default_factory=dict)  # line class: TopoDS_Compound of polygon edges
     triangles: int = 0
     edge_count: int = 0
+    textures: dict[Any, Any] = field(default_factory=dict)  # group: its texture set (a GLB's)
 
 
 def _compound(children: np.ndarray) -> bytes:
@@ -73,10 +76,11 @@ def _polygons(points: np.ndarray, counts: np.ndarray) -> bytes:
     return out.tobytes()
 
 
-def craft(groups: list[tuple[np.ndarray, np.ndarray, np.ndarray | None]], lines: dict[str, tuple[np.ndarray, np.ndarray]]) -> bytes:
+def craft(groups: list[tuple], lines: dict[str, tuple[np.ndarray, np.ndarray]]) -> bytes:
     """The BinTools bytes of a compound: one triangulation-only face per ``groups`` entry
-    (nodes (n, 3), 0-based triangles (m, 3), normals (n, 3) or None), then one compound per line
-    class of ``lines`` (points (P, 3), counts per edge), each edge a ``Poly_Polygon3D``."""
+    (nodes (n, 3), 0-based triangles (m, 3), normals (n, 3) or None, and optionally texture
+    coordinates (n, 2)), then one compound per line class of ``lines`` (points (P, 3), counts per
+    edge), each edge a ``Poly_Polygon3D``."""
     chunks = [_HEAD]
     classes = [name for name in LINES if name in lines and len(lines[name][1])]
     counts = np.concatenate([lines[name][1] for name in classes]) if classes else np.zeros(0, np.int64)
@@ -86,12 +90,16 @@ def craft(groups: list[tuple[np.ndarray, np.ndarray, np.ndarray | None]], lines:
         chunks.append(_polygons(points, counts.astype(np.int64)))
     chunks.append(b"PolygonOnTriangulations 0\nSurfaces 0\n")
     chunks.append(b"Triangulations %d\n" % len(groups))
-    for nodes, triangles, normals in groups:
+    for group in groups:
+        nodes, triangles, normals = group[:3]
+        uvs = group[3] if len(group) > 3 else None
         has_normals = normals is not None
         chunks.append(np.array([len(nodes), len(triangles)], "<i4").tobytes())
-        chunks.append(bytes([0, 1 if has_normals else 0]))
+        chunks.append(bytes([0 if uvs is None else 1, 1 if has_normals else 0]))
         chunks.append(np.array([0.0], "<f8").tobytes())
         chunks.append(np.ascontiguousarray(nodes, "<f8").tobytes())
+        if uvs is not None:
+            chunks.append(np.ascontiguousarray(uvs, "<f8").tobytes())
         chunks.append(np.ascontiguousarray(triangles + 1, "<i4").tobytes())
         if has_normals:
             chunks.append(np.ascontiguousarray(normals, "<f4").tobytes())
@@ -135,10 +143,12 @@ def read(data: bytes) -> Any:
     return shape
 
 
-def part_shapes(mesh: Mesh, group_of: dict[int, Any] | None = None, default: Any = None) -> PartShapes:
+def part_shapes(mesh: Mesh, group_of: dict[int, Any] | None = None, default: Any = None,
+                uvs: np.ndarray | None = None) -> PartShapes:
     """The part's faces, one per colour group (``group_of``: face ordinal -> group; every
     other face is ``default``'s), and its edges by class, as triangulation-only and polygon
-    shapes read from one crafted BinTools buffer."""
+    shapes read from one crafted BinTools buffer; ``uvs`` (each vertex's texture coordinates)
+    on its faces' nodes."""
     from OCP.TopoDS import TopoDS_Iterator
 
     group_of = group_of or {}
@@ -150,7 +160,7 @@ def part_shapes(mesh: Mesh, group_of: dict[int, Any] | None = None, default: Any
     painted = {ordinal: group for ordinal, group in group_of.items() if group != default}
     if not painted:
         if len(triangles):
-            groups.append((positions, triangles, normals))
+            groups.append((positions, triangles, normals) if uvs is None else (positions, triangles, normals, uvs))
             keys.append(default)
     else:
         # Each group by a number of its own: a group is a colour (an RGBA tuple), which numpy
@@ -164,7 +174,8 @@ def part_shapes(mesh: Mesh, group_of: dict[int, Any] | None = None, default: Any
             if not len(chosen):
                 continue
             used, inverse = np.unique(chosen, return_inverse=True)
-            groups.append((positions[used], inverse.reshape(-1, 3), normals[used]))
+            groups.append((positions[used], inverse.reshape(-1, 3), normals[used])
+                          + (() if uvs is None else (uvs[used],)))
             keys.append(key)
     edges = np.asarray(mesh.edges, np.int64).reshape(-1, 4)
     edges = edges[edges[:, 2] >= 2]
