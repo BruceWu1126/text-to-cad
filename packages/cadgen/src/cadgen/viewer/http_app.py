@@ -1,9 +1,8 @@
 """The HTTP contract: both browser gates, route dispatch, and the SPA.
 
-Security / trust model, unchanged from the Node backend: the server binds
-loopback and serves UNAUTHENTICATED — the loopback bind is the trust boundary
-against other processes and machines. Loopback is NOT a boundary against the
-user's own browser, so two gates defend against that specifically:
+The engine authenticates network requests before this router runs. MCP calls
+reach the same router in process through an authenticated session. Two additional
+browser gates defend against cross-origin requests:
 
 * Host validation refuses a request whose Host names anything but
   127.0.0.1/localhost/::1 — the DNS-rebinding case, where an attacker domain
@@ -27,7 +26,6 @@ import os
 import re
 import stat
 import sys
-import threading
 from pathlib import Path
 
 from .backend import absolute_path, asset_path
@@ -42,7 +40,6 @@ __all__ = [
     "hostname_only",
     "host_is_allowed",
     "read_viewer_version",
-    "newest_mtime_ns",
     "identity_token",
     "os_user",
     "create_cad_app",
@@ -55,17 +52,6 @@ _LIBRARY_BODY_LIMIT = 768 * 1024
 _THUMBNAIL_NAME = re.compile(r"[0-9a-f]{32}\.png")
 _CAD_EXTENSIONS = ", ".join(sorted(VIEWER_EXTENSIONS))
 _LOOPBACK_NAMES = frozenset({"127.0.0.1", "localhost", "::1"})
-
-# Routes that do NOT hold the development auto-reload back (``reload.py``).
-# `/__cad/server` is what the browser's own reload watcher polls — counting it
-# would let that watcher defer the very restart it is waiting for — and the
-# engine's routes (`/__cad/xbf` and everything under it) PARK on the engine's
-# daemon, which does their work in a process of its own: interrupting one costs
-# the client one more request after it reloads, and the engine's read goes on.
-# Every other route does its work here, so it is counted.
-_UNCOUNTED_ROUTES = frozenset({"/__cad/server", "/__cad/xbf", "/__cad/analytics", "/__cad/analytics/activity",
-                               "/__cad/version"})
-
 
 def hostname_only(host_header) -> str:
     value = str(host_header or "").strip()
@@ -98,13 +84,6 @@ def host_is_allowed(host_header, bound_host) -> bool:
 def read_viewer_version() -> str:
     """The installed cadgen distribution's version, ``""`` when there is no metadata.
 
-    One half of the launcher's reuse key (see ``identity_token``): both sides
-    of that comparison must read the version the same way. Metadata, not
-    ``cadgen.__version__``: the reuse probe runs in a launcher that has not
-    imported anything heavy, and ``.dist-info`` is what an installed wheel
-    carries. ``""`` is a source tree on ``PYTHONPATH`` with no install behind
-    it, which is how this repo's own test runners supply cadgen -- there the
-    runtime digest does all the work.
     """
     from importlib.metadata import PackageNotFoundError, version
 
@@ -114,27 +93,6 @@ def read_viewer_version() -> str:
         return ""
     except Exception:  # noqa: BLE001 - a metadata read that fails tells us nothing
         return ""
-
-
-def newest_mtime_ns(base_dir, *, suffix: str = "") -> int:
-    """The newest ``st_mtime_ns`` under ``base_dir`` (``suffix``-filtered), 0 when empty.
-
-    ``__pycache__`` is skipped — a byte-identical tree must not read newer
-    because an interpreter recompiled it. Unreadable files count as absent:
-    a freshness signal must never stop a viewer from starting.
-    """
-    newest = 0
-    for dirpath, dirnames, filenames in os.walk(base_dir):
-        dirnames[:] = [name for name in dirnames if name != "__pycache__"]
-        for filename in filenames:
-            if suffix and not filename.endswith(suffix):
-                continue
-            try:
-                mtime = os.stat(os.path.join(dirpath, filename)).st_mtime_ns
-            except OSError:
-                continue
-            newest = max(newest, mtime)
-    return newest
 
 
 def _identity_files(base_dir, suffix: str) -> tuple[str, list[str]]:
@@ -170,21 +128,8 @@ def _update_identity_digest(digest, base_dir, *, suffix: str = "") -> None:
 def identity_token(dist_dir: str) -> str:
     """Identity of the Python runtime and exact built client this server uses.
 
-    Computed ONCE per launch, on both sides of the launcher's reuse comparison,
-    and never re-read by a running server. Whether a running server's code has
-    since changed is a separate question with a separate answer — and it is
-    asked only in a source checkout, by ``reload.py``.
-
-    The Viewer imports cadgen runtime modules outside ``cadgen.viewer`` — in
-    particular the engine's client and cadgen's telemetry. Fingerprinting only the
-    viewer package let an old resident survive changes to those modules while
-    serving a newly rebuilt browser client. The token therefore covers every
-    Python file in the installed cadgen package, the Viewer's data table, and
-    the exact dist directory selected by this launch (including its realpath).
-
-    Content, rather than the newest mtime, is the identity. This catches any
-    changed member even when another file has a later timestamp, and does not
-    restart a correct server after a byte-identical rebuild.
+    Computed once per page session. It lets a page notice a changed backend
+    or built client; it does not select, replace or restart a process.
     """
     package_dir = Path(__file__).resolve().parents[1]
     digest = hashlib.sha256()
@@ -201,7 +146,7 @@ def identity_token(dist_dir: str) -> str:
 
 def os_user():
     """This process's OS user, as ``/__cad/server`` names it (``user``): the uid on POSIX, the
-    account name on Windows. A launch reuses, replaces or stops only a viewer that names its own."""
+    account name on Windows."""
     if hasattr(os, "getuid"):
         return os.getuid()
     import getpass
@@ -259,7 +204,7 @@ class CadApp:
         # The drawing route's renders, off the request and one per drawing (``drawings.py``).
         self.drawings = DrawingRenders(on_crash=lambda error: self._crashed(error, bugs_only=True))
         # The engine's documents (an .xbf, a STEP): each served off the request, and the page's
-        # reads of them relayed to the engine (``xbf.py``).
+        # reads dispatched directly to its document server (``documents.py``).
         self.engine_documents = documents or EngineDocuments(on_crash=lambda error: self._crashed(error, bugs_only=True))
         self.prompt_files = PromptFiles()
         self.start = to_posix_path(os.path.abspath(start if start is not None else _working_folder()))
@@ -274,37 +219,11 @@ class CadApp:
         # Computed ONCE, at start (or handed in by the launcher, which computed it to ask the port):
         # the identity this instance announces is the identity of the code it is actually running.
         self.identity_token = identity if identity is not None else identity_token(self.dist_dir)
-        # The single development predicate (reload.py). In an installed wheel
-        # this is False and the whole mechanism is absent: nothing is watched
-        # and no request is counted. The page still asks who its server is, at
-        # an installed cadence, to reload under another install on its port.
-        self.auto_reload = False
-        self._request_lock = threading.Lock()
-        self._busy_requests = 0
         self._recents = None
         self._picker = None
-        # What ``POST /__cad/shutdown`` calls, after it answers: the `cadgen viewer` process's own
-        # shutdown (``main.py``). An app with none -- the CAD app's tunnel builds them -- has no
-        # such route.
-        self.on_shutdown = None
-        # Anonymous usage analytics (``cadgen/analytics.py``): the `cadgen viewer` process attaches
-        # its recorder here (``main.py``), and the CAD app's server its own to the app its tunnel
-        # builds. ``consent_by`` says, with a person's answer, which of them asked.
+        # The engine shares one recorder across its page and MCP sessions.
         self.analytics = None
         self.consent_by = "viewer"
-
-    # --- development auto-reload accounting -------------------------------
-
-    def busy_requests(self) -> int:
-        """Requests in flight that a restart would interrupt (see ``_UNCOUNTED_ROUTES``)."""
-        with self._request_lock:
-            return self._busy_requests
-
-    def restart_is_safe(self) -> bool:
-        """``SourceReloader``'s idle gate: nothing this restart would destroy -- no request
-        in flight and no drawing it is rendering. (An engine document's read is the engine's,
-        in a process of its own: a restart leaves it running.)"""
-        return self.busy_requests() == 0 and not self.drawings.any_in_flight()
 
     # --- server info ------------------------------------------------------
 
@@ -312,17 +231,14 @@ class CadApp:
         return {
             "app": "cad-viewer",
             # The start-time token, NOT identity_token() re-evaluated: a
-            # resident answering a reuse probe must report the code it runs,
+            # session reports the code it was created with,
             # not the code now on disk. It is also what the browser's reload
             # watcher compares against to notice that this server has become
             # other code on the same port (a restarted checkout, an upgrade).
             "identityToken": self.identity_token,
-            # Whether this server watches its own code and restarts itself.
-            # False in every installed wheel; the client polls faster when true.
-            "autoReload": self.auto_reload,
             # Which file manager Reveal opens: darwin, win32 or linux.
             "platform": sys.platform if sys.platform in ("darwin", "win32") else "linux",
-            # Whose viewer this is: a launch reuses, replaces or stops only its own user's.
+            # The OS identity of the engine serving this page.
             "user": os_user(),
             # Where a developer's relative ?file= resolves, in the page. Not a boundary.
             "start": self.start,
@@ -428,23 +344,9 @@ class CadApp:
     # --- dispatch ---------------------------------------------------------
 
     def handle(self, request, response) -> None:
-        """Count the request, then dispatch it.
-
-        The counting exists only for the development auto-reload, so an
-        installed wheel takes no lock and keeps no counter: ``auto_reload`` is
-        False there and this is a straight call.
-        """
+        """Dispatch one request and record unexpected route failures."""
         try:
-            if not self.auto_reload or request.path in _UNCOUNTED_ROUTES:
-                self._dispatch(request, response)
-                return
-            with self._request_lock:
-                self._busy_requests += 1
-            try:
-                self._dispatch(request, response)
-            finally:
-                with self._request_lock:
-                    self._busy_requests -= 1
+            self._dispatch(request, response)
         except ConnectionError:
             raise  # the page left mid-request (a Response's own writes never raise it): no crash of ours
         except Exception as error:
@@ -493,7 +395,7 @@ class CadApp:
                     self._handle_robot(request, response, query)
                 elif pathname == "/__cad/xbf":
                     # An engine document (an .xbf, a STEP): where the page reads it, once the
-                    # engine serves it; 202 while the engine reads it (``xbf.py``).
+                    # engine serves it; 202 while the engine reads it (``documents.py``).
                     if query.get("held") == "1":
                         response.send_json(200, self.engine_documents.held(query.get("file") or ""))
                     else:
@@ -569,11 +471,6 @@ class CadApp:
                     response.send_json(200, self._change_recents(json.loads(request.body())))
                 elif pathname == "/__cad/pick":
                     self._handle_pick(response)
-                elif pathname == "/__cad/shutdown" and self.on_shutdown is not None:
-                    # A newer launch replacing this viewer, or `cadgen viewer stop`: answered, then
-                    # the server stops and gives its port up (``main.py``).
-                    response.send_json(202, {"ok": True})
-                    self.on_shutdown()
                 elif pathname == "/__cad/reveal":
                     from .reveal import reveal_path
                     if int(request.headers.get("content-length") or 0) > 8192:
@@ -763,10 +660,6 @@ class CadApp:
 
     def _handle_drawing(self, request, response, query):
         """A ``.dxf`` flattened to 2D primitives (``drawings.py`` owns the rules).
-
-        NOT in ``_UNCOUNTED_ROUTES``: that set is for polls and parked waits,
-        and this one starts real work — a render that a development restart
-        would throw away (``restart_is_safe`` waits for it as well).
 
         The payload is already JSON bytes, held in memory by the file's bytes,
         so it goes out through ``send_bytes`` rather than being decoded and

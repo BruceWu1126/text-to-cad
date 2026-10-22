@@ -15,7 +15,7 @@ import {
   scheduleProcessShutdown,
 } from "./scripts/serverLifetime.mjs";
 
-// Dev deliberately lives on Vite's own canonical port, NOT the launcher's 3245:
+// Vite owns its development port; the engine chooses a separate HTTP port:
 // dev is a hand-managed foreground process that no launch reuses or replaces,
 // so it must not look like (or collide with) a launched Viewer. Taken port →
 // pick another with --port; nothing reuses here.

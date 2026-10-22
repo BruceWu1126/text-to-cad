@@ -51,7 +51,6 @@ class SessionApp(CadApp):
     def __init__(self, server, **kwargs):
         super().__init__(documents=EngineDocuments(server=server), **kwargs)
         self.server = server
-        self.auto_reload = False
         self.touched = time.monotonic()
 
     def handle(self, request, response):

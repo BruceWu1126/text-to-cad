@@ -1,9 +1,6 @@
-"""``cadgen viewer`` — this machine's CAD Viewer: reused when it runs, started when it does not.
+"""``cadgen viewer`` ensures the engine, prints or opens its page URL, and exits.
 
-A thin shell over :func:`cadgen.viewer.main.serve`, which owns the parser and the
-launcher contract (reuse, replace or start on its port, the ``--json`` announce
-line). ``cadgen viewer stop`` is :mod:`cadgen.cli.viewer_stop`; ``python -m
-cadgen.viewer`` reaches both.
+The parser and launcher contract live in ``cadgen.viewer.main``.
 """
 
 from __future__ import annotations

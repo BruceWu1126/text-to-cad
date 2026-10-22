@@ -524,19 +524,22 @@ VIEWER_PYTHON=<checkout>/.venv/bin/python \
   npm --prefix <checkout>/apps/web run dev -- --host 127.0.0.1
 ```
 
-Vite owns its API-only Python backend (`--new`: a port of its own). `VIEWER_PYTHON`
+Vite requests an API-only page session (`--new`) on the installation's engine.
+Closing Vite leaves that engine and other sessions running. `VIEWER_PYTHON`
 must name an interpreter that satisfies cadgen's Python floor and imports this
 checkout. The backend opens any file by its absolute path. The web app owns
 URL/history and browser preferences. FileViewer
 state is scoped by file and renderer; each CAD render session owns its
 cache provider and worker lease.
 
-The standalone launcher is `cadgen viewer`: on port 3245, or the port `--port N`
-names, as any web server; on that port a viewer of the same code is reused and one
-of other code replaced. A source
-checkout can serve the local web build; `CADGEN_VIEWER_DIST` and
+`cadgen viewer` ensures the installation's engine, opens its page and exits.
+`--json` prints the authenticated session URL without opening a browser. `--new`
+creates a page session, with its own starting folder, on the same engine and port.
+An explicit `--host` or `--port` pins the engine listener; a conflict with an
+already-running engine fails. There is no fixed default port or viewer process.
+A checkout serves its local web build; `CADGEN_VIEWER_DIST` and
 `CADGEN_BROWSER_RUNTIME_DIR` are explicit asset overrides. A wheel resolves its
-own bundled assets without the repository. Run `scripts/bundle/bundle.sh` after
+bundled assets without the repository. Run `scripts/bundle/bundle.sh` after
 editing build inputs to refresh all packaged outputs.
 
 The self-contained browser suite creates tiny inputs and owns its project,
@@ -560,12 +563,12 @@ kinematics are the `packages/ui` browser specs' on every PR). Backend tests live
 `scripts/test/test-python.sh --select viewer`. Client tests do not cover them.
 Nothing in `cadgen.viewer` imports the CAD kernel at module scope.
 
-Launcher reuse keys on realpath(root) and an identity token derived from the
-Python runtime and selected built client. Another checkout, a different
-`--dist`, or a changed runtime cannot silently reuse a stale instance. A running
-instance that detects changed files refuses new model-data requests with a
-restart-required response. Never stop an instance you did not start; see
-`apps/web/README.md` for ports, reuse and catalog/link behavior.
+The engine is keyed by the Python installation, so the CLI, page and each host's
+stdio shim share it. Different installations have different engines. Page sessions
+reuse the same starting folder and client build unless `--new` is given. Python
+source edits require restarting your test engine with `cadgen stop`; it does not
+re-execute under active pages. Never stop an instance you did not start. See
+`apps/web/README.md` for the launcher contract and catalog/link behavior.
 
 Production outputs are centralized and ignored by Git:
 

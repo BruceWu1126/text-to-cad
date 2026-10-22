@@ -303,18 +303,7 @@ class HeldByItsBytes(unittest.TestCase):
         self.assertEqual(self.rendered, ["d1.dxf"])
 
 
-class ItStaysOffTheKernelAndTheReloadCounter(DrawingRouteTestCase):
-    def test_the_route_is_counted_by_the_development_reload_gate(self) -> None:
-        """Not an uncounted poll: a render is work a restart would throw away.
-
-        ``_UNCOUNTED_ROUTES`` exists for the watcher's own poll and for routes
-        that PARK; this one burns CPU, like a compile, and a restart mid-render
-        wastes it.
-        """
-        from cadgen.viewer.http_app import _UNCOUNTED_ROUTES
-
-        self.assertNotIn("/__cad/drawing", _UNCOUNTED_ROUTES)
-
+class ItStaysOffTheKernel(DrawingRouteTestCase):
     def test_serving_a_drawing_does_not_load_the_cad_kernel(self) -> None:
         import sys
 

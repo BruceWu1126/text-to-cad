@@ -8,7 +8,7 @@ must never happen is the CAD KERNEL loading into the server:
   ~300MB before the first request.
 * The long-lived server must not hold a kernel it never uses. A STEP or an
   ``.xbf`` is read, meshed and measured by the cadgen engine, in its daemon and
-  the processes it starts (``xbf.py`` asks it over its socket and relays its
+  the processes it starts (``documents.py`` dispatches directly to its
   HTTP); no viewer module names a build entry point.
 
 Both are checked twice: on the AST (so the offender is named by file and line)
@@ -94,7 +94,7 @@ class NoKernelInTheServer(unittest.TestCase):
 
     def test_no_module_names_a_build_entry_point(self) -> None:
         # A kernel-bearing call has no home in the viewer at all: a document is the engine's to
-        # read (``xbf.py`` asks its daemon). A call site here would be a place for the kernel
+        # read (``documents.py`` uses its document server). A call site here would be a place for the kernel
         # to leak into the server process.
         entry_points = ("cadgen.engine.build", "cadgen.engine.document", "cadgen.engine.serve",
                         "cadgen.engine.reader")

@@ -43,7 +43,7 @@ async function mount(serverInfo, drive) {
 
 test('an installed viewer reloads for another install on its port, not for its own restart', async () => {
   const drive = driver([{ ok: false }, { ok: true, identityToken: 'a' }, { ok: true, identityToken: 'b' }]);
-  const view = await mount({ autoReload: false, identityToken: 'a' }, drive);
+  const view = await mount({ identityToken: 'a' }, drive);
   try {
     await view.advance(); await view.advance(); assert.deepEqual(drive.reloads, []);
     await view.advance();
@@ -53,26 +53,16 @@ test('an installed viewer reloads for another install on its port, not for its o
 
 test('coming back to the window asks at once', async () => {
   const drive = driver([{ ok: true, identityToken: 'b' }]);
-  const view = await mount({ autoReload: false, identityToken: 'a' }, drive);
+  const view = await mount({ identityToken: 'a' }, drive);
   try {
     await view.focus();
     assert.equal(drive.reloads.length, 1); assert.equal(drive.scheduled, 0, 'the tick it pre-empted is cancelled');
   } finally { await view.dispose(); }
 });
 
-test('a development restart reloads exactly once, when the new server answers', async () => {
-  const drive = driver([{ ok: true, identityToken: 'a' }, { ok: false }, { ok: false }, { ok: true, identityToken: 'b' }]);
-  const view = await mount({ autoReload: true, identityToken: 'a' }, drive);
-  try {
-    await view.advance(); await view.advance(); assert.deepEqual(drive.reloads, []);
-    await view.advance(); await view.advance();
-    assert.equal(drive.reloads.length, 1); assert.equal(drive.scheduled, 0);
-  } finally { await view.dispose(); }
-});
-
 test('a transient outage does not reload, and unmount cancels polling', async () => {
   const drive = driver([{ ok: false }, { ok: true, identityToken: 'a' }]);
-  const view = await mount({ autoReload: true, identityToken: 'a' }, drive);
+  const view = await mount({ identityToken: 'a' }, drive);
   await view.advance(); await view.advance(); assert.deepEqual(drive.reloads, []);
   assert.equal(drive.scheduled, 1);
   await view.dispose(); assert.equal(drive.scheduled, 0);

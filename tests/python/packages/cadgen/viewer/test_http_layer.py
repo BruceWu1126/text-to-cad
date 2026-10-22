@@ -130,7 +130,7 @@ class HostGate(HttpLayerTestCase):
         self.assertIn(b"'evil.example'", body)
 
     def test_the_gate_covers_every_route(self):
-        for path in ("/", "/assets/app.js", "/__cad/catalog", "/__cad/xbf/api/look", "/__cad/nope"):
+        for path in ("/", "/assets/app.js", "/__cad/catalog", "/__cad/api/look", "/__cad/nope"):
             with self.subTest(path=path):
                 status, _, _ = self.fixture.request("GET", path, headers={"Host": "attacker.example"})
                 self.assertEqual(status, 403)
@@ -207,7 +207,6 @@ class ServerInfo(HttpLayerTestCase):
         info = json.loads(body)
         self.assertEqual(info["app"], "cad-viewer")
         self.assertIn("identityToken", info)
-        self.assertFalse(info["autoReload"])
         self.assertIn(info["platform"], ("darwin", "win32", "linux"))
         self.assertEqual(info["pid"], os.getpid())
         self.assertEqual(info["port"], self.fixture.port)
@@ -215,7 +214,7 @@ class ServerInfo(HttpLayerTestCase):
         self.assertEqual(info["start"], self.fixture.root.replace(os.sep, "/"))
         self.assertIsInstance(info["pick"], bool)
         # No tolerance: the page reads each part's one display mesh by its key.
-        self.assertEqual(list(info), ["app", "identityToken", "autoReload", "platform", "user",
+        self.assertEqual(list(info), ["app", "identityToken", "platform", "user",
                                       "start", "pick", "port", "pid"])
         self.assertEqual(headers["cache-control"], "no-store")
 

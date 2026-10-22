@@ -161,6 +161,7 @@ def hinge():
 15. **One HTTP owner per installation.** The daemon serves page sessions and document
     reads on one authenticated listener. A launcher exits after handing its client the
     engine URL; closing a client never stops the engine. Each page has its own catalog root.
+    No page replaces or re-executes the engine; stopping it is an explicit engine operation.
 16. **No kernel in request threads.** Reading XBF/STEP, meshing, topology facts and poses
     run in child processes. The daemon holds structures and buffers, never live kernel objects.
 
@@ -204,6 +205,11 @@ an in-memory registry; thread views remain session-local. The host's stdio proce
 proxies JSON-RPC and owns no page, tool implementation, catalog or view state.
 Active HTTP calls keep the daemon alive; quiet MCP sessions expire after an hour.
 A card's `cad_sync` renews its served document's warm-worker lease.
+
+The viewer launcher owns no server, reload watcher or process-reuse probe. It
+requests a session from the existing engine. Development client reload remains
+a browser concern; Python changes take effect when that installation's engine
+is explicitly restarted. Session state is memory only and is recreated after restart.
 
 
 ## Layout

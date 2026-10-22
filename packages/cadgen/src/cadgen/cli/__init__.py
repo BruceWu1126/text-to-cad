@@ -49,11 +49,9 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     "srdf validate": ("cadgen.cli.srdf_validate", "validate an SRDF against its URDF"),
     # Generic / services
     "doctor": ("cadgen.cli.doctor", "print installed cadgen and verify a skill's pin"),
-    # The CAD Viewer. One-word `viewer` starts or reuses this machine's viewer (what the
-    # CAD skills teach); `viewer stop` asks it to exit. The two-word entry is required:
-    # dispatch matches argv[0:2] first.
-    "viewer": ("cadgen.cli.viewer", "start, or reuse, this machine's CAD Viewer"),
-    # CAD inside an agent host's panels. The host starts it, one process per thread.
+    # A page session on the installation engine; the launcher exits.
+    "viewer": ("cadgen.cli.viewer", "open a viewer page on the installation engine"),
+    # CAD inside an agent host's panels. The host starts a stateless stdio peer per session.
     "mcp": ("cadgen.cli.mcp", "serve CAD to an agent host over MCP (stdio)"),
     "telemetry": ("cadgen.cli.telemetry", "show or change the usage stats and crash reports CAD sends: status, on, off"),
 }
@@ -189,7 +187,7 @@ def _main(argv: list[str] | None) -> int:
         sys.stdout.write(f"cadgen {__version__}\n")
         return 0
 
-    # Longest match first, so `viewer stop` beats `viewer`.
+    # Longest match first, so `dxf snapshot` is dispatched as one command.
     command, rest = " ".join(argv[:2]), argv[2:]
     entry = _COMMANDS.get(command)
     if entry is None:

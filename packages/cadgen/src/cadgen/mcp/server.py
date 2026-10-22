@@ -1,8 +1,8 @@
 """``cadgen mcp``: CAD beside an agent's chat, as an MCP App.
 
 Nothing heavy happens until a tool needs it: initialize and tools/list read no
-file, start no daemon and import no CAD kernel. Everything the views share --
-the open views, what was last shown -- is plain process memory.
+model file and import no CAD kernel. The engine already owns this session. Everything the views share --
+the open views, what was last shown -- is per-session engine memory.
 
 One page serves every surface. The tool that opens a surface returns a
 *launch* -- a model by its absolute path, or the home -- and the page renders it;
@@ -21,13 +21,13 @@ Hosts present views in one of three ways, told apart at initialize:
   extension with the ``global``, ``thread`` and ``file`` entrypoints). The host
   presents CAD as a sidebar page, a tab per thread and a file handler. The agent
   opens a tab once (``cad_open``) and then drives it (``cad_show``). A host that
-  declares tabs takes on what Codex does: it starts one server process per thread,
+  declares tabs takes on what Codex does: it starts one shim and MCP session per thread,
   since a call that names no view reaches the thread's own tab.
 - *Inline* (every other MCP Apps host: Claude, VS Code, ...). Each call to a tool
   with a UI mounts a new view in the chat, and the old ones stay. So ``cad_show``
   is that tool, each launch is stamped with an order for the views to retire
   their elders by, and a view the agent reads is named by the token its
-  ``cad_show`` returned: one process may serve many chats, and no host says which.
+  ``cad_show`` returned: one session may serve many chats, and no host says which.
 - *Text* (a client that renders no MCP Apps, so does not advertise the
   ``io.modelcontextprotocol/ui`` extension: Grok, Zed, Gemini CLI, Claude Code in a
   terminal, ...). ``cad_show`` is the only tool, and it answers with a link to the
@@ -628,15 +628,11 @@ class Server:
         launch = self._launch(model)
         if isinstance(view, SidebarView):
             if view.model != model:
-                self._leave(lambda: self.sidebar_views.post(view.id, {"type": "show", "launch": launch}))
+                self.sidebar_views.post(view.id, {"type": "show", "launch": launch})
             return _text(f"Showing {model} in the CAD sidebar, which shows each rebuild by itself.",
                          {"delivered": 1, "view": view.id, "sidebar": True})
         self.views.post([view.id], {"type": "show", "launch": launch})
         return _text(f"Showing {model} in CAD.", {"delivered": 1, "view": view.id})
-
-    @staticmethod
-    def _leave(request):
-        return request()
 
     def _show_in_browser(self, model: str) -> dict[str, Any]:
         """The model's link in the CAD Viewer this machine runs, started if none is."""
@@ -713,7 +709,7 @@ class Server:
             raise ToolFailed("No CAD viewer with a model is open in this thread. Open one with cad_open, "
                              "or render headless with `cadgen snapshot`.", "no_view")
         if isinstance(view, SidebarView):
-            reply = self._leave(lambda: self.sidebar_views.ask(view.id, timeout=max(1.0, deadline - time.monotonic())))
+            reply = self.sidebar_views.ask(view.id, timeout=max(1.0, deadline - time.monotonic()))
             if reply is None:
                 raise ToolFailed("The CAD sidebar did not answer in time: it may be closed or out of sight. Ask the person to "
                                  "open it, then capture again.", "timeout")

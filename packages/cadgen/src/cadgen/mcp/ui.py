@@ -6,7 +6,7 @@ resources by URI can never pair a new server with an old page. Any build's URI
 reads as the current page: a tab the host restores after an update gets the
 current app, which checks the protocol of the launch it was restored with.
 
-The page must not change while the host runs. Each thread's server reports the
+The page must not change while the host runs. Each MCP session reports the
 URI, and a host that sees it change drops the frames showing the old one. An
 installed wheel's page never changes; a build directory's changes with every
 rebuild, so serve a copy of it (``CADGEN_MCP_APP_DIR``) to a running host.

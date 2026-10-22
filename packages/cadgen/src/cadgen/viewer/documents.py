@@ -45,14 +45,11 @@ class _Serve:
 
 
 class EngineDocuments:
-    """The engine documents this server's pages read: each file's serve, off the request and
-    joined by every request for it, and the relay of the page's reads to the engine.
+    """Acquire each document once in the engine, off the HTTP request thread.
 
-    ``hold_seconds`` is how long a request waits on a serve before answering 202, ``retry_ms``
-    the wait the 202 asks of the client before it asks again, and ``wait_seconds`` the longest a
-    relayed version wait is held. The CAD Viewer holds; the CAD app's tunnel, whose calls share
-    a host's few slots, holds briefly and never waits on a version (``cadgen.mcp.tunnel``).
-    ``on_crash`` hears a serve that failed for a reason other than its file (a bug), once.
+    Concurrent requests join one read. ``hold_seconds`` bounds the time a caller
+    waits before a 202 response; the client uses ``retry_ms`` to request again.
+    ``on_crash`` hears unexpected failures once.
     """
 
     def __init__(self, *, hold_seconds: float = SERVE_HOLD_SECONDS, retry_ms: int = 0,
@@ -64,9 +61,6 @@ class EngineDocuments:
         self._clock = clock
         self._lock = threading.Lock()
         self._serves: dict[str, _Serve] = {}
-        # Where the engine serves (``host:port``, as its last answer said), and the file each
-        # document id it gave is of: what a read is relayed to, and what is served again when the
-        # engine restarted.
 
     def any_in_flight(self) -> bool:
         """Whether a serve is running: a page is waiting on it."""

@@ -672,7 +672,7 @@ class TunnelBodyTest(unittest.TestCase):
             def handle(self, request, response) -> None:
                 if request.path == "/__cad/catalog":
                     response.send_json(200, catalog)
-                elif request.path == "/__cad/xbf/api/doc/abc/version":
+                elif request.path == "/__cad/api/doc/abc/version":
                     response.send_json(200, {"version": "1-1"})
                 else:
                     response.send_bytes(200, binary, "application/octet-stream")
@@ -690,8 +690,8 @@ class TunnelBodyTest(unittest.TestCase):
         self.assertEqual(gzip.decompress(base64.b64decode(reply["body"])), written)
         self.assertEqual(int(reply["headers"]["content-length"]), len(written))
         self.assertLess(len(reply["body"]), len(base64.b64encode(written)) // 4)
-        for path, method, body in (("/__cad/xbf/api/doc/abc/version", "GET", b'{"version":"1-1"}'),
-                                   ("/__cad/xbf/api/doc/abc/part/k1", "GET", binary), ("/__cad/catalog", "HEAD", b"")):
+        for path, method, body in (("/__cad/api/doc/abc/version", "GET", b'{"version":"1-1"}'),
+                                   ("/__cad/api/doc/abc/part/k1", "GET", binary), ("/__cad/catalog", "HEAD", b"")):
             reply = call(path, method)
             self.assertNotIn("encoding", reply)
             self.assertEqual(base64.b64decode(reply["body"]), body)

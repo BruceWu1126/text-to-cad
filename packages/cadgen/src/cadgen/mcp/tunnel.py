@@ -17,8 +17,8 @@ for about 5 ms of level-1 compression. Binary bodies (display meshes) barely
 shrink, so they travel as they are.
 
 A reply is one message on the host's channel, and a host reads that channel with
-a ceiling on one message: past it, the connection closes, and this process and
-every view on it end. So no reply carries more than ``MAX_REPLY_BYTES`` of body.
+a ceiling on one message: past it, the connection closes, and its shim connection and
+every view using it disconnect. So no reply carries more than ``MAX_REPLY_BYTES`` of body.
 The page asks for every GET as a byte range of at most that (``Range``), and a
 longer body answers with its first part, ``content-range`` and an ``etag``
 (``cadgen.viewer.response``): the page reads the rest a range at a time, from
@@ -36,7 +36,7 @@ A drawing whose bytes the viewer holds no answer for renders off the request
 (``cadgen.viewer.drawings``): here a request waits on it only briefly
 (``DRAWING_HOLD_SECONDS``), since calls share a host's few slots, and the 202
 has the page ask again a moment later (``DRAWING_RETRY_MS``). So does a STEP or
-an ``.xbf`` the cadgen engine is still reading (``cadgen.viewer.xbf``:
+an ``.xbf`` the cadgen engine is still reading (``cadgen.viewer.documents``:
 ``ENGINE_HOLD_SECONDS``, ``ENGINE_RETRY_MS``); and the page's wait for its next
 version is answered at once rather than held: the page asks again a second later.
 """

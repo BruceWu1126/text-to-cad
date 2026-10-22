@@ -6,17 +6,8 @@
  * one the page loaded against, the page reloads, which picks up the client that
  * server serves -- and with it whatever its store speaks (a mesh format, a
  * route). A page from before an upgrade cannot read the meshes of the server
- * after it. Two kinds of server change under a page:
- *
- * - A source checkout's backend re-executes itself on the SAME port the moment
- *   its Python changes and the work in flight is done (`autoReload: true`, see
- *   `cadgen/viewer/reload.py`): `/__cad/server` stops answering for a fraction of
- *   a second, and answers again with a new token. It is asked every 2 s, and
- *   every 0.4 s mid-restart.
- * - An installed one is replaced by another version on its port, under a tab
- *   left open across the upgrade. It is asked every 5 s (and, by the hook, the
- *   moment the tab comes back into view): a token from another install reloads
- *   the page, and the same install restarting does not.
+ * after it. The engine never re-executes its Python process under a page.
+ * The page checks its backend identity every five seconds and on window focus.
  *
  * The decision is a pure function so the whole behaviour is testable without a
  * browser: `nextAutoReloadState` takes the state, one poll result and the
@@ -39,7 +30,7 @@ export const AUTO_RELOAD_PHASE = Object.freeze({
  * @param {{phase: string, since: number}} state
  * @param {{ok: boolean, identityToken?: string}} poll
  * @param {{baseline: string, now: number, watchMs?: number, reloadingMs?: number}} context  The cadence:
- *   a development backend's by default (`VIEWER_WATCH_INTERVAL_MS`, `VIEWER_RELOADING_POLL_MS`).
+ *   the default cadence (`VIEWER_WATCH_INTERVAL_MS`, `VIEWER_RELOADING_POLL_MS`).
  * @returns {{phase: string, since: number, reload: boolean, delayMs: number}}
  */
 export function nextAutoReloadState(state, poll, {

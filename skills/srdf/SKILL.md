@@ -43,14 +43,13 @@ validation don't replace this.
 - Otherwise run the CAD Viewer, from any folder:
 
   ```bash
-  cadgen viewer --host 127.0.0.1 --json --detach
+  cadgen viewer --host 127.0.0.1 --json
   ```
 
-  `--detach` returns once the viewer answers requests and leaves it running in the
-  background: always pass it, since a foreground viewer never exits (and piping its
-  output through `tail` can hide the URL for good). It starts this machine's one viewer,
-  or reuses it. Read `url` from its one JSON line (never guess the port), and for each
-  file return `url?file=<its URL-encoded absolute path>`. If it fails to launch, say so.
+  The command ensures this installation's engine, prints a page-session URL and
+  exits. Read `url` from its one JSON line (never guess the port). Add each file's
+  URL-encoded absolute path with `&file=`, preserving the URL's token query.
+  Return that link to the user. If it fails to launch, say so.
 
 Keep the SRDF beside its uniquely matching URDF (same robot name). Review
 planning groups, named states and joints; visual review does not prove planning

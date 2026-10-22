@@ -290,7 +290,7 @@ class TheTwoGatesCoverTheDataRoutes(SecurityTestCase):
             f"/__cad/asset?file={ref}",
             f"/__cad/folder?path={quote(self.fixture.root, safe='')}",
             f"/__cad/xbf?file={ref}&held=1",
-            "/__cad/xbf/api/look",
+            "/__cad/api/look",
         ]
 
     def test_a_hostile_host_is_refused_on_every_data_route(self):

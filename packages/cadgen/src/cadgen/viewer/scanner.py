@@ -5,7 +5,7 @@ separators, ``url`` is where its bytes are served (``/__cad/asset?file=<abs>&v=<
 ``base36(size)-base36(mtime_ns)``), ``hash`` is sha256 hex and ``bytes`` the byte size. A view names
 its file, so a row is computed for the file named and nothing walks a folder to find it. Every
 format's row is the file's own: a STEP and an ``.xbf`` are drawn from what the cadgen engine serves
-of them (``xbf.py``), never from a row, so theirs say only that the file is there and which bytes
+of them (``documents.py``), never from a row, so theirs say only that the file is there and which bytes
 it has, which is what a view watches for a change.
 
 The catalog is ARTIFACTS-ONLY. Model scripts are never entries: a model with no
@@ -58,7 +58,7 @@ SOURCE_EXTENSIONS = frozenset(
     {".step", ".stp", ".stl", ".3mf", ".glb", ".dxf", ".urdf", ".srdf", ".sdf"}
 )
 # What every CAD view lists and opens: every CAD source, and a cadgen engine document (`.xbf`),
-# which the engine serves to the page as it serves a STEP (`xbf.py`).
+# which the engine serves to the page as it serves a STEP (`documents.py`).
 VIEWER_EXTENSIONS = SOURCE_EXTENSIONS | frozenset({".xbf"})
 
 # The folders the explorer's search never walks (``folders.py``), beside every hidden one. Matched

@@ -31,6 +31,8 @@ class HttpSessionsTest(unittest.TestCase):
         changed = patch.dict(os.environ, cls.env)
         changed.start()
         cls.addClassCleanup(changed.stop)
+        from cadgen.engine.api import stop
+        cls.addClassCleanup(stop)
         cls.endpoint = EngineClient().connect()
         cls.page = cls.root / 'page'
         cls.page.mkdir()

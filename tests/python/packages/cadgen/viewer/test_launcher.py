@@ -24,6 +24,13 @@ class LauncherTest(unittest.TestCase):
         (self.dist / 'index.html').write_text('<html>viewer</html>', encoding='utf-8')
         self.env = engine_daemon.watched({**os.environ, 'CADGEN_ENGINE_DIR': str(self.root / 'engine'),
                    'CADGEN_STATE_DIR': str(self.root / 'state'), 'CADGEN_ENGINE_MESH': 'inline'}, self.addCleanup)
+        self.addCleanup(self.stop_engine)
+
+    def stop_engine(self):
+        done = subprocess.run([sys.executable, '-m', 'cadgen.engine', 'stop'],
+                              env=self.env, capture_output=True, text=True, timeout=90)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
 
     def launch(self, *args, cwd=None, ok=True):
         done = subprocess.run([sys.executable, '-m', 'cadgen.viewer', '--json', '--dist', str(self.dist), *args],

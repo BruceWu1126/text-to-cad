@@ -1,11 +1,11 @@
 # CAD Viewer
 
 A local-filesystem CAD review app. This directory is the React CLIENT; the
-backend is `cadgen viewer` — the `cadgen.viewer` package in the cadgen Python
-distribution — and the built client ships inside that same wheel. A viewer
-serves every CAD file on the machine by its absolute path, on port 3245 or the
-port `--port N` names: the page is the bare origin and `?file=` names the file (a relative one resolves
-against the folder the viewer was started in). There is no hosted deployment.
+backend is the installation's engine, hosting the `cadgen.viewer` HTTP app.
+The built client ships inside the same wheel. `cadgen viewer` opens a page session
+on that engine and exits. Each session has its own starting folder; `?file=` names
+an absolute file or resolves a relative path against that folder. There is no
+hosted deployment.
 
 This app is the browser host of `@text-to-cad/ui/file-viewer`, not the owner of
 the shared CAD interface.

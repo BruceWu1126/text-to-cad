@@ -164,7 +164,7 @@ Laws 1 to 13 and 19 to 20 are the engine's; 14 to 18 hold for the whole package.
     clients; a page closing never stops a worker. Memory and worker-count caps still apply
     (the engine's **Architecture** and **The daemon and its workers**).
 
-20. **One engine serves the installation.** Page sessions and document reads share its
+20. **One engine serves the installation.** A page never replaces or re-executes it. Page sessions and document reads share its
     authenticated HTTP listener. Launchers exit; clients closing never stop it. Kernel
     operations run in child processes, never in the engine's request threads. Each
     page session keeps its own root; each MCP session owns its views and resource. The
@@ -183,14 +183,14 @@ src/cadgen/
                          #   exports, the mesh, references, the OCCT stills (its README)
   cli/                   # the `cadgen` command: a module per command, each a shell over
                          #   the function or parser that does the work
-  viewer/                # the CAD Viewer's server: launcher (main), routes (http_app),
+  viewer/                # engine HTTP application (engine_app), launcher (main), routes (http_app),
                          #   files by absolute path (backend), a file's catalog row
                          #   (scanner), the explorer's reads (folders), the model library
                          #   every CAD view shares (recents), a STEP's and an .xbf's serve
                          #   by the engine and in-process document reads (documents), a DXF's
                          #   payload (drawings), a robot's (robots), Quick Edit's packets
                          #   (prompt_files)
-  mcp/                   # CAD for agent hosts: stdio JSON-RPC (protocol), the tools and
+  mcp/                   # stateless stdio proxy (shim), engine sessions (http), tools and
                          #   launches (server), open views (views), the viewer routes
                          #   in-process (tunnel), roots, the page (ui), and the CAD Viewer
                          #   link for a host that renders no MCP Apps (browser)
@@ -228,8 +228,8 @@ src/cadgen/
 Commands: `cadgen build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop` and
 `daemon` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
 snapshot for those files alone; `cadgen urdf|sdf|srdf validate` the validators; `cadgen
-doctor` the installation and a skill's pin; `cadgen viewer [stop]` the CAD Viewer's launcher;
-`cadgen mcp` the server an agent host starts; and `cadgen telemetry` the person's answer. A
+doctor` the installation and a skill's pin; `cadgen viewer` the engine page launcher;
+`cadgen mcp` the stateless proxy an agent host starts; and `cadgen telemetry` the person's answer. A
 model builds by running its script: `python model.py`.
 
 The viewer exposes `POST /__cad/clipboard` for explicit viewport PNG copies. It

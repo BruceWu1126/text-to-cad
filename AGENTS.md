@@ -92,7 +92,7 @@ path, the rehearsal, and local/manual fallbacks.
   `skills/` directly. Installers take it from the `latest` branch, which
   `scripts/release/plugin_branch.py` builds from this tree at each release.
 - `models/`: the corpus of engine models, plain files, each built with `python model.py`; nothing installs it.
-- `apps/web/`: the CAD Viewer's React client (its backend is `cadgen.viewer`).
+- `apps/web/`: the CAD Viewer's React client (the engine hosts `cadgen.viewer`'s HTTP app).
 - `apps/mcp/`: the CAD app agent hosts render: tabs in Codex, cards in Claude Desktop (its server is `cadgen mcp`).
 - `packages/core`: `@text-to-cad/core`, shared CAD/runtime/client code without React.
 - `packages/ui`: `@text-to-cad/ui`, the shared FileViewer, renderers, controls and styles.
@@ -196,7 +196,7 @@ path, the rehearsal, and local/manual fallbacks.
   Code preserves them, and Codex `plugin add` drops them with no error, shipping
   a skill with missing files. `scripts/github-workflows/check-builds.sh` enforces
   this; do not relax it.
-- The CAD Viewer is `cadgen viewer`: the server is `cadgen.viewer` (Python, in
+- The CAD Viewer is `cadgen viewer`: the engine hosts `cadgen.viewer` (Python, in
   `packages/cadgen`), the React client's source is `apps/web/` and its build
   ships in the wheel at `cadgen/_runtime/viewer` (built, never committed; a
   checkout serves `apps/web/dist`). The CAD, DXF and robot-description skills document that verb directly.

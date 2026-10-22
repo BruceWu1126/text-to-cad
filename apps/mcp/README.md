@@ -138,7 +138,7 @@ reference host `basic-host` does.
   served; supporting another host must not change it.
 - **Inline views are named and ordered by the server.** Each inline launch
   carries `view` (the token the agent passes to `cad_view` and `cad_screenshot`:
-  one process may serve many chats, and no host says which) and `order`
+  one MCP session may serve many chats, and no host says which) and `order`
   (`{createdAt, seq}`). The views of a chat elect the newest over a
   `BroadcastChannel`. The others keep a still of their last frame, stop polling,
   stop sending context, and tell the server they are closed.
@@ -164,7 +164,7 @@ reference host `basic-host` does.
   over its own model library and analytics. Everything the page asks of the
   server travels this way, as the web page asks its own: the models -- a STEP's
   and an `.xbf`'s reads too, dispatched directly to the engine's document router
-  that serves them (`/__cad/xbf/api/...`), never a port of the engine's own -- the
+  that serves them (`/__cad/api/...`) -- the
   library and its pictures, Open (`/__cad/pick`), Reveal, the person's analytics
   answer and features, the update check. Only the clipboard stays the host's: a
   view copies through its frame. So the page has three tools of its own:
@@ -173,7 +173,7 @@ reference host `basic-host` does.
   The fetch is a distinct function, so workers are handed bytes rather than URLs.
 - **No reply a host cannot read.** A reply is one JSON-RPC message, its body
   base64 (4/3 of its size), and a host that caps one message closes the
-  connection past the cap, ending the server and every view on it: the MCP
+  connection past the cap, disconnecting its shim and views: the MCP
   TypeScript SDK's stdio reader caps it at 10 MiB unless a host sets more
   (Claude Code 16 MiB, Claude Desktop 32 MiB). So no `cad_http` reply carries
   more than 4 MiB of body (`TUNNEL_REPLY_MAX_BYTES`), a message under 5.6 MB,
@@ -288,3 +288,7 @@ execution; selecting a model explicitly builds it. The shared viewer's In memory
 collection reads the installation engine's live metadata. It never enters saved
 recents or thumbnail storage, and disappears on worker retirement or engine restart.
 Rebuilding a named model updates the same view through the document version stream.
+
+The stdio peer exits with its host session; it deletes only that MCP session.
+There is no viewer subprocess or file-backed sidebar registry to clean up.
+Restart the installation engine explicitly after editing its Python source.
