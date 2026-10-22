@@ -82,6 +82,32 @@ class PackageScriptTest(unittest.TestCase):
         self.assertIn("../../common/dims.py changed", edited["cache"]["changed"])
         self.assertAlmostEqual(read_xbf(self.xbf).bounding_box().size.Z, 7)
 
+    def test_a_namespace_package_s_modules_are_the_model_s_imported_again_and_keyed(self) -> None:
+        # `lib/` holds no __init__.py: a namespace package, which has no file of its own. Its
+        # modules are the model's like any other: an edit to one runs the body, in the warm
+        # process, and the closure keys them by their paths.
+        write(self.root, {"craft/lib/empennage.py": "SPAN = 4\n", "craft/f14.py": """
+            import build123d as bd
+            from cadgen.engine import xbf
+
+            from lib import empennage
+
+
+            @xbf
+            def f14():
+                return bd.Box(10, empennage.SPAN, 2)
+        """})
+        script = self.root / "craft/f14.py"
+        xbf = self.root / "craft/XBF/f14.xbf"
+        self.build(script)
+        self.assertIn("../lib/empennage.py", {path for path, _digest in previous.of(xbf)["modules"]})
+        self.assertEqual(self.build(script)["bodies"], {"f14.py::f14": "replayed"})
+        write(self.root, {"craft/lib/empennage.py": "SPAN = 9\n"})
+        edited = self.build(script)
+        self.assertEqual(edited["bodies"], {"f14.py::f14": "run"})
+        self.assertIn("../lib/empennage.py changed", edited["cache"]["changed"])
+        self.assertAlmostEqual(read_xbf(xbf).bounding_box().size.Y, 9)
+
     def test_a_loose_script_is_the_module_its_stem_names(self) -> None:
         # In the package's tree, but its own folder holds no __init__.py.
         write(self.root, {"proj/tools/holes.py": "RADIUS = 1\n", "proj/tools/plate.py": """

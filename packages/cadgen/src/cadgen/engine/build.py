@@ -94,10 +94,32 @@ _FAMILIES: dict[str, frozenset[str]] = {}
 
 
 def _first_party_modules() -> list[str]:
+    """The modules of the model's own a build loaded: each by its file, and a namespace package
+    (a folder with no ``__init__.py``, which has no file) by its folders. Forgetting the package
+    too is what imports its modules again: ``from lib import empennage`` takes the attribute a
+    package still holds before it imports anything."""
     from cadgen.engine.kernel.trace import first_party_file
 
     return [name for name, module in list(sys.modules.items())
-            if name != "__main__" and first_party_file(getattr(module, "__file__", None) or "")]
+            if name != "__main__" and (first_party_file(getattr(module, "__file__", None) or "")
+                                       or _first_party_namespace(module))]
+
+
+def _first_party_namespace(module: Any) -> bool:
+    """Whether ``module`` is a namespace package whose every folder is the model's own: under no
+    library root (``trace._library_roots``)."""
+    if getattr(module, "__file__", None) is not None:
+        return False
+    try:
+        folders = [Path(folder).resolve() for folder in getattr(module, "__path__", None) or ()]
+    except (OSError, RuntimeError, TypeError):
+        return False
+    if not folders:
+        return False
+    from cadgen.engine.kernel.trace import _library_roots
+
+    roots = _library_roots()
+    return all(not any(root == folder or root in folder.parents for root in roots) for folder in folders)
 
 
 class _SourceOnlyLoader(importlib.machinery.SourceFileLoader):
