@@ -24,7 +24,7 @@ exploded translations are documented per-part static Locations along +/-Z.
 
 from __future__ import annotations
 
-from cadgen.engine import Material, materials, xbf
+from cadgen.engine import Material, configuration, couple, materials, xbf
 
 import math
 
@@ -750,8 +750,8 @@ def make_cable_tube() -> bd.Part:
 # gears, 6x lightening + 4x coupling holes), so the cycle closes at tooth/pole
 # phase. Each planet's joint is on the CARRIER, so its angle is the
 # mesh-relative spin. Each revolute joint's range is the closed cycle at its
-# member's rate; the gearing between them (the old `drive` coupling) is not a
-# build123d joint and is not ported.
+# member's rate; the gearing between them is the `drive` coupling, locked: one
+# control, in input revolutions, and no member that turns alone.
 
 _INPUT_TURNS = REDUCTION_RATIO  # 4.5 input revolutions = 1 carrier revolution
 _ROTOR_DEG = 360.0
@@ -974,7 +974,10 @@ def build_actuator(explode: float = 0.0) -> bd.Compound:
                  stator, rotor, sun, ring, enc_magnet, carrier, torque_sensor, flange, xroller,
                  tube, races, balls_by_side, rollers, inner_ring, planets)
 
-    return bd.Compound(children=children, label="qdd_actuator")
+    actuator = bd.Compound(children=children, label="qdd_actuator")
+    if not explode:
+        _drive(actuator)
+    return actuator
 
 
 def _connect(housing, retainer, cover, retainer_screws, connectors, driver_pcb, encoder_pcb,
@@ -1030,10 +1033,19 @@ def _connect(housing, retainer, cover, retainer_screws, connectors, driver_pcb, 
     _spin("front_cage", housing, balls_by_side["front"], (0, 0, 0), _turns(_BALL_CAGE_DEG))
     _spin("output", housing, carrier, (0, 0, 0), _turns(_CARRIER_DEG))
     _spin("roller_cage", housing, rollers, (0, 0, 0), _turns(_ROLLER_CAGE_DEG))
-    # Not ported: the "drive" coupling (one virtual DOF gearing the rotor,
-    # carrier, cages and planets at 4.5:1) and the rest/quarter_output/
-    # full_output poses -- build123d joints have no coupling or pose. The old
-    # motion datums rotor_axis/output_axis are the rotor_spin/output joints.
+    # The old motion datums rotor_axis/output_axis are the rotor_spin/output joints.
+
+
+def _drive(actuator: bd.Compound) -> None:
+    """The drive train: one control in input revolutions gearing the rotor, the
+    carrier, the cages and the planets at 4.5:1 (the old ``drive`` coupling),
+    locked, as a gear train is; and the old poses as its configurations ("rest"
+    is as built)."""
+    couple(actuator, "drive", range=(0.0, _INPUT_TURNS), lock=True,
+           rotor_spin=_ROTOR_DEG, output=_CARRIER_DEG, rear_cage=_BALL_CAGE_DEG, front_cage=_BALL_CAGE_DEG,
+           roller_cage=_ROLLER_CAGE_DEG, **{f"planet{i}_spin": _PLANET_DEG for i in (1, 2, 3)})
+    configuration(actuator, "quarter_output", drive=_INPUT_TURNS / 4.0)
+    configuration(actuator, "full_output", drive=_INPUT_TURNS)
 
 
 @xbf(out="../XBF/qdd_actuator.xbf")
