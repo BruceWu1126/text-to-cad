@@ -21,14 +21,10 @@ protocol relationship never imports Python or discovers an interpreter.
   resolved of it, and the bytes cadgen made — never source, never a build. A
   document the cadgen engine serves (an `.xbf`, or a STEP, which opens as one) is
   what the engine serves of it: its structure and one buffer per part
-  (`lib/xbf/xbfDocument.js`). A STEP render package on a static host is its tree,
-  each component's stored mesh, and what cadgen resolved the document's sidecar
-  (`<name>.step.json`, the old pipeline's; no app draws one now) into, as static
-  files beside it: the
-  articulation of its kinematics, the baked animation keyframes, and per occurrence
-  what its appearance resolves to (material id and name, finish, base colour,
-  opacity). The page reads no sidecar. A document ships no code, and no
-  adjacent file is discovered or fetched. The code in this package must be
+  (`lib/xbf/xbfDocument.js`), with its mechanism, its configurations and motions
+  as definitions, and per occurrence what its appearance resolves to (material,
+  finish, base colour, opacity). The page reads nothing beside the document. A
+  document ships no code, and no adjacent file is discovered or fetched. The code in this package must be
   writable against exactly those inputs. Composition joins the tree's
   occurrences to the display table by id (`applyOccurrenceDisplay`), carries
   material ids, names, finish and the folded opacity into mesh data, decides no

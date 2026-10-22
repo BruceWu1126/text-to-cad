@@ -147,7 +147,8 @@ engine's README, **The daemon and its workers** and **Body retention**):
 `CADGEN_ENGINE_WORKERS`, `CADGEN_ENGINE_WORKER_IDLE`,
 `CADGEN_ENGINE_WORKER_RSS_MB`, `CADGEN_ENGINE_IDLE`, `CADGEN_ENGINE_MEMO=0` (no memo
 hits), `CADGEN_ENGINE_BODIES=0` (no body replay), `CADGEN_ENGINE_MESH=processes|inline`
-and `CADGEN_ENGINE_THREE` (the three.js folder `cadgen serve` pages load). The
+`CADGEN_ENGINE_THREE` (the three.js folder `cadgen serve` pages load) and
+`CADGEN_VIEWER_WARM=0` (no engine warm-up at `cadgen viewer`'s launch). The
 engine writes nothing but the files models declare: there is no cache folder to
 clear, and a restart is cold but for each model's `.xbf`.
 

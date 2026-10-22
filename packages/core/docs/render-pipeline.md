@@ -63,10 +63,9 @@ The stages keep ownership narrow:
   MSAA (some 360 MB at 3024 × 1964) while X-ray is on. Neither renderer orders see-through faces
   as the other: three sorts each object back to front and draws a two-sided one back faces first,
   OCCT draws them as they were displayed, which is most of what still differs.
-- `captureModel` owns deterministic snapshot outputs without filesystem writes.
-
-The CAD skill's Python snapshot CLI remains responsible for job parsing, path
-resolution, Playwright routing, and writing returned outputs to disk.
+- `captureModel` draws the scene headless and returns its pictures, with no filesystem
+  writes. cadgen's stills are OCCT's (`cadgen snapshot`); this headless scene is what the
+  renderer parity measurement drives beside OCCT (`scripts/bench/occt_parity.py`).
 
 ## Modules
 

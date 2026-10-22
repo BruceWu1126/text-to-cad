@@ -212,12 +212,13 @@ path, the rehearsal, and local/manual fallbacks.
 - Shared UI must stay platform-agnostic. Apps implement environmental effects;
   shared features use injected capabilities and named extension slots. Before
   extending these interfaces, read [the viewer host contract](packages/ui/docs/viewer-host.md).
-- `packages/cadgen` is the whole distribution, not just the Python: artifact
-  generation, the CLI parsers behind every skill command (`cadgen/cli`), the
-  engine and its warm daemon (`cadgen/engine`), and
-  the JS/SPA assets it executes (`cadgen/_runtime`, built by
-  `scripts/bundle/cadgen-runtime.sh`). Skills consume it as an
-  installed distribution.
+- `packages/cadgen` is the whole distribution, not just the Python: the engine
+  (`cadgen/engine`: the decorators, the daemon and its workers, exports, the OCCT
+  stills, and the verbs the cadgen skills' commands run), the `cadgen` command line and
+  its other verbs (`cadgen/cli`), the CAD Viewer server (`cadgen/viewer`), the CAD app
+  server (`cadgen/mcp`), and the JS assets they serve
+  (`cadgen/_runtime`, built by `scripts/bundle/cadgen-runtime.sh`). Skills consume
+  it as an installed distribution.
 - Create lightweight shared Python packages under `packages/` when a helper
   should not inherit heavier package dependencies.
 - Use path-targeted search, validation, and `git status`; avoid broad scans over

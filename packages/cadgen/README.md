@@ -52,7 +52,7 @@ the two disagree, the engine's README is right.
 ## The design laws
 
 These are LAWS, not conventions: a change that violates them is wrong even when it works.
-Laws 1 to 12 are the engine's; 13 to 17 hold for the whole package.
+Laws 1 to 13 are the engine's; 14 to 18 hold for the whole package.
 
 1. **An xbf carries its build closure as pointers and digests** -- script and function,
    modules, data inputs, versions and the key; never source, never lines on elements, never
@@ -102,26 +102,32 @@ Laws 1 to 12 are the engine's; 13 to 17 hold for the whole package.
     its flags (`--xbf/--step/--glb/--stl/--threemf/--dxf`, `--name`) are its only declarations,
     additive among themselves. A script is built by running it (law 11), so there is one way to
     build each.
-13. **The package ships alone.** The installed distribution is the whole world: the Python, the
+13. **The document's kinematics are AP242's, and cadgen stores no kinematic fact the
+    standard cannot name.** Every entity and attribute of the mechanism subtree is ISO
+    10303-105's as Part 21 writes it (edition 4's domain model's where Part 21 has none);
+    only the root says the schema and the units. What the standard cannot say is not
+    patched with an attribute of cadgen's own: it is dropped, or refused by name at document
+    time (the engine's **Kinematics**; a conformance test walks the subtree and holds it).
+14. **The package ships alone.** The installed distribution is the whole world: the Python, the
     bundled `_runtime/`, and this document. It works with the repository it was built from gone
     -- and its markdown must read that way, referring to nothing outside the package.
     *Pressure-test*: every sentence in the package's markdown must be true and actionable for
     someone who only ran `pip install cadgen`. Naming a bundled thing ("the JavaScript runtime
     bundled at build time") passes; a repository path to its source, a repository script, or a
     repository workflow does not.
-14. **No backwards compatibility.** Hard cutovers only. A retired surface does not exist: no
+15. **No backwards compatibility.** Hard cutovers only. A retired surface does not exist: no
     alias, no shim, and no error that recognizes its old spelling to explain what replaced it. A
     removed command, flag, argument, key, module or name gets what the current contract's
     ordinary validation says -- an unknown command, an unrecognized argument, an unknown key, an
     `ImportError`, an `AttributeError`.
     *Pressure-test*: use a removed spelling; the error must read exactly as it would for a name
     that never existed.
-15. **Closed vocabularies.** Every declaration surface has a closed key/kind set. An unknown key
+16. **Closed vocabularies.** Every declaration surface has a closed key/kind set. An unknown key
     is an error naming the supported set, never silently ignored.
-16. **Loud failure or correct output, nothing between.** The cardinal sin is plausible-wrong
+17. **Loud failure or correct output, nothing between.** The cardinal sin is plausible-wrong
     output at exit 0. No silent fallbacks, no globs, no guessing; a failed write or render leaves
     NO file at the requested path.
-17. **Nothing waits on the network.** Once installed, cadgen works offline: every command,
+18. **Nothing waits on the network.** Once installed, cadgen works offline: every command,
     build, snapshot, server and page. Its own requests are two: telemetry (`analytics.py`, usage
     counts under a random id, sent by default once a `cadgen` command has said so, and never
     after the person's no) and the daily version check (`updates.py`). Both run in the
