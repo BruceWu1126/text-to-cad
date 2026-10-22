@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
 
-import { SCENE_RIG_TONE_CURVES, applySceneRig, installSceneRigToneCurve, isSceneRig } from "./sceneRig.js";
+import { SCENE_RIG_TONE_CURVES, applySceneRig, installSceneRigToneCurve, isSceneRig, sceneRigFor } from "./sceneRig.js";
 
 const IMAGE = Object.freeze({ width: 2, height: 1, data: new Float32Array([1, 1, 1, 1, 2, 2, 2, 1]) });
 const RIG = Object.freeze({
@@ -33,6 +33,19 @@ function stage() {
   scene.environmentIntensity = 1;
   return { scene, renderer: { toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.08 } };
 }
+
+test("a scene's rig for the look it wears: its rigFor's answer where it has one, else its rig, else none", () => {
+  const other = { ...RIG, id: "other" };
+  const look = { surface: { style: "shaded", opacity: 0.22 } };
+  const asked = [];
+  const scene = { rig: RIG, rigFor(found) { asked.push(found); return found === look ? other : RIG; } };
+  assert.equal(sceneRigFor(scene, look), other);
+  assert.equal(sceneRigFor(scene, null), RIG);
+  assert.deepEqual(asked, [look, null]);
+  assert.equal(sceneRigFor({ rig: RIG }, look), RIG);
+  assert.equal(sceneRigFor({}, look), null);
+  assert.equal(sceneRigFor(null, look), null);
+});
 
 test("the rig's curve is three's CustomToneMapping, once a page", () => {
   installSceneRigToneCurve(THREE, "clamp");

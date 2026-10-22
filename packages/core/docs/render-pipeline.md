@@ -48,6 +48,9 @@ The stages keep ownership narrow:
   every other scene keeps the theme's rig. Such a scene's surface look may name a surface model
   too (`brdf`, `lib/viewer/surfaceBrdf.js`): an engine document's lit surfaces answer light as
   OCCT's PBR program does, which its look is defined by, in place of three's own physical model.
+  A scene may light one look otherwise (the contract's `rigFor`, asked through `sceneRigFor`): an
+  engine document's X-ray is its look's colour-only model, an ambient term and plain directional
+  lights, no environment, three's own surface model and no finish, as OCCT draws it by Phong.
 - `captureModel` owns deterministic snapshot outputs without filesystem writes.
 
 The CAD skill's Python snapshot CLI remains responsible for job parsing, path

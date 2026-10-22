@@ -264,6 +264,33 @@ class HeldTest(unittest.TestCase):
         np.testing.assert_allclose(middle, (160, 120), atol=0.5)
         np.testing.assert_allclose(top, (160, 0), atol=0.5)
 
+    def test_x_ray_is_the_colour_only_model_and_gives_the_look_back(self) -> None:
+        """X-ray draws the look's colour-only model (``look.py``) on OCCT's Phong program: a part's
+        material is its colour alone, so the fixture with its materials taken away draws the same;
+        and the next mode is drawn under the look's own PBR rig again, as if X-ray never was."""
+        from OCP.Graphic3d import Graphic3d_TypeOfShadingModel
+
+        from cadgen.engine.render.look import LOOK
+        from cadgen.engine.render.service import Held
+
+        solid = pixels(self.draw(**ROWS["solid"])[0])
+        xray = pixels(self.draw(**ROWS["xray"])[0])
+        scene = self.held.scenes[False]
+        self.assertEqual(scene.canvas.view.ShadingModel(), Graphic3d_TypeOfShadingModel.Graphic3d_TypeOfShadingModel_Phong)
+        self.assertEqual(len(scene.lights), 1 + len(LOOK.xray.lights), "its ambient light and its directional lights")
+        self.assertLess(mismatch(pixels(self.draw(**ROWS["solid"])[0]), solid), 0.001, "Solid as before X-ray")
+        self.assertEqual(scene.canvas.view.ShadingModel(), Graphic3d_TypeOfShadingModel.Graphic3d_TypeOfShadingModel_Pbr)
+        bare = json.loads(json.dumps(self.structure))
+        bare["version"] = "bare"
+        for prototype in bare["prototypes"]:
+            prototype.pop("material", None)
+            prototype.pop("faceMaterials", None)
+        held = Held(self.document)
+        self.addCleanup(held.close)
+        held.hold(bare, self.buffers)
+        self.assertLess(mismatch(pixels(held.draw(Still(ROWS["xray"]["display"], size=SIZE))[0]), xray), 0.001,
+                        "a material is its colour alone")
+
     def test_every_segment_of_a_zigzag_stroke_is_drawn(self) -> None:
         """A stroke's segments each at the stroke's width, however sharp its turns (a strip with one
         side per point folded every other segment of a zigzag away)."""

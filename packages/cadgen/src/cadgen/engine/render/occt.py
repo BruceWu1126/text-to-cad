@@ -202,6 +202,7 @@ class Scene:
         self.mode = None
         self.display: dict[str, Any] = {}
         self.preview = False
+        self.colour_only = False  # the view's rig: X-ray's colour-only one, else the look's own
         self._setup_view()
 
     # --- the view ------------------------------------------------------------------------
@@ -226,6 +227,19 @@ class Scene:
         settings.SetEnableDepthWrite(False)
         viewer.SetZLayerSettings(Graphic3d_ZLayerId_Top, settings)
 
+    def _rig(self, colour_only: bool) -> None:
+        """The view lit for what is shown: X-ray's colour-only rig (Phong, ``finish.put_up_colour_only``)
+        or the look's own (PBR, ``finish.put_up``), the lights of the other taken down."""
+        if colour_only == self.colour_only:
+            return
+        from cadgen.engine.render.finish import put_up, put_up_colour_only
+
+        view, viewer = self.canvas.view, self.canvas.viewer
+        for light in self.lights:
+            viewer.DelLight(light)
+        self.lights = put_up_colour_only(view, viewer) if colour_only else put_up(view, viewer, _color(BACKGROUND))
+        self.colour_only = colour_only
+
     # --- sources: one presentation per part and look ----------------------------------------
 
     def _material(self, rgba: Any, look: str) -> Any:
@@ -237,8 +251,8 @@ class Scene:
         material.SetColor(color)
         material.SetAmbientColor(color)
         material.SetDiffuseColor(color)
-        material.SetSpecularColor(_color((0.08, 0.08, 0.08)))
-        material.SetShininess(0.35)
+        material.SetSpecularColor(_color((LOOK.xray.specular,) * 3))
+        material.SetShininess(LOOK.xray.shininess)
         pbr = Graphic3d_PBRMaterial()
         pbr.SetColor(Quantity_ColorRGBA(color, 1.0))
         pbr.SetMetallic(0.0)
@@ -259,15 +273,16 @@ class Scene:
         from cadgen.engine.render.finish import face_material, linear
 
         own = None if isinstance(rgba, str) else self._material_of(index, group)
-        if look == "hidden" or (look == "pbr" and own is None):
+        if look in ("hidden", "xray") or (look == "pbr" and own is None):
             # Hidden line's faces hide what is behind them whatever their finish (the viewer's are
-            # depth alone), so they are opaque; Preview's surface without a material is its own.
+            # depth alone), so they are opaque; X-ray's are the colour-only model's, a material its
+            # colour alone (``look.py``), drawn by Phong; Preview's surface without a material is its own.
             material, color = self._material(rgba, look)
         else:  # the part's material as the look draws it (``finish.py``): in Preview as in the modes
             if isinstance(rgba, str):  # a fill (Parts) keeps the part's opacity, as the viewer's does
                 part = self.prototypes[index].get("color") or ()
                 rgba = (*linear(rgba), float(part[3]) if len(part) > 3 else 1.0)
-            material, color = face_material(rgba, own, plain=look == "xray")
+            material, color = face_material(rgba, own)
         source.SetMaterial(material)
         source.SetColor(color)
         aspect = source.Attributes().ShadingAspect().Aspect()
@@ -326,6 +341,8 @@ class Scene:
         self.shown = []
         self.mode, self.display, self.preview = mode, display, preview
         look = "hidden" if mode == "hidden-line" else "xray" if mode == "xray" else "pbr" if preview else "lit"
+        if not preview:  # Preview's look puts up its own (``preview_look``)
+            self._rig(look == "xray")
         faces = mode != "wireframe"
         edges = not preview and mode != "shaded"
         on_top = mode in ("xray", "wireframe")

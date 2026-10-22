@@ -1,7 +1,8 @@
 // The engine's look (`xbfLook.js`) as the engine serves it: `__fixtures__/look.json` is
 // `GET /api/look`'s answer, which cadgen's tests hold to `render/look.py`. What it says, the image
-// its environment is, the rig it lights an engine document with, what a surface wears by it, and
-// that what it says of edges, the palette and the modes is what the viewer's own modes draw.
+// its environment is, the rig it lights an engine document with, what a surface wears by it (X-ray's
+// colour-only model apart), and that what it says of edges, the palette and the modes is what the
+// viewer's own modes draw.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -11,7 +12,10 @@ import { fileURLToPath } from "node:url";
 import { resolveCadEdgeSettings } from "../../common/cadInk.js";
 import { resolveViewSettings } from "../../common/viewSettings.js";
 import { isSceneRig } from "../viewer/sceneRig.js";
-import { XBF_ENVIRONMENT_ROTATION, decodeRadiance, fetchXbfLook, parseXbfLook, xbfLookRig, xbfLookSurface } from "./xbfLook.js";
+import {
+  XBF_ENVIRONMENT_ROTATION, decodeRadiance, fetchXbfLook, parseXbfLook, xbfLookHighlight, xbfLookRig, xbfLookSurface, xbfLookXray,
+  xbfLookXrayRig, xbfLookXraySurface
+} from "./xbfLook.js";
 
 const SERVED = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "__fixtures__", "look.json"), "utf8"));
 const near = (actual, expected, tolerance = 1e-9) => assert.ok(Math.abs(actual - expected) < tolerance, `${actual} is not ${expected}`);
@@ -33,7 +37,11 @@ test("the look as served: every field read, frozen; another version or a missing
   assert.deepEqual(look.environment, { url: "/api/look/environment", intensity: 0.5 });
   assert.deepEqual(look.plain, { metallic: 0, roughness: 0.5, ior: 1.5 });
   assert.deepEqual(look.modes.xray, { faces: "lit", edges: "all", opacity: 0.22, palette: false });
-  assert.throws(() => parseXbfLook({ ...SERVED, version: 1 }), /version 1; this viewer reads 3/);
+  assert.deepEqual([look.xray.ambient, look.xray.specular, look.xray.shininess], [0.5, 0.08, 0.35]);
+  assert.deepEqual(look.xray.lights.map(light => [light.name, light.direction, light.intensity]),
+    [["key", [-0.35, 0.55, -1], 1], ["fill", [0.6, 0.2, -0.3], 1]]);
+  assert.throws(() => parseXbfLook({ ...SERVED, version: 3 }), /version 3; this viewer reads 4/);
+  assert.throws(() => parseXbfLook({ ...SERVED, xray: { ...SERVED.xray, lights: [] } }), /no xray.lights/);
   assert.throws(() => parseXbfLook({ ...SERVED, lights: [] }), /no lights/);
   assert.throws(() => parseXbfLook({ ...SERVED, environment: null }), /no environment/);
   assert.throws(() => parseXbfLook({ ...SERVED, backdrop: "blue" }), /backdrop is a #rrggbb colour/);
@@ -80,6 +88,34 @@ test("a surface under the look: colours squared, nothing graded, the plain finis
   assert.equal(surface.brdf, "occt");
   assert.deepEqual({ ...surface.materialSettings }, { saturation: 1, contrast: 1, brightness: 1, tintStrength: 0, roughness: 0.5,
     metalness: 0, clearcoat: 0, clearcoatRoughness: 0, envMapIntensity: 1, emissiveIntensity: 0 });
+});
+
+test("X-ray: the colour-only model, its ambient and lights at pi times their radiance, no environment, three's surface model", () => {
+  const parsed = parseXbfLook(SERVED);
+  const look = { ...parsed, environment: { ...parsed.environment, image: decodeRadiance(tinyRadiance()) } };
+  const rig = xbfLookXrayRig(look);
+  assert.equal(isSceneRig(rig), true);
+  assert.notEqual(rig.id, xbfLookRig(look).id);
+  assert.deepEqual(rig.ambient, { color: "#ffffff", intensity: Math.PI * 0.5 });
+  assert.equal(rig.environment, null, "no image-based light, the image read or not");
+  assert.deepEqual(rig.lights.map(light => light.name), ["key", "fill"]);
+  for (const [light, direction] of [[rig.lights[0], [-0.35, 0.55, -1]], [rig.lights[1], [0.6, 0.2, -0.3]]]) {
+    near(light.intensity, Math.PI);
+    const length = Math.hypot(...direction);
+    direction.forEach((value, at) => near(light.towards[at], -value / length));
+  }
+  assert.deepEqual([rig.exposure, rig.toneCurve], [1, "clamp"]);
+  const surface = xbfLookXraySurface(look);
+  const highlight = xbfLookHighlight(0.08, 0.35);
+  assert.deepEqual([surface.colorPower, surface.brdf, surface.finishes], [2, null, false]);
+  assert.deepEqual({ ...surface.materialSettings }, { saturation: 1, contrast: 1, brightness: 1, tintStrength: 0,
+    roughness: highlight.roughness, metalness: 0, specularIntensity: highlight.specularIntensity, clearcoat: 0, clearcoatRoughness: 0,
+    envMapIntensity: 0, emissiveIntensity: 0 });
+  // Phong's exponent 128 * 0.35 is a GGX slope of 2 / 46.8: roughness its fourth root.
+  near(highlight.roughness, (2 / 46.8) ** 0.25);
+  assert.ok(highlight.specularIntensity > 0 && highlight.specularIntensity < 1);
+  assert.equal(xbfLookXray({ surface: { style: "shaded", opacity: 0.22 } }), true);
+  for (const other of [{ surface: { style: "shaded", opacity: 1 } }, { surface: null }, null]) assert.equal(xbfLookXray(other), false);
 });
 
 test("what the look says of edges, the palette and each mode is what the viewer's modes draw", () => {

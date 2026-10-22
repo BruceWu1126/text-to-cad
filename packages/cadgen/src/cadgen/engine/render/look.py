@@ -1,16 +1,16 @@
 """The regular display modes' look: one frozen record that both renderers draw by.
 
-``occt.py`` draws it on OCCT's PBR raster (``finish.py``), the engine serves it as JSON
-(``GET /api/look``, its environment at ``GET /api/look/environment``: ``serve.py``), and the CAD
-Viewer draws an engine document's regular modes by it through three's physical materials (core's
-``lib/xbf/xbfLook.js``). Preview's photographic look is not here.
+``occt.py`` draws it on OCCT's PBR raster (``finish.py``; X-ray on its Phong program), the engine
+serves it as JSON (``GET /api/look``, its environment at ``GET /api/look/environment``:
+``serve.py``), and the CAD Viewer draws an engine document's regular modes by it through three's
+physical materials (core's ``lib/xbf/xbfLook.js``). Preview's photographic look is not here.
 
 **The light.** One key, a directional light at ``intensity`` (radiance: a white surface facing it
 reflects ``intensity / pi``), and one environment, ``studio.hdr`` beside this module, lighting
-every surface at ``environment.intensity``. Nothing else: no ambient term, no fill, no shadow. The
-environment is the CAD Viewer's neutral studio (the one an authored finish reflected), baked once
-by ``scripts/look/bake-environment.mjs`` as a 512 x 256 equirectangular Radiance image in the
-document's frame: rows from +Z (the top row) to -Z, columns once around +Z from -X through +Y, +X
+every surface at ``environment.intensity``. Nothing else: no ambient term, no fill, no shadow
+(X-ray apart: its own model, below). The environment is the CAD Viewer's neutral studio (the one
+an authored finish reflected), baked once by ``scripts/look/bake-environment.mjs`` as a 512 x 256
+equirectangular Radiance image in the document's frame: rows from +Z (the top row) to -Z, columns once around +Z from -X through +Y, +X
 and -Y; a pixel is ``m / 255 * 2 ** (e - 128)``, as three's HDRLoader decodes it. Both renderers
 load that image: the viewer through PMREM, OCCT through a cube map whose texels hold the radiance
 over its brightest value, its ambient light (OCCT's PBR program multiplies the whole image-based
@@ -42,9 +42,21 @@ times ``2 ** Exposure`` and ``W`` the ``WhitePoint``,
     f(x)  = (x * (1.425 x + 0.05) + 0.004) / (x * (1.425 x + 0.6) + 0.0491) - 0.0821
     out   = f(x) / f(W)
 
-Edges are unlit lines in their class's colour, 1 px; X-ray's faces are lit at 0.22 opacity
-under every edge; Hidden line's faces are unlit in the backdrop's colour, hiding what is behind
-them; Wireframe draws edges alone. The grid is the viewer's measuring grid (core's
+**X-ray** is the colour-only model both renderers drew before the look was physically based
+(``xray``): no finish, a part's material its colour alone, at the mode's opacity (0.22) under
+every edge. OCCT draws it with its Phong program (``occt_phong``), an ambient light and
+directional lights white (Phong reads a directional light's colour, not its intensity, so each is
+1), each face ``AIS_Shape`` given its colour twice, which OCCT's ASPECT material multiplies:
+
+    rgb = c * c * (ambient + sum_k max(0, N.L_k)) + specular * sum_k [N.L_k > 0] * max(0, N.H_k) ** (128 * shininess)
+
+The viewer draws it with three's own physical model under the same lights (at ``pi`` times each
+radiance, three's Lambertian surface dividing by ``pi``) and no environment, its colour squared
+and a GGX lobe as wide as the Phong highlight (core's ``lib/xbf/xbfLook.js``), and blends it as
+three blends a see-through surface.
+
+Edges are unlit lines in their class's colour, 1 px; Hidden line's faces are unlit in the
+backdrop's colour, hiding what is behind them; Wireframe draws edges alone. The grid is the viewer's measuring grid (core's
 ``lib/viewer/stageGrid.js``, drawn by ``grid.py``): graph paper on z = 0 through the origin, the
 step of 1, 2 or 5 x 10^n nearest ``framing / cells`` (``framing`` the model's diameter at rest
 times 1.04), a major every 5th or 10th line, a red X and a green Y axis, faded out ``extent``
@@ -99,6 +111,17 @@ class Mode:
 
 
 @dataclass(frozen=True)
+class ColourOnly:
+    """X-ray's colour-only model: an ambient light, directional lights (``intensity`` 1: Phong
+    reads none), and Phong's white highlight, ``specular`` strong at exponent ``128 * shininess``."""
+
+    ambient: float
+    lights: tuple[Light, ...]
+    specular: float
+    shininess: float
+
+
+@dataclass(frozen=True)
 class Grid:
     colour: str
     cells: float  # minor cells across the model's framing: the cell is the round step nearest framing / cells
@@ -122,7 +145,8 @@ class Look:
     edge_width: float
     modes: tuple[Mode, ...]
     grid: Grid
-    version: int = field(default=3)
+    xray: ColourOnly
+    version: int = field(default=4)
 
     @property
     def environment_path(self) -> Path:
@@ -151,6 +175,10 @@ class Look:
                                   "palette": mode.palette} for mode in self.modes},
             "grid": {"colour": self.grid.colour, "cells": self.grid.cells, "extent": self.grid.extent,
                      "axes": self.grid.axes},
+            "xray": {"ambient": self.xray.ambient,
+                     "lights": [{"name": light.name, "direction": list(light.direction), "intensity": light.intensity}
+                                for light in self.xray.lights],
+                     "specular": self.xray.specular, "shininess": self.xray.shininess},
         }
 
 
@@ -172,4 +200,6 @@ LOOK = Look(
            Mode("parts", "lit", "visible", palette=True), Mode("xray", "lit", "all", opacity=0.22),
            Mode("hidden-line", "backdrop", "visible"), Mode("wireframe", "none", "all")),
     grid=Grid(colour="#4ea8cc", cells=20.0, extent=6.0, axes=True),
+    xray=ColourOnly(ambient=0.5, lights=(Light("key", (-0.35, 0.55, -1.0), 1.0), Light("fill", (0.6, 0.2, -0.3), 1.0)),
+                    specular=0.08, shininess=0.35),
 )

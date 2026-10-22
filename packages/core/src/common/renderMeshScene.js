@@ -31,7 +31,7 @@ import {
 import { syncRuntimeStepClipPlane } from "../lib/viewer/modelRuntime.js";
 import { createSceneClip } from "../lib/viewer/sceneClip.js";
 import { disposeSectionCaps } from "../lib/viewer/sectionCaps.js";
-import { applySceneRig } from "../lib/viewer/sceneRig.js";
+import { applySceneRig, sceneRigFor } from "../lib/viewer/sceneRig.js";
 import {
   applyExplodedViewProgress,
   clearExplodedViewRecords,
@@ -634,10 +634,11 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     backgroundTexture = colorTextureFromBackground(context.theme.background || {}, firstSize.width, firstSize.height);
     scene.background = backgroundTexture;
   }
-  // A family's scene that brings its own lighting (`sceneContract.js`'s `rig`) is lit by it outside
-  // Render, in place of the theme's rig, as the viewer's viewport lights it (`sceneRig.js`): its
-  // environment is the scene's.
-  const sceneRig = !photographicConfiguration && model.scene?.rig ? applySceneRig(THREE, { scene, renderer }, model.scene.rig) : null;
+  // A family's scene that brings its own lighting (`sceneContract.js`'s `rig`, or `rigFor` the look
+  // it wears) is lit by it outside Render, in place of the theme's rig, as the viewer's viewport
+  // lights it (`sceneRig.js`): its environment is the scene's.
+  const ownRig = photographicConfiguration ? null : sceneRigFor(model.scene, model.look);
+  const sceneRig = ownRig ? applySceneRig(THREE, { scene, renderer }, ownRig) : null;
   // PMREM generation is synchronous, but `ready` stays a promise so a failure
   // reaches the caller after it holds a viewport it can dispose.
   const ready = Promise.resolve().then(() => {

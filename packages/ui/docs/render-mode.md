@@ -82,7 +82,10 @@ a file's reflect a small neutral environment; an engine document's reflect its l
 environment, the studio image its engine serves beside the look (`GET /api/look/environment`),
 which lights every surface of the document and which the engine's OCCT stills reflect too, and
 every surface of it answers light as OCCT's PBR program does (core's `lib/viewer/surfaceBrdf.js`,
-the look's `brdf`), not by three's own physical model. X-ray and Parts draw a plain finish. Authored materials are read-only. Color
+the look's `brdf`), not by three's own physical model. Parts draws a plain finish. An engine
+document's X-ray is its look's colour-only model (the scene's `rigFor` its own rig): no finish, an
+ambient term and plain lights, no environment, three's own physical model, as the engine's OCCT
+stills draw it by Phong. Authored materials are read-only. Color
 overrides are presentation settings, not edits to the model or its material
 assignments.
 

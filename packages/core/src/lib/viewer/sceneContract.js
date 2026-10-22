@@ -52,6 +52,10 @@
  *   scene's (every surface, an authored finish included, reflects it), its exposure and its tone
  *   curve as three's `CustomToneMapping`; Render lights every scene alike. Absent or null: the
  *   theme's rig, as ever.
+ * @property {(look: SurfaceLook | null) => (SceneRig | null)} [rigFor]  The rig for the surface look
+ *   the host resolved, where a scene lights one look otherwise than the rest (an engine document's
+ *   X-ray: `lib/xbf/xbfLook.js`); a host asks it (`sceneRig.js`'s `sceneRigFor`) before `rig`. Each
+ *   answer is one of a few rigs the scene holds, so a host can tell whether it changed by identity.
  * @property {(ray: import("three").Ray) => ({ id: string, point: import("three").Vector3 } | null)} [pick]
  *   Only scenes that select.
  * @property {boolean} [complete]  `false` while `restBounds` may still GROW: a large model published

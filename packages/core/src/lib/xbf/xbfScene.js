@@ -47,7 +47,7 @@ import { createSceneExplode } from "../viewer/sceneExplode.js";
 import { createSceneHighlight } from "../viewer/sceneHighlight.js";
 import { createSurfaceLook } from "../viewer/surfaceLook.js";
 import { releaseGeometry, shareGeometry } from "../render/sharedGeometry.js";
-import { xbfLookRig, xbfLookSurface } from "./xbfLook.js";
+import { xbfLookRig, xbfLookSurface, xbfLookXray, xbfLookXrayRig, xbfLookXraySurface } from "./xbfLook.js";
 import { XBF_EDGE_CLASS_NAMES, xbfEdgeLine, xbmFaceRow, xbmEdgeRow, xbmTriangleFaceRows } from "./xbm.js";
 import { xbfKinematics, xbfPosedMatrices } from "./xbfKinematics.js";
 
@@ -355,8 +355,11 @@ export function createXbfScene(THREE, document) {
   const prototypes = structure.prototypes;
   // How the engine draws the regular modes: the rig a stage lights this scene with there, and what
   // its surfaces wear there. A document read without the engine's look is drawn under the theme's.
+  // X-ray has a rig and a surface of its own: the look's colour-only model.
   const rig = document.look ? xbfLookRig(document.look) : null;
   const lookSurface = document.look ? xbfLookSurface(document.look) : null;
+  const xrayRig = document.look ? xbfLookXrayRig(document.look) : null;
+  const xraySurface = document.look ? xbfLookXraySurface(document.look) : null;
   const root = new THREE.Group();
   root.name = "xbf-document";
   const ownedGeometries = [];
@@ -783,20 +786,27 @@ export function createXbfScene(THREE, document) {
     triangleCount,
     /** The lighting of the regular modes (`sceneContract.js`): the engine's look's (`xbfLookRig`). */
     rig,
+    /** The lighting under a surface look: X-ray's colour-only rig (`xbfLookXrayRig`), else `rig`. */
+    rigFor(next) {
+      return xbfLookXray(next) && next?.authored !== true ? xrayRig : rig;
+    },
     // A part or face the document gave a material keeps its finish in the shaded modes and in
     // Preview, reflecting the scene's environment (the rig's in the regular modes, the studio's in
     // Preview); every other surface wears the look's finish over its colour. In the regular modes
     // that is the engine's look (`xbfLookSurface`): its plain finish, the colour of a surface
-    // without a finish raised to its power, nothing graded; photographic Render's look
-    // (`authored`) is worn as any scene wears it.
+    // without a finish raised to its power, nothing graded; X-ray wears the look's colour-only
+    // model (`xbfLookXraySurface`): no finish at all; photographic Render's look (`authored`) is
+    // worn as any scene wears it.
     setSurfaceLook(next) {
       if (disposed) return;
       const regular = Boolean(next && lookSurface) && next.authored !== true;
       lastLook = next ? { ...next, authored: false } : null;
       if (regular) {
-        lastLook.colorPower = lookSurface.colorPower;
-        lastLook.brdf = lookSurface.brdf;
-        lastLook.materialSettings = { ...next.materialSettings, ...lookSurface.materialSettings };
+        const worn = xbfLookXray(next) ? xraySurface : lookSurface;
+        lastLook.colorPower = worn.colorPower;
+        lastLook.brdf = worn.brdf;
+        if (worn.finishes === false) lastLook.finishes = false;
+        lastLook.materialSettings = { ...next.materialSettings, ...worn.materialSettings };
       }
       surfaceStyle = next?.surface?.style === "hidden" || next?.surface?.style === "off" ? next.surface.style : "shaded";
       applySurfaces();

@@ -22,6 +22,8 @@ material in every look.
   (``1 - TRANSMISSION_OPACITY * transmission``) over the base colour tinted by the transmission
   colour. OCCT's roughness is ``0.01 + 0.99 n`` of the normalized ``n`` it is given, so it is
   given ``(r - 0.01) / 0.99`` for three's ``r``.
+- **X-ray** is not drawn by this: it is the look's colour-only model (``look.py``) on OCCT's Phong
+  program, its rig ``put_up_colour_only``'s and its faces' material ``occt.py``'s.
 """
 
 from __future__ import annotations
@@ -168,6 +170,31 @@ def put_up(view: Any, viewer: Any, backdrop: Any) -> list[Any]:
     return lights
 
 
+def put_up_colour_only(view: Any, viewer: Any) -> list[Any]:
+    """X-ray's colour-only rig on ``view`` (``LOOK.xray``): its ambient light and its white
+    directional lights, Phong shading, no image-based light. Returns the lights, for whoever
+    replaces them; ``put_up`` puts the look's own rig back."""
+    from OCP.Graphic3d import Graphic3d_TypeOfShadingModel
+    from OCP.Quantity import Quantity_Color, Quantity_TOC_RGB
+    from OCP.V3d import V3d_AmbientLight, V3d_DirectionalLight
+    from OCP.gp import gp_Dir
+
+    white = Quantity_Color(1, 1, 1, Quantity_TOC_RGB)
+    ambient = V3d_AmbientLight(white)
+    ambient.SetIntensity(LOOK.xray.ambient)
+    lights = [ambient]
+    for light in LOOK.xray.lights:
+        directional = V3d_DirectionalLight(gp_Dir(*light.direction), white)
+        directional.SetIntensity(light.intensity)
+        lights.append(directional)
+    for light in lights:
+        viewer.AddLight(light)
+        viewer.SetLightOn(light)
+    view.SetImageBasedLighting(False)
+    view.SetShadingModel(Graphic3d_TypeOfShadingModel.Graphic3d_TypeOfShadingModel_Phong)
+    return lights
+
+
 def occt_roughness(roughness: float) -> float:
     """The normalized roughness OCCT is given for three's ``roughness`` (``0.01 + 0.99 n``)."""
     return min(max((roughness - 0.01) / 0.99, 0.0), 1.0)
@@ -181,16 +208,12 @@ def linear(value: Any) -> tuple[float, float, float]:
     return tuple(float(c) for c in value[:3])
 
 
-def finish(rgba: Any, material: dict[str, Any] | None, *, plain: bool = False) -> dict[str, Any]:
+def finish(rgba: Any, material: dict[str, Any] | None) -> dict[str, Any]:
     """What a face is drawn as: ``rgba`` its colour (linear, as the structure holds it, or a
     ``#rrggbb`` fill), ``material`` the structure's material for it, or None. Base colour, alpha,
-    metallic, roughness, IOR and emission, every approximation applied. ``plain``: the look's plain
-    finish over the colour, a material's colour kept as authored (X-ray, as the viewer draws it)."""
+    metallic, roughness, IOR and emission, every approximation applied."""
     colour = linear(rgba if rgba is not None else LOOK.fill)
     alpha = float(rgba[3]) if isinstance(rgba, (tuple, list)) and len(rgba) > 3 else 1.0
-    if plain and material is not None:
-        return {"color": colour, "alpha": alpha, "metallic": LOOK.plain.metallic, "roughness": LOOK.plain.roughness,
-                "ior": LOOK.plain.ior, "emission": (0.0, 0.0, 0.0)}
     if material is None:
         return {"color": tuple(value ** LOOK.colour_power for value in colour), "alpha": alpha,
                 "metallic": LOOK.plain.metallic, "roughness": LOOK.plain.roughness, "ior": LOOK.plain.ior,
@@ -236,9 +259,9 @@ def aspect(found: dict[str, Any]) -> Any:
     return material
 
 
-def face_material(rgba: Any, material: dict[str, Any] | None, *, plain: bool = False) -> tuple[Any, Any]:
+def face_material(rgba: Any, material: dict[str, Any] | None) -> tuple[Any, Any]:
     """A face's OCCT material (``aspect``) and its base colour, for ``finish``'s arguments."""
     from OCP.Quantity import Quantity_Color, Quantity_TOC_RGB
 
-    found = finish(rgba, material, plain=plain)
+    found = finish(rgba, material)
     return aspect(found), Quantity_Color(*found["color"], Quantity_TOC_RGB)

@@ -50,6 +50,15 @@ export function installSceneRigToneCurve(THREE, curve) {
   THREE.ShaderChunk.tonemapping_pars_fragment = chunk.replace(CUSTOM_TONE_MAPPING, wanted);
 }
 
+/**
+ * The rig a scene is lit by under the surface look it wears (`sceneContract.js`): its `rigFor(look)`
+ * where it has one, else its `rig`, else none. The regular modes only: Render lights every scene alike.
+ */
+export function sceneRigFor(scene, look) {
+  if (!scene) return null;
+  return (typeof scene.rigFor === "function" ? scene.rigFor(look) : scene.rig) || null;
+}
+
 /** Whether a value is a rig a stage can put up: its lights, its exposure and a curve it knows. */
 export function isSceneRig(rig) {
   const environment = rig?.environment;

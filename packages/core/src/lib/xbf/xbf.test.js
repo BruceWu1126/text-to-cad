@@ -12,7 +12,7 @@ import * as THREE from "three";
 
 import { isKitScene } from "../viewer/sceneContract.js";
 import { fetchXbfElementFacts, loadXbfDocument, placeXbfFacts, waitForXbfVersion, xbfDocumentSource } from "./xbfDocument.js";
-import { parseXbfLook, xbfLookRig, xbfLookSurface } from "./xbfLook.js";
+import { parseXbfLook, xbfLookRig, xbfLookSurface, xbfLookXrayRig, xbfLookXraySurface } from "./xbfLook.js";
 import { XBF_EDGE_CLASS, readXbmPart, xbmTriangleFaceRows, xbmUnmeshedFaces } from "./xbm.js";
 import { createXbfScene, parseXbfElementId, xbfElementId, xbfFaceEdges, xbfFaceOutline, xbfLookParameters } from "./xbfScene.js";
 
@@ -197,16 +197,31 @@ test("a document's materials: a physical material per look, kept in the shaded l
   assert.equal(worn.color.getHex(), new THREE.Color().setRGB(...PLATE.color.slice(0, 3), THREE.LinearSRGBColorSpace).getHex(),
     "a part with a material keeps its colour as authored, not raised to the look's power");
   assert.deepEqual([pegOne.material.transmission, pegOne.material.envMap], [1, null]);
-  // X-ray and Parts: the engine's look's finish, as any other surface's.
-  for (const look of [{ ...LOOK, surface: { style: "shaded", opacity: 0.22 } },
-    { ...LOOK, materialSettings: { ...LOOK.materialSettings, overrideSourceColors: true } }]) {
-    scene.setSurfaceLook(look);
-    [worn] = plate.material;
-    assert.deepEqual([worn.metalness, worn.roughness, worn.anisotropy, worn.envMap], [0, PLAIN.roughness, 0, null]);
-    assert.deepEqual([pegOne.material.transmission, pegOne.material.envMap], [0, null]);
+  // Parts: the engine's look's finish, as any other surface's.
+  scene.setSurfaceLook({ ...LOOK, materialSettings: { ...LOOK.materialSettings, overrideSourceColors: true } });
+  [worn] = plate.material;
+  assert.deepEqual([worn.metalness, worn.roughness, worn.anisotropy, worn.envMap], [0, PLAIN.roughness, 0, null]);
+  assert.deepEqual([pegOne.material.transmission, pegOne.material.envMap], [0, null]);
+  // X-ray: the look's colour-only model, under its own rig: every colour squared, no finish or glow,
+  // three's own surface model, the Phong highlight's lobe, no environment.
+  const xray = { ...LOOK, surface: { style: "shaded", opacity: 0.22 } };
+  scene.setSurfaceLook(xray);
+  assert.equal(scene.rigFor(xray), scene.rigFor(xray), "one rig, by identity");
+  assert.deepEqual(scene.rigFor(xray), xbfLookXrayRig(document.look));
+  assert.equal(scene.rigFor(LOOK), scene.rig, "every other look: the look's own rig");
+  const highlight = xbfLookXraySurface(document.look).materialSettings;
+  const [body, painted] = plate.material;
+  for (const [surface, colour, name] of [[body, PLATE.color, "the part's"], [painted, LACQUER.color, "the paint's"]]) {
+    assert.deepEqual([surface.metalness, surface.roughness, surface.specularIntensity, surface.clearcoat, surface.anisotropy,
+      surface.envMapIntensity, surface.emissiveIntensity, surface.opacity],
+    [0, highlight.roughness, highlight.specularIntensity, 0, 0, 0, 0, 0.22], name);
+    surface.color.toArray().forEach((value, at) => assert.ok(Math.abs(value - colour[at] ** 2) < 1e-6, `${name} colour, squared`));
+    assert.equal(surface.onBeforeCompile, THREE.Material.prototype.onBeforeCompile, "three's own surface model");
   }
+  assert.deepEqual([pegOne.material.transmission, pegOne.material.envMapIntensity], [0, 0]);
   scene.setSurfaceLook(LOOK);
-  assert.equal(plate.material[0].metalness, 1, "and Solid again");
+  assert.deepEqual([plate.material[0].metalness, plate.material[0].specularIntensity], [1, 1], "and Solid again");
+  assert.notEqual(plate.material[0].onBeforeCompile, THREE.Material.prototype.onBeforeCompile, "drawn by the look's model");
   // Its mass: the mesh volume by the density, the peg's glass too; a part with none says so.
   const one = scene.measureParts(["i0"]);
   assert.ok(Math.abs(one.mass - one.volume * 1e-9 * 2700) < 1e-12);

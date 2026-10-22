@@ -14,13 +14,38 @@ import { SURFACE_BRDFS } from "../viewer/surfaceBrdf.js";
 // without a material (and every fill) wears the look's plain finish over its colour raised to the
 // look's power; a part with one wears its own finish. The OCCT prototype draws the same record
 // (`render/finish.py`).
+//
+// X-ray is drawn by the look's colour-only model (`xray`), as both renderers drew every mode before
+// the look was physically based: no finish, a part's material its colour alone, under an ambient
+// term and directional lights of a radiance each (OCCT's Phong reads no intensity), no environment
+// (`xbfLookXrayRig`), each surface's colour raised to the look's power with a small white highlight
+// (`xbfLookXraySurface`), blended at the mode's opacity as three blends any see-through surface.
+// Three's physical lights divide a Lambertian surface's light by π, so a radiance `r` is a light of
+// intensity `π r` here; the highlight is three's GGX lobe sized to the Phong one (`xbfLookHighlight`).
 
 const HEX = /^#[0-9a-f]{6}$/i;
-const LOOK_VERSION = 3;
+const LOOK_VERSION = 4;
 // The image's frame to three's: its rows run from +Z down, which three's equirectangular lookup
 // reads as +Y; turning the lookup a quarter about X sends each of the document's directions to its
 // texel (`scene.environmentRotation`).
 export const XBF_ENVIRONMENT_ROTATION = Object.freeze([Math.PI / 2, 0, 0]);
+
+/**
+ * A three GGX lobe as wide as OCCT's Phong highlight (`pow(N.H, 128 * shininess)`): Blinn-Phong's
+ * exponent `n` is a microfacet slope of `α² = 2 / (n + 2)`, and three's roughness is `√α`. Its
+ * peak against the Phong one's sets the specular intensity: three's peak at `N.H = 1` is
+ * `0.04 s · V · N.L / α²` against OCCT's `specular`, taken where `N.L = N.V = 0.8`
+ * (`V`, Smith's visibility there, `0.5 / (2 · 0.8 · √(α² + (1 − α²) · 0.64))`).
+ */
+export function xbfLookHighlight(specular, shininess) {
+  const exponent = 128 * shininess;
+  const slope = 2 / (exponent + 2);
+  const roughness = Math.sqrt(Math.sqrt(slope));
+  const cosine = 0.8;
+  const visibility = 0.5 / (2 * cosine * Math.sqrt(slope + (1 - slope) * cosine * cosine));
+  const specularIntensity = Math.min(Math.max(specular * slope / (0.04 * visibility * cosine), 0), 1);
+  return { roughness, specularIntensity };
+}
 
 function number(value, name) {
   const found = Number(value);
@@ -91,6 +116,18 @@ export function decodeRadiance(buffer) {
   return { width, height, data };
 }
 
+// A list of the look's directional lights, checked and frozen.
+function parseLights(list, name) {
+  const lights = (Array.isArray(list) ? list : []).map((light, at) => {
+    const direction = (Array.isArray(light?.direction) ? light.direction : []).map((value) => number(value, `${name}[${at}].direction`));
+    if (direction.length !== 3 || !Math.hypot(...direction)) throw new Error(`the engine's look's ${name}[${at}] has no direction`);
+    return Object.freeze({ name: String(light.name || `light ${at + 1}`), direction: Object.freeze(direction),
+      intensity: number(light.intensity, `${name}[${at}].intensity`) });
+  });
+  if (!lights.length) throw new Error(`the engine's look has no ${name}`);
+  return Object.freeze(lights);
+}
+
 /**
  * The look as the engine serves it, checked field by field and frozen. Throws, by name, for a look
  * of another version or a field it lacks.
@@ -98,19 +135,13 @@ export function decodeRadiance(buffer) {
 export function parseXbfLook(json) {
   if (!json || typeof json !== "object") throw new Error("the engine's look is a JSON object");
   if (json.version !== LOOK_VERSION) throw new Error(`the engine's look is version ${JSON.stringify(json.version)}; this viewer reads ${LOOK_VERSION}`);
-  const lights = (Array.isArray(json.lights) ? json.lights : []).map((light, at) => {
-    const direction = (Array.isArray(light?.direction) ? light.direction : []).map((value) => number(value, `lights[${at}].direction`));
-    if (direction.length !== 3 || !Math.hypot(...direction)) throw new Error(`the engine's look's lights[${at}] has no direction`);
-    return Object.freeze({ name: String(light.name || `light ${at + 1}`), direction: Object.freeze(direction),
-      intensity: number(light.intensity, `lights[${at}].intensity`) });
-  });
-  if (!lights.length) throw new Error("the engine's look has no lights");
+  const lights = parseLights(json.lights, "lights");
   if (typeof json.environment?.url !== "string") throw new Error("the engine's look has no environment");
   const modes = json.modes && typeof json.modes === "object" ? json.modes : {};
   return Object.freeze({
     version: LOOK_VERSION,
     backdrop: colour(json.backdrop, "backdrop"),
-    lights: Object.freeze(lights),
+    lights,
     environment: Object.freeze({ url: json.environment.url, intensity: number(json.environment.intensity, "environment.intensity") }),
     colourPower: number(json.colourPower, "colourPower"),
     plain: Object.freeze({ metallic: number(json.plain?.metallic, "plain.metallic"),
@@ -128,7 +159,9 @@ export function parseXbfLook(json) {
       faces: String(mode?.faces), edges: String(mode?.edges), opacity: number(mode?.opacity, `modes.${name}.opacity`),
       palette: mode?.palette === true
     })]))),
-    grid: Object.freeze({ ...(json.grid || {}) })
+    grid: Object.freeze({ ...(json.grid || {}) }),
+    xray: Object.freeze({ ambient: number(json.xray?.ambient, "xray.ambient"), lights: parseLights(json.xray?.lights, "xray.lights"),
+      specular: number(json.xray?.specular, "xray.specular"), shininess: number(json.xray?.shininess, "xray.shininess") })
   });
 }
 
@@ -169,11 +202,60 @@ export function xbfLookRig(look) {
 }
 
 /**
+ * The rig a stage lights an engine document's scene with in X-ray (`xbfLookXray`): the look's
+ * colour-only model, its ambient and its lights at `π` times their radiance, each shining from
+ * where its direction comes, no environment, exposure 1 and the look's curve.
+ */
+export function xbfLookXrayRig(look) {
+  return Object.freeze({
+    id: `xbf-look/${look.version}/xray`,
+    ambient: Object.freeze({ color: "#ffffff", intensity: Math.PI * look.xray.ambient }),
+    lights: Object.freeze(look.xray.lights.map((light) => {
+      const length = Math.hypot(...light.direction);
+      return Object.freeze({ name: light.name, towards: Object.freeze(light.direction.map((value) => -value / length)),
+        color: "#ffffff", intensity: Math.PI * light.intensity });
+    })),
+    environment: null,
+    exposure: 2 ** look.exposure,
+    toneCurve: look.tone
+  });
+}
+
+/**
+ * Whether a surface look (`../viewer/surfaceLook.js`) is X-ray's: see-through, its surfaces at the
+ * mode's opacity (the regular modes draw no other surface see-through).
+ */
+export function xbfLookXray(surfaceLook) {
+  const opacity = Number(surfaceLook?.surface?.opacity);
+  return Number.isFinite(opacity) && opacity < 0.999;
+}
+
+/**
+ * What a surface wears in X-ray under the look's colour-only model: its colour raised to the look's
+ * power, ungraded and untinted, as a dielectric with the Phong highlight's GGX lobe
+ * (`xbfLookHighlight`), drawn by three's own surface model, no finish, glow, clear coat,
+ * environment or lift (`finishes: false`).
+ */
+export function xbfLookXraySurface(look) {
+  const highlight = xbfLookHighlight(look.xray.specular, look.xray.shininess);
+  return Object.freeze({
+    colorPower: look.colourPower,
+    brdf: null,
+    finishes: false,
+    materialSettings: Object.freeze({
+      saturation: 1, contrast: 1, brightness: 1, tintStrength: 0,
+      roughness: highlight.roughness, metalness: 0, specularIntensity: highlight.specularIntensity,
+      clearcoat: 0, clearcoatRoughness: 0, envMapIntensity: 0, emissiveIntensity: 0
+    })
+  });
+}
+
+/**
  * What a surface wears in the regular modes under the look (`../viewer/surfaceLook.js`): the
  * colour of a surface without a finish of its own, and of every fill, raised to the look's power,
  * every colour ungraded and untinted; and where no finish of the document's is kept (no material,
- * a fill, X-ray) the look's plain finish, with no clear coat and no lift. Every surface reflects
- * the rig's environment and is drawn by the look's surface model.
+ * a fill) the look's plain finish, with no clear coat and no lift. Every surface reflects the rig's
+ * environment and is drawn by the look's surface model. X-ray wears `xbfLookXraySurface`.
  */
 export function xbfLookSurface(look) {
   return Object.freeze({

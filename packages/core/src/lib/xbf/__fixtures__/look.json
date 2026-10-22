@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "backdrop": "#f0f4f9",
   "lights": [
     {
@@ -89,5 +89,30 @@
     "cells": 20.0,
     "extent": 6.0,
     "axes": true
+  },
+  "xray": {
+    "ambient": 0.5,
+    "lights": [
+      {
+        "name": "key",
+        "direction": [
+          -0.35,
+          0.55,
+          -1.0
+        ],
+        "intensity": 1.0
+      },
+      {
+        "name": "fill",
+        "direction": [
+          0.6,
+          0.2,
+          -0.3
+        ],
+        "intensity": 1.0
+      }
+    ],
+    "specular": 0.08,
+    "shininess": 0.35
   }
 }

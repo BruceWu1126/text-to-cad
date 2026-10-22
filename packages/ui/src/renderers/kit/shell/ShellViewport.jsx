@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { createInspectEnvironmentResource, INSPECT_ENVIRONMENT_ID } from "@text-to-cad/core/common/inspectEnvironment.js";
 import { resolveCadGridSettings } from "@text-to-cad/core/common/cadInk.js";
 import { resolveSceneSurfaceLook, scenePhotographicLighting } from "@text-to-cad/core/common/sceneSettings.js";
-import { applySceneRig } from "@text-to-cad/core/lib/viewer/sceneRig.js";
+import { applySceneRig, sceneRigFor } from "@text-to-cad/core/lib/viewer/sceneRig.js";
 import {
   CAMERA_PROJECTION, normalizeCameraProjection, perspectiveSnapshotMatchesScene, resolvePerspectiveSnapshot
 } from "@text-to-cad/core/lib/perspective.js";
@@ -694,10 +694,10 @@ const ShellViewport = forwardRef(function ShellViewport({
     viewerReadyTick, onBoundsChanged: () => syncSceneBounds() });
 
   // The look: lighting rig or studio, background, floor, grid and axes. A scene that brings its own
-  // lighting (`sceneContract.js`'s `rig`) is lit by it outside Preview's Render, in place of the
-  // theme's lights, its environment the scene's (`sceneRig.js`); the theme's background, floor and
-  // grid stay.
-  const sceneRig = !renderMode && scene?.rig ? scene.rig : null;
+  // lighting (`sceneContract.js`'s `rig`, or `rigFor` the look it wears) is lit by it outside
+  // Preview's Render, in place of the theme's lights, its environment the scene's (`sceneRig.js`);
+  // the theme's background, floor and grid stay.
+  const sceneRig = !renderMode ? sceneRigFor(scene, surfaceLook) : null;
   useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;

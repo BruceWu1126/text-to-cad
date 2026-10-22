@@ -13,16 +13,20 @@ import { resolveMaterialFillBaseColor, shapeSourceColor } from "./surfaceMateria
 // A look is plain data:
 //   { materialSettings,     resolved display material settings
 //                           (`resolveDisplayMaterialSettings`): fills, colour
-//                           grading and the finish channels
+//                           grading and the finish channels (a `specularIntensity`
+//                           among them replaces the authored one)
 //     authored: boolean,    true: keep each material's own finish, sidedness and
 //                           source colours (photographic Render)
 //     surface: { style: "shaded" | "flat", opacity },
 //     colorPower?: number,  the colour of every surface without a finish of its own, and
 //                           of every fill, linear, raised to this power (1: as written,
 //                           unless a scene's own look says otherwise: `lib/xbf/xbfLook.js`)
-//     brdf?: string }       the surface model the lit surfaces are drawn by (a name of
+//     brdf?: string,        the surface model the lit surfaces are drawn by (a name of
 //                           `surfaceBrdf.js`'s `SURFACE_BRDFS`); three's own when absent,
 //                           and in an authored look always
+//     finishes?: boolean }  false: no surface keeps a finish or a glow its file authored, and
+//                           every colour is raised to `colorPower` (a scene's own look that
+//                           draws none: X-ray's, `lib/xbf/xbfLook.js`)
 //
 // A material marked `userData.cadAuthoredFinish` (a finish its file authored, which the
 // scene asks to keep) keeps it in the shaded looks too -- opaque, its source colour shown --
@@ -74,6 +78,9 @@ function plainFinish(THREE) {
   plain.dispose();
   return found;
 }
+
+// How strongly an authored material answers light specularly (a standard one: three's default).
+const authoredSpecular = (material) => (material.isMeshPhysicalMaterial ? material.specularIntensity : 1);
 
 function inspectStandIn(THREE, authored) {
   if (authored.isMeshPhysicalMaterial) return authored.clone();
@@ -133,6 +140,7 @@ export function createSurfaceLook(THREE, root) {
     const flat = look?.surface?.style === "flat";
     const opacityScale = look?.surface ? clamp01(look.surface.opacity, 1) : 1;
     const power = Number(look?.colorPower) > 0 ? Number(look.colorPower) : 1;
+    const finishes = look?.finishes !== false;
     for (const entry of slots) {
       const { lit, authored } = entry;
       const sourceColored = lit.userData?.cadSourceColor !== false;
@@ -141,7 +149,7 @@ export function createSurfaceLook(THREE, root) {
       let color = filled ? resolveMaterialFillBaseColor(THREE, settings, fillIndex)
         : authoredLook || authored.vertexColors ? authored.color
           : shapeSourceColor(THREE, authored.color, settings);
-      if (power !== 1 && (filled || lit.userData?.cadAuthoredFinish !== true)) {
+      if (power !== 1 && (filled || !finishes || lit.userData?.cadAuthoredFinish !== true)) {
         color = new THREE.Color(color.r ** power, color.g ** power, color.b ** power);
       }
       const opacity = clamp01(authored.opacity * opacityScale, 1);
@@ -160,10 +168,11 @@ export function createSurfaceLook(THREE, root) {
       } else if (!authoredLook) {
         target = entry.inspect ||= inspectStandIn(THREE, lit);
         const finish = lit.userData?.cadAuthoredFinish === true;
-        if (finish && !forceFill && opacityScale >= 0.999) {
+        if (finish && finishes && !forceFill && opacityScale >= 0.999) {
           // A finish the file authored, kept, reflecting the scene's environment.
           for (const key of FINISH_KEYS) target[key] = lit[key];
           target.attenuationColor.copy(lit.attenuationColor);
+          target.specularIntensity = authoredSpecular(lit);
           target.envMapIntensity = 1;
         } else {
           if (finish) {
@@ -172,11 +181,12 @@ export function createSurfaceLook(THREE, root) {
             target.attenuationColor.copy(plain.attenuationColor);
           }
           for (const key of ["roughness", "metalness", "clearcoat", "clearcoatRoughness"]) target[key] = clamp01(settings[key]);
+          target.specularIntensity = settings.specularIntensity === undefined ? authoredSpecular(lit) : clamp01(settings.specularIntensity);
           target.envMapIntensity = Math.max(Number(settings.envMapIntensity) || 0, 0);
         }
         // The viewer lifts its surfaces by a trace of their own colour. A part that
-        // authored a glow of its own keeps it.
-        if (!authored.glows) {
+        // authored a glow of its own keeps it, where the look keeps finishes.
+        if (!authored.glows || !finishes) {
           target.emissive.copy(color);
           target.emissiveIntensity = clamp01(settings.emissiveIntensity);
         }
