@@ -61,48 +61,8 @@ export CADGEN_STATE_DIR="$project/state"
 # test's own daemon, one part meshed at a time, stopped on the way out.
 export CADGEN_ENGINE_DIR="$project/engine" CADGEN_ENGINE_MESH=inline CADGEN_ENGINE_IDLE=120
 export CADGEN_VIEWER_DIST="$RUNTIME"
-server_pid=""
-
 cleanup() {
-  if [ -n "$server_pid" ]; then
-    # Use the native PID written by Python: under MSYS, bash's $! is not a
-    # Windows PID. POSIX descendants share this test-owned process group;
-    # taskkill /T owns the corresponding Windows tree.
-    "$PYTHON" - "$viewer_pidfile" <<'PY' 2>/dev/null || kill "$server_pid" 2>/dev/null || true
-import os
-import signal
-import subprocess
-import sys
-import time
-from pathlib import Path
-
-pid_path = Path(sys.argv[1])
-if pid_path.is_file():
-    pid = int(pid_path.read_text(encoding="ascii"))
-    if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], check=False, timeout=10,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    else:
-        try:
-            os.killpg(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        for _ in range(20):
-            try:
-                os.killpg(pid, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.05)
-        else:
-            try:
-                os.killpg(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-PY
-    wait "$server_pid" 2>/dev/null || true
-  fi
-  "$PYTHON" -m cadgen.engine stop >/dev/null 2>&1 \
-    || echo "warning: the test's engine daemon did not stop; it goes once idle" >&2
+  "$PYTHON" -m cadgen.engine stop >/dev/null 2>&1 || true
   rm -rf "$project" "$log"
 }
 trap cleanup EXIT
@@ -233,28 +193,10 @@ cat > "$project/smoke.urdf" <<'URDF'
 </robot>
 URDF
 
-"$PYTHON" -c 'import os, pathlib, sys; os.setsid() if os.name != "nt" else None; pathlib.Path(sys.argv[3]).write_text(str(os.getpid()), encoding="ascii"); os.chdir(sys.argv[1]); os.execv(sys.executable, [sys.executable, "-m", "cadgen.viewer", "--host", sys.argv[2], "--json", "--new"])' \
-  "$project" "$HOST" "$viewer_pidfile" >"$log" 2>&1 &
-server_pid=$!
-
-port=""
-for _ in $(seq 1 30); do
-  port="$(sed -n 's/^{.*"port":\([0-9]*\).*}$/\1/p' "$log" | tail -1)"
-  [ -n "$port" ] && break
-  if ! kill -0 "$server_pid" 2>/dev/null; then
-    echo "FAIL: Viewer exited before announcing its port" >&2
-    sed 's/^/    /' "$log" >&2
-    exit 1
-  fi
-  sleep 1
-done
-if [ -z "$port" ]; then
-  echo "FAIL: Viewer did not announce a port" >&2
-  sed 's/^/    /' "$log" >&2
-  exit 1
-fi
-
-e2e_args=(--dir "$project" --url "http://$HOST:$port")
+(cd "$project" && "$PYTHON" -m cadgen.viewer --json --new) >"$log"
+url="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["apiUrl"])' "$log")"
+export VIEWER_TEST_TOKEN="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["token"])' "$log")"
+e2e_args=(--dir "$project" --url "$url")
 [ -n "$out_dir" ] && e2e_args+=(--out "$out_dir")
 [ -n "$only_gate" ] && e2e_args+=(--only "$only_gate")
 echo "  [setup] $(( $(date +%s) - started_at ))s to fixtures, viewer and port"

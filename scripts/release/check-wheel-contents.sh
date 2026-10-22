@@ -51,7 +51,7 @@ REQUIRED=(
   "cadgen/viewer/__init__.py"
   "cadgen/viewer/__main__.py"
   "cadgen/viewer/main.py"
-  "cadgen/viewer/xbf.py"
+  "cadgen/viewer/documents.py"
   "cadgen/viewer/collation.json"
   "cadgen/build123d.py"
   # The robot validators moved out of skills/{sdf,srdf,urdf}/scripts into cadgen, so a

@@ -1,7 +1,7 @@
 """``/__cad/xbf`` against a real launched viewer and an engine daemon of this test's own: an
 ``.xbf`` and a STEP are served by the cadgen engine -- the route asks the engine's daemon, which
 reads a STEP in a reader process of its own -- and the page reads them through the viewer
-(``/__cad/xbf/api/...``), never from the engine's own port: what the CAD app's tunnel carries
+(``/__cad/api/...``), never from the engine's own port: what the CAD app's tunnel carries
 too. A STEP's names, colours and materials are the engine's reading of it, and the same STEP
 opened again (or touched) is not parsed again while the daemon lives. A request that names no
 engine document is refused in words.
@@ -32,7 +32,7 @@ from urllib.parse import quote
 from cadgen.viewer import handler as handler_module
 from cadgen.viewer.http_app import create_cad_app
 from cadgen.viewer.scanner import catalog_entry
-from cadgen.viewer.xbf import EngineDocuments
+from cadgen.viewer.documents import EngineDocuments
 from tests.python.support import engine_daemon
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
@@ -74,18 +74,13 @@ class XbfRouteTest(unittest.TestCase):
         cls.document = cls.base / "XBF" / "block.xbf"
         cls.step = cls.base / "pair.step"
         assert cls.step.is_file(), done.stdout + done.stderr
-        cls.app = create_cad_app(host="127.0.0.1", port=0, dist_dir="")
-        cls.server = handler_module.serve(cls.app, "127.0.0.1", 0)
-        cls.port = cls.server.server_address[1]
-        cls.app.port = cls.port
-        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
-        cls.thread.start()
+        from cadgen.engine.client import request
+        launched = request({"op": "viewer", "api_only": True, "start": str(cls.base)})
+        assert launched and "failed" not in launched, launched
+        cls.port, cls.token = launched["port"], launched["token"]
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls.server.shutdown()
-        cls.server.server_close()
-        cls.thread.join(timeout=5)
         subprocess.run([sys.executable, "-m", "cadgen.engine", "stop"], env={**os.environ, "PYTHONPATH": str(SRC)},
                        capture_output=True, timeout=120)
         deadline = time.monotonic() + 20
@@ -99,10 +94,44 @@ class XbfRouteTest(unittest.TestCase):
         shutil.rmtree(cls.base, ignore_errors=True)
         shutil.rmtree(cls.state, ignore_errors=True)
 
+    def test_request_process_never_imports_kernel(self):
+        code = r"""
+import http.client, json, sys
+from cadgen._internal.engine_host import http_factory
+from cadgen.engine.serve import Server
+server = Server(isolated=True, mesh_mode='inline', http_factory=http_factory)
+server.start()
+try:
+    ident = server.add(sys.argv[1])
+    token = server.http.app.token
+    def get(path, body=None, status=200):
+        connection = http.client.HTTPConnection('127.0.0.1', server.port, timeout=90)
+        connection.request('POST' if body else 'GET', path, body=body,
+                           headers={'Authorization': 'Bearer '+token, 'x-cadgen-viewer': '1'})
+        response = connection.getresponse()
+        data = response.read()
+        assert response.status == status, (response.status, data)
+        connection.close()
+        return data
+    document = json.loads(get('/__cad/api/doc/'+ident))
+    part = document['prototypes'][0]['key']
+    get('/__cad/api/doc/'+ident+'/part/'+part)
+    get('/__cad/api/doc/'+ident+'/part/'+part+'/volume')
+    get('/__cad/api/doc/'+ident+'/pose', b'{"pose":{}}', status=400)
+    get('/__cad/server')
+    assert not any(n == 'OCP' or n.startswith('OCP.') or n == 'build123d'
+                   or n.startswith('build123d.') for n in sys.modules), sorted(sys.modules)
+finally:
+    server.stop()
+"""
+        done = subprocess.run([sys.executable, '-c', code, str(self.document)],
+                              capture_output=True, text=True, timeout=120)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+
     def request(self, target: str, headers: dict | None = None) -> tuple[int, dict, bytes]:
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=300)
         try:
-            connection.request("GET", target, headers=headers or {})
+            connection.request("GET", target, headers={"Authorization": "Bearer " + self.token, **(headers or {})})
             response = connection.getresponse()
             return response.status, {name.lower(): value for name, value in response.getheaders()}, response.read()
         finally:
@@ -140,7 +169,7 @@ class XbfRouteTest(unittest.TestCase):
     def test_an_xbf_is_served_by_the_engine_and_read_through_the_viewer(self) -> None:
         self.assertEqual(catalog_entry(str(self.document))["kind"], "xbf")
         served = self.open(self.document)
-        self.assertEqual(served, {"doc": served["doc"], "url": f"/__cad/xbf/api/doc/{served['doc']}"})
+        self.assertEqual(served, {"doc": served["doc"], "url": f"/__cad/api/doc/{served['doc']}"})
         # The structure, a part and the look, all under the viewer's origin: a page from it reads
         # them as its own (the engine's loopback-only answer is never relayed to it).
         status, headers, body = self.request(served["url"], {"Origin": "http://example.test"})
@@ -150,9 +179,9 @@ class XbfRouteTest(unittest.TestCase):
         self.assertEqual((structure["name"], len(structure["prototypes"])), ("block", 1))
         status, headers, part = self.request(f"{served['url']}/part/{quote(structure['prototypes'][0]['key'], safe='')}")
         self.assertEqual((status, part[:4], headers["content-type"]), (200, b"XBM2", "application/octet-stream"))
-        status, look = self.get("/__cad/xbf/api/look")
+        status, look = self.get("/__cad/api/look")
         self.assertEqual((status, look["environment"]["url"]), (200, "/api/look/environment"))
-        status, _, image = self.request("/__cad/xbf/api/look/environment")
+        status, _, image = self.request("/__cad/api/look/environment")
         self.assertEqual((status, image[:10]), (200, b"#?RADIANCE"))
         # Asked again, the same document.
         self.assertEqual(self.open(self.document), served)
@@ -196,39 +225,17 @@ class XbfRouteTest(unittest.TestCase):
         self.assertEqual([p["key"] for p in again["prototypes"]], [p["key"] for p in first["prototypes"]],
                          "nor meshed again: a part's key is made from the file's bytes")
 
-    def test_the_relay_answers_the_engines_read_routes_and_nothing_else(self) -> None:
+    def test_document_routes_keep_authentication_and_do_not_relay(self):
         served = self.open(self.document)
-        for target in ("/__cad/xbf/", "/__cad/xbf/api/docs", "/__cad/xbf/page/index.html", "/__cad/xbf/three/build/three.module.js",
-                       f"{served['url']}/mesh", f"{served['url']}/pose", f"{served['url']}/part"):
-            with self.subTest(target=target):
-                status, body = self.get(target)
-                self.assertEqual((status, body), (404, {"error": "Not found"}))
-
-    def test_a_version_wait_is_held_no_longer_than_the_relay_allows(self) -> None:
-        asked = []
-
-        def engine(_address, target, timeout):
-            asked.append(target)
-            return 200, b'{"version":"1-1","patch":null}', "application/json"
-
-        # The CAD Viewer holds a wait a second at most; the CAD app's tunnel not at all.
-        for wait_seconds, expected in ((1.0, "1"), (0.0, "0")):
-            documents = EngineDocuments(wait_seconds=wait_seconds)
-            documents._engine = "127.0.0.1:9"
-            with mock.patch("cadgen.viewer.xbf._get", engine):
-                answer = documents.relay("/__cad/xbf/api/doc/abc/version", {"after": "0-0", "wait": "25"})
-            self.assertEqual(answer, (200, b'{"version":"1-1","patch":null}', "application/json"))
-            self.assertEqual(asked.pop(), f"/api/doc/abc/version?after=0-0&wait={expected}")
-        # The build count the page heard goes on to the engine, which answers when the build moves.
-        with mock.patch("cadgen.viewer.xbf._get", engine):
-            documents.relay("/__cad/xbf/api/doc/abc/version", {"after": "0-0", "wait": "25", "progress": "3"})
-            documents.relay("/__cad/xbf/api/doc/abc/version", {"after": "0-0", "wait": "25", "progress": "x"})
-        self.assertEqual(asked, ["/api/doc/abc/version?after=0-0&wait=0&progress=3", "/api/doc/abc/version?after=0-0&wait=0"])
+        status, headers, _ = self.request(served["url"], {"Authorization": ""})
+        self.assertEqual(status, 403)
+        self.assertEqual(self.request('/__cad/xbf/api/docs')[0], 404)
 
     def test_the_cad_apps_tunnel_carries_an_engine_document(self) -> None:
         from cadgen.mcp.tunnel import ViewerTunnel
 
-        tunnel = ViewerTunnel()
+        from cadgen.viewer.engine_client import RemoteApp
+        tunnel = ViewerTunnel(app=RemoteApp())
         copy = self.base / "tunnelled.step"
         shutil.copyfile(self.step, copy)
 
@@ -243,7 +250,7 @@ class XbfRouteTest(unittest.TestCase):
             if status != 202:
                 break
             # The tunnel holds no call long: the page is told to come back.
-            self.assertEqual(json.loads(body), {"state": "reading", "retryMs": 750})
+            self.assertEqual(json.loads(body)["state"], "reading")
             self.assertLess(time.monotonic(), deadline)
         self.assertEqual(status, 200, body)
         url = json.loads(body)["url"]

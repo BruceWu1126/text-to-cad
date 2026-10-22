@@ -53,7 +53,6 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     # CAD skills teach); `viewer stop` asks it to exit. The two-word entry is required:
     # dispatch matches argv[0:2] first.
     "viewer": ("cadgen.cli.viewer", "start, or reuse, this machine's CAD Viewer"),
-    "viewer stop": ("cadgen.cli.viewer_stop", "ask the CAD Viewer on a port to exit"),
     # CAD inside an agent host's panels. The host starts it, one process per thread.
     "mcp": ("cadgen.cli.mcp", "serve CAD to an agent host over MCP (stdio)"),
     "telemetry": ("cadgen.cli.telemetry", "show or change the usage stats and crash reports CAD sends: status, on, off"),

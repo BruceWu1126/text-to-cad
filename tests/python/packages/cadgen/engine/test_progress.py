@@ -347,11 +347,15 @@ class DaemonProgressTest(unittest.TestCase):
         self.assertEqual(first.returncode, 0)
         served = self.cli("serve", "XBF/slow.xbf")
         self.assertEqual(served.returncode, 0, served.stderr)
-        base, ident = served.stdout.strip().split("/?doc=")
+        from urllib.parse import urlsplit, parse_qs
+        page = urlsplit(served.stdout.strip())
+        query = parse_qs(page.query)
+        base, ident, token = f"{page.scheme}://{page.netloc}", query["doc"][0], query["token"][0]
         route = f"{base}/api/doc/{ident}/version"
 
         def get(query: str) -> dict:
-            with urllib.request.urlopen(f"{route}?{query}", timeout=120) as response:
+            with urllib.request.urlopen(urllib.request.Request(f"{route}?{query}",
+                        headers={"Authorization": "Bearer " + token}), timeout=120) as response:
                 return json.loads(response.read())
 
         idle = get("")

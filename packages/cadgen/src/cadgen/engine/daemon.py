@@ -51,6 +51,8 @@ from cadgen.engine.atomic_replace import replace_atomic
 __all__ = ["IDLE_SECONDS", "Pool", "lock", "lock_path", "main", "socket_path", "state_dir", "worker_cap",
            "worker_idle"]
 
+HTTP_FACTORY = None  # optional application supplied by the enclosing distribution
+
 IDLE_SECONDS = 3600.0
 PROTOCOL = 2
 WINDOWS = os.name == "nt"
@@ -374,10 +376,12 @@ class Pool:
     a slot after it. A worker idle ``idle`` seconds is retired (``retire_idle``), as is one that is
     gone or over its memory cap when let go. ``start(key, environment, cwd)`` starts a worker."""
 
-    def __init__(self, cap: int, idle: float, start: Callable[[str, dict[str, str], str | None], Any]) -> None:
+    def __init__(self, cap: int, idle: float, start: Callable[[str, dict[str, str], str | None], Any],
+                 connected: Callable[[Any], bool] = lambda worker: False) -> None:
         self.cap = max(1, int(cap))
         self.idle = idle
         self.start = start
+        self.connected = connected
         self.lock = threading.Condition()
         self.live: dict[str, Any] = {}  # by key
         self.starting: set[str] = set()  # the keys whose worker is being started, each holding a slot
@@ -426,10 +430,11 @@ class Pool:
             worker.stop()
 
     def retire_idle(self, now: float | None = None) -> list[Any]:
-        """Retire every worker idle ``idle`` seconds or more; the retired."""
+        """Retire workers idle ``idle`` seconds with no connected document; the retired."""
         now = time.monotonic() if now is None else now
         with self.lock:
-            gone = [worker for worker in self.live.values() if not worker.leased and now - worker.used >= self.idle]
+            gone = [worker for worker in self.live.values()
+                    if not worker.leased and now - worker.used >= self.idle and not self.connected(worker)]
             for worker in gone:
                 del self.live[worker.key]
                 self._note(worker, "idle")
@@ -526,7 +531,7 @@ class Daemon:
     def __init__(self, idle: float, cap: int | None = None, retire_after: float | None = None) -> None:
         self.idle = idle
         self.pool = Pool(cap or worker_cap(), retire_after if retire_after is not None else worker_idle(idle),
-                         self._start)
+                         self._start, self.connected)
         self.workers_lock = threading.Lock()  # each worker's ``held``
         self.born = time.time()
         self.last = time.monotonic()
@@ -546,6 +551,12 @@ class Daemon:
 
     def touch(self) -> None:
         self.last = time.monotonic()
+
+    def connected(self, worker: Worker) -> bool:
+        """A page watching any document this worker built keeps its memo warm."""
+        server = self.server
+        return server is not None and any(self.builders.get(os.path.normcase(str(path))) is worker
+                                          for path in server.watched())
 
     def _start(self, script: str, environment: dict[str, str], cwd: str | None) -> Worker:
         return Worker(script, environment, self.patched, self.settled, cwd=cwd, on_progress=self.progressed)
@@ -624,8 +635,12 @@ class Daemon:
         with self.serving:
             if self.server is None:
                 self.server = Server(port=int(request.get("port") or 0), three=request.get("three"), touch=self.touch,
-                                     provenance=self.provenance, cache=MESHES)
+                                     provenance=self.provenance, cache=MESHES, isolated=True,
+                                     host=request.get("host") or "127.0.0.1", http_factory=HTTP_FACTORY)
                 self.server.start()
+            elif ((request.get("port") and int(request["port"]) != self.server.port)
+                  or (request.get("host") and request["host"] != self.server.http.server_address[0])):
+                raise ValueError("the installation's engine already serves another host/port; stop it before changing its bind")
             return self.server
 
     def settled(self, worker: Worker, every: bool = False) -> None:
@@ -769,7 +784,17 @@ class Daemon:
             except Exception as error:  # noqa: BLE001
                 send({"failed": f"cannot serve {request['path']}: {error}"})
                 return
-            send({"ok": True, "url": f"{server.url}/?doc={ident}", "port": server.port})
+            app = getattr(server.http, "app", None)
+            token = app.token if app is not None else ""
+            send({"ok": True, "url": f"{server.url}/?doc={ident}" + (f"&token={token}" if token else ""),
+                  "doc": ident, "token": token, "port": server.port})
+        elif op in ("viewer", "http"):
+            server = self.serve(request)
+            application = getattr(server.http, "app", None)
+            if application is None:
+                send({"failed": "this engine has no application host"})
+            else:
+                send(application.launch(request) if op == "viewer" else application.endpoint())
         elif op == "draw":
             self.draw(request, send)
         elif op == "warm":
@@ -830,7 +855,9 @@ class Daemon:
                 "serving": None if self.server is None else {"url": self.server.url,
                                                              "documents": self.server.listing()},
                 "models": self.models.listing(),
-                "renders": [] if self.renders is None else self.renders.status()}
+                "renders": [] if self.renders is None else self.renders.status(),
+                "sessions": (self.server.http.app.sessions() if self.server is not None
+                             and hasattr(self.server.http, "app") else [])}
 
     def watch(self) -> None:
         period = min(30.0, max(min(self.idle, self.pool.idle) / 10, 0.2))
@@ -839,7 +866,8 @@ class Daemon:
             self.models.prune()
             if self.renders is not None:
                 self.renders.retire_idle(self.pool.idle)
-            if self.busy == 0 and time.monotonic() - self.last > self.idle:
+            if (self.busy == 0 and time.monotonic() - self.last > self.idle
+                    and not (self.server is not None and self.server.watched())):
                 self.stopping.set()
 
     def shutdown(self) -> None:
@@ -867,7 +895,10 @@ def _serve_connection(daemon: Daemon, connection: socket.socket) -> None:
                     stream.write((json.dumps(message, separators=(",", ":")) + "\n").encode())
                     stream.flush()
 
-            daemon.handle(request, send)
+            try:
+                daemon.handle(request, send)
+            except (OSError, ValueError) as error:
+                send({"failed": str(error)})
         except (OSError, ValueError):
             pass
         finally:

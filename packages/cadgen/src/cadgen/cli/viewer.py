@@ -16,9 +16,9 @@ DEFAULT_PROG = "cadgen viewer"
 def main(argv: Sequence[str] | None = None, *, prog: str = DEFAULT_PROG) -> int:
     import sys
 
-    from cadgen.viewer.main import serve
+    from cadgen.viewer.main import main as launch
 
-    return serve(list(sys.argv[1:] if argv is None else argv), prog=prog)
+    return launch(list(sys.argv[1:] if argv is None else argv), prog=prog)
 
 
 if __name__ == "__main__":

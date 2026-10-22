@@ -23,7 +23,6 @@ from urllib.parse import quote
 
 from cadgen._internal.picker import FilePicker, PickerFailed
 from cadgen.viewer import handler as handler_module
-from cadgen.viewer import reload as reload_module
 from cadgen.viewer.http_app import create_cad_app, host_is_allowed, hostname_only
 
 
@@ -208,7 +207,7 @@ class ServerInfo(HttpLayerTestCase):
         info = json.loads(body)
         self.assertEqual(info["app"], "cad-viewer")
         self.assertIn("identityToken", info)
-        self.assertIs(info["autoReload"], reload_module.running_from_source_checkout())
+        self.assertFalse(info["autoReload"])
         self.assertIn(info["platform"], ("darwin", "win32", "linux"))
         self.assertEqual(info["pid"], os.getpid())
         self.assertEqual(info["port"], self.fixture.port)

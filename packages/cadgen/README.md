@@ -32,8 +32,7 @@ cadgen where XBF/arm.xbf                      # its build closure
 **PURPOSE** — the engine and its command surface: models built in a warm worker whose memo
 makes an edit cost what it changed, documents and their exports, kinematics and motions,
 materials, references to geometry, snapshots drawn by OCCT; the CAD Viewer (`cadgen viewer`: a
-local HTTP server over the built client, on port 3245 or the port `--port` names, serving every
-CAD file by its absolute path); CAD beside an agent's chat (`cadgen mcp`: an MCP App server that
+launcher for a page on the installation’s engine, serving every CAD file by its absolute path); CAD beside an agent's chat (`cadgen mcp`: an MCP App server that
 an agent host starts, over the viewer's own routes); the URDF, SDF and SRDF validators; and
 engineering drawings (`@eng_drawing`).
 
@@ -41,8 +40,8 @@ engineering drawings (`@eng_drawing`).
 `import cadgen`) and the bundled runtime. Never app code, never JavaScript source at runtime.
 
 **DEPENDED ON BY** — every skill (as a pinned installed distribution). The CAD Viewer is not a
-dependent but a part: `cadgen.viewer` serves the client, and has the engine (its daemon) serve
-every STEP and `.xbf` a page opens, relaying the page's reads of it.
+dependent but a part: the engine serves `cadgen.viewer`’s client, HTTP application and
+every STEP and `.xbf` a page opens on one authenticated listener, without a relay.
 
 ## The rest of the package's documentation
 
@@ -56,7 +55,7 @@ the two disagree, the engine's README is right.
 ## The design laws
 
 These are LAWS, not conventions: a change that violates them is wrong even when it works.
-Laws 1 to 13 are the engine's; 14 to 18 hold for the whole package.
+Laws 1 to 13 and 19 to 20 are the engine's; 14 to 18 hold for the whole package.
 
 1. **An xbf carries its build closure as pointers and digests** -- script and function,
    modules, data inputs, versions and the key; never source, never lines on elements, never
@@ -160,6 +159,16 @@ Laws 1 to 13 are the engine's; 14 to 18 hold for the whole package.
     and run a build and a snapshot: each works, and nothing waits on a request beyond the one
     wait above.
 
+19. **Connected means warm.** A served document's outstanding version wait or recent
+    sync protects the worker that built it from idle retirement. The engine outlives its
+    clients; a page closing never stops a worker. Memory and worker-count caps still apply
+    (the engine's **Architecture** and **The daemon and its workers**).
+
+20. **One engine serves the installation.** Page sessions and document reads share its
+    authenticated HTTP listener. Launchers exit; clients closing never stop it. Kernel
+    operations run in child processes, never in the engine's request threads. Each
+    page session keeps its own root. See the engine's **Architecture**.
+
 ## The shape of the package
 
 ```
@@ -176,7 +185,7 @@ src/cadgen/
                          #   files by absolute path (backend), a file's catalog row
                          #   (scanner), the explorer's reads (folders), the model library
                          #   every CAD view shares (recents), a STEP's and an .xbf's serve
-                         #   by the engine and the relay of its reads (xbf), a DXF's
+                         #   by the engine and in-process document reads (documents), a DXF's
                          #   payload (drawings), a robot's (robots), Quick Edit's packets
                          #   (prompt_files)
   mcp/                   # CAD for agent hosts: stdio JSON-RPC (protocol), the tools and

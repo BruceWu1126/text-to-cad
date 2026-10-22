@@ -153,6 +153,39 @@ def hinge():
    patched with an attribute of cadgen's own: it is dropped, or refused by name at document
    time (`test_kinematics`' conformance test walks the subtree and holds it).
 
+14. **Connected means warm.** A worker is not retired for idleness while any served
+    document it built has a version wait outstanding or completed a sync within `serve.LIVE`
+    seconds. The memory cap still applies. Closing a page never stops the engine or its
+    worker; once its last sync expires, ordinary idle retirement applies.
+
+15. **One HTTP owner per installation.** The daemon serves page sessions and document
+    reads on one authenticated listener. A launcher exits after handing its client the
+    engine URL; closing a client never stops the engine. Each page has its own catalog root.
+16. **No kernel in request threads.** Reading XBF/STEP, meshing, topology facts and poses
+    run in child processes. The daemon holds structures and buffers, never live kernel objects.
+
+## Architecture
+
+One daemon per installation owns the worker pool, served documents and HTTP listener.
+A model's worker is a separate process, holding its memo and live kernel objects.
+The distribution injects its HTTP application through `daemon.HTTP_FACTORY`; this
+standalone engine imports no application module. The application serves the built
+viewer and per-launch catalog sessions on that listener. Document routes run in
+process, with no network relay. Kernel reads, topology, poses and meshes run in
+reader/mesh subprocesses; even an inline-mesh request stays outside the daemon.
+
+The daemon maps each built document to its worker. HTTP watcher accounting has its
+own lock, independent of document reads and pool admission. Outstanding version
+waits and recent syncs preserve that worker from idle retirement and keep the daemon
+alive. The worker-count cap still uses LRU eviction to admit a new script, and the
+per-worker memory cap remains enforced after each build.
+
+The installation's private socket supplies its HTTP token. Page URLs exchange it
+for a same-site cookie; programmatic clients use Bearer authentication. All routes
+retain the application's Host and cross-site mutation checks. Explicit host/port
+requests must match an existing listener. A second installed version has a different
+installation identity and therefore a different engine.
+
 ## Layout
 
 | Module | What it is |
@@ -292,8 +325,9 @@ guess, no refusal; the operating system does the rest.
   exits -- and its slot is the new one's. With every worker busy, the build waits for the first
   to come free, and every build that needs a slot after it waits behind it. A build that waits
   for its own script's busy worker takes no slot.
-- **Idle workers go.** A worker idle `CADGEN_ENGINE_WORKER_IDLE` seconds (default: the
-  daemon's idle time, an hour) is retired.
+- **Unwatched idle workers go.** A worker idle `CADGEN_ENGINE_WORKER_IDLE` seconds (default:
+  the daemon's idle time, an hour) is retired only when none of its served documents has
+  an outstanding version wait or a sync within `serve.LIVE` (90 seconds).
 - **A memory cap.** A worker whose resident memory is over `CADGEN_ENGINE_WORKER_RSS_MB` after
   a build (default: a quarter of the machine's memory, at least 2 GiB; `0` for no cap) is
   retired: the report says so (`retired`), and the worker exits once it has answered.
@@ -384,23 +418,12 @@ build's end wake it, and nothing polls.
 
 ## The viewer and the snapshot
 
-The CAD Viewer opens an `.xbf` or a STEP by asking this engine to serve it (the `serve` op,
-through the daemon), and its page reads the structure and every part buffer through the
-viewer's own origin, which relays the engine's read routes (`cadgen/viewer/xbf.py`), waiting on
-`/version` for the next build: so the CAD app's tunnel carries the reads, and a viewer reached
-from another machine serves them. An edit reaches the page the moment the engine has it. A
-page on this machine may also read the engine directly (the snapshot's does): every answer
-names a loopback page's origin as an allowed reader (`access.py`: `localhost`, `127.0.0.1`,
-`[::1]`, any port); a page from anywhere else gets no such header and its browser keeps the
-answer from it.
-
-`cadgen viewer` warms the engine once it has announced its URL (`{"op": "warm"}`, on a thread
-nothing waits on): the daemon starts, and with it its server, its meshing pool and a STEP reader
-(`Server.warm`), so a page's first document waits on no process start. On a 24-part assembly
-(each part filleted and drilled) the first open of its `.xbf` took 0.14 s warm against 2.4 s cold,
-and of its STEP 0.27 s against 5.8 s (a fresh daemon each, the median of three). A daemon that
-cannot start is the first open's to report. `CADGEN_VIEWER_WARM=0` skips the warm (the launcher
-tests set it: each launch otherwise starts an engine, 3-11 s apiece under load).
+The CAD Viewer and its document reads share the daemon's HTTP listener. The page
+reads `/__cad/api/doc/<id>` and waits on its `/version` route; dispatch calls the
+engine directly. XBF/STEP loading and geometry facts run in child processes. A
+launcher creates or reuses a page session, prints its authenticated URL and exits.
+Each session has its own starting directory and catalog. The standalone engine's
+minimal page and snapshot server remain available without the enclosing application.
 
 **The look.** The regular display modes draw a document as OCCT's PBR raster draws it, one frozen
 record (`render/look.py`) that the OCCT prototype (`render/occt.py`, its finishes and light in

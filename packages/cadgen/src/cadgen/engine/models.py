@@ -40,7 +40,9 @@ class Models:
                 self.daemon.builders[os.path.normcase(address)] = worker
                 if not report.get("files") or old and old.get("opened"):
                     server, ident = self.register_page(address)
-                    report["url"] = f"{server.url}/?doc={ident}"
+                    app = getattr(server.http, "app", None)
+                    token = app.token if app is not None else ""
+                    report["url"] = f"{server.url}/?doc={ident}" + (f"&token={token}" if token else "")
 
     def register_page(self, address: str) -> tuple[Any, str]:
         server = self.daemon.serve({})
