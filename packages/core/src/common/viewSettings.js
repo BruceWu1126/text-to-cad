@@ -187,11 +187,12 @@ export function readPreviewSettings(input) {
   return readable;
 }
 
-// Where Render's floor stands: at the document's Z=0 plane ("origin", Model origin), where the
-// model was authored to stand, rather than its lowest point ("lowest"), which a person may still
-// choose. The Render recipe's own backdrop default (`sceneSettings.js`) is this too: one value for
-// the Viewer and the snapshot.
-export const RENDER_FLOOR_PLACEMENT = "origin";
+// Where Preview's floor stands: at the model's lowest point ("lowest"), under it wherever it was
+// authored, rather than the document's Z=0 plane ("origin", Model origin), which a person may still
+// choose. The Render recipe's own backdrop default (`sceneSettings.js`) is this too, and the stills'
+// Preview stands its floor there as well (cadgen's `render/occt.py`): one value for the Viewer and
+// the snapshot.
+export const RENDER_FLOOR_PLACEMENT = "lowest";
 
 // The CAD edges' ink on a model's faces.
 const EDGE_COLOR = "#253443";

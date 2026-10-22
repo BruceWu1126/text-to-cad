@@ -588,8 +588,8 @@ dropdown or colour is as wide as its value, at the row's right end. Sliders are 
 as everywhere, with a committed value field after them. By part's palette is a row of
 swatches, then add and remove. Choices use Select controls. Continuous values use compact
 slider and committed-number fields; their keyboard input stays with the field. Colours
-retain swatches and a custom colour picker. Floor is on by default, at the model's Z=0
-plane. A long form scrolls within the available viewer height. A nested Select or colour
+retain swatches and a custom colour picker. Floor is on by default, at the model's lowest
+point (its Placement, **Lowest point**; **Model origin** stands it at Z=0). A long form scrolls within the available viewer height. A nested Select or colour
 picker owns Escape and outside interaction before its parent surface. The last item is
 **Reset to default**, disabled at Preview's defaults; it removes only Preview's overrides,
 never the display.
