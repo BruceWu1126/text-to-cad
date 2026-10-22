@@ -108,6 +108,7 @@ piece. Nested `@xbf` is never needed for caching.
 | `lyra` | one script: the hand and its 17 URDF links, 18 models | 16 revolute joints connected at the relaxed pose (absolute angles, the URDF's travel as ranges), the SRDF's seven group states as configurations and the five clips as motions of time (joint-space already); each link a model writing the 3MF `lyra.urdf` references; one `@memo` stage, `links()`, shared by all 18 (8.7 s cold against 12.5 s without it) |
 | `falcon_heavy` | 3 scripts -> one script, 3 models | the full stack, a 270° cutaway and an exploded view of one vehicle library: 85 parts in 2,142 placements, 27 engines as `moved` placements of one Merlin; two `@memo` stages, `engine_prototype()` (one Merlin per build, not nine) and `build_vehicle(cutaway)` (the exploded view's vehicle a placement of the stack's): 9.3 s cold with none, 6.1 s with both |
 | `branding` | `logo_c`, `logo_cad`, `logo_texttocad` | plain models with the STEP each delivers (`@xbf` + `@step`), extruded from a JSON input the body reads (`profiles.json`, a change to which rebuilds them); colours by `srgb` |
+| `tests` | the three manual cases `models/tests/README.md` lists (`joint_playground.urdf`, no model and named nowhere, not ported) | manual-validation fixtures, never CI input: the Render floor, a 32-part rebuild during a load, and materials (a catalogue steel with `color=None`, a paint with its colour), a revolute and a prismatic joint, a configuration and a motion on 11 parts |
 
 Each model's `src/README.md` says what was ported and what was dropped.
 
