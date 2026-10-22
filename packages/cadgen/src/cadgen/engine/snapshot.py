@@ -776,16 +776,14 @@ def add_parser(verbs: Any) -> argparse.ArgumentParser:
 def run(args: argparse.Namespace) -> int:
     if "::" in args.document or args.document.endswith(".py"):
         return _run_model(args)
+    from cadgen.engine import api
+
     try:
-        display = parse_display(args.display, args.grid)
-        camera = parse_camera(args.camera)
-        size = parse_size(args.width, args.height, args.size_profile)
-        pose = parse_pose(args.pose)
-        given = args.width is not None or args.height is not None or args.size_profile is not None
-        report = snapshot(Path(args.document), Path(args.out), display=display, camera=camera, preview=args.preview,
-                          size=size if given else None, daemon=not args.no_daemon, pose=pose,
-                          annotation=parse_annotation(args.annotation), measurements=parse_measurements(args.measurements),
-                          annotation_source=args.annotation)
+        # The verb as a function (``api.snapshot``), which checks the flags as ``snapshot`` does.
+        report = api.snapshot(Path(args.document), args.out, display=args.display, camera=args.camera, grid=args.grid,
+                              preview=args.preview, pose=args.pose, width=args.width, height=args.height,
+                              size_profile=args.size_profile, daemon=not args.no_daemon, annotation=args.annotation,
+                              measurements=args.measurements).report
     except SnapshotRefused as error:
         print(f"cadgen xbf snapshot: {error}", file=sys.stderr)
         return 2

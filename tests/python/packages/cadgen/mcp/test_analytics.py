@@ -282,7 +282,7 @@ class ServerCountsTest(_Tmp):
             {"name": "view", "calls": 1},
         ])
         self.assertEqual((payload["schema"], payload["process"], payload["channel"], payload["presentation"],
-                          payload["client"]["name"]), (5, "app", "claude-directory", "tabs", "codex-mcp-client"))
+                          payload["client"]["name"]), (6, "app", "claude-directory", "tabs", "codex-mcp-client"))
         # Under an id of its own, stamped with the time it was made: a random id, and a whole second.
         self.assertEqual(str(uuid.UUID(payload["batch"], version=4)), payload["batch"])
         self.assertIsInstance(payload["at"], int)

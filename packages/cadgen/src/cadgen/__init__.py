@@ -18,12 +18,21 @@ from typing import TYPE_CHECKING
 # opts out.
 from cadgen._internal.font_scan import install_font_guard as _install_font_guard
 from cadgen._internal.kernel_import_site import install as _install_kernel_import_site
+from cadgen._internal.engine_telemetry import install as _install_engine_telemetry
 
 _install_kernel_import_site()
 del _install_kernel_import_site
 
 _install_font_guard()
 del _install_font_guard
+
+# The engine counts nothing (its law 3: it imports nothing of cadgen): it tells what each of its verbs did to
+# the functions in cadgen.engine.api.observers. cadgen's telemetry is one, appended here for the reason the
+# font guard is installed here: every route into the engine -- `python model.py`, a `cadgen xbf` command,
+# `cadgen.build()` -- comes through this package first. Appended as the engine's verbs are imported, never
+# sooner: a process that uses no engine imports none of it.
+_install_engine_telemetry()
+del _install_engine_telemetry
 
 __all__ = [
     "__version__",

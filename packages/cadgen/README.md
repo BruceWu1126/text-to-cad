@@ -475,7 +475,12 @@ what it counted -- a snapshot, a drawing, a crash -- to a running build daemon o
 its local socket, never starting one, and
 gives up after a moment (`daemon.client.HAND_OVER_SECONDS`); with no daemon to take
 it, it keeps it in a small file beside the settings for the next process that sends
-(`analytics.spool`). A process that exits sends nothing either: its last batch --
+(`analytics.spool`). The engine's verbs keep what they counted there too
+(`_internal/engine_telemetry.py`, cadgen's observer of `engine.api.observers`), and a
+command that finds that file has waited more than a window, with no other process
+sending, starts a sender detached that sends it and exits
+(`_internal/telemetry_send.py`): the command never waits on it. A process that
+exits sends nothing either: its last batch --
 a server's, or the build daemon's -- is kept in a file beside the settings, and the
 next process that sends sends it in the background, a moment after it starts
 (`analytics.KEPT`). One wait remains, bounded, for something only the network can
@@ -620,7 +625,8 @@ src/cadgen/
                          #   every app and version of cadgen
   analytics.py           # telemetry: usage counts and crash reports (a
                          #   crash's type and frames, never its message) from
-                         #   the CAD apps and the build daemon, on by default
+                         #   the CAD apps, the build daemon and the engine's
+                         #   verbs (_internal/engine_telemetry.py), on by default
                          #   once a command has said so, never after a no (its
                          #   answer: settings.json's `telemetry` section)
   features.py            # the CAD views' features a person can turn off

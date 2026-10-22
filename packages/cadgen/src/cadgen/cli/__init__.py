@@ -312,6 +312,10 @@ def _tell() -> None:
 
 
 def _run(command: str, module_name: str, rest: list[str]) -> int:
+    # The engine's verbs this command runs are counted as a command's (`cadgen/_internal/engine_telemetry.py`).
+    from cadgen._internal import engine_telemetry
+
+    engine_telemetry.command = command
     # A door is a daemon job, handed over before the command's module is imported: the
     # daemon exists to avoid paying the multi-second OCP/build123d import. Only a process
     # the daemon started (CADGEN_DAEMON_CHILD: a worker, or a program its job started) runs
