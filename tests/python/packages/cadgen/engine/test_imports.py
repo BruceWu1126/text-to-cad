@@ -163,45 +163,69 @@ class ImportTest(unittest.TestCase):
             import build123d, OCP.STEPCAFControl, OCP.BinTools
             from cadgen.engine import reader
 
-            def peak():
-                # The process's peak memory, in the platform's unit: the two runs compare alike.
-                try:
-                    import resource
-                except ImportError:  # Windows: PROCESS_MEMORY_COUNTERS.PeakPagefileUsage
-                    import ctypes
-                    from ctypes import wintypes
-
-                    class Counters(ctypes.Structure):
-                        _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
-                                    *((name, ctypes.c_size_t) for name in (
-                                        "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage",
-                                        "QuotaPagedPoolUsage", "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage",
-                                        "PagefileUsage", "PeakPagefileUsage"))]
-
-                    counters = Counters()
-                    counters.cb = ctypes.sizeof(Counters)
-                    # Typed: the current process's pseudo-handle is -1, a HANDLE, not a C int.
-                    current = ctypes.windll.kernel32.GetCurrentProcess
-                    current.restype = wintypes.HANDLE
-                    info = ctypes.windll.psapi.GetProcessMemoryInfo
-                    info.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
-                    info.restype = wintypes.BOOL
-                    assert info(current(), ctypes.byref(counters), counters.cb), ctypes.WinError()
-                    # The peak committed private memory: the working set's peak is set by the imports'
-                    # mapped libraries, which a parse's heap stays under (both runs read 0 growth).
-                    return counters.PeakPagefileUsage
-                return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-
-            before = peak()
-            if sys.argv[2] == "reader":
-                shape = reader.read_step(sys.argv[1])
-            else:
+            def parse():
+                if sys.argv[2] == "reader":
+                    return reader.read_step(sys.argv[1])
                 header, data = reader._parse(sys.argv[1])
                 shapes, locations = reader.unpack(data, header["shapes"])
                 del data
-                shape = reader.assemble(header, shapes, locations)
+                return reader.assemble(header, shapes, locations)
+
+            try:
+                import resource
+            except ImportError:  # Windows
+                resource = None
+            if resource is not None:
+                # The process's peak resident memory: what the parse lifted it by.
+                before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                shape = parse()
+                grown = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before
+            else:
+                # Windows keeps no peak a parse can lift past the imports' own (the peak working set
+                # and the peak commit both read 0 growth on the runner), so the process's committed
+                # private memory (PROCESS_MEMORY_COUNTERS.PagefileUsage) is sampled while it parses.
+                import ctypes
+                import threading
+                from ctypes import wintypes
+
+                class Counters(ctypes.Structure):
+                    _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                                *((name, ctypes.c_size_t) for name in (
+                                    "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage",
+                                    "QuotaPagedPoolUsage", "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage",
+                                    "PagefileUsage", "PeakPagefileUsage"))]
+
+                # Typed: the current process's pseudo-handle is -1, a HANDLE, not a C int.
+                current = ctypes.windll.kernel32.GetCurrentProcess
+                current.restype = wintypes.HANDLE
+                info = ctypes.windll.psapi.GetProcessMemoryInfo
+                info.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+                info.restype = wintypes.BOOL
+
+                def committed():
+                    counters = Counters()
+                    counters.cb = ctypes.sizeof(Counters)
+                    assert info(current(), ctypes.byref(counters), counters.cb), ctypes.WinError()
+                    return counters.PagefileUsage
+
+                before = committed()
+                highest = [before]
+                finished = threading.Event()
+
+                def sample():
+                    while not finished.wait(0.002):
+                        highest[0] = max(highest[0], committed())
+
+                sampler = threading.Thread(target=sample)
+                sampler.start()
+                try:
+                    shape = parse()
+                finally:
+                    finished.set()
+                    sampler.join()
+                grown = max(highest[0], committed()) - before
             assert len(shape.children) == 500
-            print(json.dumps(peak() - before))
+            print(json.dumps(grown))
         """)
         grown = {}
         for where in ("here", "reader"):
