@@ -1,0 +1,66 @@
+# lyra models
+
+`models/lyra` ported to `cadgen.engine`: a five-digit robotic right hand (~198 mm
+flange to middle fingertip) with 16 degrees of freedom, and the 17 link meshes its
+URDF references. One script, `lyra.py`, holds every model:
+
+| Model | Writes | What it is |
+| --- | --- | --- |
+| `lyra` | `XBF/lyra.xbf` | The hand: 17 links, 111 occurrences, 16 revolute joints, 7 configurations, 5 motions |
+| `palm` ... `thumb_distal` (17) | `XBF/<link>.xbf`, `XBF/<link>.3mf` | One URDF link alone, in its part-local frame; `../lyra.urdf` references the 3MF |
+
+Build from this folder: `python lyra.py` builds all 18. `../lyra.urdf` and
+`../lyra.srdf` are authored (not generated); the URDF's meshes are `XBF/<link>.3mf`.
+
+```
+python lyra.py
+python -m cadgen.engine snapshot ../XBF/lyra.xbf lyra.png --pose fist
+python -m cadgen.engine snapshot ../lyra.urdf urdf.png
+python -m cadgen.engine export ../XBF/lyra.xbf lyra.glb     # the five motions, baked as clips
+python -m lib.clearance                                      # after editing a pose or a motion
+```
+
+## How it is built
+
+`lib/` holds the part builders (`palm.py`, `digits.py`) unchanged but for
+`import build123d as bd`, and the shared code: `chain.py`, the chain spec the URDF
+and SRDF mirror (offsets, travel, the named poses, a stdlib FK); `common.py`, the
+palette and `revolute_attach`; `clearance.py`, the stdlib capsule self-check of
+every pose and motion path.
+
+`links()` is the script's one `@memo` function: all 17 links (~1,650 kernel calls,
+~3.8 s). The hand and each link model call it, so a build makes every link once:
+the first call runs it, or replays it when no edit reaches a builder, and every
+other call is a new placement of its result. Measured cold: 8.7 s with it, 12.5 s
+without it, when each link model builds its own link (those calls are misses, not
+memo hits). An edit to a builder runs it again (an edit of the thumb's tip radius:
+2.4 s, 18 misses), and every xbf is written again, its closure having changed; each
+3MF keeps its bytes unless its mesh changed.
+
+## Kinematics
+
+The old `AssemblyHelper` frames and typed mates are one thing now: each joint is a
+build123d `RevoluteJoint` on the parent link and a `RigidJoint` on the child
+(`lib/common.revolute_attach`), connected root to leaf at the relaxed pose. That
+pose is the as-built configuration. Values are the chain's absolute angles, no
+longer deltas from the relaxed build, and each joint's range is the URDF's travel.
+The SRDF's seven hand group states are configurations: `zero`, `relaxed` (as built),
+`fist`, `precision_pinch`, `tripod_pinch`, `point`, `ok_sign`. The palm is the
+ground.
+
+## Motions
+
+The five clips were joint-space already (chain FK at every sample, applied as a
+rigid delta against the relaxed build), so each is a motion now: a function of time
+returning every joint's angle, looped, which the xbf keeps as samples and a GLB
+export bakes into a clip of the same name: `poseTour` (11.5 s), `graspLoop`
+(2.6 s), `pinchLoop` (2.8 s), `rippleLoop` (2.6 s), `countLoop` (7 s). Their key
+orders are the ones `lib/clearance.py` checks.
+
+## Not ported
+
+- Per-link STEP files. The xbf replaces them, and `cadgen export` writes one on
+  demand.
+- The 17 one-link scripts. Each link is a model of `lyra.py` now, so no model
+  calls another.
+- The clips' display labels ("Pose tour", ...): a motion has its name alone.
