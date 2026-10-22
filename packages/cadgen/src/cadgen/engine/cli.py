@@ -412,8 +412,9 @@ def _gb(megabytes: Any) -> str:
 
 def status_text(answer: dict[str, Any]) -> str:
     """``cadgen xbf status``: the daemon and its pool's rules, a line per worker -- busy or idle,
-    its script, process, builds and memory after its last build, how long it has been busy or
-    idle -- the builds waiting for a worker, the last retirements, and what it serves."""
+    its script, process, builds and memory after its last build, where a busy one's build is
+    (its last progress frame), how long it has been busy or idle -- the builds waiting for a
+    worker, the last retirements, and what it serves."""
     import time
 
     workers = answer.get("workers") or []
@@ -426,8 +427,15 @@ def status_text(answer: dict[str, Any]) -> str:
     width = max((len(name) for name in names), default=0)
     for worker, name in zip(workers, names):
         builds = f"{worker.get('builds', 0)} build{'' if worker.get('builds') == 1 else 's'}"
+        doing = _span(worker.get("seconds"))
+        frame = worker.get("progress")
+        if worker.get("busy") and frame:
+            from cadgen.engine.progress import describe
+
+            # Where its build is: ``building tom.py::tom · Building geometry · 3/7 stages · 41s``.
+            doing = f"building {frame.get('model')} · {describe(frame)} · {doing}"
         lines.append(f"  {'busy' if worker.get('busy') else 'idle'}  {name:<{width}}  {str(worker.get('pid')):>6}  "
-                     f"{builds:>10}  {_gb(worker.get('rssMb')):>7}  {_span(worker.get('seconds'))}")
+                     f"{builds:>10}  {_gb(worker.get('rssMb')):>7}  {doing}")
     if answer.get("waiting"):
         waiting = answer["waiting"]
         lines.append(f"  waiting  {waiting} build{'' if waiting == 1 else 's'}, first come first served")

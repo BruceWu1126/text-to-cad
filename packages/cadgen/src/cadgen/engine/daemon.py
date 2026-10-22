@@ -21,7 +21,10 @@ do not count toward the cap.
 Its only files are the operating system's coordination: a Unix socket and a lock in
 ``tempfile.gettempdir()/cadgen-engine`` (on Windows, a localhost TCP port and a token,
 in a port file there). Requests are one JSON object per line on a connection; answers
-are JSON lines, the last of which carries ``done``, ``failed`` or ``ok``.
+are JSON lines, the last of which carries ``done``, ``failed`` or ``ok``. Before it, a build
+sends its caller its ``{"log"}`` lines and its ``{"progress"}`` frames as its worker sends them
+(``progress.py``); the daemon keeps each busy worker's last frame for ``status``, and wakes the
+pages waiting on a served document the frame's build writes (``serve.Server.building``).
 """
 
 from __future__ import annotations
@@ -119,7 +122,9 @@ class Worker:
     The worker's protocol pipe (its original stdout) carries frames: a JSON object on one
     line and, when the object has ``bytes``, exactly that many bytes after the line. A
     reader thread takes every frame as it comes: a build's ``log`` lines go to that
-    build's caller, each served document it saves -- a ``patch`` frame, sent the moment
+    build's caller, and so do its ``progress`` frames (``progress.py``), the last of which it
+    keeps (``progress``, what ``status`` shows) and hands to ``on_progress``; each served
+    document it saves -- a ``patch`` frame, sent the moment
     the xbf is in place, before the exports -- to ``on_patch``, its ``done``/``failed``
     answer to the waiting ``build`` call, and its closing ``settled`` to ``on_settled``,
     which lets the server look at those files again. ``where`` asks the worker what made
@@ -128,7 +133,8 @@ same pipe, even while a build runs."""
 
     def __init__(self, script: str, environment: dict[str, str],
                  on_patch: Callable[[dict[str, Any], bytes, float], None] = lambda *_args: None,
-                 on_settled: Callable[..., None] = lambda _worker, _every=False: None, cwd: str | None = None) -> None:
+                 on_settled: Callable[..., None] = lambda _worker, _every=False: None, cwd: str | None = None,
+                 on_progress: Callable[["Worker", dict[str, Any]], None] = lambda _worker, _frame: None) -> None:
         self.script = script
         self.environment = environment
         env = dict(environment)
@@ -148,6 +154,10 @@ same pipe, even while a build runs."""
         self.sink: Callable[[dict[str, Any]], None] | None = None
         self.on_patch = on_patch
         self.on_settled = on_settled
+        self.on_progress = on_progress
+        # The running request's last progress frame, and every file its frames named.
+        self.progress: dict[str, Any] | None = None
+        self.touched: set[str] = set()
         self.answers: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
         self.started = time.time()
         self.builds = 0
@@ -191,6 +201,16 @@ same pipe, even while a build runs."""
                     sink = self.sink
                     if sink is not None:
                         sink({"log": message["log"]})
+                elif "progress" in message:
+                    frame = self.progress = message["progress"]
+                    self.touched.update(frame.get("outputs") or ())
+                    sink = self.sink
+                    if sink is not None:
+                        sink({"progress": frame})
+                    try:
+                        self.on_progress(self, frame)
+                    except Exception:  # noqa: BLE001 - where a build is never fails it
+                        pass
                 elif "patch" in message:
                     try:
                         self.on_patch(message["patch"], payload, arrived)
@@ -246,6 +266,7 @@ same pipe, even while a build runs."""
     def build(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         with self.lock:
             self.sink = send
+            self.progress, self.touched = None, set()
             try:
                 self._write(request)
                 message = self.answers.get()
@@ -499,7 +520,44 @@ class Daemon:
         self.last = time.monotonic()
 
     def _start(self, script: str, environment: dict[str, str], cwd: str | None) -> Worker:
-        return Worker(script, environment, self.patched, self.settled, cwd=cwd)
+        return Worker(script, environment, self.patched, self.settled, cwd=cwd, on_progress=self.progressed)
+
+    def progressed(self, _worker: Worker, frame: dict[str, Any]) -> None:
+        """A build's progress frame: the pages waiting on a served document it writes are woken
+        with it (``serve.Server.building``)."""
+        server = self.server
+        if server is not None and frame.get("outputs"):
+            server.building(frame)
+
+    def _built(self, worker: Worker, answer: dict[str, Any]) -> None:
+        """A request of ``worker`` answered: each served document its build wrote is built no
+        longer, and one whose model failed says what failed, and where (``serve.Server.built``)."""
+        server = self.server
+        if server is None:
+            return
+        outcomes: dict[str, Any] = {path: None for path in worker.touched}
+        done = answer.get("done")
+        reports = done.get("reports") if isinstance(done, dict) else done
+        for report in reports if isinstance(reports, list) else []:
+            frame = report.get("progress") or {}
+            failed = None if report.get("ok") else {"model": report.get("model"), "error": report.get("error"),
+                                                    "progress": frame}
+            for path in [*(frame.get("outputs") or ()), *(report.get("files") or {})]:
+                outcomes[path] = failed
+        if "failed" in answer:
+            frame = worker.progress or {}
+            outcomes = {path: {"model": frame.get("model"), "error": answer["failed"], "progress": frame}
+                        for path in outcomes}
+        if outcomes:
+            server.built(outcomes)
+
+    @staticmethod
+    def _where(error: Exception, worker: Worker | None) -> str:
+        """A worker's failure, and where its build was when it failed."""
+        from cadgen.engine.progress import describe
+
+        frame = worker.progress if worker is not None else None
+        return f"{error}, at {frame.get('model')}: {describe(frame)}" if frame else str(error)
 
     def lease(self, script: str, environment: dict[str, str], cwd: str | None = None) -> Worker:
         """The warm worker of a script (by its path), of code (``code::<name>``) or of the
@@ -584,11 +642,15 @@ class Daemon:
                         for path in _written(row):
                             if path.endswith(".xbf"):
                                 self.builders[os.path.normcase(path)] = worker
+                    self._built(worker, answer)
                     send(answer)
                     return
                 except WorkerGone as error:
                     if attempt == 2 or "during the build" in str(error):
-                        send({"failed": str(error)})
+                        failed = {"failed": self._where(error, worker)}
+                        if worker is not None:
+                            self._built(worker, failed)
+                        send(failed)
                         return
                 finally:
                     if worker is not None:
@@ -640,11 +702,15 @@ class Daemon:
                                 if path.endswith(".xbf"):
                                     self.builders[os.path.normcase(path)] = worker
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
+                        self._built(worker, answer)
                         send(answer)
                         return
                     except WorkerGone as error:
                         if attempt == 2 or "during the build" in str(error):
-                            send({"failed": str(error)})
+                            failed = {"failed": self._where(error, worker)}
+                            if worker is not None:
+                                self._built(worker, failed)
+                            send(failed)
                             return
                     finally:
                         if worker is not None:
@@ -700,14 +766,15 @@ class Daemon:
 
     def status(self) -> dict[str, Any]:
         """The daemon, its workers (each its script, its builds, its memory after its last build
-        in MiB, and how long it has been busy or idle), the requests waiting for one, the last
-        retirements, and what it serves and draws."""
+        in MiB, how long it has been busy or idle, and a busy one's last progress frame), the
+        requests waiting for one, the last retirements, and what it serves and draws."""
         from cadgen.engine.worker import rss_cap_mb
 
         now = time.monotonic()
         workers = [{"script": w.script, "pid": w.pid, "builds": w.builds, "alive": w.alive() and not w.retired,
                     "busy": w.leased, "rssMb": None if w.rss is None else round(w.rss),
-                    "seconds": round(now - (w.since if w.leased else w.used), 1)} for w in self.pool.workers()]
+                    "seconds": round(now - (w.since if w.leased else w.used), 1),
+                    "progress": w.progress if w.leased else None} for w in self.pool.workers()]
         return {"ok": True, "pid": os.getpid(), "up": round(time.time() - self.born, 1), "workers": workers,
                 "cap": self.pool.cap, "waiting": self.pool.waiting(), "idleTimeout": self.pool.idle,
                 "rssCapMb": rss_cap_mb(), "retired": list(self.pool.retired),
