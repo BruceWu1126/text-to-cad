@@ -216,6 +216,22 @@ def by_occt():
     return bd.Solid(shape)
 """
 
+# A model sized from an STL by build123d's importer, as a user writes one.
+SIZED = """
+from pathlib import Path
+
+import build123d as bd
+from cadgen.engine import xbf
+
+HERE = Path(__file__).resolve().parent
+
+
+@xbf
+def sized():
+    scan = bd.import_stl(HERE / "cube.stl")
+    return bd.Box(*scan.bounding_box().size)
+"""
+
 
 class ReadsTest(unittest.TestCase):
     """A mesh read as data, keyed by its bytes; a file read past the engine's readers, in C++
@@ -306,6 +322,25 @@ class ReadsTest(unittest.TestCase):
             # No key: a restart builds it too.
             _writer, record = previous.scan(self.folder / f"XBF/{name}.xbf")
             self.assertIsNone(json.loads(record)["key"], name)
+
+    def test_a_model_sized_by_import_stl_builds_again_when_the_stl_changes(self) -> None:
+        """The probe: a model sized from cube.stl by build123d's import_stl kept its 40 mm box
+        once the STL was 25 mm -- replayed warm, taken from its xbf after a restart: the STL is
+        opened in C++, where nothing heard it. It builds again either way."""
+        import build123d as bd
+
+        (self.folder / "sized.py").write_text(textwrap.dedent(SIZED), encoding="utf-8")
+
+        def sized(edge: float) -> tuple:
+            bd.export_stl(bd.Box(edge, edge, edge), str(self.folder / "cube.stl"))
+            (report,) = engine_build.build(self.folder / "sized.py", ["sized"], cwd=self.folder)
+            self.assertTrue(report["ok"], report)
+            return self.size("sized"), report["cache"]["used"]
+
+        self.assertEqual(sized(40), ((40.0, 40.0, 40.0), False))
+        self.assertEqual(sized(25), ((25.0, 25.0, 25.0), False), "warm: it was replayed, 40 mm")
+        self.restart()
+        self.assertEqual(sized(30), ((30.0, 30.0, 30.0), False), "a fresh worker: it took the 25 mm xbf")
 
 
 if __name__ == "__main__":
