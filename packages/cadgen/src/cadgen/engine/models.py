@@ -53,6 +53,12 @@ class Models:
         ident = server.register_model(address, lambda: self.load(address), version)
         return server, ident
 
+    def paths(self, worker: Any, model: str | None = None) -> list[str]:
+        name = model.rsplit("::", 1)[-1] if model else None
+        with self.lock:
+            return [address for address, row in self.records.items() if row["worker"] is worker
+                    and (name is None or row["source"]["name"] == name)]
+
     def resolve(self, address: str) -> dict[str, Any]:
         found = parse(address)
         if found is None:
@@ -120,5 +126,10 @@ class Models:
         with self.lock:
             return [{"address": address, "script": row["source"]["script"] if row["source"]["kind"] == "script" else "code",
                      "name": row["source"]["name"], "builtAt": row["builtAt"], "version": row["version"],
-                     "state": "building" if row["worker"].leased else "idle"}
+                     "state": self.state(address, row)}
                     for address, row in self.records.items() if not row["files"]]
+
+    def state(self, address: str, row: dict) -> str:
+        server = self.daemon.server
+        build = server.build_of(address) if server is not None else {}
+        return "building" if build.get("building") else "failed" if build.get("failed") else "idle"

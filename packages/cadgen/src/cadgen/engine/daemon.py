@@ -565,8 +565,10 @@ class Daemon:
         """A build's progress frame: the pages waiting on a served document it writes are woken
         with it (``serve.Server.building``)."""
         server = self.server
-        if server is not None and frame.get("outputs"):
-            server.building(frame)
+        if server is not None:
+            outputs = [*(frame.get("outputs") or []), *self.models.paths(_worker, frame.get("model"))]
+            if outputs:
+                server.building({**frame, "outputs": outputs})
 
     def _built(self, worker: Worker, answer: dict[str, Any]) -> None:
         """A request of ``worker`` answered: each served document its build wrote is built no
@@ -582,12 +584,13 @@ class Daemon:
             frame = report.get("progress") or {}
             failed = None if report.get("ok") else {"model": report.get("model"), "error": report.get("error"),
                                                     "progress": frame}
-            for path in [*(frame.get("outputs") or ()), *(report.get("files") or {})]:
+            for path in [*(frame.get("outputs") or ()), *(report.get("files") or {}),
+                         *self.models.paths(worker, report.get("model"))]:
                 outcomes[path] = failed
         if "failed" in answer:
             frame = worker.progress or {}
             outcomes = {path: {"model": frame.get("model"), "error": answer["failed"], "progress": frame}
-                        for path in outcomes}
+                        for path in [*outcomes, *self.models.paths(worker, frame.get("model"))]}
         if outcomes:
             server.built(outcomes)
 

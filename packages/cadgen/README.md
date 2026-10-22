@@ -1,7 +1,7 @@
 # cadgen
 
 The published distribution: CAD models written as Python, built by cadgen's engine
-(`cadgen.engine`) into documents (`.xbf`) and the files those models declare (STEP, GLB, STL,
+(`cadgen.engine`) into live XCAF documents and the files those models declare (XBF, STEP, GLB, STL,
 3MF, DXF), and the tools that show and check them. One PyPI package carrying the Python under
 `src/cadgen/` and what it serves that is not Python under `src/cadgen/_runtime/`: the CAD
 Viewer's client, the CAD app page, and a headless browser bundle of the viewer's scene, built

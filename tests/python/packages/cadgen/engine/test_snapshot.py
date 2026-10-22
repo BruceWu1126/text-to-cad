@@ -411,8 +411,8 @@ class SnapshotTest(unittest.TestCase):
             with self.subTest(said=said), self.assertRaisesRegex(SnapshotRefused, said):
                 job_pictures(broken)
         self.assertEqual(stale.read_bytes(), b"an earlier run's", "a refused job writes nothing, and takes nothing away")
-        with self.assertRaisesRegex(SnapshotRefused, "names a model"):
-            job_pictures(packet, f"{self.folder / 'stand.py'}::stand")
+        model = f"{self.folder / 'stand.py'}::stand"
+        self.assertEqual(str(job_pictures(packet, model)[0][0]), model)
         import contextlib
         import io
 

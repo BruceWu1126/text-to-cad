@@ -140,7 +140,7 @@ class EngineApp:
             from cadgen.engine.addresses import parse
 
             # The landing link selects an address without meshing it on the HTTP thread.
-            path = next(path for path, ident in self.server.idents.items() if ident == request.query['doc'])
+            path = next(path for path, ident in self.server.idents.items() if ident == request.query.get('doc'))
             address = parse(path)
             start = str(address.script.parent) if address and address.script else os.getcwd() if address else str(path.parent)
             launch = self.launch({'start': start})

@@ -1583,7 +1583,7 @@ same function name. `cadgen build 'import build123d as bd; result = bd.Box(10, 2
 builds `code::bracket` in the installation's engine. That name is explicit and
 unique within that engine; the same command with changed code updates the same
 address and open viewers. Neither code nor an address list is saved. Names are
-Python identifiers; no generated address or update flag is needed.
+ASCII Python identifiers; no generated address or update flag is needed.
 
 `cadgen serve ADDRESS`, `cadgen snapshot ADDRESS view.png`,
 `cadgen export ADDRESS part.step`, and `cadgen where ADDRESS 'face 1'`

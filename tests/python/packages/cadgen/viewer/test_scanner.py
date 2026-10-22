@@ -57,13 +57,30 @@ class ScannerTestCase(unittest.TestCase):
 
 
 class OneRowPerNamedFile(ScannerTestCase):
-    def test_the_written_artifact_has_a_row_and_a_model_script_none(self):
+    def test_artifacts_and_script_declarations_have_rows(self):
         self.write("drawing.dxf.py", "print(1)")
         self.write("model.py", "print(1)")
         self.write("outline.dxf", "0\nSECTION\n")
-        self.assertIsNone(catalog_entry(self.path("drawing.dxf.py")))
-        self.assertIsNone(catalog_entry(self.path("model.py")))
+        self.assertEqual(catalog_entry(self.path("drawing.dxf.py"))["models"], [])
+        self.assertEqual(catalog_entry(self.path("model.py"))["models"], [])
         self.assertEqual(self.entry("outline.dxf")["file"], self.path("outline.dxf").replace(os.sep, "/"))
+
+    def test_script_listing_reads_declarations_without_running_the_script(self):
+        script = self.write("parts.py", """from cadgen import model as declare, step
+import cadgen.engine as engine
+raise AssertionError('catalog must never execute a script')
+@declare
+def bare(): pass
+@step('part.step')
+def saved(): pass
+@engine.model
+def another(): pass
+""")
+        entry = catalog_entry(script)
+        self.assertEqual(entry["models"], [{"name": name, "address": f"{Path(script).resolve()}::{name}"}
+                                          for name in ("bare", "saved", "another")])
+        self.assertEqual(catalog_entry(f"{script}::bare")["sourceFormat"], "model")
+        self.assertEqual(sorted(os.listdir(self.root)), ["parts.py"])
 
     def test_a_file_under_a_hidden_folder_has_its_row_and_a_hidden_file_none(self):
         # Named, never found: a hidden FOLDER on the way is no reason to refuse it.
@@ -79,7 +96,7 @@ class OneRowPerNamedFile(ScannerTestCase):
         for name in ("a.step", "b.stp", "c.stl", "d.3mf", "e.glb", "f.dxf", "g.urdf", "h.srdf", "i.sdf", "p.xbf"):
             self.write(name, "x")
             self.assertIsNotNone(catalog_entry(self.path(name)), name)
-        for name in ("j.json", "k.js", "l.txt", "m.py", "n", "o.stepx"):
+        for name in ("j.json", "k.js", "l.txt", "n", "o.stepx"):
             self.write(name, "x")
             self.assertIsNone(catalog_entry(self.path(name)), name)
 

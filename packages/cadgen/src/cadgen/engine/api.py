@@ -1,6 +1,6 @@
 """The engine's verbs as functions, one per command; ``cli`` is a thin argparse over them.
 
-    build(code, *, name=None, xbf=None, step=None, glb=None, stl=None, threemf=None, dxf=None) -> Built
+    build(code, *, model=None, name=None, xbf=None, step=None, glb=None, stl=None, threemf=None, dxf=None) -> Built
     export(source, *destinations, pose=None, part=None) -> list[Written]
     snapshot(source, out, *, display=None, camera=None, grid=False, preview=False, pose=None,
              width=None, height=None, annotation=None, measurements=None) -> Drawn
@@ -11,9 +11,10 @@
 
 Every one goes through the daemon (``client``), so the warm worker of the script, of the code
 (by its ``name``) or of the document does the work and keeps what it made in memory for the
-next call. ``build`` takes code only (law 12): code declares nothing, so its file flags (``xbf=``,
-``step=``, ...) are its declarations, ``True`` for the default path or a path. A script's models
-build as their decorators declare: by running the script (``python model.py``), or from Python
+next call. ``build`` takes code only (law 12) and requires an explicit destination:
+``model=NAME`` holds it in memory; file flags (``xbf=``, ``step=``, ...) write to the default
+path with ``True`` or to a supplied path. A script's models build when called by the script
+(``python model.py``), or from Python
 by ``Model.build()`` (``build_script``), a ``Report``. A build writes the model as its joints place
 it; a pose, a part and a picture are the ``export`` and ``snapshot`` verbs', never cached.
 
@@ -257,9 +258,10 @@ def build(code: str, *, model: str | None = None, name: str | None = None, xbf: 
           log: Callable[[str], None] | None = None, daemon: bool = True, progress: Any = None) -> Built:
     """Build source text, ``cadgen build SOURCE`` (law 12): ``code`` assigns its final shape to
     ``result``, and is built as ``name`` (``model`` by default) in the warm worker of that name.
-    Code declares nothing, so its file flags are its declarations, additive among themselves:
+    An output is required: ``model=NAME`` holds ``code::NAME`` in memory and updates it on
+    subsequent builds. File flags are additive declarations:
     ``True`` writes the kind where a decorator with no path puts it, in the working folder
-    (``XBF/<name>.xbf``, ``<name>.step``, ...), a path writes it there; no flag, no file. A child
+    (``XBF/<name>.xbf``, ``<name>.step``, ...), a path writes it there. A child
     model the code calls writes the files it declares (law 10). ``verify`` runs every body the
     memo would replay and compares it with the logged one (``build.build``); ``daemon=False``
     builds in this process; ``progress`` as ``_built`` has it. Returns once every file is on

@@ -231,13 +231,40 @@ def unused():
 @model
 def block():
     return bd.Box(1, 2, 3)
-""")
+""", encoding="utf-8")
         served = self.cli("serve", f"{self.script}::block")
         self.assertEqual(served.returncode, 0, served.stderr)
         self.assertEqual([path.name for path in self.folder.iterdir()], ["block.py"])
         exported = self.cli("export", f"{self.script}::block", "block.step")
         self.assertEqual(exported.returncode, 0, exported.stderr)
         self.assertTrue((self.folder / 'block.step').is_file())
+
+    def test_main_calls_bare_and_file_models_in_order_and_keeps_its_arguments(self) -> None:
+        self.script.write_text("""import sys
+from cadgen import model, step, xbf
+import build123d as bd
+@model
+def bare(): return bd.Box(1, 2, 3)
+@step('saved.step')
+def saved(): return bd.Box(2, 2, 3)
+@xbf
+def document(): return bd.Box(3, 2, 3)
+if __name__ == '__main__':
+    print('before', sys.argv[1:])
+    value = bare()
+    print('volume', round(value.volume))
+    saved()
+    document()
+    print('after')
+""", encoding="utf-8")
+        done = engine_daemon.run([sys.executable, str(self.script), '--mine'], cwd=self.folder, env=self.env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("before ['--mine']", done.stdout)
+        self.assertIn('volume 6', done.stdout)
+        self.assertTrue(done.stdout.rstrip().endswith('after'))
+        self.assertTrue((self.folder / 'saved.step').is_file())
+        self.assertTrue((self.folder / 'XBF/document.xbf').is_file())
+        self.assertFalse((self.folder / 'XBF/bare.xbf').exists())
 
     def test_a_warm_worker_keeps_its_memo_between_builds(self) -> None:
         cold = self.build(10)

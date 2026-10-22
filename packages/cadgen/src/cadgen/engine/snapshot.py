@@ -669,6 +669,12 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
 def _checked(document: Path, out: Path, source: Any = None) -> str:
     """What a picture draws and where it goes, checked before anything renders: SRC a file the
     stills draw, and there (unless a build's ``source`` holds it), OUT a ``.png``. SRC's suffix."""
+    from cadgen.engine.addresses import parse as model_address
+
+    if model_address(document) is not None:
+        if out.suffix.lower() != ".png":
+            raise SnapshotRefused(f"a snapshot is a .png; {out.name} is not one")
+        return ".xbf"
     suffix = document.suffix.lower()
     if suffix not in DOCUMENTS and suffix not in FILES:
         raise SnapshotRefused(f"{document.name} is neither a document (.xbf, .step) nor a file the stills draw "
@@ -705,6 +711,15 @@ def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, st
     (``render/service.py``): by the daemon's render process for it, warm, or in this process
     (``--no-daemon``, a model's own document from its worker's memory). The answer is the PNG's
     bytes; this writes the one file."""
+    from cadgen.engine.addresses import parse as model_address
+
+    if model_address(document) is not None and source is None:
+        from cadgen.engine import api
+
+        spec = api._source(str(document), scripts=True)
+        return api._exported({"op": "export", "source": spec, "destinations": [],
+                              "draw_still": {"out": str(out), "still": still.as_json()},
+                              "cwd": os.getcwd()}, spec, lambda _text: None, daemon)["drawn"]
     if daemon and source is None:
         from cadgen.engine.client import request
 
@@ -845,8 +860,6 @@ def job_pictures(job: Any, source: Any = None, *, display: Any = None, camera: A
                               "outputs, ...}) or a list of jobs")
     if not jobs:
         raise SnapshotRefused("--job names no job")
-    if source is not None and _model(os.fspath(source)):
-        raise SnapshotRefused(f"--job draws a file: {os.fspath(source)} names a model; give the file its build writes")
     shown_flags = parse_display(display, grid) if display is not None else None
     camera_flag = parse_camera(camera if camera is None or isinstance(camera, str) else json.dumps(camera))
     pose_flag = parse_pose(pose) if isinstance(pose, str) else pose
@@ -867,9 +880,10 @@ def job_pictures(job: Any, source: Any = None, *, display: Any = None, camera: A
         named = source if source is not None else view.get("input") or shared.get("input")
         if not named:
             raise SnapshotRefused(f"{where} names no input, and no SRC is given")
-        if _model(os.fspath(named)):
-            raise SnapshotRefused(f"{where}.input {named} names a model; a job draws a file")
-        document = Path(os.fspath(named)).expanduser().resolve()
+        from cadgen.engine.addresses import parse as model_address
+
+        address = model_address(os.fspath(named))
+        document = Path(str(address)) if address else Path(os.fspath(named)).expanduser().resolve()
         drawing = document.suffix.lower() == ".dxf"
         settings = _settings(view.get("output"), f"{where}.output", drawing)
         tight, padding = settings.get("tightFrame", True), float(settings.get("padding", PADDING))
@@ -946,8 +960,8 @@ def draw_pictures(pictures: list[tuple[Path, Path, Still]], *, daemon: bool = Tr
     with nothing_left(*(out for _document, out, _still in pictures)):
         for _document, out, _still in pictures:
             out.parent.mkdir(parents=True, exist_ok=True)
-        if daemon:
-            return [_occt(document, out, still, True, None, time.perf_counter()) for document, out, still in pictures]
+        if daemon or any(_model(str(document)) for document, _out, _still in pictures):
+            return [_occt(document, out, still, daemon, None, time.perf_counter()) for document, out, still in pictures]
         from cadgen.engine.formats import FormatError
         from cadgen.engine.render.service import draw_here_each
 

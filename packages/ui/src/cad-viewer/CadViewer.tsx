@@ -157,7 +157,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   const drawable = Boolean(library && onThumbnail);
   const picture = useMemo(() => (drawable ? async (model: Model) => {
     const file = normalizePath(model.path);
-    if (latest.current.path) return false;
+    if (latest.current.path || file.includes("::") || file.endsWith(".py")) return false;
     if (STEP_FILE.test(file) && !(await client.engineHolds?.(file).catch(() => false))) return false;
     if (latest.current.path) return false;
     const keep = (png: Blob) => latest.current.onThumbnail?.(png, model.path) ?? Promise.resolve();

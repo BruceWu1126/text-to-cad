@@ -267,8 +267,8 @@ def rig():
 ## Code: `cadgen build`
 
 `cadgen build` builds one model from source text, for a quick shape or a probe. The
-code assigns its final shape to `result`; it declares nothing, so its file flags are
-its declarations, each writing its kind at the path given or where a decorator with
+code assigns its final shape to `result`; output flags declare its destination. A
+file flag writes its kind at the path given or where a decorator with
 no path would put it (`--xbf` is `XBF/<name>.xbf` in the working folder):
 
 ```bash
@@ -278,7 +278,19 @@ result = bd.Box(10, 10, 10) - bd.Cylinder(3, 10)' --name cube --xbf --step out/c
 
 `--model NAME` explicitly declares an in-memory model. At least one of `--model`
 or a file flag is required; a command with no output declaration fails before
-executing its code. Building the same named model again updates it.
+executing its code. Building the same named model again updates `code::NAME`.
+The name is required with `--model`, and is unique within this installation's
+engine. A script model is addressed by its absolute path and function name,
+`/path/parts.py::bracket`, so functions in different scripts do not clash.
+`cadgen serve`, `snapshot`, `export`, and `where` accept these addresses.
+`--model` keeps no files or restart cache; the viewer's In memory list disappears
+when its workers retire or the engine restarts. `--model` cannot use `--no-daemon`.
+
+```bash
+cadgen build 'import build123d as bd; result = bd.Box(10, 20, 3)' --model bracket
+cadgen snapshot code::bracket bracket.png
+cadgen export code::bracket bracket.step
+```
 
 `-` reads the code from stdin; `--name` (default `model`) names it, its elements and
 its warm worker; `--json` prints the report; `--verify` verifies its bodies. A

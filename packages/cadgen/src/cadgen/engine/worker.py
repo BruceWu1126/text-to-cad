@@ -316,6 +316,13 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         drawn = snapshot.draw(source, out, **options)
         files.append({"path": str(out), "kind": "png", "bytes": drawn["bytes"],
                       "seconds": round(time.perf_counter() - clock, 4)})
+    if request.get("draw_still"):
+        from cadgen.engine.snapshot import Still, _occt
+
+        options = request["draw_still"]
+        out = Path(options["out"])
+        drawn = _occt(source.path or out.with_suffix(".xbf"), out, Still.from_json(options["still"]),
+                      False, source, time.perf_counter())
     return {"reports": built, "files": files, "drawn": drawn}
 
 

@@ -196,10 +196,16 @@ def _checked(request) -> tuple[str, str, list[dict], dict | None, list | None]:
     if name is not None and type(name) is not str:
         raise ValueError("name is the file's name, a string")
     input_path = request.get("input")
-    if type(input_path) is not str or not os.path.isabs(input_path):
-        raise ValueError("input is the absolute path of the file the views show")
-    if not os.path.isfile(input_path):
-        raise ValueError(f"no file at {input_path}")
+    from cadgen.engine.addresses import parse as model_address
+
+    address = model_address(input_path) if type(input_path) is str else None
+    if address is not None:
+        input_path = str(address)
+    else:
+        if type(input_path) is not str or not os.path.isabs(input_path):
+            raise ValueError("input is the absolute path of the file the views show")
+        if not os.path.isfile(input_path):
+            raise ValueError(f"no file at {input_path}")
     views = request.get("views")
     if type(views) is not list or not views:
         raise ValueError("views lists the views to save, at least one")

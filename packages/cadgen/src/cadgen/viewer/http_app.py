@@ -667,7 +667,7 @@ class CadApp:
             return self._recents_payload()
         action, path = payload.get("action"), absolute_path(payload.get("path"))
         if action == "open":
-            if extension_of(path) not in VIEWER_EXTENSIONS or not os.path.isfile(path):
+            if extension_of(path) not in (*VIEWER_EXTENSIONS, ".py") or not os.path.isfile(path):
                 raise ValueError(f"no CAD file at {path}")
             self.recents.opened(path)
             if self.analytics is not None:

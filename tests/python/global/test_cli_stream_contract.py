@@ -33,6 +33,9 @@ import build123d as bd
 @step(out="../STEP/part.step")
 def part():
     return bd.Box(10.0, 6.0, 2.0)
+
+if __name__ == "__main__":
+    part()
 """
 
 DRAWING_SOURCE = """\
@@ -43,6 +46,9 @@ import build123d as bd
 @dxf(out="../DXF/plate.dxf")
 def plate():
     return bd.Rectangle(30.0, 20.0)
+
+if __name__ == "__main__":
+    plate()
 """
 
 _PROJECT: tempfile.TemporaryDirectory | None = None
@@ -112,7 +118,7 @@ def run_script(script: str) -> subprocess.CompletedProcess:
 def run_code_json() -> subprocess.CompletedProcess:
     # The engine's build of code, as the engine's own entry runs it, answering as JSON.
     code = "import build123d as bd\nresult = bd.Box(4, 4, 4)\n"
-    return subprocess.run([sys.executable, "-m", "cadgen.engine", "build", code, "--json"],
+    return subprocess.run([sys.executable, "-m", "cadgen.engine", "build", code, "--model", "stream_contract", "--json"],
                           cwd=Path(PART).parent, capture_output=True, text=True, check=False, env=_env())
 
 

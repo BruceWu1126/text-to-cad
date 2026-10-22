@@ -266,3 +266,12 @@ build. A build names itself in the app menu (`vite.config.mjs`, through
 `dev_install.py` takes is in CONTRIBUTING.md ("Test In Agent Apps"). A checkout's `cadgen mcp` serves `apps/mcp/dist` when it exists
 (`CADGEN_MCP_APP_DIR` overrides it); a wheel serves `cadgen/_runtime/mcp`,
 built by `scripts/bundle/bundle.sh`.
+
+## Live model addresses
+
+The catalog and open/show actions accept `script.py::name` and `code::name` as
+well as file paths. Python scripts open to a declaration list read without
+execution; selecting a model explicitly builds it. The shared viewer's In memory
+collection reads the installation engine's live metadata. It never enters saved
+recents or thumbnail storage, and disappears on worker retirement or engine restart.
+Rebuilding a named model updates the same view through the document version stream.

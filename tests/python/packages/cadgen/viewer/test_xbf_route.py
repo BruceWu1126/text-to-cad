@@ -55,6 +55,10 @@ def pair():
     peg = bd.Pos(8, 0, 4) * bd.Cylinder(1, 6)
     peg.label, peg.material = "peg", materials.aluminium_6061
     return bd.Compound(children=[plate, peg], label="pair")
+
+if __name__ == "__main__":
+    block()
+    pair()
 """
 
 

@@ -96,9 +96,9 @@ built src/bracket.py::bracket cold in 2.33s: bodies 1 run; 6 misses, 0 hits; bod
   cadgen consumes no script arguments, and never exits the caller at import time.
 - `@model` declares a document without a file. Every file decorator implies a model.
 - `@step`, `@glb`, `@stl`, `@threemf` and `@dxf` declare translations of the
-  document, written after the `.xbf`. Every decorator takes `out=` and nothing else:
+  document; `@xbf` explicitly saves that document. Every file decorator takes `out=` and nothing else:
   materials, colours, joints, configurations and motions are written in the body. A
-  model without `@xbf` writes its other files and no document.
+  model without `@xbf` writes its other declared files and keeps its document in memory.
 - The script's worker keeps every kernel operation it ran, keyed by its inputs, so an
   edit runs what it reaches and replays the rest, and an unchanged model rewrites
   nothing (`kept`). After the daemon restarts, a model whose `.xbf` was built from

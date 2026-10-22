@@ -375,3 +375,12 @@ backend writes the server machine's native clipboard on macOS or Linux (wl-copy/
 this is not the remote phone's clipboard when accessing a shared server. Failures
 use the viewer's error presentation; successful actions are silent. A host with a
 composer has no camera action: its note to the agent is Quick Edit.
+
+## Live model addresses
+
+The catalog and open/show actions accept `script.py::name` and `code::name` as
+well as file paths. Python scripts open to a declaration list read without
+execution; selecting a model explicitly builds it. The shared viewer's In memory
+collection reads the installation engine's live metadata. It never enters saved
+recents or thumbnail storage, and disappears on worker retirement or engine restart.
+Rebuilding a named model updates the same view through the document version stream.

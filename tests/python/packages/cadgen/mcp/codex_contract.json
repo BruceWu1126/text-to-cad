@@ -370,7 +370,7 @@
     "additionalProperties": false,
     "properties": {
      "path": {
-      "description": "A CAD file's absolute path.",
+      "description": "A CAD file or script path, script.py::MODEL, or code::NAME.",
       "type": "string"
      }
     },
@@ -402,7 +402,7 @@
     "additionalProperties": false,
     "properties": {
      "path": {
-      "description": "A CAD file's absolute path.",
+      "description": "A CAD file or script path, script.py::MODEL, or code::NAME.",
       "type": "string"
      },
      "view": {

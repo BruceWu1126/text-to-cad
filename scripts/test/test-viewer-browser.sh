@@ -96,6 +96,9 @@ def smoke_assembly():
     right = left.moved(bd.Pos(10, 0, 0))
     right.label = "right_cylinder"
     return bd.Compound(children=[left, right], label="smoke_assembly")
+
+if __name__ == "__main__":
+    smoke_assembly()
 ASSEMBLY
 
 # A STEP model the camera gate saves a rebuilt revision over. Built from
@@ -112,6 +115,9 @@ def hinge():
     arm = bd.Pos(30, 0, 6) * bd.Box(56, 4, 4)
     arm.label = "arm"
     return bd.Compound(children=[base, arm], label="hinge")
+
+if __name__ == "__main__":
+    hinge()
 HINGE
 # A SECOND revision of the same model, with an arm long enough that the model
 # no longer fits the frame the first one was fitted to. It is built into a
@@ -122,7 +128,7 @@ HINGE
 # side instead of one overwriting the other. Literal substitutions only: GNU and
 # BSD sed do not spell a word boundary the same way.
 sed -e 's/bd.Pos(30, 0, 6) \* bd.Box(56, 4, 4)/bd.Pos(80, 0, 6) * bd.Box(156, 4, 4)/' \
-    -e 's/def hinge()/def hinge_grown()/' \
+    -e 's/hinge()/hinge_grown()/g' \
   "$project/hinge.py" > "$project/hinge_grown.py"
 if ! grep -q 'bd.Box(156, 4, 4)' "$project/hinge_grown.py" \
    || ! grep -q 'def hinge_grown()' "$project/hinge_grown.py"; then
@@ -156,6 +162,9 @@ def smoke():
     peg = bd.Pos(8, 0, 6) * bd.Cylinder(2, 8)
     peg.label = "peg"
     return bd.Compound(children=[plate, peg], label="smoke")
+
+if __name__ == "__main__":
+    smoke()
 XBF
 if ! (cd "$project" && "$PYTHON" smoke_xbf.py && rm smoke_xbf.py) >"$log" 2>&1 \
    || [ ! -f "$project/smoke.xbf" ]; then

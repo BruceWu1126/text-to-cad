@@ -108,6 +108,7 @@ if TYPE_CHECKING:
         dxf,
         glb,
         memo,
+        model,
         motion,
         paint,
         read_step,

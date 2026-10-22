@@ -48,3 +48,17 @@ test('the file menu copies a file\'s absolute path, and reveals it only where it
   const plain = createCadFileActions({ clipboard, platform: 'plan9' });
   expect([Object.keys(plain.perform!), plain.platform]).toEqual([['copy-path'], 'linux']);
 });
+
+test('in-memory model addresses stay intact and their collection reads the live engine', async () => {
+  const client = { ...cadClient([{ file: 'code::bracket', kind: 'xbf', bytes: 0 }]),
+    models: vi.fn(async () => [{ address: 'code::bracket', name: 'bracket', script: 'code', builtAt: 100, version: 1, state: 'idle' }]),
+  };
+  const source = createCadFileSource(client);
+  const options = { signal: new AbortController().signal };
+  expect((await source.stat('code::bracket', options)).path).toBe('code::bracket');
+  const [group] = await source.collections!(options);
+  expect(group.label).toBe('In memory');
+  expect(group.entries[0]).toMatchObject({ path: 'code::bracket', name: 'bracket' });
+  client.models.mockResolvedValue([]);
+  expect((await source.collections!(options))[0].entries).toEqual([]);
+});

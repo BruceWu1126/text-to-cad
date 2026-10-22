@@ -812,11 +812,11 @@ def _document(source: Any) -> Path | None:
         if _in_build():
             return None
         found = next((target.path for target in source.plan() if target.kind == "xbf"), None)
-        if found is None:
-            raise RefError(f"model {source.identity} declares no @xbf: select reads a model's document")
-        return found
+        return found if found is not None else Path(source.address)
     if isinstance(source, (str, os.PathLike)):
-        return Path(os.fspath(source)).expanduser().resolve()
+        from cadgen.engine.addresses import key
+
+        return Path(key(source))
     if isinstance(source, Shape):
         if source.__dict__.get("_wrapped") is None:
             raise RefError("select from an empty shape")
@@ -838,6 +838,19 @@ def _tree(source: Any, document: Path | None) -> Any:
 
             failed = next(found for found in report.models if not found.get("ok"))
             raise EngineError(failed.get("error") or f"the build of {source.identity} failed")
+    if document is not None:
+        from cadgen.engine.addresses import parse as address
+        from cadgen.engine import api
+
+        target = address(document)
+        if target is not None:
+            if target.script is not None and not isinstance(source, Model):
+                report = api.build_script(target.script, [target.name])
+                if not report.ok:
+                    raise api.EngineError(next(row["error"] for row in report.models if not row.get("ok")))
+            spec = api._source(str(target))
+            return api.Built(target.name, Path(spec["script"]), {}, Path.cwd(),
+                             source_kind="code" if target.script is None else "script").shape
     return source if document is None else _read(document)
 
 
