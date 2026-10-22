@@ -8,7 +8,7 @@ into `models/` and this folder goes away. `models/` itself is untouched.
 Each model keeps the layout it had in `models/`: its sources in `src/`, and
 everything a build writes in `XBF/` beside them (the `.xbf` documents). A model
 declares its xbf, and an export only where its project needs the file on every
-build: `hypercar` declares the GLB that carries its motion as a clip. Otherwise
+build: `hypercar` and `f1` declare the GLB that carries their motions as clips. Otherwise
 STEP, GLB, STL and 3MF are translations of the xbf, written on demand by
 `cadgen xbf export`. A drawing
 declares its DXF alone, in `DXF/`. `XBF/` and `DXF/` are gitignored; nothing else
@@ -56,12 +56,14 @@ The migration a user makes, and nothing more:
   poses are `configuration(...)` in the body.
 - Animation (`animation=`, `cadgen.clip`) -> `motion(...)` in the body: a
   definition the xbf keeps (never frames), which a GLB export bakes into a clip.
-  The motorbike carries one (`steer`), the hypercar one (`doors`, baked into its
-  declared `@glb`); clips that move parts no joint moves (explodes, tours) are
-  not ported.
+  The motorbike carries one (`steer`), the hypercar one (`doors`) and the f1 two
+  (`drs`, `steering`: functions of time solving closed loops), each baked into a
+  declared `@glb`; clips that move parts no joint moves (explodes, tours) are not
+  ported.
 - A model is one output file: `@xbf` marks the dfm trays, the examples, the
-  moonwatch `case` and `movement`, `qdd_actuator`, `motorbike`, `tom` and
-  `hypercar` (with its `@glb`), and `@dxf` the two drawings, and nothing else. A big piece of a model -- a layer of an assembly, a stage of a
+  moonwatch `case` and `movement`, `qdd_actuator`, `motorbike`, `tom`, and
+  `hypercar` and `f1` (each with its `@glb`), and `@dxf` the two drawings, and
+  nothing else. A big piece of a model -- a layer of an assembly, a stage of a
   derivation -- can be a `@memo` function: called in the model's body it is a
   sub-assembly of that build, it writes no file, and a later build whose edit
   does not reach it replays it instead of running it. A verifying build
@@ -95,6 +97,7 @@ piece. Nested `@xbf` is never needed for caching.
 | `tom` | tom-cad `main` (7f79c52): 119 files, one model, 6 `@memo` stages and parts (each earns it) | a 619-part arm built from stages, 8 occurrences of Tom rev3's arm extracted once to xbf (`read_xbf`, never the 354 MB STEP) and 11 `read_step` vendor files (139 MB of local, uncommitted inputs: see its `src/README.md`); mates kept as data and authored as build123d joints; materials by finish; many-body retention |
 | `examples` | `l_bracket`, `basic_shape_mating_test_fixture`, `electronics_enclosure_base`, `electronics_enclosure_base_import` | fillets; an assembly placed by joints (`connect_to` moving parts); `read_step` of a part and of an assembly (imported naming), from STEP inputs committed in `examples/STEP/` |
 | `hypercar` | 13 system files (`@memo` stages, 1,250-24,000 kernel calls each) + one model | a 706-part car whose panels share one master surface; a placed wheel prototype per axle; doors as cylindrical joints on the chassis paired by label across systems' groups, riders fastened by rigid-joint pairs; a coupling (`doors`, turn and travel), a configuration (`open`) and a motion baked into the declared `@glb` |
+| `f1` | 32 part files, `stages.py` and one model; 12 `@memo` stages (990-11,400 kernel calls each) | an 833-part car of 28 children grouped in stages by the builders they share; two closed-loop mechanisms (the DRS four-bar, the steering) authored as their tree of joints -- revolute, prismatic and ball -- paired by label, every pose solved in Python: 3 configurations and 2 motions of time baked into the declared `@glb` |
 | `drawings` | `gasket_plate`, `clamp_plate` | `@dxf` drawings of planar documents: a layer per part (`CUT`, an open `ENGRAVE`), and a profile laid out from a solid's top face; byte-for-byte the old emitter's for the gasket |
 
 Each model's `src/README.md` says what was ported and what was dropped.
