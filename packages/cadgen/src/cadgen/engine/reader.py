@@ -335,6 +335,8 @@ class Reader:
         self.reads = 0
 
     def _start(self) -> subprocess.Popen:
+        from cadgen.engine.daemon import windowless
+
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         env = dict(os.environ)
         path = env.get("PYTHONPATH", "")
@@ -342,7 +344,7 @@ class Reader:
             env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         return subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.reader"], stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE, env=env)
+                                stdout=subprocess.PIPE, env=env, **windowless())
 
     def read(self, path: str) -> tuple[dict[str, Any], bytes]:
         """The description of the STEP at ``path`` and its packed shapes and locations."""

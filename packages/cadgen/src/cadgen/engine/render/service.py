@@ -516,7 +516,7 @@ class RenderProcess:
     first snapshot; the version it holds and the parts whose meshes it was sent."""
 
     def __init__(self, path: Path, environment: dict[str, str]) -> None:
-        from cadgen.engine.daemon import engine_root
+        from cadgen.engine.daemon import engine_root, windowless
 
         env = dict(environment)
         root = engine_root()
@@ -525,7 +525,8 @@ class RenderProcess:
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         self.path = Path(path)
         self.process = subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.render.service"],
-                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                                        **windowless())
         self.lock = threading.Lock()
         self.version: str | None = None
         self.keys: set[str] = set()

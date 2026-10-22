@@ -292,6 +292,12 @@ its closure is unchanged (**Build closure**), and else builds the model cold. A 
 process (**The viewer and the snapshot**) is no worker and does not count toward the cap; it
 is held to the same memory cap after each picture, and retired after the same idle time.
 
+On Windows every process the engine starts -- each worker, STEP reader and render process --
+has a console of its own and no window (`daemon.windowless`: `CREATE_NO_WINDOW`), and the daemon
+a process group of its own too (`daemon.detached`), never no console at all: a console program
+started with none gets a new console, with a window (#597). What they start in turn (the
+meshing and reading pools) shares their windowless console.
+
 `cadgen status` says what the daemon holds (`--json`: the same as data, `api.status()`):
 
 ```

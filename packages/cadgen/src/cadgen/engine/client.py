@@ -45,14 +45,9 @@ def _start() -> None:
     if root not in path.split(os.pathsep):
         env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    options: dict[str, Any] = {}
-    if _daemon.WINDOWS:
-        options["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    else:
-        options["start_new_session"] = True
     subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.daemon"], stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=str(_daemon.state_dir().parent)
-                     if _daemon.state_dir().parent.exists() else None, **options)
+                     if _daemon.state_dir().parent.exists() else None, **_daemon.detached())
 
 
 def connect(*, start: bool = True, timeout: float = 60.0) -> socket.socket | None:
