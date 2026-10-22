@@ -248,13 +248,13 @@ class HingeTest(_Folder):
         self.addCleanup(lambda: os.environ.pop("CADGEN_ENGINE_MESH") if previous is None
                         else os.environ.__setitem__("CADGEN_ENGINE_MESH", previous))
         path = self.folder / "XBF/hinge.xbf"
-        out = self.folder / "kept.png"
-        out.write_bytes(b"before")
+        out = self.folder / "stale.png"
         for pose, words in (({"elbw": 1}, "names no joint 'elbw'"), ({"elbow": 150}, "'elbow' at 150 deg is outside"),
                             ("folded", "no configuration 'folded'")):
+            out.write_bytes(b"before")
             with self.assertRaisesRegex(SnapshotRefused, words):
                 snapshot(path, out, pose=pose, size=(160, 120), daemon=False)
-        self.assertEqual(out.read_bytes(), b"before")
+            self.assertFalse(out.exists(), "a refused snapshot leaves no picture at OUT")
         reason = context.available()
         if reason is not None:
             self.skipTest(f"the pose is refused; drawing it needs an OpenGL context: {reason}")

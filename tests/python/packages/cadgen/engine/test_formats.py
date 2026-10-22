@@ -730,18 +730,18 @@ class PictureTest(FixtureTest):
         blue = ((parts[..., 2] - parts[..., 0]) > 90).sum()
         self.assertLess(blue, 5, "Parts paints over the texture")
 
-    def test_what_a_kind_does_not_offer_is_refused_by_name_and_out_is_kept(self) -> None:
-        out = self.folder / "kept.png"
-        out.write_bytes(b"kept")
+    def test_what_a_kind_does_not_offer_is_refused_by_name_and_leaves_no_picture(self) -> None:
+        out = self.folder / "stale.png"
         for path, options, why in (
                 (self.folder / "part.stl", {"pose": {"a": 1}}, "is a mesh and has none"),
                 (self.folder / "part.stl", {"display": {"mode": "parts"}}, "places 1 part"),
                 (self.folder / "plate.dxf", {"display": {"mode": "xray"}}, "is a drawing.*display.mode does not apply"),
                 (self.folder / "plate.dxf", {"camera": "iso"}, "is a drawing.*--camera does not apply"),
                 (self.folder / "kinematics.urdf", {"pose": {"lift": 200}}, "--pose: joint 'lift' at 200 is past its limits")):
+            out.write_bytes(b"before")
             with self.subTest(path=path.name, options=options), self.assertRaisesRegex(SnapshotRefused, why):
                 snapshot(path, out, size=SIZE, daemon=False, **options)
-        self.assertEqual(out.read_bytes(), b"kept")
+            self.assertFalse(out.exists(), f"{path.name}: a refused snapshot leaves no picture at OUT")
 
 
 class DaemonFileTest(unittest.TestCase):
