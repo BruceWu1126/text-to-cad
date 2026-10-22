@@ -348,6 +348,70 @@ class BuildSelectTest(_Folder):
         self.assertEqual(self.built("own.py")["cache"], {"used": True, "from": "file"})
 
 
+class ReadAndPlaceTest(_Folder):
+    def test_a_read_of_a_file_the_build_writes_is_refused_when_the_memo_holds_it(self) -> None:
+        """The refusal comes before the memo: a read the memo holds from a build that did not
+        write the file is refused once the build writes it. (Each body is edited so that it runs:
+        an unchanged one is replayed, and reads nothing.)"""
+        writer = """
+            import build123d as bd
+            from cadgen.engine import step, xbf
+
+
+            @xbf
+            @step
+            def plate():
+                return bd.Box(30, 20, 4)
+        """
+        reads = """
+            from pathlib import Path
+            import build123d as bd
+            from cadgen.engine import read_step, read_xbf, step, xbf
+
+            HERE = Path(__file__).resolve().parent
+            {plate}
+
+            @xbf
+            def from_xbf():
+                return read_xbf(HERE / "XBF/plate.xbf"){tail}
+
+
+            @xbf
+            def from_step():
+                return read_step(HERE / "plate.step"){tail}
+        """
+        self.built("writer.py", writer)
+        self.assertTrue(all(report["ok"] for report in self.build("reads.py", reads.format(plate="", tail=""))),
+                        "another script's files: read, and held by the memo")
+        plate = "\n            ".join(textwrap.dedent(writer).split("\n\n\n", 1)[1].strip().splitlines())
+        refused = self.build("reads.py", reads.format(plate=plate, tail=".moved(bd.Location((0, 0, 1)))"))
+        self.assertEqual([report["ok"] for report in refused], [True, False, False])
+        self.assertIn("read_xbf", refused[1]["error"])
+        self.assertIn("read_step", refused[2]["error"])
+        for report in refused[1:]:
+            self.assertIn("this build writes it (reads.py::plate)", report["error"])
+
+    def test_a_child_model_s_second_placement_measures_as_its_first(self) -> None:
+        reports = self.build("pegs.py", """
+            import build123d as bd
+            from cadgen.engine import xbf
+
+
+            @xbf
+            def peg():
+                return bd.Cylinder(2, 10)
+
+
+            @xbf
+            def rack():
+                first, second = peg(), peg().moved(bd.Location((10, 0, 0)))
+                if abs(second.volume - first.volume) > 1e-6:
+                    raise ValueError(f"the second placement measures {second.volume}, not {first.volume}")
+                return bd.Compound(children=[first, second], label="rack")
+        """)
+        self.assertEqual([report["ok"] for report in reports], [True, True], [r.get("error") for r in reports])
+
+
 class WhereTest(unittest.TestCase):
     """``cadgen where`` resolves the same grammar, through a daemon of the test's own."""
 
