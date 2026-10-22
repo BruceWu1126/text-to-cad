@@ -26,7 +26,7 @@ import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } 
 import { createClickActivation } from "./clickActivation.js";
 import XbfMeasureOverlay from "./XbfMeasure.jsx";
 import XbfModelTree from "./XbfModelTree.jsx";
-import XbfPositionSection, { useXbfPose, writeXbfPosition, xbfPositionRows } from "./XbfPositionSection.jsx";
+import XbfPositionSection, { useXbfPose, writeXbfPosition, xbfPoseGiven, xbfPositionRows } from "./XbfPositionSection.jsx";
 import { MeasureIcon, SelectIcon, SelectModeMenu, XBF_SELECT_DEFAULT, xbfSelectModes } from "./XbfSelectionModes.jsx";
 import { useXbfElementFacts, useXbfSelectionChips, xbfCopyText } from "./xbfChips.jsx";
 import { xbfJointHandles } from "./xbfJointHandles.js";
@@ -162,6 +162,11 @@ function XbfSurface({ view, data }) {
     shellRef.current?.syncSceneBounds?.();
     requestRender();
   }, [scene, poseValues, poseApplied, requestRender]);
+  // A prompt's view, as a STEP's carried its pose: the pose Position holds off as built, as
+  // `cadgen snapshot --pose` takes it (`jointValues`), so the view ink was drawn in is posed again.
+  const poseGiven = useMemo(() => (poseApplied && kinematics && poseValues ? xbfPoseGiven(kinematics, poseValues, poseCouplings) : null),
+    [poseApplied, kinematics, poseValues, poseCouplings]);
+  const viewState = useCallback(() => ({ jointValues: poseGiven }), [poseGiven]);
 
   // ---- the shell ------------------------------------------------------------------------------
   const clearSelection = useCallback(() => setChosen(now => (now.length ? EMPTY : now)), []);
@@ -190,7 +195,7 @@ function XbfSurface({ view, data }) {
     view, services: document.services, resource: document.resource, modelKey: document.modelKey, revisionKey: loaded.revision,
     features, toolModes: XBF_TOOL_MODES, tool, previewable: true, preview, scene, sceneEffects: true,
     load: { busy: loaded.busy && !scene, updating: loaded.busy && Boolean(scene), progress: loaded.progress, alert: loadAlert },
-    live, escape, deleteSelection: measure.removeSelected, preserveInteractionPixelRatio: edgesDrawn,
+    live, escape, deleteSelection: measure.removeSelected, preserveInteractionPixelRatio: edgesDrawn, viewState,
     // A prompt's annotation is in the scene's coordinates: the document's millimetres.
     annotationUnits: scene?.units?.unit || "mm"
   });
@@ -332,6 +337,24 @@ function XbfSurface({ view, data }) {
   }, [picker]);
   // What a hit reaches: a face or an edge, or the node a press on its part takes.
   const nodeOf = useCallback(hit => (hit && !hit.kind ? frontier(hit.id) : ""), [frontier]);
+  // What Annotate's ink touches at a point of the view, as a STEP's said it (`RendererShell`'s
+  // `inkTouches`): the part under it, with the face or the edge there as its reference, as copying
+  // that face or edge writes it -- whatever Select's filter picks, and whichever parts are open.
+  const inkTouches = useCallback((clientX, clientY) => {
+    const viewport = viewportRef.current;
+    const runtime = viewport?.runtimeRef.current;
+    const rect = viewport?.hostRef.current?.getBoundingClientRect?.();
+    if (!scene || !runtime?.camera || !rect?.width) return [];
+    const raycaster = new runtime.THREE.Raycaster();
+    raycaster.setFromCamera(new runtime.THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, 1 - ((clientY - rect.top) / rect.height) * 2), runtime.camera);
+    const hit = scene.pickElement(raycaster.ray, { camera: runtime.camera, width: rect.width, height: rect.height },
+      { faces: true, edges: true, parts: true, elements: null });
+    const instance = parseXbfElementId(hit?.id)?.instance;
+    if (instance == null) return [];
+    const part = `i${instance}`;
+    const ref = hit.kind ? xbfCopyText({ scene, tree, resource: shellRef.current?.frame.resource, ids: [hit.id] }).split("\n")[0] : "";
+    return [ref ? { part, ref } : { part }];
+  }, [scene, tree]);
 
   // Group faces and Group edges: the engine's groups of a part, asked for once per part.
   const groupsRef = useRef(new Map());
@@ -542,7 +565,7 @@ function XbfSurface({ view, data }) {
     references={previewing ? NO_REFERENCES : references} referenceChips={previewing ? NO_REFERENCES : chips} nameReference={nameReference}
     onClearReferences={() => { setChosen(EMPTY); measure.select([]); }} copySelection={copySelection}
     onSelectPress={measureSelect.press} onSelectHover={measureSelect.hover} selectsAnnotations={selects(selectFilter, "annotation")}
-    contextMenuItems={contextMenuItems}
+    inkTouches={inkTouches} contextMenuItems={contextMenuItems}
     viewportOverlay={viewport => {
       viewportRef.current = viewport;
       return <>

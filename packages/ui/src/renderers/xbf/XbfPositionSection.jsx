@@ -87,6 +87,32 @@ export function writeXbfPosition(values, control, next) {
 }
 
 /**
+ * A pose as `cadgen snapshot --pose` takes it (`{"<joint or coupling>": value}`): each pair a person
+ * can set, its value (a number, or a pair's several values), and each locked coupling's value, which
+ * drives its joints; what a gear or a coupling drives follows from them. A prompt's view carries it
+ * as its `jointValues`, so the view the ink was drawn in is posed again as it was.
+ * @param {object} kinematics @param {Record<string, number[]>} values @param {Record<string, number> | null} [couplings]
+ * @returns {Record<string, number | number[]>}
+ */
+export function xbfPoseGiven(kinematics, values, couplings = null) {
+  const driven = xbfDrivenPairs(kinematics);
+  const locked = xbfLockedPairs(kinematics);
+  const unposable = xbfUnposable(kinematics);
+  const given = {};
+  for (const pair of kinematics?.pairs || []) {
+    if (pair.type === "gear" || driven.has(pair.label) || locked.has(pair.label) || unposable.has(pair.label)) continue;
+    const value = values?.[pair.label];
+    if (!Array.isArray(value) || !value.length) continue;
+    given[pair.label] = value.length === 1 ? value[0] : [...value];
+  }
+  const shown = couplings || xbfCouplingValues(kinematics, values);
+  for (const [name, coupling] of Object.entries(xbfCouplings(kinematics))) {
+    if (coupling.lock) given[name] = Number(shown?.[name]) || 0;
+  }
+  return given;
+}
+
+/**
  * Position's pose of a document's mechanism: the configuration chosen (`preset`), or values set by
  * hand; every pair's values at it (`values`), and whether that is not as built (`applied`); and
  * each coupling's slider (`couplings`), where the pose stands on it until a slider moves, then
