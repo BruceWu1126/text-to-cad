@@ -66,9 +66,10 @@ models/**/*.mkv
 
 # models-xbf/ is the xbf engine's staging corpus: sources only. Every build writes
 # into an XBF/ folder beside a model's src (the xbf, its sidecar, its exports), a drawing
-# into DXF/.
+# into DXF/, an engineering drawing (@eng_drawing) its PDF into PDF/.
 models-xbf/**/XBF/
 models-xbf/**/DXF/
+models-xbf/**/PDF/
 # tom's vendor STEP inputs (536 MB, tom-cad's read-only data): a local copy, never committed.
 models-xbf/tom/STEP/
 models-xbf/**/__pycache__/

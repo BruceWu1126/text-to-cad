@@ -64,7 +64,7 @@ The migration a user makes, and nothing more:
   ported.
 - A model is one output file: `@xbf` marks the dfm trays, the examples, the
   moonwatch `case` and `movement`, `qdd_actuator`, `motorbike`, `tom`, and
-  `hypercar` and `f1` (each with its `@glb`), and `@dxf` the two drawings, and
+  `hypercar` and `f1` (each with its `@glb`), and `@dxf` the eight drawings, and
   nothing else. A big piece of a model -- a layer of an assembly, a stage of a
   derivation -- can be a `@memo` function: called in the model's body it is a
   sub-assembly of that build, it writes no file, and a later build whose edit
@@ -97,14 +97,18 @@ piece. Nested `@xbf` is never needed for caching.
 | `motorbike` | 21 part files + one model, one body | parts as sub-assemblies of one xbf, a part placed twice; revolute and rigid joints across parts; one motion, `steer` (`cadgen export ../XBF/motorbike.xbf bike.glb` carries it as a clip) |
 | `moonwatch` | `case.py`, `movement.py` (3 `@memo` layers) | finishes as materials on all 220 parts (29 case, 191 movement): catalogue entries in each finish's look (coat, grain, transmission), own materials (sapphire, ruby, print ink), a painted face finish, transparent parts |
 | `tom` | tom-cad `main` (7f79c52): 119 files, one model, 6 `@memo` stages and parts (each earns it) | a 619-part arm built from stages, 8 occurrences of Tom rev3's arm extracted once to xbf (`read_xbf`, never the 354 MB STEP) and 11 `read_step` vendor files (139 MB of local, uncommitted inputs: see its `src/README.md`); mates kept as data and authored as build123d joints; materials by finish; many-body retention |
-| `examples` | `l_bracket`, `basic_shape_mating_test_fixture`, `electronics_enclosure_base`, `electronics_enclosure_base_import` | fillets; an assembly placed by joints (`connect_to` moving parts); `read_step` of a part and of an assembly (imported naming), from STEP inputs committed in `examples/STEP/` |
+| `examples` | `l_bracket`, `basic_shape_mating_test_fixture`, `electronics_enclosure_base`, `electronics_enclosure_base_import`, `electronics_enclosure_base_drawing` | fillets; an assembly placed by joints (`connect_to` moving parts); `read_step` of a part and of an assembly (imported naming), from STEP inputs committed in `examples/STEP/`; an `@eng_drawing` PDF of the enclosure read from its xbf (`read_xbf`), not a STEP |
 | `hypercar` | 13 system files (`@memo` stages, 1,250-24,000 kernel calls each) + one model | a 706-part car whose panels share one master surface; a placed wheel prototype per axle; doors as cylindrical joints on the chassis paired by label across systems' groups, riders fastened by rigid-joint pairs; a coupling (`doors`, turn and travel), a configuration (`open`) and a motion baked into the declared `@glb` |
 | `f1` | 32 part files, `stages.py` and one model; 12 `@memo` stages (990-11,400 kernel calls each) | an 833-part car of 28 children grouped in stages by the builders they share; two closed-loop mechanisms (the DRS four-bar, the steering) authored as their tree of joints -- revolute, prismatic and ball -- paired by label, every pose solved in Python: 3 configurations and 2 motions of time baked into the declared `@glb` |
-| `drawings` | `gasket_plate`, `clamp_plate` | `@dxf` drawings of planar documents: a layer per part (`CUT`, an open `ENGRAVE`), and a profile laid out from a solid's top face; byte-for-byte the old emitter's for the gasket |
+| `drawings` | all eight scripts of `models/drawings` | `@dxf` drawings of planar documents: a layer per part (`CUT`, open `BEND` and `ENGRAVE` lines, a layer of several shapes one part of them all), bend fixtures in every orientation, `bd.Text` outlines engraved, a workshop drawing of three views and eleven dimensions, and a profile laid out from a solid's top face; byte-for-byte the old emitter's for the gasket |
 | `juno` | one script: the robot and its 28 URDF links, 29 models | 27 revolute joints connected at the athletic stance (absolute angles, the URDF's travel as ranges) and the SRDF's five group states as configurations; each link a model writing the 3MF `juno.urdf` references; one `@memo` stage, `links()`, shared by all 29 (30.8 s cold against 56.2 s without it) |
 | `assemblies` | 23 models in 21 groups | the demo assemblies: `AssemblyHelper` frames as build123d joints, the planetary gear's locked `drive` coupling and `meshCycle` motion (its GLB, the docs hero), the mars rover's 27 joints, 7 couplings and 4 configurations; no `@memo`, no model calling another |
 | `tendon_hand` | 56 of the 112 one-model scripts, folded into 5 scripts by subsystem | the research hand's components, phalanges, routing, guide mounts and forearm, each model its own xbf; four shared `@memo` stages (each finger's guide combs, the forearm frame, its guide banks, the R5 supports) placed by several models; a STEP round trip made in memory; `anatomy_layout`'s finger joints with a curl coupling per finger and two configurations; 56 not ported (frozen checkpoints, generated validation output; listed in its `src/README.md`) |
 | `radial` | 19 scripts -> one model, 18 `@memo` system stages | a sectioned nine-cylinder radial, 473 parts in 2,400 placements: finishes as catalogue materials on every part; the old animation's label contract made 122 joints (revolute and prismatic, fastened links), the gear train a locked coupling (`drive`), two configurations, and `running`, a function-of-time motion that a GLB export carries as a clip |
+| `lyra` | one script: the hand and its 17 URDF links, 18 models | 16 revolute joints connected at the relaxed pose (absolute angles, the URDF's travel as ranges), the SRDF's seven group states as configurations and the five clips as motions of time (joint-space already); each link a model writing the 3MF `lyra.urdf` references; one `@memo` stage, `links()`, shared by all 18 (7.7 s cold against 11.1 s without it) |
+| `falcon_heavy` | 3 scripts -> one script, 3 models | the full stack, a 270° cutaway and an exploded view of one vehicle library: 85 parts in 2,142 placements, 27 engines as `moved` placements of one Merlin; two `@memo` stages, `engine_prototype()` (one Merlin per build, not nine) and `build_vehicle(cutaway)` (the exploded view's vehicle a placement of the stack's): 7.1 s cold with none, 5.0 s with both |
+| `branding` | `logo_c`, `logo_cad`, `logo_texttocad` | plain models with the STEP each delivers (`@xbf` + `@step`), extruded from a JSON input the body reads (`profiles.json`, a change to which rebuilds them); colours by `srgb` |
+| `tests` | the three manual cases `models/tests/README.md` lists (`joint_playground.urdf`, no model and named nowhere, not ported) | manual-validation fixtures, never CI input: the Render floor, a 32-part rebuild during a load, and materials (a catalogue steel with `color=None`, a paint with its colour), a revolute and a prismatic joint, a configuration and a motion on 11 parts |
 
 Each model's `src/README.md` says what was ported and what was dropped.
 
@@ -133,4 +137,8 @@ recovered `tom.step` (`cadgen export ... --part`), not the whole file: cold 165 
 Known engine gaps these surface: a shape that carries a build123d joint makes
 the compound holding it unkeyable, so a body that authors joints is never
 retained; a `bd.Text` sketch fused with another sketch runs uncached; a colour
-written to STEP and read back with `read_step` comes back sRGB-encoded.
+written to STEP and read back with `read_step` comes back sRGB-encoded; a STEP numbers
+its assembly occurrences (`NEXT_ASSEMBLY_USAGE_OCCURRENCE` ids) on from the process's
+earlier STEP writes, so a warm rebuild's declared STEP of an unchanged document is other
+bytes than the cold build's (branding's `logo_texttocad.step`: ids 19-27 after two
+rebuilds, 1-9 cold; the xbf is the same bytes).
