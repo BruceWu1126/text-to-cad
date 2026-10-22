@@ -201,7 +201,9 @@ def motorbike():
     configuration(bike, "stand_down", stand_bracket=-76.2)
     configuration(bike, "turned_left", head_tube_axis=32.0)
     configuration(bike, "bump", engine_pivot=12.0)
-    return motion(bike, "steer", sweep={"head_tube_axis": (-20, 20)}, duration=2, loop="pingpong")
+    # The bars swung from 20 degrees right to 20 left and back, 2 s each way.
+    return motion(bike, "steer", [(0, {"head_tube_axis": -20}), (2, {"head_tube_axis": 20}),
+                                  (4, {"head_tube_axis": -20})])
 
 
 if __name__ == "__main__":

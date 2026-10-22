@@ -122,7 +122,7 @@ carries each old mate now (`steering` is `head_tube_axis`, `engine_swing`
 
 `ride`, which set no joint, is the bike as built, so it is no configuration.
 
-One motion is in the model's code: `steer`, `head_tube_axis` swept from -20 to
-20 degrees over 2 s and back (`motion(bike, "steer", sweep=..., duration=2,
-loop="pingpong")`). The xbf keeps it as a definition; `cadgen export
+One motion is in the model's code: `steer`, `head_tube_axis` from -20 to 20 degrees
+over 2 s and back over 2 s, as out-and-back waypoints (a motion has no loop or
+pingpong; a player repeats it). The xbf keeps it as a definition; `cadgen export
 ../XBF/motorbike.xbf bike.glb` bakes it into a glTF clip named `steer`.
