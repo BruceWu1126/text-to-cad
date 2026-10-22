@@ -111,7 +111,25 @@
      "materialName": ""
     }
    ],
-   "collisions": [],
+   "collisions": [
+    {
+     "name": "ground",
+     "type": "plane",
+     "filename": "",
+     "origin": {
+      "xyz": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rpy": [
+       0.0,
+       0.0,
+       0.0
+      ]
+     }
+    }
+   ],
    "inertial": null
   },
   {
@@ -266,6 +284,7 @@
   "frameCount": 0,
   "linkCount": 2,
   "jointCount": 1,
+  "unsupportedCollisionCount": 1,
   "staticMetadata": {
    "includes": [],
    "plugins": [],

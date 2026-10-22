@@ -761,6 +761,17 @@ def _sdf_shape_facts(owner: ET.Element, *, where: str) -> dict:
     return facts
 
 
+def _sdf_drawable(facts: dict) -> bool:
+    """Whether the viewer could draw a shape as ``_sdf_shape_facts`` describes it: a mesh by its
+    uri, or one of ``DRAWABLE_SHAPES`` with its dimensions."""
+    kind = facts.get("type")
+    if kind == "mesh":
+        return bool(facts.get("filename"))
+    if kind == "box":
+        return facts.get("size") is not None
+    return kind in DRAWABLE_SHAPES and facts.get("radius") is not None and (kind == "sphere" or facts.get("length") is not None)
+
+
 def _sdf_color(owner: ET.Element) -> str:
     material = _sdf_first(owner, "material")
     if material is None:
@@ -1007,6 +1018,10 @@ def _read_sdf(path: Path) -> _Description:
         "frameCount": frame_count,
         "linkCount": len(link_elements),
         "jointCount": len(raw_joints),
+        # The collisions with geometry the viewer cannot draw (a <plane>, a <heightmap>, none at
+        # all): never refused, since no collision is drawn, but counted. A visual like them refuses
+        # the file (above), so there is no count of those to keep.
+        "unsupportedCollisionCount": sum(not _sdf_drawable(facts) for link in description.links for facts in link.collisions),
         "staticMetadata": _sdf_metadata(root),
     }
     return description

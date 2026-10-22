@@ -59,6 +59,8 @@ export default function SdfSection({ info }) {
           <FileSheetValueField label="Lights" value={String(lights.length)} />
           <FileSheetValueField label="Physics" value={String(physics.length)} />
           <FileSheetValueField label="Nested models" value={formatSdfNumber(nestedModelCount)} />
+          {/* The collisions whose geometry the viewer cannot draw: counted, never refused. */}
+          <FileSheetValueField label="Unsupported geom." value={formatSdfNumber(sdfInfo.unsupportedCollisionCount)} />
         </FileSheetFieldGrid>
       </FileSheetSubsection>
       {includes.length || plugins.length || sensors.length || lights.length || physics.length ? (
