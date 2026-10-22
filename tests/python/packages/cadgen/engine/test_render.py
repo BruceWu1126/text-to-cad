@@ -30,6 +30,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -177,11 +178,21 @@ class ContextTest(unittest.TestCase):
     def test_a_refused_connection_is_asked_again_at_the_next_canvas(self) -> None:
         # One refused connection (an X server busy for a moment) fails that canvas, not the process's.
         gl()
-        with mock.patch("OCP.Aspect.Aspect_DisplayConnection", side_effect=RuntimeError("Can not connect")):
+        with mock.patch.object(context, "_CONNECTION", threading.local()), \
+                mock.patch("OCP.Aspect.Aspect_DisplayConnection", side_effect=RuntimeError("Can not connect")):
             with self.assertRaisesRegex(context.Unavailable, "Can not connect"):
                 context.driver()
         context.Canvas(16, 16).close()
         self.assertIsNone(context.available())
+
+    def test_the_canvases_of_a_thread_share_one_display_connection(self) -> None:
+        # One X client per thread, however many scenes it holds: an X server refuses clients past
+        # its limit, and every process drawing on it counts against that.
+        gl()
+        first, second = context.Canvas(16, 16), context.Canvas(24, 16)
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+        self.assertIs(first.driver.GetDisplayConnection(), second.driver.GetDisplayConnection())
 
     def test_a_canvas_draws_at_the_size_asked_whatever_its_window(self) -> None:
         gl()
@@ -590,7 +601,8 @@ class DaemonRenderTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         model = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertEqual((model["renderer"], "process" in model), ("occt", False))
-        self.assertEqual({path.suffix for path in self.state.iterdir()}, {".sock", ".lock"})
+        # The daemon's socket (on Windows the port file standing in for it) and its lock, nothing else.
+        self.assertEqual({path.suffix for path in self.state.iterdir()}, {".port" if os.name == "nt" else ".sock", ".lock"})
         self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/pair.xbf", "edited.png", "first.png", "model.png", "pair.py", "warm.png"])
         self.cli("stop")

@@ -795,7 +795,8 @@ class DaemonFileTest(unittest.TestCase):
         self.assertIn("openMs", changed["timings"], "read again: the file changed")
         self.assertNotEqual((self.folder / "changed.png").read_bytes(), (self.folder / "first.png").read_bytes())
         self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["changed.png", "first.png", "part.stl", "warm.png"])
-        self.assertEqual({path.suffix for path in self.state.iterdir()}, {".sock", ".lock"})
+        # The daemon's socket (on Windows the port file standing in for it) and its lock, nothing else.
+        self.assertEqual({path.suffix for path in self.state.iterdir()}, {".port" if os.name == "nt" else ".sock", ".lock"})
 
 
 if __name__ == "__main__":

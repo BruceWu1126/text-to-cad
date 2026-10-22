@@ -33,6 +33,7 @@ import io
 import os
 import struct
 import sys
+import threading
 import time
 import zlib
 from typing import Any, Callable, Iterator
@@ -165,6 +166,22 @@ def _windows_window(width: int, height: int) -> Any:
 
 # --- the driver and the canvas ---------------------------------------------------------------
 
+_CONNECTION = threading.local()
+
+
+def _connection() -> Any:
+    """The thread's one connection to the display, made at its first canvas and kept: a canvas per
+    connection would hold as many X clients as the process holds scenes, and an X server refuses
+    clients past its limit (Xvfb's 256, shared by every process drawing on it). A connection
+    refused is not kept, so the next canvas asks again."""
+    from OCP.Aspect import Aspect_DisplayConnection
+
+    made = getattr(_CONNECTION, "made", None)
+    if made is None:
+        made = _CONNECTION.made = Aspect_DisplayConnection()
+    return made
+
+
 def driver() -> Any:
     """An OpenGL driver: a core profile (PBR and the path tracer need one), drawing into frame
     buffers, never swapping a window's. Raises ``Unavailable``, by name. A refusal is asked again
@@ -174,12 +191,11 @@ def driver() -> Any:
         if platform() == "linux" and _has_xlib() and not os.environ.get("DISPLAY"):
             raise Unavailable("no X display for OpenGL: OCP's Linux build draws through GLX on an X server. Run "
                               "under Xvfb (xvfb-run -a ..., or Xvfb :99 & export DISPLAY=:99), or set DISPLAY")
-        from OCP.Aspect import Aspect_DisplayConnection
         from OCP.OpenGl import OpenGl_GraphicDriver
 
         if platform() == "darwin":
             _cocoa_application()
-        made = OpenGl_GraphicDriver(Aspect_DisplayConnection(), False)
+        made = OpenGl_GraphicDriver(_connection(), False)
         options = made.ChangeOptions()
         options.buffersNoSwap = True
         options.contextCompatible = False

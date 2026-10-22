@@ -169,7 +169,8 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(len(status["workers"]), 1)
         self.assertEqual(status["workers"][0]["builds"], 3)
         # The daemon's only files are its socket and lock; the build's, its outputs.
-        self.assertEqual({path.suffix for path in self.state.iterdir()}, {".sock", ".lock"})
+        # The daemon's socket (on Windows the port file standing in for it) and its lock, nothing else.
+        self.assertEqual({path.suffix for path in self.state.iterdir()}, {".port" if os.name == "nt" else ".sock", ".lock"})
         self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/block.xbf", "block.py"])
 
