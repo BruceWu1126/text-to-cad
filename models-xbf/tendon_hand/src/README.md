@@ -1,0 +1,140 @@
+# tendon_hand models
+
+`models/tendon_hand` ported to `cadgen.engine`: the tendon-driven right-hand research
+project (24 joint degrees of freedom, 48 antagonistic tendon actuators; millimetres,
+fingers along +Y, palm side +Z, thumb on -X). The old project was 112 one-model
+scripts. The 56 that build from the project's code are models here, folded into five
+scripts by subsystem, each model keeping its name and writing `XBF/<name>.xbf`. Of the
+other 56, 55 read frozen checkpoints or generated validation output that no program in
+the project recreates, and one fails after twenty minutes; they are left in
+`models/tendon_hand` and listed below.
+
+Build from this folder; each script builds every model it defines:
+
+```
+python components.py
+python phalanges.py
+python routing.py
+python guide_mounts.py
+python forearm.py
+python -m cadgen.engine snapshot ../XBF/anatomy_layout.xbf fist.png --pose fist
+```
+
+| Script | Models |
+| --- | --- |
+| `components.py` (20) | `axle_review`, `driven_axle_review`, `bushing_review`, `retaining_ring_review`, `pulley_review`, `pulley_hub_review`, `universal_carrier_review`, `wrist_review`, `palm_cradle_clearance_review`, `thumb_metacarpal_review`, `motor_review`, `gearbox_review`, `capstan_review`, `capstan_index_overlay`, `tension_cartridge_review`, `tension_cartridge_bank_review`, `drive_terminal_review`, `drive_terminal_macro`, `drive_terminal_placements`, `runtime_fixture` |
+| `phalanges.py` (11) | `anatomy_layout` (joints and curl couplings, below), `phalanx_review`, `phalanx_variants_review`, `phalanx_continuous_r5`, `phalanx_continuous_supports_r5`, `phalanx_continuous_representative_r5`, `fingertip_pad_review`, `fingertip_pad_export_repair`, `fingertip_bridge_repair_review`, `fingernail_export_repair_review`, `fingernail_review` |
+| `routing.py` (5) | `bowden_review`, `transport_review`, `middle_routing_review`, `thumb_cmc_transport_review`, `thumb_cmc_candidate_review` |
+| `guide_mounts.py` (14) | `index_guide_mounts`, `middle_guide_mounts`, `ring_guide_mounts`, `little_guide_mounts`, `phalanx_guide_mounts_review`, `guide_comb_review`, `fixed_outlet_review`, `fixed_outlet_mounts_review`, `yaw_reaction_mounts_review`, `yaw_outlet_mount_review`, `yaw_guide_macro_review`, `thumb_cmc_negative_jaw_repair_review`, `thumb_downstream_mounts_review`, `thumb_reaction_arm_context_candidate` |
+| `forearm.py` (6) | `forearm_frame_review`, `forearm_guide_banks_review`, `forearm_mount_system_review`, `forearm_housing_review`, `actuator_fasteners_review`, `forearm_housing_context` |
+
+Measured on 2026-10-22 (one machine, its load 20-50 from other work; the five scripts
+built at once, each in a fresh worker): cold `components` 163 s, `routing` 34 s,
+`phalanges` 303 s, `guide_mounts` 281 s, `forearm` 153 s. A no-op takes 0.4-1.8 s per
+script and rewrites nothing (all 56 xbfs keep their bytes). An edit to the capstan's
+hub height (`lib/capstan.py`) runs the three models that place a capstan -- `capstan_review`
+and `capstan_index_overlay` (6.3 s for `components`) and `forearm_housing_context` (11.8 s
+for `forearm`) -- and replays the other 53; reverting it writes the cold build's bytes
+again, all 56. (An xbf's closure names the repository's commit, so the first build after
+a commit rewrites every xbf, those bytes aside the same.)
+
+## The port
+
+- `@step(out="../STEP/x.step")` became `@xbf(out="../XBF/x.xbf")`, the engine imported
+  first; `build123d` is imported directly, `cadgen.srgb` is `lib/color.py`'s, and
+  `cadgen.report` and `read_step` are the engine's. `lib/` holds the 56 factory
+  modules these models reach, unchanged but for those imports, and the JSON data they
+  read. `lib/assembly.integration_bodies` and `lib/palm_frame.make_palm_frame_bodies`
+  still read the frozen inputs listed below; no ported model calls them.
+- No model calls another. `phalanx_guide_mounts_review` called the four finger models,
+  `forearm_mount_system_review` the frame and guide-bank models, and
+  `forearm_housing_context` read the mount system's and the fasteners' STEP. The
+  pieces several models place are `@memo` stages: `finger_guide_mounts(finger)` (18-35 s
+  and about 1,240 kernel calls each, placed by its finger's model and the four-finger
+  review), `forearm_frame()` and `forearm_guide_banks()` (about 40 s, 3,100 and 5,300
+  calls, placed by three models each) and `continuous_supports()` (about 25 s, 1,160
+  calls, placed by both R5 support models). Nothing else is: the housing and the
+  fasteners (2.4 s and 0.9 s) are plain functions, and each model makes its own.
+- The R5 supports clip against `phalanx_continuous_r5` as STEP gives it back ("native
+  STEP reconstruction is required for reliable clipping"): the original read that
+  model's STEP output with build123d's `import_step`. `lib/phalanx_r5_host.py` writes
+  the same phalanx to STEP and reads it back in memory now. Its shape and the raw
+  `BRepAlgoAPI` booleans of `lib/phalanx_r5_boolean.py` are no operations the memo
+  keys, so the two R5 models never replay from the worker's memory: a no-op takes their
+  xbfs (their key holds), and any edit their code reaches runs them whole (about 27 s).
+- Materials: `capstan_index_overlay` declared `materials=` (the palette's aluminium
+  bucket); each of its parts carries `lib/palette.py`'s `MATERIALS` entry for its bucket
+  now (`lib.assembly.compound`), a catalogue material in the old finish's look with
+  `color=None`, so a part keeps its palette colour. The other models declared no
+  materials and carry colours alone, as before.
+- Dropped: the side files four models wrote from their bodies
+  (`validation/*_frames.json`, for the validation programs; a model writes its xbf
+  and nothing else), `capstan_index_overlay`'s `capstan_records()` (r13's overlay
+  table, read from a validation output), `runtime_fixture`'s `bend` clip (a tube
+  deformation, which no joint makes) and the render-job JSON (the old snapshot's).
+
+## Kinematics
+
+`anatomy_layout` is the hand's skeleton at the neutral pose: every phalanx and every
+joint's two drive pulleys. Its finger joints are build123d joints at `lib/layout.py`'s
+datums: a `RevoluteJoint` on the parent about the joint's axis, its travel the joint's
+limits, and a `RigidJoint` of the same label on the child where it stands, so every
+joint is 0 as built. Per finger: MCP flexion, PIP and DIP; the thumb: CMC flexion, MCP
+abduction, MCP flexion and IP. A joint's two drive pulleys ride its child. The study
+has no palm, so the MCP and thumb-CMC abduction carriers (each joint's abduction
+pulleys) stand as the ground and those abductions are not modelled.
+
+Each finger's curl is one control, `couple(hand, "<finger>_curl", ...)`: 0 straight, 1
+each flexion at its limit (MCP 90, PIP 110, DIP 80 degrees); `thumb_curl` drives the
+thumb's MCP flexion (70) and IP (85). Two configurations: `fist` (every curl 1) and
+`point` (all but the index).
+
+## Not ported
+
+Left in `models/tendon_hand`, each for what it reads that the project's code does not
+make:
+
+- **The frozen palm**, `STEP/imported/palm_frame_integration.step` (8.5 MB, outside
+  Git): the main metacarpal truss that `lib/palm_frame.make_palm_frame_bodies` reads,
+  and the bootstrap of a cycle (`palm_frame_integration` reads
+  `palm_frame_candidate_review`, which reads `palm_guide_mounts_review`, which reads
+  the frozen palm). Directly or through another model's STEP: `palm_frame_review`,
+  `palm_frame_integration`, `palm_frame_candidate_review`, `palm_hardware_review`,
+  `palm_hardware_context_review`, `palm_main_rom_review`, `palm_little_rom_review`,
+  `palm_main_full_rom_review`, `palm_little_full_rom_review`,
+  `palm_main_comb_rom_review`, `palm_little_comb_rom_review`,
+  `palm_main_final_rom_review`, `palm_final_rom_context_review`,
+  `palm_guide_mounts_review`, `index_palm_guide_mounts`, `middle_palm_guide_mounts`,
+  `ring_palm_guide_mounts`, `palm_guide_bank_review`, `thumb_cmc_mounts_review`,
+  `thumb_base_mounts_review`, `wrist_guide_mounts_review`, `cup_guide_mounts_review`,
+  `integration_review`, `hand_progress_review`, `routing_layout_review` (25).
+- **The frozen native hand**, `STEP/imported/integration_native_base.step` (250 MB)
+  and its certificate `validation/integration_native_base_certificate.json`, with the
+  native archives `lib/native_integration.py` overlays: `hand_mechanical_candidate`,
+  `_r11`, `_r12`, `_r13`, `hand_native_review`, `hand_export_repair_context`,
+  `phalanx_continuous_context_r5`, `cmc_carrier_relief_review` (8); and the clearance
+  studies built on `hand_mechanical_candidate`'s STEP through the old pipeline's
+  `cadgen.step_scene`: `palm_thumb_arm_clearance_r11`, `radial_bank_surface_review`,
+  `thumb_reaction_arm_clearance_r2` to `_r5`, `tip_bridge_repair_context` (7).
+- **Other frozen STEP**: `radial_bank_arm_repair_review`
+  (`STEP/imported/rigid_clearance_inputs.step`), `phalanx_beauty_review`,
+  `phalanx_beauty_context`, `phalanx_sculpt_representative_context`,
+  `pulley_hub_context` (`STEP/phalanx_beauty_native/middle_proximal_frame.step`), and
+  `tip_export_repair_review` (`phalanx_beauty_review`'s STEP) (6).
+- **Generated validation output** (`validation/*.json`, written by the validation
+  programs, outside Git): `cmc_dorsal_ring_review`, `compact_cmc_yaw_review`,
+  `compact_mcp_dorsal_review` and `joint_hardware_review`
+  (`secondary_hardware_diagnostic.json`), `positive_yaw_bushing_review`,
+  `radial_bank_screw_clearance_candidate`, `static_clearance_relief_review`,
+  `thumb_reaction_arm_clearance_r6` (8).
+- **Broken in `models/`**: `phalanx_comb_clearance_review` imports a name
+  `lib/native_integration.py` no longer defines (1).
+- **Too slow, then failing**: `palm_little_review`, the fifth metacarpal, the one palm
+  part made from code alone. Built in the engine it ran 19.5 minutes and failed in
+  `lib/palm_frame._blend_junctions`: three junction edges at blend node 3 take no
+  0.03 mm fillet, one at a time or together. Run as plain build123d it was still running
+  after 15 minutes (1).
+
+The legacy checkout's `models/assemblies/STEP/anthropomorphic_hand` (4.7 GB) holds the
+frozen inputs; porting the palm chain would read the frozen palm as tom reads its
+vendor STEP (converted once to xbf, local and uncommitted).
