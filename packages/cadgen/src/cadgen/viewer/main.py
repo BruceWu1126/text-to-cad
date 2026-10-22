@@ -433,6 +433,17 @@ class _LateApp:
         response.send_json(503, {"ok": False, "error": "server starting"})
 
 
+def _prewarm_engine() -> None:
+    """Warm the engine (``{"op": "warm"}``: its daemon started, its server, meshing processes and a
+    STEP reader with it). Best-effort: a daemon that cannot start is the first open's to report."""
+    from cadgen.engine.client import request  # noqa: PLC0415 - kernel-free, needed only now
+
+    try:
+        request({"op": "warm"})
+    except Exception:  # noqa: BLE001 - the first document's open says why the engine cannot serve it
+        pass
+
+
 def _harden_streams() -> None:
     """Degrade an unencodable character to an escape instead of raising.
 
@@ -748,6 +759,12 @@ def serve(argv: list[str], *, prog: str = DEFAULT_PROG) -> int:
     say(f"CAD Viewer URL: {url}\n")
     if args["json"]:
         _out(f"{_compact_json({'url': url, 'port': port, 'action': 'started'})}\n")
+
+    # Warm the engine -- its daemon, its server, its meshing processes and a STEP reader -- while
+    # nobody waits: a page's first document otherwise pays for every one of them. After the
+    # announcement, never before it: the URL line is the readiness signal and waits for nothing.
+    # The viewer builds nothing itself; this only warms what serves its documents.
+    threading.Thread(target=_prewarm_engine, name="cadgen-viewer-prewarm", daemon=True).start()
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)

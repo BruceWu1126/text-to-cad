@@ -402,6 +402,18 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(found["name"], "plug")
         self.assertAlmostEqual(found["volume"], 8 - 3.14159265 * 0.25 * 2, places=2)
 
+    def test_warming_starts_the_server_before_any_document(self) -> None:
+        """What the viewer asks at its launch (``{"op": "warm"}``): the daemon, its server and the
+        processes a first document waits on, started with no document served; asked again, nothing more."""
+        probe = ("import json; from cadgen.engine.client import request; "
+                 "print(json.dumps([request({'op': 'warm'}), request({'op': 'warm'}), request({'op': 'status'})]))")
+        done = engine_daemon.run([sys.executable, "-c", probe], cwd=self.folder, env=self.env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        first, again, status = json.loads(done.stdout.strip().splitlines()[-1])
+        self.assertEqual((first, again), ({"ok": True}, {"ok": True}))
+        self.assertTrue(status["serving"]["url"].startswith("http://127.0.0.1:"))
+        self.assertEqual(status["serving"]["documents"], [])
+
     def test_an_idle_daemon_exits(self) -> None:
         env = {**self.env, "CADGEN_ENGINE_IDLE": "0.5"}
         self.script.write_text(textwrap.dedent(MODEL.format(size=3)), encoding="utf-8")

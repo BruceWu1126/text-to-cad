@@ -754,6 +754,11 @@ class Daemon:
             send({"ok": True, "url": f"{server.url}/?doc={ident}", "port": server.port})
         elif op == "draw":
             self.draw(request, send)
+        elif op == "warm":
+            # The viewer at its launch: the server, its meshing processes and a STEP reader started
+            # while nobody waits, so a page's first document waits on none of them.
+            self.serve(request).warm()
+            send({"ok": True})
         elif op == "status":
             send(self.status())
         elif op == "stop":

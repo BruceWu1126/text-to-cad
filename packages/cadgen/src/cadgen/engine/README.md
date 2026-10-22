@@ -388,6 +388,13 @@ names a loopback page's origin as an allowed reader (`access.py`: `localhost`, `
 `[::1]`, any port); a page from anywhere else gets no such header and its browser keeps the
 answer from it.
 
+`cadgen viewer` warms the engine once it has announced its URL (`{"op": "warm"}`, on a thread
+nothing waits on): the daemon starts, and with it its server, its meshing pool and a STEP reader
+(`Server.warm`), so a page's first document waits on no process start. On a 24-part assembly
+(each part filleted and drilled) the first open of its `.xbf` took 0.14 s warm against 2.4 s cold,
+and of its STEP 0.27 s against 5.8 s (a fresh daemon each, the median of three). A daemon that
+cannot start is the first open's to report.
+
 **The look.** The regular display modes draw a document as OCCT's PBR raster draws it, one frozen
 record (`render/look.py`) that the OCCT prototype (`render/occt.py`, its finishes and light in
 `render/finish.py`) draws by too: one white directional key at radiance 4 travelling

@@ -392,6 +392,18 @@ class Server:
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
 
+    def warm(self) -> None:
+        """The processes a first document waits on, started now (the viewer's launch asks it):
+        the meshing pool, warming since the server started, and a STEP reader when none has read
+        yet -- a reader takes one read and goes, so a no-op takes the first and the one a read
+        takes starts warm meanwhile."""
+        if self.mesher.mode == "processes":
+            self.mesher.processes()
+        with self.foreign_lock:
+            started = self.reader is not None
+        if not started:
+            self._readers().submit(int)
+
     def stop(self) -> None:
         if self.thread is not None:  # shutdown waits for a loop that runs
             self.http.shutdown()
