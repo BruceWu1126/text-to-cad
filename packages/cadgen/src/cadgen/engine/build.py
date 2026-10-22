@@ -439,11 +439,11 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
                             f"reads {path}, not a regular file: it runs on every build" for path in shown_paths)
             # A file read past the engine's readers (``memo._bypassed``): the call, which keeps
             # the body running, and the reader that would key it.
-            for body_name, calls in run.bypassed.items():
+            for body_name, reads in run.bypassed.items():
                 body_script, _, function = body_name.rpartition("::")
                 retention["fallbacks"].setdefault(f"{Path(body_script).name}::{function}", []).extend(
                     f"reads {_shown(Path(path), Path(body_script).parent) if path else 'a file'} through {call}: "
-                    "it runs on every build; use read_step/read_xbf/read_mesh" for call, path in calls)
+                    "it runs on every build; use read_step/read_xbf/read_mesh" for call, path in reads)
             reports.append({"ok": True, "model": f"{shown}::{model.name}", "memo": calls, "retention": retention,
                             "children": {name: round(seconds, 4) for name, seconds in context.timings.items()
                                          if name != model.identity},

@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from cadgen.engine import build as engine_build
+from cadgen.engine import cli
 from cadgen.engine import document
 
 KIT = """
@@ -338,6 +339,9 @@ class ReadsTest(unittest.TestCase):
                 self.assertEqual(report["bodies"], {f"reads.py::{name}": "run"}, name)
                 self.assertEqual(report["retention"]["fallbacks"], {f"reads.py::{name}": [
                     f"reads {path} through {call}: it runs on every build; use read_step/read_xbf/read_mesh"]})
+                # The report is the build's, its memo tally whole: `python model.py` prints it.
+                self.assertIn("misses", report["memo"], name)
+                self.assertTrue(cli._describe(report, 1.0, None).startswith(f"built reads.py::{name} in"), name)
             # No key: a restart builds it too.
             _writer, record = previous.scan(self.folder / f"XBF/{name}.xbf")
             self.assertIsNone(json.loads(record)["key"], name)
