@@ -142,7 +142,8 @@ def hinge():
 | `build.py` | one build: load the script (as Python imports it: a package's module by its dotted name) or code afresh, one memo run, document, element names, files: every model's that ran |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
-| `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in |
+| `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a read of a file the build writes refused (`refuse_written`) |
+| `refs.py` | references to geometry: the ref grammar, occurrence paths, resolution by name in the latest build, `select` (**References**) |
 | `export/` | `translate` and the kind registry (`__init__`); an xbf packaged with its closure's files (`cadz`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a STEP read in a reader process, held by its bytes; a minimal three.js page |
@@ -167,8 +168,8 @@ cadgen xbf snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--cam
                     [--width W --height H | --size-profile P] [--no-daemon] [--json]
 cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
 cadgen xbf status [--json] | stop | daemon
-cadgen where DOC [REF]                      the build closure; with REF: PART/face N (edge, vertex), an element name,
-                                            or a part or an assembly: its volume and mass
+cadgen where DOC [REF]                      the build closure; with REF (**References**): an element's facts and
+                                            what made it, or a part's or an assembly's volume and mass
 ```
 
 These are the commands as invoked today: `where` is the first verb at the top level, and
@@ -802,14 +803,15 @@ during a build too) and never from a file: a document served cold, with no live
 worker that built it (a daemon started again, `serve --foreground`), answers
 `made_by: null`, and so does an element the served version names otherwise than
 that worker's last build. The line is the call's in the run that named the part.
-`cadgen where DOC REF` serves the document on demand and prints one
-element's facts and `made_by`; `REF` is `PART/face N` (`edge`, `vertex`), `PART`
-a part's or an instance's name as the structure spells it, or an element name
-in the viewer's ref grammar (`f:plate.relief.3`). A `REF` that names a part or an assembly
-(its name, or its path: `kit/arm`, the document's name for all of it) answers what it weighs:
-each part's volume, measured on its solids (`.../part/<key>/volume`), times its material's
+`cadgen where DOC REF` serves the document on demand and resolves `REF` (**References**):
+an element answers its facts and `made_by`, with its canonical `ref`, its occurrence's `path`
+(`hand/finger.2`), its part, key, kind, ordinal and name, its points (centroid, position,
+endpoints, box) placed where that occurrence stands; a part or an assembly answers what it
+weighs: each part's volume, measured on its solids (`.../part/<key>/volume`), times its material's
 density, summed -- `{ref, parts, volume (mm³), mass (kg, null when no part has a material),
-unweighed (the parts without one)}`, and for one part its material and density.
+unweighed (the parts without one, by path)}`, and for one part its path, material and density.
+A ref of several selectors answers a list. A ref that names nothing, or several things where
+it names one, is refused by name (exit 2).
 
 ## Wire format
 
@@ -939,6 +941,79 @@ A child model or a `@memo` function names what its `return` statement makes in i
 calls it, and a replay cannot follow the caller. So marking a helper that returns a
 construction unassigned (`return body - holes`) renames those elements once; marking one
 that returns an assigned name (`return body`) renames nothing.
+
+## References
+
+A ref names a part, an assembly or one element of a document in the engine's own names
+(`refs.py`), and it is resolved by name in the document as it is now -- the latest build. Nothing
+of an earlier build is kept: an element a later build moved or resized resolves to where it is
+now; one it deleted fails, naming it; one whose making changed (a feature started or stopped
+touching it, so it is named otherwise) fails too, listing what its atom is named now (`plate.body.6
+is now f:plate.body.6`), never picking one.
+
+```
+REF      = [FILE "#"] SELECTOR ("," SELECTOR)*     a bare ELEMENT after an owner is that owner's
+SELECTOR = OWNER | [OWNER "/"] ELEMENT              no OWNER: the document's root
+OWNER    = SEGMENT ("/" SEGMENT)*                   an occurrence's path, or its last segments
+SEGMENT  = LABEL | LABEL "." N | "QUOTED" ["." N]   N: the N-th of the siblings so labelled
+ELEMENT  = NAME | face N | edge N | vertex N        NAME: f:…, e:…, v:… (Element names)
+```
+
+An occurrence is named by the labels on the way to it. A label its siblings share takes its
+number among them, in component order: `hand/finger.2` is the second component labelled `finger`
+of `hand`, and a repeated part is always addressed by such a path, never by a number across the
+document. An owner may start at any level (`palm`, `finger.2/face 7`) where what it names is one
+occurrence; a path whose first segment names the root is read from the root. A label that names
+several occurrences is refused with their paths (`finger names 3 occurrences in hand.xbf:
+hand/finger.1, hand/finger.2, hand/finger.3`). A segment is read as a label first and as `LABEL.N`
+only where no sibling bears it whole; a label holding `/`, `,` or a quote, or one that would read
+as another sibling's, is JSON-quoted. An element of an assembly resolves from it when one part
+below holds it, so a document of one part takes its elements by the document's name
+(`plate/face 3`). A part's elements are numbered by their `TopExp.MapShapes` ordinals, the ones
+its names, `faceNames` and the XBM2 buffer use. `FILE` (everything before the first `#`,
+JSON-quoted where it holds one) must be the document resolved in: the same file, or the last
+segments of its path. A canonical ref -- what `select` labels a shape with and `where` answers --
+spells the element by its name (its ordinal only where it has none) under its part's label where
+that label names one occurrence, else under the occurrence's path from the root; in a document of
+one part, under the document's name.
+
+`select(source, ref, kind=None)` (`cadgen.engine.select`) is the geometry a ref names, as a
+build123d `ShapeList` in world coordinates, one per selector: an element a `Face`, `Edge` or
+`Vertex`, a part its shape, an assembly a `Compound` of its components (new placements on the
+same geometry). `kind` (`"face"`, `"edge"`, `"vertex"`) is every such element under each instead:
+of every part below an occurrence, or of an element (a face's edges; never an edge's faces).
+`source` is a document's path (`.xbf`, `.step`), a shape -- `read_xbf`'s or `read_step`'s tree,
+whose elements its file names, or a live shape in a model's body, whose elements are named as
+this build names them (`trace`: what its document will hold) -- or a model: in a build its result
+in this run (a child), outside one built warm through the daemon first, then its xbf read.
+
+```python
+kit = read_xbf("XBF/kit.xbf")                                   # a checks script: the latest build
+rim = select(kit, "kit/wheel.2/f:wheel.rim.1")[0]               # a Face, world coordinates, labelled
+edges = select(kit, "kit/base/f:base.body.6", kind="edge")      # its edges, each labelled
+
+@xbf
+def bracket():
+    base = plate()                                              # the user picked plate/f:plate.body.6;M:plate.relief
+    top = select(base, "f:plate.body.6;M:plate.relief")[0]      # a live shape: this build's names
+    return base + bd.Pos(top.center(bd.CenterOf.MASS)) * bd.Cylinder(4, 10)
+```
+
+Outside a build every shape carries its canonical ref as its `label`. Inside one a label names
+what is made of the shape it is on (**Element names**), so an element comes unlabelled, as
+`faces()` gives it, a part or an assembly with its own label, and an element's `topo_parent` is
+its part where the tree puts it: `bd.fillet(select(base, "f:…", kind="edge"), 1)` fillets `base`,
+and what a selected element makes is named as what `faces()` gives makes. A document `select`
+reads in a body is the model's own read, keyed by the file's bytes as `read_xbf`'s: the file is
+one of the closure's `inputs`, and a changed file runs the body again.
+
+**A model never reads a file its own build writes**: its own xbf or export, a child's, a
+sibling's (`reader.refuse_written`: `select` asks before it reads, `read_xbf` and `read_step` as
+they read the file). Read,
+the file would be an input the build rewrites -- its key moving on every build, so the model would
+never be taken from its file -- or, kept out of the key, a model depending on its own past. A
+model selects what it makes from the live shape instead, by the same names, which are this
+build's: so its own output never invalidates it.
 
 ## Body retention
 
