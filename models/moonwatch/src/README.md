@@ -74,17 +74,20 @@ flip about X and the MOVT_Z_OFFSET lift. The old `KINEMATICS` and `ANIMATION` ar
 build123d joints, placed where the parts stand and paired by label:
 
 - **Mates.** The six hands turn on the dial (revolute; lume, hubs and the chrono cap
-  fastened to theirs), the going train, escapement and balance in the movement
-  (cylindrical: the turn, and the tier slide the showcase fans them by; pinions,
-  pallet stones, arbor, staff, impulse jewel and the 16 timing screws fastened), the
-  chronograph runner and coupling wheel in the chronograph works (revolute), the crown
-  on the case middle (cylindrical: winding turn and setting travel) and the two pushers
-  (prismatic, inward along their axes). The stem is no longer fastened to the crown: it
-  stays with the movement, which the clips lift out of the case.
-- **Couplings and poses.** The gear ratios are two couplings, `running` (seconds of
-  time) and `chrono` (seconds of chronograph running), and the old poses are
-  configurations (`one_minute`, `half_hour`, `chrono_at_10min`, `start_pressed`,
-  `reset_pressed`, `winding`, `setting`; `rest` is the watch as built).
+  fastened to theirs), the going train and the pallet fork in the movement (revolute),
+  the balance (cylindrical: its swing, and the tier slide the fan carries it by with its
+  cock; pinions, pallet stones, arbor, staff, impulse jewel and the 16 timing screws
+  fastened), the chronograph runner and coupling wheel in the chronograph works
+  (revolute), the crown on the case middle (cylindrical: winding turn and setting
+  travel) and the two pushers (prismatic, inward along their axes). The stem is no
+  longer fastened to the crown: it stays with the movement, which the clips lift out of
+  the case.
+- **Couplings and poses.** The gear trains are two couplings, `running` (seconds of
+  time) and `chrono` (seconds of chronograph running), each a constraint: its wheels
+  and hands move only through it, and its range is what their limits allow (an hour of
+  `running`, half an hour of `chrono`, either way). The old poses are configurations
+  (`one_minute`, `half_hour`, `chrono_at_10min`, `start_pressed`, `reset_pressed`,
+  `winding`, `setting`; `rest` is the watch as built).
 - **The clips' joints.** Each part or group the old clips translated slides on a
   prismatic joint from the case middle along its own direction (`lift_*`); the
   movement rises on one (`movement_rise`) and flips on a revolute about X through its
@@ -92,14 +95,25 @@ build123d joints, placed where the parts stand and paired by label:
   joints in its own frame (`tier_*`, each group's first part the lead, the rest
   fastened to it).
 - **Clips.** `running`, `reveal`, `showcase` and `grand_tour` are motions, functions of
-  time over those joints, which the declared `@glb` bakes into clips (animation is a
-  GLB export's alone; the xbf keeps the definitions). A joint carries one direction:
-  where the old showcase moved the face stack sideways and the reveal lifted it, both
-  lift it now (the showcase higher, clear of the rising movement), and the crown and
-  pushers, whose joints are their own travel, stay in the case.
+  time over those joints and the two couplings, which the declared `@glb` bakes into
+  clips (animation is a GLB export's alone; the xbf keeps the definitions). A motion
+  has no loop: a player repeats it, and every part ends a clip where it started but the
+  going train and the chronograph's recorders, which keep the watch's time. A joint
+  carries one direction: where the old showcase moved the face stack sideways and the
+  reveal lifted it, both lift it now (the showcase higher, clear of the rising
+  movement), and the crown and pushers, whose joints are their own travel, stay in the
+  case.
+- **The escapement** (every clip runs it): the balance swings, the pallet fork snaps
+  between its banks each beat, and each beat the escape wheel takes one half-tooth step
+  (12 deg). The old clip then crept the fourth and third wheels 144 deg a loop and the
+  small seconds with them, faster than their ratios; the train moves only through
+  `running` now, so it steps with the escape wheel at its own ratios: 0.2 s of the
+  watch's time a beat, 1.6 s a 6 s clip (the small seconds 9.6 deg, the minute hand
+  0.16 deg). The chronograph runs through `chrono`, 60 s a clip: its runner and seconds
+  hand one turn, as before, and now its minute (12 deg) and hour recorders with them.
 - **The tier fan** (`showcase`, `grand_tour`) runs as the old clips meant it. Their tier
   offsets are in the cased watch frame, negative toward the caseback (the bridge side),
-  which the movement's flip turns upward; the tier and train-wheel joints slide in the
+  which the movement's flip turns upward; the tier and balance joints slide in the
   movement's own frame, which the casing flips (watch z = MOVT_Z_OFFSET - local z), so
   each slides by the offset's negative. Fixed 2026-10-22: the first port slid them by
   the offset itself, so after the flip the bridge-side tiers fell through the main plate
@@ -107,9 +121,12 @@ build123d joints, placed where the parts stand and paired by label:
   train and barrel bridges, the winding, the balance cock and the chronograph works stand
   above the plate in that order (the chronograph works' top about 48 mm up, the plate's
   13-17 mm), the keyless works about 7 mm below it, and no tier meets another; the face
-  stack's extra 32 mm in `grand_tour` clears the chronograph works. As in the old clip,
-  the chronograph works fan as one tier: the hour recorder they carry on the dial side
-  passes up through the plate and the winding tier while the fan opens and closes.
+  stack's extra 32 mm in `grand_tour` clears the chronograph works. The old fan also
+  lifted the going train and the pallet fork 5 mm: the train's wheels move only through
+  `running`, so they take no slide and stay on the plate, and the fork with them, while
+  the bridges lift off them. As in the old clip, the chronograph works fan as one tier:
+  the hour recorder they carry on the dial side passes up through the plate and the
+  winding tier while the fan opens and closes.
 
 New finishes for the dial, hands and bracelet follow the same rules as the case's:
 `black_lacquer` and `lume_plot` are own materials (coatings, no density),

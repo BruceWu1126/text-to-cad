@@ -15,21 +15,26 @@ half where its moving joint holds it at 0 (`_held`):
   on the dial, the going train, escapement and chronograph in the movement,
   the crown (turn and travel) and the two pushers on the case middle, each
   wheel's pinion and each hand's lume and hub fastened by rigid-joint pairs;
-- its gear ratios, the old couplings, as `couple`: `running` (seconds of time)
-  and `chrono` (seconds of chronograph running), and its poses as
-  `configuration`s;
+- its gear trains, the old couplings, as `couple`: `running` (seconds of time)
+  and `chrono` (seconds of chronograph running), each a constraint its wheels and
+  hands move only through, and its poses as `configuration`s;
 - the joints its exploded clips move: each part or group the old `ANIMATION`
   translated slides on a prismatic joint along its own direction, the
   movement rises on one and flips on a revolute about X, and the movement's
-  tiers fan on prismatic joints in its own frame (a train wheel's tier slide
-  and spin are one cylindrical joint).
+  tiers fan on prismatic joints in its own frame (the balance's tier slide and
+  swing are one cylindrical joint; the going train, a coupled gear train, takes
+  no slide and stays on the plate).
 
-The four old clips are motions, functions of time over those joints, which the
-declared GLB bakes into clips: `running` (the escapement's 8 beats a loop),
-`reveal`, `showcase` and `grand_tour`. A joint carries one direction, so where
-the old showcase moved the face stack sideways and the reveal lifted it, both
-lift it now (the showcase higher, clear of the rising movement), and the crown
-and pushers, whose joints are their own travel, stay in the case.
+The four old clips are motions, functions of time over those joints and the two
+trains, which the declared GLB bakes into clips: `running` (the escapement's 8
+beats), `reveal`, `showcase` and `grand_tour`. A player repeats a clip (a motion
+has no loop): every part ends where it started but the going train and the
+chronograph's recorders, which keep the watch's time, so a repeat steps them back
+to as built (1.6 s of `running` a 6 s clip: the small seconds 9.6 deg, the
+minute hand 0.16 deg). A joint carries one direction, so where the old showcase
+moved the face stack sideways and the reveal lifted it, both lift it now (the
+showcase higher, clear of the rising movement), and the crown and pushers, whose
+joints are their own travel, stay in the case.
 """
 
 import math
@@ -143,18 +148,20 @@ _HAND_RIDERS = (
     ("chrono_cap_rides", "#hand:chrono_seconds", "#hand:chrono_cap"),
 )
 
-# The movement's turning parts that also fan with their tier: one cylindrical joint each,
-# its turn about the arbor and its slide along it (local -Z, the dial side: a negative
-# slide is toward the bridges, local +z, which the movement's own flip turns upward).
-# label, part, position, range.
-_WHEELS = (
+# The movement's turning parts, each about its arbor along local -Z. The going train is a
+# gear train, so its wheels move only through the `running` coupling (a revolute each:
+# a coupled joint takes no slide). The pallet fork banks on its arbor (a revolute). The
+# balance swings and fans with its cock: one cylindrical joint, its turn and its tier slide
+# (along local -Z, the dial side: a negative slide is toward the bridges, local +z, which
+# the movement's own flip turns upward). label, part, position, range.
+_TRAIN = (
     ("center", "#center_wheel", S.CENTER_WHEEL_POS, (-4320.0, 4320.0)),
     ("third", "#third_wheel", S.THIRD_WHEEL_POS, (-3600.0, 3600.0)),
     ("fourth", "#fourth_wheel", S.FOURTH_WHEEL_POS, (-21600.0, 21600.0)),
     ("escape", "#escape_wheel", S.ESCAPE_WHEEL_POS, (-216000.0, 216000.0)),
     ("pallet", "#pallet_fork", S.PALLET_FORK_POS, (-12.0, 12.0)),
-    ("balance", "#balance_wheel", S.BALANCE_POS, (-330.0, 330.0)),
 )
+_BALANCE = ("balance", "#balance_wheel", S.BALANCE_POS, (-330.0, 330.0))
 _WHEEL_RIDERS = (
     ("center_pinion_rides", "#center_wheel", "#center_pinion"),
     ("third_pinion_rides", "#third_wheel", "#third_pinion"),
@@ -177,9 +184,11 @@ _CHRONO_RIDERS = (
     ("runner_arbor_rides", "#chrono_runner_wheel", "#chrono_runner_arbor"),
 )
 
-# The tier offset each turning part takes in the fan: the old tiers' z, in the CASED watch
-# frame (negative is the bridge side, toward the caseback), as `_TIERS` holds them.
-_WHEEL_TIER = {"center": -5.0, "third": -5.0, "fourth": -5.0, "escape": -5.0, "pallet": -5.0, "balance": -24.0}
+# The balance's tier offset in the fan, its cock's: the old tiers' z, in the CASED watch
+# frame (negative is the bridge side, toward the caseback), as `_TIERS` holds them. (The
+# old fan also lifted the going train and the pallet fork 5 mm; a gear train's wheels
+# move only through their coupling, so they stay on the plate, and the fork with them.)
+_BALANCE_TIER = -24.0
 
 
 def _hands(parts: _Parts, dial) -> None:
@@ -192,10 +201,14 @@ def _hands(parts: _Parts, dial) -> None:
 
 
 def _train(parts: _Parts, caliber, chrono) -> None:
-    for label, wheel, pos, limits in _WHEELS:
+    for label, wheel, pos, limits in _TRAIN:
         axis = bd.Axis(_local(pos), _DOWN)
-        joint = bd.CylindricalJoint(label, caliber, axis=axis, angular_range=limits, linear_range=(-30.0, 0.0))
+        joint = bd.RevoluteJoint(label, caliber, axis=axis, angular_range=limits)
         bd.RigidJoint(label, parts[wheel], joint.location)
+    label, wheel, pos, limits = _BALANCE
+    axis = bd.Axis(_local(pos), _DOWN)
+    joint = bd.CylindricalJoint(label, caliber, axis=axis, angular_range=limits, linear_range=(-30.0, 0.0))
+    bd.RigidJoint(label, parts[wheel], joint.location)
     for label, carrier, rider in _WHEEL_RIDERS:
         _rides(label, parts[carrier], parts[rider])
     for label, wheel, pos, limits in _CHRONO_WHEELS:
@@ -249,8 +262,8 @@ _LIFTS = (
 # caseback, which the movement's flip turns upward; the keyless works, on the dial side,
 # goes the other way). Each group slides on one prismatic joint along the movement's own
 # +z, its first part the lead and the rest fastened to it. The casing flips the movement
-# (watch z = MOVT_Z_OFFSET - local z), so a tier slides by -dz along its joint. The
-# turning parts fan on their own joints (`_WHEEL_TIER`); a fastened rider goes with its wheel.
+# (watch z = MOVT_Z_OFFSET - local z), so a tier slides by -dz along its joint. The balance
+# fans with its cock on its own joint (`_BALANCE_TIER`); a fastened rider goes with its wheel.
 _PALLET_BRIDGE = ("#pallet_bridge", "#pallet_bridge:stripe_shadow:0", "#pallet_bridge:stripe_shadow:1",
                   "#pallet_bridge:anglage", "#bridge_jewel:pallet", "#chaton:pallet", "#screw:pallet_bridge")
 _TRAIN_BRIDGE = (
@@ -308,13 +321,17 @@ def _tiers(parts: _Parts, caliber) -> None:
 #   third wheel   8 rev/h    = 0.8 deg/s (conventional 2310-family ratio)
 #   center wheel  1 rev/h    = 0.1 deg/s (the minute arbor)
 # Hands run CLOCKWISE seen dial-up, i.e. negative about watch +Z; meshing wheels
-# alternate sense. A cylindrical joint's ratio is its turn's, its slide's 0.
+# alternate sense. Each coupling is a constraint: its joints move only through it, and
+# its range is what their limits allow (one hour of `running`, half an hour of `chrono`,
+# either way).
+
+_ESCAPE_DEG_PER_S = 60.0     # the escape wheel's turn per second of `running`
+
 
 def _couplings_and_poses(watch_root) -> None:
-    couple(watch_root, "running", range=(0.0, 3600.0),
-           minute=-0.1, hour=-1.0 / 120.0, sub_seconds=-6.0,
-           center=(-0.1, 0.0), third=(0.8, 0.0), fourth=(-6.0, 0.0), escape=(60.0, 0.0))
-    couple(watch_root, "chrono", range=(0.0, 1800.0),
+    couple(watch_root, "running", minute=-0.1, hour=-1.0 / 120.0, sub_seconds=-6.0,
+           center=-0.1, third=0.8, fourth=-6.0, escape=_ESCAPE_DEG_PER_S)
+    couple(watch_root, "chrono",
            chrono_seconds=-6.0, chrono_runner=-6.0, chrono_minutes=-0.2, chrono_hours=-1.0 / 120.0, coupling=6.0)
     # ZERO IS THE ARTIFACT AS WRITTEN: the watch as built reads 10:09:38 with the
     # chronograph reset, so every configuration is a departure from that.
@@ -330,12 +347,13 @@ def _couplings_and_poses(watch_root) -> None:
 # ---------------------------------------------------------------------------
 # The clips: motions of time over the joints
 # ---------------------------------------------------------------------------
-#   running    -- one seamless escapement loop, slow-motion macro pacing: 4 balance
-#                 oscillations, 8 beats. The escape wheel advances one half-tooth-pitch
-#                 step per beat (8 x 12 deg = 96 deg = exactly 4 tooth pitches of the
-#                 15-tooth wheel, so the loop is seamless), the pallet fork snaps between
-#                 banking positions at each beat, the fourth/third wheels creep
-#                 spoke-symmetric increments, and the chronograph runs.
+#   running    -- the escapement in slow-motion macro pacing: 4 balance oscillations,
+#                 8 beats. The escape wheel advances one half-tooth-pitch step per beat
+#                 (8 x 12 deg = 96 deg = exactly 4 tooth pitches of the 15-tooth wheel),
+#                 the pallet fork snaps between banking positions at each beat, the going
+#                 train steps with the escape wheel through `running` at its ratios (the
+#                 old clip crept the fourth and third wheels 144 deg a loop instead), and
+#                 the chronograph runs (its runner and seconds hand one whole turn).
 #   reveal     -- staged partial explode: the caseback stack fans downward, the movement
 #                 ring drops clear, the crystal and bezel stack lift off, the dial floats
 #                 up, the bracelet straps slide apart, and the movement rises into the
@@ -474,29 +492,20 @@ def _choreograph(*, run: float = 0.0, reveal: float = 0.0, showcase: float = 0.0
     add("movement_rise", _MOVEMENT_RISE * rise + _REVEAL_RISE * reveal_rise)
     add("movement_flip", 180.0 * min(1.0, flip + reveal_flip))
 
-    # The escapement: the balance swings sinusoidally, beats on its zero crossings.
+    # The escapement: the balance swings sinusoidally, beats on its zero crossings, and fans
+    # with its cock (its slide along the joint's local -Z: the watch-frame offset as is).
     beats = run * _BEATS
     beat = math.floor(beats)
     fraction = beats - beat
-    turns = {
-        "balance": _BALANCE_AMPLITUDE_DEG * math.sin(math.tau * _OSCILLATIONS * run),
-        # the pallet fork snaps between banking positions once per beat
-        "pallet": (_PALLET_BANK_DEG if beat % 2 == 0 else -_PALLET_BANK_DEG) * (1 - 2 * _snap(fraction)),
-        # the escape wheel: one crisp half-tooth step per beat, released as the pallet snaps
-        "escape": _ESCAPE_STEP_DEG * (beat + _snap(fraction)),
-        # the going train creeps, spoke-and-tooth-symmetric 144 deg a loop
-        "fourth": -144.0 * run,
-        "third": 144.0 * run,
-        "center": 0.0,
-    }
-    for joint, angle in turns.items():
-        # turn, then the tier's slide: along the joint's local -Z, so the watch-frame offset as is
-        values[joint] = (angle, _WHEEL_TIER[joint] * fan)
-    # The small seconds ride the fourth wheel; the chronograph runs, one turn a loop.
-    values["sub_seconds"] = -144.0 * run
-    values["chrono_runner"] = -360.0 * run
-    values["chrono_seconds"] = -360.0 * run
-    values["coupling"] = 360.0 * run
+    values["balance"] = (_BALANCE_AMPLITUDE_DEG * math.sin(math.tau * _OSCILLATIONS * run), _BALANCE_TIER * fan)
+    # the pallet fork snaps between banking positions once per beat
+    values["pallet"] = (_PALLET_BANK_DEG if beat % 2 == 0 else -_PALLET_BANK_DEG) * (1 - 2 * _snap(fraction))
+    # The going train moves only through `running`: each beat the escape wheel takes one
+    # crisp half-tooth step (12 deg, 0.2 s of the watch's time) as the pallet snaps, and the
+    # whole train, the hands and the small seconds step with it at their ratios.
+    values["running"] = _ESCAPE_STEP_DEG * (beat + _snap(fraction)) / _ESCAPE_DEG_PER_S
+    # The chronograph runs through `chrono`: its runner and seconds hand one turn a loop.
+    values["chrono"] = 60.0 * run
     return values
 
 
@@ -586,10 +595,11 @@ def moonwatch():
     bd.RigidJoint("movement_rise", movement, _held(parts["#case_middle"], joint))
 
     _couplings_and_poses(root)
-    motion(root, "running", _running, duration=6, loop="loop")
-    motion(root, "reveal", _reveal, duration=12, loop="loop")
-    motion(root, "showcase", _showcase, duration=12, loop="loop")
-    motion(root, "grand_tour", _grand_tour, duration=24, loop="loop")
+    # Each clip ends on the pose it starts from; a player repeats it (a motion has no loop).
+    motion(root, "running", _running, duration=6)
+    motion(root, "reveal", _reveal, duration=12)
+    motion(root, "showcase", _showcase, duration=12)
+    motion(root, "grand_tour", _grand_tour, duration=24)
     return root
 
 
