@@ -21,7 +21,9 @@ import JointHandleOverlay from "../kit/tools/pose/JointHandleOverlay.jsx";
 import { pickModeOf, selects } from "../kit/tools/select/selectFilter.js";
 import { TOOL_SHORTCUTS } from "../kit/tools/toolShortcuts.js";
 import { usePointerPick } from "../kit/tools/select/usePointerPick.js";
+import { prefersCoarsePointer } from "../kit/viewport/dom.js";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
+import { createClickActivation } from "./clickActivation.js";
 import XbfMeasureOverlay from "./XbfMeasure.jsx";
 import XbfModelTree from "./XbfModelTree.jsx";
 import XbfPositionSection, { useXbfPose, writeXbfPosition, xbfPositionRows } from "./XbfPositionSection.jsx";
@@ -33,6 +35,7 @@ import { xbfModelMenu, xbfPartMenu, xbfTopologyMenu } from "./xbfMenus.js";
 import { NO_CONNECTED_SELECTION, nextSelectionIds, selectGeometryMode, treeShape } from "./xbfSelectionFilter.js";
 import { isXbfAssemblyId, presentXbfTree, xbfAssemblyIds, xbfPickFrontier } from "./xbfTree.js";
 import { XBF_DECLINED_LIVE_COMMANDS, XBF_TOOL, XBF_TOOL_MODES } from "./tools.js";
+import { xbfLookSubject } from "./xbfLookAt.js";
 import { useXbfScene } from "./useXbfScene.js";
 
 // An engine document in the viewer, exactly as a STEP is: the same tools in the same order
@@ -48,8 +51,6 @@ const EMPTY = Object.freeze([]);
 const NO_HOVER = Object.freeze({ parts: EMPTY, element: null });
 const EXPLODE_OFF = Object.freeze({ exploded: { enabled: false, amount: 0 } });
 const isElementId = id => String(id).includes("/");
-// How long after a pick its double-click still puts the selection back first.
-const DOUBLE_CLICK_MS = 600;
 
 /** The selection after a pick of a part or subassembly, as a STEP's: a plain pick drops the faces and edges. */
 function pickNode(current, id, multiSelect) {
@@ -109,8 +110,7 @@ function XbfSurface({ view, data }) {
   // ---- Select's menu: All as the file opens, or one kind alone ---------------------------------
   const [selectFilter, setSelectFilter] = useState(XBF_SELECT_DEFAULT);
   // Measure's menu, a STEP's (`kit/tools/measure/measureFilter.js`): All as the file opens, or
-  // Vertices, Edges or Faces alone. What a press takes is still the point on the model
-  // (`XbfMeasure.jsx`) until a STEP's entity Measure is carried over.
+  // Vertices, Edges or Faces alone: what a press takes whole (`XbfMeasure.jsx`).
   const [measureFilter, setMeasureFilter] = useState(MEASURE_FILTER_DEFAULT);
   const [connected, setConnected] = useState(NO_CONNECTED_SELECTION);
   const geometryFilter = useMemo(() => (assembly ? selectFilter : selectFilter.filter(id => id !== "parts")), [assembly, selectFilter]);
@@ -353,11 +353,12 @@ function XbfSurface({ view, data }) {
     return Object.entries(table).filter(([, value]) => value === group).map(([ordinal]) => `i${hit.instance}/${hit.kind}/${ordinal}`);
   }, [connected, groupsOf]);
 
+  // The selection as the last activation found it: what a double-click whose first click picked puts back.
   const lastPick = useRef(null);
   const handlePick = useCallback(async (found, modifiers) => {
     const hit = found?.press || null;
     const multiSelect = Boolean(modifiers?.multiSelect);
-    lastPick.current = { at: performance.now(), before: selectedRef.current };
+    lastPick.current = { before: selectedRef.current };
     if (shellRef.current?.toolMode !== XBF_TOOL.SELECT) ensureSelect();
     if (!hit) { if (!multiSelect) { setChosen(EMPTY); measureRef.current.select([]); } return; }
     if (!multiSelect) measureRef.current.select([]);
@@ -403,28 +404,36 @@ function XbfSurface({ view, data }) {
     return chip.compact || { name: chip.label, kind: chip.glyph };
   }, [chips]);
 
-  // ---- double-click: a face or edge copied, a part isolated, empty space leaves isolation --------
-  useEffect(() => {
-    const element = viewportRef.current?.hostRef.current;
-    if (!element || !selectActive) return undefined;
-    const onDoubleClick = (event) => {
-      if (event.target !== viewportRef.current?.runtimeRef.current?.renderer?.domElement) return;
-      // The first click of the gesture picked: what it found comes back first.
-      const first = lastPick.current;
-      if (first && performance.now() - first.at < DOUBLE_CLICK_MS) setChosen(first.before);
-      const hit = pickAtClient(event.clientX, event.clientY);
-      if (!hit) { exitIsolate(); return; }
-      if (hit.kind) {
-        if (!(first?.before || EMPTY).includes(hit.id)) setChosen(now => pickElements(now, [hit.id], false));
-        copy(singleChip([hit.id]));
-        return;
-      }
-      const node = nodeOf(hit);
-      if (node && assembly) isolate([node]);
-    };
-    element.addEventListener("dblclick", onDoubleClick);
-    return () => element.removeEventListener("dblclick", onDoubleClick);
-  }, [selectActive, pickAtClient, exitIsolate, nodeOf, assembly, isolate, copy, singleChip]);
+  // ---- double-click: a face or edge looked at, a part isolated, empty space leaves isolation ----
+  // A face or an edge: the view turns square to it (CAD's Normal To, `kit/camera/lookAt.js`) and
+  // nothing is picked; navigation only.
+  const lookAt = useCallback((id) => {
+    const subject = xbfLookSubject(scene, id);
+    if (subject) shellRef.current?.frame.viewerRef.current?.lookAt?.(subject);
+  }, [scene]);
+  // `activated`: the gesture's first click picked (`clickActivation.js`), so the selection it found
+  // comes back first, through the one setter every pick goes through; then the double-click acts
+  // as if that click had never happened. Under Select, Explode or Clip alike: under the two a pick
+  // would leave, the click waited, so the tool is still the one in hand.
+  const handleDoublePick = useCallback((clientX, clientY, { activated = false } = {}) => {
+    if (activated && lastPick.current) setChosen(lastPick.current.before);
+    lastPick.current = null;
+    const hit = pickAtClient(clientX, clientY);
+    if (!hit) { exitIsolate(); return; }
+    if (hit.kind) { lookAt(hit.id); return; }
+    const node = nodeOf(hit);
+    if (node && assembly) isolate([node]);
+  }, [pickAtClient, exitIsolate, lookAt, nodeOf, assembly, isolate]);
+  // Under Measure, as a STEP's: the face or edge Measure takes there is looked at, empty space
+  // leaves isolation (the presses of the gesture were Measure's own).
+  const handleMeasureDoublePick = useCallback((id) => { if (id) lookAt(id); else exitIsolate(); }, [lookAt, exitIsolate]);
+  // A pick under Explode or Clip takes Select up: it waits the double-click window first.
+  const deferPickRef = useRef(false);
+  deferPickRef.current = toolMode !== XBF_TOOL.SELECT;
+  // What Measure lights under the resting pointer: the face or edge it would take.
+  const hoverElement = useCallback(id => setHover(now => (id
+    ? (now.element === id && !now.parts.length ? now : { parts: EMPTY, element: id })
+    : (now === NO_HOVER ? now : NO_HOVER))), []);
 
   // ---- the menus --------------------------------------------------------------------------------
   const zoomSelectionAvailable = selected.length > 0;
@@ -537,27 +546,104 @@ function XbfSurface({ view, data }) {
     viewportOverlay={viewport => {
       viewportRef.current = viewport;
       return <>
-        <XbfMeasureOverlay viewport={viewport} scene={scene} measure={measure} picking={measuring} preview={shell.previewing} />
+        <XbfMeasureOverlay viewport={viewport} scene={scene} measure={measure} picking={measuring} preview={shell.previewing}
+          filter={measureFilter} source={source} fetch={engineFetch} onHoverElement={hoverElement} onDoublePick={handleMeasureDoublePick} />
         {handles ? <JointHandleOverlay handles={handles} layoutSeamRef={handleLayoutRef} {...viewport} /> : null}
-        <XbfPick viewport={viewport} scene={picker} enabled={picking} onPick={handlePick} onHover={handleHover} pointerTypeRef={pointerTypeRef} />
+        <XbfPick viewport={viewport} scene={picker} enabled={picking} onPick={handlePick} onHover={handleHover} onDoublePick={handleDoublePick}
+          deferRef={deferPickRef} pointerTypeRef={pointerTypeRef} />
       </>;
     }} />;
 }
 
+// A press that moves further than this, in CSS pixels, is a drag of the camera, not a click (`usePointerPick`'s).
+const FINE_TAP_SLOP_PX = 4;
+const COARSE_TAP_SLOP_PX = 12;
+
 /**
  * Select's pointer: taps and the resting pointer through the picker (`usePointerPick`), and what
- * each press is made with (`pointerTypeRef`), heard before the pick's own listener hears it.
+ * each press is made with (`pointerTypeRef`), heard before the pick's own listener hears it. A tap
+ * activates as a STEP's did (`clickActivation.js`): at once, but for the second click of a
+ * double-click, which the `dblclick` owns (`onDoublePick`, told whether the first click picked),
+ * and a tap under a tool a pick would leave (`deferRef`: Explode, Clip), which waits the
+ * double-click window. A coarse pointer has no double-click: every tap picks at once.
  */
-function XbfPick({ viewport, scene, enabled, onPick, onHover, pointerTypeRef }) {
-  const { hostRef, viewerReadyTick } = viewport;
+function XbfPick({ viewport, scene, enabled, onPick, onHover, onDoublePick, deferRef, pointerTypeRef }) {
+  const { hostRef, runtimeRef, viewerReadyTick } = viewport;
+  const callbacks = useRef(null);
+  callbacks.current = { onPick, onDoublePick };
+  // The browser's count of the press just released in its click sequence (`detail`: 2 for a double-click's second).
+  const countRef = useRef(0);
+  const doubleClick = useMemo(() => !prefersCoarsePointer(), []);
+  const activation = useMemo(() => createClickActivation({ commit: (found, options) => callbacks.current.onPick(found, options), doubleClick }),
+    [doubleClick]);
   useEffect(() => {
     const host = hostRef.current;
     if (!enabled || !host) return undefined;
-    const note = (event) => { pointerTypeRef.current = event.pointerType || ""; };
-    host.addEventListener("pointerdown", note, true);
-    return () => host.removeEventListener("pointerdown", note, true);
-  }, [enabled, hostRef, viewerReadyTick, pointerTypeRef]);
-  usePointerPick({ viewport, scene, enabled, onPick, onHover, sameHit: (left, right) => (left?.rest?.id || "") === (right?.rest?.id || "") });
+    const coarseDefault = prefersCoarsePointer();
+    const slop = pointerType => (pointerType === "touch" || pointerType === "pen" || coarseDefault ? COARSE_TAP_SLOP_PX : FINE_TAP_SLOP_PX);
+    const onCanvas = event => event.target === runtimeRef.current?.renderer?.domElement;
+    const touches = new Set();
+    let press = null;
+    // Heard before the pick's own listeners: the press's count is known when it is taken.
+    const down = (event) => {
+      pointerTypeRef.current = event.pointerType || "";
+      if (event.pointerType === "touch") {
+        touches.add(event.pointerId);
+        // A second finger is a camera gesture: no click waits through it.
+        if (touches.size > 1) { press = null; activation.cancel(); return; }
+      }
+      // A right press is the viewport's menu: no click waits through it either.
+      if (event.button !== 0) { if (event.button === 2) activation.cancel(); return; }
+      press = onCanvas(event) ? { x: event.clientX, y: event.clientY, pointerId: event.pointerId, pointerType: event.pointerType || "",
+        count: Number(event.detail) || 0, moved: false } : null;
+    };
+    // The mouse event behind the press carries the browser's count.
+    const mouseDown = (event) => { if (press && event.button === 0) press.count = Math.max(press.count, Number(event.detail) || 0); };
+    const move = (event) => {
+      if (press?.pointerId === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > slop(press.pointerType)) press.moved = true;
+    };
+    const up = (event) => {
+      touches.delete(event.pointerId);
+      const started = press;
+      press = null;
+      if (!started || event.button !== 0 || event.pointerId !== started.pointerId) return;
+      countRef.current = started.count;
+      // A press that was no tap (a drag of the camera): a fresh gesture's forgets an earlier click.
+      if (started.moved || Math.hypot(event.clientX - started.x, event.clientY - started.y) > slop(started.pointerType)) activation.miss(started.count);
+    };
+    const cancel = (event) => {
+      touches.delete(event.pointerId);
+      if (press?.pointerId === event.pointerId) activation.miss(press.count);
+      press = null;
+    };
+    const dblclick = (event) => {
+      if (!onCanvas(event)) return;
+      // Whether the first click of this gesture picked: what the double-click puts back first.
+      const activated = activation.double();
+      callbacks.current.onDoublePick?.(event.clientX, event.clientY, { activated });
+    };
+    host.addEventListener("pointerdown", down, true);
+    host.addEventListener("mousedown", mouseDown, true);
+    host.addEventListener("pointermove", move, true);
+    host.addEventListener("pointerup", up, true);
+    host.addEventListener("pointercancel", cancel, true);
+    if (doubleClick) host.addEventListener("dblclick", dblclick);
+    return () => {
+      host.removeEventListener("pointerdown", down, true);
+      host.removeEventListener("mousedown", mouseDown, true);
+      host.removeEventListener("pointermove", move, true);
+      host.removeEventListener("pointerup", up, true);
+      host.removeEventListener("pointercancel", cancel, true);
+      host.removeEventListener("dblclick", dblclick);
+      // A click still waiting belongs to the tool it was made under.
+      activation.cancel();
+    };
+  }, [enabled, hostRef, runtimeRef, viewerReadyTick, pointerTypeRef, activation, doubleClick]);
+  usePointerPick({
+    viewport, scene, enabled, onHover,
+    onPick: (found, modifiers) => activation.tap(countRef.current, found, modifiers, { wait: Boolean(deferRef.current) }),
+    sameHit: (left, right) => (left?.rest?.id || "") === (right?.rest?.id || "")
+  });
   return null;
 }
 
