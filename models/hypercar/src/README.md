@@ -5,7 +5,7 @@ panels are cut from one master surface. `hypercar.py` is the one model:
 
 | Script | Writes | What it is |
 | --- | --- | --- |
-| `hypercar.py` | `XBF/hypercar.xbf`, `XBF/hypercar.glb` | The car: 13 system stages, 706 parts, the dihedral doors' mechanism, the `doors` motion (a clip of the GLB) |
+| `hypercar.py` | `XBF/hypercar.xbf`, `XBF/hypercar.glb` | The car: 13 system stages, 706 parts, the dihedral doors' mechanism, the explode joints, the `doors`, `showcase` and `explode` motions (clips of the GLB) |
 | `body.py` ... `details.py` (13) | nothing | One system each, a `@memo` stage the car calls in its body |
 
 Build from this folder: `python hypercar.py`.
@@ -52,14 +52,17 @@ cold build's bytes again.
 
 ## Kinematics
 
-The dihedral synchro-helix doors. Each door is a build123d `CylindricalJoint` on
-the chassis group -- rotation and axial travel about the same tower axis, from
-`lib/hinge.py`'s constants -- and a `RigidJoint` of the same label on the door
-skin, where it stands shut: the parts live in different systems' groups, so
-`connect_to` cannot place them, and the label pairs them as built (shut, 0 and 0).
-Everything that rides the door (side glass, door cards and pull, the mirror's five
-parts, the hinge's door bracket and lower lug) is fastened to it by a pair of
-`RigidJoint`s of one label, which makes it part of the door's link.
+The dihedral synchro-helix doors. Each door is a build123d `CylindricalJoint` --
+rotation and axial travel about the same tower axis, from `lib/hinge.py`'s
+constants -- and a `RigidJoint` of the same label on the door skin, where it stands
+shut: the parts live in different systems' groups, so `connect_to` cannot place
+them, and the label pairs them as built (shut, 0 and 0). The joint is held by the
+door's flank (its front fender), which the explodes carry off and every other pose
+leaves where it was built, so the door turns about the same tower axis it did on the
+chassis. Everything that rides the door (side glass, door cards and pull, the
+mirror's five parts, the hinge's door bracket and lower lug) hangs on a prismatic
+joint the door holds (below), at 0 in every pose but the explodes', so it rides the
+door.
 
 | Joint | Range | Rides it |
 | --- | --- | --- |
@@ -72,10 +75,52 @@ poses are `shut`, as built, and the configuration `open` (`doors=1`). The old
 `doors` clip is the motion `doors`, the coupling swept 0 to 1 over 3.5 s and back
 (`loop="pingpong"`, a 7 s clip in the GLB).
 
+### The explodes
+
+The old `showcase` (48 s, a strip-down tour that loops) and `explode` (10 s, the
+whole car apart and back, looped) moved 37 groups of parts and 10 of the engine's,
+each by one fixed vector times a 0..1 factor: radial (away from the car's long axis,
+from the group's pinned rest centre), lateral (out in Y by its side) or fixed. The
+chassis never moved.
+Each group is now a prismatic joint along its vector, at that factor times its
+length, its first part leading (the joint's rigid half) and the rest fastened to it;
+the vectors, centres, windows and engine anchor are the old clip's numbers, and the
+groups name parts by the old occurrence ids (`o1.3.49`), the port's tree being the
+old one, child for child:
+
+- 35 `explode_<group>` joints on the chassis (the flanks, the upper skins, the nose,
+  the lamps, each suspension corner, wheel and brake, the powertrain, the interior,
+  the aero sets, the hinges, the details), the systems' own compounds leading where a
+  group is a whole sub-assembly;
+- 10 for the engine's own sub-explode (heads, cam covers, gear covers, cam bosses,
+  intake, exhaust, transaxle) on the powertrain group, so the V12 comes apart where
+  the unit already stands, as the old moves added up;
+- 8 for the doors' riders, four sets a side (`explode_side_glass_<side>`,
+  `explode_door_card_<side>`, `explode_mirror_<side>`, `explode_door_hardware_<side>`)
+  on the door, along each set's old move RELATIVE to its door (`v_rider - v_door`).
+
+`showcase` and `explode` are motions, functions of time over those 53 joints (the
+old `win` windows on their tours, and the raised-cosine `bump`), which the `@glb`
+bakes into clips beside `doors`. Every part moves as the old clips moved it, within
+the motions' sampling tolerance (1e-3 of the car's size, about 5 mm), but where a
+rider and its door rose on different windows -- deliberate, measured over the 48 s:
+
+- A rider has one line to slide on relative to its door, so where the showcase
+  raised it on a window other than the door's skin window it stands at the old
+  relative move's projection on that line, the nearest a single slide reaches. The
+  holds and the fall back, which the windows share, are exact, and so is all of
+  `explode` (one factor for every group) and the mirror in both clips (the door's
+  window). The side glass strays up to 184 mm (its window starts 0.5 s after the
+  door's), the door bracket and lower lug up to 47 mm, and the door cards and pull
+  up to 1.2 m: from 4.8 s, when the door leaves, to 17.3 s, when the interior they
+  belonged to has lifted, they hang between the two instead of staying in the cabin.
+- The doors stay shut in both clips, as before.
+
+With the three clips the GLB is 49 MB (26 MB with `doors` alone): a clip carries
+channels for every part it moves. Its bake took 92 s against 77 s for `doors` alone,
+both under a load of 130-290 from other work.
+
 ## Not ported
 
-- The `showcase` and `explode` clips: they translate whole systems and part
-  groups apart, which no joint does, and the viewer's Explode shows the parts
-  apart.
 - `render/presentation_theme.json` and `presentation_display.json`, the old
   snapshot's theme and edge styling: an xbf is drawn in the engine's one look.
