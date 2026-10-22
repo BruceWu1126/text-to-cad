@@ -301,15 +301,15 @@ it("the menus are a STEP's: a part's offers Copy Reference, Select, Isolate, Hid
   expect([model.showShowAll, model.showExpandCollapse, model.copyText]).toEqual([true, true, '']);
 });
 
-it('an .xbf has its own renderer, prepared from its catalog entry', async () => {
+it('an .xbf and a STEP have the engine document renderer, prepared from the catalog entry', async () => {
   let disposed = 0;
   const client = { resolveEntry: async (path: string) => ({ file: path, kind: 'xbf' }), createRenderSession: () => ({ dispose: () => { disposed += 1; } }) } as never;
   const xbf = createXbfRenderer({ client });
   const step = createStepRenderer({ client });
   const file = (path: string) => ({ path, name: path, kind: 'file', size: 1, extension: path.split('.').at(-1), mediaType: 'cad' });
   expect(xbf.id).toBe('xbf');
-  expect(selectRenderer([step, xbf], file('arm.xbf') as never)).toBe(xbf);
-  expect(selectRenderer([step, xbf], file('arm.step') as never)).toBe(step);
+  // Above the STEP renderer even where a host still registers it: a STEP is the engine's to draw.
+  for (const path of ['arm.xbf', 'arm.step', 'ARM.STP']) expect(selectRenderer([step, xbf], file(path) as never)).toBe(xbf);
   const prepared = await xbf.prepare({ file: file('arm.xbf'), source: {}, signal: new AbortController().signal } as never);
   prepared.dispose?.();
   expect(disposed).toBe(1);

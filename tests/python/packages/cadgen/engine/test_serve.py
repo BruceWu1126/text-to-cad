@@ -211,6 +211,62 @@ class DocumentInMemoryTest(unittest.TestCase):
         self.assertIs(server.document(ident), after, "the file the patch describes is not read again")
 
 
+class ServedStepTest(unittest.TestCase):
+    """A STEP served is read in a reader process, never in the server's: its structure and each
+    part's shape bytes are what the server keeps. The read is held by the file's bytes -- served
+    again, touched or copied, it is not parsed again -- and a STEP rewritten while it is served is
+    read again in the background, the old version served until the new one is in."""
+
+    def setUp(self) -> None:
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-step-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        script = self.folder / "shelf.py"
+        script.write_text(textwrap.dedent(SHELF.format(size=4)), encoding="utf-8")
+        reports = engine_build.build(script, ["shelf"], cwd=self.folder)
+        self.assertTrue(reports[-1]["ok"], reports)
+        self.step = self.folder / "shelf.step"
+        self.server = Server(port=0, mesh_mode="inline")
+        self.addCleanup(self.server.stop)
+
+    def test_a_step_is_read_by_a_reader_process_and_held_by_its_bytes(self) -> None:
+        from cadgen.engine import document
+
+        ident = self.server.add(self.step)
+        served = self.server.document(ident)
+        self.assertNotIn(served.structure["read"]["process"], (0, os.getpid()))
+        self.assertTrue(all(isinstance(shape, bytes) for shape in served.shapes.values()), "only shape bytes are kept")
+        # The document is the engine's reading of the file: what a read in this process makes of it.
+        read, kept = (json.loads(json.dumps(structure)) for structure in (document.Loaded(self.step).structure(), served.structure))
+        names = lambda structure: sorted((p["name"], p["color"], (p["material"] or {}).get("name"))  # noqa: E731
+                                         for p in structure["prototypes"])
+        self.assertEqual(names(kept), names(read))
+        self.assertEqual(kept["instances"], read["instances"])
+        # Served again, from another path, or touched: the same read.
+        copy = self.folder / "copy.step"
+        shutil.copyfile(self.step, copy)
+        self.assertEqual(self.server.add(self.step), ident)
+        self.assertEqual(self.server.document(self.server.add(copy)).structure["read"], served.structure["read"])
+        later = time.time_ns() + 5_000_000_000
+        os.utime(self.step, ns=(later, later))
+        touched = self.server.wait(ident, served.version, 60)
+        self.assertNotEqual(touched.version, served.version)
+        self.assertEqual(touched.structure["read"], served.structure["read"])
+        self.assertEqual(sorted(touched.shapes), sorted(served.shapes), "its parts' keys are the bytes'")
+        # Other bytes are read again, in a reader of their own.
+        self.step.write_bytes(self.step.read_bytes() + b"\n")
+        rewritten = self.server.wait(ident, touched.version, 60)
+        self.assertNotEqual(rewritten.structure["read"]["process"], served.structure["read"]["process"])
+
+    def test_a_step_that_will_not_read_keeps_the_version_served_until_it_changes(self) -> None:
+        ident = self.server.add(self.step)
+        served = self.server.document(ident)
+        self.step.write_text("not a step file\n", encoding="utf-8")
+        stat = self.step.stat()
+        self.server._reread(ident, served, (stat.st_mtime_ns, stat.st_size))  # as a version ask starts it
+        self.assertIs(self.server.document(ident), served, "the page keeps the version it has")
+        self.assertNotIn(ident, self.server.rereading, "and nothing reads the file again until it changes")
+
+
 class MeshCacheTest(unittest.TestCase):
     def test_the_least_recently_used_buffer_goes_past_the_cap(self) -> None:
         from cadgen.engine.serve import MeshCache

@@ -316,12 +316,6 @@ class PackagePortabilityTest(unittest.TestCase):
         self._noop_pass(moved)
         self.assertEqual(before, write_identities(moved), "relocating the project rebuilt its packages")
 
-        from tests.python.support.viewer_status import viewer_artifact_status
-
-        for name, source in self._validators(moved):
-            with self.subTest(entry=name):
-                self.assertEqual("compiled", viewer_artifact_status(source)["state"])
-
 
 class RecordedPathHelpersTest(unittest.TestCase):
     """The function a persisted path goes through (``render.relative_to_directory``)."""

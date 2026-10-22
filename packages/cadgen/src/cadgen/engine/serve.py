@@ -36,6 +36,18 @@ page, waiting on the version, is answered at once. The file is read again only w
 other process rewrote it: its modification time and size are compared when the version
 is asked for, except while a build is writing it (``hold``).
 
+**A STEP is read in a reader process, held by its bytes.** OCCT's XCAF reader works in many
+times the memory of what it makes and its allocator keeps most of it, so the server never
+parses a ``.step``/``.stp`` itself: a reader process of its own does (``_read_foreign``, one
+read per process, the next one started and warm meanwhile) and answers the structure and each
+part's shape bytes, which are all the server keeps. The read is held by the file's bytes
+(``FOREIGN_HELD`` of them): the same bytes served again -- the file touched, copied, or put
+back -- are not parsed again while the server lives, and their parts' keys (and so their
+meshes) are the same. A STEP is read outside the server's lock, so every other document is
+served meanwhile; one rewritten while it is served is read again in the background, and the
+page keeps the old version until the new one is in. Its structure says how long the parse
+took and which process made it (``read``).
+
 Meshing runs off the request's thread (``Mesher``): by default on a pool of processes
 started with the server and kept warm, each handed one part's shape bytes; or ``inline``
 (``CADGEN_ENGINE_MESH=inline``, or ``?mode=inline``), one part after another on one thread,
@@ -78,6 +90,11 @@ PAGE = Path(__file__).resolve().parent / "page"
 PARALLEL_BYTES = 500_000
 # How long a version request waits for a new version at most, in seconds.
 WAIT_LIMIT = 60.0
+# A file this engine did not write, read by a reader process (the module docstring).
+FOREIGN = (".step", ".stp")
+# How many STEP reads are held by their bytes: a read a served document holds stays in memory
+# with it whatever this says; past it, the least recently served read goes.
+FOREIGN_HELD = 8
 
 
 def find_three(start: Path | None = None) -> Path | None:
@@ -224,6 +241,46 @@ def _triangles(data: bytes) -> int:
     return HEADER.unpack_from(data)[3] // 3
 
 
+# --- a STEP's reader process ----------------------------------------------------------------
+
+
+def _reader_ready() -> None:
+    """A reader process's start: the kernel and the reader imported, so its read waits on nothing."""
+    import cadgen.engine.document  # noqa: F401
+    import cadgen.engine.mesh  # noqa: F401
+
+
+def _read_foreign(path: str, digest: str) -> dict[str, Any]:
+    """A STEP read into a document in a reader process (the module docstring): its structure,
+    each part's shape bytes by a key made from the file's bytes (``digest``) and the part's label,
+    whether the document is named by the file's stem (several free shapes), the seconds the read
+    took and the process that made it. A reader process's job."""
+    from OCP.TDF import TDF_LabelSequence
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    from cadgen.engine.document import Loaded
+
+    started = time.perf_counter()
+    loaded = Loaded(Path(path))
+    keys = {p.key: f"step-{digest[:20]}-{p.entry}" for p in loaded.prototypes}
+    structure = loaded.structure()
+    structure["prototypes"] = [{**prototype, "key": keys[prototype["key"]]} for prototype in structure["prototypes"]]
+    shapes = {keys[p.key]: shape_bytes(p.shape, read=True) for p in loaded.prototypes}
+    free = TDF_LabelSequence()
+    XCAFDoc_DocumentTool.ShapeTool_s(loaded.doc.Main()).GetFreeShapes(free)
+    return {"structure": structure, "shapes": shapes, "stem": free.Length() != 1,
+            "seconds": round(time.perf_counter() - started, 4), "process": os.getpid()}
+
+
+def _digest(path: Path) -> str:
+    """The file's bytes, digested: what a STEP's read is held by."""
+    found = hashlib.blake2b(digest_size=20)
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            found.update(chunk)
+    return found.hexdigest()
+
+
 # --- the documents -----------------------------------------------------------------------
 
 
@@ -290,6 +347,16 @@ class Server:
         self.topology_lock = threading.Lock()
         # A document served at a pose (``POST /api/doc/<id>/pose``): its id, the document's and the pose.
         self.poses: dict[str, tuple[str, Any]] = {}
+        # STEP reads (the module docstring): held by the file's bytes, each read once however
+        # many ask for it at a time, by a reader process started on the first.
+        self.foreign: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+        self.foreign_reads: dict[str, concurrent.futures.Future] = {}
+        self.foreign_lock = threading.Lock()
+        self.reader: concurrent.futures.ProcessPoolExecutor | None = None
+        # A served STEP being read again in the background, and one whose file could not be read
+        # as it stands (by its state): it is read again once the file changes.
+        self.rereading: set[str] = set()
+        self.unreadable: dict[str, tuple | None] = {}
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -321,12 +388,28 @@ class Server:
             self.http.shutdown()
         self.http.server_close()
         self.mesher.stop()
+        with self.foreign_lock:
+            reader, self.reader = self.reader, None
+        if reader is not None:
+            reader.shutdown(wait=False, cancel_futures=True)
 
     # --- documents -------------------------------------------------------------------
 
     def add(self, path: Path) -> str:
         path = Path(path).resolve()
         ident = hashlib.blake2b(str(path).encode(), digest_size=6).hexdigest()
+        if path.suffix.lower() in FOREIGN:
+            # Read outside the lock: a STEP's read is long, and every other document is served
+            # meanwhile. Two first opens of one file share its one read (``_foreign``).
+            with self.load_lock:
+                if ident in self.served:
+                    return ident
+            served = self._read(ident, path)  # a document that cannot be read is the caller's error
+            with self.load_lock:
+                if ident not in self.served:
+                    self.served[ident] = served
+                    self.idents[path] = ident
+            return ident
         with self.load_lock:
             if ident not in self.served:
                 self.served[ident] = self._read(ident, path)  # a document that cannot be read is the caller's error
@@ -365,15 +448,79 @@ class Server:
             return sorted({key for doc in self.served.values() for key, shape in doc.shapes.items() if shape is not None})
 
     def _read(self, ident: str, path: Path) -> Served:
+        if path.suffix.lower() in FOREIGN:
+            return self._read_step(ident, path)
         from cadgen.engine.document import Loaded
 
         loaded = Loaded(path)
         return Served(ident, path, loaded.structure(), loaded.version, {p.key: p.shape for p in loaded.prototypes},
                       {p.key: p.name for p in loaded.prototypes})
 
+    def _read_step(self, ident: str, path: Path) -> Served:
+        """A STEP served: its read (``_foreign``), named and versioned as this file."""
+        read, stat = self._foreign(path)
+        structure = {**read["structure"], "path": str(path), "version": f"{stat[0]}-{stat[1]}",
+                     "read": {"seconds": read["seconds"], "process": read["process"]}}
+        if read["stem"]:  # several free shapes: the document is named by its file
+            structure["name"] = path.stem
+            structure["tree"] = {**structure["tree"], "name": path.stem}
+        return Served(ident, path, structure, stat, dict(read["shapes"]),
+                      {prototype["key"]: prototype["name"] for prototype in structure["prototypes"]})
+
+    def _readers(self) -> concurrent.futures.ProcessPoolExecutor:
+        """The reader processes: one at a time, each gone after its read (with what the parse
+        left in its memory), the next started and warm meanwhile."""
+        with self.foreign_lock:
+            if self.reader is None:
+                import multiprocessing
+
+                self.reader = concurrent.futures.ProcessPoolExecutor(
+                    1, mp_context=multiprocessing.get_context("spawn"), initializer=_reader_ready, max_tasks_per_child=1)
+            return self.reader
+
+    def _foreign(self, path: Path) -> tuple[dict[str, Any], tuple]:
+        """The read of the STEP at ``path`` and the file state it is of: held by the file's
+        bytes, else read by a reader process -- once, however many ask for it meanwhile."""
+        stat = _stat(path)
+        if stat is None:
+            raise FileNotFoundError(f"no document {path}")
+        digest = _digest(path)
+        with self.foreign_lock:
+            found = self.foreign.get(digest)
+            if found is not None:
+                self.foreign.move_to_end(digest)
+                return found, stat
+            reading = self.foreign_reads.get(digest)
+            owner = reading is None
+            if owner:
+                reading = self.foreign_reads[digest] = concurrent.futures.Future()
+        if not owner:
+            return reading.result(), stat
+        try:
+            try:
+                read = self._readers().submit(_read_foreign, str(path), digest).result()
+            except concurrent.futures.BrokenExecutor:  # the reader died mid-read
+                with self.foreign_lock:
+                    self.reader = None  # the next read starts a reader afresh
+                raise ValueError(f"the STEP reader exited reading {path.name}") from None
+        except BaseException as error:
+            with self.foreign_lock:
+                self.foreign_reads.pop(digest, None)
+            reading.set_exception(error)
+            raise
+        with self.foreign_lock:
+            self.foreign_reads.pop(digest, None)
+            if _stat(path) == stat:  # held only when the bytes read are the bytes digested
+                self.foreign[digest] = read
+                while len(self.foreign) > FOREIGN_HELD:
+                    self.foreign.popitem(last=False)
+        reading.set_result(read)
+        return read, stat
+
     def document(self, ident: str) -> Served:
         """The document as the server holds it, read from its file again only when some
-        other process rewrote the file (and no build is writing it now)."""
+        other process rewrote the file (and no build is writing it now). A STEP is read
+        again in the background (the module docstring): until it is in, this is the last."""
         with self.load_lock:
             doc = self.served[ident]
             if self.held.get(doc.path):
@@ -381,9 +528,33 @@ class Server:
             stat = _stat(doc.path)
             if stat is None or stat == doc.stat:
                 return doc
+            if doc.path.suffix.lower() in FOREIGN:
+                if ident not in self.rereading and self.unreadable.get(ident, ()) != stat:
+                    self.rereading.add(ident)
+                    threading.Thread(target=self._reread, args=(ident, doc, stat), daemon=True).start()
+                return doc
             doc = self.served[ident] = self._read(ident, doc.path)
         self._changed()
         return doc
+
+    def _reread(self, ident: str, doc: Served, stat: tuple) -> None:
+        """A served STEP whose file changed, read again and put in place of ``doc``: the page
+        waiting on the version is answered then. A file that cannot be read as it stands (a
+        writer midway, garbage) is tried again once it changes."""
+        fresh = None
+        try:
+            fresh = self._read(ident, doc.path)
+        except Exception:  # noqa: BLE001 - the page keeps the version it has
+            pass
+        with self.load_lock:
+            self.rereading.discard(ident)
+            if fresh is None:
+                self.unreadable[ident] = stat
+            else:
+                self.unreadable.pop(ident, None)
+                if self.served.get(ident) is doc:
+                    self.served[ident] = fresh
+        self._changed()
 
     def hold(self, paths: list[str]) -> list[Path]:
         """Paths a build is writing: their files are not read again until ``release``."""

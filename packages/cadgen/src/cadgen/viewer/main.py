@@ -30,7 +30,7 @@ exits once it has announced itself — the spelling for agents and scripts,
 which wait for a command to finish. ``cadgen viewer stop [--port N]`` asks the
 viewer on a port to exit.
 
-``--api-only`` serves the two API prefixes and nothing else, because Vite owns
+``--api-only`` serves the API (``/__cad``) and nothing else, because Vite owns
 the client — this is what lets ``npm run dev`` work on a checkout that has never
 been built; ``npm run dev`` runs it with ``--new``.
 
@@ -186,7 +186,7 @@ _HELP = {
     "json": "announce the instance as one JSON line on stdout",
     "detach": "run the server in the background: print its URL, then return",
     "dist": "built client to serve (default: the bundled client; env CADGEN_VIEWER_DIST)",
-    "api_only": "serve only /__cad and /__tess_cache (a dev server owns the client)",
+    "api_only": "serve only /__cad (a dev server owns the client)",
 }
 
 
@@ -433,18 +433,6 @@ class _LateApp:
         response.send_json(503, {"ok": False, "error": "server starting"})
 
 
-def _prewarm_daemon() -> None:
-    """Start the build daemon now, so the session's first build or compile finds warm workers.
-    One that cannot start is said here, on stderr, and by every compile and part job the
-    viewer then asks of it."""
-    from cadgen.daemon.client import DaemonUnavailable, prewarm  # noqa: PLC0415 - kernel-free, needed only now
-
-    try:
-        prewarm()
-    except DaemonUnavailable as error:
-        _err(f"CAD Viewer: no build daemon could start: {error}\n")
-
-
 def _harden_streams() -> None:
     """Degrade an unencodable character to an escape instead of raising.
 
@@ -617,10 +605,6 @@ def launch_detached(argv: list[str], *, as_json: bool, prog: str = DEFAULT_PROG)
 
 def serve(argv: list[str], *, prog: str = DEFAULT_PROG) -> int:
     _harden_streams()
-    from cadgen.daemon.client import refuse_no_daemon  # noqa: PLC0415 - kernel-free, needed only now
-
-    # Its compiles and parts are the build pool's jobs: it has no way to run without it.
-    refuse_no_daemon(argv, prog=prog, what="the CAD Viewer")
     # argparse answers --help on stdout with exit 0 and refuses an unknown
     # argument with exit 2, both before anything below runs. A launcher that
     # answered --help by starting a server read as broken.
@@ -628,7 +612,7 @@ def serve(argv: list[str], *, prog: str = DEFAULT_PROG) -> int:
     host, port = args["host"], args["port"]
 
     # --api-only exempts the check because in dev the CLIENT COMES FROM VITE:
-    # this process serves only /__cad and /__tess_cache, and requiring a built
+    # this process serves only /__cad, and requiring a built
     # dist made `npm run dev` fail on any checkout that had not run
     # `npm run build` first — dist/ is gitignored, so that is every fresh
     # clone. The dist routes still answer 404 in that mode, which is what they
@@ -665,15 +649,6 @@ def serve(argv: list[str], *, prog: str = DEFAULT_PROG) -> int:
             if args["json"]:
                 _out(f"{_compact_json({'url': url, 'port': port, 'action': 'reused'})}\n")
             return 0
-
-    # Every compile and every part a view lacks is a build daemon's job: where none can start,
-    # the viewer does not start either, and says why.
-    from cadgen.daemon.client import unavailable  # noqa: PLC0415 - kernel-free, needed only now
-
-    reason = unavailable()
-    if reason is not None:
-        _err(f"The CAD Viewer cannot start: no build daemon can start here. {reason}\n")
-        return 1
 
     if args["detach"]:
         return launch_detached(argv, as_json=args["json"], prog=prog)
@@ -761,13 +736,6 @@ def serve(argv: list[str], *, prog: str = DEFAULT_PROG) -> int:
     say(f"CAD Viewer URL: {url}\n")
     if args["json"]:
         _out(f"{_compact_json({'url': url, 'port': port, 'action': 'started'})}\n")
-
-    # Start the build daemon, whose workers import build123d while nobody waits: the
-    # session's first build, or the viewer's first STEP import, otherwise pays for it.
-    # After the announcement, never before it: the URL line is the readiness signal
-    # and waits for nothing. The viewer never builds anything itself; this only warms
-    # what will.
-    threading.Thread(target=_prewarm_daemon, name="cadgen-viewer-prewarm", daemon=True).start()
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)

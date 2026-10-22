@@ -26,9 +26,9 @@ from .response import Request, Response
 
 __all__ = ["CadHTTPServer", "make_handler_class", "MAX_REQUEST_BODY_BYTES"]
 
-# The tess-cache POSTs are the only body-carrying routes; everything else rides
-# the query string. The largest legitimate payload is one component's
-# tessellation entry.
+# The most body any request may carry, past every route's own cap (a Quick Edit's
+# prompt files are the largest: ``prompt_files.MAX_BODY_BYTES``); a body over it is
+# refused before it is read.
 MAX_REQUEST_BODY_BYTES = 256 * 1024 * 1024
 
 _ALLOWED_METHODS = ("GET", "HEAD", "POST")
@@ -216,9 +216,7 @@ def make_handler_class(app):
             if "chunked" in transfer_encoding:
                 # The stdlib decodes no chunked framing at all: content-length
                 # is None and rfile sits on the chunk header. Refuse rather
-                # than silently mangle — a mangled /__tess_cache/batch body
-                # permanently demotes the client's provider to per-key gets for
-                # the life of the page.
+                # than hand a route a mangled body.
                 response.send_json(400, {"ok": False, "error": "chunked request bodies are not supported"})
                 self.close_connection = True
                 return False

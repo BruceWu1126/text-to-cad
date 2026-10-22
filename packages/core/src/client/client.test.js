@@ -307,6 +307,26 @@ test('a drawing still rendering is asked for again after the server\'s retryMs, 
   waiting.dispose();
 });
 
+test('an engine document is read through this server, with the client\'s fetch, once the engine holds it', async () => {
+  const replies = [{ state: 'reading', retryMs: 0 }, { doc: 'abc123', url: '/__cad/xbf/api/doc/abc123' }];
+  const asked = [];
+  const fetch = async (url) => {
+    asked.push(url);
+    const held = new URL(url).searchParams.get('held') === '1';
+    return held ? Response.json({ held: url.includes('a.step') }) : Response.json(replies.shift(), { status: replies.length ? 202 : 200 });
+  };
+  const client = createCadClient({ origin: 'http://cad.invalid', pollIntervalMs: 0, fetch });
+  const served = await client.engineDocument('/m/a.step');
+  // Read under the client's origin and with its fetch: the CAD app's travels over its tunnel.
+  assert.deepEqual(served, { doc: 'abc123', url: 'http://cad.invalid/__cad/xbf/api/doc/abc123', fetch });
+  assert.deepEqual(asked.map(url => [new URL(url).pathname, new URL(url).searchParams.get('file')]),
+    [['/__cad/xbf', '/m/a.step'], ['/__cad/xbf', '/m/a.step']], 'asked again while the engine reads it');
+  assert.equal(await client.engineHolds('/m/a.step'), true);
+  assert.equal(await client.engineHolds('/m/b.step'), false);
+  await assert.rejects(client.engineDocument(''), /Missing file/);
+  client.dispose();
+});
+
 test('a face is measured by one POST naming its view, component, part and face, asked again while cadgen measures it', async () => {
   const replies = [{ state: 'measuring', retryMs: 0 }, { face: 3, area: 12.5, center: [1, 2, 3] }];
   const calls = [];

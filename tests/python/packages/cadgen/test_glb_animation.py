@@ -490,23 +490,6 @@ class ARealDocumentPlaysItsClip(unittest.TestCase):
             self.assert_one_skeleton(gltf, under=names["pivot 0 offset"])
             self.assert_curled(gltf, binary, carried=90.0)
 
-            # A CAD view reads the same tubes from the viewer's route (where a view's skin
-            # puts them: test_tube_skin); a second read is the store's, binding nothing again,
-            # and a read for other bytes of the document is a conflict.
-            probe = run("-c", textwrap.dedent("""\
-                import json, sys
-                from cadgen._internal import tube_skin_payload
-                from cadgen.viewer.tube_skins import tube_skins_response
-
-                status, body = tube_skins_response(sys.argv[1])
-                tube_skin_payload.build_tube_skins = None
-                again, cached = tube_skins_response(sys.argv[1])
-                stale, _ = tube_skins_response(sys.argv[1], "0" * 64)
-                print(json.dumps({"status": [status, again, stale], "same": cached == body}))
-                """), str(root / "arm.step"))
-            answer = json.loads(probe.stdout.strip().splitlines()[-1])
-            self.assertEqual(([200, 200, 409], True), (answer["status"], answer["same"]))
-
 
 if __name__ == "__main__":
     unittest.main()

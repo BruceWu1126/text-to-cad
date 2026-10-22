@@ -1,9 +1,12 @@
-// A cadgen engine document as a page reads it from the engine that serves it (`cadgen xbf
-// serve`, `cadgen/engine/serve.py`): its structure as JSON (prototypes with their names,
-// geometry keys, colours and element names by ordinal; instances with world matrices; the
-// tree; the version) and one XBM2 buffer per prototype, read as views over the fetched bytes
-// (`xbm.js`). The viewer's xbf renderer and the snapshot's headless stage both load through
-// here, so they draw the same bytes.
+// A cadgen engine document -- an `.xbf`, or a STEP the engine read -- as a page reads it from the
+// engine that serves it (`cadgen xbf serve`, `cadgen/engine/serve.py`): its structure as JSON
+// (prototypes with their names, geometry keys, colours and element names by ordinal; instances
+// with world matrices; the tree; the version) and one XBM2 buffer per prototype, read as views
+// over the fetched bytes (`xbm.js`). The viewer's xbf renderer and the snapshot's headless stage
+// both load through here, so they draw the same bytes. The viewer's page reads the engine through
+// its own server (`/__cad/xbf/api/...`, `cadgen/viewer/xbf.py`), with the fetch its client
+// sends every request with (the CAD app's goes over its tunnel); the snapshot's stage reads the
+// engine's own port. Either is a document URL here, and every read is made beside it.
 //
 // A part is fetched once per geometry key: a new version of the document fetches the parts
 // whose keys it has not held (an edit changes the keys of the parts it touched, and only those)
@@ -22,16 +25,21 @@ const PART_CONCURRENCY = 6;
 export const XBF_VERSION_WAIT_SECONDS = 25;
 
 /**
- * Where a served document is read: its API URL, `http://127.0.0.1:<port>/api/doc/<id>`.
+ * Where a served document is read: its API URL -- the engine's own,
+ * `http://127.0.0.1:<port>/api/doc/<id>`, or the viewer's relay of it, `/__cad/xbf/api/doc/<id>`
+ * (resolved against the page) -- and the base every other read of that engine is made under
+ * (`base`: the URL before `/api/doc/<id>`, its look at `<base>/api/look`).
  * @param {string | { url: string }} value
- * @returns {{ url: string, origin: string, doc: string }}
+ * @returns {{ url: string, origin: string, base: string, doc: string }}
  */
 export function xbfDocumentSource(value) {
   const text = String(typeof value === "string" ? value : value?.url || "").trim();
   const match = DOC_PATH.exec(text.split(/[?#]/)[0]);
-  if (!match) throw new Error(`an engine document is read from its API URL (…/api/doc/<id>), not ${JSON.stringify(text)}`);
-  const parsed = new URL(match[1]);
-  return { url: match[1], origin: parsed.origin, doc: decodeURIComponent(match[1].split("/").pop()) };
+  let parsed = null;
+  try { parsed = match ? new URL(match[1], globalThis.location?.href) : null; } catch { /* not a URL here */ }
+  if (!parsed) throw new Error(`an engine document is read from its API URL (…/api/doc/<id>), not ${JSON.stringify(text)}`);
+  const url = parsed.href.replace(/\/$/, "");
+  return { url, origin: parsed.origin, base: url.slice(0, url.lastIndexOf("/api/doc/")), doc: decodeURIComponent(url.split("/").pop()) };
 }
 
 async function failure(response, what) {
@@ -90,11 +98,13 @@ async function inBatches(items, limit, run) {
 
 /**
  * @typedef {object} XbfDocument
- * @property {{ url: string, origin: string, doc: string }} source
+ * @property {{ url: string, origin: string, base: string, doc: string }} source
  * @property {object} structure  The engine's structure JSON, as it answered.
  * @property {string} version
  * @property {Map<string, ReturnType<typeof createPart>>} parts  By geometry key.
  * @property {object} look  The engine's look of the regular display modes (`parseXbfLook`).
+ * @property {typeof fetch} fetch  What it was read with: every later read of its engine (an element's
+ *   facts, a part's groups) is made with it.
  * @property {{ fetched: string[], kept: string[], structureMs: number, partsMs: number, bytes: number }} load
  * @property {() => void} release  Let go of its parts (the last holder disposes their geometry).
  */
@@ -112,8 +122,8 @@ async function inBatches(items, limit, run) {
 export async function loadXbfDocument(source, { previous = null, fetch: fetchImpl = globalThis.fetch, signal, onProgress } = {}) {
   const where = xbfDocumentSource(source);
   const started = performance.now();
-  const looked = previous?.look && previous.source?.origin === where.origin ? Promise.resolve(previous.look)
-    : fetchXbfLook(where.origin, { fetch: fetchImpl, signal });
+  const looked = previous?.look && previous.source?.base === where.base ? Promise.resolve(previous.look)
+    : fetchXbfLook(where.base, { fetch: fetchImpl, signal });
   // Read beside the structure; a failure of it is reported once the structure is in.
   looked.catch(() => {});
   const structure = await getJson(fetchImpl, where.url, "the document's structure", signal);
@@ -163,6 +173,7 @@ export async function loadXbfDocument(source, { previous = null, fetch: fetchImp
     version: String(structure.version || ""),
     parts,
     look,
+    fetch: fetchImpl,
     load: { fetched, kept, structureMs: Math.round(structureMs), partsMs: Math.round(performance.now() - partsStarted), bytes },
     release() {
       if (released) return;

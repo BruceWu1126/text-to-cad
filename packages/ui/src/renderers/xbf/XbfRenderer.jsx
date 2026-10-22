@@ -9,6 +9,7 @@ import { useViewerHost } from "../../host/context.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell.js";
 import { usePreviewScene } from "../kit/shell/usePreviewScene.js";
+import { useViewportLoadStatus } from "../kit/shell/useViewportLoadStatus.js";
 import { noGeometryAlert } from "../kit/status/loadAlerts.js";
 import { useModelTools } from "../kit/tools/model-effects/ModelTools.jsx";
 import { useMotionExclusion } from "../kit/tools/model-effects/motionExclusion.js";
@@ -78,11 +79,17 @@ function XbfSurface({ view, data }) {
   const loaded = useXbfScene({ client: document.client, file: view.file.path });
   const scene = loaded.scene;
   const source = loaded.document?.source?.url || "";
+  // What every later read of the document's engine is made with: the fetch it was read with.
+  const engineFetch = loaded.document?.fetch;
   const loadAlert = useMemo(() => workspaceLoadAlert({
     catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene)
   }) || (loaded.empty ? noGeometryAlert(document.modelKey) : null),
   [document.catalogError, loaded.error, loaded.empty, document.modelKey, scene]);
   const tree = useMemo(() => presentXbfTree(scene?.structure || null), [scene?.structure]);
+  // The model's two readiness moments, as a STEP's are published (`window.__cadViewerLoad`): its
+  // first scene, and the whole of it -- one moment here, every part is in the first scene.
+  useViewportLoadStatus({ modelKey: `${document.modelKey}:${loaded.revision}`, hasGeometry: Boolean(scene),
+    modelComplete: Boolean(scene) && !loaded.busy });
   // An assembly's view is a STEP assembly's: the Model tree, Parts in the filter, Explode.
   const assembly = (scene?.partCount || 0) > 1;
   const features = useMemo(() => viewFeaturesForKind("xbf", { parts: scene?.partCount || 0 }), [scene]);
@@ -345,10 +352,10 @@ function XbfSurface({ view, data }) {
     if (!source) return Promise.resolve(null);
     const known = groupsRef.current.get(key);
     if (known) return known;
-    const asked = fetchXbfPartGroups(source, key).catch(() => null);
+    const asked = fetchXbfPartGroups(source, key, { fetch: engineFetch }).catch(() => null);
     groupsRef.current.set(key, asked);
     return asked;
-  }, [source]);
+  }, [source, engineFetch]);
   const grownIds = useCallback(async (hit) => {
     const option = hit.kind === "face" ? "tangentFaces" : "edgeChain";
     if (!connected[option]) return [hit.id];
@@ -388,7 +395,7 @@ function XbfSurface({ view, data }) {
   useEffect(() => { if (!picking) setHover(NO_HOVER); }, [picking]);
 
   // ---- references and copies -------------------------------------------------------------------
-  const facts = useXbfElementFacts({ source, version: loaded.revision, scene, elementIds: selectedElementIds });
+  const facts = useXbfElementFacts({ source, fetch: engineFetch, version: loaded.revision, scene, elementIds: selectedElementIds });
   const removeFromSelection = useCallback(ids => setChosen(now => now.filter(id => !ids.includes(id))), []);
   const hoverChip = useCallback(ids => {
     if (!ids) { setHover(NO_HOVER); return; }

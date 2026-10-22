@@ -133,7 +133,7 @@ def hinge():
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in |
 | `export/` | `translate` and the kind registry (`__init__`); an xbf packaged with its closure's files (`cadz`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
-| `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a minimal three.js page |
+| `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a STEP read in a reader process, held by its bytes; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
 | `snapshot.py` | `cadgen xbf snapshot`: a document drawn by OCCT (`render/`), or a mesh file by the CAD Viewer's mesh renderers, into a PNG; a script's model drawn from its worker's memory |
 | `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document (`service.py`); the scene (`occt.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
@@ -219,15 +219,30 @@ meshed in the worker, and the shapes the daemon lacks. The daemon puts it in
 place of the one it serves and answers the waiting page. The file is read
 again only when another process rewrote it.
 
+A served STEP is read in a reader process of the server's, never in the daemon
+(the XCAF reader's working memory is many times its result's, and its allocator
+keeps it): one read per process, the next process started and warm meanwhile,
+answering the structure and each part's shape bytes, which are all the daemon
+keeps. The read is held by the file's bytes, so the same bytes served again --
+the file touched, copied, or put back -- are not parsed again while the daemon
+lives, and a part's key is made from those bytes and its label, so its mesh is
+not made again either. A STEP is read outside the server's lock (every other
+document is served meanwhile), and one rewritten while it is served is read
+again in the background: the page keeps the old version until the new one is
+in. Its structure says how long the parse took and which process made it
+(`read`: `{seconds, process}`).
+
 ## The viewer and the snapshot
 
-The CAD Viewer opens an `.xbf` by asking this engine to serve it (the `serve` op, through the
-daemon) and handing the page the document's URL here; the page reads the structure and every
-part buffer from the engine itself and waits on `/version` for the next build. So a part's
-bytes leave the engine's memory once, straight to the page, and an edit reaches the page the
-moment the engine has it. Every answer names a loopback page's origin as an allowed reader
-(`access.py`: `localhost`, `127.0.0.1`, `[::1]`, any port); a page from anywhere else gets no
-such header and its browser keeps the answer from it.
+The CAD Viewer opens an `.xbf` or a STEP by asking this engine to serve it (the `serve` op,
+through the daemon), and its page reads the structure and every part buffer through the
+viewer's own origin, which relays the engine's read routes (`cadgen/viewer/xbf.py`), waiting on
+`/version` for the next build: so the CAD app's tunnel carries the reads, and a viewer reached
+from another machine serves them. An edit reaches the page the moment the engine has it. A
+page on this machine may also read the engine directly (the snapshot's does): every answer
+names a loopback page's origin as an allowed reader (`access.py`: `localhost`, `127.0.0.1`,
+`[::1]`, any port); a page from anywhere else gets no such header and its browser keeps the
+answer from it.
 
 **The look.** The regular display modes draw a document as OCCT's PBR raster draws it, one frozen
 record (`render/look.py`) that the OCCT prototype (`render/occt.py`, its finishes and light in

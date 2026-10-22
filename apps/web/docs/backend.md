@@ -7,12 +7,11 @@ The wheel includes that build at `cadgen/_runtime/viewer`, alongside the browser
 runtime the CLI renders snapshots with. Skills invoke the installed distribution.
 
 The HTTP layer uses Python's standard library and requires Python 3.11 or newer.
-It imports the lightweight cadgen catalog and store helpers, but never imports
-the CAD kernel at module scope. Viewing renders existing artifacts, their
-optional `<name>.step.json` sidecar (kinematics, appearance and animation
-keyframes), and their cached geometry. Model source changes never trigger a
-rebuild. The one compile operation offered by the viewer is importing a foreign
-STEP through cadgen's build worker pool.
+It never imports the CAD kernel at module scope. Viewing renders existing files;
+model source changes never trigger a rebuild. A STEP and an `.xbf` are documents
+the cadgen engine serves (`cadgen.engine`, its daemon): the viewer asks the
+engine to serve one and relays the page's reads of it (below), and the engine
+reads, meshes and measures it in processes of its own.
 
 ## Launching
 
@@ -74,8 +73,7 @@ while `--prefix` locates the app. The folder is `serverInfo.start`: the page
 resolves a relative `?file=` against it, and it bounds nothing.
 
 Vite serves the client from source with HMR. It spawns
-`python -m cadgen.viewer --new --api-only` and proxies `/__cad` and
-`/__tess_cache` to that process. `VIEWER_PYTHON` selects its interpreter; the
+`python -m cadgen.viewer --new --api-only` and proxies `/__cad` to that process. `VIEWER_PYTHON` selects its interpreter; the
 default is `python3`. `VIEWER_BACKEND_URL` attaches to a backend you started
 separately. The app needs no production build in this mode, but shared package
 imports still resolve to their compiled `dist/` exports.
@@ -107,53 +105,14 @@ catalog on a timer (the CAD app relays every request through its host's few
 shared slots) compares the revision it is told with the client's
 `catalogRevision`, and reads the catalog again only when they differ.
 
-A row is computed once per version of its file, whoever asks first: a read that
-arrives while the same version's digest or row is being computed waits for that
-computation rather than repeating it, and a read of a file that has changed since
-asks about the new version. A version is the file's mtime and size and, for a save
-by rename inside one tick of a coarse clock (HFS+, FAT, some shares), its inode and
-ctime. A STEP whose tree the store cannot read whole (an object of it missing or
-damaged) is the one row computed again on every read: it lists the document as
-unbuilt, with no hash and a URL that names no tree, as the artifact status calls it
-not compiled, and the compile that repairs the store restores the same bytes at the
-same hashes, which moves nothing a version is made of. A build the client is
-watching (its build feed, `GET /__cad/preview`) that saves the file starts the
-file's row on a thread of the server's as soon as the daemon's ledger lists the
-save (`cadgen.viewer.warm`), so the catalog read that follows the build finds it
-computed or joins it; only the watched file is warmed, never the other files the
-build saved. The row is still the file's: its digest is read from the file's
-bytes, and the tree the ledger says the build saved only starts that tree's
-capture alongside. Warming is best effort: a row it cannot compute, or a thread
-it cannot start, is left to the read, and the feed answers regardless. Reading a
+Every format's row is its file's: `kind` (its extension), `url`, `hash` and
+`bytes`, and an SRDF's paired URDF. A STEP's and an `.xbf`'s say no more than that:
+they are drawn from what the cadgen engine serves of them (below), and their rows
+are what a view watches for a change of the file. A row's digest is the file's
+sha256, computed once per version of the file (its mtime and size). Reading a
 file to hash it never holds up its deletion: the catalog opens models with delete
 sharing on Windows, and a model that vanishes mid-read gets an empty hash on that
 request and has no row on the next.
-
-The build feed, `GET /__cad/preview?file=<abs>&after=<cursor>`, is the newest
-build of the file as the daemon's ledger lists it (`cadgen.viewer.preview`):
-its `state`, `phase` and `detail`, its `error`, `superseded` once the file has
-moved past it, and `preview`, the **preview revision** the build announced the
-moment its result existed (cadgen's `STORE.md` §9b): the result `tree`'s hash,
-the `producer` its parts are keyed under, `parts` as `{cid: part key}` for every
-component whose part the store holds -- the stored parts first, then one more
-each time the build derives one -- `complete` once that is all of them, and
-`annotations`, the hash of the one object the build resolved its declarations
-into against that tree, or null until it has. All of it is names: the client
-reads the tree as it reads any (`GET /__cad/store?file=<tree>/assembly.json`
-with that `producer`), the parts by their keys, and the annotations with
-`GET /__cad/store?annotations=<object>`, which answers the object's JSON (its
-`articulation`, `appearance`, `display` and `animation`, exactly the fields a
-catalog row carries for a saved file, keyed by the tree's tokens) or 404 for
-anything that is not such an object. A `preview` whose `producer` is null names
-no parts: the client finds them as for a saved file. A superseded build's
-`preview` is null, as is a build's before its result exists. A build records
-its result and writes its file after (cadgen's `STORE.md` §3, *Exports*), so
-the feed has two events for it: the preview, complete with its parts, is the
-result recorded; `saved` -- the tree the file's bytes were written from and
-their digest (`documentHash`), null until then -- is the file written, the
-moment it lands, whatever the build's `state` (a child's `done` precedes its
-save; a root's `done` follows every export of the run). The client reads the
-catalog again on either.
 
 The explorer's two reads are `GET /__cad/folder?path=<abs>` (one folder's
 subfolders and CAD files, natural order) and `GET /__cad/search?path=<abs>&q=`
@@ -162,10 +121,10 @@ depth and time, and saying when it stopped early; `cadgen.viewer.folders`). A
 relative path is a 400, a path that is not a folder a 404, one that cannot be
 read a 403.
 
-`/__cad/asset` sends only CAD files and their `.step.json`/`.stp.json`
-sidecars, and never a file whose own name is hidden: a model script, a config
-or a key is a 404 whatever path names it. It and `/__cad/store` serve files as
-data, never as pages: each response carries `x-content-type-options: nosniff`
+`/__cad/asset` sends only CAD files, and never a file whose own name is hidden:
+a model script, a config, a sidecar `.json` or a key is a 404 whatever path names
+it. It and the engine's relayed reads serve files as data, never as pages: each
+response carries `x-content-type-options: nosniff`
 and `content-security-policy: default-src 'none'; sandbox`, so a file opened
 straight in the browser (a robot description's XML can carry an XHTML
 `<script>`) runs no script and has an origin of its own. The renderers fetch the
@@ -173,46 +132,43 @@ bytes, which neither header affects. No `Access-Control-*` header is ever
 served, so another site can make the browser send a request but never read the
 answer.
 
-## Artifacts and the shared store
+## Engine documents: a STEP and an `.xbf`
 
-`cadgen.viewer.artifact_status` reads artifact/store state and advisory build
-progress. Generated artifacts stay detached from their source: the viewer does
-not execute model scripts or rebuild generated outputs. When generation is
-needed, the alert names the CLI command.
+A STEP (`.step`, `.stp`) and an `.xbf` open in the engine document renderer
+(`@text-to-cad/ui`'s `renderers/xbf`), drawn from what the cadgen engine serves
+of them (`cadgen.viewer.xbf`). `GET /__cad/xbf?file=<abs>` asks the engine's
+daemon to serve the file (connect-or-start, the `serve` op; `cadgen.engine.client`)
+and answers `{doc, url}`, `url` being where the page reads it through this server:
+`/__cad/xbf/api/doc/<doc>`. The engine reads a file once and holds it: an `.xbf`
+by its own retrieval driver, a STEP in a reader process of its own, held by the
+file's bytes (`cadgen.engine.serve`), so a STEP opened again, touched or copied
+is not parsed again while the daemon lives, and the parse's working memory never
+stays in the daemon. The serve runs on a thread of this server's, and a request
+waits on it at most 2 s: a large STEP answers `202 {"state": "reading",
+"retryMs": 0}` until the engine holds it, and the client asks again (the CAD
+app's tunnel holds 0.25 s and asks for 750 ms). `&held=1` answers `{held}`,
+whether the engine holds the file now, without starting a read: the home pictures
+a STEP only then.
 
-A raw foreign `.step` or `.stp` without a current render artifact can be
-imported. `cadgen.viewer.cadgen_ops` delegates to cadgen's compile entry point in
-a worker process; the kernel runs there, and failures and progress return as
-structured results. Import availability is reported as `stepImportAvailable`.
-The service uses its own installed cadgen runtime, never an interpreter found
-beside a model.
-
-Store layout and I/O have one implementation. `cadgen.viewer.store_paths` is a
-thin adapter over `cadgen.catalog`, `cadgen.store` and the source-sidecar helpers;
-it returns the strings and dictionaries expected by HTTP routes. The viewer
-does not maintain a second store layout. See
-`packages/cadgen/STORE.md` for objects,
-document indexes, output records and cache-root resolution.
-
-The part routes likewise delegate reads and TESB batch framing to
-`cadgen.store.tess_cache`. `index/part/<key>` is a part's record: it names the
-two objects cadgen made for it, its display mesh (cadgen's tessellation of
-the component's exact BREP) and its selector table; a client never writes one. The
-shared JavaScript reader lives in `@text-to-cad/core/lib/parts/tessellationCache.js`.
-Part names are validated before access: a request names an entry of the store,
-never a path. The build that made a model derived each part's display data
-before it reported done, so the server only reads it: a component's
-`POST /__cad/parts` ready row carries its part's record. A part the store
-lacks (a cleared or evicted store) is derived by one build-pool job for the
-request; the server never derives.
+`GET /__cad/xbf/api/...` relays the engine's read routes, and nothing else: the
+structure (`api/doc/<id>`), one buffer per part (`.../part/<key>`), an element's
+facts (`.../part/<key>/face|edge|vertex/<n>`), a part's groups and volume, the
+look (`api/look`) and its environment image, and the version wait
+(`.../version?after=V&wait=S`), held here at most a second (the tunnel's not at
+all) because a browser has six connections for every tab of this origin; the
+page asks again about once a second. So the page never reads the engine's own
+random port: the CAD app's tunnel carries these reads as it carries every route,
+a viewer bound to another interface or reached through a port forward serves
+them, and the engine answers loopback pages alone. An engine that went is found
+again, and a document it no longer serves is served again once, before a read
+fails. The engine's wire format (structure, `XBM2` buffers, look) is
+`packages/cadgen/src/cadgen/engine/README.md`.
 
 The browser host constructs a `CadClient` from `@text-to-cad/core/client` and
 injects it into the viewer renderers. Catalog subscriptions share the client's
-two-second poll and stop when its last subscriber leaves. Each prepared render
-session owns its mesh-store provider, work queue and cancellation signal;
-there is no page-global provider registration. Session disposal releases its
-resources, and the host disposes the client when finished. A missing part is
-asked for through the part request, never tessellated in the page.
+two-second poll and stop when its last subscriber leaves. The client's
+`engineDocument(file)` answers the document's URL on the client's origin and the
+fetch every read of it is made with (the CAD app's goes over its tunnel).
 
 ## HTTP routes
 
@@ -222,12 +178,10 @@ asked for through the part request, never tessellated in the page.
 | `GET /__cad/catalog?file=...` | One file's catalog row and its `revision`. |
 | `GET /__cad/folder?path=...` | One folder's subfolders and CAD files. |
 | `GET /__cad/search?path=...&q=...` | The CAD files under a folder whose path holds `q`, bounded. |
-| `GET /__cad/asset?file=...` | A CAD file's or sidecar's bytes. |
-| `GET /__cad/store?file=...` | Virtual render assets from the shared store. |
+| `GET /__cad/asset?file=...` | A CAD file's bytes. |
+| `GET /__cad/xbf?file=...` | A STEP or an `.xbf`, served by the cadgen engine: `{doc, url}`, `202 {state: "reading", retryMs}` while the engine reads it, or the engine's refusal (400). `&held=1`: `{held}`, without starting a read. |
+| `GET /__cad/xbf/api/...` | The engine's read routes for a served document, relayed: structure, part buffers, element facts, groups, volume, the look and its image, the version wait (held at most 1 s). |
 | `GET /__cad/drawing?file=...` | A `.dxf` flattened to 2D render primitives; the DXF pane's only source. |
-| `GET /__cad/tube-skins?file=...&documentHash=...` | A STEP's bending tubes, bound as its clips play them (the catalog's `tubeSkinsUrl`). |
-| `GET /__cad/artifact?file=...` | Artifact status and advisory progress. |
-| `POST /__cad/artifact?file=...` | Start importing a foreign STEP and answer at once (`compiling`; `compiled` when there is nothing to build); `&force=1` requests a rebuild. The import is followed through `GET /__cad/artifact`, whose `failed` carries the job's reason until the file's bytes change. |
 | `GET /__cad/recents` | The model library every CAD view shares. |
 | `POST /__cad/recents` | `{action, path, png?}`: `open` (an existing CAD file on screen; counted for analytics), `pin`, `unpin`, `remove`, `thumbnail`; answers the library as it now is. |
 | `GET /__cad/thumbnail?name=...` | A library picture, by its content name. |
@@ -242,12 +196,6 @@ asked for through the part request, never tessellated in the page.
 | `GET /__cad/prompt-files?id=...` | That render: `202 {id, retryMs}` while it runs, then `200 {job, annotation, images: [{label, path}]}` (absolute paths), a 500 when it failed, a 404 for an id this process no longer keeps. |
 | `GET /__cad/prompt-files/<name>` | One of those files (a PNG or JSON), from the prompt-files directory only. |
 | `POST /__cad/shutdown` | Exit: a newer launch replacing this viewer, or `cadgen viewer stop`. Answers 202, then stops and frees the port. |
-| `POST /__cad/parts` | Read components' part records from the store; the parts it lacks, one build-pool job derives. |
-| `POST /__cad/measure` | One face's exact area and centroid (`{tree, viewId, producer, cid, part, face}`): the store's answer, else one build-pool job measures the component's stored BREP; 202 `{state: "measuring", retryMs}` while it runs. |
-| `POST /__tess_cache/probe` | The parts' records, for part keys. |
-| `GET /__tess_cache/<part>.glb` | Read a part's display mesh, a GLB body, bound to its object (POST answers 405: cadgen writes every part). |
-| `GET /__tess_cache/<part>.selectors.json` | Read a part's selector table, bound to its object. |
-| `POST /__tess_cache/batch` | Read a batch of display meshes in a TESB container. |
 
 Every POST must send `x-cadgen-viewer: 1`. The custom header forces a browser
 preflight for cross-origin POSTs, and the server sends no CORS headers. When
@@ -262,24 +210,6 @@ generation/export remain outside this HTTP interface.
 Backend tests live in `tests/python/packages/cadgen/viewer` and are run by
 `scripts/test/test-python.sh`. The web app's `npm run test` covers its JavaScript
 host only.
-
-## `GET /__cad/tube-skins`
-
-A clip that bends a tube (`.deform_tube()`) plays cadgen's skin for it:
-`cadgen._internal.tube_skin_payload` binds each tube occurrence's stored mesh and
-edges to joints along its centerline, in its component's frame, and poses the
-joints at every key; the store's `skin` index caches the payload by the
-document's bytes, its animation and the meshes it binds. The catalog names the
-URL as `tubeSkinsUrl` for a built document whose animation bends a tube, and the
-STEP renderer reads it once, with the clips (`@text-to-cad/core/common/tubeSkin.js`
-plays it; `packages/core/docs/tube-skins.md`).
-
-`?file=` names the STEP by its absolute path; anything else is 400. A missing file, a document
-not built, a sidecar the server cannot read or an animation that bends no tube
-is 404. `&documentHash=` that names other bytes than the file holds now is 409:
-the page is behind the file, and its next catalog read names the current skins.
-The answer is GLB-framed (`model/gltf-binary`): a glTF JSON chunk whose
-`extras.cadgenTubeSkins` says what each buffer view holds.
 
 ## `GET /__cad/drawing`
 
@@ -363,5 +293,5 @@ ends, so the next request is answered even where the store could not keep it.
 Rendering is CPU-bound Python (~0.2 s for 2,000 lines of text, ~1 s for 6,000,
 ~3 s for 100,000 LINEs on a warm laptop) and still holds the GIL against the
 server's other threads while it runs. If drawings that size become routine, the
-escalation is cadgen's build pool — the same move the STEP import made — not a
-thread pool here.
+escalation is a process of its own — as the engine reads a STEP — not a thread
+pool here.

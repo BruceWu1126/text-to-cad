@@ -122,10 +122,8 @@ class DeclaredOutputs(unittest.TestCase):
 
     def test_a_script_that_stops_parsing_is_listed_against_what_it_declared_last(self):
         # An edit that breaks the script fails the build at import, and its text no longer
-        # parses: the job is still listed against the document the script writes, so the
-        # viewer showing that document gets the failure, not silence.
-        from cadgen.viewer.build_progress import build_progress_snapshot
-
+        # parses: the job is still listed against the document the script writes, its failure
+        # with it.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             script = root / "part.py"
@@ -146,8 +144,9 @@ class DeclaredOutputs(unittest.TestCase):
             broken = ledger.start(tool="run", subject=str(script))
             self.assertEqual([output], broken["outputs"])
             ledger.finish(broken, 1, error="SyntaxError: invalid syntax")
-            status = build_progress_snapshot(output, jobs=ledger.snapshot())
-            self.assertEqual("SyntaxError: invalid syntax", status["failed"]["error"])
+            [listed] = [job for job in ledger.snapshot() if job["id"] == broken["id"]]
+            self.assertEqual(("failed", "SyntaxError: invalid syntax", [output]),
+                             (listed["state"], listed["error"], listed["outputs"]))
 
             # A daemon that never read the script has nothing to list it against.
             self.assertEqual([], JobLedger(clock=Clock()).start(tool="run", subject=str(script))["outputs"])
@@ -263,14 +262,11 @@ class Lifecycle(unittest.TestCase):
         # The viewer that asked for a compile was closed mid-job: the daemon killed the
         # worker. That is no verdict on the document, so a viewer opened next compiles it
         # rather than reporting "the last compile of this document failed".
-        from cadgen.viewer.build_progress import build_progress_snapshot
-
         document = str((Path(self.tmp.name) / "widget.step").resolve())
         job = self.ledger.start(tool="step-compile", subject=document)
         self.ledger.finish(job, 1, error="worker killed", cancelled=True)
         listed = self.ledger.snapshot()[0]
         self.assertEqual(("cancelled", None), (listed["state"], listed["error"]))
-        self.assertIsNone(build_progress_snapshot(document, jobs=self.ledger.snapshot()))
 
     def test_a_child_built_inside_a_request_is_a_row_of_its_own_under_it(self):
         parent = str((Path(self.tmp.name) / "rig.py").resolve())

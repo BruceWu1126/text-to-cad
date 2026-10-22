@@ -18,6 +18,9 @@ import { useTabViewerState } from '../tab-store/useTabViewerState.js';
 import { normalizePath } from './catalog.js';
 import { MissingCadFile } from './MissingCadFile.js';
 
+// A STEP: read by the cadgen engine, at a length its size decides (the home's pictures ask first).
+const STEP_FILE = /\.(?:step|stp)$/i;
+
 export interface CadViewerProps<Model extends LibraryModel = LibraryModel> {
   /** The CAD client: the catalog of the files on screen, and every document's resources. */
   client: CadWorkspaceService;
@@ -147,15 +150,15 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   const viewerHost = useMemo<ViewerHost>(() => ({ ...host, navigation: homed ? { openFile, home } : {} }), [host, openFile, home, homed]);
 
   // The home's pictures for cards without a current one, drawn out of sight one at a time and kept as
-  // the file on screen's are. A model whose display is not built yet is left to its placeholder: the
-  // status is read, never built.
+  // the file on screen's are. A STEP the cadgen engine does not hold is left to its placeholder: the
+  // home never starts the engine's read of one (a large STEP's is long), it only asks.
   const [drawing, setDrawing] = useState<{ source: ModelPictureSource; done(kept: boolean): void } | null>(null);
   const drawable = Boolean(library && onThumbnail);
   const picture = useMemo(() => (drawable ? async (model: Model) => {
     const file = normalizePath(model.path);
     if (latest.current.path) return false;
-    const status = await client.requestArtifactStatus(file).catch(() => null);
-    if (status?.state !== 'compiled' || latest.current.path) return false;
+    if (STEP_FILE.test(file) && !(await client.engineHolds?.(file).catch(() => false))) return false;
+    if (latest.current.path) return false;
     const keep = (png: Blob) => latest.current.onThumbnail?.(png, model.path) ?? Promise.resolve();
     return new Promise<boolean>(done => setDrawing({ source: { client, file, keep }, done }));
   } : undefined), [drawable, client]);
@@ -180,9 +183,9 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
       links={host.links} onError={onError} /> : undefined,
     loading: <div className="relative h-full"><ViewerLoadingOverlay viewerLoading /></div>,
     error: ({ message, missing, reload }: { message: string; missing: boolean; reload?: () => void }) => missing
-      ? <MissingCadFile file={path} client={client} entry={entry} reload={reload} action={goHome} title={t("file.missing")} />
+      ? <MissingCadFile file={path} entry={entry} reload={reload} action={goHome} title={t("file.missing")} />
       : <EmptyState icon={FileWarning} title={t("file.openFailed")} description={message} tone="warn" action={goHome} />,
-  }), [library, layout, changeLayout, path, picture, host.links, client, entry, onError, goHome, t]);
+  }), [library, layout, changeLayout, path, picture, host.links, entry, onError, goHome, t]);
   return <I18nProvider locale={locale}>
     <FileViewer file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
       colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} fullSize={fullSize} history={history} notice={notice} onError={onError} presentation={presentation} />

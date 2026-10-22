@@ -82,7 +82,7 @@ function PartDetail({ assembly, parts, measured }) {
  * What the engine measures of each picked face and edge, asked for as it is picked and again for
  * a new version of the document: by element id, `null` while it is asked.
  */
-export function useXbfElementFacts({ source, version, scene, elementIds }) {
+export function useXbfElementFacts({ source, fetch, version, scene, elementIds }) {
   const [held, setHeld] = useState(() => ({ version: "", facts: new Map() }));
   const key = elementIds.join("\n");
   useEffect(() => {
@@ -94,7 +94,7 @@ export function useXbfElementFacts({ source, version, scene, elementIds }) {
     for (const id of wanted) {
       const element = scene.describeElement(id);
       if (!element) continue;
-      fetchXbfElementFacts(source, element.key, element.kind, element.ordinal, { signal: controller.signal })
+      fetchXbfElementFacts(source, element.key, element.kind, element.ordinal, { fetch, signal: controller.signal })
         .then(facts => setHeld(current => ({ version, facts: new Map(current.version === version ? current.facts : []).set(id, facts) })),
           () => {});
     }
@@ -102,7 +102,7 @@ export function useXbfElementFacts({ source, version, scene, elementIds }) {
     return () => controller.abort();
     // The elements by their ids, again for a new version of the document.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source, version, scene, key]);
+  }, [source, fetch, version, scene, key]);
   return held.version === version ? held.facts : new Map();
 }
 
