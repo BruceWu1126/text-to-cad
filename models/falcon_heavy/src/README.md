@@ -21,10 +21,11 @@ python -m cadgen.engine snapshot ../XBF/falcon_heavy.xbf falcon_heavy.png
 python -m cadgen.engine snapshot ../XBF/falcon_heavy_cutaway.xbf cutaway.png --camera back
 ```
 
-The sources, confidence and estimates behind every number (`RESEARCH.md`,
-`PROVENANCE.md`, `DIMENSIONS.md`) and the point-in-time hierarchy and engine map
-(`HIERARCHY.md`, `ENGINE_INSTANCES.md`) were the original project's, and are in its
-history (`git log -- models/falcon_heavy/PROVENANCE.md`).
+The sources, confidence and estimates behind every number
+([`RESEARCH.md`](../RESEARCH.md), [`PROVENANCE.md`](../PROVENANCE.md),
+[`DIMENSIONS.md`](../DIMENSIONS.md)) and the point-in-time hierarchy and engine map
+([`HIERARCHY.md`](../HIERARCHY.md), [`ENGINE_INSTANCES.md`](../ENGINE_INSTANCES.md)) were the
+original project's, and are kept beside this folder.
 
 ## How it is built
 

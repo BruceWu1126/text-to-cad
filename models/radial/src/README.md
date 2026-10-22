@@ -116,5 +116,6 @@ directions; and the valve springs, which `kin.py` compresses as tubes, ride noth
   animation bake. `lib/clips.py` and `lib/systems.py` (the clip contract and the
   systems' order) live on in `lib/mechanism.py` and `radial.py`.
 - The systems' own STEP files, and `render/presentation.json` (the old renderer's rig).
-- The hand-off notes (`REPORT.md`, `BUILDING.md`, `GAUNTLET.md`, `BUGS.md`): the
-  original's, in its history (`git log -- models/radial/REPORT.md`).
+
+The original's hand-off notes are kept beside this folder: [`REPORT.md`](../REPORT.md),
+[`BUILDING.md`](../BUILDING.md), [`GAUNTLET.md`](../GAUNTLET.md), [`BUGS.md`](../BUGS.md).

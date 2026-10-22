@@ -10,6 +10,6 @@ to `../XBF/` (relative to the script); `cadgen export` translates it to STEP or 
 - `cnc.py`: thicker walls and optional floor root fillets.
 
 Shared geometry lives in `lib/tray_geometry.py`. The original's write-up (its
-`README.md`: the comparison, its checks and limitations) and its checks and figure
-(`scripts/verify.py`, `scripts/figure.py`, reading STEP and STL exports) are in its
-history (`git log -- models/dfm-process-comparison/README.md`).
+[`README.md`](../README.md): the comparison, its checks and limitations) and its checks and
+figure ([`scripts/verify.py`](../scripts/verify.py), [`scripts/figure.py`](../scripts/figure.py),
+reading STEP and STL exports, which `cadgen export` writes) are beside this folder.

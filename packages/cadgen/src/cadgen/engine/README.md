@@ -714,8 +714,8 @@ def hypercar():
 knuckles at 54, 60 and 42 degrees: the picture of `--pose '{"index_mcp_flexion": 54,
 "index_pip": 60, "index_dip": 42}'`. `cadgen export XBF/hypercar.xbf half.step --pose
 '{"doors": 0.5}'` writes the doors a half turn and a half travel open. A gear train is a locked
-coupling: `couple(actuator, "drive", range=(0, 4.5), lock=True, rotor_spin=360, output=80, ...)`
-(`models-xbf/qdd_actuator`). A coupling joint in no pair, or given as many ratios as its pair has
+coupling: `couple(actuator, "drive", range=(0, 4.5), lock=True, rotor_spin=360, output=80, ...)`,
+a quasi-direct-drive actuator's. A coupling joint in no pair, or given as many ratios as its pair has
 no values, is left out of it and warned. A label names the joint in each placement of a
 sub-assembly placed several times, and a name two couplings share takes the path of the assembly
 holding each (`hand/index:curl`), as a label two pairs share does.
