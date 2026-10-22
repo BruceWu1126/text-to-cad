@@ -1,11 +1,22 @@
 """The engine daemon: one per installation, started on demand, gone after an idle hour.
 
-It holds a warm worker per model script (``worker``) and hands each build to its
-script's worker, one build at a time per worker, builds of different scripts at once.
+It holds a pool of warm workers, one per model script (``Pool``), and hands each build to its
+script's worker: one build at a time per worker, builds of different scripts at once, and at
+most ``CADGEN_ENGINE_WORKERS`` workers alive (by default, the machine's cores). A build for a
+script with a live worker waits for it while it is busy. One for a script with none starts one
+when fewer than the cap are alive; at the cap the least recently used idle worker is retired
+first (its stdin closed: it exits); with every worker busy, the build waits, first come first
+served, for the first to come free. Nothing is refused, and nothing is predicted: no memory
+budget, no admission. A worker idle ``CADGEN_ENGINE_WORKER_IDLE`` seconds (by default the
+daemon's own idle time, an hour) is retired, and so is one over its memory cap after a build
+(``worker.retirement``). A retired script's next build is a fresh worker's, a restart.
+
 It also serves documents over HTTP (``serve``), holding each loaded document and its
 parts' tessellations in its memory, and draws them (``draw``): each served document a
 snapshot asks for gets a render process of its own (``render/service.py``), started on its
-first picture, sent every version the document is patched to, gone with the daemon.
+first picture, sent every version the document is patched to, gone with the daemon or after
+the workers' idle time, and held to their memory cap; render processes are not workers, and
+do not count toward the cap.
 
 Its only files are the operating system's coordination: a Unix socket and a lock in
 ``tempfile.gettempdir()/cadgen-engine`` (on Windows, a localhost TCP port and a token,
@@ -15,6 +26,7 @@ are JSON lines, the last of which carries ``done``, ``failed`` or ``ok``.
 
 from __future__ import annotations
 
+import collections
 import hashlib
 import itertools
 import json
@@ -27,16 +39,41 @@ import sys
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from cadgen.engine.atomic_replace import replace_atomic
 
-__all__ = ["IDLE_SECONDS", "lock", "lock_path", "main", "socket_path", "state_dir"]
+__all__ = ["IDLE_SECONDS", "Pool", "lock", "lock_path", "main", "socket_path", "state_dir", "worker_cap",
+           "worker_idle"]
 
 IDLE_SECONDS = 3600.0
-PROTOCOL = 1
+PROTOCOL = 2
 WINDOWS = os.name == "nt"
+# The retirements ``status`` lists, the latest first.
+RETIRED_KEPT = 12
+# What a worker's environment must share with a request's for the request to use it.
+_RELEVANT = ("PYTHONPATH", "PATH", "VIRTUAL_ENV")
+
+
+def worker_cap() -> int:
+    """The live workers' cap: ``CADGEN_ENGINE_WORKERS``, else the machine's cores."""
+    try:
+        given = int(os.environ.get("CADGEN_ENGINE_WORKERS", "").strip() or 0)
+    except ValueError:
+        given = 0
+    return given if given > 0 else (os.cpu_count() or 1)
+
+
+def worker_idle(idle: float) -> float:
+    """How long a worker may sit idle before it is retired: ``CADGEN_ENGINE_WORKER_IDLE``
+    seconds, else the daemon's own idle time (``idle``)."""
+    try:
+        given = float(os.environ.get("CADGEN_ENGINE_WORKER_IDLE", "").strip() or -1)
+    except ValueError:
+        given = -1.0
+    return given if given > 0 else idle
 
 
 def state_dir() -> Path:
@@ -114,6 +151,13 @@ same pipe, even while a build runs."""
         self.answers: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
         self.started = time.time()
         self.builds = 0
+        # Its place in the pool (``Pool``): its key, whether a request holds it, since when, and
+        # when it was last let go; its resident memory after its last build, in MiB.
+        self.key = os.path.normcase(script)
+        self.leased = False
+        self.since = 0.0
+        self.used = time.monotonic()
+        self.rss: float | None = None
         # Over its memory cap after a build (``worker.retirement``): it exits, and is never asked again.
         self.retired = False
         self.held: list[Any] = []  # what the daemon holds for this worker's build until it settles
@@ -209,6 +253,7 @@ same pipe, even while a build runs."""
                     code = self.process.wait()
                     raise WorkerGone(f"the worker for {Path(self.script).name} exited ({code}) during the build")
                 self.builds += 1
+                self.rss = message.pop("rssMb", self.rss)
                 done = message.get("done")
                 if isinstance(done, dict):
                     reports = done.get("reports") or []
@@ -249,14 +294,195 @@ def _read_exactly(stream: Any, size: int) -> bytes:
     return b"".join(chunks)
 
 
+# --- the pool -----------------------------------------------------------------------------
+
+
+@dataclass(eq=False)
+class _Ticket:
+    """A request waiting for a worker: granted the live worker of its key (``worker``), or a
+    slot to start one in (``start``), retiring ``victim`` first."""
+
+    key: str
+    environment: dict[str, str]
+    cwd: str | None
+    worker: Any = None
+    start: bool = False
+    victim: Any = None
+
+    @property
+    def granted(self) -> bool:
+        return self.worker is not None or self.start
+
+
+def _shared(environment: dict[str, str]) -> dict[str, str]:
+    return {name: environment.get(name, "") for name in _RELEVANT}
+
+
+class Pool:
+    """The daemon's live workers, one per key (a script's path, ``code::<name>``, ``documents``),
+    at most ``cap`` of them (see the module): ``lease`` a key's worker for one request, and
+    ``release`` it after. Requests are granted first come first served: one whose key has a live
+    worker takes it when it is free; one that needs a worker of its own takes a slot under the cap,
+    else the slot of the least recently used idle worker -- one no request waits for, if there is
+    one -- which is retired; with every worker busy it waits, and so does every request that needs
+    a slot after it. A worker idle ``idle`` seconds is retired (``retire_idle``), as is one that is
+    gone or over its memory cap when let go. ``start(key, environment, cwd)`` starts a worker."""
+
+    def __init__(self, cap: int, idle: float, start: Callable[[str, dict[str, str], str | None], Any]) -> None:
+        self.cap = max(1, int(cap))
+        self.idle = idle
+        self.start = start
+        self.lock = threading.Condition()
+        self.live: dict[str, Any] = {}  # by key
+        self.starting: set[str] = set()  # the keys whose worker is being started, each holding a slot
+        self.queue: list[_Ticket] = []
+        self.retired: collections.deque = collections.deque(maxlen=RETIRED_KEPT)
+
+    def lease(self, script: str, environment: dict[str, str], cwd: str | None = None) -> Any:
+        """The worker of ``script`` for one request, waiting its turn (see the class); started
+        when it has none. ``release`` it after."""
+        ticket = _Ticket(os.path.normcase(script), environment, cwd)
+        with self.lock:
+            self.queue.append(ticket)
+            self._grant()
+            while not ticket.granted:
+                self.lock.wait()
+        if ticket.worker is not None:
+            return ticket.worker
+        if ticket.victim is not None:
+            ticket.victim.stop()  # the worker whose slot this is exits before the new one starts
+        try:
+            worker = self.start(script, environment, cwd)
+        except BaseException:
+            with self.lock:
+                self.starting.discard(ticket.key)
+                self._grant()
+            raise
+        with self.lock:
+            self.starting.discard(ticket.key)
+            worker.leased, worker.since = True, time.monotonic()
+            self.live[ticket.key] = worker
+        return worker
+
+    def release(self, worker: Any) -> None:
+        """A request is done with its worker: it is free again, or retired when it is gone or
+        over its memory cap."""
+        gone = False
+        with self.lock:
+            worker.leased, worker.used = False, time.monotonic()
+            if worker.retired or not worker.alive():
+                gone = self.live.get(worker.key) is worker
+                if gone:
+                    del self.live[worker.key]
+                    self._note(worker, "RSS" if worker.retired else "exited")
+            self._grant()
+        if gone:
+            worker.stop()
+
+    def retire_idle(self, now: float | None = None) -> list[Any]:
+        """Retire every worker idle ``idle`` seconds or more; the retired."""
+        now = time.monotonic() if now is None else now
+        with self.lock:
+            gone = [worker for worker in self.live.values() if not worker.leased and now - worker.used >= self.idle]
+            for worker in gone:
+                del self.live[worker.key]
+                self._note(worker, "idle")
+            if gone:
+                self._grant()
+        for worker in gone:
+            worker.stop()
+        return gone
+
+    def holds(self, worker: Any) -> bool:
+        """Whether ``worker`` is live in the pool: neither retired nor gone."""
+        with self.lock:
+            return self.live.get(worker.key) is worker and not worker.retired and worker.alive()
+
+    def workers(self) -> list[Any]:
+        with self.lock:
+            return list(self.live.values())
+
+    def waiting(self) -> int:
+        with self.lock:
+            return sum(not ticket.granted for ticket in self.queue)
+
+    def stop(self) -> None:
+        with self.lock:
+            every = list(self.live.values())
+            self.live.clear()
+        for worker in every:
+            worker.stop()
+
+    def _note(self, worker: Any, reason: str) -> None:
+        self.retired.appendleft({"script": worker.script, "pid": getattr(worker, "pid", None),
+                                 "builds": getattr(worker, "builds", 0), "reason": reason, "at": time.time()})
+
+    def _grant(self) -> None:
+        """Grant what the waiting requests can have, in the order they came (call with the lock
+        held): see the class."""
+        for key, worker in list(self.live.items()):
+            if not worker.leased and not worker.alive():
+                del self.live[key]
+                self._note(worker, "exited")
+        wanted = {ticket.key for ticket in self.queue if ticket.key in self.live}
+        taken: set[int] = set()  # the workers this pass granted or retired
+        blocked = False  # a request before found no slot: no later one takes one
+        granted = False
+        for ticket in self.queue:
+            worker = self.live.get(ticket.key)
+            if worker is not None and _shared(worker.environment) == _shared(ticket.environment):
+                if not worker.leased and id(worker) not in taken:
+                    worker.leased, worker.since = True, time.monotonic()
+                    ticket.worker = worker
+                    taken.add(id(worker))
+                    granted = True
+                continue
+            if ticket.key in self.starting:
+                continue  # its key's worker is being started: it waits for that one
+            if worker is not None:
+                # Its script's worker, of another environment: replaced in its slot once it is free.
+                if not worker.leased and id(worker) not in taken:
+                    del self.live[ticket.key]
+                    self._note(worker, "environment")
+                    self._slot(ticket, worker)
+                    taken.add(id(worker))
+                    granted = True
+                continue
+            if blocked:
+                continue
+            if len(self.live) + len(self.starting) < self.cap:
+                self._slot(ticket, None)
+                granted = True
+                continue
+            idle = [held for held in self.live.values() if not held.leased and id(held) not in taken]
+            if not idle:
+                blocked = True
+                continue
+            victim = min(idle, key=lambda held: (held.key in wanted, held.used))
+            del self.live[victim.key]
+            self._note(victim, "LRU")
+            self._slot(ticket, victim)
+            taken.add(id(victim))
+            granted = True
+        if granted:
+            self.queue = [ticket for ticket in self.queue if not ticket.granted]
+            self.lock.notify_all()
+
+    def _slot(self, ticket: _Ticket, victim: Any) -> None:
+        ticket.start, ticket.victim = True, victim
+        self.starting.add(ticket.key)
+
+
 # --- the daemon ---------------------------------------------------------------------------
 
 
 class Daemon:
-    def __init__(self, idle: float) -> None:
+    def __init__(self, idle: float, cap: int | None = None, retire_after: float | None = None) -> None:
         self.idle = idle
-        self.workers: dict[str, Worker] = {}
-        self.workers_lock = threading.Lock()
+        self.pool = Pool(cap or worker_cap(), retire_after if retire_after is not None else worker_idle(idle),
+                         self._start)
+        self.workers_lock = threading.Lock()  # each worker's ``held``
+        self.born = time.time()
         self.last = time.monotonic()
         self.busy = 0
         self.busy_lock = threading.Lock()
@@ -272,27 +498,24 @@ class Daemon:
     def touch(self) -> None:
         self.last = time.monotonic()
 
-    def worker(self, script: str, environment: dict[str, str], cwd: str | None = None) -> Worker:
+    def _start(self, script: str, environment: dict[str, str], cwd: str | None) -> Worker:
+        return Worker(script, environment, self.patched, self.settled, cwd=cwd)
+
+    def lease(self, script: str, environment: dict[str, str], cwd: str | None = None) -> Worker:
         """The warm worker of a script (by its path), of code (``code::<name>``) or of the
-        documents no worker built (``documents``), started when none is alive."""
-        key = os.path.normcase(script)
-        relevant = {name: environment.get(name, "") for name in ("PYTHONPATH", "PATH", "VIRTUAL_ENV")}
-        with self.workers_lock:
-            found = self.workers.get(key)
-            if found is not None and found.alive() and not found.retired and \
-                    {name: found.environment.get(name, "") for name in relevant} == relevant:
-                return found
-            if found is not None:
-                found.stop()
-            found = self.workers[key] = Worker(script, environment, self.patched, self.settled, cwd=cwd)
-            return found
+        documents no worker built (``documents``), for one request: waiting its turn in the
+        pool, started when none is alive (``Pool``). ``release`` it after."""
+        return self.pool.lease(script, environment, cwd)
+
+    def release(self, worker: Worker) -> None:
+        self.pool.release(worker)
 
     def provenance(self, path: str, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
         """What made one element of a served document, asked of the worker that built it
         (``Worker.where``): None for a document no live worker built -- one served cold."""
         resolved = str(Path(path).resolve())
         worker = self.builders.get(os.path.normcase(resolved))
-        if worker is None or not worker.alive():
+        if worker is None or not self.pool.holds(worker):
             return None
         return worker.where(resolved, key, kind, ordinal)
 
@@ -334,7 +557,7 @@ class Daemon:
         source = request.get("source") or {}
         if "path" in source:
             builder = self.builders.get(os.path.normcase(str(Path(source["path"]).resolve())))
-            if builder is not None and builder.alive():
+            if builder is not None and self.pool.holds(builder):
                 return builder.script, None
             return "documents", request.get("cwd")
         return request.get("script") or source["script"], None
@@ -346,8 +569,9 @@ class Daemon:
         try:
             key, cwd = self._routed(request)
             for attempt in (1, 2):
+                worker = None
                 try:
-                    worker = self.worker(key, request.get("env") or {}, cwd)
+                    worker = self.lease(key, request.get("env") or {}, cwd)
                     answer = worker.build(order, send)
                     payload = answer.pop("payload", b"")
                     if payload:
@@ -363,11 +587,12 @@ class Daemon:
                     send(answer)
                     return
                 except WorkerGone as error:
-                    with self.workers_lock:
-                        self.workers.pop(os.path.normcase(key), None)
                     if attempt == 2 or "during the build" in str(error):
                         send({"failed": str(error)})
                         return
+                finally:
+                    if worker is not None:
+                        self.release(worker)
         finally:
             with self.busy_lock:
                 self.busy -= 1
@@ -392,8 +617,9 @@ class Daemon:
                 script = request["script"]
                 key, cwd = self._routed(request)
                 for attempt in (1, 2):
+                    worker = None
                     try:
-                        worker = self.worker(key, request.get("env") or {}, cwd)
+                        worker = self.lease(key, request.get("env") or {}, cwd)
                         fresh = worker.builds == 0
                         order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
                                  "cwd": request.get("cwd"), "outputs": request.get("outputs"),
@@ -417,11 +643,12 @@ class Daemon:
                         send(answer)
                         return
                     except WorkerGone as error:
-                        with self.workers_lock:
-                            self.workers.pop(os.path.normcase(key), None)
                         if attempt == 2 or "during the build" in str(error):
                             send({"failed": str(error)})
                             return
+                    finally:
+                        if worker is not None:
+                            self.release(worker)
             finally:
                 with self.busy_lock:
                     self.busy -= 1
@@ -437,13 +664,7 @@ class Daemon:
         elif op == "draw":
             self.draw(request, send)
         elif op == "status":
-            with self.workers_lock:
-                workers = [{"script": w.script, "pid": w.pid, "builds": w.builds, "alive": w.alive() and not w.retired,
-                            "busy": w.lock.locked()} for w in self.workers.values()]
-            send({"ok": True, "pid": os.getpid(), "workers": workers, "idle": round(time.monotonic() - self.last, 1),
-                  "serving": None if self.server is None else {"url": self.server.url,
-                                                               "documents": self.server.listing()},
-                  "renders": [] if self.renders is None else self.renders.status()})
+            send(self.status())
         elif op == "stop":
             send({"ok": True})
             self.stopping.set()
@@ -477,16 +698,35 @@ class Daemon:
                 self.busy -= 1
             self.touch()
 
+    def status(self) -> dict[str, Any]:
+        """The daemon, its workers (each its script, its builds, its memory after its last build
+        in MiB, and how long it has been busy or idle), the requests waiting for one, the last
+        retirements, and what it serves and draws."""
+        from cadgen.engine.worker import rss_cap_mb
+
+        now = time.monotonic()
+        workers = [{"script": w.script, "pid": w.pid, "builds": w.builds, "alive": w.alive() and not w.retired,
+                    "busy": w.leased, "rssMb": None if w.rss is None else round(w.rss),
+                    "seconds": round(now - (w.since if w.leased else w.used), 1)} for w in self.pool.workers()]
+        return {"ok": True, "pid": os.getpid(), "up": round(time.time() - self.born, 1), "workers": workers,
+                "cap": self.pool.cap, "waiting": self.pool.waiting(), "idleTimeout": self.pool.idle,
+                "rssCapMb": rss_cap_mb(), "retired": list(self.pool.retired),
+                "idle": round(now - self.last, 1),
+                "serving": None if self.server is None else {"url": self.server.url,
+                                                             "documents": self.server.listing()},
+                "renders": [] if self.renders is None else self.renders.status()}
+
     def watch(self) -> None:
-        while not self.stopping.wait(min(30.0, max(self.idle / 10, 0.2))):
+        period = min(30.0, max(min(self.idle, self.pool.idle) / 10, 0.2))
+        while not self.stopping.wait(period):
+            self.pool.retire_idle()
+            if self.renders is not None:
+                self.renders.retire_idle(self.pool.idle)
             if self.busy == 0 and time.monotonic() - self.last > self.idle:
                 self.stopping.set()
 
     def shutdown(self) -> None:
-        with self.workers_lock:
-            for worker in self.workers.values():
-                worker.stop()
-            self.workers.clear()
+        self.pool.stop()
         if self.renders is not None:
             self.renders.stop()
         if self.server is not None:
@@ -562,7 +802,7 @@ def lock() -> Any:
 
 def main(argv: list[str] | None = None) -> int:
     sys.dont_write_bytecode = True
-    idle = float(os.environ.get("CADGEN_ENGINE_IDLE", IDLE_SECONDS))
+    idle = float(os.environ.get("CADGEN_ENGINE_IDLE") or IDLE_SECONDS)
     held = lock()
     if held is None:
         return 0  # another daemon is up

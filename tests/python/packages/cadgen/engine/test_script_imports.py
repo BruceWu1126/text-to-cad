@@ -172,7 +172,7 @@ class PackageScriptRunTest(unittest.TestCase):
         edited = self.run_script()
         self.assertIn("bodies 1 run", edited)
         self.assertIn("rebuilt: ../../common/dims.py changed", edited)
-        workers = json.loads(self.python("-m", "cadgen.engine", "status").stdout)["workers"]
+        workers = json.loads(self.python("-m", "cadgen.engine", "status", "--json").stdout)["workers"]
         self.assertEqual([(Path(worker["script"]).name, worker["builds"]) for worker in workers], [("model.py", 2)],
                          "one warm worker built both, not the script's own process")
 

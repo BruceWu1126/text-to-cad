@@ -167,7 +167,7 @@ class DaemonTest(unittest.TestCase):
         edited = self.build(12)
         self.assertGreater(edited["memo"]["misses"], 0)
         self.assertTrue(edited["files"][str(self.folder / "XBF/block.xbf")]["written"])
-        status = json.loads(self.cli("status").stdout)
+        status = json.loads(self.cli("status", "--json").stdout)
         self.assertEqual(len(status["workers"]), 1)
         self.assertEqual(status["workers"][0]["builds"], 3)
         # The daemon's only files are its socket and lock; the build's, its outputs.
@@ -277,8 +277,9 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertTrue(again.stdout.startswith("took block.py::block cold"), again.stdout)
         self.assertIn("retired: the worker held", again.stdout)
-        status = json.loads(self.cli("status").stdout)
-        self.assertEqual([worker["alive"] for worker in status["workers"]], [False])
+        status = json.loads(self.cli("status", "--json").stdout)
+        self.assertEqual(status["workers"], [], "each worker left the pool when it was retired")
+        self.assertEqual([row["reason"] for row in status["retired"]], ["RSS", "RSS"])
 
     def test_a_failing_body_answers_with_its_error(self) -> None:
         self.script.write_text("from cadgen.engine import xbf\n\n@xbf\ndef block():\n    raise RuntimeError('no')\n", encoding="utf-8")
@@ -297,7 +298,7 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual([line.split(" in ")[0] for line in done.stdout.splitlines() if line.startswith("built")],
                          ["built block.py::block cold", "built block.py::peg cold"])
-        workers = json.loads(self.cli("status").stdout)["workers"]
+        workers = json.loads(self.cli("status", "--json").stdout)["workers"]
         self.assertEqual([(Path(w["script"]).name, w["builds"]) for w in workers], [("block.py", 1)],
                          "the daemon's worker built it, not the script's own process")
         done = subprocess.run([sys.executable, "block.py", "--step", "b.step", "--json"], cwd=self.folder, env=self.env,
@@ -347,7 +348,7 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(self.run_script("pair.py").returncode, 0)
         done = self.cli("export", "XBF/pair.xbf", "pair.glb", "pair.step")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(len(json.loads(self.cli("status").stdout)["workers"]), 1,
+        self.assertEqual(len(json.loads(self.cli("status", "--json").stdout)["workers"]), 1,
                          "the worker that built the document wrote its exports")
         done = self.cli("export", "pair.step", "back.xbf")
         self.assertEqual(done.returncode, 0, done.stderr)
