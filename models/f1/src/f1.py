@@ -28,8 +28,11 @@ order:
   power_unit        steering_rack   <- slides (rack joint)
   drivetrain        details
 
-The car is one xbf (`XBF/f1.xbf`) and one GLB (`XBF/f1.glb`), whose `drs` and
-`steering` clips are the two motions below.
+Every child but the monocoque also slides apart on a prismatic joint of its own
+(`explode_<child>`), and the power unit's twelve systems in it (`eng_*`): the old
+teardown choreography. The car is one xbf (`XBF/f1.xbf`) and one GLB
+(`XBF/f1.glb`), whose `showcase`, `drs`, `steering`, `teardown` and `engine`
+clips are the five motions below.
 """
 
 from __future__ import annotations
@@ -329,6 +332,183 @@ def _joints(parts):
     bd.RigidJoint("rack", parts["steering_rack"], bd.Location(rack_axis.position))
 
 
+# ---------------------------------------------------------------------------
+# The teardown: the old `showcase`, `teardown` and `engine` clips.
+#
+# Each child but the monocoque translates along its own direction by its
+# distance times an eased TIME WINDOW on the explode clock. Windows overlap only
+# slightly and run in a deliberate order -- bodywork, then cooling and rear aero,
+# then running gear, then power unit and drivetrain last -- which is what keeps
+# the teardown readable. Directions are car coordinates (+X forward, +Y left,
+# +Z up), normalized before use. PURE TRANSLATION: a rotating subject and a
+# rotating part fight the one thing the viewer is meant to be reading. Distances
+# are sized so parts clear each other in PROJECTION, not just in space.
+#
+# The monocoque never moves: it is the car's ground (it already holds the `rack`
+# joint), and it holds each child's slide, `explode_<child>`. A child that holds a
+# joint for another (rear_wing, suspension_front, steering_rack) or hangs on one
+# (drs_flap, drs_actuator, the front corners, the track rods, steering_rack) keeps
+# its compound where it is -- holding, or held by, its joints -- and slides its
+# CONTENTS instead, on a prismatic joint its compound holds (its first part the
+# rigid half, the rest fastened to it), so no child drags another by its explode.
+# ---------------------------------------------------------------------------
+
+_BODYWORK = (
+    # (child, direction, distance mm, window on the explode clock). Both covers are
+    # pushed off the centreline: the column straight above the car is reserved for
+    # the power unit, which rises into it as the hero.
+    ("engine_cover", (-0.22, -0.72, 0.72), 1150.0, (0.0, 0.3)),
+    ("airbox", (0.18, -0.78, 0.7), 1180.0, (0.03, 0.33)),
+    ("sidepod_left", (0.0, 1.0, 0.34), 1320.0, (0.05, 0.33)),
+    ("sidepod_right", (0.0, -1.0, 0.34), 1320.0, (0.05, 0.33)),
+    ("floor", (0.0, 0.0, -1.0), 980.0, (0.08, 0.33)),
+    ("diffuser", (-0.45, 0.0, -1.0), 1020.0, (0.1, 0.33)),
+)
+_INTERNALS = (
+    ("cooling", (0.0, 1.0, 0.55), 1860.0, (0.33, 0.52)),
+    ("rear_wing", (-0.34, 0.0, 1.0), 1160.0, (0.33, 0.52)),
+    ("drs_flap", (-0.34, 0.0, 1.0), 1420.0, (0.33, 0.52)),
+    ("drs_actuator", (-0.34, 0.0, 1.0), 1280.0, (0.33, 0.52)),
+    ("beam_wing", (-1.0, 0.0, 0.25), 980.0, (0.36, 0.55)),
+    ("front_wing", (1.0, 0.0, -0.08), 1420.0, (0.36, 0.55)),
+    ("nose", (1.0, 0.0, 0.22), 1680.0, (0.38, 0.58)),
+    ("corner_fl", (0.0, 1.0, 0.05), 1180.0, (0.5, 0.72)),
+    ("corner_fr", (0.0, -1.0, 0.05), 1180.0, (0.5, 0.72)),
+    ("corner_rl", (0.0, 1.0, 0.05), 1180.0, (0.5, 0.72)),
+    ("corner_rr", (0.0, -1.0, 0.05), 1180.0, (0.5, 0.72)),
+    ("track_rod_left", (0.0, 1.0, 0.18), 820.0, (0.53, 0.74)),
+    ("track_rod_right", (0.0, -1.0, 0.18), 820.0, (0.53, 0.74)),
+    ("suspension_front", (0.35, 0.0, 0.85), 880.0, (0.55, 0.76)),
+    ("suspension_rear", (-0.35, 0.0, 0.85), 880.0, (0.55, 0.76)),
+    ("steering_rack", (1.0, 0.0, 0.2), 980.0, (0.57, 0.78)),
+    ("details", (0.0, 1.0, 0.62), 1320.0, (0.62, 0.84)),
+    ("halo", (0.42, 0.55, 0.68), 940.0, (0.62, 0.82)),
+    ("cockpit", (0.12, 0.85, 0.62), 1180.0, (0.64, 0.86)),
+    ("drivetrain", (-1.0, 0.0, 0.32), 1560.0, (0.7, 0.92)),
+    # THE HERO: it lifts straight up and out of the car, early, into the column
+    # everything else was pushed clear of, then takes itself apart.
+    ("power_unit", (0.0, 0.0, 1.0), 1080.0, (0.08, 0.34)),
+)
+_EXPLODE = _BODYWORK + _INTERNALS
+# The children that hold a DRS or steering joint, or hang on one: each slides its
+# contents in its compound, which keeps holding (or hanging on) its joints.
+_SLIDES_CONTENTS = frozenset({"rear_wing", "drs_flap", "drs_actuator", "suspension_front", "corner_fl", "corner_fr",
+                              "track_rod_left", "track_rod_right", "steering_rack"})
+
+# The engine sub-explode: the power unit's 100 leaves collapsed into 12 systems,
+# addressed BY LABEL, each sliding along its own direction by its distance times
+# the engine clock, on top of the power unit's own explode. The crankcase, sump,
+# front and gearbox faces, belt ribs and main webs never move in it.
+_SIDES = ("left", "right")
+
+
+def _seq(base: str, n: int) -> list[str]:
+    return [f"{base}:{i + 1}" for i in range(n)]
+
+
+_ENGINE_GROUPS = (
+    ("eng_induction", ["plenum", "charge_pipe", "charge_pipe_clamp", "airbox_trunk",
+                       *(f"trumpet:{side}:{i}" for side in _SIDES for i in (1, 2, 3))], (0.0, 0.0, 1.0), 760.0),
+    ("eng_head_left", ["cylinder_head:left", "cam_cover:left", "fuel_rail:left", "head_joint_rail:left",
+                       *(f"coil_pack:left:{i}" for i in (1, 2, 3))], (0.0, 1.0, 0.5), 620.0),
+    ("eng_head_right", ["cylinder_head:right", "cam_cover:right", "fuel_rail:right", "head_joint_rail:right",
+                        *(f"coil_pack:right:{i}" for i in (1, 2, 3))], (0.0, -1.0, 0.5), 620.0),
+    # split turbo: compressor forward, turbine aft -- the layout reads instantly
+    ("eng_compressor", ["compressor_volute", "compressor_housing"], (1.0, 0.0, 0.2), 620.0),
+    ("eng_turbine", ["turbine_volute", "turbine_housing", "turbine_inlet"], (-1.0, 0.0, 0.2), 620.0),
+    ("eng_mguh", ["turbo_shaft", "mgu_h", "mgu_h_gland", "mgu_h_cable"], (0.0, 0.0, 1.0), 380.0),
+    ("eng_exhaust_left", [*(f"exhaust_primary:left:{i}" for i in (1, 2, 3)), "collector:left",
+                          "heat_shield:collector"], (-0.45, 1.0, 0.45), 760.0),
+    ("eng_exhaust_right", [*(f"exhaust_primary:right:{i}" for i in (1, 2, 3)), "collector:right"],
+     (-0.45, -1.0, 0.45), 760.0),
+    ("eng_tailpipe", ["collector_merge", "tailpipe", "tailpipe_tip", "heat_shield:tailpipe", "wastegate_body",
+                      "wastegate_flange", "wastegate_pipe", "wastegate_tip"], (-1.0, 0.0, 0.15), 900.0),
+    ("eng_mguk", ["mgu_k", "mgu_k_ring", "mgu_k_drive_housing", *_seq("mgu_k_cable", 2)], (0.35, 1.0, -0.3), 700.0),
+    ("eng_ers", ["ers_battery_case", "ers_battery_lid", "ers_terminal_block", *_seq("ers_bracket", 4),
+                 *_seq("ers_bus_bar", 6), *_seq("ers_coolant", 2)], (1.0, 0.0, -0.35), 860.0),
+    ("eng_ancillaries", ["water_pump", "oil_pump", "oil_tank", "ecu_box", "ecu_connector", "water_feed",
+                         "water_return", "oil_feed", "oil_return", "fuel_line", "fuel_crossover",
+                         *_seq("ecu_pin", 3), *_seq("line_bracket", 4)], (0.0, -1.0, -0.28), 780.0),
+)
+
+
+def _smoothstep(u: float) -> float:
+    u = _clamp(u, 0.0, 1.0)
+    return u * u * (3.0 - 2.0 * u)
+
+
+def _window(a: float, b: float, u: float) -> float:
+    """Eased window: 0 before `a`, 1 after `b`, smooth between."""
+    return _smoothstep((u - a) / max(b - a, 1e-6))
+
+
+def _teardown_pose(explode: float = 0.0, engine: float = 0.0) -> dict:
+    """Every teardown joint at an explode clock and an engine clock, each 0..1. A function
+    of time sets the same joints at every time: all of them, the DRS and steering left as
+    built."""
+    pose = {f"explode_{child}": distance * _window(a, b, explode)
+            for child, _direction, distance, (a, b) in _EXPLODE}
+    for group, _labels, _direction, distance in _ENGINE_GROUPS:
+        pose[group] = distance * _clamp(engine, 0.0, 1.0)
+    return pose
+
+
+def _showcase_at(u: float) -> dict:
+    """The showcase's one loop-closed timeline (22.5 s): hold assembled to 1.5 s, the car
+    opens to 10.5 s, a short handover, the engine opens 11.2-14.8 s, the money frame holds
+    to 16.3 s, the engine closes to 18.8 s, the car to 22.3 s, and it settles. Both clocks
+    are exactly 0 at u = 0 and u = 1; each switch point sits inside a plateau where both
+    branches are 1, so neither steps."""
+    u = _clamp(u, 0.0, 1.0)
+    explode = _window(0.067, 0.467, u) if u < 0.7 else 1.0 - _window(0.836, 0.991, u)
+    engine = _window(0.498, 0.658, u) if u < 0.69 else 1.0 - _window(0.724, 0.836, u)
+    return _teardown_pose(explode=_clamp(explode, 0.0, 1.0), engine=_clamp(engine, 0.0, 1.0))
+
+
+def _in_parent(part, world: bd.Location) -> bd.Location:
+    """`world` in the frame of `part`'s parent, where build123d takes a joint's location."""
+    return world if part.parent is None else part.parent.global_location.inverse() * world
+
+
+def _slide(label: str, holder, rider, direction, travel: float) -> None:
+    """A prismatic joint along `direction` (car coordinates) through the origin on `holder`,
+    its rigid half on `rider` where the joint holds it at 0: the holder's axes at the
+    axis's origin, given in the rider's parent frame."""
+    parent_world = bd.Location() if holder.parent is None else holder.parent.global_location
+    axis = bd.Axis((0.0, 0.0, 0.0), _unit(direction)).located(parent_world.inverse())
+    joint = bd.LinearJoint(label, holder, axis=axis, linear_range=(0.0, travel))
+    held = holder.global_location * bd.Location(joint.relative_axis.position)
+    bd.RigidJoint(label, rider, _in_parent(rider, held))
+
+
+def _fasten(label: str, lead, riders) -> None:
+    """Each of `riders` fastened to `lead`: a rigid pair of one label each."""
+    for index, rider in enumerate(riders):
+        bd.RigidJoint(f"{label}_rides_{index}", lead, bd.Location())
+        bd.RigidJoint(f"{label}_rides_{index}", rider, bd.Location())
+
+
+def _teardown_joints(parts) -> None:
+    """The teardown's slides, authored once the car's compound holds every child."""
+    monocoque = parts["monocoque"]
+    for child, direction, distance, _span in _EXPLODE:
+        label = f"explode_{child}"
+        part = parts[child]
+        if child in _SLIDES_CONTENTS:
+            lead, *rest = part.children
+            _slide(label, part, lead, direction, distance)
+            _fasten(label, lead, rest)
+        else:
+            _slide(label, monocoque, part, direction, distance)
+    # The engine's systems slide in the power unit, which carries them on its own explode.
+    power_unit = parts["power_unit"]
+    leaves = {leaf.label: leaf for leaf in power_unit.children}
+    for group, labels, direction, distance in _ENGINE_GROUPS:
+        members = [leaves[label] for label in labels]
+        _slide(group, power_unit, members[0], direction, distance)
+        _fasten(group, members[0], members[1:])
+
+
 @xbf(out="../XBF/f1.xbf")
 @glb(out="../XBF/f1.glb")
 def f1():
@@ -339,10 +519,17 @@ def f1():
         part.label = name
     _joints(parts)
     car = bd.Compound(children=[parts[name] for name in CHILDREN], label="f1_concept_car")
+    _teardown_joints(parts)
     configuration(car, "drs_open", **_drs_pose(1.0))
     configuration(car, "full_lock_left", **_steer_pose(1.0))
     configuration(car, "full_lock_right", **_steer_pose(-1.0))
+    # The exploded view and nothing else, one loop-closed timeline: the car opens, then
+    # the engine, and both close again, 22.5 s.
+    motion(car, "showcase", lambda t: _showcase_at((t / 22.5) % 1.0), duration=22.5)
     # The one mechanism you can show while the car is still whole: open and shut, 4 s.
-    motion(car, "drs", lambda t: _drs_pose(_pingpong(t / 4.0)), duration=4, loop="loop")
+    motion(car, "drs", lambda t: _drs_pose(_pingpong(t / 4.0)), duration=4)
     # Left, through centre, to right and back — the car "looking around", 6 s.
-    return motion(car, "steering", lambda t: _steer_pose(math.sin(math.tau * t / 6.0)), duration=6, loop="loop")
+    motion(car, "steering", lambda t: _steer_pose(math.sin(math.tau * t / 6.0)), duration=6)
+    # The car apart and back together, 12 s; the engine apart and back, 8 s.
+    motion(car, "teardown", lambda t: _teardown_pose(explode=_pingpong(t / 12.0)), duration=12)
+    return motion(car, "engine", lambda t: _teardown_pose(engine=_pingpong(t / 8.0)), duration=8)
