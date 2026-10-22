@@ -65,7 +65,7 @@ __all__ = ["Assembly", "Component", "Kept", "Loaded", "Part", "Tree", "collect",
 KEY_GUID = "c8f2d4a6-1b3e-4f5a-9c7d-2e8b6a4f0d13"
 # What wrote a document, on its main label: the engine's xbf format and cadgen's release.
 WRITER_GUID = "c49e4620-5730-422f-808f-c1e84d7bd163"
-WRITER = "cadgen.engine xbf/1 (cadgen {release})"
+WRITER = "cadgen.engine {format} (cadgen {release})"
 # The model's build closure, on its main label beside the writer (``previous``): its engine,
 # libraries, source, modules and inputs as pointers and digests, and the key over them.
 CLOSURE_GUID = "2f6c9d1e-8a43-4b7e-b5d0-7e1a3c9f4b62"
@@ -1469,9 +1469,17 @@ def _read(path: Path) -> Any:
 
 @functools.cache
 def _writer() -> str:
-    from cadgen.engine.previous import version
+    from cadgen.engine.previous import FORMAT, version
 
-    return WRITER.format(release=version())
+    return WRITER.format(format=FORMAT, release=version())
+
+
+def written_format(writer: str | None) -> str | None:
+    """The xbf format a document's writer names (``xbf/2``), or None for another program's."""
+    import re
+
+    found = re.match(r"cadgen\.engine (xbf/[0-9]+) \(cadgen ", writer or "")
+    return found.group(1) if found else None
 
 
 def _label_text(label: Any, guid: str) -> str | None:

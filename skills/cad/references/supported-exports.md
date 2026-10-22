@@ -97,7 +97,7 @@ cadgen export XBF/bracket.xbf bracket.cadz
 A `.cadz` zips the `.xbf` with its build closure's source files (the script and
 every module it reached) and its input files at their places relative to one another;
 `--no-inputs` leaves the inputs out. Extracted and built, it writes the same `.xbf`
-bytes again, but for the repository commit the original names.
+bytes again.
 
 ## Other tools
 

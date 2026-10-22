@@ -55,9 +55,9 @@ These are LAWS, not conventions: a change that violates them is wrong even when 
 Laws 1 to 12 are the engine's; 13 to 17 hold for the whole package.
 
 1. **An xbf carries its build closure as pointers and digests** -- script and function,
-   modules, data inputs, versions, the key, and the repository commit when there is one; never
-   source, never lines on elements, never input contents; names remain the per-element tie to
-   code (the engine's **Build closure**).
+   modules, data inputs, versions and the key; never source, never lines on elements, never
+   input contents, nothing of git's; names remain the per-element tie to code (the engine's
+   **Build closure**).
 2. **Nothing to disk.** The engine writes the files a model declares -- the xbf and the exports
    its decorators name, nothing beside them -- and the operating system's coordination for its
    warm process: a socket and a lock in `tempfile.gettempdir()/cadgen-engine`. It writes no

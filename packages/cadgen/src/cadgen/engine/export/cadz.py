@@ -6,8 +6,7 @@ Self-contained delivery is an export, never a property of the document: the xbf 
 its closure as pointers and digests (``previous``), and this follows the pointers. Every
 file is stored under its path relative to the folder that holds them all, so extracting
 the archive and building the script there writes the xbf where the archive has it; a
-drift-free model rebuilds its bytes (the closure's ``commit`` aside, which names the
-repository the original was built in). The archive itself is a function of those files:
+drift-free model rebuilds its bytes. The archive itself is a function of those files:
 sorted entries, one fixed date, no extra attributes.
 """
 

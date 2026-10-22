@@ -4,13 +4,13 @@ digests, and the key a restart compares.
 When a build writes a model's xbf, the document's main label carries its closure
 (``manifest``, schema ``cadgen.engine closure/1``):
 
-- ``engine``: the release that wrote it (``cadgen <VERSION>``, the version declared beside
-  this very code: ``version``), the xbf format, and a digest of the engine's own code;
-- ``libs``: the versions of build123d, OCP and numpy;
-- ``source``: ``{"kind": "script", "path", "function", "commit"}`` -- the script relative to
-  the document's folder, the model's function, the repository's commit when the script is
-  in one (``null`` otherwise) -- or, for code built from text, ``{"kind": "code", "name",
-  "digest"}``, the code never written;
+- ``engine``: the xbf format (``FORMAT``), and, as information only, the release that wrote
+  it (``cadgen <VERSION>``, the version declared beside this very code: ``version``) and a
+  digest of the engine's own code;
+- ``libs``: the versions of build123d and OCP, which decide the geometry;
+- ``source``: ``{"kind": "script", "path", "function"}`` -- the script relative to the
+  document's folder and the model's function -- or, for code built from text, ``{"kind":
+  "code", "name", "digest"}``, the code never written;
 - ``modules``: ``[path, digest]`` per first-party module the script's load imported or the
   model reaches, each a digest of what the model reaches in it (its functions' code objects
   with no line tables, its classes, the values its bindings hold: ``sources.Symbols.modules``);
@@ -23,9 +23,12 @@ When a build writes a model's xbf, the document's main label carries its closure
   relative to the document's folder (``null`` digest: a file it found missing), and a text's
   font (``font``);
 - ``bodies``: how many bodies the model is;
-- ``key``: one digest over the engine, the libraries, the source (but its commit), the
-  modules and the inputs; ``null`` where the closure cannot say all the model is made of (a
-  body read a pipe, or reaches what cannot be keyed).
+- ``key``: one digest over the format, the libraries, the source, the modules and the
+  inputs; ``null`` where the closure cannot say all the model is made of (a body read a
+  pipe, or reaches what cannot be keyed). Neither the release nor the engine's code digest
+  is in it: a cadgen release or an engine edit that leaves the document alone keeps every
+  xbf current. ``FORMAT`` is what moves when the written document, or what the key covers,
+  changes (``xbf/1`` to ``xbf/2``), and every xbf then builds once, cleanly.
 
 No source text, no line, no input's contents (**the file is the document**, **names are the
 durable tie to code**).
@@ -53,12 +56,16 @@ import functools
 import hashlib
 import json
 import os
-import subprocess
 from pathlib import Path
 from typing import Any
 
 SCHEMA = "cadgen.engine closure/1"
-FORMAT = "xbf/1"
+# Bumped deliberately, never by a release: when the document an engine writes, or what the
+# key covers, changes. A document of another format is built again once (``build._previous``).
+# xbf/2: the key covers the format alone of the engine, and no numpy; the closure holds no commit.
+FORMAT = "xbf/2"
+# The libraries a key covers: what decides the geometry.
+KEYED_LIBRARIES = ("build123d", "OCP")
 # The start of a closure's text: the schema first, so a head scan finds it.
 _PREFIX = b'{"schema":"cadgen.engine closure/1",'
 # How far into a document its main label's attributes are: right after the header.
@@ -97,8 +104,7 @@ def _libraries() -> dict[str, str]:
 
     found = {}
     # OCP ships as two distributions, with VTK and without: either is the OCP a body runs on.
-    for shown, names in (("build123d", ("build123d",)), ("OCP", ("cadquery-ocp", "cadquery-ocp-novtk")),
-                         ("numpy", ("numpy",))):
+    for shown, names in (("build123d", ("build123d",)), ("OCP", ("cadquery-ocp", "cadquery-ocp-novtk"))):
         for name in names:
             try:
                 found[shown] = metadata.version(name)
@@ -148,25 +154,13 @@ def absolute(path: str | None, folder: Path) -> str | None:
     return None if path is None else os.path.normpath(os.path.join(folder, path))
 
 
-def commit(folder: Path) -> str | None:
-    """The commit the repository holding ``folder`` is at, or None outside one."""
-    try:
-        done = subprocess.run(["git", "-C", str(folder), "rev-parse", "--verify", "-q", "HEAD"], capture_output=True,
-                              text=True, timeout=10, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    found = done.stdout.strip()
-    return found if done.returncode == 0 and len(found) >= 40 else None
-
-
 def _source(model: Any, folder: Path) -> dict[str, Any]:
     from cadgen.engine import sources
 
     held = sources.MEMORY.get(str(model.script))
     if held is not None:
         return {"kind": "code", "name": model.name, "digest": hashlib.sha256(held).hexdigest()[:32]}
-    return {"kind": "script", "path": _relative(str(model.script), folder), "function": model.name,
-            "commit": commit(Path(model.script).parent)}
+    return {"kind": "script", "path": _relative(str(model.script), folder), "function": model.name}
 
 
 def _input(recipe: tuple, value: Any, folder: Path) -> list:
@@ -230,10 +224,11 @@ def _named(symbols: dict[str, dict[str, str]], folder: Path) -> dict[str, dict[s
 
 
 def key(record: dict[str, Any]) -> str:
-    """The digest a restart compares: the engine, the libraries, the source but its commit,
-    the modules and the inputs."""
-    source = {name: value for name, value in record["source"].items() if name != "commit"}
-    return _digest([SCHEMA, record["engine"], record["libs"], source, record["modules"], record["inputs"]])
+    """The digest a restart compares: the format, the libraries, the source, the modules and
+    the inputs. Not the release that wrote the document, nor the engine's code digest: the
+    format moves when what an engine writes does."""
+    libs = {name: record["libs"].get(name) for name in KEYED_LIBRARIES}
+    return _digest([SCHEMA, record["engine"]["format"], libs, record["source"], record["modules"], record["inputs"]])
 
 
 def text(record: dict[str, Any]) -> str:
@@ -252,15 +247,12 @@ def again(record: dict[str, Any], model: Any, folder: Path, modules: dict[str, s
     now = {"schema": SCHEMA, "engine": _engine(), "libs": _libraries(), "source": _source(model, folder),
            "modules": sorted([_relative(path, folder), digest] for path, digest in modules.items())}
     changes: list[str] = []
-    if now["engine"] != record["engine"]:
-        old, new = record["engine"].get("release"), now["engine"]["release"]
-        changes.append(f"the engine changed ({old} to {new})" if old != new else "the engine's code changed")
+    if now["engine"]["format"] != record["engine"].get("format"):
+        changes.append(f"the xbf format changed ({record['engine'].get('format')} to {now['engine']['format']})")
     for name in sorted(set(now["libs"]) | set(record["libs"])):
         if now["libs"].get(name) != record["libs"].get(name):
             changes.append(f"{name} {record['libs'].get(name)} became {now['libs'].get(name)}")
-    drop = {"commit"}
-    if {k: v for k, v in now["source"].items() if k not in drop} != \
-            {k: v for k, v in record["source"].items() if k not in drop}:
+    if now["source"] != record["source"]:
         source = now["source"]
         changes.append("the code changed" if source["kind"] == "code"
                        else f"the model is now {source['path']}::{source['function']}")
@@ -299,7 +291,7 @@ def scan(path: Path) -> tuple[str | None, str | None]:
 
     with open(path, "rb") as handle:
         head = handle.read(_HEAD_BYTES)
-    writer = re.search(rb"cadgen\.engine xbf/1 \(cadgen [ -~]{1,64}?\)", head)
+    writer = re.search(rb"cadgen\.engine xbf/[0-9]+ \(cadgen [ -~]{1,64}?\)", head)
     found = None
     at = head.find(_PREFIX)
     if at >= 0:

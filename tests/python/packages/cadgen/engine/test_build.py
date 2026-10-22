@@ -124,7 +124,7 @@ class BuildTest(EngineCase):
         self.assertEqual(len(bracket.key), 32)
         # What wrote it is on the document's main label; where its code is, in its build closure
         # alone, relative to the document; no absolute path anywhere.
-        self.assertRegex(loaded.writer, r"^cadgen\.engine xbf/1 \(cadgen .+\)$")
+        self.assertRegex(loaded.writer, r"^cadgen\.engine xbf/2 \(cadgen .+\)$")
         raw = (self.folder / "out/frame.xbf").read_bytes()
         self.assertEqual(loaded.closure["source"]["path"], "../frame.py")
         self.assertNotIn(b"frame.py", raw.replace(json.dumps(loaded.closure, separators=(",", ":")).encode(), b""))

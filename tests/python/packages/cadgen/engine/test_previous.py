@@ -189,21 +189,39 @@ class PreviousTest(unittest.TestCase):
         self.assertEqual([row[:2] for row in record["inputs"]], [["read", "../peg.json"], ["file", "../inputs/cap.step"],
                                                                  ["read", "../kit.json"]])
         self.assertTrue(all(len(row[2]) == 64 for row in record["inputs"]))
-        self.assertEqual(record["source"], {"kind": "script", "path": "../kit.py", "function": "kit", "commit": None})
+        self.assertEqual(record["source"], {"kind": "script", "path": "../kit.py", "function": "kit"})
         self.assertNotIn(str(self.folder).encode(), text)
         self.assertNotIn(b"thickness", text, "no source text")
         self.assertEqual(writer, document._writer())
 
-    def test_another_engines_file_is_built_again(self) -> None:
+    def test_another_programs_file_is_built_again(self) -> None:
         self.cold()
         writer = document._writer().encode()
-        other = writer.replace(b"(cadgen ", b"(cadgem ")
-        self.xbf.write_bytes(self.xbf.read_bytes().replace(writer, other))
+        self.xbf.write_bytes(self.xbf.read_bytes().replace(writer, writer.replace(b"(cadgen ", b"(cadgem ")))
         self.restart()
         report = self.kit()
-        self.assertEqual(report["cache"]["reason"], f"written by {other.decode()}"
-                         if b"cadgen.engine xbf/1 (cadgen " in other else "written by another program")
+        self.assertEqual(report["cache"]["reason"], "written by another program")
         self.assertTrue(report["files"][str(self.xbf)]["written"])
+
+    def test_another_release_of_the_format_is_current_and_another_format_builds_once(self) -> None:
+        self.cold()
+        writer = document._writer().encode()
+        release = previous.version().encode()
+        # Another cadgen release that wrote this format: the key is the format's, the file is taken.
+        other_release = writer.replace(b"(cadgen " + release, b"(cadgen " + b"9" * len(release))
+        self.xbf.write_bytes(self.xbf.read_bytes().replace(writer, other_release))
+        self.restart()
+        self.assertEqual(self.kit()["cache"], {"used": True, "from": "file"})
+        # A document of the format before (the key made differently): built again, once.
+        old = other_release.replace(f"cadgen.engine {previous.FORMAT} ".encode(), b"cadgen.engine xbf/1 ")
+        self.assertEqual(len(old), len(other_release))
+        self.xbf.write_bytes(self.xbf.read_bytes().replace(other_release, old))
+        self.restart()
+        report = self.kit()
+        self.assertEqual(report["cache"]["reason"], f"written by {old.decode()}")
+        self.assertTrue(report["files"][str(self.xbf)]["written"])
+        self.restart()
+        self.assertEqual(self.kit()["cache"], {"used": True, "from": "file"}, "built once, then current")
 
     def test_a_missing_or_broken_file_builds(self) -> None:
         first = self.cold()
@@ -330,10 +348,9 @@ class ClosureTest(unittest.TestCase):
         self.assertEqual(record["schema"], "cadgen.engine closure/1")
         version = (Path(__file__).resolve().parents[5] / "VERSION").read_text(encoding="utf-8").strip()
         self.assertEqual(record["engine"]["release"], f"cadgen {version}", "the release VERSION stamps")
-        self.assertEqual((record["engine"]["format"], len(record["engine"]["digest"])), ("xbf/1", 32))
-        self.assertEqual(set(record["libs"]), {"build123d", "OCP", "numpy"})
-        self.assertEqual(record["source"], {"kind": "script", "path": "../plate.py", "function": "plate",
-                                            "commit": None})
+        self.assertEqual((record["engine"]["format"], len(record["engine"]["digest"])), ("xbf/2", 32))
+        self.assertEqual(set(record["libs"]), {"build123d", "OCP"})
+        self.assertEqual(record["source"], {"kind": "script", "path": "../plate.py", "function": "plate"})
         self.assertEqual([path for path, _digest in record["modules"]], ["../dims.py", "../plate.py"])
         self.assertEqual([row[:2] for row in record["inputs"]], [["read", "../depth.json"]])
         self.assertEqual(record["bodies"], 1)
@@ -367,20 +384,50 @@ class ClosureTest(unittest.TestCase):
         self.assertEqual(previous.of(self.xbf)["inputs"][0][2], None)
         self.assertEqual(self.plate()["cache"], {"used": True, "from": "file"})
 
-    def test_the_commit_is_recorded_in_a_repository(self) -> None:
+    def test_a_commit_is_nothing_to_the_engine_and_a_no_op_after_one_writes_nothing(self) -> None:
         import subprocess
+        from unittest import mock
 
         git = ["git", "-C", str(self.folder), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
         for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "fixture"]):
             subprocess.run([*git, *args], check=True, capture_output=True)
-        head = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
-        self.plate()
-        self.assertEqual(previous.of(self.xbf)["source"]["commit"], head)
-        # A commit names where the code was; it is no part of the key.
+        asked = []
+        run, popen = subprocess.run, subprocess.Popen
+
+        def watched(real):
+            def call(args, *rest, **options):
+                if isinstance(args, (list, tuple)) and args and Path(str(args[0])).name.startswith("git"):
+                    asked.append(args)
+                return real(args, *rest, **options)
+            return call
+
+        def watching():
+            return mock.patch.multiple(subprocess, run=watched(run), Popen=watched(popen))
+
+        with watching():
+            self.plate()
+        self.assertNotIn("commit", previous.of(self.xbf)["source"])
+        written = self.xbf.read_bytes(), self.xbf.stat().st_mtime_ns
         (self.folder / "notes.txt").write_text("x", encoding="utf-8")
-        subprocess.run([*git, "add", "-A"], check=True, capture_output=True)
-        subprocess.run([*git, "commit", "-q", "-m", "notes"], check=True, capture_output=True)
-        self.assertEqual(self.plate()["cache"], {"used": True, "from": "file"})
+        for args in (["add", "-A"], ["commit", "-q", "-m", "notes"]):
+            subprocess.run([*git, *args], check=True, capture_output=True)
+        with watching():
+            report = self.plate()
+        self.assertEqual(asked, [], "the engine calls no git")
+        # The no-op after a commit: taken from the file, nothing written, the same bytes.
+        self.assertEqual(report["cache"], {"used": True, "from": "file"})
+        self.assertFalse(report["files"][str(self.xbf)]["written"])
+        self.assertEqual((self.xbf.read_bytes(), self.xbf.stat().st_mtime_ns), written)
+
+    def test_the_key_is_the_formats_not_the_release_the_engine_digest_or_numpy(self) -> None:
+        self.plate()
+        record = previous.of(self.xbf)
+        other = json.loads(json.dumps(record))
+        other["engine"] = {**other["engine"], "release": "cadgen 99.0.0", "digest": "0" * 32}
+        other["libs"] = {**other["libs"], "numpy": "0.1"}
+        self.assertEqual(previous.key(other), record["key"])
+        other["engine"]["format"] = "xbf/1"
+        self.assertNotEqual(previous.key(other), record["key"], "the format is keyed")
 
     def test_code_names_its_digest_never_its_text(self) -> None:
         code = "import build123d as bd\nresult = bd.Box(3, 4, 5)\n"
@@ -425,14 +472,14 @@ class ClosureTest(unittest.TestCase):
 
         def version(name: str) -> str:
             # An install with OCP's no-VTK distribution and not the other.
-            if name in ("build123d", "numpy", "cadquery-ocp-novtk"):
+            if name in ("build123d", "cadquery-ocp-novtk"):
                 return {"cadquery-ocp-novtk": "7.9.3.1"}.get(name, "1.0")
             raise metadata.PackageNotFoundError(name)
 
         previous._libraries.cache_clear()
         self.addCleanup(previous._libraries.cache_clear)
         with mock.patch.object(metadata, "version", version):
-            self.assertEqual(previous._libraries(), {"build123d": "1.0", "OCP": "7.9.3.1", "numpy": "1.0"})
+            self.assertEqual(previous._libraries(), {"build123d": "1.0", "OCP": "7.9.3.1"})
 
 
 if __name__ == "__main__":

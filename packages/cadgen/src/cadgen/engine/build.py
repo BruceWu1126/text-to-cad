@@ -764,7 +764,8 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
         if missing:
             return {"used": False, "reason": f"{_shown(Path(missing[0]), xbf.parent)} is missing"}, None
         writer, text = previous.scan(xbf)
-        if writer != document._writer():
+        # The format, not the release: a cadgen release that leaves the document alone keeps it.
+        if document.written_format(writer) != previous.FORMAT:
             return {"used": False, "reason": f"written by {writer or 'another program'}"}, None
         if text is None:
             return {"used": False, "reason": "the file holds no key"}, None
@@ -787,7 +788,7 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
         except Exception as error:  # noqa: BLE001 - a document that does not read is built again
             return {"used": False, "reason": f"the file does not read: {error}"}, None
         del doc
-        if held != (document._writer(), text):
+        if document.written_format(held[0]) != previous.FORMAT or held[1] != text:
             return {"used": False, "reason": "the file does not hold the closure its head shows"}, None
         timings["read"] = round(time.perf_counter() - keyed, 4)
         _WRITTEN[name] = _Written(("loaded", found["key"]), stats, None, text)
