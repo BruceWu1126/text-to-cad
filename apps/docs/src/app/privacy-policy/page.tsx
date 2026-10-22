@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 
 export default function PrivacyPolicyPage() {
   return (
-    <LegalPage title="Privacy Policy" updated="October 9, 2026">
+    <LegalPage title="Privacy Policy" updated="October 22, 2026">
       <LegalSection>
         <p>
           This policy describes how Thompson Labs LLC (“we”, “us”) handles personal data for
@@ -66,8 +66,8 @@ export default function PrivacyPolicyPage() {
                 that is not there, the snapshot browser not starting, or a bug in cadgen) -- never the
                 error’s message, your code or the path; how many times assemblies, mesh exports, posed
                 joints, animations, engineering drawings and Quick Edit were used; and how many of the
-                build daemon’s workers started, crashed or were replaced, and how many builds it turned
-                away for want of memory;
+                build workers (the build daemon’s and the CAD engine’s) started, crashed or were replaced, and
+                how many builds were turned away for want of memory;
               </li>
               <li>
                 crash reports, when cadgen’s own code fails unexpectedly: the error’s type (such as
@@ -84,8 +84,11 @@ export default function PrivacyPolicyPage() {
             from, which it works out from your IP address; it keeps neither the address nor anything
             finer than the country. Nothing is sent while cadgen sits unused. Telemetry never includes
             your files, models, file or folder names, prompts, tool arguments or anything you type. A{" "}
-            <code>cadgen</code> command sends nothing itself: it hands what it counted (a snapshot, a
-            drawing, a crash) to the build daemon if one is running, which sends it with its own. Like any
+            <code>cadgen</code> command or model script sends nothing itself: it hands what it counted (a
+            build, a snapshot, a drawing, a crash) to the build daemon if one is running, which sends it with
+            its own, or keeps it on your computer for the next part of cadgen that sends; when nothing has sent
+            it for five minutes, the next <code>cadgen</code> command starts a short-lived sender in the
+            background, which sends it and exits. Like any
             request over the internet, each one also reaches our host with your IP address, the time
             and a user agent (for cadgen, just “cadgen”); see section 4 for what happens to them.
             Section 5 says when telemetry is on and how to turn it off.
@@ -201,7 +204,8 @@ export default function PrivacyPolicyPage() {
             off analytics in an earlier version still installed, and deletes what it sent. Nothing waits to
             send: what a command counts without cadgen’s build daemon, and what any part of cadgen counted
             since its last send when it exits, wait in small files beside that setting until the next part
-            of cadgen sends them; turning telemetry off deletes those files too.
+            of cadgen sends them, or a sender the next command starts once they have waited five minutes;
+            turning telemetry off deletes those files too.
           </li>
           <li>
             To turn telemetry off, run <code>uvx cadgen telemetry off</code>, use{" "}

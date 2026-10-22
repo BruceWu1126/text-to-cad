@@ -11,7 +11,8 @@ exits, each batch under an id of its own and stamped with the time it was made:
 
 - who, by random ids only: an install id made on this machine, an id for the sending process, and one
   for the batch, so a batch sent again is never counted twice;
-- what runs: which process (``app``, ``viewer`` or ``daemon``), cadgen's version, where it was
+- what runs: which process (``app``, ``viewer``, ``daemon``, or ``cli``: the sender a command starts,
+  ``cadgen._internal.telemetry_send``), cadgen's version, where it was
   installed from (its channel, ``cadgen/_internal/channel.py``: a plugin directory, the Cursor
   Marketplace, GitHub, a development install, or ``unknown``), the operating system and processor,
   and from the apps the agent app's name and version and how that app shows CAD (tabs, inline or
@@ -50,7 +51,10 @@ exits, each batch under an id of its own and stamped with the time it was made:
 A command sends nothing itself. What it counts -- a snapshot, a drawing, a crash -- is handed to a running
 daemon (``cadgen.daemon.client.hand_over``), or, with none running to take it, kept beside the settings for
 the next process that sends (``spool``): only while sharing is on, under the answer in force, capped, and
-deleted by a no.
+deleted by a no. The engine's verbs (``cadgen.engine.api``: a ``python model.py``, a ``cadgen xbf`` command,
+``cadgen.build()``) count the same events of kind ``xbf`` into the spool (``cadgen._internal.engine_telemetry``),
+and with nothing taking it for a window, a command starts a sender that sends it and exits
+(``cadgen._internal.telemetry_send``, the process ``cli``).
 
 Never a path or a file name of the person's, a model, an argument, a message, a prompt or anything
 typed. A batch with nothing in it is never sent: a process the host started and nobody used counts
@@ -141,14 +145,16 @@ from cadgen.settings import LOCK, read_section, settings_path, update_section
 LOG = logging.getLogger("cadgen.analytics")
 
 PRIVACY_URL = "https://www.texttocad.dev/privacy-policy"
-# 5: why builds and snapshots failed, and each batch's id and time; 4: why tool calls failed; 3: the build
-# daemon's counts, and files as numbers; 2: the install's channel replaced `source`
-SCHEMA = 5
+# 6: the engine's documents (kind ``xbf``) and a command's sender (process ``cli``); 5: why builds and snapshots
+# failed, and each batch's id and time; 4: why tool calls failed; 3: the build daemon's counts, and files as
+# numbers; 2: the install's channel replaced `source`
+SCHEMA = 6
 # What a yes agreed to: the fields and events this module sends. Raise it when that grows, and a yes
 # to less counts as no answer again; a no stays a no. Restarts and updates that send nothing new keep
-# the answer: it lives in the person's state directory, not the install. Neither schema 4 nor 5 raised it
+# the answer: it lives in the person's state directory, not the install. Neither schema 4, 5 nor 6 raised it
 # (nor ``NOTICE``): each says more of what was told already -- why a counted call, build or snapshot failed,
-# in a word of ours -- and a batch's random id and time link nothing its process's id did not.
+# in a word of ours; one more format; one more of cadgen's processes sending what commands counted, which
+# the daemon sent before -- and a batch's random id and time link nothing its process's id did not.
 DISCLOSURE = 1
 # What the notice told (``notify``): what is sent by default, without a yes. Raise it when that grows,
 # and the next ``cadgen`` command says it again; nothing is sent by default until it has.
@@ -178,12 +184,16 @@ HANDED = 16  # the most of each kind one command's counts carry (``Recorder.take
 # drown what does. A view's own activity is noted from its sync (``viewed``) and as it adds the model
 # on screen to the library (``opened``).
 UNCOUNTED = frozenset({"cad_sync", "cad_http", "cad_capture_reply"})
-# A file's format, by extension: what the viewer opens (``cadgen.viewer.scanner.SOURCE_EXTENSIONS``).
+# A file's format, by extension: what the viewer opens (``cadgen.viewer.scanner.SOURCE_EXTENSIONS``), the
+# engine's document (``.xbf``) among them.
 FILE_KINDS = {".step": "step", ".stp": "step", ".stl": "stl", ".3mf": "3mf", ".glb": "glb", ".dxf": "dxf",
-              ".urdf": "urdf", ".srdf": "srdf", ".sdf": "sdf"}
+              ".urdf": "urdf", ".srdf": "srdf", ".sdf": "sdf", ".xbf": "xbf"}
 KINDS = frozenset(FILE_KINDS.values())  # a format, as every event names it
-PROCESSES = frozenset({"app", "viewer", "daemon"})
-# Who asked for a build: a model script (``python model.py``) or a ``cadgen`` command (``cadgen step build``, ...).
+# Who sends: the CAD app, the browser viewer, the build daemon, and the sender a command starts when nothing
+# else has taken what commands counted (``cadgen._internal.telemetry_send``).
+PROCESSES = frozenset({"app", "viewer", "daemon", "cli"})
+# Who asked for a build: a model script (``python model.py``, or a Python caller's ``cadgen.build()``) or a
+# ``cadgen`` command (``cadgen step build``, ``cadgen xbf build``, ...).
 VIAS = frozenset({"script", "command"})
 # How a build ended: built; failed (the model raised, or its command refused what it was given); crashed (its
 # worker died under it); or cancelled (whoever asked left before it ended, and it was stopped, or someone
@@ -217,12 +227,13 @@ BUILD_FAILURES = frozenset({"model_error", "kernel_error", "refused", "script_er
 # (``render_error``), a mistake in cadgen's code (``bug``), or none of these (``other``).
 SNAPSHOT_FAILURES = frozenset({"bad_request", "no_file", "input_error", "browser", "timeout", "memory", "render_error",
                                "bug", "other"})
-# What a person used: a model with children, a model declaring mesh exports (``@stl``, ``@glb``, ``@threemf``),
-# a snapshot that posed joints or played an animation, an engineering drawing (``@eng_drawing``), and a CAD
-# view's Quick Edit sending its prompt.
+# What a person used: a model with children (an engine model of several parts too), a model declaring mesh
+# exports (``@stl``, ``@glb``, ``@threemf``), a snapshot (or an engine export) that posed joints or played an
+# animation, an engineering drawing (``@eng_drawing``), and a CAD view's Quick Edit sending its prompt.
 FEATURES = frozenset({"assembly", "declared_mesh", "kinematics", "animation", "drawing", "quick_edit"})
 # The daemon's build workers: started (each imports the CAD kernel), crashed (died mid-job, or could not
-# start), recycled (retired after their share of jobs), and builds refused for want of memory.
+# start), recycled (retired after their share of jobs; the engine's, over their memory cap), and builds refused
+# for want of memory.
 HEALTH = ("workers", "crashes", "recycles", "refusals")
 # Each event: the names it is told apart by, and what it counts. A batch holds one event per event and
 # names, its counts added up over the window -- ``longest`` is the longest.
@@ -771,34 +782,122 @@ def signature(error: BaseException, where: str, *, tool: str | None = None, hand
         return None
     if bugs_only and not isinstance(error, BUGS):  # before reading any frame: a failure is never kept waiting
         return None
-    frames: list[dict[str, Any]] = []
-    decisive = None  # the innermost frame of cadgen's or of the person's: whose code failed, and at which line
-    for frame, line in traceback.walk_tb(error.__traceback__):
-        file = _file_of(frame.f_code.co_filename)
-        if file is None or file.startswith("cadgen/"):
-            decisive = (file, frame.f_code.co_filename, int(line or 0))
-        if file is None:
-            if not frames or frames[-1]["file"] != USER:
-                frames.append({"file": USER, "function": USER, "line": 0})
-            continue
-        function = frame.f_code.co_qualname
-        frames.append({"file": file, "function": function if _FUNCTION.fullmatch(function) else "<?>", "line": int(line or 0)})
+    frames, decisive = _named_frames([(frame.f_code.co_filename, frame.f_code.co_qualname, int(line or 0))
+                                      for frame, line in traceback.walk_tb(error.__traceback__)])
     if bugs_only and not (decisive is not None and decisive[0] is not None and _mistake(error, decisive[1], decisive[2])):
         return None
     frames = frames[-MAX_FRAMES:]
-    if isinstance(error, RecursionError) and any(frame["file"] == USER for frame in frames) \
-            and all(frame["file"] in _THEIR_CYCLE for frame in frames if frame["file"].startswith("cadgen/")):
-        return None  # the person's recursion, through no cadgen code but the wrapper that calls their model
+    if isinstance(error, RecursionError) and _their_cycle(frames):
+        return None
     found = {"where": where, "type": _type_of(error), "handled": bool(handled), "frames": frames}
     if tool is not None and _TOOL.fullmatch(str(tool)):
         found["tool"] = tool
     return found
 
 
+def _named_frames(raw: list[tuple[str, str, int]]) -> tuple[list[dict[str, Any]], tuple[str | None, str, int] | None]:
+    """An error's frames (``(file as Python has it, function, line)``, innermost last) as a crash names them:
+    each a file inside cadgen, the standard library or a dependency, any run of the person's own code one bare
+    ``<user>``; and its innermost frame of cadgen's or of the person's -- whose code failed, and at which line:
+    its file as named (``None``: the person's), as Python has it, and its line."""
+    frames: list[dict[str, Any]] = []
+    decisive = None
+    for filename, function, line in raw:
+        file = _file_of(filename)
+        if file is None or file.startswith("cadgen/"):
+            decisive = (file, filename, line)
+        if file is None:
+            if not frames or frames[-1]["file"] != USER:
+                frames.append({"file": USER, "function": USER, "line": 0})
+            continue
+        frames.append({"file": file, "function": function if _FUNCTION.fullmatch(function) else "<?>", "line": line})
+    return frames, decisive
+
+
+def _their_cycle(frames: list[dict[str, Any]]) -> bool:
+    """A recursion that is the person's: through no cadgen code but the wrapper that calls their model."""
+    return any(frame["file"] == USER for frame in frames) and \
+        all(frame["file"] in _THEIR_CYCLE for frame in frames if frame["file"].startswith("cadgen/"))
+
+
 def _mistake(error: BaseException, filename: str, line: int) -> bool:
     """Whether ``error``, last in cadgen's code at ``filename``'s ``line``, is a mistake there: one of ``BUGS``,
     and never at a ``raise`` (``_RAISED``), where cadgen says what it was given in those words on purpose."""
     return isinstance(error, BUGS) and not _RAISED.search(linecache.getline(filename, line))
+
+
+def _builtin(name: Any) -> type[BaseException] | None:
+    """The built-in exception a type's name names (``KeyError``), or ``None``: a module's, or no name at all."""
+    import builtins
+
+    found = getattr(builtins, name, None) if isinstance(name, str) and name.isidentifier() else None
+    return found if isinstance(found, type) and issubclass(found, BaseException) else None
+
+
+def _told_frames(found: Mapping[str, Any]) -> list[tuple[str, str, int]]:
+    """An error's frames as another part of cadgen told them (``[{file, line, function}]``, innermost last)."""
+    frames = []
+    for frame in found.get("frames") or ():
+        if isinstance(frame, Mapping) and isinstance(frame.get("file"), str):
+            line = frame.get("line")
+            frames.append((frame["file"], str(frame.get("function") or ""), line if type(line) is int and line >= 0 else 0))
+    return frames
+
+
+def told_signature(found: Mapping[str, Any], where: str, *, handled: bool = True) -> dict[str, Any] | None:
+    """``signature(error, where, bugs_only=True)`` of an error that another part of cadgen saw and told as facts
+    rather than raised here: its type by name (a built-in's, or ``module.Name``) and its frames, each a file as
+    Python had it, a function and a line -- the engine's verbs tell a worker's error so (``cadgen.engine.api``).
+    A mistake in cadgen's own code, named as ``signature`` names one, or ``None``. Never raises."""
+    try:
+        kind = _builtin(found.get("type"))
+        if where not in WHERE or kind is None or not issubclass(kind, BUGS):
+            return None
+        frames, decisive = _named_frames(_told_frames(found))
+        if decisive is None or decisive[0] is None or _RAISED.search(linecache.getline(decisive[1], decisive[2])):
+            return None
+        frames = frames[-MAX_FRAMES:]
+        if issubclass(kind, RecursionError) and _their_cycle(frames):
+            return None
+        return {"where": where, "type": kind.__qualname__, "handled": bool(handled), "frames": frames}
+    except Exception:  # noqa: BLE001 - a crash that cannot be named is not sent
+        LOG.debug("could not name a told crash", exc_info=True)
+        return None
+
+
+# The CAD kernel's packages, by their import names: an error of one of theirs is the kernel refusing what a model
+# asked (``told_failure``), even where cadgen's dependencies cannot be read (``_places``).
+_KERNEL = frozenset({"OCP", "build123d"})
+
+
+def told_failure(found: Mapping[str, Any]) -> str:
+    """``build_failure`` of an error told as facts (``told_signature``'s, with ``engine``: the engine's own code
+    raised it, and ``refused``: the engine refused the request by name), never from what it said: a refusal
+    (``refused``); cadgen's mistake (``bug``); one its class says (``_BUILD_ERRORS``, by a built-in's name); else
+    the engine's (``export_error``: writing what the model made) or, for the model's own error, the class's
+    module -- cadgen's (``refused``), the kernel's or a library's (``kernel_error``), anyone else's
+    (``model_error``). Never raises."""
+    try:
+        if found.get("refused"):
+            return "refused"
+        if told_signature(found, "build") is not None:
+            return "bug"
+        kind = _builtin(found.get("type"))
+        for named, reason in _BUILD_ERRORS:
+            if kind is not None and not isinstance(named, str) and issubclass(kind, named):
+                return reason
+        if found.get("engine"):
+            return "export_error"
+        name = found.get("type")
+        if not isinstance(name, str) or not name:
+            return "other"
+        top, dot, _rest = name.partition(".")
+        if dot and top == "cadgen":
+            return "refused"
+        return "kernel_error" if dot and (top in _KERNEL or top in _places()[1]) else "model_error"
+    except Exception:  # noqa: BLE001 - a reason never fails the failure it names
+        LOG.debug("could not tell why a build failed", exc_info=True)
+        return "other"
 
 
 # Why a failure failed, where cadgen named it (``because``): a word of ``BUILD_FAILURES`` or ``SNAPSHOT_FAILURES``.
@@ -978,16 +1077,20 @@ def report(error: BaseException, where: str, *, tool: str | None = None, handled
 def spool(counts: dict[str, Any], *, path: Path | None = None) -> bool:
     """Keep a command's counts for the next process that sends (``Recorder.take``, by way of its flush):
     what it would have handed a running daemon (``cadgen.daemon.client.hand_over``), when none is
-    running. One line, under the answer in force
-    (``_answer``), and only while sharing is on: a sender takes a line only under that same answer, and a
-    no deletes them all (``choose``). Past ``SPOOL_BYTES`` nothing more is kept. Never raises."""
+    running, and what the engine's verbs count (``cadgen._internal.engine_telemetry``). One line, under the
+    answer in force (``_answer``) and stamped with when it was kept (``at``: how long the spool has waited,
+    ``cadgen._internal.telemetry_send``), and only while sharing is on: a sender takes a line only under that
+    same answer, and a no deletes them all (``choose``). Past ``SPOOL_BYTES`` nothing more is kept. Never
+    raises."""
     try:
-        if not isinstance(counts, dict) or not any(counts.get(name) for name in ("builds", "snapshots", "features", "crashes")):
+        if not isinstance(counts, dict) or not any(counts.get(name) for name in ("builds", "snapshots", "features",
+                                                                                  "crashes", "health")):
             return False  # nothing counted, nothing to keep
         path = path or settings_path()
         if not status(path=path, probe=False)["sharing"]:
             return False
-        return _keep(path, SPOOL, {"answer": list(_answer(_read(path) or {})), "counts": counts})
+        return _keep(path, SPOOL, {"answer": list(_answer(_read(path) or {})), "at": round(time.time(), 3),
+                                   "counts": counts})
     except Exception:  # noqa: BLE001 - a count kept or not never fails the command that made it
         LOG.debug("could not keep a command's counts", exc_info=True)
         return False
@@ -1306,9 +1409,10 @@ class Recorder:
     @_guarded(lambda: None)
     def take(self, counts: Any) -> None:
         """A command's counts, handed to this process (``cadgen.daemon.client.hand_over``) or kept for the
-        next one that sends (``spool``): the snapshots it rendered, the features it used, its crashes, and
-        the builds an earlier cadgen's command made itself. Anything else in it, or past ``HANDED`` of any,
-        is not counted."""
+        next one that sends (``spool``): the snapshots it rendered, the features it used, its crashes, the
+        builds an earlier cadgen's command made itself, and the engine's builds and the health of its
+        workers (``cadgen._internal.engine_telemetry``). Anything else in it, or past ``HANDED`` of any, is
+        not counted."""
         if not isinstance(counts, dict):
             return
 
@@ -1327,6 +1431,10 @@ class Recorder:
             self.used(feature)
         for crash in each("crashes"):
             self.crashed(crash)  # checked there: a command is another process
+        health = counts.get("health")
+        for name, count in (health.items() if isinstance(health, dict) else ()):
+            if isinstance(count, int) and 0 < count <= HANDED:
+                self.health(name, count)  # checked there: one of ``HEALTH``
 
     @_guarded(lambda: None)
     def _drain(self) -> None:

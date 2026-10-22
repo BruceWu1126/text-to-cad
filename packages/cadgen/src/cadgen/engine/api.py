@@ -15,20 +15,32 @@ next call. ``build`` takes code only (law 12): code declares nothing, so its fil
 build as their decorators declare: by running the script (``python model.py``), or from Python
 by ``Model.build()`` (``build_script``), a ``Report``. A build writes the model as its joints place
 it; a pose, a part and a picture are the ``export`` and ``snapshot`` verbs', never cached.
+
+The engine counts nothing. After each ``build``, ``export`` and ``snapshot`` it calls every
+function in ``observers``, in the verb's thread, with one plain dict of what the verb did
+(``_facts``): kinds, counts, times, the warm worker's part, and an error's type and frames --
+never a name, a path or a message of the person's but the frames' files as Python has them. An
+observer that raises is passed over, and the verb returns or raises as it would have. cadgen's
+telemetry is one, appended by cadgen's own ``__init__`` (law 3: nothing here imports it).
 """
 
 from __future__ import annotations
 
 import base64
+import functools
 import json
 import os
+import re
+import sys
+import threading
 import time
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, TypeVar, cast
 
 __all__ = ["Built", "Drawn", "EngineError", "Facts", "Report", "Served", "Written", "build", "daemon", "export",
-           "serve", "snapshot", "status", "stop", "where"]
+           "observers", "serve", "snapshot", "status", "stop", "where"]
 
 KINDS = ("xbf", "step", "glb", "stl", "threemf")
 
@@ -158,6 +170,7 @@ def _ask(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] | Non
     answer = request({**message, "env": dict(os.environ)}, on_log or (lambda _message: None))
     if answer is None:
         raise EngineError("no engine daemon")
+    _heard("worker", answer.get("worker"))
     if "failed" in answer:
         raise EngineError(str(answer["failed"]))
     return answer
@@ -327,6 +340,7 @@ def _exported(order: dict[str, Any], spec: dict[str, Any], shown: Callable[[str]
             done = _export(order, shown)
         except BuildError as error:
             raise EngineError(str(error)) from None
+    _heard("reports", done.get("reports"))
     failed = [report for report in done.get("reports") or [] if not report.get("ok")]
     if failed:
         raise EngineError(failed[0].get("error") or f"the build of {failed[0].get('model')} failed")
@@ -455,3 +469,193 @@ def daemon() -> int:
     from cadgen.engine.daemon import main
 
     return main([])
+
+
+# --- what each verb did, told to its observers ------------------------------------------------
+#
+# ``observers``: functions called after each build, export and snapshot with the verb's facts (``_facts``):
+#
+#     verb      "build", "export" or "snapshot"
+#     ok        it did all it was asked
+#     seconds   its wall time here
+#     program   ``python model.py`` asked (``model._run_as_program``)
+#     models    each model a build reported, or the one an export or a snapshot of a script built first:
+#               {ok, cached (its xbf taken whole: ``cache.used``), children (models it called), parts,
+#               files (the kinds it wrote or kept)}
+#     worker    the warm worker's part: {fresh (started for it; None when no answer said), retired (over
+#               its memory cap after it), died (its exit status, when it died under the work; else None)}
+#     error     why it failed, or None: {type (the error's class, ``module.Name`` or a builtin's name; None
+#               when no error says), frames ([{file, line, function}], innermost last), engine (raised in
+#               the engine's own code, or its worker's), refused (the engine refused the request by name),
+#               here (raised in this process, as against told by the daemon or a report)}
+#     source    export, snapshot: what it read -- "xbf", "step", "glb", "stl", "threemf", "model" (a script's
+#               model or built code) or "other"
+#     found     snapshot: the source file is there (a model's always is)
+#     outputs   export: each destination, {kind, seconds (None for one not written)}
+#     pose      export, snapshot: a pose was asked for
+#
+# The facts of a verb another verb runs are its caller's: only the outermost one tells.
+
+observers: list[Callable[[dict[str, Any]], None]] = []
+
+_HEARD = threading.local()  # what the daemon's answers said while a verb ran in this thread (``_heard``)
+_ENGINE = os.path.dirname(os.path.abspath(__file__)) + os.sep
+_SUFFIXES = {".xbf": "xbf", ".step": "step", ".stp": "step", ".glb": "glb", ".stl": "stl", ".3mf": "threemf",
+             ".cadz": "cadz"}
+_FRAME = re.compile(r'  File "(?P<file>[^"]+)", line (?P<line>\d+), in (?P<function>\S.*)')
+_TYPE = re.compile(r"(?P<type>[A-Za-z_][A-Za-z0-9_.]*)(?::|$)")
+_DIED = re.compile(r"exited \((?P<status>-?\d+)\) during the build")  # the daemon's word (``daemon.Worker.build``)
+_TRACEBACK = "Traceback (most recent call last):"
+# The engine's refusals, by module and name: a verb that raised one has imported its module already.
+_REFUSALS = (("cadgen.engine.build", "BuildError"), ("cadgen.engine.export", "ExportRefused"),
+             ("cadgen.engine.snapshot", "SnapshotRefused"))
+
+_Verb = TypeVar("_Verb", bound=Callable[..., Any])
+
+
+def _heard(name: str, value: Any) -> None:
+    """Something the daemon answered while a verb runs in this thread: kept for its facts."""
+    heard = getattr(_HEARD, "facts", None)
+    if heard is not None and value is not None:
+        heard[name] = value
+
+
+def _observed(verb: str, function: _Verb) -> _Verb:
+    """``function``, telling ``observers`` what it did as it returns or raises."""
+
+    @functools.wraps(function)
+    def observed(*args: Any, **kwargs: Any) -> Any:
+        if not observers or getattr(_HEARD, "facts", None) is not None:
+            return function(*args, **kwargs)
+        _HEARD.facts = heard = {}
+        started = time.perf_counter()
+        try:
+            result = function(*args, **kwargs)
+        except BaseException as error:
+            _HEARD.facts = None
+            _tell(verb, args, kwargs, heard, None, error, time.perf_counter() - started)
+            raise
+        _HEARD.facts = None
+        _tell(verb, args, kwargs, heard, result, None, time.perf_counter() - started)
+        return result
+
+    return cast(_Verb, observed)
+
+
+def _tell(verb: str, args: tuple, kwargs: dict[str, Any], heard: dict[str, Any], result: Any,
+          error: BaseException | None, seconds: float) -> None:
+    try:
+        found = _facts(verb, args, kwargs, heard, result, error, seconds)
+    except Exception:  # noqa: BLE001 - facts that cannot be made are not told
+        return
+    for observer in list(observers):
+        try:
+            observer(found)
+        except Exception:  # noqa: BLE001 - an observer never fails the verb it observes
+            pass
+
+
+def _facts(verb: str, args: tuple, kwargs: dict[str, Any], heard: dict[str, Any], result: Any,
+           error: BaseException | None, seconds: float) -> dict[str, Any]:
+    """What one verb did (the table above), from its arguments, what it returned or raised, and what the
+    daemon's answers said meanwhile (``_heard``)."""
+    from cadgen.engine import model
+
+    if verb == "build":
+        reports = (result.models if isinstance(result, Report) else [result.report] if isinstance(result, Built)
+                   else [])
+    else:
+        reports = list(heard.get("reports") or [])
+    worker = {"fresh": (heard.get("worker") or {}).get("fresh"),
+              "retired": any(report.get("retired") for report in reports), "died": None}
+    found: dict[str, Any] = {
+        "verb": verb, "ok": error is None and all(report.get("ok") for report in reports),
+        "seconds": round(seconds, 4), "program": bool(getattr(model._run_as_program, "running", False)),
+        "models": [_model(report) for report in reports], "worker": worker,
+        "error": _error(error, reports, worker)}
+    if verb in ("export", "snapshot"):
+        source = args[0] if args else kwargs.get("source")
+        found["source"] = _kind(source)
+        found["pose"] = kwargs.get("pose") is not None
+    if verb == "export":
+        if error is None:
+            found["outputs"] = [{"kind": row.kind, "seconds": row.seconds} for row in result]
+        else:
+            found["outputs"] = [{"kind": _SUFFIXES.get(Path(os.fspath(path)).suffix.lower(), "other"),
+                                 "seconds": None} for path in args[1:]]
+    if verb == "snapshot":
+        found["found"] = found["source"] == "model" or Path(os.fspath(source)).is_file()
+    return found
+
+
+def _kind(source: Any) -> str:
+    from cadgen.engine.model import Model
+
+    if isinstance(source, (Model, Built)):
+        return "model"
+    text = os.fspath(source)
+    if "::" in text or text.endswith(".py"):
+        return "model"
+    return _SUFFIXES.get(Path(text).suffix.lower(), "other")
+
+
+def _model(report: dict[str, Any]) -> dict[str, Any]:
+    return {"ok": bool(report.get("ok")), "cached": bool((report.get("cache") or {}).get("used")),
+            "children": len(report.get("children") or {}), "parts": int(report.get("parts") or 0),
+            "files": sorted({str(row.get("kind")) for row in (report.get("files") or {}).values() if row.get("kind")})}
+
+
+def _error(error: BaseException | None, reports: list[dict[str, Any]], worker: dict[str, Any]) -> dict[str, Any] | None:
+    """Why a verb failed: the first failed report's error -- a body's (the model's frames, ``build``), or
+    a file the engine could not write (``trace``, the engine's) -- else what the verb raised: the worker's
+    own error as it answered it, a worker that died under the work (``worker["died"]``), a refusal, or an
+    error raised here."""
+    told = {"engine": True, "refused": False, "here": False}
+    failed = next((report for report in reports if not report.get("ok")), None)
+    if failed is not None:
+        trace = failed.get("trace")
+        return {**_read(trace or failed.get("error") or ""), **told, "engine": bool(trace)}
+    if error is None:
+        return None
+    if isinstance(error, EngineError):
+        text = str(error)
+        died = _DIED.search(text)
+        if died:
+            worker["died"] = int(died["status"])
+            return {"type": None, "frames": [], **told}
+        if _TRACEBACK in text:
+            return {**_read(text), **told}
+        return {"type": None, "frames": [], **told, "refused": text != "no engine daemon"}
+    refusals = tuple(kind for kind in (getattr(sys.modules.get(module), name, None) for module, name in _REFUSALS)
+                     if isinstance(kind, type))
+    frames = [{"file": frame.f_code.co_filename, "line": int(line or 0), "function": frame.f_code.co_name}
+              for frame, line in traceback.walk_tb(error.__traceback__)]
+    kind = type(error)
+    return {"type": kind.__qualname__ if kind.__module__ == "builtins" else f"{kind.__module__}.{kind.__qualname__}",
+            "frames": frames, "engine": bool(frames) and os.path.abspath(frames[-1]["file"]).startswith(_ENGINE),
+            "refused": isinstance(error, refusals), "here": True}
+
+
+def _read(text: str) -> dict[str, Any]:
+    """The last error a traceback's text shows (``traceback.format_exception``'s, the model's own frames'
+    from ``build``, or the error's line alone): its type's name and its frames, innermost last."""
+    kind, frames, expecting = None, [], True
+    for line in text.splitlines():
+        if line.startswith("Traceback ("):  # a block, or the next one of a chain
+            kind, frames, expecting = None, [], True
+            continue
+        frame = _FRAME.fullmatch(line)
+        if frame is not None:
+            frames.append({"file": frame["file"], "line": int(frame["line"]), "function": frame["function"].strip()})
+            expecting = True
+        elif expecting and line and not line[0].isspace():  # the error's own line, after its frames
+            named = _TYPE.match(line)
+            kind, expecting = named["type"] if named else None, False
+    return {"type": kind, "frames": frames}
+
+
+build = _observed("build", build)
+# A script's models build here (law 11: ``python model.py``, ``Model.build()``): a build too.
+build_script = _observed("build", build_script)
+export = _observed("export", export)
+snapshot = _observed("snapshot", snapshot)

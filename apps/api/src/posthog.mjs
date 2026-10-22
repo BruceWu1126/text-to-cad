@@ -85,7 +85,7 @@ export function propertiesOf(row, country) {
 }
 
 /**
- * A row as one PostHog event. A row with an id (schema 5's, `events.mjs`: `idOf`) is sent under it as the event's
+ * A row as one PostHog event. A row with an id (schema 5's and 6's, `events.mjs`: `idOf`) is sent under it as the event's
  * `uuid`, and at its batch's time (`at`, the sender's clock): PostHog takes events with the same uuid, event,
  * distinct id and timestamp as one (they are de-duplicated as its tables merge), so a batch sent again -- its
  * sender never heard it was taken -- is the same events again, not more counts, however long after. Every earlier
