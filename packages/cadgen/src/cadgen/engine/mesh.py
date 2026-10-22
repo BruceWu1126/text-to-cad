@@ -87,10 +87,7 @@ _G1 = int(GeomAbs_G1)
 # BRepMesh_Status bits, as the mesher's GetStatusFlags reports them.
 _MESH_FLAGS = ((1, "Failure"), (2, "ReMesh"), (4, "SelfIntersectingWire"), (8, "UserBreak"))
 
-MAGIC = b"XBM2"
-VERSION = 2
-HEADER = struct.Struct("<4sI6I7I2f3I")
-assert HEADER.size == 80
+from cadgen.engine.mesh_format import HEADER, MAGIC, VERSION
 
 
 @dataclass

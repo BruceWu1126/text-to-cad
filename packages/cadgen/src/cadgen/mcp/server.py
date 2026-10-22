@@ -835,7 +835,10 @@ def serve(argv: list[str] | None = None) -> int:
     analytics.start()
     collect_crashes(analytics.crashed)  # what fails in this process, wherever it is caught, is this recorder's
     updates.refresh()
-    server = Server(analytics=analytics)
+    from cadgen.viewer.engine_client import RemoteApp
+    from .tunnel import ViewerTunnel
+
+    server = Server(analytics=analytics, tunnel=ViewerTunnel(app=RemoteApp()))
     connection = Connection(sys.stdin.buffer, protocol_out, server.handle, workers=64)
     try:
         connection.serve()

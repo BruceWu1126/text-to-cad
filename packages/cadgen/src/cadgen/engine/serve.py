@@ -82,7 +82,6 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlparse
 
 from cadgen.engine.access import allow_origin
-from cadgen.engine.mesh import shape_bytes
 from cadgen.engine.render.look import LOOK
 
 __all__ = ["MeshCache", "PARALLEL_BYTES", "Served", "Server", "find_three"]
@@ -244,9 +243,56 @@ class Mesher:
 
 
 def _triangles(data: bytes) -> int:
-    from cadgen.engine.mesh import HEADER
+    from cadgen.engine.mesh_format import HEADER
 
     return HEADER.unpack_from(data)[3] // 3
+
+
+# Kernel jobs return only serializable values. Daemon request threads never own kernel objects.
+_TOPOLOGIES: OrderedDict = OrderedDict()
+
+
+def shape_bytes(shape, **kwargs):
+    # Only worker jobs and the standalone snapshot server can own live shapes.
+    from cadgen.engine.mesh import shape_bytes as encode
+    return encode(shape, **kwargs)
+
+
+def _read_document(path: str) -> tuple:
+    from cadgen.engine.document import Loaded
+
+    loaded = Loaded(Path(path))
+    return (loaded.structure(), loaded.version,
+            {p.key: shape_bytes(p.shape) for p in loaded.prototypes},
+            {p.key: p.name for p in loaded.prototypes})
+
+
+def _topology_fact(key: str, data: bytes, method: str, args: tuple) -> Any:
+    from cadgen.engine.mesh import Topology
+
+    found = _TOPOLOGIES.get(key)
+    if found is None:
+        found = _TOPOLOGIES[key] = Topology(data)
+    _TOPOLOGIES.move_to_end(key)
+    while len(_TOPOLOGIES) > 32:
+        _TOPOLOGIES.popitem(last=False)
+    return getattr(found, method)(*args)
+
+
+class _RemoteTopology:
+    def __init__(self, pool, key: str, data: bytes) -> None:
+        self.pool, self.key, self.data = pool, key, data
+
+    def __getattr__(self, method: str):
+        if method not in {"face", "edge", "vertex", "groups", "volume"}:
+            raise AttributeError(method)
+        return lambda *args: self.pool.submit(_topology_fact, self.key, self.data, method, args).result()
+
+
+def _pose_structure(structure: dict, pose: Any) -> dict:
+    from cadgen.engine.mechanism import posed_structure
+
+    return posed_structure(structure, pose)
 
 
 # --- a STEP's reader process ----------------------------------------------------------------
@@ -337,13 +383,15 @@ class Server:
     def __init__(self, port: int = 0, three: str | None = None, touch: Callable[[], None] = lambda: None,
                  host: str = "127.0.0.1", mesh_mode: str | None = None,
                  provenance: Callable[[str, str, str, int], dict[str, Any] | None] | None = None,
-                 cache: MeshCache | None = None) -> None:
+                 cache: MeshCache | None = None, isolated: bool = False, http_factory=None) -> None:
         self.served: dict[str, Served] = {}
         self.idents: dict[Path, str] = {}
         # The daemon's server and a worker's snapshot serve from the process's one cache
         # (``MESHES``); a server of its own (a test's) holds its own.
         self.cache = cache if cache is not None else MeshCache()
-        self.mesher = Mesher(mesh_mode)
+        self.isolated = isolated
+        self.mesher = Mesher("processes" if isolated else mesh_mode,
+                             workers=1 if isolated and (mesh_mode or os.environ.get("CADGEN_ENGINE_MESH")) == "inline" else None)
         self.three = Path(three) if three else find_three()
         self.touch = touch
         self.provenance = provenance
@@ -387,7 +435,8 @@ class Server:
                 server.touch()
                 server.route(self, "POST")
 
-        self.http = ThreadingHTTPServer((host, port), Handler)
+        self.http = (http_factory(self, host, port) if http_factory is not None
+                     else ThreadingHTTPServer((host, port), Handler))
         self.http.daemon_threads = True
         self.port = self.http.server_address[1]
         self.url = f"http://{host}:{self.port}"
@@ -476,6 +525,9 @@ class Server:
     def _read(self, ident: str, path: Path) -> Served:
         if path.suffix.lower() in FOREIGN:
             return self._read_step(ident, path)
+        if self.isolated:
+            structure, version, shapes, names = self._readers().submit(_read_document, str(path)).result()
+            return Served(ident, path, structure, version, shapes, names)
         from cadgen.engine.document import Loaded
 
         loaded = Loaded(path)
@@ -768,6 +820,8 @@ class Server:
 
     def topology(self, key: str, data: bytes) -> Any:
         """A part's ``mesh.Topology``, for its facts: a few held, for the process's convenience."""
+        if self.isolated:
+            return _RemoteTopology(self.mesher.processes(), key, data)
         from cadgen.engine.mesh import Topology
 
         with self.topology_lock:
@@ -791,7 +845,7 @@ class Server:
             future = self.cache.pending.get(key)
             if future is not None:
                 return future
-            future = self.cache.pending[key] = self.mesher.submit(data, mode)
+            future = self.cache.pending[key] = self.mesher.submit(data, "processes" if self.isolated else mode)
 
         def settle(done: concurrent.futures.Future) -> None:
             if not done.cancelled() and done.exception() is None:
@@ -908,9 +962,9 @@ class Server:
         structure = self.structure(doc)
         if pose is None:
             return structure
-        from cadgen.engine.mechanism import posed_structure
-
-        return posed_structure(structure, pose)
+        if self.isolated:
+            return self.mesher.processes().submit(_pose_structure, structure, pose).result()
+        return _pose_structure(structure, pose)
 
     def pose(self, handler: BaseHTTPRequestHandler, doc: Served) -> None:
         """``POST /api/doc/<id>/pose`` with ``{"pose": NAME | {joint or coupling: value}}``: the

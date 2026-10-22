@@ -14,6 +14,8 @@ from cadgen.engine import daemon as _daemon
 
 __all__ = ["request"]
 
+DAEMON_MODULE = "cadgen.engine.daemon"  # the enclosing distribution may supply an application host
+
 
 def _connect() -> socket.socket | None:
     try:
@@ -49,7 +51,7 @@ def _start() -> None:
     if root not in path.split(os.pathsep):
         env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.daemon"], stdin=subprocess.DEVNULL,
+    subprocess.Popen([sys.executable, "-P", "-m", DAEMON_MODULE], stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=str(_daemon.state_dir().parent)
                      if _daemon.state_dir().parent.exists() else None, **_daemon.detached())
 

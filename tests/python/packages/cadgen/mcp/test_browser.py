@@ -51,7 +51,7 @@ class ViewerUrlTest(unittest.TestCase):
     def test_a_started_viewer_runs_detached_from_the_launch(self) -> None:
         # The launch returns once the Viewer answers; the Viewer runs on in its own session and
         # writes to its own log, never into a pipe this server stopped reading.
-        self.assertIn("--detach", LAUNCH)
+        self.assertNotIn("--detach", LAUNCH)
         command, _ = self.launch("started")
         self.assertEqual(viewer_url(command=command), "http://127.0.0.1:3245/")
 

@@ -491,11 +491,13 @@ def where(source: Any, ref: str | None = None) -> Facts | list[Facts]:
         return json.loads(found)
     refs.parse(ref)  # a ref that does not parse is refused before anything is served
     answer = _ask({"op": "serve", "path": str(path)})
-    base, _sep, ident = answer["url"].partition("/?doc=")
+    base = answer["url"].split("/?", 1)[0]
+    ident = answer["doc"]
 
     def get(route: str) -> Any:
         try:
-            with urllib.request.urlopen(f"{base}/api/doc/{ident}{route}", timeout=300) as response:  # noqa: S310
+            with urllib.request.urlopen(urllib.request.Request(f"{base}/api/doc/{ident}{route}",
+                    headers={"Authorization": "Bearer " + answer.get("token", "")}), timeout=300) as response:  # noqa: S310
                 return json.loads(response.read())
         except urllib.error.HTTPError as error:
             try:

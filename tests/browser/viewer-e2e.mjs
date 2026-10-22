@@ -79,7 +79,7 @@ const browser = await chromium.launch({
 });
 
 async function newPage() {
-  const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 1, extraHTTPHeaders: process.env.VIEWER_TEST_TOKEN ? { Authorization: `Bearer ${process.env.VIEWER_TEST_TOKEN}` } : {} });
   const errors = [];
   const responseReads = new Set();
   await context.route("**/*", async (route) => {

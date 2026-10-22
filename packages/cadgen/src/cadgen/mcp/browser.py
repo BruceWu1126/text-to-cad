@@ -16,7 +16,7 @@ import subprocess
 import sys
 from urllib.parse import quote
 
-LAUNCH = (sys.executable, "-P", "-m", "cadgen.cli", "viewer", "--host", "127.0.0.1", "--json", "--detach")
+LAUNCH = (sys.executable, "-P", "-m", "cadgen.cli", "viewer", "--host", "127.0.0.1", "--json")
 LAUNCH_SECONDS = 30.0
 
 
@@ -57,4 +57,4 @@ def viewer_url(*, cwd: str | None = None, command=LAUNCH, timeout: float = LAUNC
 
 def model_link(url: str, model: str) -> str:
     """``url`` opened at ``model``, named by its absolute path: readable, with ``/`` and ``:`` kept."""
-    return f"{url}?file={quote(model.replace(os.sep, '/'), safe='/:')}"
+    return f"{url}{'&' if '?' in url else '?'}file={quote(model.replace(os.sep, '/'), safe='/:')}"

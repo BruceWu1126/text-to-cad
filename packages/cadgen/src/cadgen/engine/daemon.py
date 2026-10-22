@@ -51,6 +51,8 @@ from cadgen.engine.atomic_replace import replace_atomic
 __all__ = ["IDLE_SECONDS", "Pool", "lock", "lock_path", "main", "socket_path", "state_dir", "worker_cap",
            "worker_idle"]
 
+HTTP_FACTORY = None  # optional application supplied by the enclosing distribution
+
 IDLE_SECONDS = 3600.0
 PROTOCOL = 2
 WINDOWS = os.name == "nt"
@@ -627,8 +629,12 @@ class Daemon:
         with self.serving:
             if self.server is None:
                 self.server = Server(port=int(request.get("port") or 0), three=request.get("three"), touch=self.touch,
-                                     provenance=self.provenance, cache=MESHES)
+                                     provenance=self.provenance, cache=MESHES, isolated=True,
+                                     host=request.get("host") or "127.0.0.1", http_factory=HTTP_FACTORY)
                 self.server.start()
+            elif ((request.get("port") and int(request["port"]) != self.server.port)
+                  or (request.get("host") and request["host"] != self.server.http.server_address[0])):
+                raise ValueError("the installation's engine already serves another host/port; stop it before changing its bind")
             return self.server
 
     def settled(self, worker: Worker, every: bool = False) -> None:
@@ -760,7 +766,17 @@ class Daemon:
             except Exception as error:  # noqa: BLE001
                 send({"failed": f"cannot serve {request['path']}: {error}"})
                 return
-            send({"ok": True, "url": f"{server.url}/?doc={ident}", "port": server.port})
+            app = getattr(server.http, "app", None)
+            token = app.token if app is not None else ""
+            send({"ok": True, "url": f"{server.url}/?doc={ident}" + (f"&token={token}" if token else ""),
+                  "doc": ident, "token": token, "port": server.port})
+        elif op in ("viewer", "http"):
+            server = self.serve(request)
+            application = getattr(server.http, "app", None)
+            if application is None:
+                send({"failed": "this engine has no application host"})
+            else:
+                send(application.launch(request) if op == "viewer" else application.endpoint())
         elif op == "draw":
             self.draw(request, send)
         elif op == "warm":
@@ -820,7 +836,9 @@ class Daemon:
                 "idle": round(now - self.last, 1),
                 "serving": None if self.server is None else {"url": self.server.url,
                                                              "documents": self.server.listing()},
-                "renders": [] if self.renders is None else self.renders.status()}
+                "renders": [] if self.renders is None else self.renders.status(),
+                "sessions": (self.server.http.app.sessions() if self.server is not None
+                             and hasattr(self.server.http, "app") else [])}
 
     def watch(self) -> None:
         period = min(30.0, max(min(self.idle, self.pool.idle) / 10, 0.2))
@@ -857,7 +875,10 @@ def _serve_connection(daemon: Daemon, connection: socket.socket) -> None:
                     stream.write((json.dumps(message, separators=(",", ":")) + "\n").encode())
                     stream.flush()
 
-            daemon.handle(request, send)
+            try:
+                daemon.handle(request, send)
+            except (OSError, ValueError) as error:
+                send({"failed": str(error)})
         except (OSError, ValueError):
             pass
         finally:

@@ -291,18 +291,8 @@ class TabServerTest(_Session):
         # document the engine is still reading holds a call no longer than a drawing does.
         from cadgen.mcp.tunnel import ENGINE_HOLD_SECONDS, ENGINE_RETRY_MS
 
-        asked = []
-
-        def engine(_address, target, _timeout):
-            asked.append(target)
-            return 200, b'{"version":"1-1","patch":null}', "application/json"
-
         documents = self.server.tunnel.app.engine_documents
         self.assertEqual((documents.hold_seconds, documents.retry_ms), (ENGINE_HOLD_SECONDS, ENGINE_RETRY_MS))
-        with mock.patch.object(documents, "_engine", "127.0.0.1:9"), mock.patch("cadgen.viewer.xbf._get", engine):
-            reply = self.http("GET", "http://cad.invalid/__cad/xbf/api/doc/abc/version?after=0-0&wait=25")
-        self.assertEqual(reply, (200, {"version": "1-1", "patch": None}))
-        self.assertEqual(asked, ["/api/doc/abc/version?after=0-0&wait=0"])
 
     def test_the_sidebar_and_a_tab_with_nothing_to_show_open_the_home(self) -> None:
         self.http("POST", "/__cad/recents", {"action": "open", "path": self.bracket})
@@ -653,16 +643,14 @@ class TunnelBoundTest(_Session):
         body = os.urandom(2 * MAX_REPLY_BYTES + 11)
         asked = []
 
-        def engine(_address, target, _timeout):
-            asked.append(target)
-            return 200, body, "application/octet-stream"
+        def handle(request, response):
+            asked.append(request.path)
+            response.send_bytes(200, body, "application/octet-stream")
 
-        documents = self.server.tunnel.app.engine_documents
-        url = "http://cad.invalid/__cad/xbf/api/doc/abc/part/k1"
+        url = "http://cad.invalid/__cad/api/doc/abc/part/k1"
         whole, sizes, etag = b"", [], ""
-        with mock.patch.object(documents, "_engine", "127.0.0.1:9"), mock.patch("cadgen.viewer.xbf._get", engine):
+        with mock.patch.object(self.server.tunnel.app, "handle", handle):
             while len(whole) < len(body):
-                # As the page asks: each later part names the body it continues (``if-range``).
                 headers = {"range": f"bytes={len(whole)}-{len(whole) + MAX_REPLY_BYTES - 1}", **({"if-range": etag} if etag else {})}
                 reply, size = self.sized("GET", url, headers)
                 self.assertEqual(reply["status"], 206)
@@ -670,7 +658,7 @@ class TunnelBoundTest(_Session):
                 self.assertEqual(reply["headers"]["etag"], etag)
                 whole += base64.b64decode(reply["body"])
                 sizes.append(size)
-        self.assertEqual((whole, asked), (body, ["/api/doc/abc/part/k1"]))
+        self.assertEqual((whole, asked), (body, ["/__cad/api/doc/abc/part/k1"]))
         self.assertEqual(len(sizes), 3)
         self.assertLessEqual(max(sizes), MESSAGE_BOUND)
 

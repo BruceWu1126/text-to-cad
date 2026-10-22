@@ -67,13 +67,13 @@ def cut():
 """
 
 
-def get(url: str) -> bytes:
-    with urllib.request.urlopen(url, timeout=120) as response:
+def get(url: str, token: str) -> bytes:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": "Bearer "+token}), timeout=120) as response:
         return response.read()
 
 
-def get_json(url: str) -> dict:
-    return json.loads(get(url))
+def get_json(url: str, token: str) -> dict:
+    return json.loads(get(url, token))
 
 
 class PatcherTest(unittest.TestCase):
@@ -228,23 +228,26 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(self.run_script("pair.py").returncode, 0)
         served = self.cli("serve", "XBF/pair.xbf")
         self.assertEqual(served.returncode, 0, served.stderr)
-        base, ident = served.stdout.strip().split("/?doc=")
+        from urllib.parse import urlsplit, parse_qs
+        url = urlsplit(served.stdout.strip())
+        base, query = f"{url.scheme}://{url.netloc}", parse_qs(url.query)
+        ident, token = query["doc"][0], query["token"][0]
         api = f"{base}/api/doc/{ident}"
-        before = get_json(api)
+        before = get_json(api, token)
         for prototype in before["prototypes"]:  # the page has every part
-            self.assertEqual(get(f"{api}/part/{prototype['key']}")[:4], b"XBM2")
+            self.assertEqual(get(f"{api}/part/{prototype['key']}", token)[:4], b"XBM2")
         self.script.write_text(textwrap.dedent(PAIR.format(size=12)), encoding="utf-8")
         self.assertEqual(self.run_script("pair.py").returncode, 0)
-        answer = get_json(f"{api}/version?after={before['version']}&wait=60")
+        answer = get_json(f"{api}/version?after={before['version']}&wait=60", token)
         stat = (self.folder / "XBF/pair.xbf").stat()
         self.assertEqual(answer["version"], f"{stat.st_mtime_ns}-{stat.st_size}")
         self.assertIsNotNone(answer["patch"], "the document came from the worker, not from its file")
         self.assertEqual(answer["patch"]["meshes"], 1, "the worker meshed the changed part alone")
-        after = get_json(api)
+        after = get_json(api, token)
         keys = lambda s: {p["name"]: p["key"] for p in s["prototypes"]}  # noqa: E731
         self.assertNotEqual(keys(after)["block"], keys(before)["block"])
         self.assertEqual(keys(after)["peg"], keys(before)["peg"])
-        self.assertEqual(get(f"{api}/part/{keys(after)['block']}")[:4], b"XBM2")
+        self.assertEqual(get(f"{api}/part/{keys(after)['block']}", token)[:4], b"XBM2")
 
     def test_a_build_meshes_only_what_it_changed_of_a_served_document(self) -> None:
         self.script = self.folder / "pair.py"
@@ -254,11 +257,14 @@ class DaemonTest(unittest.TestCase):
         self.cli("stop")
         served = self.cli("serve", "XBF/pair.xbf")
         self.assertEqual(served.returncode, 0, served.stderr)
-        base, ident = served.stdout.strip().split("/?doc=")
-        before = get_json(f"{base}/api/doc/{ident}")
+        from urllib.parse import urlsplit, parse_qs
+        url = urlsplit(served.stdout.strip())
+        base, query = f"{url.scheme}://{url.netloc}", parse_qs(url.query)
+        ident, token = query["doc"][0], query["token"][0]
+        before = get_json(f"{base}/api/doc/{ident}", token)
         self.script.write_text(textwrap.dedent(PAIR.format(size=12)), encoding="utf-8")
         self.assertEqual(self.built("pair")["meshed"], 1, "the changed part alone, not the whole document")
-        answer = get_json(f"{base}/api/doc/{ident}/version?after={before['version']}&wait=60")
+        answer = get_json(f"{base}/api/doc/{ident}/version?after={before['version']}&wait=60", token)
         self.assertEqual(answer["patch"]["meshes"], 1)
         self.assertEqual(self.built("pair")["meshed"], 0)
 
@@ -378,15 +384,18 @@ class DaemonTest(unittest.TestCase):
         self.script.write_text(slow.format(size=10), encoding="utf-8")
         self.assertEqual(self.run_script("pair.py").returncode, 0)
         served = self.cli("serve", "XBF/pair.xbf")
-        base, ident = served.stdout.strip().split("/?doc=")
-        before = get_json(f"{base}/api/doc/{ident}")
+        from urllib.parse import urlsplit, parse_qs
+        url = urlsplit(served.stdout.strip())
+        base, query = f"{url.scheme}://{url.netloc}", parse_qs(url.query)
+        ident, token = query["doc"][0], query["token"][0]
+        before = get_json(f"{base}/api/doc/{ident}", token)
         stl = self.folder / "pair.stl"
         written = stl.stat().st_mtime_ns
         self.script.write_text(slow.format(size=12), encoding="utf-8")
         building = subprocess.Popen([sys.executable, "pair.py"], cwd=self.folder, env=self.env,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.addCleanup(building.wait)
-        answer = get_json(f"{base}/api/doc/{ident}/version?after={before['version']}&wait=60")
+        answer = get_json(f"{base}/api/doc/{ident}/version?after={before['version']}&wait=60", token)
         self.assertNotEqual(answer["version"], before["version"])
         self.assertEqual(stl.stat().st_mtime_ns, written, "the viewer moved before the STL was written")
         self.assertEqual(building.wait(timeout=300), 0)

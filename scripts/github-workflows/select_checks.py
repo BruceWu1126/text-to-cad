@@ -147,7 +147,7 @@ def _test_file(suite: str, whole: str | None = None) -> Callable[[str], Select]:
 # all of cadgen at once; and, for the viewer, the gates that serve the bundled client. The
 # skill suites and the heavy policy tests reach neither.
 CADGEN_SRC = "packages/cadgen/src/cadgen"
-VIEWER_CODE = (f"{CADGEN_SRC}/viewer/**", f"{CADGEN_SRC}/cli/viewer.py", f"{CADGEN_SRC}/cli/viewer_stop.py")
+VIEWER_CODE = (f"{CADGEN_SRC}/viewer/**", f"{CADGEN_SRC}/cli/viewer.py")
 MCP_CODE = (f"{CADGEN_SRC}/mcp/**", f"{CADGEN_SRC}/cli/mcp.py")
 VIEWER_SHARED = (f"{CADGEN_SRC}/viewer/__init__.py", f"{CADGEN_SRC}/viewer/recents.py")
 _NAMES_VIEWER = r"cadgen\.viewer|cadgen\.mcp|cli\.viewer|cli\.mcp|[\"'](?:viewer|mcp)[\"' ]"

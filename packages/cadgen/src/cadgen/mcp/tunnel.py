@@ -128,8 +128,8 @@ def _result(status: int, headers: dict[str, str], body: bytes) -> dict[str, Any]
 class ViewerTunnel:
     """The viewer backend every view of this server shares, made when the first one asks."""
 
-    def __init__(self, *, recents=None, analytics=None, clock=time.monotonic) -> None:
-        self._app = None
+    def __init__(self, *, recents=None, analytics=None, clock=time.monotonic, app=None) -> None:
+        self._app = app
         self._recents = recents
         self._analytics = analytics
         self._lock = threading.Lock()

@@ -141,9 +141,6 @@ class RawFilesAreNeverPages(SecurityTestCase):
         status, headers, _ = self.fixture.asset(self.fixture.path("robot.urdf"))
         self.assertEqual((status, headers["content-type"]), (200, "application/xml; charset=utf-8"))
         self.assertEqual((headers["x-content-type-options"], headers["content-security-policy"]), sandbox)
-        # What the engine's routes answer is data too (here, that no engine is serving).
-        status, headers, _ = self.fixture.request("GET", "/__cad/xbf/api/look")
-        self.assertEqual((status, headers["x-content-type-options"], headers["content-security-policy"]), (502, *sandbox))
         # The viewer's own page is the app, never sandboxed.
         status, headers, _ = self.fixture.request("GET", "/")
         self.assertEqual(status, 200)

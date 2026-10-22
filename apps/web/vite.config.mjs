@@ -50,41 +50,16 @@ function resolveDirectoryRoot() {
   });
 }
 
-// Dev runs the SAME backend as production — `cadgen viewer`, spawned as
-// `python -m cadgen.viewer` — but as a second process that Vite proxies to,
-// because a Python server cannot be in-process Vite middleware. `npm run dev`
-// stays ONE command: this plugin spawns the backend on an ephemeral port, reads
-// the port off its {url,port,action} line, and hands it to the proxy in the
-// server block.
-//
-// The backend runs --new --api-only. --new is a CORRECTNESS requirement, not
-// tidiness: on the launcher's port, a later `cadgen viewer` launch would find
-// this backend and reuse it (or replace it), handing an agent a URL served by
-// Vite's proxy target instead of a real Viewer; --new binds a port of its own
-// that no launch asks about. --api-only is what makes dev
-// work on a checkout that has never been built: Vite serves the client here, so
-// this backend needs no dist/ — and dist/ is gitignored, so without it
-// `npm run dev` failed on every fresh clone with a complaint about a missing
-// build.
-//
-// VIEWER_PYTHON names the interpreter that has cadgen installed, defaulting to
-// python3 — usually WRONG in a checkout, where that interpreter is the repo
-// venv. The resolved interpreter is logged at startup so an exit is
-// attributable. See CONTRIBUTING.md for the checkout recipe.
-//
-// VIEWER_BACKEND_URL attaches to a backend you started yourself, which is also
-// how you put a debugger on it.
-// Resolved during CONFIG, not in configureServer: Vite builds the proxy
-// middleware from `server.proxy` while creating the server, and http-proxy
-// wants a plain string target — so the port has to be known before the config
-// object exists. Vite supports an async config function, which is what makes
-// that possible.
+// Vite obtains a fresh API session from this installation's engine, then proxies
+// /__cad with its token. Closing Vite leaves the engine and its other clients alive.
+// VIEWER_PYTHON names the editable installation's interpreter. An explicit
+// VIEWER_BACKEND_URL (the launcher's apiUrl) also needs VIEWER_ENGINE_TOKEN.
 async function startDevBackend() {
   const external = String(process.env.VIEWER_BACKEND_URL || "").trim();
   if (external) {
     const target = external.replace(/\/+$/u, "");
     console.info(`CAD Viewer backend: ${target} (VIEWER_BACKEND_URL)`);
-    return target;
+    return { target, token: process.env.VIEWER_ENGINE_TOKEN };
   }
 
   const python = process.env.VIEWER_PYTHON || "python3";
@@ -105,30 +80,10 @@ async function startDevBackend() {
     ],
     { cwd: directoryRoot, stdio: ["ignore", "pipe", "inherit"] },
   );
-  // The backend's stderr is INHERITED, so whatever it printed is already above
-  // this line. Say only what the exit code cannot: which interpreter ran, so a
-  // version or import failure is attributable. Guessing at a cause here was
-  // actively harmful — it used to blame a missing cadgen for every exit,
-  // including the ones that had nothing to do with cadgen.
-  child.once("exit", (code, signal) => {
-    if (signal === "SIGTERM") {
-      return; // our own teardown, below
-    }
-    console.error(
-      `CAD Viewer backend (${python}) exited ${code === null ? `on ${signal}` : `with code ${code}`}. ` +
-        "Its error is printed above; VIEWER_PYTHON selects the interpreter.",
-    );
-  });
-  // Vite's own exit is the only teardown that always runs; a killed dev server
-  // must not leave the backend holding a port.
-  for (const signal of ["exit", "SIGINT", "SIGTERM"]) {
-    process.once(signal, () => child.kill("SIGTERM"));
-  }
-
   const announced = await readFirstJsonLine(child.stdout);
-  const target = String(announced.url || "").replace(/\/+$/u, "");
+  const target = String(announced.apiUrl || "").replace(/\/+$/u, "");
   console.info(`CAD Viewer backend: ${target} (${python}, started in ${directoryRoot})`);
-  return target;
+  return { target, token: announced.token };
 }
 
 function readFirstJsonLine(stream) {
@@ -222,6 +177,7 @@ function chunkIdsPlugin() {
 
 export default defineConfig(async ({ command }) => ({
   root: viewerAppRoot,
+  base: "./",
   envPrefix: "VIEWER_",
   // Which build this is, for the version the app menu shows (src/host/viewerLinks.js): none for
   // the release's own, this checkout's commit for any other (@text-to-cad/ui/build-id).
@@ -269,9 +225,9 @@ export default defineConfig(async ({ command }) => ({
     proxy:
       command === "serve"
         ? await (async () => {
-            const target = await startDevBackend();
+            const { target, token } = await startDevBackend();
             return {
-              "/__cad": { target, changeOrigin: false },
+              "/__cad": { target, changeOrigin: false, headers: token ? { Authorization: `Bearer ${token}` } : {} },
             };
           })()
         : undefined,

@@ -43,6 +43,11 @@ del _install_font_guard
 _install_engine_telemetry()
 del _install_engine_telemetry
 
+from cadgen._internal.engine_host import install as _install_engine_host
+
+_install_engine_host()
+del _install_engine_host
+
 # The engine's surface (``cadgen.engine.__all__``) and its verbs as functions (``cadgen.engine.api``).
 _ENGINE = ("xbf", "memo", "step", "glb", "stl", "threemf", "dxf", "Material", "materials", "paint", "configuration",
            "motion", "couple", "read_step", "read_xbf", "read_mesh", "select", "report", "track")

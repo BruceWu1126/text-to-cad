@@ -83,13 +83,13 @@ qualifies, Vite defaults to the app's parent, `<checkout>/apps`. npm sets
 without changing that folder. It is only where relative links resolve
 (`serverInfo.start`): the backend opens any file by its absolute path.
 
-Dev spawns the real backend — `python -m cadgen.viewer --new --api-only` on a
-port of its own — and proxies `/__cad` to it, so there is
-one implementation, not two, and Vite owns the client. `VIEWER_PYTHON` names the
-interpreter that has cadgen installed (it defaults to `python3` and must be
-Python 3.11 or newer); `VIEWER_BACKEND_URL` attaches to a backend you started
-yourself. The shared packages must be built first; the web app itself needs no
-production build for Vite development.
+Dev obtains an API session from the same engine with
+`python -m cadgen.viewer --new --api-only --json`, then proxies `/__cad` with the
+engine token. Vite owns the client and closing it leaves the engine running.
+`VIEWER_PYTHON` names the interpreter with cadgen installed (default `python3`).
+`VIEWER_BACKEND_URL` and `VIEWER_ENGINE_TOKEN` attach to an existing session
+using its `apiUrl` and `token`. Build shared packages first; Vite needs no web
+production build.
 
 Prod is `cadgen viewer`, run from anywhere. It serves the client bundled by
 `scripts/bundle/bundle.sh` or installed in the wheel. To explicitly select this
@@ -101,39 +101,33 @@ export CADGEN_VIEWER_DIST="$PWD/apps/web/dist"
 cadgen viewer --host 127.0.0.1 --json
 ```
 
-The launcher is unconditional and prints the URL it serves: on port 3245, or the
-port `--port N` names, as any web server. Before binding it asks that port who holds it
-(`GET /__cad/server`): nothing, and it starts there (`action:"started"`); this
-user's viewer at the same identity, and it is REUSED (`action:"reused"`); this
-user's viewer running other code, and that one is asked to exit
-(`POST /__cad/shutdown`) and the launch starts on the freed port — the newest
-code wins, on the same URL; anything else (another program, another user's
-viewer), and it refuses, naming `--port`. `--new` binds an OS-assigned free
-port, asks nothing and is never reused (dev and tests); `--dist DIR` (or
-`CADGEN_VIEWER_DIST`) names another built client. The URL line (and the
-`--json` line) is written only after the socket is bound and listening with the
-app attached, so the first request after reading it answers — no poll, no
-retry, no grace period.
+The launcher ensures this installation's engine, creates or reuses a page session,
+prints its URL, opens it in the browser, and exits. `--json` prints the launch
+record without opening a browser; `--no-open` prints only the URL. There is no
+foreground viewer server and no `--detach` or `viewer stop`. `cadgen stop` stops
+the installation's engine and all its clients; never stop an engine you did not start.
 
-A launch that STARTS a server is that server: it stays in the foreground until
-it is stopped (Ctrl-C, `stop`), which is what a terminal and `npm run dev`
-want. A launch that REUSES one prints and exits. `--detach` makes both return:
-the server runs as a background process in its own session, its output goes
-to one log in the state directory (`viewer.log`, named by the launcher's
-message), and the launcher exits 0 once the server has announced itself — or
-relays the server's refusal and exits non-zero. The log outlives the server so
-a crash can be read afterwards, until the next detached start. Agents and
-scripts use `--detach`; never pipe a foreground launch into `tail` or `head`,
-which wait for an EOF a running server never sends.
-`cadgen viewer stop [--port N]` asks this user's viewer on a port to exit and
-waits for the port to be free. Dev lives on Vite's port (5173, strict).
+The engine binds loopback on an OS-assigned port. `--port N` pins its HTTP port
+and `--host ADDRESS` pins its bind address. If the running engine has a different
+port or address, the launch fails with that conflict; it never replaces a server
+or starts a second engine. A taken port fails. `--new` creates a fresh page session
+on the same engine and port. Otherwise a launch reuses a session with the same
+starting directory and client build. Each session's home and relative links start
+from its own directory; changing one session's navigation does not change another.
+`--dist DIR` (or `CADGEN_VIEWER_DIST`) selects a built client.
 
-The identity is the cadgen version plus content digests of the server runtime
-and the selected built client, so a viewer running code that has since been
-edited, pulled, or rebuilt — or another client — is replaced rather than handed
-back by mistake. In a checkout, a server that finds `src/` beside the `dist/` it
-serves also warns once on stderr when any source is newer than the build —
-detection only; it keeps serving.
+The JSON record includes `url`, `apiUrl`, `token`, `port`, `pid`, `session` and
+`action` (`started` or `reused`, referring to the page session). The URL is usable
+as soon as it is printed. Its token is exchanged for an HttpOnly, SameSite cookie
+and removed from the address bar. Programmatic clients send the token as a Bearer
+header. Every route, including documents, requires it. The loopback Host check,
+cross-site POST guard and raw-file response headers remain. Binding `--host`
+off loopback exposes these same authenticated routes; anyone with the token has
+local-file access. Keep the URL private. Vite remains on its own strict port, 5173.
+
+A page closing never stops the engine. Active requests and document version waits
+keep it alive; it exits after its idle hour. Code changes in a checkout require
+restarting an engine you own, then rerunning the launcher. Vite handles client HMR.
 
 ## Behaviours worth knowing before concluding something is broken
 
@@ -262,15 +256,10 @@ compiler output, whose Retry reloads only that file and whose Report Issue opens
 new issue titled "Issue: ", labelled `bug`, filled in from the card. A failed update the
 model survives can be dismissed, leaving the previous version to inspect.
 
-The page reloads once its server is other code: it asks `/__cad/server` for its
-`identityToken` (cadgen's version and a digest of its Python and client) and
-reloads on a new one, picking up the client that server serves. A
-source-checkout backend (`autoReload: true`) restarts on Python code changes and is
-asked every 2 s, every 0.4 s while it is down; an installed one, which changes only
-when another install replaces it on its port, every 5 s and whenever the window
-regains focus. The same install restarting does not reload. Vite 8 handles client HMR,
-uses compiled workspace exports and honors an explicit `PORT` while retaining
-strict port binding. React 19 is deduplicated with the shared packages.
+The page checks its session's `identityToken` and reloads when the served client
+changes. Python code does not trigger a server restart: the engine owns other
+pages and sessions. Vite handles client HMR and consumes compiled workspace
+exports; React is deduplicated with the shared packages.
 
 Prompt actions prepare clipboard content for an external composer. References
 name the file by its absolute path, in the canonical selector grammar. Image writes

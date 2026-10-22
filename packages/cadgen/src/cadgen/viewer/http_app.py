@@ -30,12 +30,11 @@ import sys
 import threading
 from pathlib import Path
 
-from . import reload as dev_reload
 from .backend import absolute_path, asset_path
 from .content_types import content_type_for_path, content_type_for_static_asset, extension_of
 from .encoding import UriError, strict_decode_uri_component
 from .scanner import CAD_CATALOG_SCHEMA_VERSION, VIEWER_EXTENSIONS, catalog_entry, to_posix_path
-from .xbf import RELAY_PREFIX, EngineDocuments
+from .documents import EngineDocuments
 
 __all__ = [
     "CadApp",
@@ -251,7 +250,7 @@ class CadApp:
     relative ``?file=`` against it, and it bounds nothing.
     """
 
-    def __init__(self, *, host: str, port: int, dist_dir: str = "", start: str | None = None, identity: str | None = None):
+    def __init__(self, *, host: str, port: int, dist_dir: str = "", start: str | None = None, identity: str | None = None, documents=None):
         from cadgen._internal.picker import available
 
         from .drawings import DrawingRenders
@@ -261,7 +260,7 @@ class CadApp:
         self.drawings = DrawingRenders(on_crash=lambda error: self._crashed(error, bugs_only=True))
         # The engine's documents (an .xbf, a STEP): each served off the request, and the page's
         # reads of them relayed to the engine (``xbf.py``).
-        self.engine_documents = EngineDocuments(on_crash=lambda error: self._crashed(error, bugs_only=True))
+        self.engine_documents = documents or EngineDocuments(on_crash=lambda error: self._crashed(error, bugs_only=True))
         self.prompt_files = PromptFiles()
         self.start = to_posix_path(os.path.abspath(start if start is not None else _working_folder()))
         # Whether this computer has a file chooser for the home's Open (``POST /__cad/pick``).
@@ -279,7 +278,7 @@ class CadApp:
         # this is False and the whole mechanism is absent: nothing is watched
         # and no request is counted. The page still asks who its server is, at
         # an installed cadence, to reload under another install on its port.
-        self.auto_reload = dev_reload.running_from_source_checkout()
+        self.auto_reload = False
         self._request_lock = threading.Lock()
         self._busy_requests = 0
         self._recents = None
@@ -432,7 +431,7 @@ class CadApp:
         False there and this is a straight call.
         """
         try:
-            if not self.auto_reload or request.path in _UNCOUNTED_ROUTES or request.path.startswith(RELAY_PREFIX):
+            if not self.auto_reload or request.path in _UNCOUNTED_ROUTES:
                 self._dispatch(request, response)
                 return
             with self._request_lock:
@@ -492,10 +491,6 @@ class CadApp:
                     else:
                         status, body = self.engine_documents.response(query.get("file") or "")
                         response.send_json(status, body)
-                elif pathname.startswith(RELAY_PREFIX):
-                    # The page's reads of an engine document, relayed to the engine (``xbf.py``).
-                    status, body, content_type = self.engine_documents.relay(pathname, query)
-                    response.send_bytes(status, body, content_type, RAW_FILE_HEADERS)
                 elif pathname == "/__cad/prompt-files" or pathname.startswith("/__cad/prompt-files/"):
                     self._handle_prompt_files_get(request, response, pathname, query)
                 elif pathname == "/__cad/asset":

@@ -98,13 +98,16 @@ export function createTunnelFetch(server: Pick<Server, 'http'>): typeof fetch {
   return async (input, init) => {
     const request = new Request(input, init);
     const method = request.method.toUpperCase();
+    const target = new URL(request.url);
+    // Host call slots must remain available while the page waits for a model edit.
+    if (target.pathname.endsWith('/version')) target.searchParams.set('wait', '0');
     const body = method === 'GET' || method === 'HEAD' ? '' : encodeBase64(new Uint8Array(await request.arrayBuffer()));
     const headers: Record<string, string> = {};
     request.headers.forEach((value, name) => { headers[name] = value; });
     const send = async (range?: string, etag?: string): Promise<TunnelReply> => {
       const asked = range ? { ...headers, range, ...(etag ? { 'if-range': etag } : {}) } : headers;
       try {
-        return await server.http({ method, url: request.url, headers: asked, body }, { signal: request.signal });
+        return await server.http({ method, url: target.href, headers: asked, body }, { signal: request.signal });
       } catch (error) {
         if (request.signal.aborted) throw request.signal.reason ?? error;
         // What fetch itself throws for a request that never got a response.
