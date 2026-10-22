@@ -2,7 +2,7 @@
  * The views a prompt carries: how the viewer stood when each part of the annotation was drawn. A view is said in a snapshot job's own words (`camera`,
  * `display.mode` and `display.grid`, `display.clip` and `display.exploded`, `kinematics` or
  * `jointValues`, `animation`, `selection.hide` and `selection.focus`, and the picture's `width` and
- * `height`), so the prompt's views file is a job `cadgen snapshot --job` renders as it was.
+ * `height`), so the prompt's views file is a job `cadgen snapshot --annotation PACKET --camera authored` draws as it was.
  *
  * @typedef {{
  *   camera: { position: number[], target: number[], up: number[], orthographicHalfHeight: number },

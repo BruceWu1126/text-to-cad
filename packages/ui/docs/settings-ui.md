@@ -828,8 +828,9 @@ note has gone. Copy Prompt keeps it all, since nothing has gone yet: its button
 shows a tick for a moment. A failure keeps the note and says why in the box. The message is
 one format, sent, queued or copied: what the person wrote; then `File: <path>`; then
 `References:` and one reference per line; then each file that travels as a file by its
-label and path — `Snapshot (cadgen snapshot --job):` — or the compact object under
-`Snapshot JSON (cadgen snapshot --job):`.
+label and path — `Snapshot (cadgen snapshot --annotation):` — or the compact object under
+`Snapshot JSON (cadgen snapshot --annotation):`. An agent draws each view with
+`cadgen snapshot SRC OUT.png --annotation PACKET --camera authored`.
 
 ## Camera, animation and Preview
 
