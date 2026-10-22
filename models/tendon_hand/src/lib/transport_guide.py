@@ -1,6 +1,8 @@
 """Swept open guide shoes and full solid tendons for the axis crossover family."""
 from math import cos, radians, sin
-from cadgen import build123d as bd, srgb
+import build123d as bd
+
+from lib.color import srgb
 from lib.axis_transport import (point_at, tangent_at, GUIDE_OUTER_RADIUS,
     GUIDE_INNER_RADIUS, TENDON_RADIUS)
 

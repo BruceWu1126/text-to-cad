@@ -1,10 +1,10 @@
 from __future__ import annotations
-from cadgen import step
+from cadgen.engine import xbf
 
 import math
 from collections.abc import Sequence
 
-from cadgen import build123d as bd
+import build123d as bd
 
 
 DISPLAY_NAME = "Pelican riding a bicycle"
@@ -133,19 +133,13 @@ def _oriented_box(
 
 
 def _cylinder_between(label: str, p1: Vector3, p2: Vector3, radius: float, color_name: str) -> bd.Shape:
-    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
-    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf
     axis = _v_sub(p2, p1)
     length = _v_len(axis)
     if length <= 1e-6:
         return _style(bd.Sphere(radius).moved(bd.Location(p1)), label, color_name)
     direction = _v_norm(axis)
-    wrapped = BRepPrimAPI_MakeCylinder(
-        gp_Ax2(gp_Pnt(*p1), gp_Dir(*direction)),
-        radius,
-        length,
-    ).Shape()
-    return _style(bd.Shape(obj=wrapped), label, color_name)
+    cylinder = bd.Cylinder(radius, length, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    return _style(cylinder.moved(bd.Plane(origin=p1, z_dir=direction).location), label, color_name)
 
 
 def _cylinder_y(label: str, center: Vector3, radius: float, length: float, color_name: str) -> bd.Shape:
@@ -318,7 +312,7 @@ def _make_ground_shadow() -> bd.Compound:
     return _group("subtle_ground_shadow", [front_pad, rear_pad])
 
 
-@step(out="../../STEP/pelican_riding_bicycle/pelican_riding_bicycle.step")
+@xbf(out="../../XBF/pelican_riding_bicycle/pelican_riding_bicycle.xbf")
 def pelican_riding_bicycle() -> bd.Compound:
     bicycle = _make_bicycle()
     pelican = _make_pelican()

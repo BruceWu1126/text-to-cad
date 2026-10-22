@@ -4,8 +4,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cadgen import build123d as bd
-from cadgen import srgb
+import build123d as bd
+
+from lib.color import srgb
 
 PROFILE_PATH = Path(__file__).resolve().parents[1] / "profiles.json"
 

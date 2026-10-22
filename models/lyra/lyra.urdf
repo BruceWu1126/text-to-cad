@@ -4,8 +4,8 @@
     robot: lyra (RIGHT hand) | consumers: CAD Viewer, external URDF consumers (RViz/MoveIt)
     units: meters, kilograms, radians | frames: wrist-flange mount face center = origin,
     +Z distal (fingers up), +Y palmar, +X radial (thumb side)
-    root: wrist_mount (frame-only) | source of dimensions: lyra.step.py / lyra_parts/chain.py (mm)
-    meshes: 3MF/, one mm 3MF export per link in that link's part-local frame (scale 0.001); link
+    root: wrist_mount (frame-only) | source of dimensions: src/lyra.py / src/lib/chain.py (mm)
+    meshes: XBF/, the mm 3MF each link model of src/lyra.py declares, in that link's part-local frame (scale 0.001); link
     frames sit at joint centers with axes parallel to the palm at zero angles, so all visual
     origins are identity and URDF joint origins are pure translations
     inertials: CAD volume properties at a uniform ASSUMED density chosen so the hand masses
@@ -13,7 +13,7 @@
     only the density is assumed (confidence: estimated)
     collisions: per-link axis-aligned CAD bounding boxes (intentionally coarse)
     assumptions:
-    - joint limits/efforts are assumed tendon-drive values documented in lyra_parts/chain.py
+    - joint limits/efforts are assumed tendon-drive values documented in src/lib/chain.py
     - total mass 0.62 kg is assumed, distributed by CAD volume
   -->
   <link name="wrist_mount" />
@@ -26,7 +26,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/palm.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/palm.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -45,7 +45,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/index_proximal.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/index_proximal.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -64,7 +64,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/index_middle.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/index_middle.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -83,7 +83,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/index_distal.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/index_distal.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -102,7 +102,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/middle_proximal.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/middle_proximal.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -121,7 +121,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/middle_middle.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/middle_middle.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -140,7 +140,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/middle_distal.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/middle_distal.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -159,7 +159,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/ring_proximal.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/ring_proximal.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -178,7 +178,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/ring_middle.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/ring_middle.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -197,7 +197,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/ring_distal.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/ring_distal.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -216,7 +216,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/pinky_proximal.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/pinky_proximal.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -235,7 +235,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/pinky_middle.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/pinky_middle.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -254,7 +254,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/pinky_distal.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/pinky_distal.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -273,7 +273,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/thumb_base.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/thumb_base.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -292,7 +292,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/thumb_metacarpal.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/thumb_metacarpal.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -311,7 +311,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/thumb_proximal.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/thumb_proximal.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -330,7 +330,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="3MF/thumb_distal.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="XBF/thumb_distal.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>

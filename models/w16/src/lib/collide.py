@@ -1,7 +1,7 @@
 """Kinematic collision gate.
 
 Builds every moving part ONCE at theta = 0, then for each sampled crank angle
-applies the same rigid transforms the animation clips apply (`lib/animation.py`:
+applies the same rigid transforms the `crank` motion poses (`lib/kinematics.py`:
 crank spin, rod swing, piston slide, cam spin, valve lift, follower rock) and
 tests the required pairs for interpenetration:
 
@@ -23,7 +23,7 @@ import math
 import sys
 import time
 
-from cadgen import build123d as bd
+import build123d as bd
 
 from lib import kin, spec as S
 
@@ -92,7 +92,7 @@ def clash_volume(a, b):
 
 
 # ---------------------------------------------------------------------------
-# Motion: rest shapes + a transform per theta (the clips in lib/animation.py, exactly)
+# Motion: rest shapes + a transform per theta (the `crank` motion of lib/kinematics.py)
 # ---------------------------------------------------------------------------
 
 class Mover:

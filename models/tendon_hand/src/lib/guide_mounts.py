@@ -7,7 +7,9 @@ Guide ends shared by two adjacent liners use one clamping datum.
 from dataclasses import dataclass, field
 from collections import defaultdict
 import numpy as np
-from cadgen import build123d as bd, srgb
+import build123d as bd
+
+from lib.color import srgb
 from lib.layout import JOINT_BY_NAME, FINGERS, finger_fan_matrix
 from lib.finger_routing import endpoint, tangent
 from lib.neutral_routes import NEUTRAL_ROUTES

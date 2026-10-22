@@ -7,7 +7,9 @@ rounded tip bridge and two bored pad/nail seats.
 """
 from math import sqrt
 
-from cadgen import build123d as bd, srgb
+import build123d as bd
+
+from lib.color import srgb
 
 
 def _swept_rib(points, radius=.66):

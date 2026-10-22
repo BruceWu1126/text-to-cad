@@ -19,8 +19,8 @@ Units: millimetres. Right-handed.
 So the front axle is x = 0, the rear axle is x = -3600, the ground is z = 0,
 and the car is mirror-symmetric about the y = 0 plane. Every part module
 builds in these car coordinates directly (no part-local frames) so the
-assembly is a flat list of correctly-placed children and the animation sidecar
-can rotate things about real, stated pivots.
+assembly is a flat list of correctly-placed children and `f1.py`'s joints
+turn things about real, stated pivots.
 
 --------------------------------------------------------------------------
 DESIGN LANGUAGE  (the aesthetic rubric, expressed as rules)
@@ -65,7 +65,7 @@ from __future__ import annotations
 
 import math
 
-from cadgen import build123d as bd
+import build123d as bd
 
 # ==========================================================================
 # PACKAGE — overall vehicle
@@ -200,8 +200,8 @@ BEAM_WING_CHORD = 175.0
 # SUSPENSION HARDPOINTS — the single source of truth
 #
 # Stated for the LEFT (+Y) side; the right side is the y-mirror. Every
-# suspension member, the uprights, the steering rack and the animation sidecar
-# read these, so a member never "nearly" reaches its joint.
+# suspension member, the uprights, the steering rack and `f1.py`'s steering
+# motion read these, so a member never "nearly" reaches its joint.
 #
 # The two front ball joints DEFINE the steering axis. The upright, brake, hub
 # and wheel rotate about that axis; the wishbones do not move, because their
@@ -343,7 +343,7 @@ SHOULDER_LINE = (
 
 # Plain RGB(A) tuples / sRGB hex strings, not bd.Color objects: build123d's
 # Shape.color setter builds the Color on assignment, and a module-level
-# bd.Color(...) would import the CAD kernel before the @step freshness gate.
+# bd.Color(...) would import the CAD kernel when this module loads.
 RED = (0.520, 0.043, 0.038)  # the bodywork red — deep, slightly warm
 RED_DEEP = (0.240, 0.022, 0.020)  # shadowed / inner face of a red panel
 

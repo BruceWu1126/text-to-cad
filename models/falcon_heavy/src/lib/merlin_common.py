@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from math import cos, radians, sin
 
-from cadgen import build123d as bd
+import build123d as bd
 
 DISPLAY_NAME = "SpaceX Merlin 1D sea-level engine (educational public-source reconstruction)"
 
@@ -55,12 +55,14 @@ EXPANSION_RATIO = (EXIT_RADIUS / THROAT_RADIUS) ** 2   # ~16 effective. LOW
 #    r_c <= 1830 - exit/2), so the vehicle copy uses 960 mm exit / 240 mm
 #    throat - still inside the public 0.93-1.10 m photo band, eps = 16. LOW.
 # 2) DETAIL_BOLTS toggles decorative bolt/bellows loops so 27 instances stay
-#    tractable; geometry of retained parts is identical.
+#    tractable; geometry of retained parts is identical. The vehicle builds
+#    every engine without them, so the constant is False here (it was a
+#    global the vehicle library set before each build).
 EXIT_DIAMETER = 960.0
 EXIT_RADIUS = EXIT_DIAMETER / 2.0
 THROAT_RADIUS = 120.0
 EXPANSION_RATIO = (EXIT_RADIUS / THROAT_RADIUS) ** 2
-DETAIL_BOLTS = True
+DETAIL_BOLTS = False
 
 BELL_LENGTH = 1165.0          # 80% Rao length for eps~16 at Rt=130. schematic
 Z_THROAT = BELL_LENGTH
@@ -96,9 +98,8 @@ CUT_INNER_ARC_DEG = 266.0
 # Palette
 # ---------------------------------------------------------------------------
 
-# Plain RGB(A) tuples / sRGB hex strings, not bd.Color objects: build123d's
-# Shape.color setter builds the Color on assignment, and a module-level
-# bd.Color(...) would import the CAD kernel before the @step freshness gate.
+# Plain RGB(A) tuples: build123d's Shape.color setter builds the Color on
+# assignment.
 COL_BELL_OUTER = (0.45, 0.46, 0.49, 1.0)     # dark oxidized regen bell
 COL_BELL_INNER = (0.10, 0.10, 0.12, 1.0)     # dark nozzle interior
 COL_CHAMBER = (0.58, 0.56, 0.52, 1.0)        # warm alloy chamber

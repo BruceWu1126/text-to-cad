@@ -34,7 +34,7 @@ from __future__ import annotations
 import math
 from bisect import bisect_left
 
-from cadgen import build123d as bd
+import build123d as bd
 
 # ---------------------------------------------------------------------------
 # package / hard points

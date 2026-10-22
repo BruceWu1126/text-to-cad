@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from cadgen.engine import configuration, couple, xbf
+
 import math
 from collections.abc import Sequence
 
-from cadgen import step  # noqa: E402
-from cadgen import build123d as bd
+import build123d as bd
 
 
 DISPLAY_NAME = "Mars rover concept vehicle"
@@ -16,9 +17,8 @@ DISPLAY_NAME = "Mars rover concept vehicle"
 # - the vehicle is modeled in its display pose: suspension neutral, arm in a
 #   sampling hover, mast head level, solar wings deployed, HGA at 35 deg
 #
-# Kinematics (typed mates) is declared on the @step decorator from KINEMATICS
-# below and travels in the model's sidecar; choreography is the ANIMATION clips,
-# baked to keyframes in the same sidecar. Mate axes and clip pivots are built
+# The mechanism is build123d joints on the top-level groups (`_connect` below),
+# with couplings and configurations in the model's body. Joint axes are built
 # from the SAME derived constants the geometry uses, so re-deriving the layout
 # re-derives the pivots.
 
@@ -235,19 +235,13 @@ def oriented_box(
 
 
 def cylinder_between(label: str, p1: Vector3, p2: Vector3, radius: float, color_name: str) -> bd.Shape:
-    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
-    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf
     axis = v_sub(p2, p1)
     length = v_len(axis)
     if length <= 1e-6:
         return style(bd.Sphere(radius).moved(bd.Location(p1)), label, color_name)
     direction = v_norm(axis)
-    wrapped = BRepPrimAPI_MakeCylinder(
-        gp_Ax2(gp_Pnt(*p1), gp_Dir(*direction)),
-        radius,
-        length,
-    ).Shape()
-    return style(bd.Shape(obj=wrapped), label, color_name)
+    cylinder = bd.Cylinder(radius, length, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    return style(cylinder.moved(bd.Plane(origin=p1, z_dir=direction).location), label, color_name)
 
 
 def cylinder_x(label: str, center: Vector3, radius: float, length: float, color_name: str) -> bd.Shape:
@@ -425,9 +419,9 @@ def body_shell() -> bd.Compound:
 
 
 def deck_lid() -> bd.Compound:
-    # Front-left deck plate: the cutaway lid the sidecar lifts to reveal the
-    # avionics/power/science bays. The dust patch rides on the lid; the sidecar
-    # styles it by its name (`deck_lid_dust_patch`).
+    # Front-left deck plate: the cutaway lid `lid_lift` raises to reveal the
+    # avionics/power/science bays. The dust patch rides on the lid
+    # (`deck_lid_dust_patch`).
     parts = [
         oriented_box("deck_lid_plate", (575.0, 255.0, deck_z - 11.0),
                      920.0, 770.0, 22.0, color_name="ivory_panel", fillet_radius=5.0),
@@ -645,8 +639,7 @@ def rocker(s: float, side: str) -> bd.Compound:
     steer_mount = (x_front, s * y_wheel, STEER_TOP_Z)
     bogie_pt = (BOGIE_PIVOT[0], s * BOGIE_PIVOT[1], BOGIE_PIVOT[2])
     parts = [
-        # the accent hub cap's name is what the sidecar accent palette restyles
-        # it by
+        # the accent hub cap, named for its accent colour
         cylinder_y(f"rocker_{side}_pivot_accent_cap", (pivot[0], s * (y_susp + 52.0), pivot[2]), 48.0, 14.0, "jpl_orange"),
         cylinder_y(f"rocker_{side}_pivot_hub", pivot, 70.0, 90.0, "satin_titanium"),
         cylinder_between(f"rocker_{side}_front_tube", pivot, front_elbow, 34.0, "satin_titanium"),
@@ -984,7 +977,7 @@ def antenna_whips() -> bd.Compound:
 
 
 def solar_wing(s: float, side: str) -> bd.Compound:
-    # Modeled at the display deploy angle; the sidecar rotates about the hinge
+    # Modeled at the display deploy angle; `solar_<side>` turns it about the hinge
     # axis (X-parallel line at y=±half_wid, z=deck+6) by the deploy delta.
     alpha = math.radians(SOLAR_DEPLOY_DEG)
     o = (0.0, s * math.sin(alpha), -math.cos(alpha))          # outward span direction
@@ -1043,32 +1036,24 @@ def power_rtg() -> bd.Compound:
 
 
 # ---------------------------------------------------------------------------
-# Kinematics: typed mates.
+# Kinematics: build123d joints on the top-level groups.
 #
-# ZERO IS THE ARTIFACT AS WRITTEN. The rover is modeled in its display pose —
+# ZERO IS THE MODEL AS BUILT. The rover is modeled in its display pose --
 # suspension neutral, arm in a sampling hover, mast level, wings deployed at
-# SOLAR_DEPLOY_DEG, HGA at 35 deg — so every DOF below reads 0 there and the
-# limits are offsets FROM that pose, not absolute machine angles. The solar
-# wings are the one place that shows: the retired pose block carried a 102 deg
-# `offset` on the deploy driver to say the same thing, and here the offset is
-# simply gone because the modeled angle IS the origin.
+# SOLAR_DEPLOY_DEG, HGA at 35 deg -- so every joint is connected at 0 there and
+# the limits are offsets FROM that pose, not absolute machine angles.
 #
 # Every axis is built from the derived layout constants above rather than
-# retyped, so the pivots cannot drift from the geometry (the retired block had
-# to warn that its literals mirrored the default parameters).
-#
-# Mate refs name the top-level GROUPS by label; a mate on a group carries its
-# whole instance subtree, which is what makes the rocker-bogie chain three
-# mates instead of three hundred.
+# retyped, so the pivots cannot drift from the geometry. A joint on a group
+# carries its whole subtree, which is what makes the rocker-bogie chain three
+# joints instead of three hundred.
 #
 # What did NOT become kinematics, deliberately: the explode ramps, the accent
 # palette, the shell X-ray / emissive styling, the dust and RTG visibility
-# toggles, and the chassis heave/pitch/roll (which drove a MERGED feature over
-# sixteen groups — not one occurrence, so not one mate). Those are
-# presentation; the ones worth keeping are the ANIMATION clips below.
+# toggles, and the chassis heave/pitch/roll (one feature over sixteen groups,
+# not one joint). Those were presentation, as were the four animation clips,
+# which are not ported.
 # ---------------------------------------------------------------------------
-
-import cadgen  # noqa: E402  (light import; no kernel)
 
 _Y_AXIS = (0.0, 1.0, 0.0)
 _Z_AXIS = (0.0, 0.0, 1.0)
@@ -1108,26 +1093,37 @@ _STEER_GEARS = {"steer_front_left": 1.0, "steer_front_right": 0.79,
                 "steer_rear_left": -1.0, "steer_rear_right": -0.79}
 
 
-def _rover_kinematics() -> dict:
-    chassis = "#chassis_frame"
-    mates = []
+def _mate(fixed: bd.Shape, moving: bd.Shape, label: str, origin: Vector3, direction: Vector3,
+          limits: tuple[float, float], *, linear: bool = False) -> None:
+    """``moving`` turns (or, ``linear``, slides) about the axis on ``fixed``: build123d's
+    revolute or linear joint, the moving side's rigid joint on the joint's own frame,
+    connected at 0 where the parts stand."""
+    axis = bd.Axis(origin, direction)
+    if linear:
+        bd.LinearJoint(label, fixed, axis=axis, linear_range=limits)
+    else:
+        bd.RevoluteJoint(label, fixed, axis=axis, angular_range=limits)
+    bd.RigidJoint(label, moving, fixed.location * fixed.joints[label].relative_axis.location)
+    if linear:
+        fixed.joints[label].connect_to(moving.joints[label], position=0.0)
+    else:
+        fixed.joints[label].connect_to(moving.joints[label], angle=0.0)
+
+
+def _connect(groups: dict[str, bd.Shape]) -> None:
+    """The rover's 27 joints, on its top-level groups by label."""
+    chassis = groups["chassis_frame"]
 
     # -- rocker-bogie suspension -------------------------------------------
     # The rocker hangs off the chassis, the bogie off the rocker, and the
     # differential bar splits the two rockers (the ratio lives in the
-    # `rocker_split` coupling, exactly as the retired ratio driver did).
+    # `rocker_split` coupling).
     for side, sign in _SIDE_SIGN.items():
         rocker_pivot = ROCKER_PIVOT if sign > 0 else _mirror_y(ROCKER_PIVOT)
         bogie_pivot = BOGIE_PIVOT if sign > 0 else _mirror_y(BOGIE_PIVOT)
-        mates.append(cadgen.revolute(
-            f"rocker_{side}", parent=chassis, child=f"#rocker_{side}",
-            origin=rocker_pivot, direction=_Y_AXIS, limits=(-12, 12)))
-        mates.append(cadgen.revolute(
-            f"bogie_{side}", parent=f"#rocker_{side}", child=f"#bogie_{side}",
-            origin=bogie_pivot, direction=_Y_AXIS, limits=(-15, 15)))
-    mates.append(cadgen.revolute(
-        "differential", parent=chassis, child="#differential",
-        origin=_DIFFERENTIAL_PIVOT, direction=_Z_AXIS, limits=(-6, 6)))
+        _mate(chassis, groups[f"rocker_{side}"], f"rocker_{side}", rocker_pivot, _Y_AXIS, (-12, 12))
+        _mate(groups[f"rocker_{side}"], groups[f"bogie_{side}"], f"bogie_{side}", bogie_pivot, _Y_AXIS, (-15, 15))
+    _mate(chassis, groups["differential"], "differential", _DIFFERENTIAL_PIVOT, _Z_AXIS, (-6, 6))
 
     # -- steering and drive --------------------------------------------------
     # Each corner fork steers about the vertical through its own wheel center,
@@ -1136,307 +1132,78 @@ def _rover_kinematics() -> dict:
     # so they hang straight off their bogie.
     for mate_name, group_label, x0, side, on_bogie in _STEER_STATIONS:
         center = (x0, _SIDE_SIGN[side] * y_wheel, axle_z)
-        mates.append(cadgen.revolute(
-            mate_name,
-            parent=f"#bogie_{side}" if on_bogie else f"#rocker_{side}",
-            child=f"#{group_label}",
-            origin=center, direction=_Z_AXIS, limits=(-60, 60)))
+        carrier = groups[f"bogie_{side}" if on_bogie else f"rocker_{side}"]
+        _mate(carrier, groups[group_label], mate_name, center, _Z_AXIS, (-60, 60))
     for mate_name, group_label, x0, side, steer in _WHEEL_STATIONS:
         center = (x0, _SIDE_SIGN[side] * y_wheel, axle_z)
-        parent = f"#steering_{steer.removeprefix('steer_')}" if steer else f"#bogie_{side}"
-        mates.append(cadgen.revolute(
-            mate_name, parent=parent, child=f"#{group_label}",
-            origin=center, direction=_Y_AXIS, limits=(-360, 360)))
+        carrier = groups[f"steering_{steer.removeprefix('steer_')}"] if steer else groups[f"bogie_{side}"]
+        _mate(carrier, groups[group_label], mate_name, center, _Y_AXIS, (-360, 360))
 
     # -- remote sensing mast -------------------------------------------------
-    # Azimuth turns the COLUMN (the head rides it as a mate child); elevation
-    # pitches the head alone. The retired block hung both joints on the head,
-    # which a mate tree forbids — one parent mate per occurrence — and turning
-    # the column is the truer reading anyway.
+    # Azimuth turns the column (the head rides it); elevation pitches the head.
     mast_x, mast_y = MAST_XY
-    mates.append(cadgen.revolute(
-        "mast_yaw", parent=chassis, child="#mast_base",
-        origin=(mast_x, mast_y, deck_z), direction=_Z_AXIS, limits=(-170, 170)))
-    mates.append(cadgen.revolute(
-        "mast_pitch", parent="#mast_base", child="#mast_head",
-        origin=(mast_x, mast_y, HEAD_PIVOT_Z), direction=_Y_AXIS, limits=(-60, 25)))
+    _mate(chassis, groups["mast_base"], "mast_yaw", (mast_x, mast_y, deck_z), _Z_AXIS, (-170, 170))
+    _mate(groups["mast_base"], groups["mast_head"], "mast_pitch", (mast_x, mast_y, HEAD_PIVOT_Z), _Y_AXIS,
+          (-60, 25))
 
     # -- robotic arm: azimuth -> shoulder -> elbow -> wrist -> turret --------
-    mates.append(cadgen.revolute(
-        "arm_azim", parent=chassis, child="#arm_azimuth",
-        origin=(ARM_AZIMUTH_XY[0], ARM_AZIMUTH_XY[1], 715.0), direction=_Z_AXIS,
-        limits=(-45, 45)))
-    mates.append(cadgen.revolute(
-        "arm_shoulder", parent="#arm_azimuth", child="#arm_shoulder",
-        origin=ARM_SHOULDER, direction=_Y_AXIS, limits=(-60, 35)))
-    mates.append(cadgen.revolute(
-        "arm_elbow", parent="#arm_shoulder", child="#arm_elbow",
-        origin=ARM_ELBOW, direction=_Y_AXIS, limits=(-75, 45)))
-    mates.append(cadgen.revolute(
-        "arm_wrist", parent="#arm_elbow", child="#arm_wrist",
-        origin=ARM_WRIST, direction=_Y_AXIS, limits=(-70, 60)))
-    mates.append(cadgen.revolute(
-        "arm_turret", parent="#arm_wrist", child="#arm_turret",
-        origin=ARM_TURRET, direction=_wrist_dir, limits=(-180, 180)))
+    _mate(chassis, groups["arm_azimuth"], "arm_azim", (ARM_AZIMUTH_XY[0], ARM_AZIMUTH_XY[1], 715.0), _Z_AXIS,
+          (-45, 45))
+    _mate(groups["arm_azimuth"], groups["arm_shoulder"], "arm_shoulder", ARM_SHOULDER, _Y_AXIS, (-60, 35))
+    _mate(groups["arm_shoulder"], groups["arm_elbow"], "arm_elbow", ARM_ELBOW, _Y_AXIS, (-75, 45))
+    _mate(groups["arm_elbow"], groups["arm_wrist"], "arm_wrist", ARM_WRIST, _Y_AXIS, (-70, 60))
+    _mate(groups["arm_wrist"], groups["arm_turret"], "arm_turret", ARM_TURRET, _wrist_dir, (-180, 180))
 
     # -- antennas and solar wings -------------------------------------------
-    mates.append(cadgen.revolute(
-        "hga_elev", parent="#antenna_hga_mast", child="#antenna_hga_dish",
-        origin=HGA_ELEV_PIVOT, direction=_Y_AXIS, limits=(-15, 55)))
+    _mate(groups["antenna_hga_mast"], groups["antenna_hga_dish"], "hga_elev", HGA_ELEV_PIVOT, _Y_AXIS, (-15, 55))
     for side, sign in _SIDE_SIGN.items():
         hinge = (-150.0, sign * half_wid, SOLAR_HINGE_Z)
         # Modeled at SOLAR_DEPLOY_DEG, so 0 is deployed: stowing is -82 deg on
         # the left wing and +82 on the right (mirrored hinges, one X axis).
         limits = (-82, 13) if sign > 0 else (-13, 82)
-        mates.append(cadgen.revolute(
-            f"solar_{side}", parent=chassis, child=f"#solar_wing_{side}",
-            origin=hinge, direction=_X_AXIS, limits=limits))
+        _mate(chassis, groups[f"solar_wing_{side}"], f"solar_{side}", hinge, _X_AXIS, limits)
 
-    # -- cutaway hardware ----------------------------------------------------
-    # Real motion of real parts, kept as mates; the opacity/emissive half of
-    # the retired `cutaway_fraction` driver was presentation and is gone.
-    mates.append(cadgen.slider(
-        "lid_lift", parent=chassis, child="#deck_lid",
-        origin=(575.0, 255.0, deck_z), direction=_Z_AXIS, limits=(0, 420)))
-    mates.append(cadgen.revolute(
-        "panel_swing", parent=chassis, child="#side_panel_left",
-        origin=_PANEL_HINGE, direction=_X_AXIS, limits=(-75, 0)))
-
-    couplings = [
-        # One knob rolls all six wheels: same diameter, same axis, ratio 1.
-        cadgen.couple("drive", {name: 1.0 for name, *_rest in _WHEEL_STATIONS},
-                      limits=(0, 360)),
-        # Ackermann-ish coordinated steer: the retired grand tour swept the
-        # front pair 48/38 deg and the rear pair the other way, which is this
-        # gear set with the front-left as the unit.
-        cadgen.couple("steer", _STEER_GEARS, limits=(-48, 48)),
-        # Crab walk: every corner to the same heading.
-        cadgen.couple("crab", {name: 1.0 for name, *_rest in _STEER_STATIONS},
-                      limits=(-60, 60)),
-        # Rockers counter-rotate and the differential bar takes half the split,
-        # which is exactly the retired {"kind": "ratio", ..., "ratio": 0.5}.
-        cadgen.couple("rocker_split",
-                      {"rocker_left": 1.0, "rocker_right": -1.0, "differential": 0.5},
-                      limits=(-12, 12)),
-        cadgen.couple("bogie_pitch", {"bogie_left": 1.0, "bogie_right": 1.0},
-                      limits=(-15, 15)),
-        # Mirrored hinges, so one deploy knob drives the wings apart.
-        cadgen.couple("solar_deploy", {"solar_left": 1.0, "solar_right": -1.0},
-                      limits=(-82, 13)),
-        # The retired cutaway_fraction geared the lid 420 mm up and swung the
-        # left panel 75 deg out; same two numbers, now over real DOFs.
-        cadgen.couple("cutaway", {"lid_lift": 420.0, "panel_swing": -75.0},
-                      limits=(0, 1)),
-    ]
-
-    poses = {
-        # Cruise stage / launch configuration: wings folded in, arm tucked,
-        # mast down, HGA parked.
-        "stowed": {"solar_deploy": -82, "arm_shoulder": 35, "arm_elbow": -75,
-                   "arm_wrist": 60, "mast_pitch": -60, "hga_elev": -15},
-        # On-surface science attitude: HGA on Earth, mast scanning off to port.
-        "deployed": {"hga_elev": 35, "mast_yaw": -60, "mast_pitch": 12},
-        # Arm out over a target ahead of the front-left wheel, turret presenting
-        # the drill.
-        "arm_reach": {"arm_azim": -18, "arm_shoulder": -30, "arm_elbow": 40,
-                      "arm_wrist": -25, "arm_turret": 90},
-        # Deck open for the internals.
-        "cutaway_open": {"cutaway": 1},
-    }
-
-    return {"mates": mates, "couplings": couplings, "poses": poses}
+    # -- cutaway hardware: the lid lifts, the left side panel swings clear ----
+    _mate(chassis, groups["deck_lid"], "lid_lift", (575.0, 255.0, deck_z), _Z_AXIS, (0, 420), linear=True)
+    _mate(chassis, groups["side_panel_left"], "panel_swing", _PANEL_HINGE, _X_AXIS, (-75, 0))
 
 
-KINEMATICS = _rover_kinematics()
+# One control each, driving several joints by ratio: name -> (range, ratios).
+_COUPLINGS = {
+    # One knob rolls all six wheels: same diameter, same axis, ratio 1.
+    "drive": ((0, 360), {name: 1.0 for name, *_rest in _WHEEL_STATIONS}),
+    # Ackermann-ish coordinated steer, the front-left fork as the unit.
+    "steer": ((-48, 48), _STEER_GEARS),
+    # Crab walk: every corner to the same heading.
+    "crab": ((-60, 60), {name: 1.0 for name, *_rest in _STEER_STATIONS}),
+    # Rockers counter-rotate and the differential bar takes half the split.
+    "rocker_split": ((-12, 12), {"rocker_left": 1.0, "rocker_right": -1.0, "differential": 0.5}),
+    "bogie_pitch": ((-15, 15), {"bogie_left": 1.0, "bogie_right": 1.0}),
+    # Mirrored hinges, so one deploy knob drives the wings apart.
+    "solar_deploy": ((-82, 13), {"solar_left": 1.0, "solar_right": -1.0}),
+    # The lid 420 mm up and the left panel 75 deg out.
+    "cutaway": ((0, 1), {"lid_lift": 420.0, "panel_swing": -75.0}),
+}
 
-# ---------------------------------------------------------------------------
-# Assembly
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Animation: clips sampled to keyframes when the model builds. Groups are
-# targeted by label, and every pivot is the derived constant the geometry and
-# the mates use. The handle PREMULTIPLIES, so a chain is written parent-last: a
-# part turns about its own pivot first, then each later call wraps it in the
-# next link outward -- forward kinematics folded by hand.
-# ---------------------------------------------------------------------------
-
-# Everything bolted to the warm body: it rides the chassis bob but has no
-# articulation of its own. The terrain is absent: the ground stays put.
-_BODY = (
-    "#chassis_frame", "#body_core", "#body_shell", "#deck_lid", "#side_panel_left",
-    "#access_panels", "#thermal_control", "#internals_avionics", "#internals_power",
-    "#science_payloads", "#cable_harness", "#dust_covers", "#dust_layer",
-    "#mast_base", "#mast_head", "#arm_azimuth", "#arm_shoulder", "#arm_elbow",
-    "#arm_wrist", "#arm_turret", "#antenna_hga_mast", "#antenna_hga_dish",
-    "#antenna_uhf", "#antenna_whips", "#solar_wing_left", "#solar_wing_right", "#power_rtg",
-)
-# The arm, shoulder-outward: (group, axis, pivot, angle key).
-_ARM_LINKS = (
-    ("#arm_azimuth", _Z_AXIS, (ARM_AZIMUTH_XY[0], ARM_AZIMUTH_XY[1], 715.0), "azim"),
-    ("#arm_shoulder", _Y_AXIS, ARM_SHOULDER, "shoulder"),
-    ("#arm_elbow", _Y_AXIS, ARM_ELBOW, "elbow"),
-    ("#arm_wrist", _Y_AXIS, ARM_WRIST, "wrist"),
-    ("#arm_turret", _wrist_dir, ARM_TURRET, "turret"),
-)
-_FORK_ON_BOGIE = {mate: on_bogie for mate, _group, _x, _side, on_bogie in _STEER_STATIONS}
-_MAST_FOOT = (MAST_XY[0], MAST_XY[1], deck_z)
-_MAST_NECK = (MAST_XY[0], MAST_XY[1], HEAD_PIVOT_Z)
-
-
-def _sine(u: float) -> float:
-    """0 -> 1 -> 0 over u in [0, 1]."""
-    return 0.5 - 0.5 * math.cos(math.tau * u)
-
-
-def _smooth(u: float) -> float:
-    c = min(1.0, max(0.0, u))
-    return c * c * (3.0 - 2.0 * c)
-
-
-def _bump(u: float, start: float, end: float) -> float:
-    """0 -> 1 -> 0 across [start, end] of the clip, 0 outside it."""
-    return 0.0 if u <= start or u >= end else _sine((u - start) / (end - start))
-
-
-def _suspension(m, *, heave: float, rocker_split: float, bogie_pitch: float, drive: float, steer: float) -> None:
-    """One frame of the rocker-bogie chain, folded in the mates' parent order:
-    wheel -> fork -> bogie -> rocker -> body."""
-    lift = (0.0, 0.0, heave)
-    m.get(*_BODY).translate(lift)
-    rocker_deg = {"left": rocker_split, "right": -rocker_split}
-    pivots = {
-        side: (ROCKER_PIVOT if sign > 0 else _mirror_y(ROCKER_PIVOT), BOGIE_PIVOT if sign > 0 else _mirror_y(BOGIE_PIVOT))
-        for side, sign in _SIDE_SIGN.items()
-    }
-    for side, (rocker_pivot, bogie_pivot) in pivots.items():
-        m.get(f"#rocker_{side}").rotate(_Y_AXIS, rocker_deg[side], rocker_pivot).translate(lift)
-        bogie = m.get(f"#bogie_{side}").rotate(_Y_AXIS, bogie_pitch, bogie_pivot)
-        bogie.rotate(_Y_AXIS, rocker_deg[side], rocker_pivot).translate(lift)
-    # The differential bar splits the two rockers at half rate.
-    m.get("#differential").rotate(_Z_AXIS, rocker_split * 0.5, _DIFFERENTIAL_PIVOT).translate(lift)
-    for _mate, wheel, x0, side, steer_mate in _WHEEL_STATIONS:
-        center = (x0, _SIDE_SIGN[side] * y_wheel, axle_z)
-        rocker_pivot, bogie_pivot = pivots[side]
-        steer_deg = steer * _STEER_GEARS[steer_mate] if steer_mate else 0.0
-        on_bogie = _FORK_ON_BOGIE[steer_mate] if steer_mate else True
-        hub = m.get(f"#{wheel}").rotate(_Y_AXIS, drive, center)  # its own axle
-        links = [hub]
-        if steer_mate:
-            links.append(m.get(f"#steering_{steer_mate.removeprefix('steer_')}"))
-        for link in links:
-            link.rotate(_Z_AXIS, steer_deg, center)  # the steering fork
-            if on_bogie:
-                link.rotate(_Y_AXIS, bogie_pitch, bogie_pivot)
-            link.rotate(_Y_AXIS, rocker_deg[side], rocker_pivot).translate(lift)
-
-
-def _arm_chain(m, angles: dict[str, float]) -> None:
-    """The arm, each link turned about its own joint and then by every joint
-    above it: later calls premultiply, so the parent wraps the child."""
-    for index, (group, axis, pivot, key) in enumerate(_ARM_LINKS):
-        link = m.get(group).rotate(axis, angles.get(key, 0.0), pivot)
-        for _up, up_axis, up_pivot, up_key in reversed(_ARM_LINKS[:index]):
-            link.rotate(up_axis, angles.get(up_key, 0.0), up_pivot)
-
-
-def _mast_scan(m, yaw_deg: float, pitch_deg: float) -> None:
-    """Azimuth turns the column; elevation pitches the head on top of it."""
-    m.get("#mast_base").rotate(_Z_AXIS, yaw_deg, _MAST_FOOT)
-    m.get("#mast_head").rotate(_Y_AXIS, pitch_deg, _MAST_NECK).rotate(_Z_AXIS, yaw_deg, _MAST_FOOT)
-
-
-def _drive_around(t: float, m) -> None:
-    u = t / 18.0
-    steer = 34.0 * math.sin(math.tau * 2.0 * u)
-    _suspension(
-        m,
-        heave=18.0 * math.sin(math.tau * 10.0 * u),
-        rocker_split=6.0 * math.sin(math.tau * 5.0 * u),
-        bogie_pitch=8.0 * math.sin(math.tau * 5.0 * u + 1.1),
-        drive=4.0 * 360.0 * u,  # four wheel revolutions a lap
-        steer=steer,
-    )
-    # The mast looks into the turn; it rides the body, so only its own two
-    # rotations are described here.
-    _mast_scan(m, -1.6 * steer, 8.0 * math.sin(math.tau * u))
-
-
-def _arm_cycle(t: float, m) -> None:
-    u = t / 12.0
-    # Reach out, dwell over the target while the turret indexes tools, come
-    # back. The dwell is where the drill would be on the rock.
-    reach = _bump(u, 0.0, 0.86)
-    turret = 90.0 * _smooth((u - 0.3) / 0.25) - 90.0 * _smooth((u - 0.62) / 0.2)
-    _arm_chain(m, {"azim": -18.0 * reach, "shoulder": -30.0 * reach, "elbow": 40.0 * reach,
-                   "wrist": -25.0 * reach, "turret": turret})
-    _mast_scan(m, -14.0 * reach, 22.0 * reach)
-
-
-def _deploy_sequence(t: float, m) -> None:
-    u = t / 20.0
-    # Staged the way the real thing would come alive: wings out, HGA up, mast
-    # raised and panned, arm checked out, deck opened.
-    wings = _smooth(u / 0.22)
-    hga = _smooth((u - 0.2) / 0.18)
-    mast = _smooth((u - 0.36) / 0.18)
-    arm = _bump(u, 0.5, 0.78)
-    cutaway = _bump(u, 0.74, 1.0)
-    # The wings start folded and open to the modeled deploy angle, this model's zero.
-    for side, sign in _SIDE_SIGN.items():
-        hinge = (-150.0, sign * half_wid, SOLAR_HINGE_Z)
-        m.get(f"#solar_wing_{side}").rotate(_X_AXIS, -sign * 82.0 * (1.0 - wings), hinge)
-    m.get("#antenna_hga_dish").rotate(_Y_AXIS, -15.0 + 50.0 * hga, HGA_ELEV_PIVOT)
-    _mast_scan(m, 150.0 * mast * math.sin(math.tau * u), -60.0 * (1.0 - mast))
-    _arm_chain(m, {"azim": -12.0 * arm, "shoulder": -22.0 * arm, "elbow": 30.0 * arm,
-                   "wrist": -18.0 * arm, "turret": 180.0 * arm})
-    # The deck lid lifts clear, the port panel swings out, and the dust film thins.
-    m.get("#deck_lid").translate((0.0, 0.0, 420.0 * cutaway))
-    m.get("#side_panel_left").rotate(_X_AXIS, -75.0 * cutaway, _PANEL_HINGE)
-    m.get("#dust_layer").opacity(1.0 - 0.85 * cutaway)
-
-
-# Each group's explode direction, scaled by a 520 mm peak.
-_EXPLODE = {
-    "#body_core": (0, 0, 0.35), "#body_shell": (0, 0, 0.5), "#deck_lid": (0, 0, 1.15),
-    "#side_panel_left": (0, 0.9, 0.15), "#access_panels": (0, -0.8, 0.1),
-    "#thermal_control": (0, -0.35, 0.75), "#internals_avionics": (0, 0, 0.85),
-    "#internals_power": (0.15, -0.2, 0.75), "#science_payloads": (-0.2, 0.15, 0.95),
-    "#cable_harness": (0, 0, 0.3), "#dust_covers": (0, 0, -0.4), "#dust_layer": (0, 0, 1.35),
-    "#rocker_left": (0, 0.45, 0), "#rocker_right": (0, -0.45, 0),
-    "#bogie_left": (0, 0.6, 0), "#bogie_right": (0, -0.6, 0), "#differential": (0, 0, 0.9),
-    "#steering_front_left": (0.15, 0.75, 0.1), "#steering_front_right": (0.15, -0.75, 0.1),
-    "#steering_rear_left": (-0.15, 0.75, 0.1), "#steering_rear_right": (-0.15, -0.75, 0.1),
-    "#wheel_front_left": (0.15, 1, 0), "#wheel_front_right": (0.15, -1, 0),
-    "#wheel_middle_left": (0, 1, 0), "#wheel_middle_right": (0, -1, 0),
-    "#wheel_rear_left": (-0.15, 1, 0), "#wheel_rear_right": (-0.15, -1, 0),
-    "#mast_base": (0, 0, 0.7), "#mast_head": (0, 0, 1.25),
-    "#arm_azimuth": (0.5, 0, 0.35), "#arm_shoulder": (0.8, 0, 0.5), "#arm_elbow": (1.05, 0, 0.6),
-    "#arm_wrist": (1.25, 0, 0.68), "#arm_turret": (1.45, 0, 0.78),
-    "#antenna_hga_mast": (-0.3, 0.5, 0.5), "#antenna_hga_dish": (-0.45, 0.75, 0.85),
-    "#antenna_uhf": (-0.35, -0.6, 0.6), "#antenna_whips": (-0.5, -0.8, 0.45),
-    "#solar_wing_left": (0, 0.85, 0.3), "#solar_wing_right": (0, -0.85, 0.3), "#power_rtg": (-0.95, 0, 0.15),
+_POSES = {
+    # Cruise stage / launch configuration: wings folded in, arm tucked,
+    # mast down, HGA parked.
+    "stowed": {"solar_deploy": -82, "arm_shoulder": 35, "arm_elbow": -75,
+               "arm_wrist": 60, "mast_pitch": -60, "hga_elev": -15},
+    # On-surface science attitude: HGA on Earth, mast scanning off to port.
+    "deployed": {"hga_elev": 35, "mast_yaw": -60, "mast_pitch": 12},
+    # Arm out over a target ahead of the front-left wheel, turret presenting
+    # the drill.
+    "arm_reach": {"arm_azim": -18, "arm_shoulder": -30, "arm_elbow": 40,
+                  "arm_wrist": -25, "arm_turret": 90},
+    # Deck open for the internals.
+    "cutaway_open": {"cutaway": 1},
 }
 
 
-def _exploded_assembly(t: float, m) -> None:
-    # One ramp out and back, each group along its own direction.
-    d = 520.0 * _sine(t / 12.0)
-    for group, (x, y, z) in _EXPLODE.items():
-        m.get(group).translate((x * d, y * d, z * d))
-
-
-ANIMATION = {
-    "driveAround": cadgen.clip(_drive_around, duration=18, label="Drive-around"),
-    "armCycle": cadgen.clip(_arm_cycle, duration=12, label="Arm sampling cycle"),
-    "deploySequence": cadgen.clip(_deploy_sequence, duration=20, label="Deploy sequence"),
-    "explodedAssembly": cadgen.clip(_exploded_assembly, duration=12, label="Exploded assembly"),
-}
-
-
-@step(out="../../STEP/mars_rover_concept/mars_rover_concept.step", kinematics=KINEMATICS, animation=ANIMATION)
+@xbf(out="../../XBF/mars_rover_concept/mars_rover_concept.xbf")
 def mars_rover_concept():
-    # Top-level children, in order (the mates and clips address them by label):
+    # Top-level children, in order (the joints address them by label):
     #  1 terrain            2 chassis_frame     3 body_core        4 body_shell
     #  5 deck_lid           6 side_panel_left   7 access_panels    8 thermal_control
     #  9 internals_avionics 10 internals_power  11 science_payloads 12 cable_harness
@@ -1494,7 +1261,13 @@ def mars_rover_concept():
         solar_wing(-1.0, "right"),
         power_rtg(),
     ]
-    return group("mars_rover_concept", children)
+    _connect({child.label: child for child in children})
+    rover = group("mars_rover_concept", children)
+    for name, (limits, ratios) in _COUPLINGS.items():
+        couple(rover, name, range=limits, **ratios)
+    for name, values in _POSES.items():
+        configuration(rover, name, **values)
+    return rover
 
 
 if __name__ == "__main__":

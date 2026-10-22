@@ -5,7 +5,9 @@ capstan guide outlets and wrist inlets. Split jaws have R.47 through bores;
 liners remain R.45. Fasteners are separate named solids with socket recesses.
 """
 from collections import defaultdict
-from cadgen import build123d as bd, report
+from cadgen.engine import report
+
+import build123d as bd
 from .guide_mounts import guide_end_registry, _bolt, _finish, _rod, _sweep
 from .finish import finish
 from .forearm_frame import SIDE_RAIL_X,SIDE_RAIL_WIDTH,SIDE_RAIL_LENGTH,SIDE_RAIL_HEIGHT,SIDE_RAIL_CENTER_Y,SIDE_RAIL_FILLET

@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
-from cadgen import build123d as bd
-from cadgen import dxf
+from cadgen.engine import dxf
+
+import build123d as bd
 
 WIDTH_MM = 80.0
 HEIGHT_MM = 50.0
@@ -30,10 +31,9 @@ def gasket_plate():
 
     # Open geometry, so it belongs on a marking layer: the cut layer must close.
     half = CROSSHAIR_LENGTH_MM / 2.0
-    crosshair = [bd.Line((-half, 0), (half, 0)), bd.Line((0, -half), (0, half))]
+    crosshair = bd.Compound([bd.Line((-half, 0), (half, 0)), bd.Line((0, -half), (0, half))])
 
-    return {"CUT": cut.sketch, "ENGRAVE": crosshair}
-
-
-if __name__ == "__main__":
-    gasket_plate()
+    # A part per layer, named by its label.
+    plate = cut.sketch
+    plate.label, crosshair.label = "CUT", "ENGRAVE"
+    return bd.Compound(children=[plate, crosshair], label="gasket_plate")

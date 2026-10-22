@@ -3,7 +3,9 @@
 The two 1.8 mm side frames stay outside X±42.5 mm. Existing actuator, guide,
 chassis and tendon geometry is immutable. All screws are nominal envelopes.
 """
-from cadgen import build123d as bd, srgb
+import build123d as bd
+
+from lib.color import srgb
 from .finish import finish
 from .actuator_fasteners import socket_screw
 from .forearm_frame import SIDE_RAIL_WIDTH,SIDE_RAIL_LENGTH,SIDE_RAIL_HEIGHT,SIDE_RAIL_CENTER_Y,SIDE_RAIL_FILLET

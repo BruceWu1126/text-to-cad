@@ -50,8 +50,8 @@ repo-scan*.md
 /scripts/bench/**/*.heapsnapshot
 /scripts/bench/**/*.png
 
-# Review media rendered next to a fixture. models/ holds CAD/robot sources,
-# generated 3D and fabrication outputs, and docs only; see models/README.md.
+# Review media rendered next to a fixture. models/ holds CAD/robot sources and docs
+# only; see models/README.md.
 models/**/*.png
 models/**/*.jpg
 models/**/*.jpeg
@@ -67,23 +67,18 @@ models/**/*.mov
 models/**/*.webm
 models/**/*.mkv
 
-# models-xbf/ is the xbf engine's staging corpus: sources only. Every build writes
-# into an XBF/ folder beside a model's src (the xbf, its sidecar, its exports), a drawing
-# into DXF/, an engineering drawing (@eng_drawing) its PDF into PDF/.
-models-xbf/**/XBF/
-models-xbf/**/DXF/
-models-xbf/**/PDF/
+# models/ holds sources only. Every build writes into an XBF/ folder beside a model's src
+# (the xbf, its exports), a drawing into DXF/, an engineering drawing (@eng_drawing) its PDF
+# into PDF/.
+models/**/XBF/
+models/**/DXF/
+models/**/PDF/
 # tom's vendor STEP inputs (536 MB, tom-cad's read-only data): a local copy, never committed.
-models-xbf/tom/STEP/
-models-xbf/**/__pycache__/
-models-xbf/**/*.png
-models-xbf/**/*.jpg
-models-xbf/**/*.jpeg
-models-xbf/**/*.gif
-models-xbf/**/*.webp
-models-xbf/**/*.svg
-models-xbf/**/*.mp4
-models-xbf/**/*.webm
+models/tom/STEP/
+# The unported models' frozen inputs and generated validation output (tendon_hand's
+# palm and native hand, 8.5 MB and 250 MB), wherever someone restores them.
+models/*/unported/STEP/
+models/*/unported/validation/
 
 # Component-GLB render packages are regenerated on demand; never committed.
 .*.step.glb/

@@ -41,7 +41,7 @@ is redeployed from its tag). The Vercel project's Root Directory setting (in
 Vercel, not this repo) must point at `apps/docs`.
 
 The hero is one GLB, `public/hero/planetary.glb`: the planetary gear model
-(`models-xbf/assemblies/src/planetary_gear_assembly/`) exported from its document by
+(`models/assemblies/src/planetary_gear_assembly/`) exported from its document by
 `cadgen export`, its parts, colours and its `meshCycle` motion, which the export bakes
 into a clip. It is committed as a PLAIN file (never LFS: Vercel serves it statically
 with no backend). The page frames it, draws each part's folds and outline in the

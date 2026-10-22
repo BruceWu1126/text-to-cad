@@ -1,5 +1,5 @@
 from copy import deepcopy
-from cadgen import build123d as bd
+import build123d as bd
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Common,BRepAlgoAPI_Cut
 def _run(cls,a,b):
     a,b=deepcopy(a),deepcopy(b)

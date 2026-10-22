@@ -1,8 +1,8 @@
 from __future__ import annotations
-from cadgen import step
+from cadgen.engine import xbf
 from math import cos, radians, sin
 
-from cadgen import build123d as bd
+import build123d as bd
 
 
 BASE_DIAMETER = 90.0
@@ -125,7 +125,7 @@ def _make_baluster(index: int):
     return part
 
 
-@step(out="../../STEP/spiral_staircase/spiral_staircase.step")
+@xbf(out="../../XBF/spiral_staircase/spiral_staircase.xbf")
 def spiral_staircase():
     """Return the miniature spiral staircase model in millimeters."""
     parts = [_make_base(), _make_column()]

@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
-from cadgen import build123d as bd
-from cadgen import dxf
+from cadgen.engine import dxf
+
+import build123d as bd
 
 BLANK_WIDTH_MM = 60.0
 LEG_A_LENGTH_MM = 50.0
@@ -31,8 +32,8 @@ def l_bracket_flat():
     # Open geometry: allowed only because the layer name carries bend intent.
     bend = bd.Line((LEG_A_LENGTH_MM, 0.0), (LEG_A_LENGTH_MM, BLANK_WIDTH_MM))
 
-    return {"CUT": cut.sketch, "BEND": bend}
+    # A part per layer, named by its label.
+    blank = cut.sketch
+    blank.label, bend.label = "CUT", "BEND"
+    return bd.Compound(children=[blank, bend], label="l_bracket_flat")
 
-
-if __name__ == "__main__":
-    l_bracket_flat()

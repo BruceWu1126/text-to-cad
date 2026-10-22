@@ -4,8 +4,8 @@ Stdlib-only. Each digit segment is approximated by a conservative capsule
 (segment + radius) in its link frame; a pose is collision-free when every
 thumb capsule clears every finger capsule. The named grip poses are tuned
 to small POSITIVE clearances (pads kiss at ~+0.7..0.8 mm, never overlap),
-and the key orders of the `ANIMATION` clips in `src/lyra.py` are chosen so
-every adjacent smoothstep blend stays clear:
+and the key orders of the motions in `src/lyra.py` are chosen so every
+adjacent smoothstep blend stays clear:
 
 - pose tour: relaxed -> precision_pinch -> ok_sign -> point ->
   tripod_pinch -> fist (the fist only neighbors tripod/relaxed; blending
@@ -15,7 +15,7 @@ every adjacent smoothstep blend stays clear:
 
 Run after editing poses:
 
-    ../../../.venv/bin/python -m lib.clearance   (from models/lyra/src)
+    python -m lib.clearance   (from models/lyra/src)
 
 Exits nonzero if any named pose or animation path dips below zero.
 """

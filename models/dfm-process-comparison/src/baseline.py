@@ -1,10 +1,14 @@
-from cadgen import step, stl
+from cadgen.engine import materials, xbf
 from lib.tray_geometry import tray
 
-@step(out="../STEP/baseline.step")
-@stl(out="../STL/baseline.stl")
+
+@xbf(out="../XBF/baseline.xbf")
 def baseline():
-    return tray("baseline")
+    part = tray("baseline")
+    # the thin-wall FDM starting point: PLA (README)
+    part.material = materials.pla
+    return part
+
 
 if __name__ == "__main__":
     baseline()

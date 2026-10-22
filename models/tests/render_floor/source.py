@@ -1,7 +1,9 @@
-from cadgen import build123d as bd
-from cadgen import step
+from cadgen.engine import xbf
 
-@step(out="floor_positions.step")
+import build123d as bd
+
+
+@xbf(out="XBF/floor_positions.xbf")
 def floor_positions():
     parts = []
     for label, x, z, color in [
@@ -14,6 +16,3 @@ def floor_positions():
         part.color = bd.Color(*color)
         parts.append(part)
     return bd.Compound(children=parts)
-
-if __name__ == "__main__":
-    floor_positions()

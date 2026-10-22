@@ -1,9 +1,9 @@
 from __future__ import annotations
-from cadgen import step
+from cadgen.engine import xbf
 
 from math import atan2, cos, degrees, hypot, radians, sin
 
-from cadgen import build123d as bd
+import build123d as bd
 
 
 DISPLAY_NAME = "Cutaway miniature turbofan jet engine"
@@ -602,7 +602,7 @@ def _make_display_base() -> object:
     return _label(part, "display_base_rounded_rectangle_countersunk_holes", bd.Color(0.22, 0.24, 0.25, 1.0))
 
 
-@step(out="../../STEP/cutaway_turbofan_engine/cutaway_turbofan_engine.step")
+@xbf(out="../../XBF/cutaway_turbofan_engine/cutaway_turbofan_engine.xbf")
 def cutaway_turbofan_engine():
     """Return a labeled multi-body cutaway turbofan display model."""
     bodies = [

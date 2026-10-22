@@ -53,7 +53,7 @@ import math
 import sys
 from typing import Callable, Iterable, Sequence
 
-from cadgen import build123d as bd
+import build123d as bd
 
 
 # Run BRepAlgoAPI_Check as part of is_sound(). Costs real time on big

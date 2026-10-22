@@ -251,7 +251,7 @@ RULES: tuple[Rule, ...] = (
     Rule(("apps/api/**",), select(flags=["api"])),
     Rule(("apps/docs/**",), select(flags=["docs"])),
     # The hero's GLB check holds the GLB to the motion its model's script declares.
-    Rule(("models-xbf/assemblies/src/planetary_gear_assembly/planetary_gear_assembly.py",), select(flags=["docs"])),
+    Rule(("models/assemblies/src/planetary_gear_assembly/planetary_gear_assembly.py",), select(flags=["docs"])),
     # check-dependencies.mjs walks every app's source and runs in core-js, the cheapest job
     # that has it.
     Rule(("apps/docs/src/**",), select(flags=["core_js"])),
@@ -292,7 +292,7 @@ RULES: tuple[Rule, ...] = (
     # release scripts and workflows the contracts pin, the plugin manifests, configs and
     # root prose, the deploy, the manual bake of the look's environment (its image is
     # packages/cadgen's), the manual benchmarks and their inputs (a light test reads their pure
-    # helpers), and the sample models no test may read (the xbf migration corpus, models-xbf/, too).
+    # helpers), and the sample models no test may read.
     Rule((
         "scripts/release/**", "scripts/install/**", "scripts/github-workflows/deploy-vercel-app.sh",
         "scripts/look/**",
@@ -304,7 +304,7 @@ RULES: tuple[Rule, ...] = (
         "*.mcp.json", "plugin.json", "mcp.json", "skills.sh.json",
         "README.md", "AGENTS.md", "CONTRIBUTING.md", "SECURITY.md", "SPLIT_REPORT.md", "LICENSE", "docs/**",
         ".gitignore",
-        "models/**", "models-xbf/**",
+        "models/**",
     ), NOTHING),
 )
 

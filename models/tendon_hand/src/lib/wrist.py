@@ -3,7 +3,9 @@
 Yaw is Z through (0,-9,0); flexion is X through (0,0,0).
 Drive flats are +X for yaw and +Y for flexion. All dimensions millimetres.
 """
-from cadgen import build123d as bd, srgb
+import build123d as bd
+
+from lib.color import srgb
 
 WRIST_FOREARM_MOUNTS=tuple((x,-30.,z) for x in (-10.,10.) for z in (-9.,9.))
 WRIST_PALM_MOUNTS=((-24.,14.,-10.2),(24.,14.,-10.2))

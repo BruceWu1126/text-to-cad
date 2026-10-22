@@ -4,7 +4,9 @@ The carrier rotates about Z and carries two outboard X-axis bearing eyes.
 Neither orthogonal shaft traverses the tendon transport corridor. Four curved
 load-path ribbons join the peripheral flex eyes to the outboard yaw hubs.
 """
-from cadgen import build123d as bd, srgb
+import build123d as bd
+
+from lib.color import srgb
 from .layout import MCP_YAW_HUB_PLANES,CMC_YAW_HUB_PLANES
 from .phalanx import _drive_bore
 

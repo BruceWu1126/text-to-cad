@@ -1,76 +1,65 @@
-# moonwatch models
+# moonwatch models (case and movement)
 
-| Script                  | Artifact                       | Description                                                        |
-|-------------------------|--------------------------------|--------------------------------------------------------------------|
-| moonwatch.py            | STEP/moonwatch.step            | Full watch: case + dial/hands + movement + bracelet; carries kinematics and animation clips |
-| case.py                 | STEP/case.step                 | Case cluster: middle, bezel stack, crystal, caseback, crown, pushers, lugs |
-| dial.py                 | STEP/dial.step                 | Three-register step dial, applied indices, printed tracks, full hand stack |
-| movement.py             | STEP/movement.step             | Complete movement = movement_base + keyless_works + chrono_works    |
-| movement_base.py        | STEP/movement_base.step        | Main plate, barrel, going train, bridges, escapement, balance       |
-| keyless_works.py        | STEP/keyless_works.step        | Stem, winding/sliding pinions, setting lever, yoke, motion works    |
-| chrono_works.py         | STEP/chrono_works.step         | Column wheel, levers, lateral clutch, runners, hammers              |
-| bracelet.py             | STEP/bracelet.step             | Flat three-link bracelet, end links, fold-over clasp                |
-| finishing_sampler.py    | STEP/finishing_sampler.step    | Standing coupon exercising the shared finishing vocabulary          |
+The two main documents of `models/moonwatch`, ported to `cadgen.engine`:
 
-Build: `python src/<script>` per row; unchanged models are no-ops.
-Imported sources: none — every artifact is generated.
+| Script            | What it is                                | Description                                                     |
+|-------------------|-------------------------------------------|-----------------------------------------------------------------|
+| case.py           | model -> XBF/case.xbf                     | Case cluster: middle, bezel stack, crystal, caseback, crown, pushers, lugs |
+| movement.py       | model -> XBF/movement.xbf                 | Complete movement = movement_base + keyless_works + chrono_works (sub-assemblies) |
+| movement_base.py  | `@memo` layer of the movement             | Main plate, barrel, going train, bridges, escapement, balance  |
+| keyless_works.py  | `@memo` layer of the movement             | Stem, winding/sliding pinions, setting lever, yoke, motion works |
+| chrono_works.py   | `@memo` layer of the movement             | Column wheel, levers, lateral clutch, runners, hammers          |
 
-## Composition
+Build from this folder: `python case.py` and `python movement.py`. The two models
+are the only files the builds write.
 
-`moonwatch.py` and `movement.py` compose their children by FUNCTION: they
-import the sibling model module (importing never builds) and wrap its model
-function with `cadgen.compose.memo`, which caches the child's geometry as a
-traced scope keyed by that child's own source closure. The retired
-path-addressed `cadgen.compose.child_entry()` seam raises a teaching error.
+Only the three layers are `@memo`: each holds seconds of kernel work (movement_base
+alone is ~130 s cold), so an edit to one layer runs it and replays the other two, and
+a leaf edit costs about 4.5 s. The groups of parts inside a layer (`lib/mvt_*.py`,
+`_plate_parts` ... `_chrono_bridge_parts`) are plain functions: marking each of the
+19 added nothing beyond the layers (see "When to use `@memo`" in
+`models/README.md`). The case stays one body: `lib/case.py`'s band builder leaves
+`_BAND_CHAMFER_APPLIED` in its module for the polish builder to read, state a replay
+would not set, so no builder of the case is a `@memo`.
 
-## Shared code — `lib/`
+## Materials
 
-`lib/` holds plain modules; none of them is a model.
+The original's `materials=` finishes (`lib/materials.py`) are `Material`
+values set on the parts before they are composed, by the same leaf-label
+assignments (`apply_materials`). Each finish is the catalogue's entry for the
+metal, glass or rubber in the finish's look (`.but(...)`), or the project's own
+where the catalogue has none, with the old finish name as the description. A
+finish keeps the original's metallic, roughness and clearcoat (`coat`,
+`coat_roughness`), and takes the look fields its name implies:
 
-- `lib/spec.py` — master dimensional spec + shared palette. **Single source of
-  truth**; no builder restates a shared dimension. Read its header for the
-  coordinate conventions (watch frame vs movement local frame).
-- `lib/finishing.py` — shared finishing vocabulary: `anglage_top`,
-  `safe_chamfer`/`safe_fillet` (retry ladders), `slotted_screw`, `jewel*`,
-  `snailing_cutter`, `geneva_stripes_cutter`, `perlage_cutter`,
-  `straight_grain_cutter`, `train_wheel`, `pinion`, `heart_cam`. Use these —
-  do not fork private variants of the same vocabulary.
-- `lib/materials.py` — applies the shared material/appearance pass to a
-  finished compound.
-- Cluster builders: `lib/case.py`, `lib/dial.py`, `lib/mvt_base.py`,
-  `lib/mvt_keyless.py`, `lib/mvt_chrono.py`, `lib/bracelet.py` — each exposes
-  `build_*()` returning labeled, colored parts in the frame documented in
-  `lib/spec.py`.
+| Old finish | Material | Look beyond the original's metallic, roughness and coat |
+| --- | --- | --- |
+| brushed_steel | Stainless 316 | anisotropy 0.5 (brushed) |
+| case_mirror_polish | Stainless 316 | no grain |
+| polished_steel | Stainless 304 | no grain |
+| satin_steel | Stainless 304 | anisotropy 0.4 (satin) |
+| blued_screw | Steel 1018 | |
+| grained_lever | Steel 1018 | anisotropy 0.5 (straight grain) |
+| brass_part, copper_plate, gilt_wheel | Brass C360 | |
+| anglage_mirror | Brass C360 | roughness 0.1 (mirror; 0.14 before) |
+| bezel_anodized | Aluminum 6061-T6 | no grain |
+| glass | Glass, soda-lime | transmissive, ior 1.52 |
+| glass_back | `Sapphire` (corundum, 3980 kg/m^3) | transmissive, ior 1.77 |
+| ruby_jewel | `Ruby` (corundum, 3980 kg/m^3) | transmission 0.8, ior 1.77 |
+| rubber | NBR 70A | |
+| matte_print | `Matte Print`, no density | |
 
-Scripts sit directly in `src/`, so python already has `src/` on `sys.path`:
-`from lib import spec as S` and `import case` both work from any working
-directory, with no `sys.path` manipulation.
+Every finish has `color=None`, so parts keep their authored colours, and a
+transmissive part's colour is its tint. One face finish is painted: the bezel
+ring is polished steel and its snailed top annulus satin (`paint(ring, faces,
+FINISHES["satin_steel"])` in `case.py`). The chronograph works, which had no
+assignments in the original, take the base's finishes by the same rules
+(`MODEL_MATERIAL_ASSIGNMENTS["chrono_works"]`), so every part of both
+documents has a material.
 
-## Articulation
+## Not ported
 
-`moonwatch.py` declares `KINEMATICS` (typed mates, pure data), which lands in
-`STEP/moonwatch.step.json`. Choreography is the `ANIMATION` clips in
-`moonwatch.py`, baked to keyframes in that same sidecar when the watch builds.
-
-- **Mates** — the watch's real DOFs: `hour`, `minute`, `chrono_seconds`,
-  `sub_seconds`, `chrono_minutes`, `chrono_hours`, the going train (`center`,
-  `third`, `fourth`), the escapement (`escape`, `pallet`, `balance`), the
-  chronograph (`chrono_runner`, `coupling`), `crown` (cylindrical: `.turn` to
-  wind, `.travel` to pull out for setting), and the `pusher_start` /
-  `pusher_reset` sliders. Parts that must ride a moving part but are its
-  SIBLINGS in the instance tree (hand lume + hub, wheel pinions, pallet
-  stones, the balance's 16 timing screws, the stem on the crown) are joined
-  with `fastened` mates.
-- **Couplings** — the gear ratios, as ratio arithmetic, not code:
-  `running` (seconds of elapsed time, 0..3600) and `chrono` (seconds of
-  chronograph running, 0..1800).
-- **Poses** — `rest`, `one_minute`, `half_hour`, `chrono_at_10min`,
-  `start_pressed`, `reset_pressed`, `winding`, `setting`.
-- **`ANIMATION` in `moonwatch.py`** — choreography only: the `running`, `reveal`,
-  `showcase` and `grand_tour` clips (staged explodes, the movement's
-  lift-and-flip out of the case, the sinusoidal balance swing and the escape
-  wheel's per-beat snap — neither of the last two is a linear gearing, so
-  neither is a mate).
-
-The bezel is deliberately NOT a mate: a tachymeter bezel is press-fit and does
-not rotate.
+`moonwatch.py` (the full watch: its `KINEMATICS` mates and couplings and its
+`ANIMATION` clips), `dial.py`, `bracelet.py` and `finishing_sampler.py`. The
+animation is dropped by decision (the xbf has no animation). The four are kept, with
+their old sources, in `../unported/`.

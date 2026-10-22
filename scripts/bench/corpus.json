@@ -3,7 +3,7 @@
   "models": [
     {
       "name": "l_bracket",
-      "root": "models-xbf/examples",
+      "root": "models/examples",
       "cwd": "src",
       "targets": ["l_bracket.py"],
       "xbf": "XBF/l_bracket.xbf",
@@ -12,7 +12,7 @@
     },
     {
       "name": "planetary_gear",
-      "root": "models-xbf/assemblies",
+      "root": "models/assemblies",
       "cwd": "src/planetary_gear_assembly",
       "targets": ["planetary_gear_assembly.py"],
       "xbf": "XBF/planetary_gear_assembly/planetary_gear_assembly.xbf",
@@ -21,7 +21,7 @@
     },
     {
       "name": "qdd",
-      "root": "models-xbf/qdd_actuator",
+      "root": "models/qdd_actuator",
       "cwd": "src",
       "targets": ["qdd_actuator.py"],
       "xbf": "XBF/qdd_actuator.xbf",
@@ -29,7 +29,7 @@
     },
     {
       "name": "motorbike",
-      "root": "models-xbf/motorbike",
+      "root": "models/motorbike",
       "cwd": "src",
       "targets": ["motorbike.py"],
       "xbf": "XBF/motorbike.xbf",
@@ -37,7 +37,7 @@
     },
     {
       "name": "case",
-      "root": "models-xbf/moonwatch",
+      "root": "models/moonwatch",
       "cwd": "src",
       "targets": ["case.py"],
       "xbf": "XBF/case.xbf",
@@ -45,7 +45,7 @@
     },
     {
       "name": "juno",
-      "root": "models-xbf/juno",
+      "root": "models/juno",
       "cwd": "src",
       "targets": ["juno.py::juno"],
       "xbf": "XBF/juno.xbf",
@@ -54,7 +54,7 @@
     },
     {
       "name": "movement",
-      "root": "models-xbf/moonwatch",
+      "root": "models/moonwatch",
       "cwd": "src",
       "targets": ["movement.py"],
       "xbf": "XBF/movement.xbf",
@@ -62,7 +62,7 @@
     },
     {
       "name": "tom",
-      "root": "models-xbf/tom",
+      "root": "models/tom",
       "cwd": ".",
       "pythonpath": ["src"],
       "targets": ["src/tom.py"],
@@ -73,7 +73,7 @@
     },
     {
       "name": "hypercar",
-      "root": "models-xbf/hypercar",
+      "root": "models/hypercar",
       "cwd": "src",
       "targets": ["hypercar.py"],
       "xbf": "XBF/hypercar.xbf",
@@ -82,7 +82,7 @@
     },
     {
       "name": "f1",
-      "root": "models-xbf/f1",
+      "root": "models/f1",
       "cwd": "src",
       "targets": ["f1.py"],
       "xbf": "XBF/f1.xbf",

@@ -26,7 +26,7 @@ it, or `script.py::model`), its document (`xbf`), one `edit` (`{file, from, to}`
 `from` found exactly once in `file`), the inputs a build reads that are never
 committed (`needs`: tom's vendor STEP) and a `note`. The models, smallest first:
 `l_bracket`, `planetary_gear`, `qdd`, `motorbike`, `case`, `juno`, `movement`,
-`tom`, `hypercar` and `f1`, all from `models-xbf/`. `--dry-run` checks every key,
+`tom`, `hypercar` and `f1`, all from `models/`. `--dry-run` checks every key,
 that each file is there and each edit's `from` occurs once, and that the
 interpreter imports this checkout's cadgen (`--cadgen-src`; not the venv's
 editable install), and runs nothing.
@@ -86,7 +86,7 @@ STEP), then the sources.
 
 ```sh
 PYTHONPATH=packages/cadgen/src .venv/bin/python scripts/bench/occt_parity.py \
-  --doc motorbike=models-xbf/motorbike/XBF/motorbike.xbf --out tmp/bench/occt-parity/now
+  --doc motorbike=models/motorbike/XBF/motorbike.xbf --out tmp/bench/occt-parity/now
 ```
 
 `occt_parity.py` measures how alike the viewer and OCCT draw an `.xbf`'s regular
