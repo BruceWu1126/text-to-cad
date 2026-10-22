@@ -177,8 +177,13 @@ class ImportTest(unittest.TestCase):
 
                     counters = Counters()
                     counters.cb = ctypes.sizeof(Counters)
-                    ctypes.windll.psapi.GetProcessMemoryInfo(ctypes.windll.kernel32.GetCurrentProcess(),
-                                                             ctypes.byref(counters), counters.cb)
+                    # Typed: the current process's pseudo-handle is -1, a HANDLE, not a C int.
+                    current = ctypes.windll.kernel32.GetCurrentProcess
+                    current.restype = wintypes.HANDLE
+                    info = ctypes.windll.psapi.GetProcessMemoryInfo
+                    info.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+                    info.restype = wintypes.BOOL
+                    assert info(current(), ctypes.byref(counters), counters.cb), ctypes.WinError()
                     return counters.PeakWorkingSetSize
                 return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
