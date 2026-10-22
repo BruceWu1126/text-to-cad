@@ -85,52 +85,6 @@ presentations).
   Known: portrait framing bug in Scene.frame/_pinned (lane A fixing); `snapshot --no-daemon` with a file-taken
   xbf fails "the build left no document" (engine agent fixing on the working branch).
 
-### Status 2026-10-21 (night): lanes C and G landed on their branches; merges not started
-
-Run on the Mac, not in the cloud (so the Linux context is still unverified). Both lane branches
-are pushed with their WIP commits rewritten into clean history.
-
-- **Lane G landed:** `xbf-render-g` @ 6dcc56b60 = 7986c2764 + two commits. `render/grid.py` (the
-  viewer's grid: cell rule, red/green axes; grid IoU fixture iso 0.013 → 0.974, motorbike iso 0.80 →
-  0.986, top views 0.85–0.86) and `render/clip.py` (the carrier cap exactly as designed: fixture clip
-  rows 3.3–19.6 % pixels off → 0.00–0.21 %; cap golden `cap.png`; `clip.png` regenerated; carriers
-  survive the warm process's clip on/off and patches; the path tracer withdraws the caps, since it
-  neither cuts nor hides them). Also: Preview's floor and shadow are no longer cut by the clip (a
-  one-line change in lane A's `_structure`). Warm frame: grid +11–13 ms, cap +1–2 ms.
-- **Lane C landed:** `xbf-render-c` @ e35f2b4b6 = 7986c2764 + the materials merge d3daa2967 + seven
-  commits: look v2 (one key + `render/studio.hdr`, `GET /api/look/environment`, `studio.hdr` in
-  package data), OCCT regular modes on PBR (`render/finish.py`), hidden-line faces opaque (a
-  transmissive part had let edges through), the viewer rig carrying the environment, **look v3**:
-  `brdf: "occt"` — `packages/core/src/lib/viewer/surfaceBrdf.js` injects OCCT's PBR program into
-  three's regular-mode stand-ins through `onBeforeCompile` (the viewer was the side off the spec:
-  multiple-scattering compensation, height-correlated Smith, the roughness floor, bent reflections,
-  dielectric-Fresnel environment diffuse), authored looks and Preview untouched; OCCT Preview gives a
-  material part its finish; the parity harness measures Preview over OCCT's own model mask and the
-  hue check frames as Solid. Median ΔE iso/front, solid: fixture 1.23/0.90, motorbike 0.97/0.86, qdd
-  1.15/1.32, movement 2.19/1.81 (shaded-iso 3.01), case 4.18/3.97 (shaded 5.27/5.18). Case and
-  movement stay above 3 on the finishes OCCT 7.9 only approximates (the crystal's transmission → opacity
-  0; anisotropic brushed/satin steel 25–64 % of the case's pixels). Hidden line and wireframe ΔE 0.
-  **X-ray regressed** (fixture 1.78 → 10.8/8.7, case 12.7/15.3): OCCT's PBR shader multiplies the
-  diffuse by the opacity and blends by it again — a decision, not a tuning pass (draw X-ray with the
-  Phong model as phase 1 did, or compensate). Preview rows 6–27 (studio, camera, glass: Phase 3).
-  Contact sheets in the session scratchpad (`sheet-<doc>-pbr.png`).
-- **Not done:** the brief's steps 4–7. Merge C then G into `xbf-render` with `--no-ff` (both touch
-  `occt.py`'s Scene, `look.py` and core's `look.json` fixture: regenerate the fixture, don't hand-merge);
-  merge `xbf-render` into the working branch with the Xvfb step on `test.yml`'s cadgen-linux job
-  (`sudo apt-get install -y xvfb libgl1-mesa-dri fonts-dejavu-core`, then `xvfb-run -a -s "-screen 0
-  1920x1080x24 +extension GLX" scripts/test/test-python.sh ...`); the four GLB export fixes.
-- **Found on the way, pre-existing (fix at the merge):**
-  1. `engine/previous.py::_libraries` looks up the distributions `cadquery-ocp`/`cadquery_ocp` only, so an
-     install with `cadquery-ocp-novtk` alone (a fresh requirements-dev venv, CI, every user) records no
-     OCP in the closure and its version never enters the digest: `test_previous` fails on bbce82504 and
-     7986c2764 (it passes in Jake's main `.venv`, which also holds `cadquery_ocp`).
-  2. `--select cadgen` on the working branch head bbce82504 fails three policy tests: launches without
-     `-P` (`engine/client.py:53`, `daemon.py:100`, `reader.py:328`; `xbf-render` adds a fourth, lane B's
-     render process), engine modules calling `os.replace` directly, and the torus mesh budget (25592 >
-     25568 triangles).
-  3. STEP export is not byte-stable run to run on the same tree (header timestamp, styled-item order),
-     against the README's "same bytes" promise; compared up to numbering, head and base are identical.
-
 ## Phase 2 — the viewer's regular modes adopt OCCT's look
 
 1. **One look spec** (`engine/render/look.py`, served to the viewer as JSON): key light direction and intensity,
