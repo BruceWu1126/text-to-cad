@@ -4,7 +4,10 @@
 // each (4x4, column-major, in its link's frame, coinciding at value 0), and link 2 stands at
 // `link_1 · item_1 · M(v) · item_2⁻¹`: M a turn about Z (revolute), a slide along Z (prismatic),
 // both (cylindrical: angle, then distance) or an intrinsic X-Y-Z rotation (spherical). A gear pair
-// drives one pair from another. Degrees and millimetres.
+// drives one pair from another. Degrees and millimetres. A coupling (`couplings`, by name) is one
+// control driving several pairs by ratio: at value c each of its pairs' values is its as-built one
+// plus its ratio times c (couplings sharing a pair add), so 0 is as built; a locked one is its
+// pairs' only control (a gear train).
 //
 // Posing is exact forward kinematics on the tree, from the ground down, the same fold the engine
 // makes for a posed snapshot or export: each link's placement at the values over its placement at
@@ -62,8 +65,29 @@ export function xbfPairMotion(type, values) {
 const asValues = value => (Array.isArray(value) ? value.map(Number) : [Number(value)]);
 
 /**
+ * Each coupling of the block, by name: `{ range: [lower, upper], lock, terms: [[pair, value index, ratio]] }`.
+ * @returns {Record<string, { range: number[], lock: boolean, terms: [string, number, number][] }>}
+ */
+export function xbfCouplings(kinematics) {
+  const found = kinematics?.couplings;
+  return found && typeof found === "object" && !Array.isArray(found) ? found : {};
+}
+
+/**
+ * Each pair a locked coupling drives, its only control: the coupling's name.
+ * @returns {Map<string, string>}
+ */
+export function xbfLockedPairs(kinematics) {
+  const found = new Map();
+  for (const [name, coupling] of Object.entries(xbfCouplings(kinematics))) {
+    if (coupling.lock) for (const [label] of coupling.terms || []) found.set(label, name);
+  }
+  return found;
+}
+
+/**
  * Each pair that cannot be posed, and why: one the engine kept with no value because the built
- * tree contradicts it (`inconsistent`), and each pair of a loop.
+ * tree contradicts it (`inconsistent`), and each pair of a loop; and each coupling driving one.
  * @returns {Map<string, string>}
  */
 export function xbfUnposable(kinematics) {
@@ -71,6 +95,10 @@ export function xbfUnposable(kinematics) {
   for (const pair of kinematics?.pairs || []) if (pair.inconsistent) found.set(pair.label, pair.inconsistent);
   for (const label of kinematics?.loop || []) {
     if (!found.has(label)) found.set(label, `pairs ${kinematics.loop.join(", ")} close a loop, which has no pose without a solver`);
+  }
+  for (const [name, coupling] of Object.entries(xbfCouplings(kinematics))) {
+    const stuck = (coupling.terms || []).find(([label]) => found.has(label));
+    if (stuck) found.set(name, `its joint '${stuck[0]}' cannot be`);
   }
   return found;
 }
@@ -109,15 +137,54 @@ function checked(pair, values, where) {
 }
 
 /**
+ * The pair values couplings put their joints at: `controls` is each coupling's value by name, and
+ * `given` the joints the same pose sets. Each joint stands at its as-built values plus each
+ * coupling's ratio times its value (couplings sharing a joint add); a coupling set with one of its
+ * joints, a value that is no number or is outside its coupling's range, a joint that cannot be
+ * posed and one put past its limits are refused by name, as the engine refuses them.
+ * @returns {Record<string, number[]>}
+ */
+function coupledValues(kinematics, controls, given, where) {
+  const couplings = xbfCouplings(kinematics);
+  const pairs = new Map(kinematics.pairs.map(pair => [pair.label, pair]));
+  const unposable = xbfUnposable(kinematics);
+  const moved = new Map(), by = new Map();
+  for (const [name, value] of Object.entries(controls)) {
+    const coupling = couplings[name];
+    for (const [label] of coupling.terms) {
+      if (label in given) throw new Error(`${where} sets coupling '${name}' and its joint '${label}': set one of them`);
+      const why = unposable.get(label);
+      if (why) throw new Error(`${where}: coupling '${name}' cannot be posed: its joint '${label}' cannot be: ${why}`);
+    }
+    const numbers = Array.isArray(value) ? value : [value];
+    if (numbers.length !== 1 || typeof numbers[0] !== "number" || !Number.isFinite(numbers[0])) {
+      throw new Error(`${where}: coupling '${name}' takes a number`);
+    }
+    const c = numbers[0];
+    const [lower, upper] = coupling.range;
+    if (c < lower - 1e-9 || c > upper + 1e-9) throw new Error(`${where}: coupling '${name}' at ${c} is outside its range [${lower}, ${upper}]`);
+    for (const [label, index, ratio] of coupling.terms) {
+      if (!moved.has(label)) moved.set(label, asValues(kinematics.asBuilt[label]));
+      moved.get(label)[index] += ratio * c;
+      by.set(label, [...new Set([...(by.get(label) || []), `'${name}' at ${c}`])]);
+    }
+  }
+  return Object.fromEntries([...moved].map(([label, row]) => [label,
+    checked(pairs.get(label), row, `${where}: coupling${by.get(label).length > 1 ? "s" : ""} ${by.get(label).join(", ")}`)]));
+}
+
+/**
  * The values a pose sets every pair to: `pose` is null (as built), a configuration's name, or
- * `{ label: value }` (the rest as built). What it names wrong is refused by name, as the engine
- * refuses it.
+ * `{ label: value }` (the rest as built), a label a joint's or a coupling's. What it names wrong is
+ * refused by name, as the engine refuses it: a locked coupling's joint set alone among it.
  * @returns {Record<string, number[]>}
  */
 export function xbfPoseValues(kinematics, pose = null) {
   const values = Object.fromEntries(Object.entries(kinematics.asBuilt || {}).map(([label, value]) => [label, asValues(value)]));
   const pairs = new Map(kinematics.pairs.map(pair => [pair.label, pair]));
   const driven = xbfDrivenPairs(kinematics);
+  const couplings = xbfCouplings(kinematics);
+  const locked = xbfLockedPairs(kinematics);
   let given = {}, where = "the pose";
   if (typeof pose === "string") {
     const configurations = kinematics.configurations || {};
@@ -127,8 +194,10 @@ export function xbfPoseValues(kinematics, pose = null) {
   } else if (pose) {
     given = pose;
   }
+  const controls = {};
   for (const [label, value] of Object.entries(given)) {
     const pair = pairs.get(label);
+    if (!pair && Object.hasOwn(couplings, label)) { controls[label] = value; continue; }
     if (!pair || pair.type === "gear") throw new Error(`${where} names no joint '${label}'`);
     const unposable = xbfUnposable(kinematics).get(label);
     if (unposable) throw new Error(`${where}: joint '${label}' cannot be posed: ${unposable}`);
@@ -136,8 +205,12 @@ export function xbfPoseValues(kinematics, pose = null) {
       const { driver, gear } = driven.get(label);
       throw new Error(`${where}: joint '${label}' is driven by '${driver}' through gear '${gear}'`);
     }
+    if (locked.has(label) && typeof pose !== "string") {
+      throw new Error(`${where}: joint '${label}' moves only with the locked coupling '${locked.get(label)}'`);
+    }
     values[label] = checked(pair, asValues(value), where);
   }
+  Object.assign(values, coupledValues(kinematics, controls, given, where));
   for (const [label, { driver, ratio, gear }] of driven) {
     if (!values[driver] || !values[label]) continue;
     values[label] = checked(pairs.get(label), [values[driver][0] * ratio, ...values[label].slice(1)], `gear '${gear}'`);
@@ -196,16 +269,17 @@ export function xbfPosedMatrices(structure, values) {
 }
 
 /**
- * What a Position panel drives: one control per value of every posable pair a gear does not drive, within
- * its limits (an unbounded side spans one turn or 100 mm from the other).
+ * What a Position panel drives: one control per value of every posable pair neither a gear nor a
+ * locked coupling drives, within its limits (an unbounded side spans one turn or 100 mm from the other).
  * @returns {{ id: string, pair: string, index: number, label: string, unit: string, min: number, max: number }[]}
  */
 export function xbfPoseControls(kinematics) {
   const driven = xbfDrivenPairs(kinematics);
   const unposable = xbfUnposable(kinematics);
+  const locked = xbfLockedPairs(kinematics);
   const controls = [];
   for (const pair of kinematics?.pairs || []) {
-    if (pair.type === "gear" || driven.has(pair.label) || unposable.has(pair.label)) continue;
+    if (pair.type === "gear" || driven.has(pair.label) || unposable.has(pair.label) || locked.has(pair.label)) continue;
     const names = VALUE_NAMES[pair.type];
     for (let index = 0; index < XBF_PAIR_VALUES[pair.type]; index += 1) {
       const unit = pair.units?.[index] || "deg";
@@ -219,6 +293,87 @@ export function xbfPoseControls(kinematics) {
     }
   }
   return controls;
+}
+
+/**
+ * The couplings a Position panel drives: one control per coupling whose joints can all be posed,
+ * over its range (0 as built), with the pairs it drives.
+ * @returns {{ id: string, coupling: string, label: string, unit: string, min: number, max: number, lock: boolean, pairs: string[] }[]}
+ */
+export function xbfCouplingControls(kinematics) {
+  const unposable = xbfUnposable(kinematics);
+  return Object.entries(xbfCouplings(kinematics)).filter(([name]) => !unposable.has(name)).map(([name, coupling]) => ({
+    id: `coupling:${name}`, coupling: name, label: name, unit: "", min: Number(coupling.range[0]), max: Number(coupling.range[1]),
+    lock: Boolean(coupling.lock), pairs: [...new Set((coupling.terms || []).map(([label]) => label))]
+  }));
+}
+
+// A coupled value without coupling `name`'s share: its as-built value plus every other coupling's
+// ratio times its value (`couplings`).
+function restOf(kinematics, couplings, name, label, index) {
+  let found = asValues(kinematics.asBuilt?.[label] ?? [])[index] ?? 0;
+  for (const [other, coupling] of Object.entries(xbfCouplings(kinematics))) {
+    if (other === name) continue;
+    for (const [at, value, ratio] of coupling.terms || []) if (at === label && value === index) found += ratio * (Number(couplings?.[other]) || 0);
+  }
+  return found;
+}
+
+/**
+ * Every pair's values, and every coupling's, once coupling `name` is set to `next`: each joint it
+ * drives at its as-built values plus every coupling's ratio times its value (couplings sharing a
+ * joint add), `next` held within the coupling's range and where each such joint keeps within its
+ * limits; the other joints as `values` has them. Null for no number, or no value that keeps them.
+ * @returns {{ values: Record<string, number[]>, couplings: Record<string, number> } | null}
+ */
+export function xbfCouplingWrite(kinematics, values, couplings, name, next) {
+  const coupling = xbfCouplings(kinematics)[name];
+  const wanted = Number(next);
+  if (!coupling || !Number.isFinite(wanted)) return null;
+  const pairs = new Map((kinematics.pairs || []).map(pair => [pair.label, pair]));
+  let [lower, upper] = coupling.range.map(Number);
+  for (const [label, index, ratio] of coupling.terms) {
+    if (!ratio) continue;
+    const rest = restOf(kinematics, couplings, name, label, index);
+    const [low, high] = pairs.get(label)?.limits?.[index] || [null, null];
+    const fromLow = low == null ? null : (low - rest) / ratio, fromHigh = high == null ? null : (high - rest) / ratio;
+    if (ratio > 0) {
+      if (fromLow != null) lower = Math.max(lower, fromLow);
+      if (fromHigh != null) upper = Math.min(upper, fromHigh);
+    } else {
+      if (fromLow != null) upper = Math.min(upper, fromLow);
+      if (fromHigh != null) lower = Math.max(lower, fromHigh);
+    }
+  }
+  if (lower > upper) return null;
+  const value = Math.min(Math.max(wanted, lower), upper);
+  const written = { ...values };
+  for (const [label, index, ratio] of coupling.terms) {
+    const row = [...(written[label] || asValues(kinematics.asBuilt?.[label] ?? []))];
+    row[index] = restOf(kinematics, couplings, name, label, index) + ratio * value;
+    written[label] = row;
+  }
+  return { values: written, couplings: { ...couplings, [name]: value } };
+}
+
+/**
+ * Where `values` stand on each coupling: the value at which every joint it drives is at its
+ * as-built value plus its ratio times it, within the coupling's range; 0 for a pose off its line.
+ * @returns {Record<string, number>}
+ */
+export function xbfCouplingValues(kinematics, values) {
+  const found = {};
+  for (const [name, coupling] of Object.entries(xbfCouplings(kinematics))) {
+    let at = null, on = true;
+    for (const [label, index, ratio] of coupling.terms || []) {
+      if (!ratio) continue;
+      const value = (Number(values?.[label]?.[index]) - asValues(kinematics.asBuilt?.[label] ?? [])[index]) / ratio;
+      if (!Number.isFinite(value) || (at != null && Math.abs(value - at) > 1e-6 * Math.max(1, Math.abs(at)))) { on = false; break; }
+      if (at == null) at = value;
+    }
+    found[name] = on && at != null ? Math.min(Math.max(at, Number(coupling.range[0])), Number(coupling.range[1])) : 0;
+  }
+  return found;
 }
 
 /** Whether two sets of pair values are the same pose. */

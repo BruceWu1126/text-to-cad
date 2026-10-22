@@ -184,6 +184,7 @@ _EDGE, _VERTEX, _FACE, _COMPOUND = int(TopAbs_EDGE), int(TopAbs_VERTEX), int(Top
 FACE_COLORS = "xbf_face_colors"
 FACE_MATERIALS = "xbf_face_materials"
 CONFIGURATIONS = "xbf_configurations"  # an assembly's poses by name (``mechanism.configuration``)
+COUPLINGS = "xbf_couplings"  # and its couplings by name (``mechanism.couple``)
 
 
 class _Unkeyable(Exception):
@@ -2577,8 +2578,10 @@ def _shape_key(shape: Any, state: _Run) -> int:
         tuple(sorted((int(ordinal), _normalize(value, state)) for ordinal, value in dict(face_materials).items())),
         _normalize(state_dict.get("joints") or {}, state),  # a hit hands back the joints the first run held
         # and the configurations an assembly was given (``mechanism.configuration``): a hit of an
-        # operation on it hands back what the first run held, so a configuration is its input.
+        # operation on it hands back what the first run held, so a configuration is its input,
+        # and a coupling (``mechanism.couple``) too.
         _normalize(state_dict.get(CONFIGURATIONS) or {}, state),
+        _normalize(state_dict.get(COUPLINGS) or {}, state),
     )
     children = tuple(_shape_key(child, state) for child in state_dict.get("_NodeMixin__children") or ())
     return _intern((placed, attrs, children))

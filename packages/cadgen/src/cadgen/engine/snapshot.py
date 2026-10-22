@@ -28,10 +28,10 @@ view the ink was drawn in, exactly (no fit): a mark names its view only by label
 the view -- its camera, size and projection -- is a job of the packet (``authored``). Nothing is
 written but OUT.
 
-``--pose`` draws the document's mechanism at a configuration (its name) or at joint values (a JSON
-object, the rest as built): each link placed by its pairs from the ground. An unknown configuration
-or joint, a value out of range and a mechanism that is not a tree are refused by name before
-anything renders.
+``--pose`` draws the document's mechanism at a configuration (its name) or at joint and coupling
+values (a JSON object, the rest as built): each link placed by its pairs from the ground. An unknown
+configuration, joint or coupling, a value out of range and a mechanism that is not a tree are refused
+by name before anything renders.
 """
 
 from __future__ import annotations
@@ -370,7 +370,7 @@ def authored(camera: Any, annotation: dict[str, Any] | None, source: Any, docume
 
 
 def parse_pose(value: str | None) -> Any:
-    """``--pose``: a configuration's name, or ``{"<joint>": value}`` (JSON, or a JSON file of it)."""
+    """``--pose``: a configuration's name, or ``{"<joint or coupling>": value}`` (JSON, or a JSON file of it)."""
     if value is None:
         return None
     text = value.strip()
@@ -761,8 +761,9 @@ def add_parser(verbs: Any) -> argparse.ArgumentParser:
     parser.add_argument("--width", type=int)
     parser.add_argument("--height", type=int)
     parser.add_argument("--size-profile", choices=sorted(SIZE_PROFILES))
-    parser.add_argument("--pose", help="a configuration's name, or joint values as JSON ('{\"elbow\": 45}'): the "
-                                       "mechanism posed there; as built without it")
+    parser.add_argument("--pose", help="a configuration's name, or joint and coupling values as JSON "
+                                       "('{\"elbow\": 45}', '{\"curl\": 0.6}'): the mechanism posed there; as built "
+                                       "without it")
     parser.add_argument("--annotation", metavar="FILE", help="the viewer's annotation file, or the Quick Edit packet "
                                                               "(.snapshot.json) that carries it: its ink drawn over the "
                                                               "model, on the parts it was drawn on")

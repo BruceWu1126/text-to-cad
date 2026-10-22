@@ -33,6 +33,11 @@ housing (`rotor_spin`, `rear_cage`, `front_cage`, `output`, `roller_cage`) and
 on the carrier (`planet1_spin`..`planet3_spin`), each with the range of the
 closed drive cycle at its member's rate.
 
-Not ported: the `drive` coupling that geared them all off one input (build123d
-joints have no coupling), the `rest`/`quarter_output`/`full_output` poses, and
-the `drive`/`inspect`/`teardown` animation clips (the engine has no animation).
+The `drive` coupling gears them all off one input, in input revolutions
+(`couple(actuator, "drive", range=(0, 4.5), lock=True, ...)`): locked, so the
+viewer's Position shows its slider and none of its joints', and a pose sets them
+through it alone. The old `quarter_output` and `full_output` poses are
+configurations naming it (`rest` is as built):
+`cadgen xbf snapshot ../XBF/qdd_actuator.xbf q.png --pose '{"drive": 2.25}'`.
+
+Not ported: the `drive`/`inspect`/`teardown` animation clips.

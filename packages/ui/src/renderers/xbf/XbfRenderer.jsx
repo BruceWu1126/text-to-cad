@@ -3,7 +3,6 @@ import { viewFeaturesForKind } from "@text-to-cad/core/common/viewSettings.js";
 import { sceneFramingBounds } from "@text-to-cad/core/lib/viewer/sceneContract.js";
 import { boundsInUnits } from "@text-to-cad/core/lib/viewer/sceneUnits.js";
 import { fetchXbfPartGroups } from "@text-to-cad/core/lib/xbf/xbfDocument.js";
-import { xbfDrivenPairs, xbfPoseValues, xbfSamePose } from "@text-to-cad/core/lib/xbf/xbfKinematics.js";
 import { parseXbfElementId } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 import { useViewerHost } from "../../host/context.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
@@ -22,7 +21,7 @@ import { usePointerPick } from "../kit/tools/select/usePointerPick.js";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
 import XbfMeasureOverlay from "./XbfMeasure.jsx";
 import XbfModelTree from "./XbfModelTree.jsx";
-import XbfPositionSection, { DEFAULT_POSE_VALUE, NO_PRESET_VALUE, writeXbfPosition, xbfPositionRows } from "./XbfPositionSection.jsx";
+import XbfPositionSection, { useXbfPose, writeXbfPosition, xbfPositionRows } from "./XbfPositionSection.jsx";
 import { MeasureIcon, SelectIcon, SelectModeMenu, XBF_SELECT_DEFAULT } from "./XbfSelectionModes.jsx";
 import { useXbfElementFacts, useXbfSelectionChips, xbfCopyText } from "./xbfChips.jsx";
 import { xbfJointHandles } from "./xbfJointHandles.js";
@@ -148,33 +147,15 @@ function XbfSurface({ view, data }) {
   const kinematics = scene?.kinematics || null;
   const positionRows = useMemo(() => (kinematics ? xbfPositionRows(kinematics) : EMPTY), [kinematics]);
   const posable = positionRows.length > 0;
-  const kinematicsKey = kinematics ? JSON.stringify([kinematics.pairs, kinematics.configurations, kinematics.asBuilt]) : "";
-  const [pose, setPose] = useState({ key: "", preset: DEFAULT_POSE_VALUE, given: null });
-  const current = pose.key === kinematicsKey ? pose : { key: kinematicsKey, preset: DEFAULT_POSE_VALUE, given: null };
-  const poseValues = useMemo(() => {
-    if (!kinematics) return null;
-    try {
-      return xbfPoseValues(kinematics, current.given || (current.preset !== DEFAULT_POSE_VALUE && current.preset !== NO_PRESET_VALUE ? current.preset : null));
-    } catch {
-      return xbfPoseValues(kinematics);
-    }
-  }, [kinematics, current.given, current.preset]);
-  const asBuilt = useMemo(() => (kinematics ? xbfPoseValues(kinematics) : null), [kinematics]);
-  const poseApplied = Boolean(poseValues && asBuilt && !xbfSamePose(poseValues, asBuilt));
+  const pose = useXbfPose(kinematics);
+  const { values: poseValues, applied: poseApplied, preset: posePreset, couplings: poseCouplings,
+    setValues: setPoseValues, choosePreset, reset: resetPose } = pose;
   useEffect(() => {
     if (!scene || !poseValues) return;
     scene.setPose(poseApplied ? poseValues : null);
     shellRef.current?.syncSceneBounds?.();
     requestRender();
   }, [scene, poseValues, poseApplied, requestRender]);
-  const posePreset = !poseApplied ? DEFAULT_POSE_VALUE
-    : current.preset !== NO_PRESET_VALUE && current.preset !== DEFAULT_POSE_VALUE && !current.given ? current.preset : NO_PRESET_VALUE;
-  const setPoseValues = useCallback((values) => {
-    const driven = xbfDrivenPairs(kinematics);
-    setPose({ key: kinematicsKey, preset: NO_PRESET_VALUE, given: Object.fromEntries(Object.entries(values).filter(([label]) => !driven.has(label))) });
-  }, [kinematics, kinematicsKey]);
-  const choosePreset = useCallback(name => setPose({ key: kinematicsKey, preset: name, given: null }), [kinematicsKey]);
-  const resetPose = useCallback(() => setPose({ key: kinematicsKey, preset: DEFAULT_POSE_VALUE, given: null }), [kinematicsKey]);
 
   // ---- the shell ------------------------------------------------------------------------------
   const clearSelection = useCallback(() => setChosen(now => (now.length ? EMPTY : now)), []);
@@ -531,7 +512,7 @@ function XbfSurface({ view, data }) {
   const sidebar = scene && (assembly || kinematics) ? <>
     {assembly ? <XbfModelTree key={document.modelKey} tree={tree} active={!previewing} disabled={shell.idle} mode={shape}
       selectedIds={selected} onClearSelection={clearSelection} partControls={partControls} /> : null}
-    {kinematics ? <XbfPositionSection kinematics={kinematics} values={poseValues || {}} preset={posePreset}
+    {kinematics ? <XbfPositionSection kinematics={kinematics} values={poseValues || {}} couplings={poseCouplings} preset={posePreset}
       changed={poseApplied} onValues={setPoseValues} onPreset={choosePreset} onReset={resetPose} /> : null}
   </> : null;
 

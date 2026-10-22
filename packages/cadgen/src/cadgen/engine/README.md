@@ -42,12 +42,13 @@ unit gram³·cm² (the exponents wrong, the number right: the reader gives the d
 written), and it writes materials sharing a name as one entity, so a STEP gives every such
 material the first one's description.
 
-An assembly's mechanism is build123d's joints and nothing else: `RevoluteJoint`,
+An assembly's mechanism is build123d's joints: `RevoluteJoint`,
 `LinearJoint`, `CylindricalJoint`, `BallJoint` and `RigidJoint` on its parts, placed with
 `connect_to(..., angle=, position=, angles=)`. The values they are connected at are the
 as-built configuration, the pose every file of the model shows; `configuration(assembly, name,
-**values)` names another, by joint label, and never moves the build; `motion(assembly, name,
-...)` names a motion (**Motions**). Connect parts before putting them in the compound that holds
+**values)` names another, by joint label, and never moves the build; `couple(assembly, name,
+...)` drives several joints from one control (**Kinematics**); `motion(assembly, name, ...)`
+names a motion (**Motions**). Connect parts before putting them in the compound that holds
 them; where `connect_to` cannot place them (a nested assembly), give the two joints one label
 where the parts stand.
 
@@ -140,7 +141,7 @@ def hinge():
 | `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run, and the models a target's run ran (`BuildContext.children`); `@memo` and its calls; `python model.py` asking the daemon; a script's module and package (`module_of`); `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
 | `api.py` | the verbs as functions, through the daemon: `build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop`, `daemon` (`cadgen.build`, ...); `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
-| `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
+| `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`couple`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
 | `build.py` | one build: load the script (as Python imports it: a package's module by its dotted name) or code afresh, one memo run, document, element names, files: every model's that ran |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
@@ -597,9 +598,10 @@ a mechanism in ISO 10303-105's terms (STEP AP242's kinematics):
   (cylindrical: angle, then distance) or build123d's intrinsic X-Y-Z rotation (spherical).
   Degrees and millimetres.
 - A **gear pair** drives one pair from another (`gear_ratio`, the second's value that times
-  the first's). build123d's joints cannot express a coupling, so no model authors one; the
+  the first's). build123d's joints cannot express one, so no model authors one; the
   document, its readers and every pose honour it.
 - **Configurations**: the as-built values and each named configuration, as pair values.
+- **Couplings**: each `couple(...)`, one control driving several pairs by ratio (below).
 - **Motions**: each named motion, as AP242's `INTERPOLATED_CONFIGURATION_SEQUENCE`: its
   segments' times (`t_parameter`) and states (a configuration it names, or pair values).
 
@@ -614,8 +616,76 @@ pair is) and a configuration value a pair cannot take are left out; pairs that c
 are kept and not posed. The warnings travel with the mechanism (a `TDataStd_ExtStringArray` on
 its label), in the structure's `kinematics.warnings` and the build report's
 `kinematics.warnings`; posing a warned pair is refused by name, and the viewer's Position says
-why beside it. The one harvest error is a configuration naming a joint its assembly does not
-hold: it means nothing to store.
+why beside it. The harvest's errors are a configuration, a motion or a coupling naming a joint
+its assembly does not hold, a coupling named as a joint is, and a joint a locked coupling
+drives that another coupling drives too: they mean nothing to store.
+
+**Couplings.** `couple(assembly, name, *, range=(0, 1), lock=False, **joints)` is one control
+driving several joints by ratio, each by the joint's label (a pair of several values takes a
+ratio per value, as `configuration` takes a value per value). At value `c` each joint stands at
+its as-built value plus its ratio times `c`: `c = 0` is as built, so a coupling never moves the
+build, and `range` holds 0. A control, not a constraint: each joint still poses alone. Its name
+poses wherever a joint's does -- `configuration(..., curl=0.5)`, a motion's waypoints and
+sweeps, `--pose '{"curl": 0.6}'` -- and configurations and motions resolve it to pair values at
+document time, so their AP242 states and a GLB's bake are as ever. Couplings sharing a joint
+add. `lock=True` makes a coupling its joints' only control, a gear train's: the viewer shows its
+slider and none of theirs, and a pose, a configuration or a motion setting one of them alone is
+refused by name. A gear pair cannot say a coupling: it couples single values of two pairs with
+no offset, so a door's turn and travel, or a 0-1 control, are out of its reach.
+
+```python
+import build123d as bd
+from cadgen.engine import configuration, couple, motion, xbf
+
+CURL = {"index_mcp_flexion": 90, "index_pip": 100, "index_dip": 70}  # degrees at a full curl
+BONES = {"base": 30, "proximal": 40, "middle": 25, "distal": 20}     # lengths along +X
+
+@xbf
+def index_finger():
+    bones, x = [], -BONES["base"]
+    for name, length in BONES.items():
+        bone = bd.Pos(x, 0, 0) * bd.Box(length, 16, 12, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.CENTER))
+        bone.label, x = name, x + length
+        bones.append(bone)
+    for joint, parent, child in zip(CURL, bones, bones[1:]):
+        knuckle = bd.Axis(child.location.position, (0, 1, 0))
+        bd.RevoluteJoint(joint, parent, axis=knuckle, angular_range=(0, CURL[joint]))
+        bd.RigidJoint(joint, child, bd.Plane(origin=knuckle.position, z_dir=knuckle.direction).location)
+        parent.joints[joint].connect_to(child.joints[joint], angle=0)  # as built: straight
+    finger = bd.Compound(children=bones, label="index_finger")
+    couple(finger, "index_curl", **CURL)                              # one control: 0 straight, 1 a fist
+    return motion(finger, "grip", sweep={"index_curl": (0, 1)}, duration=1.5, loop="pingpong")
+
+SWEEP, TRAVEL = {"left": -70, "right": 70}, 40                       # a door's turn and travel when open
+
+@xbf
+def hypercar():
+    chassis = bd.Box(4400, 900, 400, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    chassis.label = "chassis"
+    doors = []
+    for side, y in (("left", 475), ("right", -475)):
+        door = bd.Pos(400, y, 500) * bd.Box(1000, 50, 600)
+        door.label = f"door_{side}"
+        hinge = bd.Axis((800, 450 if side == "left" else -450, 500), (0.3, 0, 1))  # a helical hinge
+        bd.CylindricalJoint(f"door_{side}", chassis, axis=hinge, angular_range=tuple(sorted((0, SWEEP[side]))),
+                            linear_range=(0, TRAVEL))
+        bd.RigidJoint(f"door_{side}", door, bd.Plane(origin=hinge.position, z_dir=hinge.direction).location)
+        chassis.joints[f"door_{side}"].connect_to(door.joints[f"door_{side}"], angle=0, position=0)  # shut
+        doors.append(door)
+    car = bd.Compound(children=[chassis, *doors], label="hypercar")
+    couple(car, "doors", door_left=(SWEEP["left"], TRAVEL), door_right=(SWEEP["right"], TRAVEL))
+    return configuration(car, "open", doors=1)                        # shut is as built
+```
+
+`cadgen xbf snapshot XBF/index_finger.xbf c.png --pose '{"index_curl": 0.6}'` draws the
+knuckles at 54, 60 and 42 degrees: the picture of `--pose '{"index_mcp_flexion": 54,
+"index_pip": 60, "index_dip": 42}'`. `cadgen xbf export XBF/hypercar.xbf half.step --pose
+'{"doors": 0.5}'` writes the doors a half turn and a half travel open. A gear train is a locked
+coupling: `couple(actuator, "drive", range=(0, 4.5), lock=True, rotor_spin=360, output=80, ...)`
+(`models-xbf/qdd_actuator`). A coupling joint in no pair, or given as many ratios as its pair has
+no values, is left out of it and warned. A label names the joint in each placement of a
+sub-assembly placed several times, and a name two couplings share takes the path of the assembly
+holding each (`hand/index:curl`), as a label two pairs share does.
 
 The xbf holds the mechanism as a subtree under `Main():100`, found by the
 `TDataStd_UAttribute` of its GUID, of standard attributes only: `TDataStd_Name` on every
@@ -623,16 +693,29 @@ label, `TDataStd_NamedData` for an entity's AP242 name (`entity`) and attributes
 the standard names them), `TDataStd_ReferenceList` for references, `TDataStd_RealArray` and
 `TDataStd_IntegerArray` for a configuration's values, `XCAFDoc_AssemblyItemRef` for an
 occurrence (`mechanism.py` draws the tree); a motion's ease and loop are `cadgen_ease` and
-`cadgen_loop` strings in its `NamedData`, AP242 having no such attribute. **STEP carries none of it**: OCCT reads AP242
+`cadgen_loop` strings in its `NamedData`, AP242 having no such attribute. A coupling is the
+engine's own entity, AP242 having no virtual degree of freedom: a label under `:6 "couplings"`
+with `NamedData{entity: cadgen_coupling, lower_limit, upper_limit, lock}` (`lock` 1, only when
+locked) and its terms as a state's rows, a ratio where a state holds a value. The structure
+serves them as `kinematics.couplings`: `{name: {range, lock, terms: [[pair, value index,
+ratio]]}}`. **STEP carries none of it**: OCCT reads AP242
 kinematics but cannot write them, so every STEP, posed or not, is placements only.
 
 `--pose` on `cadgen xbf snapshot` and `cadgen xbf export` poses the mechanism at a
-configuration (its name) or at joint values (`'{"elbow": 45}'`, the rest as built): the
-engine places each link by composing its pairs from the ground down, exact forward
-kinematics, and draws or writes that (a posed STEP is written from the document's tree with
-every placement its own). No flag is as built. An unknown configuration or joint, a value out
-of range, a pair a gear drives, a pair kept inconsistent and a pair of a loop are refused by
-name before anything renders or is written.
+configuration (its name) or at joint and coupling values (`'{"elbow": 45}'`, `'{"curl": 0.6}'`,
+the rest as built): the engine places each link by composing its pairs from the ground down,
+exact forward kinematics, and draws or writes that (a posed STEP is written from the document's
+tree with every placement its own). No flag is as built. An unknown configuration, joint or
+coupling, a value out of range (a joint's, a coupling's, or a joint's a coupling puts it at), a
+pair a gear drives, a locked coupling's joint set alone, a coupling set with one of its joints, a
+pair kept inconsistent and a pair of a loop are refused by name before anything renders or is
+written.
+
+**The viewer's Position** shows a slider per coupling under the Pose row (0 as built, its range
+the coupling's): dragging it poses every joint it drives through the page's forward kinematics
+(`xbfKinematics.js`), their sliders following; moving one of them after leaves the coupling's
+slider where it was, and choosing a configuration puts it where that configuration stands on it
+(0 where it is off its line). A locked coupling's joints have no slider of their own.
 
 ## Motions
 

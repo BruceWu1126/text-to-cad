@@ -9,8 +9,8 @@ write takes the geometry key a build would give it, so an xbf of it caches like 
 
 An xbf extracted with ``part`` carries the mechanism's share of the subtree: the links
 every member of which is in it, the pairs between two such links, the configurations'
-values of those pairs, and the motions that move those pairs alone; the ground is the
-document's when it is kept, else the first link kept.
+values of those pairs, the couplings' terms on those pairs, and the motions that move those
+pairs alone; the ground is the document's when it is kept, else the first link kept.
 """
 
 from __future__ import annotations
@@ -147,8 +147,10 @@ def _mechanism(mechanism: Any, root: tuple[int, ...]) -> Any:
                if motion.labels() <= labels and all(configuration in configurations and set(
                    mechanism.configurations[configuration]) <= labels
                    for _t, configuration, _values in motion.keys if configuration is not None)}
+    couplings = {name: replace(coupling, ratios=share(coupling.ratios))
+                 for name, coupling in mechanism.couplings.items() if share(coupling.ratios)}
     return Mechanism(mechanism.name, links, kept.get(mechanism.ground, 0), pairs, share(mechanism.as_built),
-                     configurations, list(mechanism.warnings), motions)
+                     configurations, list(mechanism.warnings), motions, couplings)
 
 
 def write_xbf(view: Any, path: Path) -> None:

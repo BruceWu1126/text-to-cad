@@ -49,8 +49,9 @@ The migration a user makes, and nothing more:
 - Mates (`AssemblyHelper` frames, `KINEMATICS` revolute/fastened) -> build123d
   joints (`RigidJoint`, `RevoluteJoint`) placed with `connect_to`, which the
   engine harvests into the document's mechanism. The as-built pose is where the
-  joints connect the parts. Couplings have no build123d equivalent and are
-  dropped; poses are `configuration(...)` in the body.
+  joints connect the parts. Couplings are `couple(...)` in the body (one control
+  driving several joints by ratio: the qdd's `drive`, locked, as a gear train is);
+  poses are `configuration(...)` in the body.
 - Animation (`animation=`, `cadgen.clip`) -> `motion(...)` in the body: a
   definition the xbf keeps (never frames), which a GLB export bakes into a clip.
   The motorbike carries one (`steer`); the others' clips are not ported.
@@ -84,7 +85,7 @@ piece. Nested `@xbf` is never needed for caching.
 | Model | Source | What it exercises |
 | --- | --- | --- |
 | `dfm-process-comparison` | 5 single-part trays | per-part catalogue materials (PLA, aluminium, ABS); lofts, fillets, drafted cones |
-| `qdd_actuator` | one file, 153 occurrences | a 102-part assembly, modules as nested compounds; one body (no `@memo`: its makers save under 0.1 s); 54 build123d joints (rigid mounts, revolute drive train with ranges) |
+| `qdd_actuator` | one file, 153 occurrences | a 102-part assembly, modules as nested compounds; one body (no `@memo`: its makers save under 0.1 s); 54 build123d joints (rigid mounts, revolute drive train with ranges); the drive train a locked coupling, `drive`, with two configurations |
 | `motorbike` | 21 part files + one model, one body | parts as sub-assemblies of one xbf, a part placed twice; revolute and rigid joints across parts; one motion, `steer` (`cadgen xbf export ../XBF/motorbike.xbf bike.glb` carries it as a clip) |
 | `moonwatch` | `case.py`, `movement.py` (3 `@memo` layers) | finishes as materials on all 220 parts (29 case, 191 movement): catalogue entries in each finish's look (coat, grain, transmission), own materials (sapphire, ruby, print ink), a painted face finish, transparent parts |
 | `tom` | tom-cad `main` (7f79c52): 119 files, one model, 6 `@memo` stages and parts (each earns it) | a 619-part arm built from stages, 8 occurrences of Tom rev3's arm extracted once to xbf (`read_xbf`, never the 354 MB STEP) and 11 `read_step` vendor files (139 MB of local, uncommitted inputs: see its `src/README.md`); mates kept as data and authored as build123d joints; materials by finish; many-body retention |

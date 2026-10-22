@@ -2,10 +2,9 @@ import React, { useState } from 'react';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { xbfDrivenPairs, xbfPoseValues, xbfSamePose } from '@text-to-cad/core/lib/xbf/xbfKinematics.js';
 import FileSidebar from '../../../dist/renderers/kit/tools/FileSidebar.js';
 import ToolPanel from '../../../dist/renderers/kit/tools/ToolPanel.js';
-import XbfPositionSection, { DEFAULT_POSE_VALUE, NO_PRESET_VALUE } from '../../../dist/renderers/xbf/XbfPositionSection.js';
+import XbfPositionSection, { useXbfPose } from '../../../dist/renderers/xbf/XbfPositionSection.js';
 import XbfModelTree from '../../../dist/renderers/xbf/XbfModelTree.js';
 import { SelectModeMenu as XbfSelectModeMenu, XBF_SELECT_DEFAULT } from '../../../dist/renderers/xbf/XbfSelectionModes.js';
 import { presentXbfTree, xbfPickFrontier } from '../../../dist/renderers/xbf/xbfTree.js';
@@ -142,17 +141,14 @@ const hingeArticulation = { url: '/hinge.step.json', articulation: { schemaVersi
   controls: [{ id: 'hinge', label: 'hinge', unit: 'deg', min: -180, max: 180, default: 0 }],
   joints: [], handles: [], carries: {}, poses: { open: { hinge: 90 } }, opening: { hinge: 0 } } };
 
+// The section over the renderer's own pose state (`useXbfPose`).
 function XbfPosition({ kinematics = hingeKinematics, onPose = () => {} }: { kinematics?: any, onPose?: (values: any) => void }) {
   const [layout, setLayout] = useState<any>({ panels: {}, collapsed: {} });
-  const [state, setState] = useState<{ preset: string, given: any }>({ preset: DEFAULT_POSE_VALUE, given: null });
-  const values = xbfPoseValues(kinematics, state.given || (state.preset === DEFAULT_POSE_VALUE || state.preset === NO_PRESET_VALUE ? null : state.preset));
-  onPose(values);
-  const preset = xbfSamePose(values, xbfPoseValues(kinematics)) ? DEFAULT_POSE_VALUE : state.given ? NO_PRESET_VALUE : state.preset;
+  const pose = useXbfPose(kinematics);
+  onPose(pose.values);
   return <FileSidebar layout={layout} onLayoutChange={(patch: any) => setLayout((current: any) => ({ ...current, ...patch }))}>
-    <XbfPositionSection kinematics={kinematics} values={values} preset={preset} changed={preset !== DEFAULT_POSE_VALUE}
-      onValues={(given: any) => setState({ preset: NO_PRESET_VALUE, given: Object.fromEntries(Object.entries(given).filter(([label]) => !xbfDrivenPairs(kinematics).has(label))) })}
-      onPreset={(name: string) => setState({ preset: name, given: null })}
-      onReset={() => setState({ preset: DEFAULT_POSE_VALUE, given: null })} />
+    <XbfPositionSection kinematics={kinematics} values={pose.values} couplings={pose.couplings} preset={pose.preset}
+      changed={pose.applied} onValues={pose.setValues} onPreset={pose.choosePreset} onReset={pose.reset} />
   </FileSidebar>;
 }
 function StepPosition() {
@@ -233,6 +229,76 @@ it('Position drives a cylindrical pair by both its values and a geared pair thro
   expect(onPose.mock.lastCall![0]).toMatchObject({ hinge: [30], spin: [60] });
   // A pair the engine could not keep a value for is said, not drawn.
   expect(within(panel).getByText(/knee cannot be posed: rig\/leg is not where it can put it/)).toBeTruthy();
+});
+
+// The spec's index finger: three knuckles from straight, one coupling curling them all, and a
+// configuration naming it.
+const KNUCKLES: [string, number][] = [['index_mcp_flexion', 90], ['index_pip', 100], ['index_dip', 70]];
+const JOINTS = KNUCKLES.map(([label]) => label);
+const fingerKinematics = (lock: boolean) => ({
+  ...hingeKinematics,
+  links: ['base', 'proximal', 'middle', 'distal'].map((name, at) => ({ name, instances: [at], matrix: I })),
+  pairs: KNUCKLES.map(([label, top], at) => ({
+    label, type: 'revolute', links: [at, at + 1], frames: [I, I], limits: [[0, top]], units: ['deg'] })),
+  asBuilt: Object.fromEntries(JOINTS.map(label => [label, 0])), configurations: { fist: Object.fromEntries(KNUCKLES) },
+  couplings: { index_curl: { range: [0, 1], lock, terms: KNUCKLES.map(([label, ratio]) => [label, 0, ratio]) } },
+});
+// The joints' values in the knuckles' order.
+const pose = (...values: number[]) => Object.fromEntries(JOINTS.map((label, at) => [label, [values[at]]]));
+const sliders = (panel: HTMLElement) => within(panel).getAllByRole('slider').map(thumb =>
+  [thumb.getAttribute('aria-label'), thumb.getAttribute('aria-valuemin'), thumb.getAttribute('aria-valuemax')]);
+const valueOf = (panel: HTMLElement, label: string) => (within(panel).getByLabelText(`${label} slider value`) as HTMLInputElement).value;
+
+async function setValue(user: ReturnType<typeof userEvent.setup>, panel: HTMLElement, label: string, text: string) {
+  const field = within(panel).getByLabelText(`${label} slider value`) as HTMLInputElement;
+  await user.clear(field);
+  await user.type(field, `${text}{Enter}`);
+}
+
+async function choose(user: ReturnType<typeof userEvent.setup>, panel: HTMLElement, name: string) {
+  await user.click(within(panel).getByRole('button', { name: /^Pose: / }));
+  await user.click(within(document.querySelector<HTMLElement>('[role=menu][aria-label="Pose"]')!).getByRole('menuitemradio', { name }));
+}
+
+it('Position shows a slider per coupling under the Pose row, posing every joint it drives', async () => {
+  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const onPose = vi.fn();
+  render(<XbfPosition kinematics={fingerKinematics(false)} onPose={onPose} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Position' }));
+  const panel = screen.getByRole('region', { name: 'Position controls' });
+  // Under the Pose row: the coupling, 0 as built over its range, then each joint's own.
+  expect(sliders(panel)).toEqual([['index_curl', '0', '1'], ...KNUCKLES.map(([label, top]) => [label, '0', String(top)])]);
+  expect(valueOf(panel, 'index_curl')).toBe('0.00');
+  await setValue(user, panel, 'index_curl', '0.6');
+  expect(onPose.mock.lastCall![0]).toEqual(pose(54, 60, 42));
+  expect(JOINTS.map(label => valueOf(panel, label))).toEqual(['54.0°', '60.0°', '42.0°']);
+  // A joint moved after leaves the coupling's slider where it was.
+  await setValue(user, panel, 'index_pip', '10');
+  expect(onPose.mock.lastCall![0]).toEqual(pose(54, 10, 42));
+  expect(valueOf(panel, 'index_curl')).toBe('0.60');
+  // A configuration puts it where that configuration stands on it, and Reset back at 0.
+  await choose(user, panel, 'fist');
+  expect(valueOf(panel, 'index_curl')).toBe('1.00');
+  await user.click(within(panel.querySelector<HTMLElement>('[data-sidebar-head]')!).getByRole('button', { name: 'Reset position' }));
+  expect(valueOf(panel, 'index_curl')).toBe('0.00');
+  expect(onPose.mock.lastCall![0]).toEqual(pose(0, 0, 0));
+});
+
+it("Position hides a locked coupling's joints: it is their only control", async () => {
+  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const onPose = vi.fn();
+  render(<XbfPosition kinematics={fingerKinematics(true)} onPose={onPose} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Position' }));
+  const panel = screen.getByRole('region', { name: 'Position controls' });
+  expect(sliders(panel)).toEqual([['index_curl', '0', '1']]);
+  expect(within(panel).queryByLabelText('index_pip slider value')).toBeNull();
+  await setValue(user, panel, 'index_curl', '0.5');
+  expect(onPose.mock.lastCall![0]).toEqual(pose(45, 50, 35));
+  // A configuration naming it, then the coupling again: the joints follow it alone.
+  await choose(user, panel, 'fist');
+  expect(onPose.mock.lastCall![0]).toEqual(pose(90, 100, 70));
+  await setValue(user, panel, 'index_curl', '0.2');
+  expect(onPose.mock.lastCall![0]).toEqual(pose(18, 20, 14));
 });
 
 it("parity: a face's and an edge's card rows are a STEP's for the same measurements", () => {
