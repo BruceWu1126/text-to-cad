@@ -21,7 +21,7 @@ python -m cadgen.engine snapshot ../../XBF/planetary_gear_assembly/planetary_gea
 | `flying_car/flying_car.py` | `flying_car.xbf` | Four-rotor flying car concept |
 | `link_robot/link_robot.py` | `link_robot.xbf` | A base, two placements of `link_arm()` and a spare `link_pin()`: one pin B-rep placed five times, two levels deep |
 | `lunar_rover_corner_assembly/lunar_rover_corner_assembly.py` | `lunar_rover_corner_assembly.xbf` | Lunar rover corner: wheel, hub motor, suspension |
-| `mars_rover_concept/mars_rover_concept.py` | `mars_rover_concept.xbf` | Mars rover on terrain: 69 joints, 7 couplings, 4 configurations, 4 motions |
+| `mars_rover_concept/mars_rover_concept.py` | `mars_rover_concept.xbf` | Mars rover on terrain: 69 joints, 1 coupling, 4 configurations, 4 motions |
 | `mechanical_iris_aperture/mechanical_iris_aperture.py` | `mechanical_iris_aperture.xbf` | Labeled mechanical iris aperture |
 | `miniature_spiral_staircase/miniature_spiral_staircase.py` | `miniature_spiral_staircase.xbf` | Labeled miniature spiral staircase |
 | `motorcycle_fidgets/motorcycle_{helmet,seat,shock,wheel}_fidget.py` | `motorcycle_*_fidget.xbf` | Four Cherry MX switch fidgets; the group shares `lib/mx_switch_socket.py` and `lib/color.py` |
@@ -81,14 +81,28 @@ python -m cadgen.engine snapshot ../../XBF/planetary_gear_assembly/planetary_gea
   bakes it into a clip of that name. The `inspectExplode` clip (radial
   translations, which no joint makes) and the STL and 3MF exports are dropped.
 - `mars_rover_concept`: its 27 typed mates are build123d joints on its
-  top-level groups (26 revolute, one linear: `lid_lift`). Its 7 couplings are
-  `couple(...)`: `drive`, `steer`, `crab`, `rocker_split`, `bogie_pitch`,
-  `solar_deploy`, `cutaway`. Its 4 poses are configurations: `stowed`,
-  `deployed`, `arm_reach`, `cutaway_open`. Limits are offsets from the display
-  pose, as before. Its four clips are motions (no `loop`, as before), functions
-  of time with the old clips' numbers: `driveAround` (18 s), `armCycle` (12 s),
-  `deploySequence` (20 s) and `explodedAssembly` (12 s). For them the rover
-  gains 42 prismatic joints:
+  top-level groups (26 revolute, one linear: `lid_lift`). Of its 7 couplings
+  one is a real linkage and stays: `rocker_split`, the differential bar making
+  the rockers counter-rotate and taking half the split, a constraint (the
+  rockers and the bar move only through it, over the rockers' +-12 deg). The
+  six convenience controls are dropped, each pose and motion setting their
+  joints itself:
+  - `drive` (all six wheels by one knob): each wheel is driven on its own.
+  - `steer` (the Ackermann-ish gearing, 1 / 0.79 / -1 / -0.79): the four
+    steer joints set by those ratios (`_steer`).
+  - `crab` (every corner to one heading): no pose or clip used it.
+  - `bogie_pitch` (both bogies by one knob): the bogies pivot independently.
+  - `solar_deploy` (both wings, mirrored): `solar_left` and `-solar_right`
+    (`_solar`).
+  - `cutaway` (lid 420 mm, panel -75 deg by one 0..1 knob): `lid_lift` and
+    `panel_swing` (`_cutaway`).
+
+  Its 4 poses are configurations: `stowed`, `deployed`, `arm_reach`,
+  `cutaway_open`. Limits are offsets from the display pose, as before. Its four
+  clips are motions, functions of time with the old clips' numbers:
+  `driveAround` (18 s), `armCycle` (12 s), `deploySequence` (20 s) and
+  `explodedAssembly` (12 s), none looped, as before. For them the rover gains
+  42 prismatic joints:
   - `heave`: the chassis rides the terrain, which is the ground now and stays
     put while the body heaves over it; every group the chassis carries heaves
     with it, through its joints or its explode slide.
@@ -103,7 +117,7 @@ python -m cadgen.engine snapshot ../../XBF/planetary_gear_assembly/planetary_gea
   - Deliberate differences: `driveAround` rolls the wheels four turns
     unwrapped, where the old clip wrapped the angle at 360 (a jump a joint's
     curve cannot take), so the six wheel joints range over +-1440 deg, four
-    turns each way (+-360 before; `drive` keeps 0..360); the mast pitches about
+    turns each way (+-360 before); the mast pitches about
     its head pivot as it heaves with the body, where the old clip pitched it
     about the unheaved pivot (at most 2.5 mm apart). `deploySequence` also
     thinned the dust layer's opacity as the deck opened, which no joint does:

@@ -18,10 +18,10 @@ DISPLAY_NAME = "Mars rover concept vehicle"
 #   sampling hover, mast head level, solar wings deployed, HGA at 35 deg
 #
 # The mechanism is build123d joints on the top-level groups (`_connect` below)
-# and the joints the clips need (`_clip_joints`), with couplings,
-# configurations and the four old clips as motions in the model's body. Joint axes are built
-# from the SAME derived constants the geometry uses, so re-deriving the layout
-# re-derives the pivots.
+# and the joints the clips need (`_clip_joints`), with the differential's
+# coupling, the configurations and the four old clips as motions in the model's
+# body. Joint axes are built from the SAME derived constants the geometry uses,
+# so re-deriving the layout re-derives the pivots.
 
 # ---------------------------------------------------------------------------
 # Source parameters (geometry contract; snake_case names are part of the
@@ -1298,15 +1298,17 @@ def _bump(u: float, start: float, end: float) -> float:
 
 def _drive_around(t: float) -> dict:
     """A lap: the body heaves over the terrain, the rockers split, the bogies pitch, the
-    corners steer (the `steer` gearing), every wheel rolls four turns, and the mast looks
-    into the turn."""
+    corners steer (`_steer`, the old Ackermann gearing), every wheel rolls four turns,
+    and the mast looks into the turn."""
     u = t / 18
     steer = 34 * math.sin(u * math.tau * 2)
+    bogie = 8 * math.sin(u * math.tau * 5 + 1.1)
     values = {
         "heave": 18 * math.sin(u * math.tau * 10),
         "rocker_split": 6 * math.sin(u * math.tau * 5),
-        "bogie_pitch": 8 * math.sin(u * math.tau * 5 + 1.1),
-        "steer": steer,
+        "bogie_left": bogie,
+        "bogie_right": bogie,
+        **_steer(steer),
         "mast_yaw": -1.6 * steer,
         "mast_pitch": 8 * math.sin(u * math.tau),
     }
@@ -1341,13 +1343,13 @@ def _deploy_sequence(t: float) -> dict:
     cutaway = _bump(u, 0.74, 1)
     return {
         # folded (-82 deg on the left hinge) out to the modelled deploy angle, this model's zero
-        "solar_deploy": -82 * (1 - wings),
+        **_solar(-82 * (1 - wings)),
         "hga_elev": -15 + 50 * hga,
         "mast_yaw": 150 * mast * math.sin(u * math.tau),
         "mast_pitch": -60 * (1 - mast),
         **_arm(-12 * arm, -22 * arm, 30 * arm, -18 * arm, 180 * arm),
         # the deck lid lifts clear and the port panel swings out
-        "cutaway": cutaway,
+        **_cutaway(cutaway),
     }
 
 
@@ -1358,26 +1360,34 @@ def _exploded_assembly(t: float) -> dict:
 
 
 # One control each, driving several joints by ratio: name -> (range, ratios).
+# The one real linkage: the differential bar makes the rockers counter-rotate,
+# taking half the split itself. A constraint: the rockers and the bar move only
+# through it, its range the rockers' limits (+-12 deg).
 _COUPLINGS = {
-    # One knob rolls all six wheels: same diameter, same axis, ratio 1.
-    "drive": ((0, 360), {name: 1.0 for name, *_rest in _WHEEL_STATIONS}),
-    # Ackermann-ish coordinated steer, the front-left fork as the unit.
-    "steer": ((-48, 48), _STEER_GEARS),
-    # Crab walk: every corner to the same heading.
-    "crab": ((-60, 60), {name: 1.0 for name, *_rest in _STEER_STATIONS}),
-    # Rockers counter-rotate and the differential bar takes half the split.
-    "rocker_split": ((-12, 12), {"rocker_left": 1.0, "rocker_right": -1.0, "differential": 0.5}),
-    "bogie_pitch": ((-15, 15), {"bogie_left": 1.0, "bogie_right": 1.0}),
-    # Mirrored hinges, so one deploy knob drives the wings apart.
-    "solar_deploy": ((-82, 13), {"solar_left": 1.0, "solar_right": -1.0}),
-    # The lid 420 mm up and the left panel 75 deg out.
-    "cutaway": ((0, 1), {"lid_lift": 420.0, "panel_swing": -75.0}),
+    "rocker_split": {"rocker_left": 1.0, "rocker_right": -1.0, "differential": 0.5},
 }
+
+
+def _steer(heading: float) -> dict:
+    """The four corners' Ackermann-ish steer at ``heading`` on the front-left fork (the old
+    `steer` coupling's gearing, now set joint by joint)."""
+    return {name: ratio * heading for name, ratio in _STEER_GEARS.items()}
+
+
+def _solar(deploy: float) -> dict:
+    """Both wings at ``deploy`` on the left hinge (mirrored hinges: the right takes -deploy)."""
+    return {"solar_left": deploy, "solar_right": -deploy}
+
+
+def _cutaway(open_: float) -> dict:
+    """The deck lid lifted and the left side panel swung out, ``open_`` of the way (0..1)."""
+    return {"lid_lift": 420.0 * open_, "panel_swing": -75.0 * open_}
+
 
 _POSES = {
     # Cruise stage / launch configuration: wings folded in, arm tucked,
     # mast down, HGA parked.
-    "stowed": {"solar_deploy": -82, "arm_shoulder": 35, "arm_elbow": -75,
+    "stowed": {**_solar(-82), "arm_shoulder": 35, "arm_elbow": -75,
                "arm_wrist": 60, "mast_pitch": -60, "hga_elev": -15},
     # On-surface science attitude: HGA on Earth, mast scanning off to port.
     "deployed": {"hga_elev": 35, "mast_yaw": -60, "mast_pitch": 12},
@@ -1386,7 +1396,7 @@ _POSES = {
     "arm_reach": {"arm_azim": -18, "arm_shoulder": -30, "arm_elbow": 40,
                   "arm_wrist": -25, "arm_turret": 90},
     # Deck open for the internals.
-    "cutaway_open": {"cutaway": 1},
+    "cutaway_open": _cutaway(1),
 }
 
 
@@ -1454,8 +1464,8 @@ def mars_rover_concept():
     _connect(by_label)
     _clip_joints(by_label)
     rover = group("mars_rover_concept", children)
-    for name, (limits, ratios) in _COUPLINGS.items():
-        couple(rover, name, range=limits, **ratios)
+    for name, ratios in _COUPLINGS.items():
+        couple(rover, name, **ratios)
     for name, values in _POSES.items():
         configuration(rover, name, **values)
     motion(rover, "driveAround", _drive_around, duration=18)
