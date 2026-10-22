@@ -5,8 +5,9 @@ import { serveXbfHarness } from '../harness/xbfScenario.mjs';
 // An engine document reopens as it was left, as a STEP did: the Model tree's open rows, the parts
 // hidden and the node isolated come back when the view is mounted again over the same tab's record
 // (a reload), over core's bracket (a plate and two pegs, one prototype: the pegs fold into one row).
+// And what is picked in it reaches the agent as a STEP's did.
 
-test('an engine document reopens with its tree as it was left: what is open, hidden and isolated', async (t) => {
+test('an engine document reopens with its tree as it was left, and its selection reaches the agent', async (t) => {
   const harness = await serveXbfHarness(t);
   const { page, pane, errors } = await harness.open();
   const loaded = () => page.waitForFunction(() => {
@@ -31,5 +32,15 @@ test('an engine document reopens with its tree as it was left: what is open, hid
   await pane.getByRole('button', { name: 'Model tree', exact: true }).click();
   await pane.getByRole('button', { name: 'Collapse peg (2)', exact: true }).waitFor();
   assert.deepEqual(await rows(), left);
+
+  // What is selected is what an agent reads of the view (`cad_view`), and what a capture sent to the
+  // chat names: the part's reference, as Copy Prompt copies it.
+  await pane.getByRole('button', { name: 'Select peg', exact: true }).first().click();
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().selection.length === 1);
+  const selection = await page.evaluate(() => window.cadHarness.a.controller.readState().selection);
+  assert.deepEqual(selection.map(reference => [reference.resource.path, reference.target.selectors]), [['/models/bracket.xbf', ['bracket/peg.1']]]);
+  await page.evaluate(() => window.cadHarness.capture());
+  await page.waitForFunction(() => window.cadHarness.captures.length === 1);
+  assert.deepEqual(await page.evaluate(() => window.cadHarness.captures[0].references), selection);
   assert.deepEqual(errors, []);
 });

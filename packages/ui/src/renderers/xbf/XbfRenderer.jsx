@@ -215,6 +215,10 @@ function XbfSurface({ view, data }) {
     commands: { clearSelection: () => setChosen(EMPTY) },
     state: () => ({ selected: [...selectedRef.current] })
   }), []);
+  // The selection in the prompt grammar, as Quick Edit's chips reference it (set below, once they
+  // are made): what a capture sent to the chat names, and what `cad_view` says is selected.
+  const promptReferencesRef = useRef(NO_REFERENCES);
+  const promptReferences = useCallback(() => promptReferencesRef.current, []);
   // Escape, as a STEP's: a measurement in progress, then the tool in hand (Select taken up), then
   // the measurements picked, then the parts, faces and edges, then the isolation -- one layer a press.
   const escapeRef = useRef(() => false);
@@ -234,7 +238,7 @@ function XbfSurface({ view, data }) {
     // (`progress.py`'s frame), until it lands or fails.
     load: { busy: loaded.busy && !scene, updating: loaded.busy && Boolean(scene), editPending: Boolean(loaded.building),
       progress: loaded.progress || loaded.building, alert: loadAlert },
-    live, escape, deleteSelection: measure.removeSelected, preserveInteractionPixelRatio: edgesDrawn, viewState, rendererState,
+    live, promptReferences, escape, deleteSelection: measure.removeSelected, preserveInteractionPixelRatio: edgesDrawn, viewState, rendererState,
     // A prompt's annotation is in the scene's coordinates: the document's millimetres.
     annotationUnits: scene?.units?.unit || "mm"
   });
@@ -462,6 +466,7 @@ function XbfSurface({ view, data }) {
   const resource = shell.frame.resource;
   const { references, chips } = useXbfSelectionChips({ scene, tree, resource, selectedIds: selected, facts,
     onRemove: removeFromSelection, onHover: hoverChip });
+  promptReferencesRef.current = previewing ? NO_REFERENCES : references;
   // What a node or an element copies: its reference, the file's path with it.
   const singleChip = useCallback(ids => xbfCopyText({ scene, tree, resource, ids }), [scene, tree, resource]);
   const copy = useCallback(text => { if (text) void host.clipboard.writeText(text).catch(() => {}); }, [host.clipboard]);
