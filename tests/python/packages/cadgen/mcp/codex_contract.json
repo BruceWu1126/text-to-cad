@@ -550,13 +550,6 @@
          "string",
          "null"
         ]
-       },
-       "previews": {
-        "items": {
-         "type": "string"
-        },
-        "maxItems": 4,
-        "type": "array"
        }
       },
       "type": "object"

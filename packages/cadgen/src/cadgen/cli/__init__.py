@@ -34,29 +34,9 @@ import sys
 # Generation has NO CLI (README law 7): a model script runs itself —
 # `python <model>.py` through the @step/@dxf decorators.
 _COMMANDS: dict[str, tuple[str, str]] = {
-    # STEP. `build` writes a NEW document (IN OUT); `compile` only makes an
-    # existing document's tree current and is INTERNAL — every door
-    # and the viewer compile on demand, so no skill documentation names it.
-    "step build": (
-        "cadgen.cli.step_build",
-        "re-emit a STEP as a new one; can add kinematics and materials",
-    ),
-    "step compile": ("cadgen.cli.step_compile", "make a STEP's tree current"),
-    "step snapshot": ("cadgen.cli.step_snapshot", "render a STEP model to an image"),
-    # Mesh formats — one door each: `build` tessellates a STEP DOCUMENT into this
-    # format (the sibling default, or OUT) and reads no model declaration;
-    # `snapshot` renders a mesh file. One format, one door.
-    "stl build": ("cadgen.cli.stl_build", "write an STL mesh of a STEP document"),
-    "stl snapshot": ("cadgen.cli.stl_snapshot", "render an STL mesh to an image"),
-    "3mf build": ("cadgen.cli.threemf_build", "write a 3MF mesh of a STEP document"),
-    "3mf snapshot": ("cadgen.cli.threemf_snapshot", "render a 3MF mesh to an image"),
-    "glb build": ("cadgen.cli.glb_build", "write a GLB mesh of a STEP document"),
-    "glb snapshot": ("cadgen.cli.glb_snapshot", "render a GLB mesh to an image"),
-    # DXF. A drawing has no derived state a door must materialize: the file is
-    # the product, made by running its script (python <drawing>.py), and
-    # `dxf snapshot` meshes it on demand.
+    # DXF and robot descriptions: each format's snapshot draws its own files alone (the engine's
+    # snapshot, cadgen.engine.snapshot), and the robot validators check a description.
     "dxf snapshot": ("cadgen.cli.dxf_snapshot", "render a DXF to an image"),
-    # Robot descriptions
     "urdf validate": ("cadgen.cli.urdf_validate", "validate a URDF robot description"),
     "urdf snapshot": ("cadgen.cli.urdf_snapshot", "render a URDF to an image"),
     "sdf validate": ("cadgen.cli.sdf_validate", "validate an SDF world or model"),
@@ -64,19 +44,9 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     "srdf validate": ("cadgen.cli.srdf_validate", "validate an SRDF against its URDF"),
     # Generic / services
     "doctor": ("cadgen.cli.doctor", "print installed cadgen and verify a skill's pin"),
-    "export": ("cadgen.cli.export", "finish a saved file from its recorded result"),
-    # The store. `store why <model>` is the debugging surface STORE.md describes;
-    # `store where <document> <ref>` is its sibling for provenance (README law 20).
-    "store": ("cadgen.cli.store", "the store: info, why <model> (gate verdict), where <document> <ref> (which operation made a face), forget <target>, gc"),
-    "snapshot": ("cadgen.cli.snapshot", "render any supported input to an image"),
-    "daemon": ("cadgen.daemon", "run the warm build daemon"),
-    # The two-word entry is required, not cosmetic: dispatch matches argv[0:2] first, so
-    # without it `cadgen daemon status` falls through to one-word `daemon` and the
-    # supervisor treats "status" as a stray argument.
-    "daemon status": ("cadgen.cli.daemon_status", "show the warm daemon's workers"),
     # The CAD Viewer. One-word `viewer` starts or reuses this machine's viewer (what the
-    # CAD skills teach); `viewer stop` asks it to exit, split into its own module for the
-    # same dispatch reason `daemon status` is.
+    # CAD skills teach); `viewer stop` asks it to exit. The two-word entry is required:
+    # dispatch matches argv[0:2] first.
     "viewer": ("cadgen.cli.viewer", "start, or reuse, this machine's CAD Viewer"),
     "viewer stop": ("cadgen.cli.viewer_stop", "ask the CAD Viewer on a port to exit"),
     # CAD inside an agent host's panels. The host starts it, one process per thread.
@@ -110,35 +80,10 @@ def read_skill_pin(skill_path) -> str | None:
     return match.group("pin") if match else None
 
 
-# Commands the warm daemon runs, mapped to its tool names. The daemon exists to avoid
-# paying the multi-second OCP/build123d import per invocation, so the handoff has to
-# happen BEFORE the command's module is imported -- which is why it lives here in dispatch
-# rather than inside each command.
-#
-# Snapshot orchestration stays in the caller. Its document compilation, missing
-# parts and missing meshes use the build pool; rendering needs no kernel.
-#
-# ONE table: a tool's name is its command with the space dashed, and its module is
-# the command's own (`_COMMANDS`). The daemon derives what it may import from here
-# (`daemon_tool_modules`), so a door cannot be warm on one side and unknown on the other.
-_WARM_COMMANDS = ("step build", "step compile", "stl build", "3mf build", "glb build", "export")
-_DAEMON_TOOLS = {command: command.replace(" ", "-") for command in _WARM_COMMANDS}
-# What each of those doors, and a model script, takes to build in its own process instead,
-# never asking the daemon anything (``daemon.client.no_daemon_from_now``).
-NO_DAEMON_FLAG = "--no-daemon"
-
-
-def daemon_tool_modules() -> dict[str, str]:
-    """``{daemon tool name: parser module}`` for every warm-served door."""
-    return {tool: _COMMANDS[command][0] for command, tool in _DAEMON_TOOLS.items()}
-
-
 _USAGE_HEAD = "usage: cadgen <command> [args...]\n\ncommands:\n"
 _USAGE_TAIL = (
     "\nRun 'cadgen <command> --help' for a command's own options.\n"
     "Each command is also available as 'python -m <module>'.\n"
-    f"Where no build daemon can run, {NO_DAEMON_FLAG} builds in the command's own process:\n"
-    "a model script, export, step build|compile and stl|3mf|glb build take it.\n"
 )
 
 
@@ -316,23 +261,6 @@ def _run(command: str, module_name: str, rest: list[str]) -> int:
     from cadgen._internal import engine_telemetry
 
     engine_telemetry.command = command
-    # A door is a daemon job, handed over before the command's module is imported: the
-    # daemon exists to avoid paying the multi-second OCP/build123d import. Only a process
-    # the daemon started (CADGEN_DAEMON_CHILD: a worker, or a program its job started) runs
-    # a door here, as the daemon's own work: it never recurses into the daemon.
-    daemon_tool = _DAEMON_TOOLS.get(command)
-    if daemon_tool is not None and NO_DAEMON_FLAG in rest:
-        # The one opt-in out of the daemon (NO_DAEMON_FLAG): this door runs
-        # here, and every pool job it owes runs in this process before it answers. Never a
-        # fallback: without it, a daemon that cannot take the door fails it.
-        from cadgen.daemon.client import no_daemon_from_now
-
-        no_daemon_from_now()
-        return _run_module(command, module_name, [arg for arg in rest if arg != NO_DAEMON_FLAG])
-    if daemon_tool is not None and not os.environ.get("CADGEN_DAEMON_CHILD"):
-        from cadgen.daemon.client import run_via_daemon
-
-        return run_via_daemon(daemon_tool, rest, os.getcwd(), prog=f"cadgen {command}")
     return _run_module(command, module_name, rest)
 
 

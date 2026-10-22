@@ -1,14 +1,15 @@
 """``cadgen.robot_payload``: a robot description resolved into what a page plays and draws.
 
-Every description here is written into a fresh temporary workspace with a store of its own:
-nothing reads the sample corpus. Each case holds one contract -- the articulation a URDF's
-joints become (its rows, limits, mimic terms, handles and opening), the rest placements an
-SDF's frame graph resolves to, an SRDF's poses, cadgen's primitive meshes in the store, the
-cache, and every refusal with the sentence it says.
+Every description here is written into a fresh temporary workspace: nothing reads the sample
+corpus. Each case holds one contract -- the articulation a URDF's joints become (its rows,
+limits, mimic terms, handles and opening), the rest placements an SDF's frame graph resolves
+to, an SRDF's poses, cadgen's primitive meshes held in memory, the payloads held in memory,
+and every refusal with the sentence it says.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import math
@@ -18,8 +19,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests.python.support.cad_test_roots import IsolatedCadRoots
 from tests.python.support.paths import REPO_ROOT, add_repo_path
+from tests.python.support.tmp_root import temporary_directory
 
 add_repo_path("packages/cadgen/src")
 
@@ -34,11 +35,11 @@ from cadgen.robot_payload import (  # noqa: E402
     prepare_robot_description,
     read_robot_description,
     resolve_robot_primitives,
+    primitive_glb_bytes,
     robot_control_values,
     robot_payload_bytes,
 )
-from cadgen.store.objects import object_path, read_verified_object  # noqa: E402
-from cadgen.tessellation_policy import DISPLAY_TESSELLATION  # noqa: E402
+from cadgen._internal.primitive_mesh import ANGLE  # noqa: E402
 
 
 def box(size: str, xyz: str = "0 0 0", rgba: str = "") -> str:
@@ -164,8 +165,13 @@ def degrees(radians: float) -> float:
 
 class _Workspace(unittest.TestCase):
     def setUp(self) -> None:
-        self.roots = IsolatedCadRoots(self, prefix="robot-payload-")
-        self.root = self.roots.cad_root
+        folder = temporary_directory(prefix="robot-payload-")
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        # A description is named relative to the working directory: the workspace's.
+        previous = Path.cwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, previous)
 
     def write(self, name: str, text: str) -> Path:
         path = self.root / name
@@ -175,22 +181,17 @@ class _Workspace(unittest.TestCase):
 
 
 class PreparingDescriptions(_Workspace):
-    def test_preparation_validates_controls_without_meshing_or_store_writes(self) -> None:
+    def test_preparation_validates_controls_without_meshing(self) -> None:
         urdf = self.write("arm.urdf", ARM_URDF)
         srdf = self.write("arm.srdf", ARM_SRDF)
         sdf = self.write("swing.sdf", SWING_SDF)
         for path in (urdf, srdf, sdf):
             with self.subTest(kind=path.suffix):
-                before = sorted(self.roots.cache_dir.rglob("*"))
-                with (
-                    mock.patch.dict("sys.modules", {"cadgen._internal.primitive_mesh": None}),
-                    mock.patch("cadgen.store.objects.put_object", side_effect=AssertionError("prepare wrote an object")),
-                ):
+                with mock.patch.dict("sys.modules", {"cadgen._internal.primitive_mesh": None}):
                     prepared = prepare_robot_description(path)
                     self.assertTrue(robot_control_values(prepared, None))
                     with self.assertRaisesRegex(RobotReadError, "Unknown joint"):
                         robot_control_values(prepared, {"unknown": 1})
-                self.assertEqual(sorted(self.roots.cache_dir.rglob("*")), before)
                 self.assertTrue(all("_primitive" in visual["mesh"] for visual in prepared["visuals"]))
                 resolved = resolve_robot_primitives(prepared)
                 self.assertEqual(resolved, read_robot_description(path))
@@ -247,7 +248,7 @@ class UrdfArticulation(_Workspace):
         self.assertEqual(transform(deltas["shoulder"], (1.0, 0, 0.2)), [0.0, 0.0, -0.8], "a quarter turn about +Y at the shoulder")
         self.assertEqual(transform(deltas["camera_mount"], (1, 2, 3)), [1.0, 2.0, 3.0], "a fixed joint carries only its parent's motion")
 
-    def test_visuals_are_placed_in_rest_space_and_primitives_are_store_meshes(self) -> None:
+    def test_visuals_are_placed_in_rest_space_and_primitives_are_held_meshes(self) -> None:
         visuals = {visual["id"]: visual for visual in self.payload["visuals"]}
         self.assertEqual(list(visuals), ["base:v1", "upper_arm:v1", "carriage:v1", "finger_left:v1", "finger_right:v1", "wheel:v1"])
         base = visuals["base:v1"]
@@ -258,16 +259,18 @@ class UrdfArticulation(_Workspace):
         self.assertAlmostEqual(visuals["upper_arm:v1"]["placement"][3], 0.25)
         self.assertAlmostEqual(visuals["upper_arm:v1"]["placement"][11], 0.2, msg="the link frame carries its visual")
         for visual in visuals.values():
-            data = read_verified_object(visual["mesh"]["object"])
-            self.assertEqual(struct.unpack("<I", data[:4])[0], 0x46546C67, "a GLB object in the store")
-        self.assertEqual(visuals["finger_left:v1"]["mesh"]["object"], visuals["finger_right:v1"]["mesh"]["object"], "one shape, one object")
-        # The wheel's cylinder takes the segments the display ladder's standard rung gives it.
-        document = json.loads(read_verified_object(visuals["wheel:v1"]["mesh"]["object"])[20:20 + struct.unpack("<I", read_verified_object(visuals["wheel:v1"]["mesh"]["object"])[12:16])[0]])
+            data = primitive_glb_bytes(visual["mesh"]["object"])
+            self.assertEqual(struct.unpack("<I", data[:4])[0], 0x46546C67, "a GLB held by its digest")
+            self.assertEqual(hashlib.sha256(data).hexdigest(), visual["mesh"]["object"])
+        self.assertEqual(visuals["finger_left:v1"]["mesh"]["object"], visuals["finger_right:v1"]["mesh"]["object"], "one shape, one mesh")
+        # The wheel's cylinder takes the segments the primitive tolerance gives it.
+        wheel = primitive_glb_bytes(visuals["wheel:v1"]["mesh"]["object"])
+        document = json.loads(wheel[20:20 + struct.unpack("<I", wheel[12:16])[0]])
         self.assertNotIn("materials", document, "no material: the description's colour or the viewer's surface paints it")
         self.assertEqual(document["nodes"][0]["extras"]["cadUpAxis"], "y")
         from cadgen._internal.primitive_mesh import primitive_segments
         segments = primitive_segments(0.3, math.sqrt(2 * 0.6 ** 2 + 0.1 ** 2))
-        self.assertGreater(segments, 2 * math.pi / DISPLAY_TESSELLATION["angleTolerance"] - 1)
+        self.assertGreater(segments, 2 * math.pi / ANGLE - 1)
         self.assertEqual(document["accessors"][0]["count"], 2 * segments + 2 * (segments + 1))
 
     def test_links_and_joints_carry_what_the_description_says(self) -> None:
@@ -681,19 +684,21 @@ class Refusals(_Workspace):
             robot_control_values(payload, {"lead": -5})
 
 
-class TheStoreCachesThePayload(_Workspace):
-    def test_unchanged_bytes_read_one_object_and_changed_bytes_read_again(self) -> None:
+class TheProcessHoldsThePayload(_Workspace):
+    def test_unchanged_bytes_are_read_once_and_changed_bytes_read_again(self) -> None:
         path = self.write("arm.urdf", ARM_URDF)
         first = robot_payload_bytes(path)
         with mock.patch.object(robot_payload, "read_robot_description", side_effect=AssertionError("read twice")):
             self.assertEqual(robot_payload_bytes(path), first)
         payload = json.loads(first)
         self.assertEqual(payload["kind"], "urdf")
-        # A sweep that took a primitive's object: a rebuild meshes it again under the same hash.
+        # A mesh this process let go of: a rebuild meshes it again under the same digest.
         digest = payload["visuals"][0]["mesh"]["object"]
-        os.remove(object_path(digest))
+        with robot_payload._LOCK:
+            robot_payload._MESHES.pop(digest)
+        self.assertIsNone(primitive_glb_bytes(digest))
         self.assertEqual(json.loads(robot_payload_bytes(path, rebuild=True))["visuals"][0]["mesh"]["object"], digest)
-        self.assertTrue(object_path(digest).is_file())
+        self.assertIsNotNone(primitive_glb_bytes(digest))
         path.write_text(ARM_URDF.replace('limit lower="0" upper="0.3"', 'limit lower="0" upper="0.6"'), encoding="utf-8")
         changed = json.loads(robot_payload_bytes(path))
         self.assertEqual({control["id"]: control["max"] for control in changed["articulation"]["controls"]}["lift"], 0.6)
@@ -726,11 +731,10 @@ class TheBrowserFixturesAreCurrent(unittest.TestCase):
     FIXTURES = REPO_ROOT / "packages" / "ui" / "src" / "renderers" / "robot" / "__fixtures__"
 
     def test_the_committed_payloads_refusals_and_meshes_are_what_cadgen_reads_now(self) -> None:
-        roots = IsolatedCadRoots(self, prefix="robot-fixtures-")
         spec = importlib.util.spec_from_file_location("robot_fixtures", self.FIXTURES / "make_fixtures.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        payloads, refusals, meshes = module.fixture_payloads(roots.cache_dir)
+        payloads, refusals, meshes = module.fixture_payloads()
         self.assertEqual(set(payloads) | set(refusals), set(module.DESCRIPTIONS))
         regenerate = "regenerate with packages/ui/src/renderers/robot/__fixtures__/make_fixtures.py"
         for name, payload in payloads.items():

@@ -1,7 +1,7 @@
 // Two ref grammars. An engine document's (`.xbf`) is the engine's own, at the end of this module
 // ("The engine's grammar"). A STEP's is the one described here, until the engine's carries over.
 //
-// A STEP's ref grammar: one language, shared with cadgen (cadgen/cad_ref_syntax.py). A ref names an
+// A STEP's ref grammar, which the CAD Viewer copies for a STEP whichever renderer draws it. A ref names an
 // occurrence by its token (`o:` + 12 hex, minted from its place in the tree) and an element by the
 // occurrence's token, a slash and the element's name: its kind (`f:`, `e:`, `v:`) and its
 // derivation from the features that made it -- an atom (the n-th element of its kind a feature
@@ -12,16 +12,15 @@
 // (`f:lid.2`). An element no construction names (an imported file's) is named by its geometric
 // token, 12 hex (`f:9d2e8c1b5a70`). A part label stands in for an occurrence token (`#base`,
 // `#base/f:dial.make_box1.6`); a bare element name resolves in a document with one leaf. A name is
-// an opaque string this grammar admits: nothing here reads a derivation. The cases of
-// cadRefs.parity.json are asserted by both languages.
+// an opaque string this grammar admits: nothing here reads a derivation. Its cases are
+// cadRefs.parity.json's `selectorCases`, `inheritanceCases` and `tokenCases`.
 //
-// `<file>#<selectors>`, file half optional. Mirrors QUOTED_PREFIX_RE in cadgen/cad_ref_syntax.py.
+// `<file>#<selectors>`, file half optional.
 // The prefix sits LEFT of the '#' so it can never collide with the selector grammar on the right.
 // JSON-quote paths containing whitespace or delimiters: `"my part.step"#o:4b1f9e2a7c03`.
 const CAD_TOKEN_RE = /^\s*("(?:[^"\\\r\n]|\\.)*"|[^#"\s]*)#([^\s]*)/;
 const OCCURRENCE_TOKEN_SOURCE = "o:[0-9a-f]{12}";
-// Mirrors FEATURE_NAME_PATTERN, ATOM_PATTERN, STEP_PATTERN and ELEMENT_NAME_PATTERN in
-// cadgen/cad_ref_syntax.py: a feature is a label or `function.operationN`; segments start with a
+// A feature is a label or `function.operationN`; segments start with a
 // letter and numbers with a digit, so the two never read as one another, and a geometric token
 // holds no dot.
 const SEGMENT_SOURCE = "[A-Za-z_][A-Za-z0-9_]*";
@@ -38,8 +37,7 @@ const OCCURRENCE_ELEMENT_SELECTOR_RE = new RegExp(`^(${OCCURRENCE_TOKEN_SOURCE})
 const ELEMENT_SELECTOR_RE = new RegExp(`^(${ELEMENT_NAME_SOURCE})$`);
 const MATE_SELECTOR_RE = /^m\d+$/i;
 
-// Mirrors LABEL_PATTERN in cadgen/cad_ref_syntax.py. Kept in step by cadRefs.parity.json,
-// which both this module's tests and the Python tests assert against.
+// A part label.
 const LABEL_SOURCE = "[A-Za-z_][A-Za-z0-9_:]*";
 const LABEL_SELECTOR_RE = new RegExp(`^(${LABEL_SOURCE})$`);
 const LABEL_ELEMENT_SELECTOR_RE = new RegExp(`^(${LABEL_SOURCE})/(${ELEMENT_NAME_SOURCE})$`);
@@ -47,8 +45,7 @@ const OCCURRENCE_TOKEN_RE = new RegExp(`^${OCCURRENCE_TOKEN_SOURCE}$`);
 
 /**
  * Whether `candidate` is a ref in the grammar itself -- an occurrence token, an occurrence/element
- * pair, a bare element name or a mate -- rather than a label or an opaque string. Mirrors
- * `is_native_selector` in cadgen/cad_ref_syntax.py.
+ * pair, a bare element name or a mate -- rather than a label or an opaque string.
  */
 export function isNativeCadSelector(candidate) {
   const parsed = parseStructuredSelector(candidate);

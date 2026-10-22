@@ -5,9 +5,8 @@ import { CONNECTED_SELECTION, SELECT_GEOMETRY, connectedSelectionApplies } from 
 import { DropdownMenuCheckboxItem } from '@text-to-cad/ui/primitives/dropdown-menu';
 import SelectFilterMenu from "../kit/tools/select/SelectFilterMenu.jsx";
 
-// A copy of the STEP renderer's (`step/components/workbench/SelectionModes.jsx`), so Select's
-// button, Measure's and the selection filter read the same on an engine document; the two are
-// one again at the renderers' migration.
+// Select's button, Measure's and the selection filter, which read on an engine document as the
+// STEP renderer's did.
 //
 // The two tools that pick in modes share one set of drawings. Each mode has ONE glyph, drawn on
 // the 24-unit grid: a cube whole and bold for Parts; faint, with the element a pick takes drawn

@@ -1,6 +1,6 @@
 // The articulation player.
 //
-// cadgen resolves a model's kinematics into ONE artifact (`cadgen.articulation`): controls
+// cadgen resolves a model's kinematics into ONE artifact (`cadgen.robot_payload`'s): controls
 // with their limits and rest values, joints in their rest frames with affine rows over the
 // controls, which occurrences each joint carries, what a drag gesture writes, the named
 // poses and the opening pose. This module plays it and decides nothing: control values go

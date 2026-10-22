@@ -1,7 +1,7 @@
 """``cadgen mcp``: CAD beside an agent's chat, as an MCP App.
 
 Nothing heavy happens until a tool needs it: initialize and tools/list read no
-store, start no daemon and import no CAD kernel. Everything the views share --
+file, start no daemon and import no CAD kernel. Everything the views share --
 the open views, what was last shown -- is plain process memory.
 
 One page serves every surface. The tool that opens a surface returns a
@@ -9,7 +9,7 @@ One page serves every surface. The tool that opens a surface returns a
 a view browses from its model's folder, so nothing says where it may browse. Once
 open, a view makes ONE call each second, ``cad_sync``: it says what it shows (its
 model, its selection, whether a person just touched it) and what it watches (its
-model's catalog entry, a STEP's build feed), and gets back the agent's requests
+model's catalog entry), and gets back the agent's requests
 and what changed. Everything else -- its model, the library and the home's Open,
 Reveal, the person's analytics answer and features, the update check -- it reaches
 through ``cad_http``, the viewer's own HTTP routes. No call is held open
@@ -145,8 +145,8 @@ def _object(properties: dict[str, Any] | None = None, required: list[str] | None
 
 _PATH = {"type": "string", "description": "A CAD file's absolute path."}
 _VIEW = {"type": "string", "description": "A view id from cad_view; defaults to the most recently used viewer."}
-# What a view watches: its model's catalog entry, and the build feed of each STEP it shows.
-_WATCH = _object({"file": {"type": ["string", "null"]}, "previews": {"type": "array", "items": {"type": "string"}, "maxItems": 4}})
+# What a view watches: its model's catalog entry.
+_WATCH = _object({"file": {"type": ["string", "null"]}})
 _SHOWN_VIEW = {"type": "string", "description": "The view that cad_show returned."}
 _READ_ONLY = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}
 # Every client's: the agent reports CAD's telemetry setting, or turns sharing off when the user asks.
@@ -489,7 +489,7 @@ class Server:
         draw at once, and Open with the desktop's chooser."""
         try:
             recents = [entry.public() for entry in self.recents.list()]
-        except Exception:  # the home opens whatever the store says
+        except Exception:  # the home opens whatever the library says
             LOG.exception("could not read recents")
             recents = []
         launch: dict[str, Any] = {"protocol": PROTOCOL, "page": "home", "model": None, "recents": recents}
@@ -826,7 +826,7 @@ def serve(argv: list[str] | None = None) -> int:
     from cadgen.analytics import Recorder, collect_crashes
 
     # The channel this server's plugin named, written down for the processes of its installation no plugin
-    # names one to -- the build daemon, a skill's commands and the Viewer they open. In the background, so no
+    # names one to -- the engine daemon, a skill's commands and the Viewer they open. In the background, so no
     # start waits on the state directory; an exit waits a moment for it, as a host may start a server only to
     # list its tools.
     remembering = threading.Thread(target=remember, name="cadgen-channel", daemon=True)

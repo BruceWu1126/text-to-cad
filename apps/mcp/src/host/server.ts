@@ -1,4 +1,3 @@
-import type { CadEditingPreview } from '@text-to-cad/core/client';
 import type { LibraryModel } from '@text-to-cad/ui/library';
 import type { UpdateNotice } from '@text-to-cad/ui/update';
 import type { Bridge, CallOptions, ToolResult } from './bridge';
@@ -41,13 +40,12 @@ export interface HttpReply { status: number; headers: Record<string, string>; bo
 export interface SyncRequest {
   view: string; surface: string; model: string | null;
   focused?: boolean; closed?: boolean; state?: Record<string, unknown>;
-  watch?: { file: string; previews?: string[] };
+  watch?: { file: string };
 }
 export interface SyncReply {
   events: ViewEvent[];
   /** The watched file's catalog revision, or why it could not be read (the agent's requests come regardless). */
   catalog?: { revision?: string; error?: string };
-  previews?: ({ file: string; error?: string } & CadEditingPreview)[];
 }
 
 export class ServerError extends Error {

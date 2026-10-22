@@ -164,9 +164,9 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   }), [sync]);
   // Everything else the view asks of the server travels as viewer requests over `cad_http`: its
   // model, the library, Open, Reveal, the person's settings and the update check. The client polls
-  // nothing: the sync says when the file's catalog entry moved, and carries a STEP's build feed.
+  // nothing: the sync says when the file's catalog entry moved.
   const tunnel = useMemo(() => createTunnelFetch(server), [server]);
-  const client = useMemo(() => createTunnelClient(tunnel, { pollIntervalMs: 0, editingPreviewFeed: sync.observePreview }), [tunnel, sync]);
+  const client = useMemo(() => createTunnelClient(tunnel, { pollIntervalMs: 0 }), [tunnel]);
   useEffect(() => () => client.dispose(), [client]);
 
   useEffect(() => {

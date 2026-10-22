@@ -412,10 +412,10 @@ class StagedApp(LauncherFixture):
 
     @staticmethod
     def change_runtime_code(staged: str) -> None:
-        """Edit runtime code OUTSIDE cadgen.viewer, as a pull would: the viewer imports the
-        daemon's transport, so this re-keys the identity and, in a checkout, trips the
+        """Edit runtime code OUTSIDE cadgen.viewer, as a pull would: the viewer imports
+        cadgen's telemetry, so this re-keys the identity and, in a checkout, trips the
         auto-reload watcher."""
-        runtime_file = Path(StagedApp.staged_sources(staged), "cadgen", "daemon", "transport.py")
+        runtime_file = Path(StagedApp.staged_sources(staged), "cadgen", "analytics.py")
         runtime_file.write_text(
             runtime_file.read_text(encoding="utf-8") + "\n# changed runtime\n", encoding="utf-8"
         )

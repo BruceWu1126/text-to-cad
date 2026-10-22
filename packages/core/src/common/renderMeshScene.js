@@ -367,9 +367,8 @@ function roundedBounds(bounds) {
   return min && max ? { min, max } : null;
 }
 
-// The parts inventory of a family scene (a GLB, an STL, a 3MF, a robot): what it drew.
-// A STEP model's parts are cadgen's facts and never reach the page (cadgen.snapshot_parts
-// lists them, with the same fields, from the tree and the store).
+// The parts inventory of a family scene (a GLB, an STL, a 3MF, a robot, an engine document):
+// what it drew.
 //
 // This is the ONLY output whose size grows with the model -- everything else in the CLI
 // surface is constant (a 600-part assembly logs the same ~100 bytes a single part does).
@@ -378,9 +377,8 @@ function roundedBounds(bounds) {
 // `ref` were the same string three times over (identical in 600/600 parts), `label`
 // duplicated `name` (600/600), and the coordinates carried 16 significant figures.
 //
-// `ref` survives rather than `id`/`occurrenceId` because it is the form that goes
-// straight back into `--focus` / `--hide` / `read_scene(...).resolve()`; the bare id is one string slice
-// away for anyone who needs it.
+// `ref` survives rather than `id`/`occurrenceId` because it is the form a reader hands
+// back to address the part; the bare id is one string slice away for anyone who needs it.
 // A label ref (`#eye_shank`) addresses a part by the `name` already in every row, so this
 // payload deliberately does NOT carry a second `labelRef` identifier -- that would undo the
 // size work above for a string the row already contains. A duplicated label's numbered

@@ -143,8 +143,7 @@ class EngineTelemetryTest(unittest.TestCase):
         self.assertEqual(why(refused, found=False), "no_file")
         self.assertEqual(why(error(), models=[{"ok": False, "cached": False, "children": 0, "parts": 0, "files": []}]),
                          "input_error")
-        self.assertEqual(why(error("playwright._impl._errors.Error", here=True)), "browser")
-        self.assertEqual(why(error("playwright._impl._errors.TimeoutError", here=True)), "timeout")
+        self.assertEqual(why(error("TimeoutError", here=True)), "timeout")
         # No OpenGL to draw with: the picture was not drawn.
         self.assertEqual(why(error("RuntimeError", engine=True, here=True)), "render_error")
 

@@ -52,8 +52,8 @@ from typing import Any
 
 from cadgen.engine.atomic_replace import replace_atomic
 
-__all__ = ["SnapshotRefused", "Still", "add_parser", "authored", "draw", "options", "parse_annotation",
-           "parse_measurements", "parse_pose", "run", "snapshot"]
+__all__ = ["SnapshotRefused", "Still", "add_parser", "authored", "build_parser", "draw", "main", "options",
+           "parse_annotation", "parse_camera", "parse_display", "parse_measurements", "parse_pose", "run", "snapshot"]
 
 DISPLAY_MODES = ("solid", "shaded", "parts", "xray", "hidden-line", "wireframe")
 DISPLAY_KEYS = frozenset({"mode", "grid", "appearance", "camera", "clip", "exploded"})
@@ -558,10 +558,7 @@ def _warn(unmeshed: dict[str, list[int]]) -> dict[str, list[int]]:
     return unmeshed
 
 
-def add_parser(verbs: Any) -> argparse.ArgumentParser:
-    """The ``snapshot`` verb of ``cadgen xbf``."""
-    parser = verbs.add_parser("snapshot", help="draw a document or a file the viewer opens as the CAD Viewer does, "
-                                               "into a PNG")
+def _arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument("document", metavar="SRC", help="a document (.xbf, .step), a mesh file (.glb, .stl, .3mf), a "
                                                         "robot (.urdf, .sdf, .srdf), a drawing (.dxf), or "
                                                         "SCRIPT.py::MODEL (built first, drawn from its worker)")
@@ -591,9 +588,32 @@ def add_parser(verbs: Any) -> argparse.ArgumentParser:
     return parser
 
 
-def run(args: argparse.Namespace) -> int:
+_HELP = "draw a document or a file the viewer opens as the CAD Viewer does, into a PNG"
+
+
+def add_parser(verbs: Any) -> argparse.ArgumentParser:
+    """The ``snapshot`` verb among a command's subcommands (``python -m cadgen.engine snapshot``)."""
+    return _arguments(verbs.add_parser("snapshot", help=_HELP, description=_HELP))
+
+
+def build_parser(prog: str = "cadgen snapshot") -> argparse.ArgumentParser:
+    """``cadgen snapshot``'s parser."""
+    return _arguments(argparse.ArgumentParser(prog=prog, description=_HELP))
+
+
+def main(argv: list[str] | None = None, prog: str = "cadgen snapshot", suffixes: tuple[str, ...] = ()) -> int:
+    """``cadgen snapshot SRC OUT.png``; with ``suffixes``, a command that draws those files alone
+    (``cadgen dxf snapshot`` draws a ``.dxf``), refusing any other SRC by name before anything renders."""
+    args = build_parser(prog).parse_args(argv)
+    if suffixes and Path(args.document).suffix.lower() not in suffixes:
+        print(f"{prog}: {args.document} is not a {' or '.join(suffixes)} file", file=sys.stderr)
+        return 2
+    return run(args, prog)
+
+
+def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
     if "::" in args.document or args.document.endswith(".py"):
-        return _run_model(args)
+        return _run_model(args, prog)
     from cadgen.engine import api
 
     try:
@@ -603,10 +623,10 @@ def run(args: argparse.Namespace) -> int:
                               size_profile=args.size_profile, daemon=not args.no_daemon, annotation=args.annotation,
                               measurements=args.measurements).report
     except SnapshotRefused as error:
-        print(f"cadgen xbf snapshot: {error}", file=sys.stderr)
+        print(f"{prog}: {error}", file=sys.stderr)
         return 2
     except Exception as error:  # noqa: BLE001 - a failed render is the command's answer
-        print(f"cadgen xbf snapshot: {type(error).__name__}: {error}", file=sys.stderr)
+        print(f"{prog}: {type(error).__name__}: {error}", file=sys.stderr)
         return 1
     if args.json:
         print(json.dumps(report))
@@ -617,8 +637,8 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_model(args: argparse.Namespace) -> int:
-    """``cadgen xbf snapshot SCRIPT.py::MODEL OUT.png``: the model built in its worker, its
+def _run_model(args: argparse.Namespace, prog: str) -> int:
+    """``cadgen snapshot SCRIPT.py::MODEL OUT.png``: the model built in its worker, its
     document drawn from that worker's memory (``api.snapshot``)."""
     from cadgen.engine import api
 
@@ -628,10 +648,10 @@ def _run_model(args: argparse.Namespace) -> int:
                              size_profile=args.size_profile, daemon=not args.no_daemon, annotation=args.annotation,
                              measurements=args.measurements)
     except (SnapshotRefused, ValueError) as error:
-        print(f"cadgen xbf snapshot: {error}", file=sys.stderr)
+        print(f"{prog}: {error}", file=sys.stderr)
         return 2
     except api.EngineError as error:
-        print(f"cadgen xbf snapshot: {error}", file=sys.stderr)
+        print(f"{prog}: {error}", file=sys.stderr)
         return 1
     if args.json:
         print(json.dumps(drawn.report))

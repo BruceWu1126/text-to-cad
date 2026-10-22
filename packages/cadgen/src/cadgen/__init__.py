@@ -36,56 +36,12 @@ del _install_engine_telemetry
 
 __all__ = [
     "__version__",
-    "AssemblyHelper",
-    "step",
-    "dxf",
-    "stl",
-    "glb",
-    "threemf",
-    "revolute",
-    "slider",
-    "cylindrical",
-    "fastened",
-    "couple",
-    "clip",
     "build123d",
     "srgb",
-    "MateTarget",
-    "compound_from_instances",
-    "read_step",
-    "read_scene",
-    "StepScene",
-    "Occurrence",
-    "Selection",
-    "label_text",
-    "label_shape",
-    "report",
-    "target",
-    "track",
 ]
 
 
 def __getattr__(name: str):
-    if name in {"step", "dxf", "stl", "glb", "threemf"}:
-        # A FORMAT NAMESPACE: the declaration decorator and the format's verbs in
-        # one callable module (cadgen._internal.format_namespace). Returning the
-        # module rather than cadgen.authoring.<name> keeps a single identity —
-        # `import cadgen.stl` would otherwise shadow the decorator.
-        import importlib
-
-        return importlib.import_module(f"cadgen.{name}")
-    if name in {"revolute", "slider", "cylindrical", "fastened", "couple"}:
-        # Typed-mates kinematics vocabulary for the kinematics= dict on
-        # @step/@stl/@glb/@threemf.
-        from cadgen import kinematics
-
-        return getattr(kinematics, name)
-    if name == "clip":
-        # Animation clips for the animation= dict on @step, baked to keyframes
-        # when the model builds.
-        from cadgen.animation import clip
-
-        return clip
     if name == "build123d":
         # `from cadgen import build123d as bd` — the lazy transparent re-export.
         # Importing the submodule is cheap; the real build123d import happens on
@@ -93,32 +49,10 @@ def __getattr__(name: str):
         import cadgen.build123d as _bd
 
         return _bd
-    if name in {"AssemblyHelper", "MateTarget", "label_shape", "label_text", "target"}:
-        from cadgen.assembly import AssemblyHelper, MateTarget, label_shape, label_text, target
-
-        return {
-            "AssemblyHelper": AssemblyHelper,
-            "MateTarget": MateTarget,
-            "label_text": label_text,
-            "label_shape": label_shape,
-            "target": target,
-        }[name]
-    if name in {"read_step", "read_scene", "StepScene", "Occurrence", "Selection"}:
-        from cadgen import step_scene
-
-        return getattr(step_scene, name)
     if name in {"srgb", "srgb_to_linear", "linear_to_srgb"}:
         from cadgen import color
 
         return getattr(color, name)
-    if name == "compound_from_instances":
-        from cadgen.instances import compound_from_instances
-
-        return compound_from_instances
-    if name in {"report", "track"}:
-        from cadgen.progress import report, track
-
-        return {"report": report, "track": track}[name]
     if name in {"build", "export", "snapshot", "serve", "where"}:
         # The engine's verbs as functions (cadgen.engine.api), one per `cadgen xbf` command,
         # each through the engine's daemon. Served without advertising them in __all__ while
@@ -135,25 +69,13 @@ if TYPE_CHECKING:
     # Mirrors the lazy __getattr__ above so type checkers and editors see the root exports
     # without importing OCP. Every name here must have a branch there, and comes from the
     # module that defines it.
-    from cadgen import build123d, dxf, glb, step, stl, threemf
-    from cadgen.assembly import AssemblyHelper, MateTarget, label_shape, label_text, target
+    from cadgen import build123d
     from cadgen.color import (
         srgb,
         # __getattr__ serves these two without advertising them in __all__;
         # the alias is how the mirror says "re-export" rather than "unused".
         linear_to_srgb as linear_to_srgb,
         srgb_to_linear as srgb_to_linear,
-    )
-    from cadgen.animation import clip
-    from cadgen.kinematics import couple, cylindrical, fastened, revolute, slider
-    from cadgen.instances import compound_from_instances
-    from cadgen.progress import report, track
-    from cadgen.step_scene import (
-        read_step,
-        read_scene,
-        StepScene,
-        Occurrence,
-        Selection,
     )
     from cadgen.engine.api import (
         build as build,

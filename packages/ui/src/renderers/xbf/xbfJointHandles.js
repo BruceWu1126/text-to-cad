@@ -2,8 +2,7 @@ import { xbfLinkPlacements, xbfPairMotion } from "@text-to-cad/core/lib/xbf/xbfK
 import { xbfElementId } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 import { add, armOffset, subtract } from "../kit/tools/pose/jointHandleMath.js";
 
-// What Position's knobs take hold of in an engine document: the kit's plain list (the STEP
-// renderer's `step/workbench/jointHandles.js` makes the same list from a STEP's articulation), one
+// What Position's knobs take hold of in an engine document: the kit's plain list, one
 // handle per row of the Position section that turns or slides -- a revolute pair's angle, a
 // prismatic pair's distance, a cylindrical pair's both, a geared pair's angle written through its
 // gear -- placed where the mechanism stands now: `pivot` on the pair's frame (a slide's where its

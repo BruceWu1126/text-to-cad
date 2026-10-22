@@ -1,11 +1,8 @@
-"""The render contract: what the Python producer writes and pins must stay what its
-readers expect.
+"""The viewer backend's suite must actually run.
 
-This repo has lost a cross-language mirror to a deleted check before (the
-viewer scanner's package-path constants drifted silently once nothing compared
-them). The viewer BACKEND is ``cadgen.viewer`` now and reads the store through
-cadgen's own helpers, and the page takes every part key from cadgen, so there is no
-second derivation of a store key or a format version left to compare.
+This repo has lost a cross-language mirror to a deleted check before (the viewer scanner's
+package-path constants drifted silently once nothing compared them), and the viewer backend's
+own suite once ran in no configuration at all. This pins that the runner still reaches it.
 """
 
 from __future__ import annotations
@@ -14,24 +11,6 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-
-
-class RenderContractSyncTest(unittest.TestCase):
-    def test_component_blob_format_is_pinned_not_current(self) -> None:
-        # Component blobs are content-addressed: their serialized bytes ARE the
-        # cid. A floating BinTools_FormatVersion_CURRENT would let an OCP
-        # upgrade silently re-serialize every blob and re-key every cid; the
-        # write site must name an explicit version so a format bump is a
-        # deliberate act, not a dependency-update side effect.
-        source = (ROOT / "packages/cadgen/src/cadgen/_internal/component_package.py").read_text()
-        writes = source.count("BinTools.Write_s(")
-        self.assertGreaterEqual(writes, 1, "the component blob write site moved; update this test")
-        self.assertNotIn(
-            "BinTools_FormatVersion.BinTools_FormatVersion_CURRENT",
-            source,
-            "component blobs must be written with a PINNED BinTools format "
-            "version (see _shape_brep_bytes), never _CURRENT",
-        )
 
 
 class TheViewerSuiteActuallyRuns(unittest.TestCase):

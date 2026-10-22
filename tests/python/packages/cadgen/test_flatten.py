@@ -37,9 +37,10 @@ def _plate():
 
 
 def _entity_kinds(shape) -> dict[str, int]:
-    from cadgen._internal.dxf_emit import emit_dxf
+    # The engine's DXF writer (build123d's ExportDXF), as a declared @dxf file writes the edges.
+    from cadgen.engine.export.dxf import _emit
 
-    _, document = emit_dxf(shape, label="flatten-test")
+    _, document = _emit([("CUT", list(shape.edges()))], "flatten-test")
     return dict(collections.Counter(entity.dxftype() for entity in document.modelspace()))
 
 

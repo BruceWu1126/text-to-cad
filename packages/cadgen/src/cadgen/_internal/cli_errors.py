@@ -1,17 +1,10 @@
-"""Compact failure reporting for the CAD CLIs.
+"""Compact failure reporting for the CLIs generated from a verb's signature.
 
-A generator that raises used to reach the interpreter uncaught, so an ordinary authoring
-mistake printed a 62-line, 4.2 KB traceback whose one useful line -- the exception -- was
-last, under ~50 frames of ``runpy``, the launcher, and cadgen internals. A model entry's
-missing its return printed 43 lines to say ``must return one value``.
-
-What a caller actually needs is the failure and WHERE IN THEIR MODEL it happened. Those
-frames are already identifiable: :func:`is_first_party_source_file` is the same predicate
-the source-closure capture uses to tell model code from the stdlib, site-packages, and the
-running runtime. So the report keeps the model's own frames and drops everything else.
-
-``--verbose`` still prints the full traceback -- when the fault IS in cadgen, the internal
-frames are the point.
+A verb that raises would otherwise reach the interpreter uncaught, and an ordinary mistake
+would print a long traceback whose one useful line -- the exception -- comes last, under the
+launcher's and cadgen's frames. What a caller needs is the failure and where it was raised,
+so that is what is printed. ``--verbose`` still prints the full traceback: when the fault IS
+in cadgen, the internal frames are the point.
 """
 
 from __future__ import annotations
@@ -21,17 +14,12 @@ import traceback
 from pathlib import Path
 from typing import TextIO
 
-# Deep recursion in a generator (a parametric model calling itself) can produce hundreds of
-# identical model frames. The innermost few are where the failure is.
-_MAX_FRAMES = 6
-
 
 def _display(filename: str) -> str:
     """Cwd-relative where that is meaningful, otherwise the tail.
 
-    A runtime frame's absolute path runs through the symlinked skill bundle and is longer
-    than the line it is annotating; the last few components identify the module just as
-    well without burying the message above it.
+    A runtime frame's absolute path is longer than the line it is annotating; the last
+    few components identify the module just as well without burying the message above it.
     """
     try:
         resolved = Path(filename).resolve()
@@ -42,45 +30,6 @@ def _display(filename: str) -> str:
     except ValueError:
         parts = resolved.parts
         return ("…/" + "/".join(parts[-3:])) if len(parts) > 3 else resolved.as_posix()
-
-
-def _model_frames(exc: BaseException) -> list[traceback.FrameSummary]:
-    """The frames in the caller's own CAD sources, outermost first.
-
-    Everything else -- the launcher, cadgen, build123d/OCP, the stdlib -- is runtime: it is
-    the same in every failure and says nothing about which model broke.
-    """
-    from cadgen._internal.source_hash import is_first_party_source_file
-
-    frames: list[traceback.FrameSummary] = []
-    for frame in traceback.extract_tb(exc.__traceback__):
-        try:
-            path = Path(frame.filename).resolve()
-        except (OSError, ValueError):
-            continue
-        if is_first_party_source_file(path):
-            frames.append(frame)
-    return frames
-
-
-def model_site() -> tuple[str, int, str] | None:
-    """The innermost frame of the caller's own CAD sources on the stack now, as
-    ``(file, line, function)``, or None: where a declaration a decorator refuses was
-    written (the decorator's line in the model), for a report made where the decorator
-    was applied, below which the exception's own traceback never reaches."""
-    from cadgen._internal.source_hash import is_first_party_source_file
-
-    frame = sys._getframe(1)
-    while frame is not None:
-        filename = frame.f_code.co_filename
-        try:
-            path = Path(filename).resolve()
-        except (OSError, ValueError):
-            path = None
-        if path is not None and is_first_party_source_file(path):
-            return filename, frame.f_lineno, frame.f_code.co_name
-        frame = frame.f_back
-    return None
 
 
 def failure_text(exc: BaseException) -> str:
@@ -109,7 +58,7 @@ def report_cli_error(
     """Print ``exc`` as a CLI failure and return the exit code (always 1).
 
     Under ``verbose`` this is the raw traceback, unchanged -- a cadgen bug needs its own
-    frames. Otherwise it is the exception plus the model frames that led to it.
+    frames. Otherwise it is the exception and the frame that raised it.
 
     ``verbose_hint`` is whether the caller ACCEPTS ``--verbose``: a command whose
     parser has no such flag must not be told to re-run with it. Only the caller
@@ -125,38 +74,12 @@ def report_cli_error(
 
     detail = str(exc).strip()
     line(f"FAILED: {type(exc).__name__}: {detail}" if detail else f"FAILED: {type(exc).__name__}")
+    raised = traceback.extract_tb(exc.__traceback__)
+    if raised:
+        innermost = raised[-1]
+        line(f"  raised in {_display(innermost.filename)}:{innermost.lineno}")
 
-    frames = _model_frames(exc)
-    site = getattr(exc, "__cadgen_site__", None)
-    if frames:
-        if len(frames) > _MAX_FRAMES:
-            line(f"  ... {len(frames) - _MAX_FRAMES} earlier frame(s) omitted")
-        for frame in frames[-_MAX_FRAMES:]:
-            line(f"  {_display(frame.filename)}:{frame.lineno} in {frame.name}")
-            if frame.line:
-                line(f"      {frame.line.strip()}")
-    elif site is not None:
-        # None of the caller's code is on the exception's way, yet the failure is a
-        # model's: its declaration (a decorator refusing its arguments, caught where the
-        # decorator was applied) or what cadgen made of its result after the body
-        # returned (``__cadgen_site__``: the file, the line and the function).
-        import linecache
-
-        filename, lineno, name = site
-        line(f"  {_display(filename)}:{lineno} in {name}")
-        text = linecache.getline(filename, lineno).strip()
-        if text:
-            line(f"      {text}")
-    else:
-        # Nothing of the caller's ran -- a validation or resolution error raised before the
-        # generator was reached. Name the frame that raised so it is still diagnosable; the
-        # message itself usually already names the offending file.
-        raised = traceback.extract_tb(exc.__traceback__)
-        if raised:
-            innermost = raised[-1]
-            line(f"  raised in {_display(innermost.filename)}:{innermost.lineno}")
-
-    # A kernel the OS refused to load is not a model error and no frame explains it:
+    # A kernel the OS refused to load is no mistake of the caller's and no frame explains it:
     # on Windows 11 that is Smart App Control, and the reader needs to be told so.
     from cadgen._internal.kernel_load_hint import kernel_load_hint
 

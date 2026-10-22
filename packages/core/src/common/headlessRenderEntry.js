@@ -1,8 +1,4 @@
-import { createHttpCadResourceProvider } from "../client/resources.js";
 import * as THREE from "three";
-import {
-  buildModel
-} from "./cadScene.js";
 import {
   headlessResources,
   headlessSceneDress,
@@ -12,30 +8,18 @@ import {
 } from "./headlessScene.js";
 import {
   captureModel,
-  modelOptionsForRenderJob,
   renderJobContext,
   renderModel
 } from "./renderMeshScene.js";
 import { validateSnapshotRenderJob } from "./snapshotJobValidation.js";
 import { scenePartCount } from "./viewSettings.js";
-import {
-  loadSource,
-  sourceIsStep
-} from "./source.js";
-import { resolveAnimationFrame } from "./animationClock.js";
 import { runHeadlessDrawingJob } from "./headlessDrawingRender.js";
-import { loadSourceAnimation } from "./animationRuntime.js";
-import {
-  createHttpTessellationCacheProvider,
-  createTessellationCache
-} from "../lib/parts/tessellationCache.js";
 
 // Each call owns its measurements. Capture reports camera fitting, draw
 // submission and image encoding separately; viewport construction is not a draw.
 //
-// ONE capture for every file family: the model is the family's (a STEP's `buildModel`,
-// anything else's scene from its family's shared builder), and the stage, the camera and
-// the encoding are the same for all of them.
+// ONE capture for every file family: the model is the scene of its family's shared builder,
+// and the stage, the camera and the encoding are the same for all of them.
 async function captureWithModel(model, context, job, stageTimings) {
   if (context.mode === "list") {
     try {
@@ -60,17 +44,10 @@ async function captureWithModel(model, context, job, stageTimings) {
   }
 }
 
-async function capturePreparedSource(source, job, stageTimings) {
-  const buildStarted = performance.now();
-  const context = renderJobContext(source.meshData, job);
-  const model = buildModel(THREE, source, modelOptionsForRenderJob(context, job));
-  stageTimings.buildModelMs = Math.round(performance.now() - buildStarted);
-  return captureWithModel(model, context, job, stageTimings);
-}
-
-// A GLB, an STL, a 3MF or a robot: the file is read by its family's loader and drawn by its
-// family's builder, the two the viewer's renderer for it uses (`headlessScene.js`), then
-// dressed in the look the viewer's viewport would put on it for these settings.
+// A GLB, an STL, a 3MF, a robot or an engine document: the file is read by its family's loader
+// and drawn by its family's builder, the two the viewer's renderer for it uses
+// (`headlessScene.js`), then dressed in the look the viewer's viewport would put on it for these
+// settings.
 async function captureFamilyScene(family, job) {
   validateSnapshotRenderJob(job);
   const stageTimings = {};
@@ -92,70 +69,6 @@ async function captureFamilyScene(family, job) {
   return captureWithModel(model, context, job, stageTimings);
 }
 
-// `job.animation` is the JOB PACKET's frame request ({clip, time}); the
-// `stepAnimation` it becomes is the SETTINGS key renderMeshScene routes to the
-// shared effects pass — the same `{clip, elapsedSec}` the viewer's Animation
-// tab hands its own pass. Choreography is the baked keyframes cadgen resolved
-// into the job (`resolved.animation`), bound to the same tree as the pose.
-async function loadStepAnimation(job, source, resources) {
-  const request = job.animation;
-  if (request === undefined || request === null) {
-    return null;
-  }
-  if (!sourceIsStep(source)) {
-    throw new Error("animation is supported only for STEP/STP sources");
-  }
-  if (String(job.mode || "view").toLowerCase() !== "view") {
-    throw new Error("an animation frame supports only view mode");
-  }
-  const animation = await loadSourceAnimation({ animation: source.animation }, {
-    tubeSkinsUrl: job.resolved?.tubeSkinsUrl || "", resources
-  });
-  if (!animation) {
-    throw new Error("the document sidecar declares no animation, so there is no clip frame to render");
-  }
-  return resolveAnimationFrame(animation.clips, request);
-}
-
-// Everything a render needs before a single pixel is drawn: the fetched
-// source and its meshes, the compiled clip frame, and the job carrying the runtime
-// objects the shared render path reads. A still pays for this once and throws it
-// away; a video pays for it once and keeps it (see prepareHeadlessRenderSequence).
-async function prepareRenderJob(job) {
-  const loadStarted = performance.now();
-  const stageTimings = {};
-  const assetOrigin = String(globalThis.window?.__cadgenSnapshotAssetOrigin || "").replace(/\/+$/, "");
-  const tessellationCache = createTessellationCache({ provider: createHttpTessellationCacheProvider({
-    origin: assetOrigin,
-  }) });
-  const resources = createHttpCadResourceProvider({ origin: assetOrigin, cache: "no-store" });
-  let source;
-  try {
-    source = await loadSource(job, { stageTimings, tessellationCache, resources });
-  } finally {
-    tessellationCache.dispose();
-  }
-  stageTimings.loadSourceMs = Math.round(performance.now() - loadStarted);
-  const prepareStarted = performance.now();
-  const stepAnimation = await loadStepAnimation(job, source, resources);
-  // `job.kinematics` is the JOB PACKET's pose input (a preset name or {dof: value}), which
-  // cadgen resolved into `resolved.controls`; the `stepParameters` set below is the shared
-  // buildModel/renderMeshScene SETTINGS key, carrying the articulation at those values.
-  const renderJob = {
-    ...job,
-    selectorRuntime: source.selectorRuntime,
-    stepAnimation
-  };
-  const prepared = {
-    source,
-    stepAnimation,
-    stageTimings,
-    renderJob: source.pose ? { ...renderJob, stepParameters: source.pose } : renderJob
-  };
-  stageTimings.preparePoseMs = Math.round(performance.now() - prepareStarted);
-  return prepared;
-}
-
 /** A 2D drawing cadgen resolved (a `.dxf`), not a scene. */
 function jobIsDrawing(job) {
   return Boolean(job?.resolved?.drawingUrl);
@@ -172,200 +85,11 @@ export async function runHeadlessRenderJob(job) {
   if (family) {
     return captureFamilyScene(family, job);
   }
-  const { source, renderJob, stageTimings } = await prepareRenderJob(job);
-  return capturePreparedSource(source, renderJob, stageTimings);
-}
-
-// --- video: prepare once, then move only the clock -------------------------
-//
-// A still throws its source and model away when it is done. Rendering a clip
-// that way would re-fetch and re-decode the whole document for every frame
-// — minutes of load per second of video — so a sequence prepares ONCE and then
-// answers per-frame capture requests against the model already on the GPU.
-//
-// The per-frame update is a merged `callbacks.animation` and nothing else:
-// cadScene's `settingsSignature` reads materials, edge style and display mode,
-// none of which move, so `update()` re-runs the effects pass over the records
-// it already built instead of rebuilding them. That seam is the whole reason a
-// video is affordable, and `sequencePoseState` is the one place it is used.
-//
-// The host drives it a frame at a time (`__snapshotRenderSequenceFrame(index)`)
-// rather than collecting an array: a 30 s 60 fps render is 1800 PNGs, and the
-// driver pipe cannot carry that in one protocol message.
-
-// Which moments of the clip the frames show is cadgen's to say: the job carries
-// them (`resolved.framePlan.times`, snapshot_video.resolve_frame_plan), and the
-// page renders each.
-
-/** The `update` patch that poses a prepared model at one moment of its clip.
- *
- * The merged `callbacks.animation` is the only thing that changes, so applying
- * it re-runs the effects pass over the existing records; nothing rebuilds. */
-export function sequencePoseState(stepAnimation, elapsedSec) {
-  return {
-    callbacks: {
-      animation: { ...stepAnimation, elapsedSec }
-    }
-  };
-}
-
-/** Re-pose a prepared model at one moment of its clip. */
-export function poseSequenceFrame(model, stepAnimation, elapsedSec) {
-  return model.update(sequencePoseState(stepAnimation, elapsedSec));
-}
-
-/** Bounds containing every frame of the plan.
- *
- * `captureModel` fits the camera to the bounds the model has AT CAPTURE TIME,
- * which is right for a still and wrong for a sequence: a moving model would
- * make the camera breathe frame to frame. Fitting to frame 0 alone is worse
- * still — the clip travels out of shot wherever it moves furthest. So the
- * camera is fitted once, to the union, and this pre-pass pays one effects pass
- * per frame (no GL, no readback) to know what that union is. */
-// How many poses the union is measured over. It SAMPLES rather than walking
-// every frame: a clip's extent moves smoothly, so a couple of hundred poses
-// bound it as well as thousands do — and a frame is not free (the tendon hand
-// re-solves 48 swept centerlines per pose, at which point enumerating 1,800
-// frames costs more than the render). The first and last frame are always
-// included, and the result is padded by a hair so a pose between two samples
-// cannot poke outside the frame the camera is then locked to.
-const SEQUENCE_BOUNDS_SAMPLES = 192;
-const SEQUENCE_BOUNDS_MARGIN = 0.01;
-
-export function sequenceFrameBounds(model, stepAnimation, plan) {
-  const min = [Infinity, Infinity, Infinity];
-  const max = [-Infinity, -Infinity, -Infinity];
-  const samples = Math.min(plan.times.length, SEQUENCE_BOUNDS_SAMPLES);
-  const last = plan.times.length - 1;
-  for (let sample = 0; sample < samples; sample += 1) {
-    const index = samples === 1 ? 0 : Math.round((sample * last) / (samples - 1));
-    const bounds = poseSequenceFrame(model, stepAnimation, plan.times[index]).bounds;
-    for (let axis = 0; axis < 3; axis += 1) {
-      min[axis] = Math.min(min[axis], Number(bounds?.min?.[axis] ?? 0));
-      max[axis] = Math.max(max[axis], Number(bounds?.max?.[axis] ?? 0));
-    }
-  }
-  const margin = SEQUENCE_BOUNDS_MARGIN * Math.max(
-    ...[0, 1, 2].map((axis) => (Number.isFinite(max[axis] - min[axis]) ? max[axis] - min[axis] : 0)),
-    1
-  );
-  return {
-    min: min.map((value) => value - margin),
-    max: max.map((value) => value + margin)
-  };
-}
-
-let activeRenderSequence = null;
-
-export async function prepareHeadlessRenderSequence(job) {
-  disposeHeadlessRenderSequence();
-  if (jobIsDrawing(job)) {
-    throw new Error("a video renders an animation clip; a DXF is a flat 2D drawing with no clips");
-  }
-  if (headlessSceneFamily(job)) {
-    throw new Error(`a video renders a STEP model's animation clip; a ${String(job?.resolved?.kind || job?.kind).toUpperCase()} has none`);
-  }
-  const { source, stepAnimation, renderJob } = await prepareRenderJob(job);
-  if (!stepAnimation) {
-    throw new Error("a video renders a clip: the job needs an animation request beside its video request");
-  }
-  const context = renderJobContext(source.meshData, renderJob);
-  const model = buildModel(THREE, source, modelOptionsForRenderJob(context, renderJob));
-  let viewport = null;
-  try {
-    // cadgen resolved which moments of the clip the frames show (snapshot_video.resolve_frame_plan).
-    const plan = job.resolved?.framePlan;
-    if (!Array.isArray(plan?.times) || !plan.times.length) {
-      throw new Error("a video job carries its frame plan: cadgen resolves it against the clip");
-    }
-    // The union is measured BEFORE the scene is built, because the stage floor
-    // and grid are sized to the bounds `renderModel` is handed while the camera
-    // is locked to this union: built from the t = 0 pose they end up inside the
-    // frame, and a travelling part walks off the shadow catcher mid-clip.
-    const frameBounds = sequenceFrameBounds(model, stepAnimation, plan);
-    context.warnings.push(...plan.warnings);
-    viewport = renderModel(THREE, model, { job: renderJob, context, floorBounds: frameBounds });
-    activeRenderSequence = { job: renderJob, model, viewport, stepAnimation, plan, frameBounds };
-  } catch (error) {
-    // Whichever of the two exists owns the GPU buffers: a viewport disposes the
-    // model it was built over, and before that the model is on its own.
-    (viewport || model).dispose();
-    throw error;
-  }
-  return {
-    ok: true,
-    frames: activeRenderSequence.plan.times.length,
-    fps: activeRenderSequence.plan.fps,
-    seconds: activeRenderSequence.plan.seconds,
-    start: activeRenderSequence.plan.start
-  };
-}
-
-export async function captureHeadlessRenderSequenceFrame(index) {
-  const session = activeRenderSequence;
-  if (!session) {
-    throw new Error("no prepared render sequence: call __snapshotRenderSequence(job) first");
-  }
-  if (!Number.isInteger(index) || index < 0 || index >= session.plan.times.length) {
-    throw new Error(`render sequence frame ${JSON.stringify(index)} is outside 0..${session.plan.times.length - 1}`);
-  }
-  const captured = await captureModel(session.viewport, {
-    job: session.job,
-    frameBounds: session.frameBounds,
-    // The pose rides INTO captureModel's own `update` rather than being applied
-    // just before it: captureModel updates the model itself, so posing
-    // separately ran the clip evaluator and the whole effects pass twice on
-    // every frame — the largest per-frame cost a video pays, doubled.
-    modelState: sequencePoseState(session.stepAnimation, session.plan.times[index])
-  });
-  const output = captured?.outputs?.[0];
-  if (!output?.dataUrl) {
-    throw new Error(`render sequence frame ${index} produced no image`);
-  }
-  return {
-    ok: true,
-    index,
-    dataUrl: output.dataUrl,
-    width: output.width,
-    height: output.height,
-    // The camera the page RESOLVED, as a still reports it. The host builds the
-    // video's output record itself and would otherwise echo the request, which
-    // for an explicit-position camera is an object, not a name.
-    camera: output.camera
-  };
-}
-
-export function disposeHeadlessRenderSequence() {
-  const session = activeRenderSequence;
-  activeRenderSequence = null;
-  if (!session) {
-    return { ok: true, warnings: [] };
-  }
-  // One context serves every frame, so a warning raised on frame 0 is still in
-  // the list on frame 1799: report the SET, once, as the sequence is torn down.
-  const warnings = Array.from(new Set(session.viewport.context.warnings.map(String)));
-  session.viewport.dispose();
-  return { ok: true, warnings };
+  // A STEP is drawn as the engine document it opens as (`resolved.kind` "xbf").
+  throw new Error(`a snapshot job draws a DXF or a file family (GLB, STL, 3MF, URDF, SRDF, SDF, an engine document), `
+    + `not ${JSON.stringify(String(job?.resolved?.kind || job?.kind || ""))}: a STEP is drawn as the engine document it opens as`);
 }
 
 if (typeof window !== "undefined") {
   window.__snapshotRender = runHeadlessRenderJob;
-  window.__snapshotRenderSequence = prepareHeadlessRenderSequence;
-  window.__snapshotRenderSequenceFrame = captureHeadlessRenderSequenceFrame;
-  window.__snapshotRenderSequenceDispose = disposeHeadlessRenderSequence;
-  // The snapshot host (cadgen's snapshot driver) serves the store's component
-  // meshes on /__tess_cache/ from its loopback asset server: the page draws
-  // what cadgen made and never tessellates.
-  //
-  // That server is addressed by its ABSOLUTE origin, injected before this
-  // bundle runs. A page-relative /__tess_cache/ URL is intercepted by the
-  // host's Playwright route first, and interception hands a whole response
-  // body to the driver as escaped text in one protocol message, which a large
-  // assembly's batch exceeds. The host raises when it cannot start the server,
-  // so the origin is always here; a build talking to some other host degrades
-  // to relative URLs and says so.
-  const assetOrigin = String(window.__cadgenSnapshotAssetOrigin || "").replace(/\/+$/, "");
-  if (!assetOrigin) {
-    console.warn("snapshot asset origin missing: bulk cache transfers fall back to the host's route");
-  }
 }

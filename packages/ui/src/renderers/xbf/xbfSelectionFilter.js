@@ -1,5 +1,4 @@
-// What an engine document's Select picks, as a STEP's does (a copy of the STEP renderer's
-// `step/workbench/selectionFilter.js`, one again at the renderers' migration): the kinds of the
+// What an engine document's Select picks, as the STEP renderer's did: the kinds of the
 // model's geometry its filter ticks, how they are picked as one mode, how a face or edge pick
 // grows, and the model tree's shape under each mode.
 

@@ -3,7 +3,7 @@
 // `EXT_meshopt_compression` is a REQUIRED extension: without the decoder registered,
 // GLTFLoader rejects the file outright rather than degrading, so a compressed GLB a person
 // opens would fail to. This test reads one (`fixtures/cube.meshopt.glb`: a unit cube, welded,
-// quantized and compressed; `fixtures/make_fixtures.py` says how it was made) through
+// quantized and compressed; `fixtures/README.md` says how it was made) through
 // `buildMeshDataFromGlbBuffer` -- the same entry point the main thread and the GLB worker
 // both use -- so a missing or mis-registered decoder fails here rather than in the viewer.
 

@@ -10,11 +10,11 @@ The descriptions are committed as they are (``arm.urdf``, the ``arm.srdf`` paire
 * ``<name>.robot.json``: the payload, with every visual's mesh named by the URL the browser
   test's server answers for it (``/meshes/<file>`` for a link mesh file, ``/primitives/<hash>.glb``
   for a shape cadgen meshed);
-* ``primitives/<hash>.glb``: those meshes, as the store holds them;
+* ``primitives/<hash>.glb``: those meshes, named by the sha256 of their bytes as the payload names them;
 * ``refusals.json``: the sentence cadgen refuses each refused description with, which the
   test's server answers as a 400, as the viewer's route does.
 
-So the browser test needs neither Python nor a store, and the Python suite holds these files
+So the browser test needs no Python, and the Python suite holds these files
 current (``tests/python/packages/cadgen/test_robot_payload.py``). Regenerate after changing a
 description or the payload shape, from the repository root:
 
@@ -27,19 +27,16 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DESCRIPTIONS = ("arm.urdf", "arm.srdf", "swing.sdf", "chain.urdf", "linkage.urdf", "gone.urdf", "lonely.srdf")
 
 
-def fixture_payloads(cache_dir: Path) -> tuple[dict[str, dict], dict[str, str], dict[str, bytes]]:
+def fixture_payloads() -> tuple[dict[str, dict], dict[str, str], dict[str, bytes]]:
     """``(payloads by name, refusals by name, primitive GLB bytes by hash)`` for the descriptions here,
-    located as the browser test serves them. Reads through a store at ``cache_dir``."""
-    os.environ["CADGEN_CACHE_DIR"] = str(cache_dir)
-    from cadgen.robot_payload import RobotReadError, locate_robot_payload, read_robot_description
-    from cadgen.store.objects import read_verified_object
+    located as the browser test serves them."""
+    from cadgen.robot_payload import RobotReadError, locate_robot_payload, primitive_glb_bytes, read_robot_description
 
     payloads: dict[str, dict] = {}
     refusals: dict[str, str] = {}
@@ -59,7 +56,7 @@ def fixture_payloads(cache_dir: Path) -> tuple[dict[str, dict], dict[str, str], 
         for visual in payload["visuals"]:
             digest = visual["mesh"].get("object")
             if digest and digest not in meshes:
-                meshes[digest] = read_verified_object(digest)
+                meshes[digest] = primitive_glb_bytes(digest)
         payloads[name] = locate_robot_payload(
             payload,
             file_url=lambda path: "/" + Path(path).resolve().relative_to(HERE).as_posix(),
@@ -74,8 +71,7 @@ def fixture_payloads(cache_dir: Path) -> tuple[dict[str, dict], dict[str, str], 
 
 def main() -> None:
     sys.path.insert(0, str(HERE.parents[5] / "packages" / "cadgen" / "src"))
-    with tempfile.TemporaryDirectory(prefix="robot-fixtures-") as cache:
-        payloads, refusals, meshes = fixture_payloads(Path(cache))
+    payloads, refusals, meshes = fixture_payloads()
     primitives = HERE / "primitives"
     shutil.rmtree(primitives, ignore_errors=True)
     primitives.mkdir()

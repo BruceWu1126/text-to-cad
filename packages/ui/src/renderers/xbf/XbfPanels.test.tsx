@@ -3,7 +3,6 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import FileSidebar from '../../../dist/renderers/kit/tools/FileSidebar.js';
-import ToolPanel from '../../../dist/renderers/kit/tools/ToolPanel.js';
 import XbfPositionSection, { useXbfPose } from '../../../dist/renderers/xbf/XbfPositionSection.js';
 import XbfModelTree from '../../../dist/renderers/xbf/XbfModelTree.js';
 import { SelectModeMenu as XbfSelectModeMenu, XBF_SELECT_DEFAULT } from '../../../dist/renderers/xbf/XbfSelectionModes.js';
@@ -12,18 +11,14 @@ import { useXbfSelectionChips, xbfMassText, xbfMeasurementRows } from '../../../
 import { selectGeometryMode, treeShape } from '../../../dist/renderers/xbf/xbfSelectionFilter.js';
 import { xbfModelMenu, xbfPartMenu } from '../../../dist/renderers/xbf/xbfMenus.js';
 import { assemblyPartMenuEntries } from '../../../dist/renderers/xbf/xbfMenuItems.js';
-import ModelingTreeView from '../../../dist/renderers/step/components/workbench/ModelingTree.js';
-import { SelectModeMenu as StepSelectModeMenu, STEP_SELECT_DEFAULT } from '../../../dist/renderers/step/components/workbench/SelectionModes.js';
-import { buildPositionSection } from '../../../dist/renderers/step/components/workbench/MotionControlsSection.js';
-import { referenceMeasurements } from '../../../dist/renderers/step/workbench/referenceMeasurements.js';
 import { selectRenderer } from '../../../dist/file-viewer/registry.js';
-import { createStepRenderer } from '../../../dist/renderers/step/index.js';
 import { createXbfRenderer } from '../../../dist/renderers/xbf/index.js';
 
-// An engine document's panels are a STEP's: the same Model tree over the same assembly, the same
-// selection filter, the same Position section, the same chips. Where it is feasible the two
-// renderers' panels are mounted over one fixture and their controls compared, so the xbf cannot
-// grow a control the STEP does not have. The viewport is the browser's.
+// An engine document's panels are the ones a STEP's renderer had: the same Model tree over the same
+// assembly, the same selection filter, the same Position section, the same chips. While that
+// renderer was there the two were mounted over one fixture and their controls compared; the
+// controls it drew are written down here, so the xbf cannot grow one a STEP's did not have. The
+// viewport is the browser's.
 
 Object.assign(globalThis, { React });
 const restores: (() => void)[] = [];
@@ -39,8 +34,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); while (restores.length) restores.pop()!(); });
 
-// One assembly, twice: a hinge of a base and two arms of one part, and a pin beside it -- as the
-// engine serves it, and as a STEP's tree holds it.
+// One assembly: a hinge of a base and two arms of one part, and a pin beside it, as the engine serves it.
 const structure = {
   name: 'fixture', version: '1-1', units: 'mm',
   prototypes: [
@@ -59,10 +53,6 @@ const structure = {
     { name: 'pin', prototype: 2, instance: 3 },
   ] },
 };
-const partNode = (id: string, name: string, componentId: string) => ({ id, nodeType: 'part', name, componentId, leafPartIds: [id], children: [] });
-const stepRoot = { id: 'document', nodeType: 'assembly', name: 'fixture', children: [
-  { id: 'o1.1', nodeType: 'assembly', name: 'hinge', children: [partNode('o1.1.1', 'base', 'c-base'), partNode('o1.1.2', 'arm_1', 'c-arm'), partNode('o1.1.3', 'arm_2', 'c-arm')] },
-  partNode('o1.2', 'pin', 'c-pin')] };
 
 it("the tree is a STEP's: the document's wrapper is no row, repeated parts fold, a collapsed assembly is picked as a unit", () => {
   const tree = presentXbfTree(structure);
@@ -81,55 +71,46 @@ const controls = () => [...document.querySelectorAll('[aria-label="Modeling tree
 const heading = () => [...document.querySelectorAll('section[data-tool-panel][aria-label="Model tree"] input, section[data-tool-panel][aria-label="Model tree"] header button')]
   .map(element => element.getAttribute('aria-label'));
 
-function Trees({ which, mode }: { which: 'step' | 'xbf', mode: string }) {
+function Tree({ mode }: { mode: string }) {
   const [layout, setLayout] = useState<any>({ panels: {}, collapsed: {} });
   const [expanded, setExpanded] = useState<string[]>([]);
   const toggle = (id: string) => setExpanded(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
   const partControls = { isAssemblyView: true, expandedTreeNodeIds: expanded, onToggleTreeNode: toggle, onFocusTreeNode: () => {}, hiddenPartIds: [] };
   return <FileSidebar layout={layout} onLayoutChange={(patch: any) => setLayout((current: any) => ({ ...current, ...patch }))}>
-    {which === 'step'
-      ? <ModelingTreeView stepRoot={stepRoot} active mode={mode} onLoadTopology={() => {}} partControls={partControls} />
-      : <XbfModelTree tree={presentXbfTree(structure)} active mode={mode} partControls={partControls} />}
+    <XbfModelTree tree={presentXbfTree(structure)} active mode={mode} partControls={partControls} />
   </FileSidebar>;
 }
 
-it("parity: the Model tree's controls are a STEP's under every shape Select's filter gives it", () => {
-  const seen: Record<string, string[][]> = {};
-  for (const which of ['step', 'xbf'] as const) {
-    const view = render(<Trees which={which} mode="all" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Model tree' }));
-    const states = [heading(), controls()];
-    fireEvent.click(screen.getByRole('button', { name: 'Expand hinge' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Expand arm (2)' }));
-    states.push(controls());
-    for (const mode of ['parts', 'faces']) { view.rerender(<Trees which={which} mode={mode} />); states.push(controls()); }
-    seen[which] = states;
-    cleanup();
-  }
-  expect(seen.xbf).toEqual(seen.step);
-  expect(seen.xbf[1]).toEqual(['Expand hinge', 'Select hinge', 'Isolate hinge', 'Hide hinge', 'Select pin', 'Isolate pin', 'Hide pin']);
+it("the Model tree's controls are a STEP's under every shape Select's filter gives it", () => {
+  const view = render(<Tree mode="all" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Model tree' }));
+  const states = [heading(), controls()];
+  fireEvent.click(screen.getByRole('button', { name: 'Expand hinge' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Expand arm (2)' }));
+  states.push(controls());
+  for (const mode of ['parts', 'faces']) { view.rerender(<Tree mode={mode} />); states.push(controls()); }
+  // The heading's filter; the tree shut; the tree open; and under Select's Parts and Faces, its
+  // open rows' disclosure locked open.
+  const hinge = ['Select hinge', 'Isolate hinge', 'Hide hinge'], pin = ['Select pin', 'Isolate pin', 'Hide pin'];
+  const open = (disclosure: (row: string) => string) => [disclosure('hinge'), ...hinge, 'Select base', 'Isolate base', 'Hide base',
+    disclosure('arm (2)'), 'Select arm (2)', 'Select arm_1', 'Isolate arm_1', 'Hide arm_1', 'Select arm_2', 'Isolate arm_2', 'Hide arm_2', ...pin];
+  expect(states).toEqual([['Filter model'], ['Expand hinge', ...hinge, ...pin], open(row => `Collapse ${row}`), open(() => 'locked:open'), open(() => 'locked:open')]);
 });
 
-it("parity: Select's filter offers what a STEP's does, ticked alike when a file opens", async () => {
+it("Select's filter offers what a STEP's did, ticked alike when a file opens", async () => {
   const user = userEvent.setup({ pointerEventsCheck: 0 });
-  const items: Record<string, string[]> = {};
-  expect([...XBF_SELECT_DEFAULT]).toEqual([...STEP_SELECT_DEFAULT]);
-  for (const [which, Menu] of [['step', StepSelectModeMenu], ['xbf', XbfSelectModeMenu]] as const) {
-    render(<Menu value={XBF_SELECT_DEFAULT} onChange={() => {}} assembly posable connected={{ edgeChain: false, tangentFaces: false }} onConnectedChange={() => {}} />);
-    await user.click(screen.getByRole('button', { name: /^Selection filter/ }));
-    items[which] = within(document.querySelector<HTMLElement>('[role=menu]')!).getAllByRole('menuitemcheckbox')
-      .map(item => `${item.textContent}:${item.getAttribute('aria-checked')}`);
-    cleanup();
-  }
-  expect(items.xbf).toEqual(items.step);
-  expect(items.xbf.map(item => item.split(':')[0])).toEqual(['Select all', 'Parts', 'Faces', 'Edges', 'Position', 'Annotations', 'Measurement', 'Group edges', 'Group faces']);
+  expect([...XBF_SELECT_DEFAULT]).toEqual(['parts', 'faces', 'edges', 'position', 'annotation', 'measurement']);
+  render(<XbfSelectModeMenu value={XBF_SELECT_DEFAULT} onChange={() => {}} assembly posable connected={{ edgeChain: false, tangentFaces: false }} onConnectedChange={() => {}} />);
+  await user.click(screen.getByRole('button', { name: /^Selection filter/ }));
+  expect(within(document.querySelector<HTMLElement>('[role=menu]')!).getAllByRole('menuitemcheckbox')
+    .map(item => `${item.textContent}:${item.getAttribute('aria-checked')}`)).toEqual(['Select all:true', 'Parts:true', 'Faces:true',
+    'Edges:true', 'Position:true', 'Annotations:true', 'Measurement:true', 'Group edges:false', 'Group faces:false']);
   // The geometry ticked is picked as one mode, which shapes the tree.
   expect(['all', 'parts', 'topology', 'none'].map(mode => treeShape(mode))).toEqual(['all', 'parts', 'faces', 'all']);
   expect(selectGeometryMode(['faces', 'edges'])).toBe('topology');
 });
 
-// A STEP's Position over a hinge's articulation, and an engine document's over a mechanism of the
-// same hinge: one revolute pair with one named configuration.
+// An engine document's Position over a hinge's mechanism: one revolute pair with one named configuration.
 const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const hingeKinematics = {
   schema: 'cadgen.kinematics/1', name: 'rig', ground: 0, loop: null,
@@ -137,9 +118,6 @@ const hingeKinematics = {
   pairs: [{ label: 'hinge', type: 'revolute', links: [0, 1], frames: [I, I], limits: [[-180, 180]], units: ['deg'] }],
   asBuilt: { hinge: 0 }, configurations: { open: { hinge: 90 } },
 };
-const hingeArticulation = { url: '/hinge.step.json', articulation: { schemaVersion: 2,
-  controls: [{ id: 'hinge', label: 'hinge', unit: 'deg', min: -180, max: 180, default: 0 }],
-  joints: [], handles: [], carries: {}, poses: { open: { hinge: 90 } }, opening: { hinge: 0 } } };
 
 // The section over the renderer's own pose state (`useXbfPose`).
 function XbfPosition({ kinematics = hingeKinematics, onPose = () => {} }: { kinematics?: any, onPose?: (values: any) => void }) {
@@ -149,19 +127,6 @@ function XbfPosition({ kinematics = hingeKinematics, onPose = () => {} }: { kine
   return <FileSidebar layout={layout} onLayoutChange={(patch: any) => setLayout((current: any) => ({ ...current, ...patch }))}>
     <XbfPositionSection kinematics={kinematics} values={pose.values} couplings={pose.couplings} preset={pose.preset}
       changed={pose.applied} onValues={pose.setValues} onPreset={pose.choosePreset} onReset={pose.reset} />
-  </FileSidebar>;
-}
-function StepPosition() {
-  const [layout, setLayout] = useState<any>({ panels: {}, collapsed: {} });
-  const [values, setValues] = useState<Record<string, number>>({ hinge: 0 });
-  const [activePose, setActivePose] = useState('');
-  const runtime = { definition: hingeArticulation, parameterValues: values, activePose,
-    onApplyPose: (name: string) => { setActivePose(name); setValues({ hinge: 90 }); },
-    onResetMotion: () => { setActivePose(''); setValues({ hinge: 0 }); },
-    onParameterChange: (id: string, value: number) => { setActivePose(''); setValues(current => ({ ...current, [id]: value })); } };
-  const position = buildPositionSection({ poseRuntime: runtime })!;
-  return <FileSidebar layout={layout} onLayoutChange={(patch: any) => setLayout((current: any) => ({ ...current, ...patch }))}>
-    <ToolPanel id="position" title={position.title} label="Position controls" fit="details">{position.content}</ToolPanel>
   </FileSidebar>;
 }
 
@@ -176,30 +141,28 @@ function positionControls() {
   };
 }
 
-it("parity: Position is a STEP's -- its heading, its Pose row, a named slider and value per joint -- through a configuration and back", async () => {
+it("Position is a STEP's -- its heading, its Pose row, a named slider and value per joint -- through a configuration and back", async () => {
   const user = userEvent.setup({ pointerEventsCheck: 0 });
-  const seen: Record<string, any[]> = {};
-  for (const [which, Section] of [['step', StepPosition], ['xbf', XbfPosition]] as const) {
-    render(<Section />);
-    fireEvent.click(screen.getByRole('button', { name: 'Position' }));
-    const states = [positionControls()];
-    const panel = screen.getByRole('region', { name: 'Position controls' });
-    await user.click(within(panel).getByRole('button', { name: /^Pose: / }));
-    const menu = document.querySelector<HTMLElement>('[role=menu][aria-label="Pose"]')!;
-    states.push(within(menu).getAllByRole('menuitemradio').map(item => `${item.textContent}:${item.getAttribute('aria-checked')}`));
-    await user.click(within(menu).getByRole('menuitemradio', { name: 'open' }));
-    states.push(positionControls());
-    const value = within(panel).getByLabelText('hinge slider value') as HTMLInputElement;
-    await user.clear(value);
-    await user.type(value, '25{Enter}');
-    states.push(positionControls());
-    await user.click(within(panel.querySelector<HTMLElement>('[data-sidebar-head]')!).getByRole('button', { name: 'Reset position' }));
-    states.push(positionControls());
-    seen[which] = states;
-    cleanup();
-  }
-  expect(seen.xbf).toEqual(seen.step);
-  expect(seen.xbf[2].body).toContain('input:hinge slider value:90.0°');
+  render(<XbfPosition />);
+  fireEvent.click(screen.getByRole('button', { name: 'Position' }));
+  const states: unknown[] = [positionControls()];
+  const panel = screen.getByRole('region', { name: 'Position controls' });
+  await user.click(within(panel).getByRole('button', { name: /^Pose: / }));
+  const menu = document.querySelector<HTMLElement>('[role=menu][aria-label="Pose"]')!;
+  states.push(within(menu).getAllByRole('menuitemradio').map(item => `${item.textContent}:${item.getAttribute('aria-checked')}`));
+  await user.click(within(menu).getByRole('menuitemradio', { name: 'open' }));
+  states.push(positionControls());
+  const value = within(panel).getByLabelText('hinge slider value') as HTMLInputElement;
+  await user.clear(value);
+  await user.type(value, '25{Enter}');
+  states.push(positionControls());
+  await user.click(within(panel.querySelector<HTMLElement>('[data-sidebar-head]')!).getByRole('button', { name: 'Reset position' }));
+  states.push(positionControls());
+  // The heading (Reset is off at the opening pose), the Pose row, then the joint's slider and value.
+  const shown = (pose: string, value: string, atOpening: boolean) => ({ head: ['Position', `Reset position:${atOpening}`, 'Close position:false'],
+    body: [`button:Pose: ${pose}:`, 'slider:hinge:', `input:hinge slider value:${value}`] });
+  expect(states).toEqual([shown('Default', '0.00°', true), ['Default:true', 'open:false'], shown('open', '90.0°', false),
+    shown('Custom', '25.0°', false), shown('Default', '0.00°', true)]);
 });
 
 it('Position drives a cylindrical pair by both its values and a geared pair through its gear, and says what it cannot pose', async () => {
@@ -301,16 +264,15 @@ it("Position hides a locked coupling's joints: it is their only control", async 
   expect(onPose.mock.lastCall![0]).toEqual(pose(18, 20, 14));
 });
 
-it("parity: a face's and an edge's card rows are a STEP's for the same measurements", () => {
+it("a face's and an edge's card rows are a STEP's for the same measurements", () => {
   const cases = [
-    ['face', { surface: 'cylinder', radius: 2, area: 50 }, { selectorType: 'face', pickData: { surfaceType: 'cylinder', params: { radius: 2 } } }, 50],
-    ['face', { surface: 'plane', area: 12 }, { selectorType: 'face', pickData: { surfaceType: 'plane', params: {} } }, 12],
-    ['edge', { curve: 'circle', radius: 3, sweepRadians: Math.PI, length: 3 * Math.PI }, { selectorType: 'edge', pickData: { curveType: 'circle', params: { radius: 3, sweepRadians: Math.PI }, length: 3 * Math.PI } }, null],
-    ['edge', { curve: 'line', length: 7 }, { selectorType: 'edge', pickData: { curveType: 'line', params: {}, length: 7 } }, null],
+    ['face', { surface: 'cylinder', radius: 2, area: 50 }, [['Diameter Ø', 4, 'mm'], ['Radius R', 2, 'mm'], ['Area', 50, 'mm²']]],
+    ['face', { surface: 'plane', area: 12 }, [['Area', 12, 'mm²']]],
+    ['edge', { curve: 'circle', radius: 3, sweepRadians: Math.PI, length: 3 * Math.PI },
+      [['Diameter Ø', 6, 'mm'], ['Radius R', 3, 'mm'], ['Arc length', 3 * Math.PI, 'mm'], ['Sweep angle', 180, '°']]],
+    ['edge', { curve: 'line', length: 7 }, [['Length', 7, 'mm']]],
   ] as const;
-  for (const [kind, facts, reference, area] of cases) {
-    expect(xbfMeasurementRows(kind, facts)).toEqual(referenceMeasurements(reference, { faceArea: area === null ? null : { state: 'ready', area } }).rows);
-  }
+  for (const [kind, facts, rows] of cases) expect(xbfMeasurementRows(kind, facts)).toEqual(rows);
 });
 
 function Chips({ ids }: { ids: string[] }) {
@@ -371,11 +333,9 @@ it('an .xbf and a STEP have the engine document renderer, prepared from the cata
   let disposed = 0;
   const client = { resolveEntry: async (path: string) => ({ file: path, kind: 'xbf' }), createRenderSession: () => ({ dispose: () => { disposed += 1; } }) } as never;
   const xbf = createXbfRenderer({ client });
-  const step = createStepRenderer({ client });
   const file = (path: string) => ({ path, name: path, kind: 'file', size: 1, extension: path.split('.').at(-1), mediaType: 'cad' });
   expect(xbf.id).toBe('xbf');
-  // Above the STEP renderer even where a host still registers it: a STEP is the engine's to draw.
-  for (const path of ['arm.xbf', 'arm.step', 'ARM.STP']) expect(selectRenderer([step, xbf], file(path) as never)).toBe(xbf);
+  for (const path of ['arm.xbf', 'arm.step', 'ARM.STP']) expect(selectRenderer([xbf], file(path) as never)).toBe(xbf);
   const prepared = await xbf.prepare({ file: file('arm.xbf'), source: {}, signal: new AbortController().signal } as never);
   prepared.dispose?.();
   expect(disposed).toBe(1);

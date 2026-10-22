@@ -519,7 +519,7 @@ test("inspection grid uses explicit appearance and shared Viewer spacing", () =>
 
 test("a posed model's ground is sized from its REST placement, while the floor still drops under it", () => {
   // The viewer sizes the grid and stage from the rest pose so posing never rescales the ground;
-  // a snapshot must too, or `cadgen step snapshot --kinematics` shows a different ground than the
+  // a snapshot must too, or a posed model's snapshot shows a different ground than the
   // viewer does. Only the SIZE follows rest: a pose that reaches below the rest box still pushes
   // the floor down, or the moved part would sink through it.
   const rest = { min: [0, 0, 0], max: [10, 10, 10] };

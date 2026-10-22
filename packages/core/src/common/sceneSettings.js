@@ -27,9 +27,8 @@ const SCENE_APPEARANCE = Object.freeze({
 const DEFAULT_SCENE_APPEARANCE = SCENE_APPEARANCE.SYSTEM;
 
 // The studio, quality, envelope, lighting and backdrop vocabularies are the
-// cross-language Render contract: cadgen's snapshot_core carries the same sets
-// and tests/python/global/test_snapshot_viewer_theme_parity.py reads these
-// exports from source to prove they still agree. Keep them exported and frozen.
+// Render contract the viewer's settings and a snapshot job share. Keep them
+// exported and frozen.
 export const RENDER_STUDIO = Object.freeze({
   LIGHT: "light",
   DARK: "dark"

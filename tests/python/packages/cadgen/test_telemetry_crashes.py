@@ -15,7 +15,6 @@ from pathlib import Path
 from unittest import mock
 
 from cadgen import analytics
-from cadgen.daemon import client
 
 
 def _user_calls(target, filename: str = "/home/someone/secret_bracket.py"):
@@ -145,7 +144,7 @@ class SignatureTest(unittest.TestCase):
         file_of, here = analytics._file_of, os.path.realpath(__file__)
         self.addCleanup(sys.setrecursionlimit, sys.getrecursionlimit())
         sys.setrecursionlimit(200)  # a short stack: each frame's file is looked up on disk
-        with mock.patch.object(analytics, "_file_of", lambda path: "cadgen/authoring.py"
+        with mock.patch.object(analytics, "_file_of", lambda path: "cadgen/engine/model.py"
                                if os.path.realpath(path) == here else file_of(path)):
             theirs, mine = _caught(model), _caught(_user_calls(ours, "/work/model.py"))
             sys.setrecursionlimit(1000)
@@ -154,7 +153,7 @@ class SignatureTest(unittest.TestCase):
                     self.assertIsNone(analytics.signature(theirs, where, bugs_only=bugs_only), "theirs is in the cycle")
                     found = analytics.signature(mine, where, bugs_only=bugs_only)
                     self.assertEqual((found["type"], {frame["file"] for frame in found["frames"]}),
-                                     ("RecursionError", {"cadgen/authoring.py"}), "the person's call is far outside it")
+                                     ("RecursionError", {"cadgen/engine/model.py"}), "the person's call is far outside it")
 
     def test_cadgens_own_module_gone_is_its_installation_removed_and_never_a_crash(self) -> None:
         import importlib
@@ -296,23 +295,6 @@ class FailureReasonTest(unittest.TestCase):
         self.assertEqual(analytics.build_failure(analytics.because(ValueError(), "Secret words")), "other")
         self.assertEqual(analytics.build_failure(ValueError()), "other", "no frames: whose code is unknown")
 
-    def test_a_snapshots_failure_is_what_it_was_doing_unless_the_error_says_more(self) -> None:
-        playwright_timeout = type("TimeoutError", (Exception,), {"__module__": "playwright._impl._errors"})
-        route = type("RouteFileError", (RuntimeError,), {"__module__": "cadgen.snapshot_core", "status": 404})
-        for error, otherwise, reason in (
-            (_caught(_user_calls(self.cadgen["broke"])), "input_error", "bug"),
-            (analytics.because(RuntimeError(), "browser"), "render_error", "browser"),
-            (FileNotFoundError("/w/secret.step"), "input_error", "no_file"),
-            (route("no such file"), "bad_request", "no_file"),
-            (playwright_timeout(), "render_error", "timeout"),
-            (MemoryError(), "render_error", "memory"),
-            (ValueError("bad camera"), "bad_request", "bad_request"),
-            (ValueError("bad camera"), "a word of tomorrow", "other"),
-        ):
-            with self.subTest(error=type(error).__name__, otherwise=otherwise):
-                self.assertEqual(analytics.snapshot_failure(error, otherwise), reason)
-                self.assertIn(reason, analytics.SNAPSHOT_FAILURES)
-
 
 class _Recording(unittest.TestCase):
     """A recorder that shares, sending into ``self.sent``."""
@@ -358,12 +340,12 @@ class RecorderCrashTest(_Recording):
         analytics.report(_caught(lambda: int("x")), "command", bugs_only=True)  # raised on purpose: none
         self.assertEqual([crash["where"] for crash in noted], ["route"])
         analytics.collect_crashes(None)
-        with mock.patch.object(client, "hand_over") as handed:
+        with mock.patch.object(analytics, "hand_over") as handed:
             analytics.report(_caught(_cadgen_bug), "command", handled=False)
         [counts] = [call.args[0] for call in handed.call_args_list]
         self.assertEqual([(crash["where"], crash["handled"]) for crash in counts["crashes"]], [("command", False)])
         # Reporting never fails what failed.
-        with mock.patch.object(client, "hand_over", side_effect=RuntimeError("broken")):
+        with mock.patch.object(analytics, "hand_over", side_effect=RuntimeError("broken")):
             analytics.report(_caught(_cadgen_bug), "command")
 
 
@@ -403,11 +385,11 @@ class ServerCrashTest(_Recording):
 
 
 class CommandCrashTest(unittest.TestCase):
-    """A command sends nothing itself: its crash is handed to a running daemon, as its snapshots are."""
+    """A command sends nothing itself: its crash is kept with its counts (``analytics.hand_over``)."""
 
     def setUp(self) -> None:
         analytics.collect_crashes(None)
-        handed = mock.patch.object(client, "hand_over")
+        handed = mock.patch.object(analytics, "hand_over")
         self.handed = handed.start()
         self.addCleanup(handed.stop)
 
@@ -459,7 +441,7 @@ class CommandCrashTest(unittest.TestCase):
             raise ValueError("no such file: /home/someone/secret.step")
 
         for invoke in (told, _cadgen_bug):
-            emit(invoke, prog="cadgen step build", as_json=True, stdout=io.StringIO())
+            emit(invoke, prog="cadgen urdf validate", as_json=True, stdout=io.StringIO())
         [crash] = self.crashes()
         self.assertEqual((crash["where"], crash["type"], crash["frames"][-1]["file"]), ("command", "KeyError", "cadgen/analytics.py"))
 

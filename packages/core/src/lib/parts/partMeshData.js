@@ -1,4 +1,4 @@
-// meshData from a component's stored mesh (cadgen/store/meshes.py).
+// meshData from a component's stored mesh (`tessellationCache.js` decodes one).
 //
 // Produces the structure buildMeshDataFromGlbBuffer produced from a component
 // GLB, so everything downstream — package composition, themes, selection

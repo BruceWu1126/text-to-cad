@@ -1,7 +1,7 @@
 """Flat patterns from 3D topology: exact 2D geometry for ``@dxf`` drawings.
 
-A drawing generator returns build123d 2D geometry and the engine writes the DXF
-(cadgen._internal.dxf_emit). This module is the bridge from a solid to that
+A drawing model returns build123d 2D geometry and the engine writes the DXF
+(``cadgen.engine.export.dxf``). This module is the bridge from a solid to that
 geometry: pick the planar faces that make up the flat pattern, lay each one into
 the XY plane, fuse them, and — where the cutting process needs it — offset for
 kerf. Everything it hands back is build123d geometry, ready to return from a
@@ -15,8 +15,6 @@ shapely, and emitted polylines — which turned every curve into a run of chords
 before it ever reached the file, at a resolution nobody chose. Shapely survives
 here only as an internal fallback for the unions OCC refuses (see
 :func:`union_faces`), and even then only its topology is borrowed.
-
-A worked example lives in ``skills/dxf/references/generator-templates.md``.
 """
 
 from __future__ import annotations

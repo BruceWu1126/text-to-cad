@@ -16,7 +16,7 @@ an argument-parsing framework:
 * The allowed annotation set is ``str, int, float, bool, Path`` and ``X | None``
   over those. Anything richer DISQUALIFIES the function from mirror status: it
   must be an ADAPTER instead — a hand-written parser plus an explicit
-  signature-sync allowlist (tests/python/packages/cadgen/test_public_surface.py).
+  signature-sync allowlist.
 * The docstring's summary paragraph becomes the ``--help`` description, and
   ``name: description`` lines in its body become per-argument help. A plain
   convention, so no docstring-parser dependency rides in the runtime.
@@ -39,7 +39,6 @@ import dataclasses
 import importlib
 import inspect
 import json
-import os
 import re
 import sys
 import types
@@ -347,20 +346,15 @@ def report_failure(
     stdout: Any | None = None,
     stderr: Any | None = None,
 ) -> int:
-    """The ONE failure envelope of every cadgen command, and its exit code (1).
+    """The ONE failure envelope of every generated command, and its exit code (1).
 
     Under ``--json`` a failure is ``{"ok": false, "error": ...}`` on STDOUT -- the
     result channel, so a caller parsing the last stdout line always finds an
     answer; otherwise it is the one-line ``[tool] FAILED: ...`` report on stderr.
-    Shared by the generated doors (:func:`emit`) and the model-script runner
-    (``cadgen.cli._run_model``), which prints its own success lines and so cannot
-    go through :func:`emit` itself.
 
     A failure that is a mistake in cadgen's own code, not the person's or one cadgen
-    raised on purpose, is also a crash telemetry reports (``cadgen.analytics.report``):
-    a build worker's goes to the daemon with its exit frame, a command's is handed to a
-    running daemon. Reporting it changes nothing here. In a build, why it failed is decided here too
-    (``cadgen.analytics.build_failure``), for the build's count (``cadgen.daemon.telemetry.job_failed``).
+    raised on purpose, is also a crash telemetry reports (``cadgen.analytics.report``,
+    kept with the command's counts). Reporting it changes nothing here.
     """
     _report_crash(exc)
     from cadgen._internal.cli_errors import failure_text, report_cli_error
@@ -378,12 +372,8 @@ def report_failure(
 def _report_crash(exc: BaseException) -> None:
     try:
         from cadgen import analytics
-        from cadgen.daemon import telemetry
 
-        building = bool(os.environ.get("CADGEN_DAEMON_CHILD")) or telemetry.building()
-        analytics.report(exc, "build" if building else "command", bugs_only=True)
-        if telemetry.building():
-            telemetry.job_failed(analytics.build_failure(exc))
+        analytics.report(exc, "command", bugs_only=True)
     except Exception:  # noqa: BLE001 - a crash report never fails a command's own report
         pass
 
@@ -414,9 +404,6 @@ def emit(
             exc, prog=prog, as_json=as_json, verbose=verbose, verbose_hint=verbose_hint,
             stdout=out, stderr=stderr,
         )
-    from cadgen.daemon import telemetry
-
-    telemetry.job_result(result)  # in a build worker: whether what it made was the store's already
     if as_json:
         print(json.dumps(result_payload(result), separators=(",", ":")), file=out)
     else:

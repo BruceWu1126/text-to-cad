@@ -33,7 +33,7 @@ export function createXbfRenderer({ client, ...options }: XbfRendererOptions) {
   const services = { ...options, preferences: options.preferences || createCadPreferences() };
   return defineFileRenderer<PreparedXbfDocument>({
     id: 'xbf',
-    // Above the STEP renderer's, which takes any file the viewer calls CAD: an .xbf and a STEP are this one's.
+    // An .xbf and a STEP are this one's, above any renderer that takes whatever the viewer calls CAD.
     priority: 110,
     matches: (file) => ENGINE_DOCUMENT_FILE.test(file.path),
     async prepare(context) {

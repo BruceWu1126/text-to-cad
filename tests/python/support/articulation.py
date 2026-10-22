@@ -1,7 +1,7 @@
 """The articulation played in closed form: the reference a page's player is compared against.
 
-``cadgen.articulation`` resolves a model's kinematics into the artifact a page plays; this
-plays it as the page must: joint values from the controls by dot products (plus a curve's
+``cadgen.robot_payload`` resolves a robot description's kinematics into the articulation a page
+plays; this plays it as the page must: joint values from the controls by dot products (plus a curve's
 interpolated term), and each joint's world delta from its parent's and its own displacement.
 """
 

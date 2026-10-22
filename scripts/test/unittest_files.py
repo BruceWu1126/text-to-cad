@@ -17,24 +17,20 @@ which `-m unittest` would run silently.
 ``--print-weights`` prints this run's measured per-file costs, the first thing to read
 when a run is slow.
 
-Each FILE runs in its own interpreter, ``--jobs`` at a time (default one), with its own
-fresh store, so modules cannot see one another's builds. Every build, compile and
-artifact job they ask for runs on ONE build daemon the run starts for itself, as every
-build runs on one (``run_daemon``): a private state directory and endpoint, so nothing a
-test does reaches a developer's own daemon. It is retired after the last file, once it
-has finished every job it was asked, and only then are the stores and its folder
-removed. The per-module output is printed as each finishes and the final ``Ran N
-tests`` / ``OK`` / ``FAILED`` summary aggregates every module. The loaded test set is
-identical to `python -m unittest <files>` run from --top. A file still running
-``FILE_HANG_SECONDS`` after it started is hung: its interpreter prints every thread's
-stack and exits, and the run fails naming the file.
+Each FILE runs in its own interpreter, ``--jobs`` at a time (default one), with an engine
+directory of its own (``CADGEN_ENGINE_DIR``): a build it asks for without naming one runs on
+an engine daemon of that file's alone, never on a developer's own, and a daemon the file left
+running there is stopped once it ends (``stop_engine``). The per-module output is printed as
+each finishes and the final ``Ran N tests`` / ``OK`` / ``FAILED`` summary aggregates every
+module. The loaded test set is identical to `python -m unittest <files>` run from --top. A
+file still running ``FILE_HANG_SECONDS`` after it started is hung: its interpreter prints
+every thread's stack and exits, and the run fails naming the file.
 """
 
 from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import contextlib
 import faulthandler
 import importlib
 import locale
@@ -47,19 +43,15 @@ import tempfile
 import time
 import traceback
 import unittest
-import uuid
-from collections.abc import Iterator
 
 # Hung, not slow: the slowest file CI has run took about four minutes. Without this a
 # hang runs out the CI job's timeout and says nothing about where it is.
 FILE_HANG_SECONDS = 15 * 60
-# The run's daemon outlives none of it -- it is retired after the last file -- but one a
-# killed run leaves behind goes away on its own after this long idle.
-DAEMON_IDLE_SECONDS = 300
-# Starting it, and retiring it: the retirement waits out the jobs still in flight
-# (tests/python/support/daemon_cleanup.py), so its bound is that wait's and then some.
-DAEMON_START_SECONDS = 120
-DAEMON_RETIRE_SECONDS = 180
+# A file's engine daemon goes when the file ends (``stop_engine``); one a killed run leaves
+# behind goes away on its own after this long idle.
+ENGINE_IDLE_SECONDS = 300
+# Stopping a file's daemon waits for its workers to exit.
+ENGINE_STOP_SECONDS = 120
 
 
 def dotted_name(path: str, top: str) -> str:
@@ -161,50 +153,32 @@ def _counts(output: str) -> dict[str, int]:
     return counts
 
 
-@contextlib.contextmanager
-def run_daemon(top: str) -> Iterator[dict[str, str]]:
-    """The one build daemon a run's files build on; yields the variables that point a
-    file at it.
-
-    Started here, in the runner's environment, before the first file: the first test to
-    build would otherwise start it with its own settings (one job slot, a memory budget)
-    for every file after. Retired after the last file -- the retirement waits out the jobs
-    it still has in flight, such as a build's verify, which answers into that build's
-    store -- and only then is its folder removed: those jobs reach the daemon through the
-    address and key in it.
-    """
-    # Short: a Unix socket path caps near 104 bytes. Windows pipe names need explicit
-    # uniqueness.
-    state = tempfile.mkdtemp(prefix="cgt-")
-    endpoint = {
-        "CADGEN_DAEMON_STATE_DIR": state,
-        "CADGEN_DAEMON_SOCKET": (rf"\\.\pipe\cadgen-test-{uuid.uuid4().hex}" if os.name == "nt"
-                                 else os.path.join(state, "d.sock")),
-        "CADGEN_DAEMON_IDLE_TIMEOUT": str(DAEMON_IDLE_SECONDS),
-    }
-    env = {**os.environ, **endpoint}
-    env["PYTHONPATH"] = os.pathsep.join(filter(None, [os.path.join(top, "packages", "cadgen", "src"),
-                                                      env.get("PYTHONPATH", "")]))
+def stop_engine(top: str, engine_dir: str) -> None:
+    """Stop the engine daemon a file left running in its own engine directory, if it left one."""
     try:
-        subprocess.run([sys.executable, "-c", "from cadgen.daemon import client; client.prewarm()"],
-                       env=env, check=True, timeout=DAEMON_START_SECONDS)
-        yield endpoint
-    finally:
-        try:
-            # No key means no daemon ever bound under this private state.
-            if any(name.endswith(".key") for name in os.listdir(state)):
-                cleanup = subprocess.run([
-                    sys.executable, os.path.join(top, "tests", "python", "support", "daemon_cleanup.py"),
-                    endpoint["CADGEN_DAEMON_SOCKET"],
-                ], env=env, capture_output=True, text=True, timeout=DAEMON_RETIRE_SECONDS)
-                if cleanup.returncode:
-                    raise RuntimeError(f"test daemon cleanup failed: {cleanup.stdout}{cleanup.stderr}")
-        finally:
-            shutil.rmtree(state, ignore_errors=True)
+        names = os.listdir(engine_dir)
+    except FileNotFoundError:
+        return
+    if not any(name.endswith((".sock", ".port")) for name in names):
+        return
+    env = {**os.environ, "CADGEN_ENGINE_DIR": engine_dir,
+           "PYTHONPATH": os.pathsep.join(filter(None, [os.path.join(top, "packages", "cadgen", "src"),
+                                                       os.environ.get("PYTHONPATH", "")]))}
+    stopped = subprocess.run([sys.executable, "-P", "-c", "from cadgen.engine import api; api.stop()"],
+                             env=env, capture_output=True, text=True, timeout=ENGINE_STOP_SECONDS)
+    if stopped.returncode:
+        raise RuntimeError(f"the test engine daemon in {engine_dir} did not stop: {stopped.stdout}{stopped.stderr}")
 
 
 def _run_one_file(path: str, top: str, verbose: bool, env: dict[str, str]) -> tuple[str, int, str, float]:
     started = time.perf_counter()
+    try:
+        return _run_file(path, top, verbose, env, started)
+    finally:
+        stop_engine(top, env["CADGEN_ENGINE_DIR"])
+
+
+def _run_file(path: str, top: str, verbose: bool, env: dict[str, str], started: float) -> tuple[str, int, str, float]:
     argv = [sys.executable, os.path.abspath(__file__), "--top", top, "--file",
             "--hang-seconds", str(FILE_HANG_SECONDS)]
     if verbose:
@@ -233,13 +207,14 @@ def run_files(files: list[str], top: str, jobs: int, verbose: bool, print_weight
     durations: list[tuple[str, float]] = []
     failed_modules: list[str] = []
     unparsed: list[str] = []
-    stores: list[str] = []
+    # Short: a Unix socket path caps near 104 bytes, and the engine's sits in this folder.
+    engines = tempfile.mkdtemp(prefix="cgt-")
     try:
-        with run_daemon(top) as endpoint, concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
             futures = []
-            for path in files:
-                stores.append(tempfile.mkdtemp(prefix="cadgen-test-store."))
-                env = {**os.environ, **endpoint, "CADGEN_CACHE_DIR": stores[-1]}
+            for index, path in enumerate(files):
+                env = {**os.environ, "CADGEN_ENGINE_DIR": os.path.join(engines, f"e{index}"),
+                       "CADGEN_ENGINE_IDLE": str(ENGINE_IDLE_SECONDS)}
                 futures.append(pool.submit(_run_one_file, path, top, verbose, env))
             for future in concurrent.futures.as_completed(futures):
                 path, code, output, seconds = future.result()
@@ -260,9 +235,7 @@ def run_files(files: list[str], top: str, jobs: int, verbose: bool, print_weight
                 if body:
                     sys.stderr.write(body + "\n")
     finally:
-        # After the daemon: it answers a build's verify into the build's store.
-        for store in stores:
-            shutil.rmtree(store, ignore_errors=True)
+        shutil.rmtree(engines, ignore_errors=True)
     elapsed = time.perf_counter() - started
     if print_weights:
         # stdout is free here: every line of a run goes to stderr. One `WEIGHT` line per
@@ -295,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
         "--jobs",
         type=int,
         default=1,
-        help="how many test files run at once, each in its own interpreter with its own store (default 1)",
+        help="how many test files run at once, each in its own interpreter with an engine directory of its own (default 1)",
     )
     parser.add_argument(
         "--print-weights",

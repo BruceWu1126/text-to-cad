@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { runAnnotateScenario } from '../../../harness/annotateScenario.mjs';
-import { serveStepHarness } from '../../../harness/stepScenario.mjs';
+import { serveXbfHarness } from '../../../harness/xbfScenario.mjs';
 
-// Annotate under the frame that ships it: the STEP renderer, over the committed
-// two-part fixture. It is a kit tool, so the scenario itself
-// (`harness/annotateScenario.mjs`) knows nothing about STEP.
+// Annotate under the frame that ships it: the engine document's renderer (`renderers/xbf`, which
+// draws an .xbf and a STEP), over core's bracket fixture. It is a kit tool, so the scenario itself
+// (`harness/annotateScenario.mjs`) knows nothing about the frame.
 
-test('Annotate puts ink into the model that orbits with it, undoes, redoes, recolours and clears, stays when Annotate is left — where Select picks, haloes and deletes it — and goes when the model updates', async (t) => {
-  const harness = await serveStepHarness(t);
+test('Annotate puts ink into the model that orbits with it, undoes, redoes, recolours and clears, and stays when Annotate is left — where Select picks, haloes and deletes it', async (t) => {
+  const harness = await serveXbfHarness(t);
   await runAnnotateScenario(await harness.open());
 });
 
 
 test('on a narrow view Annotate\'s controls are two aligned rows, and on a phone the menu of a chevron after its tile', async (t) => {
-  const harness = await serveStepHarness(t);
+  const harness = await serveXbfHarness(t);
   const { page, pane, errors } = await harness.open();
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
   await pane.getByRole('button', { name: 'Annotate', exact: true }).click();

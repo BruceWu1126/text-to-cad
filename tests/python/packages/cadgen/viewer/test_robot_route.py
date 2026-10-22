@@ -1,10 +1,9 @@
 """``GET /__cad/robot`` against a real launched server.
 
-The fixture writes its own descriptions into a fresh temporary folder and points the store
-at a temporary directory; nothing here reads the sample corpus and nothing shares a store with
-another test file. A description is named by its absolute path, as every file is: the route
+The fixture writes its own descriptions into a fresh temporary folder; nothing here reads the
+sample corpus. A description is named by its absolute path, as every file is: the route
 answers the payload with every mesh by a URL this server serves, and each primitive's GLB by
-its hash; every refusal asserts the status and the sentence.
+its digest; every refusal asserts the status and the sentence.
 """
 
 from __future__ import annotations
@@ -39,8 +38,6 @@ class RobotRouteFixture:
         self.base = os.path.realpath(tempfile.mkdtemp())
         self.root = os.path.join(self.base, "project")
         os.makedirs(os.path.join(self.root, "meshes"))
-        self._previous_cache = os.environ.get("CADGEN_CACHE_DIR")
-        os.environ["CADGEN_CACHE_DIR"] = os.path.join(self.base, "cache")
         Path(self.root, "arm.urdf").write_text(ARM_URDF, encoding="utf-8")
         Path(self.root, "meshes", "head.stl").write_bytes(b"solid head\nendsolid head\n")
         Path(self.root, "lonely.srdf").write_text("<robot name='nobody'><group name='g'><link name='l'/></group></robot>", encoding="utf-8")
@@ -61,10 +58,6 @@ class RobotRouteFixture:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=5)
-        if self._previous_cache is None:
-            os.environ.pop("CADGEN_CACHE_DIR", None)
-        else:
-            os.environ["CADGEN_CACHE_DIR"] = self._previous_cache
         shutil.rmtree(self.base, ignore_errors=True)
 
     def request(self, target: str):
@@ -125,14 +118,15 @@ class ItServesTheRobot(RobotRouteTestCase):
         self.assertEqual((status, json.loads(body)), (404, {"error": "Not found"}))
         status, _headers, body = self.fixture.robot(self.fixture.path("arm.urdf"), mesh="not-a-hash")
         self.assertEqual(status, 400)
-        self.assertIn("by its object hash", json.loads(body)["error"])
+        self.assertIn("by its digest", json.loads(body)["error"])
 
-    def test_a_swept_primitive_is_meshed_again(self) -> None:
-        from cadgen.store.objects import object_path
+    def test_a_primitive_the_process_let_go_of_is_meshed_again(self) -> None:
+        from cadgen import robot_payload
 
         payload = json.loads(self.fixture.robot(self.fixture.path("arm.urdf"))[2])
         digest = parse_qs(urlparse(payload["visuals"][0]["mesh"]["url"]).query)["mesh"][0]
-        os.remove(object_path(digest))
+        with robot_payload._LOCK:
+            robot_payload._MESHES.pop(digest)
         status, _headers, mesh = self.fixture.robot(self.fixture.path("arm.urdf"), mesh=digest)
         self.assertEqual((status, mesh[:4]), (200, b"glTF"))
 

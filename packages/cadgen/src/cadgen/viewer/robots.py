@@ -2,16 +2,17 @@
 
 This module is the route's decisions — what may be opened, and what the HTTP answer is.
 The payload itself is cadgen's (``cadgen.robot_payload``), imported inside the handler so the
-validators never load at ``cadgen.viewer`` import time and a cache hit loads only the store.
+validators never load at ``cadgen.viewer`` import time; it holds each payload and primitive mesh
+in this process's memory.
 
 Two answers, both named by the description's absolute path (``file``, as every file is):
 
 * ``?file=<description>`` -> the payload (``application/json``), every visual's mesh named by
   the URL this server answers for it: a link mesh file by the asset route, a primitive cadgen
   meshed by this route with ``mesh``.
-* ``?file=<description>&mesh=<object hash>`` -> that primitive's GLB (``model/gltf-binary``),
-  served only when the description's payload names it; a sweep that took the object costs one
-  re-read of the description, never a 404.
+* ``?file=<description>&mesh=<digest>`` -> that primitive's GLB (``model/gltf-binary``),
+  served only when the description's payload names it; a mesh this process no longer holds
+  costs one re-read of the description, never a 404.
 
 Statuses, in the order they are decided: no ``?file=``, a ref that is not an absolute path or
 one that does not end in ``.urdf``, ``.srdf`` or ``.sdf`` -> 400; no such file -> 404; a
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 from .backend import absolute_path
 from .encoding import file_version, form_encode, local_asset_url_for_path
@@ -33,6 +35,8 @@ __all__ = ["ROBOT_ROUTE_PATH", "ROBOT_SUFFIXES", "resolve_robot_path", "robot_re
 
 ROBOT_ROUTE_PATH = "/__cad/robot"
 ROBOT_SUFFIXES = (".urdf", ".srdf", ".sdf")
+# A primitive's mesh is named by the sha256 of its GLB (``cadgen.robot_payload.primitive_glb_bytes``).
+_DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 def resolve_robot_path(file_ref) -> str | None:
@@ -79,19 +83,18 @@ def robot_response(file_ref, mesh_ref=None) -> tuple[int, bytes | dict, str]:
         )
         return 200, json.dumps(located, separators=(",", ":")).encode("utf-8"), "application/json; charset=utf-8"
 
-    from cadgen.store.objects import is_object_hash, read_verified_object
+    from cadgen.robot_payload import primitive_glb_bytes
 
     digest = str(mesh_ref or "").strip().lower()
-    if not is_object_hash(digest):
-        raise ValueError(f"{ROBOT_ROUTE_PATH} serves a primitive mesh by its object hash; {mesh_ref!r} is not one")
+    if not _DIGEST.fullmatch(digest):
+        raise ValueError(f"{ROBOT_ROUTE_PATH} serves a primitive mesh by its digest; {mesh_ref!r} is not one")
     for rebuild in (False, True):
         payload = json.loads(robot_payload_bytes(candidate, rebuild=rebuild).decode("utf-8"))
         named = {str(visual.get("mesh", {}).get("object") or "") for visual in payload.get("visuals") or []}
         if digest not in named:
             return 404, {"error": "Not found"}, ""
-        try:
-            return 200, read_verified_object(digest), "model/gltf-binary"
-        except (OSError, ValueError):
-            # A sweep took the object: read the description again, which meshes it again.
-            continue
+        found = primitive_glb_bytes(digest)
+        if found is not None:
+            return 200, found, "model/gltf-binary"
+        # This process no longer holds the mesh: read the description again, which meshes it again.
     return 404, {"error": "Not found"}, ""

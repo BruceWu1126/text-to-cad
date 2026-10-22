@@ -21,8 +21,8 @@ export function normalizeCameraProjection(value, fallback = CAMERA_PROJECTION.PE
 export const WORLD_UP = Object.freeze([0, 0, 1]);
 export const TOP_VIEW_UP = Object.freeze([0, 1, 0]);
 
-// One name per view. Mirrored as CAMERA_PRESETS in cadgen's snapshot_core.py,
-// which refuses an unknown name before a browser starts (the parity is tested).
+// One name per view. The engine's snapshot names the same views (CAMERA_PRESETS in
+// cadgen/engine/snapshot.py) and refuses an unknown one.
 export const RENDER_CAMERA_PRESETS = Object.freeze({
   front: Object.freeze({ name: "front", direction: Object.freeze([0, -1, 0]), up: WORLD_UP }),
   back: Object.freeze({ name: "back", direction: Object.freeze([0, 1, 0]), up: WORLD_UP }),

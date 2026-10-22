@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One self-contained browser gate for the CAD Viewer's format and camera
-# contracts. It runs exactly what CI runs. The project, store, Viewer, and
-# browser are all owned by this process.
+# contracts. It runs exactly what CI runs. The project, the engine daemon, the
+# Viewer, and the browser are all owned by this process.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,8 +44,8 @@ while [ "$#" -ne 0 ]; do
   esac
 done
 started_at="$(date +%s)"
-# macOS Unix sockets have a 104-byte path limit. Keep the test's daemon state
-# and child-process scratch paths short as well as private.
+# macOS Unix sockets have a 104-byte path limit. Keep the test's engine daemon's
+# folder and child-process scratch paths short as well as private.
 if [ "$(uname -s)" = "Darwin" ]; then
   project="$(mktemp -d /tmp/cvb.XXXXXX)"
   export TMPDIR="$project/tmp"
@@ -55,19 +55,12 @@ else
 fi
 log="$(mktemp)"
 viewer_pidfile="$project/viewer.pid"
-export CADGEN_CACHE_DIR="$project/cache"
-# The fixture builds below run on a build daemon: this test's own, at a private address,
-# retired on the way out -- and gone by itself after a minute idle if not.
-export CADGEN_DAEMON_STATE_DIR="$project/daemon-state"
-CADGEN_DAEMON_SOCKET="$("$PYTHON" -c 'import os, sys, uuid; print(rf"\\.\pipe\cadgen-test-{uuid.uuid4().hex}" if os.name == "nt" else os.path.join(sys.argv[1], "d.sock"))' "$CADGEN_DAEMON_STATE_DIR")"
-export CADGEN_DAEMON_SOCKET CADGEN_DAEMON_IDLE_TIMEOUT=60
 # The model library every Viewer writes: the test's own, never the user's.
 export CADGEN_STATE_DIR="$project/state"
-# The engine that serves the STEP and .xbf fixtures to the page: this test's own daemon, one
-# part meshed at a time, stopped on the way out.
+# The engine that builds the fixtures and serves the STEP and .xbf ones to the page: this
+# test's own daemon, one part meshed at a time, stopped on the way out.
 export CADGEN_ENGINE_DIR="$project/engine" CADGEN_ENGINE_MESH=inline CADGEN_ENGINE_IDLE=120
 export CADGEN_VIEWER_DIST="$RUNTIME"
-unset CADGEN_DAEMON_CHILD
 server_pid=""
 
 cleanup() {
@@ -108,8 +101,6 @@ if pid_path.is_file():
 PY
     wait "$server_pid" 2>/dev/null || true
   fi
-  "$PYTHON" "$REPO_ROOT/tests/python/support/daemon_cleanup.py" "$CADGEN_DAEMON_SOCKET" \
-    || echo "warning: the test's build daemon did not retire; it goes once idle" >&2
   "$PYTHON" -m cadgen.engine stop >/dev/null 2>&1 \
     || echo "warning: the test's engine daemon did not stop; it goes once idle" >&2
   rm -rf "$project" "$log"
@@ -118,52 +109,49 @@ trap cleanup EXIT
 
 cp "$FIXTURE" "$project/smoke.step"
 
-# One imported document and one tessellation produce the mesh fixture, with no
-# model build or repository data.
-"$PYTHON" - "$project" <<'PY'
-import sys
+# The mesh fixture is an export of the STEP fixture, by the engine.
+if ! (cd "$project" && "$PYTHON" -m cadgen.engine export smoke.step smoke.stl) >"$log" 2>&1 \
+   || [ ! -f "$project/smoke.stl" ]; then
+  echo "FAIL: the mesh fixture did not export" >&2
+  sed 's/^/    /' "$log" >&2
+  exit 1
+fi
+
+# The canonical STEP fixture is intentionally one part. A model places it twice to exercise
+# the positive STEP assembly-tree capability, with no other CAD construction or any
+# repository model dependency; its script goes once it is built.
+cat > "$project/assembly_fixture.py" <<'ASSEMBLY'
 from pathlib import Path
 
-from cadgen import build123d as bd
-from cadgen.step_export import export_build123d_step_file
-from cadgen.step_export_target import export_cad_target
+from cadgen.engine import read_step, step
+import build123d as bd
 
-root = Path(sys.argv[1])
-result = export_cad_target(
-    root / "smoke.step",
-    [("stl", root / "smoke.stl")],
-    repo_root=root,
-)
-if len(result.get("files") or []) != 1:
-    raise RuntimeError(f"mesh setup did not write its output: {result}")
+HERE = Path(__file__).resolve().parent
 
-# The canonical fixture is intentionally one part. Reuse its exact solid twice
-# to exercise the positive STEP assembly-tree capability without another CAD
-# construction or any repository model dependency.
-left = bd.import_step(root / "smoke.step")
-left.label = "left_cylinder"
-right = left.moved(bd.Pos(10, 0, 0))
-right.label = "right_cylinder"
-assembly = bd.Compound(children=[left, right], label="smoke_assembly")
-export_build123d_step_file(assembly, root / "assembly.step")
-PY
+
+@step(out="assembly.step")
+def smoke_assembly():
+    left = read_step(HERE / "smoke.step")
+    left.label = "left_cylinder"
+    right = left.moved(bd.Pos(10, 0, 0))
+    right.label = "right_cylinder"
+    return bd.Compound(children=[left, right], label="smoke_assembly")
+ASSEMBLY
 
 # A STEP model the camera gate saves a rebuilt revision over. Built from
 # primitives, so it imports nothing.
 cat > "$project/hinge.py" <<'HINGE'
-from cadgen import label_shape, step
-from cadgen import build123d as bd
+from cadgen.engine import step
+import build123d as bd
 
 
 @step
 def hinge():
-    base = label_shape(bd.Box(20, 20, 4), "base")
-    arm = label_shape(bd.Pos(30, 0, 6) * bd.Box(56, 4, 4), "arm")
-    return bd.Compound(children=[base, arm])
-
-
-if __name__ == "__main__":
-    hinge()
+    base = bd.Box(20, 20, 4)
+    base.label = "base"
+    arm = bd.Pos(30, 0, 6) * bd.Box(56, 4, 4)
+    arm.label = "arm"
+    return bd.Compound(children=[base, arm], label="hinge")
 HINGE
 # A SECOND revision of the same model, with an arm long enough that the model
 # no longer fits the frame the first one was fitted to. It is built into a
@@ -175,7 +163,6 @@ HINGE
 # BSD sed do not spell a word boundary the same way.
 sed -e 's/bd.Pos(30, 0, 6) \* bd.Box(56, 4, 4)/bd.Pos(80, 0, 6) * bd.Box(156, 4, 4)/' \
     -e 's/def hinge()/def hinge_grown()/' \
-    -e 's/^    hinge()$/    hinge_grown()/' \
   "$project/hinge.py" > "$project/hinge_grown.py"
 if ! grep -q 'bd.Box(156, 4, 4)' "$project/hinge_grown.py" \
    || ! grep -q 'def hinge_grown()' "$project/hinge_grown.py"; then
@@ -183,24 +170,14 @@ if ! grep -q 'bd.Box(156, 4, 4)' "$project/hinge_grown.py" \
   exit 1
 fi
 
-# A model's build returns before its daemon's save of the STEP has landed: wait
-# for the file itself (a save lands whole, by rename) before moving it.
-wait_for_file() {
-  for _ in $(seq 1 600); do
-    [ -f "$1" ] && return 0
-    sleep 0.1
-  done
-  echo "the build's save of $1 did not land within 60s" >&2
-  return 1
-}
-
 # The served project holds artifacts only: a model script beside them would
-# enter the catalog as a buildable entry and change what the gates see.
-if ! (cd "$project" && "$PYTHON" hinge.py && "$PYTHON" hinge_grown.py \
-        && wait_for_file hinge.step && wait_for_file hinge_grown.step \
+# enter the catalog as an entry of its own and change what the gates see. A build
+# returns once every file it declares is on disk.
+if ! (cd "$project" && "$PYTHON" assembly_fixture.py && "$PYTHON" hinge.py && "$PYTHON" hinge_grown.py \
         && mkdir -p .revision && mv hinge_grown.step .revision/hinge.step \
-        && rm hinge.py hinge_grown.py) >"$log" 2>&1; then
-  echo "FAIL: the hinge revision fixture did not build" >&2
+        && rm assembly_fixture.py hinge.py hinge_grown.py) >"$log" 2>&1 \
+   || [ ! -f "$project/assembly.step" ] || [ ! -f "$project/hinge.step" ]; then
+  echo "FAIL: the STEP model fixtures did not build" >&2
   sed 's/^/    /' "$log" >&2
   exit 1
 fi
@@ -226,11 +203,6 @@ if ! (cd "$project" && "$PYTHON" smoke_xbf.py && rm smoke_xbf.py) >"$log" 2>&1 \
   sed 's/^/    /' "$log" >&2
   exit 1
 fi
-
-# The fixture builds above stored their results in this test's private store; the
-# viewer reads none of it (a STEP and the .xbf are the engine's to read), so it goes.
-rm -rf "$CADGEN_CACHE_DIR"
-mkdir -p "$CADGEN_CACHE_DIR"
 
 # A closed 20 x 12 outline on layer OUTLINE, written by ezdxf (cadgen's DXF reader) so it is a
 # DXF the backend reads: a hand-written one lacks the subclass markers it requires.

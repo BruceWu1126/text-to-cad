@@ -53,7 +53,7 @@ import { xbfKinematics, xbfPosedMatrices } from "./xbfKinematics.js";
 
 export const XBF_SCENE_UNITS = Object.freeze({ unit: "mm", perWorld: 1 });
 export const XBF_EDGE_LINES = Object.freeze(["feature", "tangent", "seam"]);
-// A STEP's Select's edge pick (`useStepPicking.js`): how near the pointer, in CSS pixels, an
+// A STEP's Select's edge pick, as the STEP renderer took one: how near the pointer, in CSS pixels, an
 // edge is taken -- a press's, a resting pointer's, a touch's -- and, over a face, how near one
 // of THAT face's own edges must be to win over it (an edge the face does not own never does).
 export const XBF_PICK_PIXELS = Object.freeze({ edge: 10, edgeHover: 6, edgeTouch: 20, edgeTouchOverFace: 16 });
@@ -593,7 +593,7 @@ export function createXbfScene(THREE, document) {
   });
 
   /**
-   * The edge of `entry` a STEP's edge pick takes (`useStepPicking.js`'s `pickEdgeCandidate`): of
+   * The edge of `entry` a STEP's edge pick takes (as the STEP renderer's did): of
    * the edges whose polyline passes within `reach.threshold` of the ray (in the scene's units),
    * not clipped, not behind the nearest surface by more than `reach.allowance` (`reach.nearest`:
    * that surface's distance along the ray, Infinity for none) and within `reach.pixels` of the
@@ -963,8 +963,8 @@ export function createXbfScene(THREE, document) {
       return { id: xbfElementId(index), name: instances[index].prototype.name || instances[index].instance.path, point: hit.point.toArray() };
     },
     /**
-     * What a STEP's Select takes under the pointer (`useStepPicking.js`'s
-     * `pickTopologyReference`): the face under it is found first; the edge nearest the pointer
+     * What a STEP's Select takes under the pointer (as the STEP renderer's did): the face under
+     * it is found first; the edge nearest the pointer
      * within `XBF_PICK_PIXELS` (a press's, `hover` a resting pointer's, `touch` a finger's) wins
      * over that face only when it is one of the face's own edges (`xbfFaceEdges`) and within the
      * face's priority distance -- an edge the face does not own loses to it, however near; with

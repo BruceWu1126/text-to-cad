@@ -8,8 +8,7 @@
 // viewport does not: the camera fit, the studio set up once per output, and PNG encoding
 // (`renderMeshScene.js`).
 //
-// A STEP model is not here: its scene is `buildModel` (`cadScene.js`), which the viewer's
-// STEP renderer and the headless stage already share.
+// A STEP is drawn as the engine document it opens as (the xbf family below), as the viewer draws it.
 
 import { createHttpCadResourceProvider } from "../client/resources.js";
 import { loadRenderGlbDocument } from "../lib/renderAssetClient.js";

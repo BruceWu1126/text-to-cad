@@ -729,8 +729,8 @@ function buildPackageAssemblyRoot(descriptor, parts, previous = null) {
   const partById = new Map(partList.map((part) => [String(part.id), part]));
   // The nested hierarchy the descriptor records (subassembly grouping over leaves),
   // so the structure tree can drill into / isolate subassemblies just like a monolithic STEP.
-  // Every assembly descriptor carries it (component_package.py writes assembly.root
-  // whenever the entry is not a single-component part).
+  // Every assembly descriptor carries it (cadgen wrote assembly.root whenever the
+  // entry was not a single-component part).
   const descriptorRoot = descriptor?.assembly?.root;
   if (!descriptorRoot || typeof descriptorRoot !== "object") {
     throw new Error("Assembly tree has no assembly.root hierarchy");

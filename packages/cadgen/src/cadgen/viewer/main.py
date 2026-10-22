@@ -514,6 +514,20 @@ def _read_lines(path: str) -> list[str]:
         return []
 
 
+def _detach_kwargs() -> dict:
+    """How to start a process that outlives the command that started it.
+
+    ``start_new_session`` is POSIX-only and Windows does not merely ignore it -- it is named
+    ``unused_start_new_session`` in subprocess, so passing it there is silently nothing and the
+    process would share its parent's console and die with it. On Windows it gets a console of its
+    own with no window (``CREATE_NO_WINDOW``), never no console at all (``DETACHED_PROCESS``): every
+    console program a process without a console starts gets a NEW console, with a window (#597).
+    """
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
 def launch_detached(argv: list[str], *, as_json: bool, prog: str = DEFAULT_PROG) -> int:
     """``--detach``: start the same launch as a background process, relay its
     announcement, and RETURN.
@@ -541,8 +555,6 @@ def launch_detached(argv: list[str], *, as_json: bool, prog: str = DEFAULT_PROG)
     child_argv = [item for item in argv if item != "--detach"]
     if "--json" not in child_argv:
         child_argv.append("--json")
-    from cadgen.daemon.client import detach_kwargs  # noqa: PLC0415 - kernel-free, needed only now
-
     log_file = log_path()
     try:
         with open(log_file, "wb") as log:
@@ -554,7 +566,7 @@ def launch_detached(argv: list[str], *, as_json: bool, prog: str = DEFAULT_PROG)
                 close_fds=True,
                 # It outlives this command, so it goes by the person's telemetry settings, not this shell's.
                 env=for_others(os.environ),
-                **detach_kwargs(),
+                **_detach_kwargs(),
             )
     except OSError as error:
         _err(f"CAD Viewer could not start in the background: {error}\n")
