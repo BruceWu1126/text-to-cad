@@ -71,6 +71,8 @@ as top-level packages):
 ```
 PYTHONPATH=<cadgen>/src:src python src/tom.py
 PYTHONPATH=<cadgen>/src:src python -m cadgen.engine snapshot XBF/tom.xbf tom.png
+PYTHONPATH=<cadgen>/src:src python -m cadgen.engine snapshot XBF/tom.xbf rest.png --pose rest
+PYTHONPATH=<cadgen>/src:src python -m cadgen.engine export XBF/tom.xbf tom.glb   # the three clips
 ```
 
 The xbf lands in `XBF/` beside `src/`. A cold build takes under two minutes (107 s on
@@ -101,11 +103,33 @@ replays from the worker's memory (1 s), and a restarted daemon takes the file wh
   its part's own frame, placed with `connect_to` at the as-built pose. build123d's `connect_to`
   composes local locations, so where parent and child sit in different compounds it would move
   the child: there the joints are authored and the child keeps its pose (the build log lists
-  those mates as `unplaced`). The stages' own `kinematics=` blocks and the mates' presets
-  ("poses") are not ported: build123d joints have no poses.
-- Animation: the three clips (`showcase`, `wrist`, `approach`) and their beat table
-  (`lib/showcase_keys.json`) are removed; the engine has no animation. The pinned occurrence
-  ids and their check stay (`lib/tom_showcase.py`).
+  those mates as `unplaced`). Each joint is named after its mate (`shoulderYaw` ...
+  `gripperJaw`) and reads from joint zero, the old mates' convention: posing one alone turns
+  exactly the parts the old clips rotated, by a right-handed turn about the mate's axis.
+- Poses: the mates' presets (`poses`, from joint zero) are configurations of `tom`: `zero`
+  (every joint 0: the as-built pose, kept because the old dict named every joint), `rest` (the
+  folded rest: shoulder pitch +90, elbow pitch -90), `reach` and `packed`.
+- The stages' own `kinematics=` blocks were the mechanisms of their own STEP models. Those
+  stages are `@memo` stages (`tom2`, `tom2_side_mounted_elbow`, `tom2_symmetric_yokes`) or
+  plain functions (`tom2_500mm`, `tom2_600mm_solid`) now: their results are stock `tom`
+  re-places, never a document, so there is no document for a mechanism of theirs to live in.
+  Their kinematics functions stay as data, the chain each revision layer derives the next
+  one's mates from (`lib/current_arm_parts.configuration`), and `tom`'s final mates are the
+  joints. A stage's own poses and limits are read by nothing but that chain.
+- Clips: the three clips are motions of `tom` with their old names and durations, each
+  looping as before: `showcase` 23.4 s, `wrist` 15.2 s and `approach` 28.65 s. Their beat
+  table, control/ik/showcase.py's validated performances, is committed data again
+  (`lib/showcase_keys.json`, unchanged), and `lib/tom_showcase.py` plays it as the old page
+  did: a function of time over the seven joints (the table's URDF names map to the mates'
+  by `MATES`), smoothstep between keys or linear into a key marked so, the breathing drift on
+  top, wrapped at the duration. It checks the table against the audited limits, keys plus
+  breath, as the old module did. The old clips were keyed, but one motion has one ease and no
+  drift, so a waypoint motion could not say the mixed eases and the breath; a function can.
+  Its values match the old page's to 1e-12 deg over 2001 samples a clip, and the document's
+  samples of it stay within 0.09 deg (the engine samples a function to about 1e-3 rad; the
+  linear keys' kinks are where it is furthest). The clips' labels and descriptions stay in
+  `CLIPS` (the engine has no clip label). The pinned occurrence ids the old clips addressed,
+  and their check, stay.
 - Materials: `lib/materials.py`'s finishes are `Material` values set on the parts at the end
   of the build (`apply_materials`), each the catalogue's entry in its finish's look (`.but`):
   the sheet is Aluminum 5052-H32, the standoffs Brass C360, the nuts Stainless 304 and the

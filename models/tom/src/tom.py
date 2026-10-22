@@ -5,8 +5,9 @@ stages in src/stages/ are child models; this root reads them once as
 stock, finishes each part, and places every occurrence once
 (lib.current_arm_parts) at the folded rest, then re-places the arm at joint zero:
 the servo-centre pose, upper arm standing and forearm level (lib.joint_zero).
-Its mates become build123d joints on the parts (lib.joints) and its finishes
-materials (lib.materials).
+Its mates become build123d joints on the parts (lib.joints), their presets
+configurations, the control showcase's three clips motions (lib.tom_showcase), and
+its finishes materials (lib.materials).
 """
 from cadgen.engine import xbf
 
@@ -15,7 +16,7 @@ import sys
 from stages.tom2_symmetric_yokes import tom2_symmetric_yokes
 from lib.current_arm_parts import configuration,build_current_arm
 from lib.current_arm_stock import component_stock
-from lib.tom_showcase import check_occurrence_ids
+from lib.tom_showcase import add_clips, add_poses, check_occurrence_ids
 from lib.joint_limits import with_audited_limits
 from lib.joint_zero import rezeroed_kinematics, posed_at_zero
 from lib.joints import author_joints
@@ -31,7 +32,9 @@ def kinematics():
 KINEMATICS=kinematics()
 
 
-# The occurrence ids the old showcase clips addressed are still pinned and checked below.
+# The occurrence ids the old showcase clips addressed are still pinned and checked below;
+# the clips play control/ik/showcase.py's validated performances on the joints
+# (lib/tom_showcase.py).
 @xbf(out='../XBF/tom.xbf')
 def tom():
     # Imported stock is read once. The stock recipe retains vendor BREP and
@@ -44,7 +47,9 @@ def tom():
     joints=author_joints(arm,KINEMATICS)
     print(f"tom: materials {finishes}; joints placed {len(joints['placed'])}, "
           f"unplaced {joints['unplaced']}, missing {joints['missing']}",file=sys.stderr,flush=True)
-    return arm
+    # The mates' presets and the showcase's clips, by joint label (the mates' names).
+    add_poses(arm,KINEMATICS)
+    return add_clips(arm,KINEMATICS)
 
 
 if __name__=='__main__':tom()
