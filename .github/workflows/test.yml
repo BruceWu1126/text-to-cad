@@ -148,8 +148,8 @@ jobs:
       - name: Check the tracked tree
         run: scripts/github-workflows/check-builds.sh --tree-only
 
-  # The cadgen package suite, CAD Viewer backend included, on both platforms -- or the
-  # files of it a change selected (a test edited, a document a test reads).
+  # The cadgen package suite, the engine's and the CAD Viewer backend's included, on both
+  # platforms -- or the files of it a change selected (a test edited, a document a test reads).
   cadgen-linux:
     name: cadgen (Linux)
     needs: changes
@@ -169,7 +169,16 @@ jobs:
       - name: Set up dependencies
         uses: ./.github/actions/setup-deps
         with:
+          playwright: "false"
           npm: packages/core
+
+      # The engine's stills are drawn by OCCT in an OpenGL context, which on a machine with no
+      # screen is made on an X server's: Xvfb, with Mesa's software GL, and the font the
+      # stills' text is set in.
+      - name: Install the display the engine's stills draw on
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1-mesa-dri fonts-dejavu-core
 
       - name: Check cadgen types (basic)
         run: python -m pyrefly check --config packages/cadgen/pyproject.toml --output-format full-text-with-github
@@ -180,7 +189,8 @@ jobs:
         run: |
           # TESTS is a space-separated list of repo paths: split on purpose.
           # shellcheck disable=SC2086
-          scripts/test/test-python.sh --select cadgen --print-weights $TESTS
+          xvfb-run -a -s "-screen 0 1920x1080x24 +extension GLX" \
+            scripts/test/test-python.sh --select cadgen --print-weights $TESTS
 
   # Why Windows runs at all: four of the last five user-reported bugs were Windows-only
   # (#260, #266, #267, #269) and every one passed CI -- the coverage existed, the runner
@@ -206,6 +216,7 @@ jobs:
       - name: Set up dependencies
         uses: ./.github/actions/setup-deps
         with:
+          playwright: "false"
           npm: packages/core
 
       - name: Check cadgen types (basic)
@@ -371,7 +382,6 @@ jobs:
 
       - name: Run the light contracts
         env:
-          PYTHON_TEST_RUNTIME: "0"
           POLICY: ${{ needs.changes.outputs.light_policy }}
           TESTS: ${{ needs.changes.outputs.light_tests }}
         run: |
@@ -385,6 +395,7 @@ jobs:
         if: needs.changes.outputs.skills_runtime == 'true'
         uses: ./.github/actions/setup-deps
         with:
+          playwright: "false"
           npm: packages/core
 
       - name: Run the policy gates that load cadgen or its runtime
@@ -395,7 +406,7 @@ jobs:
           # shellcheck disable=SC2086
           scripts/test/test-global.sh $TESTS
 
-      - name: Run the skill suites that drive the CAD kernel
+      - name: Run the skill suites that need their dependencies
         if: needs.changes.outputs.skills_tests != ''
         env:
           TESTS: ${{ needs.changes.outputs.skills_tests }}

@@ -2,10 +2,8 @@
 
 Manual commands that measure cadgen and the CAD Viewer. None of them runs in
 CI, and what they write goes under an ignored `tmp/` directory, never into the
-tree (`AGENTS.md`). [`viewer-memory/`](viewer-memory/) measures viewer loading
-and lifecycle (its helper units run in `scripts/test/test-js.sh`), and
-`occt_parity.py` how alike the viewer and the engine's OCCT prototype draw an
-`.xbf`'s regular display modes.
+tree (`AGENTS.md`). `occt_parity.py` measures how alike the viewer and the
+engine's OCCT prototype draw an `.xbf`'s regular display modes.
 
 ## Viewer against OCCT, mode by mode
 

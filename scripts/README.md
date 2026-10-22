@@ -44,8 +44,8 @@ where those files ship, so these scripts are what produces them.
   runners per job instead.
 - `test-js.sh [--select core|ui|web|mcp|all]` — builds the required shared exports,
   checks dependency boundaries and runs the selected shared JS/UI/web suites.
-  Core includes the pure `bench/viewer-memory/` helper units; `mcp` runs the CAD
-  app's tests and builds it, since its one-file build is half its contract.
+  `mcp` runs the CAD app's tests and builds it, since its one-file build is half
+  its contract.
 - `test-python.sh [--keep-going] [--select GROUP] [--print-weights] [PATH...]`
   — the cadgen package suite, then every skill's suite. Each test FILE runs in
   its own interpreter with an engine daemon of its own, `CADGEN_TEST_JOBS` at a
@@ -201,11 +201,9 @@ studio scene ray-cast into a small equirectangular Radiance image, which the vie
 and the OCCT prototype both light an engine document's regular modes with. Run by
 hand when the studio or the look changes.
 
-`bench/` — manual viewer measurements ([`bench/README.md`](bench/README.md)):
-`viewer-memory/` (viewer loading and lifecycle) and `occt_parity.py` (the viewer
-against the OCCT prototype, mode by mode). Reports and profiler captures are
-local output under `tmp/`, never committed here. The drivers are manual; their
-`*.test.mjs` helper units run in `test-js.sh`.
+`bench/` — `occt_parity.py`, a manual measurement of the viewer against the OCCT
+prototype, mode by mode ([`bench/README.md`](bench/README.md)). Its reports are
+local output under `tmp/`, never committed here.
 
 ## CI
 
