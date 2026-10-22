@@ -424,15 +424,20 @@ def serve(source: Any, port: int = 0, three: str | None = None) -> Served:
 
 
 def where(source: Any, ref: str | None = None) -> Facts | list[Facts]:
-    """What made one element of a document, and what the kernel measures of it: ``ref`` is
-    ``PART/face N`` (``edge``, ``vertex``) or an element name (``f:...``). A part or an assembly
-    (its name or path) answers its volume and its mass: each part's volume times its material's
-    density, summed (``cli.weighed``). Without ``ref``, the build closure the xbf holds
-    (``previous``): its engine, libraries, source, modules, inputs and key, read from the file
-    alone."""
+    """What a ref names in a document (``refs``: ``hand/finger.2/face 7``, ``base/f:...``, a
+    copied ``/abs/kit.xbf#...`` line) and what made it. An element answers what the kernel
+    measures of it -- its points placed where its occurrence stands, in the document's frame --
+    with its canonical ``ref``, its occurrence's ``path`` and ``made_by``; a part or an assembly
+    its volume and its mass: each part's volume times its material's density, summed
+    (``cli.weighed``). One answer per selector (a list for several). Without ``ref``, the build
+    closure the xbf holds (``previous``): its engine, libraries, source, modules, inputs and
+    key, read from the file alone. A ref that names nothing, or several things, is refused by
+    name (``refs.RefError``)."""
+    import urllib.error
     import urllib.request
 
-    from cadgen.engine.cli import elements, placements, weighed
+    from cadgen.engine import refs
+    from cadgen.engine.cli import weighed
 
     path = Path(os.fspath(source)).resolve()
     if not path.is_file():
@@ -445,25 +450,40 @@ def where(source: Any, ref: str | None = None) -> Facts | list[Facts]:
             raise EngineError(f"{path.name} holds no build closure"
                               + (f" (written by {writer})" if writer else ": no engine wrote it"))
         return json.loads(found)
+    refs.parse(ref)  # a ref that does not parse is refused before anything is served
     answer = _ask({"op": "serve", "path": str(path)})
     base, _sep, ident = answer["url"].partition("/?doc=")
 
     def get(route: str) -> Any:
-        with urllib.request.urlopen(f"{base}/api/doc/{ident}{route}", timeout=300) as response:  # noqa: S310
-            return json.loads(response.read())
+        try:
+            with urllib.request.urlopen(f"{base}/api/doc/{ident}{route}", timeout=300) as response:  # noqa: S310
+                return json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            try:
+                said = json.loads(error.read()).get("error")
+            except ValueError:
+                said = None
+            raise refs.RefError(said or str(error)) from None
 
     structure = get("")
-    held = placements(structure, ref)
-    if held:
-        keys = {structure["prototypes"][i["prototype"]]["key"] for i in held}
-        return weighed(structure, held, {key: get(f"/part/{key}/volume")["volume"] for key in sorted(keys)}, ref)
-    found = []
-    for prototype, kind, ordinal in elements(structure, ref):
-        facts = get(f"/part/{prototype['key']}/{kind}/{ordinal}")
-        found.append({"part": prototype["name"], "key": prototype["key"], "kind": kind, "ordinal": ordinal,
-                      "name": prototype.get(f"{kind}Names", {}).get(str(ordinal)), **facts})
-    if not found:
-        raise EngineError(f"{path.name} has no element {ref!r}")
+    found: list[Facts] = []
+    volumes: dict[str, float] = {}
+    for hit in refs.resolve_structure(structure, ref, path):
+        if hit.kind is None:
+            for key in sorted({structure["prototypes"][node.payload["prototype"]]["key"] for node in hit.node.parts()}):
+                if key not in volumes:
+                    volumes[key] = get(f"/part/{key}/volume")["volume"]
+            found.append(weighed(structure, hit, volumes))
+            continue
+        prototype = structure["prototypes"][hit.node.payload["prototype"]]
+        matrix = structure["instances"][hit.node.payload["instance"]]["matrix"]
+        try:
+            facts = get(f"/part/{prototype['key']}/{hit.kind}/{hit.ordinal}")
+        except refs.RefError as error:  # an ordinal past the part's elements
+            raise refs.RefError(str(error).replace("the part", hit.path or path.name, 1)) from None
+        found.append({"ref": hit.ref, "path": hit.path, "part": prototype["name"],
+                      "key": prototype["key"], "kind": hit.kind, "ordinal": hit.ordinal, "name": hit.name,
+                      **refs.placed_facts(facts, matrix)})
     return found[0] if len(found) == 1 else found
 
 

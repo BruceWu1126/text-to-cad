@@ -26,6 +26,12 @@ own for it.
 
 An xbf is read in the worker (``read_xbf``): its reader is the document's own retrieval
 driver, its working memory the document's.
+
+**A model never reads a file its own build writes** (``refuse_written``): its own xbf or
+export, a child's, a sibling's. Read, the file would be an input the build rewrites -- its
+key moving on every build, so the model would never be taken from its file -- or, keyed by
+anything but its bytes, a model depending on its own past. A model takes what it makes from
+the live shape instead (``select(shape, ref)``, or the child it calls).
 """
 
 from __future__ import annotations
@@ -39,7 +45,8 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-__all__ = ["Reader", "assemble", "describe", "main", "read_step", "read_xbf", "session"]
+__all__ = ["Reader", "assemble", "describe", "main", "read_step", "read_xbf", "refuse_written", "session",
+           "written_by_build"]
 
 
 # --- a document described ---------------------------------------------------------------------
@@ -395,9 +402,62 @@ def session() -> Iterator[Reader]:
         reader.close()
 
 
+def written_by_build(path: Any) -> str | None:
+    """The model of the build running on this thread that writes ``path`` -- its identity,
+    ``script.py::model`` -- or None: outside a build, or for a file no model of the build
+    declares. The build's models are its script's (the one running and its siblings) and the
+    children it has called."""
+    from pathlib import Path
+
+    from cadgen.engine import model as engine_model
+
+    context = getattr(engine_model._CONTEXT, "build", None)
+    keys = [] if context is None else [*context.stack, *context.results]
+    if not keys:
+        return None
+    by_file: dict[str, Any] = {}
+    for module in list(sys.modules.values()):
+        file = getattr(module, "__file__", None)
+        if isinstance(file, str) and file.endswith(".py"):
+            by_file.setdefault(os.path.normcase(os.path.abspath(file)), module)
+
+    def module_of(script: str) -> Any:
+        found = by_file.get(os.path.normcase(script))
+        if found is None:  # a module imported through a link: by the file it is
+            wanted = Path(script).resolve()
+            found = next((module for file, module in by_file.items() if Path(file).resolve() == wanted), None)
+            by_file[os.path.normcase(script)] = found
+        return found
+
+    root = keys[0].rpartition("::")[0]
+    held = module_of(root)
+    found = list(engine_model.models_in(vars(held), Path(root))) if held is not None else []
+    for key in keys:
+        script, _sep, name = key.rpartition("::")
+        held = module_of(script) if name.isidentifier() else None
+        candidate = getattr(held, name, None) if held is not None else None
+        if isinstance(candidate, engine_model.Model) and candidate not in found:
+            found.append(candidate)
+    wanted = Path(os.fspath(path)).resolve()
+    for candidate in found:
+        if any(Path(out).resolve() == wanted for _kind, out in candidate.targets()):
+            return candidate.identity
+    return None
+
+
+def refuse_written(path: Any, verb: str) -> None:
+    """Refuse a read, by a model of the build running on this thread, of a file the build writes
+    (``written_by_build``): see the module."""
+    writer = written_by_build(path)
+    if writer is not None:
+        raise ValueError(f"{verb} {os.fspath(path)}: this build writes it ({writer}), and a model reads no file "
+                         "its own build writes; select from the live shape instead, select(shape, ref)")
+
+
 def read_step(path: Any) -> Any:
     """A STEP file as a build123d compound tree (see the module), parsed by the build's
     reader process, or by one of its own outside a build."""
+    refuse_written(path, "read_step")
     with _SESSION_LOCK:
         reader = _SESSION[-1] if _SESSION else None
     own = reader is None
@@ -423,6 +483,7 @@ def read_xbf(path: Any) -> Any:
     path = Path(os.fspath(path))
     if path.suffix.lower() != ".xbf":
         raise ValueError(f"read_xbf reads an .xbf, not {path.name}: read a STEP with read_step")
+    refuse_written(path, "read_xbf")
     if not path.is_file():
         raise FileNotFoundError(f"no document {path}")
     doc = _read(path)

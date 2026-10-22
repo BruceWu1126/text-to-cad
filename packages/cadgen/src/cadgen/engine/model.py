@@ -476,6 +476,10 @@ def read_step(path: Any) -> Any:
         _READ_STEP = wrap_function("read_step", _read_step)
     import os
 
+    from cadgen.engine.reader import refuse_written
+
+    # Before the memo: a read of a file this build writes is refused, whether or not the memo holds it.
+    refuse_written(path, "read_step")
     return _READ_STEP(os.fspath(path))
 
 
@@ -503,6 +507,9 @@ def read_xbf(path: Any) -> Any:
         _READ_XBF = wrap_function("read_xbf", _read_xbf)
     import os
 
+    from cadgen.engine.reader import refuse_written
+
+    refuse_written(path, "read_xbf")  # before the memo, as read_step's
     return _READ_XBF(os.fspath(path))
 
 
@@ -537,7 +544,11 @@ def _instance(shape: Any, copied: dict[int, Any]) -> Any:
     attrs.pop("_NodeMixin__parent", None)
     wrapped = attrs.get("_wrapped")
     if wrapped is not None:
-        attrs["_wrapped"] = wrapped.Located(wrapped.Location())
+        from build123d.topology.shape_core import downcast
+
+        # ``Located`` hands back a bare ``TopoDS_Shape``: the placement holds its own class's
+        # handle (a ``TopoDS_Solid``), as the shape it copies does, so its measures are the shape's.
+        attrs["_wrapped"] = downcast(wrapped.Located(wrapped.Location()))
     attrs = {name: dict(value) if type(value) is dict else list(value) if type(value) is list else value
              for name, value in attrs.items()}
     joints = attrs.get("joints")
