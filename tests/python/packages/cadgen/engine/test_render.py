@@ -537,9 +537,12 @@ class DaemonRenderTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout.strip().splitlines()[-1])
 
-    def build(self, size: int, *flags: str) -> None:
+    def build(self, size: int, *, daemon: bool = True) -> None:
         (self.folder / "pair.py").write_text(textwrap.dedent(PAIR.format(size=size)), encoding="utf-8")
-        done = self.cli("build", "pair.py", *flags)
+        # ``python pair.py`` asks the daemon; ``Model.build(daemon=False)`` builds in its own process.
+        argv = ["pair.py"] if daemon else ["-B", "-c", "import pair; pair.pair.build(daemon=False)"]
+        done = subprocess.run([sys.executable, *argv], cwd=self.folder, env=self.env, capture_output=True, text=True,
+                              timeout=300)
         self.assertEqual(done.returncode, 0, done.stderr)
 
     def renders(self) -> list[dict]:
@@ -580,7 +583,7 @@ class DaemonRenderTest(unittest.TestCase):
             self.assertFalse(_alive(pid), "gone with the daemon")
 
     def test_no_daemon_draws_in_this_process(self) -> None:
-        self.build(10, "--no-daemon")
+        self.build(10, daemon=False)
         report = self.snapshot("cold.png", "--no-daemon", "--display", "exploded=0.5")
         self.assertEqual((report["renderer"], report["exploded"]), ("occt", 0.5))
         self.assertNotIn("process", report)

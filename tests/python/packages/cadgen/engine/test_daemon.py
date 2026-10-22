@@ -140,11 +140,22 @@ class DaemonTest(unittest.TestCase):
         return subprocess.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.folder, env=env or self.env,
                               capture_output=True, text=True, timeout=300)
 
-    def build(self, size: int) -> dict:
-        self.script.write_text(textwrap.dedent(MODEL.format(size=size)), encoding="utf-8")
-        done = self.cli("build", "--json", "block.py::block")
+    def run_script(self, name: str, env: dict | None = None) -> subprocess.CompletedProcess:
+        """``python NAME``: the script asks the daemon to build its models."""
+        return subprocess.run([sys.executable, name], cwd=self.folder, env=env or self.env, capture_output=True,
+                              text=True, timeout=300)
+
+    def built(self, name: str, env: dict | None = None) -> dict:
+        """Model ``name`` of ``name.py`` built through the daemon by ``Model.build()``: its report."""
+        probe = f"import json, {name}; print(json.dumps({name}.{name}.build().models[0]))"
+        done = subprocess.run([sys.executable, "-B", "-c", probe], cwd=self.folder, env=env or self.env,
+                              capture_output=True, text=True, timeout=300)
         self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout.strip().splitlines()[-1])
+
+    def build(self, size: int) -> dict:
+        self.script.write_text(textwrap.dedent(MODEL.format(size=size)), encoding="utf-8")
+        return self.built("block")
 
     def test_a_warm_worker_keeps_its_memo_between_builds(self) -> None:
         cold = self.build(10)
@@ -173,9 +184,7 @@ class DaemonTest(unittest.TestCase):
 
         def build(size: int) -> dict:
             self.script.write_text(textwrap.dedent(CUT.format(size=size)), encoding="utf-8")
-            done = self.cli("build", "--json", "cut.py")
-            self.assertEqual(done.returncode, 0, done.stderr)
-            return json.loads(done.stdout.strip().splitlines()[-1])
+            return self.built("cut")
 
         build(10)
         cold = xbf.read_bytes()
@@ -192,7 +201,7 @@ class DaemonTest(unittest.TestCase):
     def test_a_served_document_follows_the_build_without_its_file_being_read(self) -> None:
         self.script = self.folder / "pair.py"
         self.script.write_text(textwrap.dedent(PAIR.format(size=10)), encoding="utf-8")
-        self.assertEqual(self.cli("build", "pair.py").returncode, 0)
+        self.assertEqual(self.run_script("pair.py").returncode, 0)
         served = self.cli("serve", "XBF/pair.xbf")
         self.assertEqual(served.returncode, 0, served.stderr)
         base, ident = served.stdout.strip().split("/?doc=")
@@ -201,7 +210,7 @@ class DaemonTest(unittest.TestCase):
         for prototype in before["prototypes"]:  # the page has every part
             self.assertEqual(get(f"{api}/part/{prototype['key']}")[:4], b"XBM2")
         self.script.write_text(textwrap.dedent(PAIR.format(size=12)), encoding="utf-8")
-        self.assertEqual(self.cli("build", "pair.py").returncode, 0)
+        self.assertEqual(self.run_script("pair.py").returncode, 0)
         answer = get_json(f"{api}/version?after={before['version']}&wait=60")
         stat = (self.folder / "XBF/pair.xbf").stat()
         self.assertEqual(answer["version"], f"{stat.st_mtime_ns}-{stat.st_size}")
@@ -216,8 +225,7 @@ class DaemonTest(unittest.TestCase):
     def test_a_build_meshes_only_what_it_changed_of_a_served_document(self) -> None:
         self.script = self.folder / "pair.py"
         self.script.write_text(textwrap.dedent(PAIR.format(size=10)), encoding="utf-8")
-        done = self.cli("build", "--json", "pair.py")
-        self.assertEqual(json.loads(done.stdout.strip().splitlines()[-1])["meshed"], 0, "nobody serves it: nothing meshed")
+        self.assertEqual(self.built("pair")["meshed"], 0, "nobody serves it: nothing meshed")
         # A fresh daemon serves the file: its worker has built nothing yet.
         self.cli("stop")
         served = self.cli("serve", "XBF/pair.xbf")
@@ -225,13 +233,10 @@ class DaemonTest(unittest.TestCase):
         base, ident = served.stdout.strip().split("/?doc=")
         before = get_json(f"{base}/api/doc/{ident}")
         self.script.write_text(textwrap.dedent(PAIR.format(size=12)), encoding="utf-8")
-        done = self.cli("build", "--json", "pair.py")
-        self.assertEqual(json.loads(done.stdout.strip().splitlines()[-1])["meshed"], 1,
-                         "the changed part alone, not the whole document")
+        self.assertEqual(self.built("pair")["meshed"], 1, "the changed part alone, not the whole document")
         answer = get_json(f"{base}/api/doc/{ident}/version?after={before['version']}&wait=60")
         self.assertEqual(answer["patch"]["meshes"], 1)
-        unchanged = self.cli("build", "--json", "pair.py")
-        self.assertEqual(json.loads(unchanged.stdout.strip().splitlines()[-1])["meshed"], 0)
+        self.assertEqual(self.built("pair")["meshed"], 0)
 
     def where(self, ref: str) -> dict:
         found = subprocess.run([sys.executable, "-m", "cadgen.cli", "where", "XBF/block.xbf", ref], cwd=self.folder,
@@ -265,12 +270,10 @@ class DaemonTest(unittest.TestCase):
     def test_a_worker_over_its_memory_cap_is_retired_and_the_next_build_restarts(self) -> None:
         capped = {**self.env, "CADGEN_ENGINE_WORKER_RSS_MB": "1"}
         self.script.write_text(textwrap.dedent(MODEL.format(size=10)), encoding="utf-8")
-        first = self.cli("build", "--json", "block.py::block", env=capped)
-        self.assertEqual(first.returncode, 0, first.stderr)
-        report = json.loads(first.stdout.strip().splitlines()[-1])
+        report = self.built("block", env=capped)
         self.assertIn("over its 1 MB cap", report["retired"])
         # The next build is a fresh worker's: a restart, which takes the file it wrote.
-        again = self.cli("build", "block.py::block", env=capped)
+        again = self.run_script("block.py", env=capped)
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertTrue(again.stdout.startswith("took block.py::block cold"), again.stdout)
         self.assertIn("retired: the worker held", again.stdout)
@@ -279,25 +282,29 @@ class DaemonTest(unittest.TestCase):
 
     def test_a_failing_body_answers_with_its_error(self) -> None:
         self.script.write_text("from cadgen.engine import xbf\n\n@xbf\ndef block():\n    raise RuntimeError('no')\n", encoding="utf-8")
-        done = self.cli("build", "block.py")
+        done = self.run_script("block.py")
         self.assertEqual(done.returncode, 1)
         self.assertIn("RuntimeError: no", done.stderr)
 
     def test_running_a_model_script_asks_the_daemon_to_build_it(self) -> None:
-        self.script.write_text(textwrap.dedent(MODEL.format(size=3)), encoding="utf-8")
-        done = subprocess.run([sys.executable, "block.py", "--json"], cwd=self.folder, env=self.env,
-                              capture_output=True, text=True, timeout=300)
+        # A script runs like Python and takes no options (law 11): every model it defines writes
+        # what it declares, whatever its argv holds.
+        self.script.write_text(textwrap.dedent(MODEL.format(size=3)) + "\n\n@stl\ndef peg():\n"
+                               "    return bd.Cylinder(1, 3)\n", encoding="utf-8")
+        self.script.write_text(self.script.read_text(encoding="utf-8").replace("import xbf", "import stl, xbf"),
+                               encoding="utf-8")
+        done = self.run_script("block.py")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertTrue(json.loads(done.stdout.strip().splitlines()[-1])["ok"])
-        self.assertTrue((self.folder / "XBF/block.xbf").is_file())
+        self.assertEqual([line.split(" in ")[0] for line in done.stdout.splitlines() if line.startswith("built")],
+                         ["built block.py::block cold", "built block.py::peg cold"])
         workers = json.loads(self.cli("status").stdout)["workers"]
         self.assertEqual([(Path(w["script"]).name, w["builds"]) for w in workers], [("block.py", 1)],
                          "the daemon's worker built it, not the script's own process")
-        # The script's argv is the build's: a flag selects its files.
-        done = subprocess.run([sys.executable, "block.py", "--step", "b.step"], cwd=self.folder, env=self.env,
+        done = subprocess.run([sys.executable, "block.py", "--step", "b.step", "--json"], cwd=self.folder, env=self.env,
                               capture_output=True, text=True, timeout=300)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertTrue((self.folder / "b.step").is_file())
+        self.assertEqual(sorted(str(path.relative_to(self.folder)) for path in self.folder.rglob("*") if path.is_file()),
+                         ["XBF/block.xbf", "block.py", "peg.stl"])
 
     def test_the_viewer_moves_before_a_derived_file_is_written(self) -> None:
         # A deliberately slow STL writer, put in place in the worker by the model's own module.
@@ -318,15 +325,15 @@ class DaemonTest(unittest.TestCase):
             "import xbf", "import stl, xbf")
         self.script = self.folder / "pair.py"
         self.script.write_text(slow.format(size=10), encoding="utf-8")
-        self.assertEqual(self.cli("build", "pair.py").returncode, 0)
+        self.assertEqual(self.run_script("pair.py").returncode, 0)
         served = self.cli("serve", "XBF/pair.xbf")
         base, ident = served.stdout.strip().split("/?doc=")
         before = get_json(f"{base}/api/doc/{ident}")
         stl = self.folder / "pair.stl"
         written = stl.stat().st_mtime_ns
         self.script.write_text(slow.format(size=12), encoding="utf-8")
-        building = subprocess.Popen([sys.executable, "-m", "cadgen.engine", "build", "pair.py"], cwd=self.folder,
-                                    env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        building = subprocess.Popen([sys.executable, "pair.py"], cwd=self.folder, env=self.env,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.addCleanup(building.wait)
         answer = get_json(f"{base}/api/doc/{ident}/version?after={before['version']}&wait=60")
         self.assertNotEqual(answer["version"], before["version"])
@@ -337,7 +344,7 @@ class DaemonTest(unittest.TestCase):
     def test_exports_and_code_through_the_daemon(self) -> None:
         self.script = self.folder / "pair.py"
         self.script.write_text(textwrap.dedent(PAIR.format(size=10)), encoding="utf-8")
-        self.assertEqual(self.cli("build", "pair.py").returncode, 0)
+        self.assertEqual(self.run_script("pair.py").returncode, 0)
         done = self.cli("export", "XBF/pair.xbf", "pair.glb", "pair.step")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(len(json.loads(self.cli("status").stdout)["workers"]), 1,
@@ -349,15 +356,15 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.cli("export", "pair.glb", "x.step").returncode, 2, "a mesh is no source")
         code = "import build123d as bd\nresult = bd.Box(2, 2, 2) - bd.Cylinder(0.5, 3)\n"
-        built = subprocess.run([sys.executable, "-m", "cadgen.engine", "build", "--code", "-", "--name", "plug",
-                                "--stl", "plug.stl", "--json"], input=code, cwd=self.folder, env=self.env,
+        built = subprocess.run([sys.executable, "-m", "cadgen.engine", "build", "-", "--name", "plug", "--stl",
+                                "plug.stl", "--json"], input=code, cwd=self.folder, env=self.env,
                                capture_output=True, text=True, timeout=300)
         self.assertEqual(built.returncode, 0, built.stderr)
         self.assertTrue((self.folder / "plug.stl").is_file())
         # From Python: the code's document and shape, asked of the worker that holds them.
         probe = textwrap.dedent(f"""
             import json, cadgen
-            built = cadgen.build(code={code!r}, name="plug", stl="plug.stl")
+            built = cadgen.build({code!r}, name="plug", stl="plug.stl")
             shape = built.shape
             print(json.dumps({{"bodies": built.report["bodies"], "name": built.document.name,
                                "volume": round(shape.volume, 3)}}))
@@ -373,7 +380,7 @@ class DaemonTest(unittest.TestCase):
     def test_an_idle_daemon_exits(self) -> None:
         env = {**self.env, "CADGEN_ENGINE_IDLE": "0.5"}
         self.script.write_text(textwrap.dedent(MODEL.format(size=3)), encoding="utf-8")
-        self.assertEqual(self.cli("build", "block.py", env=env).returncode, 0)
+        self.assertEqual(self.run_script("block.py", env=env).returncode, 0)
         deadline = time.monotonic() + 30
         while any(self.state.glob("*.sock")) and time.monotonic() < deadline:
             time.sleep(0.1)

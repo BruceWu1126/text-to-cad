@@ -14,10 +14,12 @@ bottom, and the xbf, when declared, is always written first.
 
 The decorated function is a ``Model``: ``.build()``, ``.export(*destinations)``,
 ``.snapshot(out)`` and ``.document`` run the engine's verbs on it, through the daemon.
-Run as a program (``python model.py [flags]``), a model script asks the daemon to build
-it, as ``cadgen xbf build model.py [flags]`` does: the script's own process builds
-nothing, and exits with the build's status. A script inside a package is that package's
-module (``module_of``), in a build and run by its path alike (``as_package_module``).
+Run as a program (``python model.py``), a model script asks the daemon to build every
+model it defines, as their decorators declare: the script's own process builds nothing,
+and exits with the build's status. It takes no options (law 11): the decorators are the
+whole definition of what a script writes, and the engine's switches are environment
+variables. A script inside a package is that package's module (``module_of``), in a
+build and run by its path alike (``as_package_module``).
 
 Called inside a build, a model is a child: its body runs in the same run, with the
 same memo, and its result is a sub-assembly of whatever the caller makes of it,
@@ -132,46 +134,22 @@ class Model:
         ``<function><suffix>``) beside the script."""
         return [(target.kind, target.path) for target in self.plan()]
 
-    def plan(self, outputs: dict[str, dict[str, Any]] | None = None, *, cwd: Path | None = None) -> list[Target]:
-        """The files a build of this model writes, the xbf first. ``outputs`` (``{kind:
-        {"out": path or None}}``) selects and overrides: only the kinds it names are
-        written, each at its path (relative to ``cwd``), else the declared one, else the
-        default; a kind given None is written only where the model declares it, and ``{}``
-        writes nothing. ``outputs`` None is what the decorators declare."""
-        declared = {output.kind: output for output in self.outputs}
-        if outputs is not None:
-            unknown = sorted(set(outputs) - set(KINDS))
-            if unknown:
-                raise ValueError(f"no output kind {', '.join(unknown)}; the kinds are {', '.join(KINDS)}")
-            # A kind given None is written only where the model declares it.
-            order = [output.kind for output in self.outputs if output.kind in outputs]
-            order += [kind for kind in KINDS if outputs.get(kind) is not None and kind not in order]
-        else:
-            order = [output.kind for output in self.outputs]
-        found = []
-        for kind in sorted(order, key=lambda kind: kind != "xbf"):
-            output = declared.get(kind)
-            given = dict((outputs or {}).get(kind) or {})
-            out = given.pop("out", None)
-            if given:
-                raise ValueError(f"{kind} takes no {', '.join(sorted(given))}; it takes out alone")
-            if out is not None:
-                check_output(kind, out, f"--{kind}")
-                path = Path(out)
-                path = Path(_normalized(path if path.is_absolute() else (cwd or Path.cwd()) / path))
-            else:
-                path = self._path(kind, output.out if output is not None else None)
-            found.append(Target(kind, path))
-        return found
+    def plan(self) -> list[Target]:
+        """The files a build of this model writes: what its decorators declare (law 10), the
+        xbf first, then the derived files in the order the decorators are written."""
+        return [Target(output.kind, self._path(output.kind, output.out))
+                for output in sorted(self.outputs, key=lambda output: output.kind != "xbf")]
 
     # --- the verbs, through the daemon (``cadgen.engine.api``) -----------------------------
 
-    def build(self, **flags: Any) -> Any:
-        """Build this model (``cadgen xbf build script.py::model``); ``flags`` are the
-        build's (``xbf=``, ``step=``, ...)."""
+    def build(self, *, verify: bool = False, log: Callable[[str], None] | None = None, daemon: bool = True) -> Any:
+        """Build this model, through the daemon (``daemon=False``: in this process): it and every
+        child model it calls write what their decorators declare, as ``python script.py`` builds
+        every model of the script (``api.build_script``); a ``Report``. ``verify`` runs every body
+        the memo would replay and compares its result with the logged one."""
         from cadgen.engine import api
 
-        return api.build(self, **flags)
+        return api.build_script(self.script, [self.name], verify=verify, log=log, daemon=daemon)
 
     def export(self, *destinations: Any, pose: Any = None, part: str | None = None) -> Any:
         """Build this model, then write its document to each destination (by suffix)."""
@@ -262,9 +240,10 @@ def as_package_module(main: Any) -> None:
 
 
 def _run_as_program(script: Path) -> None:
-    """``python model.py [flags]``: the daemon builds the script, as ``cadgen xbf build
-    model.py [flags]`` does (``::name`` in the flags selects a model), and this process
-    exits with the build's status, building nothing itself."""
+    """``python model.py``: the daemon builds every model the script defines, as their
+    decorators declare, and this process exits with the build's status, building nothing
+    itself (``cli.run_script``). Like any Python script it takes no options (law 11): what it
+    is given past its name is the script's own ``sys.argv``, never the build's."""
     if getattr(_run_as_program, "running", False) or os.environ.get("CADGEN_ENGINE_WORKER") == "1":
         return
     import sys
@@ -273,12 +252,9 @@ def _run_as_program(script: Path) -> None:
     if argv0 != Path(script).resolve():
         return  # the script was not run as a program (``python -c``, an embedding)
     _run_as_program.running = True  # type: ignore[attr-defined]
-    from cadgen.engine.cli import main
+    from cadgen.engine.cli import run_script
 
-    args = [f"{script}{arg}" if arg.startswith("::") else arg for arg in sys.argv[1:]]
-    targets = [arg for arg in args if arg.startswith(f"{script}::")]
-    rest = [arg for arg in args if arg not in targets]
-    raise SystemExit(main(["build", *(targets or [str(script)]), *rest], prog=f"python {Path(script).name}"))
+    raise SystemExit(run_script(script))
 
 
 def _decorator(kind: str) -> Callable[..., Any]:
@@ -372,8 +348,8 @@ def memo(function: Any = None, /, **options: Any) -> Any:
     """Mark a function worth replaying: ``@memo``, bare. Its arguments are keyed by value
     (plain values, build123d's value types, materials, shapes the engine made); it returns
     geometry (a shape, or a tuple, list or dict of shapes); it writes nothing outside
-    itself. ``cadgen xbf build --verify`` runs every call the engine would replay and
-    compares what it makes with what was logged."""
+    itself. A verifying build (``Model.build(verify=True)``, ``cadgen build SOURCE --verify``)
+    runs every call the engine would replay and compares what it makes with what was logged."""
     if options or function is None:
         raise TypeError("@memo takes no arguments: write @memo")
     if isinstance(function, Model):

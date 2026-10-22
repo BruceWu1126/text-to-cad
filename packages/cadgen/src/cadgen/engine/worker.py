@@ -248,8 +248,8 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
     if "script" in source_spec and "code" not in source_spec:
         script = Path(source_spec["script"])
         function = source_spec.get("function")
-        # Built with the document it declares and nothing else: the exports are this request's.
-        reports = engine_build.build(script, [function] if function else None, outputs={"xbf": None}, log=log,
+        # Built as it declares, its children as theirs (law 10); the exports are this request's.
+        reports = engine_build.build(script, [function] if function else None, log=log,
                                      cwd=Path(request["cwd"]) if request.get("cwd") else None)
         if len(reports) != 1:
             raise engine_build.BuildError(f"{script.name} defines {len(reports)} models: name one (SCRIPT::MODEL)")

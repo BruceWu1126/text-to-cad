@@ -69,7 +69,7 @@ From `models-xbf/tom`, with `src` on `PYTHONPATH` (the stages import `lib`, `pur
 as top-level packages):
 
 ```
-PYTHONPATH=<cadgen>/src:src python -m cadgen.engine build src/tom.py::tom
+PYTHONPATH=<cadgen>/src:src python src/tom.py
 PYTHONPATH=<cadgen>/src:src python -m cadgen.engine snapshot XBF/tom.xbf tom.png
 ```
 

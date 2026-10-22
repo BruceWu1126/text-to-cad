@@ -539,7 +539,7 @@ class RunOrderTest(unittest.TestCase):
             # A cold build in a process of its own: no daemon, no memo carried over.
             env = {**os.environ, "PYTHONPATH": str(src), "PYTHONHASHSEED": seed,
                    "CADGEN_ENGINE_DIR": str(folder / "engine")}
-            done = subprocess.run([sys.executable, "-m", "cadgen.engine", "build", "grid.py", "--no-daemon", "--json"],
+            done = subprocess.run([sys.executable, "-B", "-c", "import grid; grid.grid.build(daemon=False)"],
                                   cwd=folder, env=env, capture_output=True, text=True, timeout=300)
             self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
             prototype = document.load(folder / "XBF/grid.xbf").prototypes[0]

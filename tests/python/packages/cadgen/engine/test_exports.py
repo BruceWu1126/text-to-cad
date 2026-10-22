@@ -334,7 +334,7 @@ class ExportTest(unittest.TestCase):
 
 
 class BuildFilesTest(unittest.TestCase):
-    """What a build writes: what its decorators declare, or what its flags select."""
+    """What a build writes: what its decorators declare (law 10), and nothing else."""
 
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-files-")).resolve()
@@ -361,19 +361,6 @@ class BuildFilesTest(unittest.TestCase):
         (self.folder / "board.stl").unlink()
         [report] = engine_build.build(script, ["board"], cwd=self.folder)
         self.assertEqual([Path(path).name for path, row in report["files"].items() if row["written"]], ["board.stl"])
-
-    def test_file_flags_select_and_override_what_the_decorators_declare(self) -> None:
-        script = self.write("board.py", BOARD.format(lift=6))
-        [report] = engine_build.build(script, ["board"], cwd=self.folder, outputs={"xbf": {}})
-        # The flags are the target's: its peg, a child, writes what it declares.
-        self.assertEqual(self.files(), {"board.py", "XBF/board.xbf", "XBF/peg.xbf"}, "--xbf alone: the xbf alone")
-        [report] = engine_build.build(script, ["board"], cwd=self.folder,
-                                      outputs={"xbf": {}, "step": {"out": "elsewhere/b.step"}, "glb": {}})
-        self.assertTrue(report["ok"], report)
-        self.assertEqual(self.files(), {"board.py", "XBF/board.xbf", "XBF/peg.xbf", "elsewhere/b.step", "board.glb"})
-        self.assertFalse(report["files"][str(self.folder / "XBF/board.xbf")]["written"], "the document did not change")
-        with self.assertRaisesRegex(engine_build.BuildError, "a flag names one file"):
-            engine_build.build(script, None, cwd=self.folder, outputs={"step": {"out": "x.step"}})
 
     def test_a_derived_decorator_alone_writes_its_one_file(self) -> None:
         script = self.write("solo.py", """
@@ -407,7 +394,7 @@ class BuildFilesTest(unittest.TestCase):
         # As built is where the joints connect the parts: lid at 30 degrees in every file.
         script = self.write("hinged.py", BOARD.format(lift=6).replace("connect_to(lid.joints[\"mount\"], angle=0)",
                                                                       "connect_to(lid.joints[\"mount\"], angle=30)"))
-        [report] = engine_build.build(script, ["board"], cwd=self.folder, outputs={"xbf": {}, "step": {}})
+        [report] = engine_build.build(script, ["board"], cwd=self.folder)
         self.assertTrue(report["ok"], report)
         built = document.Loaded(self.folder / "XBF/board.xbf").structure()
         self.assertEqual(built["kinematics"]["asBuilt"], {"flap": 30.0})
@@ -418,8 +405,6 @@ class BuildFilesTest(unittest.TestCase):
 
         self.assertEqual(lid(document.Loaded(self.folder / "board.step").structure()), lid(built),
                          "the STEP shows the lid where its joint put it, not at a configuration")
-        with self.assertRaisesRegex(engine_build.BuildError, "takes no pose"):
-            engine_build.build(script, ["board"], cwd=self.folder, outputs={"step": {"pose": "open"}})
 
     def test_an_export_from_a_script_builds_it_then_writes(self) -> None:
         script = self.write("board.py", BOARD.format(lift=6))
@@ -428,7 +413,7 @@ class BuildFilesTest(unittest.TestCase):
         self.assertEqual([row.path for row in written], [out, self.folder / "made/rack.3mf"])
         self.assertTrue(out.is_file())
         self.assertIn("XBF/board.xbf", self.files(), "the model's document was built")
-        self.assertNotIn("board.step", self.files(), "and none of its declared derived files")
+        self.assertIn("board.step", self.files(), "a model that runs writes every file it declares")
 
 
 class CodeTest(unittest.TestCase):
@@ -445,11 +430,35 @@ class CodeTest(unittest.TestCase):
         [report] = engine_build.build(self.script, ["plug"], cwd=self.folder, outputs=outputs, code=code)
         return report
 
-    def test_code_assigns_result(self) -> None:
+    def test_code_assigns_result_and_its_flags_are_its_files(self) -> None:
         with self.assertRaisesRegex(engine_build.BuildError, "assigns no `result`"):
             self.build("import build123d as bd\nshape = bd.Box(1, 1, 1)\n")
-        with self.assertRaisesRegex(engine_build.BuildError, "--step takes the file's path"):
-            self.build(self.CODE.format(height=5), {"step": {}})
+        # Code declares nothing (law 12): a flag with no path writes where a decorator with none
+        # puts the file, in the working folder; the flags add up.
+        self.assertTrue(self.build(self.CODE.format(height=5), {"xbf": {}, "stl": {}, "step": {"out": "a/p.step"}})["ok"])
+        self.assertEqual({str(path.relative_to(self.folder)) for path in self.folder.rglob("*") if path.is_file()},
+                         {"XBF/plug.xbf", "plug.stl", "a/p.step"})
+
+    def test_the_build_verb_takes_code_alone(self) -> None:
+        import contextlib
+        import io
+
+        from cadgen.engine import cli
+
+        here = Path.cwd()
+        os.chdir(self.folder)
+        self.addCleanup(os.chdir, here)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = cli.main(["build", self.CODE.format(height=5), "--name", "plug", "--stl", "--json", "--no-daemon"])
+            self.assertEqual(status, 0, err.getvalue())
+            # Its one argument is code: a script's path is code that assigns no result.
+            self.assertEqual(cli.main(["build", "plug.py", "--no-daemon"]), 1)
+            with self.assertRaises(SystemExit):
+                cli.main(["build", "--stl"])
+        self.assertEqual(list(json.loads(out.getvalue().splitlines()[0])["files"]), [str(self.folder / "plug.stl")])
+        self.assertIn("assigns no `result`", err.getvalue())
+        self.assertIn("the following arguments are required: SOURCE", err.getvalue())
 
     def test_code_is_named_warm_and_cold_cached_by_its_xbf(self) -> None:
         outputs = {"xbf": {"out": "plug.xbf"}, "stl": {"out": "plug.stl"}}

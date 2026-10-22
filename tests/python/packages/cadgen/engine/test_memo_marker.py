@@ -1,7 +1,8 @@
 """``@memo``: a function the engine replays instead of executing when what it is made of --
 its code, the symbols it uses, the files it reads, its arguments -- is what it was; a call
-it cannot key runs and is reported; ``--verify`` runs every replayable call again and
-marks a function whose result differs."""
+it cannot key runs and is reported; a verifying build (``Model.build(verify=True)``,
+``cadgen build SOURCE --verify``) runs every replayable call again and marks a function whose
+result differs."""
 
 from __future__ import annotations
 
@@ -255,12 +256,13 @@ class MemoTest(MemoCase):
         self.assertEqual(self.statuses(report)["parts.py::jitter"], ["run"])
         self.assertEqual(report["cache"]["reason"], "it calls parts.py::jitter, which a verification found impure")
 
-    def test_the_cli_s_verify_reaches_the_build_through_the_api(self) -> None:
+    def test_verify_reaches_the_build_through_the_api(self) -> None:
         import contextlib
         import io
         import json
 
         from cadgen.engine import api, cli
+        from cadgen.engine.model import xbf
 
         self.build()
         self.write("size.bin", "xx")
@@ -269,19 +271,27 @@ class MemoTest(MemoCase):
         here = Path.cwd()
         os.chdir(self.folder)
         self.addCleanup(os.chdir, here)
+        # Code calling the model: a verifying build of it runs the model's bodies again too.
         printed = io.StringIO()
         with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(io.StringIO()):
-            status = cli.main(["build", "root.py", "--no-daemon", "--verify", "--json"])
+            status = cli.main(["build", "from root import root\nresult = root()", "--no-daemon", "--verify", "--json"])
         self.assertEqual(status, 0)
         found = json.loads(printed.getvalue().splitlines()[-1])["verify"]
         self.assertEqual(found["mismatches"], ["parts.py::jitter"], found)
-        # Through the daemon, the request carries it to the worker's build.
+
+        @xbf
+        def probe():
+            return None
+
+        # Through the daemon, the request carries it to the worker's build: code's and a model's.
         asked = []
-        with mock.patch.object(api, "_ask", side_effect=lambda message, _log: asked.append(message) or
-                               {"done": [], "worker": {}}):
-            cli.main(["build", "root.py", "--verify"])
-            cli.main(["build", "root.py"])
-        self.assertEqual([message["verify"] for message in asked], [True, False])
+        answer = {"done": [{"ok": True, "model": "probe"}], "worker": {}}
+        with mock.patch.object(api, "_ask", side_effect=lambda message, _log: asked.append(message) or answer), \
+                contextlib.redirect_stdout(io.StringIO()):
+            cli.main(["build", "result = 1", "--verify"])
+            cli.main(["build", "result = 1"])
+            probe.build(verify=True)
+        self.assertEqual([message["verify"] for message in asked], [True, False, True])
 
     def test_the_restart_cache_folds_a_memo_function_into_the_model_key(self) -> None:
         self.build()

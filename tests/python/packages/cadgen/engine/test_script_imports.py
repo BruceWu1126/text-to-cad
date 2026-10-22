@@ -160,18 +160,18 @@ class PackageScriptRunTest(unittest.TestCase):
         return subprocess.run([sys.executable, *args], cwd=self.root, env=self.env, capture_output=True, text=True,
                               timeout=300)
 
-    def report(self, *args: str) -> dict:
-        done = self.python(*args)
+    def run_script(self) -> str:
+        done = self.python("proj/parts/model.py")
         self.assertEqual(done.returncode, 0, done.stderr)
-        return json.loads(done.stdout.strip().splitlines()[-1])
+        return done.stdout
 
     def test_running_a_script_in_a_package_builds_it_in_the_warm_worker_across_edits(self) -> None:
         write(self.root, PACKAGE)
-        self.assertEqual(self.report("proj/parts/model.py", "--json")["bodies"], {"model.py::bracket": "run"})
+        self.assertIn("bodies 1 run", self.run_script())
         write(self.root, {"proj/common/dims.py": "HEIGHT = 7\n"})
-        edited = self.report("-m", "cadgen.engine", "build", "--json", "proj/parts/model.py")
-        self.assertEqual(edited["bodies"], {"model.py::bracket": "run"})
-        self.assertIn("../../common/dims.py changed", edited["cache"]["changed"])
+        edited = self.run_script()
+        self.assertIn("bodies 1 run", edited)
+        self.assertIn("rebuilt: ../../common/dims.py changed", edited)
         workers = json.loads(self.python("-m", "cadgen.engine", "status").stdout)["workers"]
         self.assertEqual([(Path(worker["script"]).name, worker["builds"]) for worker in workers], [("model.py", 2)],
                          "one warm worker built both, not the script's own process")

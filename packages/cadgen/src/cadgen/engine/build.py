@@ -182,8 +182,8 @@ def _model_traceback(error: BaseException) -> str:
 
 
 def code_script(name: str, cwd: Path) -> Path:
-    """The path code built from source text is known by (``--code``): never a file on disk,
-    a name in the working folder's ``(code)`` folder, ``<name>.py``."""
+    """The path code built from source text is known by (``cadgen build SOURCE``): never a
+    file on disk, a name in the working folder's ``(code)`` folder, ``<name>.py``."""
     return Path(cwd).resolve() / CODE_FOLDER / f"{name}.py"
 
 
@@ -259,6 +259,25 @@ def load_code(script: Path, name: str, code: str, outputs: dict[str, dict[str, A
     return module
 
 
+def _declared(name: str, outputs: dict[str, dict[str, Any]] | None, base: Path) -> dict[str, dict[str, Any]]:
+    """Code's flags as its declarations (law 12): each kind at its path from ``base``, the
+    working folder, or where a decorator with no path puts it there."""
+    from cadgen.engine.model import KINDS, SUFFIXES, XBF_FOLDER, check_output
+
+    declared = {}
+    for kind, given in (outputs or {}).items():
+        if kind not in KINDS:
+            raise BuildError(f"no output kind {kind}; the kinds are {', '.join(KINDS)}")
+        out = (given or {}).get("out")
+        try:
+            check_output(kind, out, f"--{kind}")
+        except (TypeError, ValueError) as error:
+            raise BuildError(str(error)) from None
+        default = Path(XBF_FOLDER) / f"{name}.xbf" if kind == "xbf" else Path(name + SUFFIXES[kind])
+        declared[kind] = {"out": os.path.normpath(os.path.abspath(base / (out or default)))}
+    return declared
+
+
 def build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
           cwd: Path | None = None, outputs: dict[str, dict[str, Any]] | None = None, code: str | None = None,
           verify: bool = False) -> list[dict[str, Any]]:
@@ -267,13 +286,14 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
     files (``child_models``). Raises BuildError for a script or function that is not there;
     a body that raises is its model's report (``ok`` false, ``error`` the model's traceback).
 
-    ``outputs`` selects and overrides the files written (``Model.plan``): ``{kind: {"out":
-    path or None}}``, the kinds ``xbf``, ``step``, ``glb``, ``stl``, ``threemf``; None writes
-    what the decorators declare. Every file shows the model as its joints place it: a pose
-    or a part is the ``export`` verb's, never a build's. ``code`` builds source text
-    instead of a script: ``script`` is then ``code_script(name, cwd)`` and ``functions`` the
-    one name; the code has no decorators, its files are the ``outputs`` alone, each with
-    its path.
+    A script's models write what their decorators declare (``Model.plan``) and nothing else:
+    a script takes no file flags (law 11). ``code`` builds source text instead: ``script`` is
+    then ``code_script(name, cwd)`` and ``functions`` the one name; code declares nothing, so
+    its files are its flags, ``outputs`` (law 12): ``{kind: {"out": path or None}}``, the kinds
+    ``xbf``, ``step``, ``glb``, ``stl``, ``threemf``, each at its path from the working folder or,
+    with none, where a decorator with no path puts it there (``XBF/<name>.xbf``,
+    ``<name><suffix>``). Every file shows the model as its joints place it: a pose or a part is
+    the ``export`` verb's, never a build's.
 
     ``verify``: every body the memo would replay -- a model's, a ``@memo`` call's -- runs
     instead, and its fresh result is compared with the logged one; the report's
@@ -286,16 +306,12 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
     script = Path(script).resolve() if code is None else Path(script)
     if code is None and not script.is_file():
         raise BuildError(f"no script {script}")
+    if code is None and outputs:
+        raise BuildError("file flags declare code's files; a script's models write what their decorators declare")
     if code is not None:
-        missing = [kind for kind, given in (outputs or {}).items() if not (given or {}).get("out")]
-        if missing:
-            raise BuildError(f"code has no decorators: --{missing[0]} takes the file's path")
         if not functions or len(functions) != 1:
             raise BuildError("code is one model: name it with --name")
-        # Code has no decorators: its flags are its declarations, each path from the working folder.
-        base = Path(cwd or Path.cwd())
-        outputs = {kind: {**given, "out": os.path.normpath(os.path.abspath(base / given["out"]))}
-                   for kind, given in (outputs or {}).items()}
+        outputs = _declared(functions[0], outputs, Path(cwd or Path.cwd()))
     determinism.install()
     memo.install()
     shown = _shown(script, cwd) if code is None else "<code>"
@@ -304,10 +320,6 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
     # Per target: the model, its result (None: it wrote nothing), its body's seconds, and the
     # models that ran as its children whose files the build writes, each with its result.
     results: list[tuple[Any, Any, float, list]] = []
-    plans: dict[str, list] = {}
-    # A request that names its own files is written as it asks: the previous document is not
-    # taken in place of the run (it says nothing of files the model does not declare).
-    overridden = code is None and any(kind != "xbf" or given for kind, given in (outputs or {}).items())
     from cadgen.engine import reader
 
     # One reader process for the build's STEP reads (``reader``), gone when the build is.
@@ -316,8 +328,6 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
         _MODELS.clear()  # the models this build defines, known by name to what its replays ran
         try:
             module = load_script(script) if code is None else load_code(script, functions[0], code, outputs)
-            if code is not None:
-                outputs = None  # its flags are its model's declarations now
         except BuildError:
             raise
         except Exception as error:  # noqa: BLE001 - the model's own error, reported
@@ -342,14 +352,6 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             raise BuildError(f"{shown} defines no model" + (
                 f"; {', '.join(marked)} {'is a @memo function' if len(marked) == 1 else 'are @memo functions'}: "
                 "a model calls it, and it writes no file" if marked else ""))
-        if len(models) > 1 and any((given or {}).get("out") for given in (outputs or {}).values()):
-            raise BuildError(f"{shown} defines {len(models)} models and a flag names one file: "
-                             f"build one (SCRIPT::MODEL) to give its file a path")
-        for model in models:
-            try:
-                plans[model.name] = model.plan(outputs, cwd=cwd)
-            except (TypeError, ValueError) as error:
-                raise BuildError(f"{shown}::{model.name}: {error}") from None
         # Every model that runs writes its files once a build: a target its own, and a child
         # those of the first target whose run ran it.
         written = {f"{model.script}::{model.name}" for model in models}
@@ -371,8 +373,6 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             try:
                 if verify:
                     verdict, previous_report = {"used": False, "reason": "verifying"}, None
-                elif overridden:
-                    verdict, previous_report = {"used": False, "reason": "the request names its own files"}, None
                 else:
                     verdict, previous_report = _previous(model, context, shown, log)
             except Exception as error:  # noqa: BLE001 - the cache never fails a build: the body runs
@@ -429,7 +429,7 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
     for report, (model, result, body, children) in zip(reports, results):
         if result is not None:
             report["timings"] = {"load": round(load_seconds, 4), "body": round(body, 4)}
-            _written(model, result, run, report, log, plans[model.name], context)
+            _written(model, result, run, report, log, model.plan(), context)
         # Each child that ran writes the files it declares, from its own document, after its
         # target's: its report is the target's, under its identity (``child_models``).
         for child, made in children:
