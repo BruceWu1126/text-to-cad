@@ -52,10 +52,11 @@ ground.
 
 The five clips were joint-space already (chain FK at every sample, applied as a
 rigid delta against the relaxed build), so each is a motion now: a function of time
-returning every joint's angle, looped, which the xbf keeps as samples and a GLB
-export bakes into a clip of the same name: `poseTour` (11.5 s), `graspLoop`
-(2.6 s), `pinchLoop` (2.8 s), `rippleLoop` (2.6 s), `countLoop` (7 s). Their key
-orders are the ones `lib/clearance.py` checks.
+returning every joint's angle, which the xbf keeps as samples and a GLB export bakes
+into a clip of the same name: `poseTour` (11.5 s), `graspLoop` (2.6 s), `pinchLoop`
+(2.8 s), `rippleLoop` (2.6 s), `countLoop` (7 s). The old clips looped; a motion has
+no loop, and each ends on the pose it starts from, so a player repeats it the same
+way. Their key orders are the ones `lib/clearance.py` checks.
 
 ## Not ported
 

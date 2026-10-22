@@ -263,8 +263,10 @@ def lyra():
     hand = bd.Compound(children=[link[name] for name in chain.all_links()], label="lyra")
     for name, pose in _NAMED_POSES.items():
         configuration(hand, name, **pose)
+    # Each clip ends on the pose it starts from, so a player repeats it as the old looping
+    # clips ran (a motion has no loop of its own).
     for name, (pose_at, duration) in MOTIONS.items():
-        motion(hand, name, _over_time(pose_at, duration), duration=duration, loop="loop")
+        motion(hand, name, _over_time(pose_at, duration), duration=duration)
     return hand
 
 

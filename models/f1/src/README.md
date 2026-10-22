@@ -5,7 +5,7 @@ car. `f1.py` is the one model:
 
 | Script | Writes | What it is |
 | --- | --- | --- |
-| `f1.py` | `XBF/f1.xbf`, `XBF/f1.glb` | The car: 28 children, the DRS and steering joints, 3 configurations, the `drs` and `steering` motions (clips of the GLB) |
+| `f1.py` | `XBF/f1.xbf`, `XBF/f1.glb` | The car: 28 children, the DRS and steering joints, the teardown's slides, 3 configurations, the `showcase`, `drs`, `steering`, `teardown` and `engine` motions (clips of the GLB) |
 | `stages.py` | nothing | Eight `@memo` stages, each building a group of the children |
 | `front_wing.py` ... `details.py` (28) | nothing | One child each, a function a stage calls; `power_unit`, `drivetrain`, `suspension_rear` and `details` are `@memo` stages of their own |
 | `cover_panel.py`, `gearbox_casing.py`, `drivetrain_ancillaries.py`, `rear_structure.py` | nothing | Pieces of `engine_cover` and `drivetrain`, which call them |
@@ -99,8 +99,59 @@ Configurations: `drs_open` (the flap laid flat, the crank where the four-bar put
 it), `full_lock_left` and `full_lock_right` (the rack at 55.4 mm, where the inside
 wheel reaches `spec.MAX_STEER_DEG`). Motions, each a function of time the document
 keeps as samples: `drs`, open and shut on a raised cosine over 4 s, and
-`steering`, left through centre to right and back over 6 s; both loop, and the GLB
+`steering`, left through centre to right and back over 6 s; each ends where it
+starts, so a player repeats it seamlessly (a motion carries no loop), and the GLB
 carries each as a clip.
+
+### The teardown
+
+The old `showcase`, `teardown` and `engine` clips came back as motions over
+prismatic joints, with their names and durations; each ends where it starts, as
+the old looping clips did, and carries no loop of its own (players repeat a clip). Each child but the
+monocoque slides along its old direction (`explode_<child>`, 0 .. its old distance
+in mm), and the power unit's twelve systems slide in it (`eng_induction`,
+`eng_head_left` ... `eng_ancillaries`, the old group names, each its leaves by
+label):
+
+| Joints | On -> moves | How |
+| --- | --- | --- |
+| `explode_<child>`, 18 children that hold no joint (front_wing, nose, halo, cockpit, the sidepods, engine_cover, airbox, floor, diffuser, cooling, power_unit, drivetrain, beam_wing, suspension_rear, corner_rl, corner_rr, details) | monocoque -> the child | the child moves whole |
+| `explode_<child>`, the 9 children that hold a joint or hang on one (rear_wing, drs_flap, drs_actuator, suspension_front, corner_fl, corner_fr, track_rod_left, track_rod_right, steering_rack) | the child's compound -> its contents | its first part slides, the rest fastened to it (`explode_<child>_rides_<i>`); the compound stays put, holding or held by its DRS and steering joints, so no child drags another |
+| `eng_*` (12) | power_unit -> the system's leaves | its first leaf slides, the rest fastened to it (`eng_*_rides_<i>`); the power unit carries them on its own explode |
+
+The monocoque is the car's ground, as it was the old clips' fixed reference. The
+motions are the old functions of the two clocks: `showcase` (22.5 s) the old
+loop-closed beat sheet, the car opening 1.5-10.5 s and the engine 11.2-14.8 s, both
+closing by 22.3 s; `teardown` (12 s) the car apart and back on a raised
+cosine; `engine` (8 s) the engine alone. Each sets every teardown joint at
+every time and leaves the DRS and the steering as built, as the old clips held them
+at 0. The GLB carries all five clips. A cold build with them (2026-10-22, load ~200)
+took 602 s, the GLB's bake 44 s of it; posed from the document, every one of the 853
+leaves stays within 5.2 mm (the samples' tolerance) of the old functions' offsets.
+
+Deliberate differences from the old clips:
+
+- **The engine's systems ride the power unit once.** The old frame translated each
+  system's leaves by the power unit's offset plus their own (its comment: "Sub-parts
+  inherit the power unit's own offset, or they would detach from it"), and then
+  translated every leaf under the power unit by that offset again: the viewer's
+  handles act on the leaves and add up, so in the old `showcase` and `teardown` the
+  88 system leaves rose 2,160 mm while the crankcase rose 1,080 mm, and the
+  systems hung a power unit's lift above the core before the engine clock started.
+  Joints compose once, which is what the comment meant: the systems sit on the core
+  until the engine clock opens them. The `engine` clip, whose explode is 0, is
+  unchanged.
+- **An articulated child's explode is in its own frame.** The old frame applied each
+  articulated child's explode in world space after its DRS or steering turn; here
+  the contents of `drs_flap`, `drs_actuator` and the front corners slide in their
+  compound, which the turn carries, and the track rods' in theirs. In all three
+  clips the DRS and steering stand at 0, where the two are the same motion; a pose
+  that turns the DRS or steers while exploded tilts those slides with the turn.
+- **The cylinder heads' joint rails move with the heads**, as the old groups list
+  had them (`head_joint_rail:left` in `eng_head_left`); the old comment's static
+  spine ("the crankcase, sump, bearing webs and joint rails never move") is the
+  other twelve leaves: crankcase, sump pan, the front and gearbox faces, the two
+  belt ribs and the six main webs.
 
 The old `drs` clip turned the crank the wrong way: its solve measured the crank's
 angle from +X toward +Z, a turn about -Y, and the clip turned the actuator that
@@ -112,8 +163,5 @@ arm's (0.0 mm apart).
 
 ## Not ported
 
-- The `showcase`, `teardown` and `engine` clips: the explode choreography
-  translates children and engine systems apart, which no joint does; the viewer's
-  Explode shows the parts apart.
 - `../f1_stage.appearance.json`, the old viewer stage (lights, floor, the
   materials' satin finish): an xbf is drawn in the engine's one look.

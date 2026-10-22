@@ -6,18 +6,17 @@ Every system is a `@memo` stage below -- `lib/<system>.py`'s `build()`, each par
 given the finish its colour names (`lib/palette.py`) -- so an edit that does not
 reach a system's code replays it from the worker's memory instead of running it.
 
-The mechanism is `lib/mechanism.py`'s: build123d joints on the parts its label
-contract picks, standing at 0 as built (crank angle 0, cylinder 1 at firing TDC),
-the gear train one locked coupling, `drive` (degrees of crank), and `running`, the
-720-degree four-stroke cycle in 8 s, a motion every joint follows from `lib/kin.py`,
-which a GLB exported from the xbf carries as a clip.
+The mechanism is `lib/mechanism.py`'s (`assemble`): build123d joints on the parts its
+label contract picks, standing at 0 as built (crank angle 0, cylinder 1 at firing TDC),
+the gear train one coupling, `drive` (degrees of crank), two configurations, and three
+motions a GLB exported from the xbf carries as clips: `running`, the 720-degree
+four-stroke cycle in 8 s from `lib/kin.py`; `explode`, the original's 24 s teardown; and
+`exploded-running`, the cycle with the engine held partly apart (`lib/explode.py`).
 """
 
 from __future__ import annotations
 
-from cadgen.engine import configuration, couple, memo, motion, xbf
-
-import build123d as bd
+from cadgen.engine import memo, xbf
 
 from lib import (
     accessory as accessory_lib,
@@ -229,11 +228,4 @@ def radial():
         crankcase(), crankshaft(), rods(), pistons(), barrels(), heads(), valvetrain(), cam(), pushrods(),
         nose(), reduction(), propeller(), blower(), intake(), accessory(), ignition(), exhaust(), mount(),
     ]
-    mechanism.author(systems)
-    engine = bd.Compound(label="radial", children=systems)
-    couple(engine, "drive", range=mechanism.DRIVE_RANGE, lock=True, **mechanism.DRIVE)
-    for name, theta in mechanism.CONFIGURATIONS.items():
-        configuration(engine, name, **mechanism.running_values(theta))
-    motion(engine, "running", lambda t: mechanism.running_values(mechanism.DEG_PER_S * t),
-           duration=mechanism.CYCLE_S, loop="loop")
-    return engine
+    return mechanism.assemble(systems)

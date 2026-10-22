@@ -27,7 +27,10 @@ The models of this script:
 - `juno` (XBF/juno.xbf): the robot. Its 28 links are placed by their joints,
   connected at the athletic ready stance: that stance is the as-built
   configuration, every joint's value its absolute angle, every range the
-  URDF's travel, and the SRDF's five group states are configurations.
+  URDF's travel (the ankle pitch's widened for the run and the jump), and
+  the SRDF's five group states are configurations. The seven old clips are
+  motions (functions of time over the joints, lib/gaits.py), the pelvis
+  riding `pelvis_lift`, a vertical slide between the world and the pelvis.
 - one model per URDF link (`pelvis` ... `hand_right`): the link alone in its
   part-local frame, whose 3MF ../juno.urdf references (XBF/<link>.3mf).
 
@@ -39,11 +42,11 @@ and every other call is a new placement of its result.
 
 from __future__ import annotations
 
-from cadgen.engine import configuration, memo, threemf, xbf
+from cadgen.engine import configuration, memo, motion, threemf, xbf
 
 import build123d as bd
 
-from lib import chain
+from lib import chain, gaits
 from lib.arms import build_bicep, build_forearm
 from lib.hand import build_hand
 from lib.head import build_head
@@ -77,8 +80,24 @@ SIDED = {
     "hand": build_hand,
 }
 
-# Every joint's travel (degrees, absolute), as the URDF has it.
+# Every joint's travel (degrees, absolute), as the URDF has it, but the ankle pitch's:
+# the run's heel recovery and the jump's crouch dorsiflex the ankle to -51.6 deg, past
+# the URDF's assumed -30 (the old clips played joint values with no limit), so the
+# xbf's travel reaches -55.
 RANGES = {joint["name"]: joint["range_deg"] for joint in chain.all_joints()}
+ANKLE_PITCH_RANGE_DEG = (-55.0, chain.ANKLE_PITCH_RANGE_DEG[1])
+for _side in chain.SIDES:
+    RANGES[f"ankle_pitch_{_side}"] = ANKLE_PITCH_RANGE_DEG
+
+# The pelvis's one degree of freedom in the world: a vertical slide (mm), held by the
+# robot compound, 0 as built. The old clips moved the pelvis (bounce, crouch, dip);
+# one joint between the world and the pelvis keeps the vertical part of that.
+PELVIS_LIFT = "pelvis_lift"
+PELVIS_LIFT_RANGE_MM = (-200.0, 200.0)
+# The clips whose pelvis moves vertically: their motions set pelvis_lift.
+LIFTED = {"runLoop", "jumpLoop", "kickLoop", "danceLoop"}
+# The clips that shifted the pelvis sideways over a planted leg: solved with no shift.
+UNSHIFTED = {"kickLoop", "danceLoop"}
 
 X = chain.X_AXIS
 Y = chain.Y_AXIS
@@ -99,6 +118,24 @@ def links():
         for part, build in SIDED.items():
             made[f"{part}_{side}"] = build(side)
     return made
+
+
+def _over_time(name, gait, duration):
+    """A clip's function of time: the gait at its phase ``t / duration`` (wrapped, as the
+    old clips were), its 27 joint angles and, for the clips that lift the pelvis, the
+    pelvis's height on ``pelvis_lift``. The torso extras and the root's lateral shift
+    and pitch have no joint (src/README.md, "Motions")."""
+
+    def at(t):
+        phase = (t / duration) % 1.0
+        angles, _extras, root_offset, _root_pitch = (
+            gait(phase, pelvis_dy=0.0) if name in UNSHIFTED else gait(phase))
+        values = dict(angles)
+        if name in LIFTED:
+            values[PELVIS_LIFT] = root_offset[2]
+        return values
+
+    return at
 
 
 def _attach(parent, child, name, origin, axis, xref, angle):
@@ -155,8 +192,14 @@ def juno():
         order += [f"{name}_{side}" for name in SIDED]
 
     robot = bd.Compound(children=[link[name] for name in order], label="juno")
+    # The robot compound holds the pelvis's slide: the compound is the world (the
+    # ground link), the pelvis rides on it, and every other link on the pelvis.
+    bd.LinearJoint(PELVIS_LIFT, robot, axis=bd.Axis((0, 0, 0), Z), linear_range=PELVIS_LIFT_RANGE_MM)
+    bd.RigidJoint(PELVIS_LIFT, link["pelvis"], bd.Location((0, 0, 0)))
     for name, pose in chain.named_poses_deg().items():
         configuration(robot, name, **pose)
+    for name, (gait, duration) in gaits.CLIPS.items():
+        motion(robot, name, _over_time(name, gait, duration), duration=duration)
     return robot
 
 

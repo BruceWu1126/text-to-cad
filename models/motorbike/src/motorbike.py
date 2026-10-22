@@ -15,10 +15,12 @@ world-coincident datum frames:
 - center stand: frame bracket <-> stand pivot tubes (revolute)
 - everything else: rigid mounts at named, parameterized datums.
 
-Each revolute joint carries the range the old typed mate declared. The old
-`KINEMATICS` poses (ride, stand_down, turned_left, bump) are not ported; one
-motion is: `steer`, the bars swung 20 degrees each way and back, which a GLB
-export bakes into a clip of that name.
+Each revolute joint carries the range the old typed mate declared, and the old
+`KINEMATICS` poses are configurations on those joints: `stand_down` (the stand
+deployed to the floor), `turned_left` (the bars 32 degrees left) and `bump` (the
+engine swung up 12 degrees); `ride`, which set nothing, is the bike as built. One
+motion: `steer`, the bars swung 20 degrees each way and back, which a GLB export
+bakes into a clip of that name.
 
 Two parts are instanced twice: `turn_signal_left()` is the front-left signal
 and, PLACED with `Pos`, the rear-left one (a second call in one build is a new
@@ -32,7 +34,7 @@ OCCURRENCE ORDER IS FROZEN — top to bottom below.
 
 from __future__ import annotations
 
-from cadgen.engine import motion, xbf
+from cadgen.engine import configuration, motion, xbf
 
 import build123d as bd
 
@@ -193,7 +195,15 @@ def motorbike():
         motor, pipe, shock, wheel_rear,
         body, fender_rear, saddle, lamp_rear, signal_rl, signal_rr, mirror_l, mirror_r, stand,
     ], label="motorbike")
-    return motion(bike, "steer", sweep={"head_tube_axis": (-20, 20)}, duration=2, loop="pingpong")
+    # The old typed mates' poses, by the joints that carry them now (steering is
+    # head_tube_axis, engine_swing engine_pivot, center_stand_pivot stand_bracket;
+    # same axes, same senses). "ride" set nothing: it is the bike as built.
+    configuration(bike, "stand_down", stand_bracket=-76.2)
+    configuration(bike, "turned_left", head_tube_axis=32.0)
+    configuration(bike, "bump", engine_pivot=12.0)
+    # The bars swung from 20 degrees right to 20 left and back, 2 s each way.
+    return motion(bike, "steer", [(0, {"head_tube_axis": -20}), (2, {"head_tube_axis": 20}),
+                                  (4, {"head_tube_axis": -20})])
 
 
 if __name__ == "__main__":
