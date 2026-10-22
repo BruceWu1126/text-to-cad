@@ -116,9 +116,14 @@ class SnapshotTest(unittest.TestCase):
         self.assertGreater(report["timings"]["totalMs"], 0)
         self.assertEqual(out.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
 
-    def test_what_a_document_does_not_offer_is_refused_by_name_and_out_is_kept(self) -> None:
-        out = self.folder / "kept.png"
-        out.write_bytes(b"before")
+    def test_what_a_document_does_not_offer_is_refused_by_name_and_leaves_no_picture(self) -> None:
+        # A picture an earlier run wrote at OUT is gone once a run is refused (law 16); an OUT
+        # that is no .png is refused, and kept.
+        out = self.folder / "stale.png"
+
+        def stale() -> Path:
+            out.write_bytes(b"before")
+            return out
         with self.assertRaisesRegex(SnapshotRefused, "exploded=2 is no amount"):
             parse_display("exploded=2", grid=False)
         with self.assertRaisesRegex(SnapshotRefused, "display.exploded has no spin"):
@@ -133,24 +138,29 @@ class SnapshotTest(unittest.TestCase):
             parse_camera("underneath")
         with self.assertRaisesRegex(SnapshotRefused, "projection"):
             parse_camera('{"projection": "perspective"}')
+        (self.folder / "out.jpg").write_bytes(b"a photo")
         with self.assertRaisesRegex(SnapshotRefused, r"\.png"):
             snapshot(self.document, self.folder / "out.jpg", daemon=False)
+        self.assertEqual((self.folder / "out.jpg").read_bytes(), b"a photo")
         # Parts colours placed parts apart, and Explode moves them apart: a document of one is
         # refused before anything renders.
-        with self.assertRaisesRegex(SnapshotRefused, "parts .* places 1 part"):
-            snapshot(self.single, out, display={"mode": "parts"}, daemon=False)
-        with self.assertRaisesRegex(SnapshotRefused, "exploded .* peg.xbf places 1 part"):
-            snapshot(self.single, out, display=parse_display("exploded=0.5", grid=False), daemon=False)
-        with self.assertRaisesRegex(SnapshotRefused, "--camera authored .* give --annotation"):
-            snapshot(self.document, out, camera="authored", daemon=False)
-        self.assertEqual(out.read_bytes(), b"before")
+        for said, call in (
+                ("parts .* places 1 part", lambda: snapshot(self.single, stale(), display={"mode": "parts"}, daemon=False)),
+                ("exploded .* peg.xbf places 1 part", lambda: snapshot(
+                    self.single, stale(), display=parse_display("exploded=0.5", grid=False), daemon=False)),
+                ("--camera authored .* give --annotation", lambda: snapshot(self.document, stale(), camera="authored",
+                                                                           daemon=False))):
+            with self.assertRaisesRegex(SnapshotRefused, said):
+                call()
+            self.assertFalse(out.exists(), said)
         env = {**os.environ, "PYTHONPATH": str(SRC)}
+        stale()
         done = subprocess.run([sys.executable, "-m", "cadgen.engine", "snapshot", str(self.single), str(out),
                                "--display", '{"exploded": {"enabled": true}}', "--no-daemon"],
                               env=env, capture_output=True, text=True, timeout=120)
         self.assertEqual(done.returncode, 2)
         self.assertIn("display.exploded", done.stderr)
-        self.assertEqual(out.read_bytes(), b"before")
+        self.assertFalse(out.exists())
 
     def test_explode_an_annotation_and_measurements_are_asked_for_by_flags_and_checked(self) -> None:
         self.assertEqual(parse_display("exploded=0.6", grid=False), {"exploded": {"enabled": True, "amount": 0.6}})

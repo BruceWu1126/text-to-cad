@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import json
 import math
 import os
@@ -48,7 +49,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from cadgen.engine.atomic_replace import replace_atomic
 
@@ -453,6 +454,19 @@ def write_png(out: Path, data: bytes) -> None:
     replace_atomic(temporary, out)
 
 
+@contextlib.contextmanager
+def nothing_left(out: Path) -> Iterator[None]:
+    """A snapshot that fails or is refused leaves no picture at ``out``, not even one an earlier
+    run wrote there: a stale picture at exit 1 reads as this run's (law 16). Only a ``.png`` is
+    taken away; an OUT of another kind is refused before anything is written, and kept."""
+    try:
+        yield
+    except BaseException:
+        if Path(out).suffix.lower() == ".png" and Path(out).is_file():
+            Path(out).unlink(missing_ok=True)
+        raise
+
+
 def options(display: Any = None, camera: Any = None, grid: bool = False, width: int | None = None,
             height: int | None = None, size_profile: str | None = None) -> tuple[dict[str, Any], Any, tuple[int, int]]:
     """A snapshot's options as a function gives them -- ``display`` a mode, a
@@ -493,9 +507,18 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
     drawn in, read from the Quick Edit packet ``annotation_source`` is (or is beside: ``authored``),
     and its size and projection unless ``size`` and ``display.camera`` say otherwise. ``size`` None
     is the default size. Raises ``SnapshotRefused`` for a request it will not draw, before
-    rendering."""
+    rendering, and leaves no picture at ``out`` when it refuses or fails (``nothing_left``)."""
     started = time.perf_counter()
     document, out = Path(document).resolve(), Path(out).resolve()
+    with nothing_left(out):
+        return _snapshot(document, out, display=display, camera=camera, preview=preview, size=size, daemon=daemon,
+                         pose=pose, source=source, annotation=annotation, measurements=measurements,
+                         annotation_source=annotation_source, started=started)
+
+
+def _snapshot(document: Path, out: Path, *, display: dict[str, Any] | None, camera: Any, preview: bool,
+              size: tuple[int, int] | None, daemon: bool, pose: Any, source: Any, annotation: dict[str, Any] | None,
+              measurements: list[dict[str, Any]] | None, annotation_source: Any, started: float) -> dict[str, Any]:
     suffix = document.suffix.lower()
     if suffix not in DOCUMENTS and suffix not in FILES:
         raise SnapshotRefused(f"{document.name} is neither a document (.xbf, .step) nor a file the stills draw "

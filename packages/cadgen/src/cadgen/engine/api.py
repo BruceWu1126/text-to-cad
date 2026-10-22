@@ -381,11 +381,23 @@ def snapshot(source: Any, out: Any, *, display: Any = None, camera: Any = None, 
     worker holds in memory, whether or not an xbf of it is on disk. ``annotation`` (the viewer's
     annotation: its file's path, its object, or the Quick Edit packet that carries it) and
     ``measurements`` are drawn over the model; ``camera="authored"`` draws it from the view the
-    annotation's ink was drawn in, which the packet holds."""
+    annotation's ink was drawn in, which the packet holds. A snapshot refused or failed leaves no
+    picture at ``out`` (``snapshot.nothing_left``)."""
+    from cadgen.engine import snapshot as drawing
+
+    out = Path(os.fspath(out)).resolve()
+    with drawing.nothing_left(out):
+        return _snapshot(source, out, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
+                         width=width, height=height, size_profile=size_profile, daemon=daemon, annotation=annotation,
+                         measurements=measurements)
+
+
+def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, preview: bool, pose: Any,
+              width: int | None, height: int | None, size_profile: str | None, daemon: bool, annotation: Any,
+              measurements: Any) -> Drawn:
     from cadgen.engine import snapshot as drawing
     from cadgen.engine.model import Model
 
-    out = Path(os.fspath(out)).resolve()
     if isinstance(source, (Model, Built)) or (not isinstance(source, Path) and (
             "::" in os.fspath(source) or os.fspath(source).endswith(".py"))):
         if out.suffix.lower() != ".png":
