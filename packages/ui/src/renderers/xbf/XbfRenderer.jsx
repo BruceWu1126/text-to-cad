@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { viewFeaturesForKind } from "@text-to-cad/core/common/viewSettings.js";
 import { sceneFramingBounds } from "@text-to-cad/core/lib/viewer/sceneContract.js";
 import { boundsInUnits } from "@text-to-cad/core/lib/viewer/sceneUnits.js";
 import { fetchXbfPartGroups } from "@text-to-cad/core/lib/xbf/xbfDocument.js";
 import { parseXbfElementId } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 import { useViewerHost } from "../../host/context.js";
+import { readFileView } from "../kit/shell/fileView.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell.js";
 import { usePreviewScene } from "../kit/shell/usePreviewScene.js";
@@ -36,6 +37,7 @@ import { NO_CONNECTED_SELECTION, nextSelectionIds, selectGeometryMode, treeShape
 import { isXbfAssemblyId, presentXbfTree, xbfAssemblyIds, xbfPickFrontier } from "./xbfTree.js";
 import { XBF_DECLINED_LIVE_COMMANDS, XBF_TOOL, XBF_TOOL_MODES } from "./tools.js";
 import { xbfLookSubject } from "./xbfLookAt.js";
+import { readXbfView, xbfViewSignatures, xbfViewSlices } from "./xbfViewSlices.js";
 import { useXbfScene } from "./useXbfScene.js";
 
 // An engine document in the viewer, exactly as a STEP is: the same tools in the same order
@@ -168,6 +170,32 @@ function XbfSurface({ view, data }) {
     [poseApplied, kinematics, poseValues, poseCouplings]);
   const viewState = useCallback(() => ({ jointValues: poseGiven }), [poseGiven]);
 
+  // ---- this document's own slices of the file's view: the tree and the pose --------------------
+  // As a STEP's were (`xbfViewSlices.js`): what is open, hidden and isolated in the Model tree, and
+  // Position's pose, come back when the file is opened again (a reload, the tab reopened), each only
+  // while the document is the one it was written against. Read once, as the first scene arrives (an
+  // engine document's slices are signed by its structure, which only the scene knows), and written
+  // soon after any of them changes. Until then the shell keeps what was stored as it is.
+  const [stored] = useState(() => view.state);
+  const viewSignatures = useMemo(() => xbfViewSignatures(scene?.structure || null, kinematics), [scene?.structure, kinematics]);
+  const [viewRestored, setViewRestored] = useState(false);
+  const restorePose = pose.restore;
+  useLayoutEffect(() => {
+    if (viewRestored || !viewSignatures) return;
+    const kept = readXbfView(readFileView(stored, viewSignatures).renderer);
+    if (kept.tree.expanded.length) setExpandedIds(kept.tree.expanded);
+    if (kept.tree.hidden.length) setHiddenIds(kept.tree.hidden);
+    if (kept.tree.isolated.length) setIsolatedIds(kept.tree.isolated);
+    if (kept.pose && kinematics) restorePose(kept.pose);
+    setViewRestored(true);
+  }, [viewRestored, viewSignatures, stored, kinematics, restorePose]);
+  const viewInputs = useRef(null);
+  viewInputs.current = { tree: { expanded: expandedIds, hidden: hiddenIds, isolated: isolatedIds }, pose: kinematics ? pose.saved : null };
+  const rendererState = useMemo(() => (viewRestored && viewSignatures
+    ? { signatures: viewSignatures, read: () => xbfViewSlices(viewInputs.current) } : null), [viewRestored, viewSignatures]);
+  useEffect(() => { if (viewRestored) shellRef.current?.scheduleStateSave(); },
+    [viewRestored, viewSignatures, expandedIds, hiddenIds, isolatedIds, pose.saved]);
+
   // ---- the shell ------------------------------------------------------------------------------
   const clearSelection = useCallback(() => setChosen(now => (now.length ? EMPTY : now)), []);
   const measureRef = useRef(measure);
@@ -195,7 +223,7 @@ function XbfSurface({ view, data }) {
     view, services: document.services, resource: document.resource, modelKey: document.modelKey, revisionKey: loaded.revision,
     features, toolModes: XBF_TOOL_MODES, tool, previewable: true, preview, scene, sceneEffects: true,
     load: { busy: loaded.busy && !scene, updating: loaded.busy && Boolean(scene), progress: loaded.progress, alert: loadAlert },
-    live, escape, deleteSelection: measure.removeSelected, preserveInteractionPixelRatio: edgesDrawn, viewState,
+    live, escape, deleteSelection: measure.removeSelected, preserveInteractionPixelRatio: edgesDrawn, viewState, rendererState,
     // A prompt's annotation is in the scene's coordinates: the document's millimetres.
     annotationUnits: scene?.units?.unit || "mm"
   });
@@ -304,7 +332,12 @@ function XbfSurface({ view, data }) {
   const openElements = useMemo(() => {
     if (shape !== "all") return null;
     const open = new Set();
-    for (const id of openIds) if (!isXbfAssemblyId(id) && frontier(id) === id) open.add(parseXbfElementId(id).instance);
+    // The instances the person opened; an assembly, and a folded group's row (which the tree keeps
+    // open by its own id), are none.
+    for (const id of openIds) {
+      const element = parseXbfElementId(id);
+      if (element && frontier(id) === id) open.add(element.instance);
+    }
     return open;
   }, [shape, openIds, frontier]);
   const pickOptions = useMemo(() => ({

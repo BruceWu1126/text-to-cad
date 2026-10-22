@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import FileSidebar from '../../../dist/renderers/kit/tools/FileSidebar.js';
@@ -208,6 +208,31 @@ it("Position is a STEP's -- its heading, its Pose row, a named slider and value 
     body: [`button:Pose: ${pose}:`, 'slider:hinge:', `input:hinge slider value:${value}`] });
   expect(states).toEqual([shown('Default', '0.00°', true), ['Default:true', 'open:false'], shown('open', '90.0°', false),
     shown('Custom', '25.0°', false), shown('Default', '0.00°', true)]);
+});
+
+it("Position's pose is what the file's view keeps of it, and a new mount of the same mechanism takes it back", () => {
+  let latest: any = null;
+  function Probe({ restore = null }: { restore?: any }) {
+    const pose = useXbfPose(hingeKinematics);
+    latest = pose;
+    React.useLayoutEffect(() => { if (restore) pose.restore(restore); }, []);
+    return null;
+  }
+  const first = render(<Probe />);
+  expect(latest.saved).toEqual({ preset: '__default__', given: null, couplings: null });
+  act(() => latest.choosePreset('open'));
+  expect(latest.saved).toEqual({ preset: 'open', given: null, couplings: null });
+  act(() => latest.setValues({ hinge: [25] }));
+  const saved = latest.saved;
+  expect([saved.preset, saved.given]).toEqual(['__none__', { hinge: [25] }]);
+  first.unmount();
+  // A reload: the pose set by hand comes back, Custom, as it was left.
+  render(<Probe restore={saved} />);
+  expect([latest.values, latest.preset, latest.applied]).toEqual([{ hinge: [25] }, '__none__', true]);
+  cleanup();
+  // A named configuration comes back as the configuration.
+  render(<Probe restore={{ preset: 'open', given: null, couplings: null }} />);
+  expect([latest.values, latest.preset]).toEqual([{ hinge: [90] }, 'open']);
 });
 
 it('Position drives a cylindrical pair by both its values and a geared pair through its gear, and says what it cannot pose', async () => {
