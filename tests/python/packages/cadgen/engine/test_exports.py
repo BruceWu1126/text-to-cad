@@ -414,7 +414,7 @@ class BuildFilesTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
 
     def files(self) -> set[str]:
-        return {str(path.relative_to(self.folder)) for path in self.folder.rglob("*") if path.is_file()}
+        return {path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()}
 
     def write(self, name: str, text: str) -> Path:
         script = self.folder / name
@@ -517,7 +517,7 @@ class CodeTest(unittest.TestCase):
         # Code declares nothing (law 12): a flag with no path writes where a decorator with none
         # puts the file, in the working folder; the flags add up.
         self.assertTrue(self.build(self.CODE.format(height=5), {"xbf": {}, "stl": {}, "step": {"out": "a/p.step"}})["ok"])
-        self.assertEqual({str(path.relative_to(self.folder)) for path in self.folder.rglob("*") if path.is_file()},
+        self.assertEqual({path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()},
                          {"XBF/plug.xbf", "plug.stl", "a/p.step"})
 
     def test_the_build_verb_takes_code_alone(self) -> None:

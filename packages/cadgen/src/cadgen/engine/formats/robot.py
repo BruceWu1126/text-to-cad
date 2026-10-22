@@ -723,7 +723,10 @@ def read_srdf(path: Path) -> Robot:
     if _local(root.tag) != "robot" or not name:
         raise RobotError(f"{path.name} has no <robot name>, so its URDF cannot be found: {rule}")
     matches = []
-    for candidate in sorted(path.parent.glob("*.urdf")) + sorted(path.parent.glob("*.URDF")):
+    # Each file once: on a case-insensitive file system (Windows, macOS) both patterns find it.
+    candidates = {os.path.normcase(str(found.resolve())): found
+                  for found in sorted(path.parent.glob("*.urdf")) + sorted(path.parent.glob("*.URDF"))}
+    for candidate in candidates.values():
         try:
             for _event, element in ET.iterparse(str(candidate), events=("start",)):
                 if _local(element.tag) == "robot" and str(element.get("name") or "").strip() == name:

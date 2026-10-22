@@ -172,7 +172,7 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(status["workers"][0]["builds"], 3)
         # The daemon's only files are its socket and lock; the build's, its outputs.
         self.assertEqual({path.suffix for path in self.state.iterdir()}, {".sock", ".lock"})
-        self.assertEqual(sorted(str(path.relative_to(self.folder)) for path in self.folder.rglob("*") if path.is_file()),
+        self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/block.xbf", "block.py"])
 
     def test_a_warm_build_writes_the_bytes_a_cold_one_does(self) -> None:
@@ -264,7 +264,7 @@ class DaemonTest(unittest.TestCase):
         self.assertIsNone(cold.pop("made_by"))
         drop = ("made_by", "meshed")
         self.assertEqual({k: v for k, v in cold.items() if k not in drop}, {k: v for k, v in face.items() if k not in drop})
-        self.assertEqual(sorted(str(path.relative_to(self.folder)) for path in self.folder.rglob("*") if path.is_file()),
+        self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/block.xbf", "block.py"])
 
     def test_a_worker_over_its_memory_cap_is_retired_and_the_next_build_restarts(self) -> None:
@@ -304,7 +304,7 @@ class DaemonTest(unittest.TestCase):
         done = subprocess.run([sys.executable, "block.py", "--step", "b.step", "--json"], cwd=self.folder, env=self.env,
                               capture_output=True, text=True, timeout=300)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(sorted(str(path.relative_to(self.folder)) for path in self.folder.rglob("*") if path.is_file()),
+        self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/block.xbf", "block.py", "peg.stl"])
 
     def test_a_model_script_asks_at_its_import_of_the_engine(self) -> None:

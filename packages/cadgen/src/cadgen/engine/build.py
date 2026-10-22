@@ -520,10 +520,11 @@ def _written(model: Any, result: Any, run: Any, report: dict[str, Any], log: Cal
 
 
 def _shown(script: Path, cwd: Path | None) -> str:
-    """A path relative to ``cwd`` (the working folder by default), or whole where none can be: on
-    Windows, a path on another drive than the folder's."""
+    """A path relative to ``cwd`` (the working folder by default), with ``/`` on every platform as
+    the closure spells one, or whole where none can be: on Windows, a path on another drive than
+    the folder's."""
     try:
-        return os.path.relpath(script, cwd or Path.cwd())
+        return Path(os.path.relpath(script, cwd or Path.cwd())).as_posix()
     except ValueError:
         return str(script)
 

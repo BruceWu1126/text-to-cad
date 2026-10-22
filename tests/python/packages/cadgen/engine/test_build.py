@@ -48,7 +48,7 @@ def frame():
 
 
 def _files(folder: Path) -> set[str]:
-    return {str(path.relative_to(folder)) for path in folder.rglob("*") if path.is_file()}
+    return {path.relative_to(folder).as_posix() for path in folder.rglob("*") if path.is_file()}
 
 
 class EngineCase(unittest.TestCase):

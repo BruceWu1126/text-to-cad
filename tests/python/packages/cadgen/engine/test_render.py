@@ -573,7 +573,7 @@ class DaemonRenderTest(unittest.TestCase):
         model = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertEqual((model["renderer"], "process" in model), ("occt", False))
         self.assertEqual({path.suffix for path in self.state.iterdir()}, {".sock", ".lock"})
-        self.assertEqual(sorted(str(path.relative_to(self.folder)) for path in self.folder.rglob("*") if path.is_file()),
+        self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/pair.xbf", "edited.png", "first.png", "model.png", "pair.py", "warm.png"])
         self.cli("stop")
         if os.name != "nt":  # os.kill(pid, 0) asks after a process on POSIX alone

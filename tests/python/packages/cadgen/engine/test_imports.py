@@ -159,10 +159,30 @@ class ImportTest(unittest.TestCase):
         """)
         subprocess.run([sys.executable, "-c", code, str(step)], check=True, capture_output=True)
         measure = textwrap.dedent("""
-            import resource, sys, json
+            import sys, json
             import build123d, OCP.STEPCAFControl, OCP.BinTools
             from cadgen.engine import reader
-            before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+
+            def peak():
+                # The process's peak memory, in the platform's unit: the two runs compare alike.
+                try:
+                    import resource
+                except ImportError:  # Windows: PROCESS_MEMORY_COUNTERS.PeakWorkingSetSize
+                    import ctypes
+                    from ctypes import wintypes
+
+                    class Counters(ctypes.Structure):
+                        _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                                    ("PeakWorkingSetSize", ctypes.c_size_t), ("rest", ctypes.c_size_t * 7)]
+
+                    counters = Counters()
+                    counters.cb = ctypes.sizeof(Counters)
+                    ctypes.windll.psapi.GetProcessMemoryInfo(ctypes.windll.kernel32.GetCurrentProcess(),
+                                                             ctypes.byref(counters), counters.cb)
+                    return counters.PeakWorkingSetSize
+                return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+
+            before = peak()
             if sys.argv[2] == "reader":
                 shape = reader.read_step(sys.argv[1])
             else:
@@ -171,7 +191,7 @@ class ImportTest(unittest.TestCase):
                 del data
                 shape = reader.assemble(header, shapes, locations)
             assert len(shape.children) == 500
-            print(json.dumps(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before))
+            print(json.dumps(peak() - before))
         """)
         grown = {}
         for where in ("here", "reader"):
