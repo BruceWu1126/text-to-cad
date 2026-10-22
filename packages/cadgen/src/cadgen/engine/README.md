@@ -857,10 +857,14 @@ back says its way back as waypoints. `loop=` and the `spline` ease are refused b
 never moves the build.
 
 The document keeps the definition (**Kinematics**), never frames. A callable is stored as its
-samples, interpolated linearly: eight equal steps over its duration, each step halved while the
-samples' line strays from the function by more than the tolerance at a quarter, half or three
-quarters of it -- 1e-3 radian for an angle, 1e-3 of the model's size (its bounding box's
-diagonal, from the B-rep's geometry) for a distance -- at most 4,097 samples. The same code
+samples, interpolated linearly: eight equal steps over its duration, each step split while the
+samples' line strays from the function by more than half the tolerance at any eighth of it --
+the tolerance 1e-3 radian for an angle, 1e-3 of the model's size (its bounding box's diagonal,
+from the B-rep's geometry) for a distance -- at most 4,097 samples. A step is split where it
+strays most: a kink, where two straight runs meet, is the error's peak between two checks, so
+the samples close in on it, and the half tolerance at the checks keeps the line within the whole
+one between them (a zigzag with kinks off the grid is held within 0.55 of it, `sin` within 0.44,
+where the quarter checks and middle splits let a kink stray to 1.06). The same code
 samples at the same times, so the file is a function of the code. A motion naming a
 configuration or a joint its assembly lacks fails the build by name; one setting a value its
 pair cannot take, or moving a pair that closes a loop, is left out and warned.

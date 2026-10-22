@@ -1175,11 +1175,14 @@ def _flat(values: dict[str, tuple[float, ...]], labels: list[str]) -> np.ndarray
 
 def _sampled(function: Callable, duration: float, convert: Callable, tolerances: dict[str, list[float]],
              where: str, path: tuple[int, ...], joint_labels: list, controls: list) -> list:
-    """A function of time's samples: eight equal steps over its duration, each step halved
-    where the samples' linear interpolation (AP242's, which a reader of the document and the GLB
-    baker both apply) strays from the function, at a quarter, half or three quarters of it, by
-    more than the tolerance (``ANGULAR_TOLERANCE``, ``LINEAR_TOLERANCE``), until none does. A
-    function of the code: the same function samples at the same times."""
+    """A function of time's samples: eight equal steps over its duration, each step split while
+    the samples' linear interpolation (AP242's, which a reader of the document and the GLB baker
+    both apply) strays from the function, at any eighth of it, by more than half the tolerance
+    (``ANGULAR_TOLERANCE``, ``LINEAR_TOLERANCE``), until none does. A step is split where it
+    strays most, not at its middle: a kink (where straight runs meet) is the error's peak, between
+    two check points, so the split closes in on it and the runs either side are then held
+    exactly; and the half tolerance at the checks keeps the peak between them within the whole
+    one. A function of the code: the same function samples at the same times."""
     held: dict[float, dict[str, tuple[float, ...]]] = {}
     names = {name for holder, own, kept in controls if holder[:len(path)] == path for name in (own, kept)}
 
@@ -1216,11 +1219,16 @@ def _sampled(function: Callable, duration: float, convert: Callable, tolerances:
         grid, table = np.array(times), np.array(rows)
         split = []
         for a, b in zip(times, times[1:]):
-            for fraction in (0.25, 0.5, 0.75):
-                t = a + (b - a) * fraction
-                if np.any(np.abs(_interpolated(grid, table, "linear", t) - _flat(at(t), labels)) > tolerance):
-                    split.append((a + b) / 2)
-                    break
+            # The step's worst check against the tolerance, and where it is.
+            worst, there = 0.0, None
+            for eighth in range(1, 8):
+                t = a + (b - a) * eighth / 8
+                strayed = float(np.max(np.abs(_interpolated(grid, table, "linear", t) - _flat(at(t), labels))
+                                       / tolerance))
+                if strayed > worst:
+                    worst, there = strayed, t
+            if worst > 0.5:
+                split.append(there)
         if not split:
             return [(t, None, at(t)) for t in times]
         times = sorted(set(times) | set(split))

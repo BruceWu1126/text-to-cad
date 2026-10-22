@@ -165,6 +165,21 @@ class DocumentTest(_Folder):
         first = self.xbf.read_bytes()
         self.assertEqual(self.cold(), first, "the same code samples at the same times: the same bytes")
 
+    def test_a_function_with_kinks_is_kept_within_the_tolerance_at_its_kinks_too(self) -> None:
+        # A zigzag: straight runs meeting at kinks every 0.685 s, none on the sampler's grid. Its
+        # error is largest at a kink, between any two check points.
+        zigzag = lambda t: 40 + 60 * 2 * abs(t / 1.37 - math.floor(t / 1.37 + 0.5))  # noqa: E731
+        self.arm(more='motion(arm, "zigzag", lambda t: {"elbow": 40 + 60 * 2 * abs(t / 1.37 - math.floor(t / 1.37 + '
+                      '0.5))}, duration=6)')
+        keys = document.Loaded(self.xbf).mechanism.motions["zigzag"].keys
+        times = np.array([t for t, _name, _values in keys])
+        table = np.array([[values["elbow"][0]] for _t, _name, values in keys])
+        kinks = [0.685 * k for k in range(1, 9) if 0.685 * k < 6]
+        checked = sorted({*np.linspace(0, 6, 6001).tolist(), *kinks})
+        worst = max(abs(float(mechanism._interpolated(times, table, "linear", t)[0]) - zigzag(t)) for t in checked)
+        self.assertLessEqual(worst, math.degrees(mechanism.ANGULAR_TOLERANCE), "the samples hold the tolerance everywhere")
+        self.assertLess(len(times), 200)
+
     def test_a_warm_edit_of_a_motion_patches_the_document_to_the_cold_bytes(self) -> None:
         self.arm()
         report = self.arm(reach=90)
