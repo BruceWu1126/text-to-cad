@@ -14,7 +14,7 @@ Each case builds into an `XBF/` beside its script (gitignored).
 | --- | --- | --- |
 | `render_floor/` | `floor_positions` | Three coloured blocks above, across and below Z=0. Render's floor stays at the authored origin; aligning to the lowest point is an explicit option. |
 | `viewer_concurrency/` | `assembly` | A 32-part drilled-plate assembly. Change `REVISION` and rebuild while the viewer is loading to check update handoffs, progress and replacement geometry. |
-| `unified_annotations/` | `annotation_fixture` | An 11-part assembly: brushed steel on the base and shaft (each keeping its own colour), a blue paint on the arm (its own colour green at alpha 0.6; the paint's blue at opacity 0.5 is what shows), the arm's `swing` joint and the shaft's `lift`, a configuration (`open`: swing 45) and a motion (`demo`: the shaft lifting 8 mm and back over 4 s). Check materials, Position, motion in both view modes, a motion-only edit (the mechanism rewritten, no prototype converted), snapshots and the GLB clip. |
+| `unified_annotations/` | `annotation_fixture` | An 11-part assembly: brushed steel on the base and shaft (each keeping its own colour), a blue paint on the arm (its own colour green at alpha 0.6; the paint's blue at opacity 0.5 is what shows), the arm's `swing` joint and the shaft's `lift`, a configuration (`open`: swing 45) and a motion (`demo`: the shaft 8 mm up, 8 mm down and home over 4 s, looping, as the old clip did). Check materials, Position, motion in both view modes, a motion-only edit (the mechanism rewritten, no prototype converted), snapshots and the GLB clip. |
 
 ## Run manually
 

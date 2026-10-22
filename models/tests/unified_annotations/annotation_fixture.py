@@ -41,4 +41,5 @@ def annotation_fixture():
 
     fixture = bd.Compound(children=[base, shaft, arm, *pins], label="annotation_fixture")
     configuration(fixture, "open", swing=45)
-    return motion(fixture, "demo", _lift, duration=4)
+    # The old clip looped (`loop: true`): up 8 mm, down 8 mm, home, every 4 s.
+    return motion(fixture, "demo", _lift, duration=4, loop="loop")
