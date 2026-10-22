@@ -241,6 +241,9 @@ class ThroughTheDaemonTest(unittest.TestCase):
                 base, peg = bd.Box(10, 10, 2), bd.Pos(20, 0, 0) * bd.Cylinder(2, 4)
                 base.label, peg.label = "base", "peg"
                 return bd.Compound(children=[base, peg], label="plate")
+
+            if __name__ == "__main__":
+                plate()
         """), encoding="utf-8")
         (self.folder / "dies.py").write_text(textwrap.dedent("""
             import os
@@ -249,6 +252,9 @@ class ThroughTheDaemonTest(unittest.TestCase):
             @xbf
             def dies():
                 os._exit(3)
+
+            if __name__ == "__main__":
+                dies()
         """), encoding="utf-8")
         script = self.run_in("plate.py")
         self.assertEqual(script.returncode, 0, script.stderr)

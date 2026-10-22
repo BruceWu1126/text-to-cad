@@ -203,8 +203,7 @@ PY
 step "Build a real model with no repo in sight"
 mkdir -p "$EMPTY/models"
 cat >"$EMPTY/models/probe.py" <<'PY'
-# A model script: running it builds every model it defines, each writing what its decorators
-# declare. Deliberately the simplest one that exists: this checks that an installed cadgen can
+# A model script explicitly calls its model, writing what its decorators declare. Deliberately the simplest one that exists: this checks that an installed cadgen can
 # build at all, not that it models anything interesting.
 from cadgen.engine import step, stl, xbf
 import build123d as bd
@@ -215,6 +214,10 @@ import build123d as bd
 @stl
 def probe():
     return bd.Box(10, 10, 10)
+
+
+if __name__ == "__main__":
+    probe()
 PY
 # Running the script IS the build: no CLI verb takes its place.
 "$VENV/bin/python" models/probe.py >"$WORK/build.log" 2>&1 \
