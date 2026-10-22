@@ -155,7 +155,8 @@ def hinge():
 
 14. **Connected means warm.** A worker is not retired for idleness while any served
     document it built has a version wait outstanding or completed a sync within `serve.LIVE`
-    seconds. The memory cap still applies. Closing a page never stops the engine or its
+    seconds. Heartbeats use the canonical document address, including `code::NAME`
+    and `script.py::NAME`; they never turn a model address into a file path. The memory cap still applies. Closing a page never stops the engine or its
     worker; once its last sync expires, ordinary idle retirement applies.
 
 15. **One HTTP owner per installation.** The daemon serves page sessions and document

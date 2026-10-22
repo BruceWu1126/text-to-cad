@@ -204,6 +204,25 @@ class ConnectedPoolTest(unittest.TestCase):
             with mock.patch("time.monotonic", return_value=synced + LIVE + 1):
                 self.assertEqual(daemon.pool.retire_idle(), [builder], "no watcher: idle retirement")
 
+    def test_memory_model_sync_keeps_its_worker_warm(self) -> None:
+        from cadgen.engine.serve import LIVE, Server
+
+        daemon = Daemon(3600, cap=1, retire_after=1)
+        daemon.pool.start = Fake
+        server = daemon.server = Server(mesh_mode="inline")
+        self.addCleanup(daemon.shutdown)
+        address = "code::part"
+        server.put(address, {"version": "one", "prototypes": []}, {})
+        worker = daemon.pool.lease("part.py", {})
+        daemon.builders[os.path.normcase(address)] = worker
+        daemon.pool.release(worker)
+        synced = worker.used + 10
+        with mock.patch("time.monotonic", return_value=synced):
+            server.sync(address)
+            self.assertEqual(daemon.pool.retire_idle(), [])
+        with mock.patch("time.monotonic", return_value=synced + LIVE + 1):
+            self.assertEqual(daemon.pool.retire_idle(), [worker])
+
     def test_failed_wait_releases_watcher_and_memory_cap_still_retires(self) -> None:
         from cadgen.engine.serve import Server
 

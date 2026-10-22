@@ -408,8 +408,8 @@ class Server:
         self.held: dict[Path, int] = {}
         self.changed = threading.Condition()
         self.watch_lock = threading.Lock()
-        self.watchers: dict[Path, int] = {}
-        self.synced: dict[Path, float] = {}
+        self.watchers: dict[Path | str, int] = {}
+        self.synced: dict[Path | str, float] = {}
         self.generation = 0
         self.topologies: "OrderedDict[str, Any]" = OrderedDict()
         self.topology_lock = threading.Lock()
@@ -834,15 +834,15 @@ class Server:
                 self.synced[path] = time.monotonic()
             self.touch()
 
-    def sync(self, path: Path) -> None:
+    def sync(self, path: Path | str) -> None:
         """A connected app's heartbeat, even when its document version has not changed."""
-        path = Path(path).resolve()
+        path = document_key(path)
         if path in self.idents:
             with self.watch_lock:
                 self.synced[path] = time.monotonic()
             self.touch()
 
-    def watched(self) -> set[Path]:
+    def watched(self) -> set[Path | str]:
         """Documents with an outstanding version read or a sync in the last LIVE seconds.
 
         This lock is independent of document loading and the worker pool: retirement must
