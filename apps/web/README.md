@@ -192,9 +192,8 @@ npm run test    # client + app tooling (node:test, beside the code)
 The backend's suite lives with cadgen and is not collected here; running only
 `npm run test` leaves that half unchecked.
 
-Headless CAD checks use Playwright with Metal on macOS and SwiftShader on
-Linux/Windows. Use the same graphics backend for baseline/refactor image
-comparisons.
+The UI's browser specs run in npm's Playwright Chromium: Metal on macOS, SwiftShader
+on Linux and Windows. Compare a baseline and a refactor on the same backend.
 
 From the repository root, `scripts/test/test-viewer-browser.sh` exercises the
 bundled client's format and camera contracts through the real backend, with fresh

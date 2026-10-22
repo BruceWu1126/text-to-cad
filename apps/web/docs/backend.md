@@ -122,7 +122,7 @@ relative path is a 400, a path that is not a folder a 404, one that cannot be
 read a 403.
 
 `/__cad/asset` sends only CAD files, and never a file whose own name is hidden:
-a model script, a config, a sidecar `.json` or a key is a 404 whatever path names
+a model script, a config, a `.json` beside a model or a key is a 404 whatever path names
 it. It and the engine's relayed reads serve files as data, never as pages: each
 response carries `x-content-type-options: nosniff`
 and `content-security-policy: default-src 'none'; sandbox`, so a file opened
