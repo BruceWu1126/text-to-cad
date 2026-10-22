@@ -1,25 +1,24 @@
 # Snapshots
 
-Read this file when choosing visual checks for saved STEP/STP or mesh outputs.
-Use `cadgen step snapshot` for STEP, or the corresponding `stl`, `3mf` or `glb`
-snapshot command for meshes (see [mesh exports](supported-exports.md)). The
-CAD topology, selection and motion controls below apply to STEP; clipping applies
-to every 3D input, and exploding to a STEP or a GLB of several parts.
+Read this file when choosing visual checks for a document or a file the viewer
+opens.
 
-A STEP model with no surfaces (empty, or only curves and points) has nothing a
-view can draw: the snapshot still writes its image and warns that the model has
-no surfaces. A view or list that warns faces `could not be meshed` draws that part
-without them (and a list counts it without them); they are usually slivers a
-boolean left, and the warning names the part's ref and the faces
-(`#o:4b1f9e2a7c03`, `f:bracket.make_box1.2;M:bracket.cut1`). One that warns faces `could not be brought
-within tolerance of their exact surface` draws them as the mesher left them,
-past the display tolerance, and names them the same way.
-A part that `could not be meshed` at all, as the build warned, is left out: the
-view draws the rest of the model and the list lists the rest, each warning with the
-part's ref and the reason (`#o:4b1f9e2a7c03 peg could not be meshed (...)`). The image or list
-is then not the whole model. A view or list of nothing else (every part it focuses
-on, or every one it does not hide) fails, naming them. Without `--json`, warnings
-print on stderr.
+`cadgen snapshot SRC OUT.png` draws SRC as the CAD Viewer draws it, rendered by
+OCCT, into a PNG. SRC is a document (`.xbf`, `.step`), a mesh (`.stl`, `.3mf`,
+`.glb`), a robot (`.urdf`, `.sdf`, `.srdf`), a drawing (`.dxf`), or a script's model
+(`src/bracket.py::bracket`: built first in its worker, which writes the files it
+declares, and drawn from the document that worker holds). Nothing is written but
+OUT.
+
+```bash
+cadgen snapshot XBF/bracket.xbf tmp/review.png
+cadgen snapshot XBF/bracket.xbf tmp/review.png --display hidden-line --grid --camera top
+cadgen snapshot src/bracket.py::bracket tmp/review.png --preview
+```
+
+A face the mesher left without triangles is drawn without it and named in a
+warning, with its part. It is usually a sliver a boolean left: the picture is then
+not the whole model.
 
 ## Views
 
@@ -28,45 +27,52 @@ Skip saved snapshots only when no visible geometry was created or updated, or no
 - pure format/export requests where geometry is unchanged
 - source changes that do not alter visible geometry
 - inspection-only tasks (for example direct measurement questions) that create or update nothing
-- failed Python or STEP generation before a valid artifact exists
+- failed Python builds before a valid document exists
 
 When skipping, report the reason and the deterministic evidence that still ran.
 
 Do not loop on snapshots. Rerender only when a source repair changed visible geometry or when a specific visual finding needs confirmation.
 
-## Packet sizing
+## Choosing views
 
-Choose views that expose the features being checked. One may be enough;
-add an opposing view for hidden exterior features, an orthographic view for
-a pattern or silhouette, or a clipped view for internal geometry. No fixed set of
-views proves every face or feature is correct.
+Choose views that expose the features being checked; each command draws one. One
+may be enough; add an opposing view for hidden exterior features, an orthographic
+side view for a pattern or silhouette, or a clipped view for internal geometry. No
+fixed set of views proves every face or feature is correct.
 
-## Small packet
-
-For example, a four-view comparison can use one JSON job:
-
-```json
-{
-  "input": "models/part.step",
-  "mode": "view",
-  "outputs": [
-    { "path": "/tmp/render/iso.png", "camera": "iso" },
-    { "path": "/tmp/render/iso_opposite.png", "camera": { "direction": [-1, 1, -0.8] } },
-    { "path": "/tmp/render/top_ortho.png", "camera": "top" },
-    { "path": "/tmp/render/front_ortho.png", "camera": "front" }
-  ],
-  "output": { "viewLabels": true, "padding": 0.12, "sizeProfile": "diagnostic" }
-}
+```bash
+cadgen snapshot XBF/part.xbf tmp/iso.png
+cadgen snapshot XBF/part.xbf tmp/below_behind.png --camera 225:-30
+cadgen snapshot XBF/part.xbf tmp/top.png --camera top
+cadgen snapshot XBF/part.xbf tmp/front.png --camera front
 ```
 
-Set `input` to the saved STEP/STP artifact using a relative or absolute path
-(documents only: run a `.py` model first). With no explicit display settings,
-snapshots use the `solid` preset, Light appearance and an orthographic isometric
-camera. Every mode defaults to 1600x1200 (the `diagnostic` profile). Job `mode`
-is `view` or `list`; display presets are a separate choice.
+With no flags a snapshot is the `solid` display, Light appearance, an orthographic
+isometric camera fitted to the model, 1600x1200.
 
-`--size-profile` (`output.sizeProfile` in a job) is one of exactly these names;
-anything else is refused with this list:
+## Display, camera and size
+
+`--display` takes one of the viewer's six display modes, each at its own defaults:
+`solid` (shaded, with edge linework), `shaded` (no edges), `parts` (each part its own
+colour), `xray` (translucent surfaces, hidden edges visible), `hidden-line`
+(linework with occluded edges suppressed) and `wireframe` (edges only). It also takes
+`exploded=AMOUNT` (the parts moved apart as the viewer's Explode moves them, 0 to 1),
+alone or after a mode (`hidden-line,exploded=0.6`), or the viewer's display object,
+inline or as a JSON file: `mode`, `grid`, `appearance` (`light` or `dark`), `camera`
+(`projection`: `orthographic` or `perspective`; `focalLength`), `clip` and `exploded`
+(`{"enabled": true, "amount": 0.5}`). `parts` and `exploded` are refused for a
+document of one part. Unknown keys and out-of-range values are refused.
+
+`--grid` draws the measuring grid (red X and green Y axes) under the model.
+`--preview` draws Preview's photographic look instead of a mode.
+
+`--camera` is a preset (`iso`, `front`, `back`, `left`, `right`, `top`, `bottom`),
+an `azimuth:elevation` pair in degrees, a camera object (`position`, `target`, `up`,
+`direction`, `zoom`, `orthographicHalfHeight`), or `authored` (below). Projection and
+focal length belong in `display.camera`.
+
+`--size-profile` is one of exactly these names; anything else is refused with this
+list:
 
 | Profile | Size |
 | --- | --- |
@@ -78,194 +84,103 @@ anything else is refused with this list:
 | `presentation`, `contact-sheet` | 2400x1600 |
 | `presentation-large` | 2800x1800 |
 
-`--width`/`--height` (an output's `width`/`height` in a job) override the profile
-with a whole number of pixels from 1 to 8192; a larger request is refused rather
-than clamped. With `--job` they size every output in the packet.
+`--width` and `--height` set the size in pixels instead, up to 8192.
 
-`--display` takes one of the Viewer's six Display modes, each drawn at its own
-defaults: `solid` (the default: shaded, with edge linework), `shaded` (the same
-surfaces, no edges), `parts` (Solid with each part its own colour), `xray`
-(translucent surfaces with occluded edges visible), `hidden-line` (linework with
-occluded edges suppressed), and `wireframe` (edges only); they use the shared
-projection, orthographic by default. `--grid` draws the measuring grid (red X and
-green Y axes) under the model in any mode; it is off by default. `--preview` draws
-Preview's photographic look instead, in perspective with studio lighting, at
-Preview's defaults; it draws no grid and is view mode only.
+`--pose` poses a document's mechanism first: a configuration's name, or joint and
+coupling values as JSON ([reviewing motion](kinematics.md#reviewing-motion)).
 
-```bash
-cadgen step snapshot STEP/part.step tmp/review.png --display hidden-line --grid
-cadgen step snapshot STEP/part.step tmp/review.png --preview
-cadgen step snapshot STEP/part.step tmp/review.png --display display.json --camera front
-```
-
-`--display` (and a job's `display`) also takes the Viewer's display object, inline
-or as a JSON file: `mode`, boolean `grid`, `appearance` (`light`, the CLI default,
-or `dark`), `camera` (`projection`: `orthographic` or `perspective`; `focalLength`:
-20–200 mm), and the shared tools `clip` and `exploded`. A mode has no settings of
-its own, and anything else is refused.
-
-`--camera` (or a job's top-level or per-output `camera`) sets pose and framing
-(`preset`, `position`, `target`, `up`, `direction`, `zoom`,
-`orthographicHalfHeight`); projection and focal length belong in
-`display.camera`. Every 3D input takes `clip` (`at` in the file's own unit), and
-`exploded` takes a STEP or a GLB of several parts. `shaded`, `xray`, `hidden-line`
-and `wireframe` are STEP-only; meshes and robot descriptions take `solid` or
-`parts`, `--grid`, or `--preview`. DXF uses `--appearance` and has no scene display
-modes.
-
-`camera` is a preset (`front`, `back`, `left`, `right`, `top`, `bottom`, `iso`),
-an `azimuth:elevation` pair, or a camera object. `output` takes `sizeProfile`,
-`padding` (0–0.15), `renderScale` (1–3) and the booleans `viewLabels`,
-`tightFrame` and `transparent`. Top-level `timeoutSeconds` is a positive number
-and `scale` is `cad` or `urdf`. Unknown keys and out-of-range values are refused.
-
-
-### Flags and job keys
-
-A JSON job's keys are the flags without their dashes. `--animation CLIP --time
-SECONDS` is one `animation` object in a job; `time` is not a top-level key:
-
-```json
-{
-  "input": "models/arm.step",
-  "kinematics": "open",
-  "animation": { "clip": "demo", "time": 2.0 },
-  "outputs": [{ "path": "/tmp/render/demo_t2.png", "camera": "iso" }]
-}
-```
-
-`clip` is required; `time` is seconds, default 0. A bare `"animation": "demo"` is
-refused (that is the flag's spelling). A `"video"` object beside `animation`
-renders the clip's span instead of one frame; see
-[rendering the whole clip](kinematics.md#rendering-the-whole-clip).
-
-`--focus` and `--hide` nest under a job-level `selection` object, which applies
-to the whole job (give a view its own job in a `jobs` array to select per view):
-
-```json
-{
-  "input": "STEP/assembly.step",
-  "mode": "view",
-  "selection": { "hide": ["#o:e8a03d5b61f4", "#o:19c7f2d4a8b5"] },
-  "outputs": [{ "path": "tmp/render/without_covers.png", "camera": "iso" }]
-}
-```
-
-`"selection": { "focus": ["#o1.2"] }` is the `--focus` form; `focus` and `hide` are the only selection keys. Every other flag keeps the plain rule (`--kinematics` → `"kinematics"`, `--animation CLIP --time S` → `"animation": {"clip": ..., "time": ...}`).
-
-With `--job FILE`, other flags override every job in it; there is no stdin form.
-A TARGET given with `--job` replaces every job's `input`, so one job file renders
-the same views over another model; OUT is ignored, and the jobs' outputs name
-the files:
-
-```bash
-cadgen snapshot STEP/bracket_v2.step --job views.job.json
-```
-
-### Annotations and Quick Edit views
-
-`--annotation FILE` (a job's `annotation`: a path or the object) draws a person's ink
-over the model as they drew it in the CAD Viewer: its marks are in model
-coordinates and stay put whatever explodes or poses the model, and are cut by a clip; what
-the model hides of them is drawn faint through it. A mark lies on the surface it was
-drawn on, or on that surface's plane (flat across a curved face, carried on in the air past the
-model's edge), so its points need not be coplanar.
-Each mark's `touches` says what it was drawn over, most first: the faces and edges
-as `@cad[...]` references (`ref`) where the Viewer could name them, each with its
-part — read those to know what a mark is about.
-A DXF annotation lies on the drawing plane; `--mode list` takes none.
-
-A Quick Edit prompt carries a snapshot packet captured only when Copy, Queue or
-Send is pressed. Up to 1 KiB of compact UTF-8 JSON is included directly in the
-prompt; larger packets are saved to a temporary `.snapshot.json` and named by
-absolute path. Save inline JSON to a temporary `.snapshot.json` before calling
-`cadgen snapshot --job <file>`; the CLI takes a file path. Render and inspect supplied
-annotations before editing. A view without annotations is optional context: render it
-only when useful to the request; its presence alone does not require inspection.
-The `jobs` list includes the current view and every distinct drawn view with
-remaining ink. A matching drawn view uses the exact current framing in the export;
-otherwise `current view` is appended. Text and selections without
-ink still capture the current view. Shared `input` and inline `annotation`
-live at the top level once. An individual job can override any
-shared field (whole-value replacement, not a merge); empty `marks`
-suppress shared marks. Captured 3D views preserve projection and lens. No PNGs are
-rendered or attached at handoff. Input and output paths are absolute, so the packet
-can be replayed from another working folder. Annotation chips do not
-export individual references; their data travels in the snapshot packet. A Quick Edit from any 3D file replays: a robot's job carries its
-`jointValues` and the parts hidden in its Links panel (`selection.hide`), a GLB's or a
-3MF's its `display.clip`, and a multi-part GLB's its `display.exploded`. `cadgen snapshot --job <job
-file>` renders those views again: after an edit, run it to see the change from
-where the person looked, with their annotation still on it. Add a TARGET to aim the
-same views at another document.
+`--json` prints what was drawn and each stage's milliseconds as one JSON object.
 
 ## Clipped views
 
-Use the viewer's Clip setting to reveal internal geometry in a normal view snapshot.
-`display.clip` takes `enabled`, `axis` (`x`, `y` or `z`), `at` in the file's own unit
-(a STEP's millimetres; a GLB's, URDF's and SDF's metres; a 3MF's declared unit), and
-`invert`. The cut stays capped and uses the same scene as the viewer.
+Clip reveals internal geometry: a shell, a bore, a cavity, a blind hole, a wall's
+relation to a floor. `display.clip` takes `enabled`, `axis` (`x`, `y` or `z`), `at`
+(the plane's coordinate on that axis, in the file's own unit: a document's
+millimetres) and `invert`; the cut is capped. Look straight at the cut:
 
 ```bash
-cadgen step snapshot STEP/housing.step tmp/cut.png --camera back --display '{"clip":{"enabled":true,"axis":"y","at":12.5}}'
+cadgen snapshot XBF/housing.xbf tmp/cut.png --camera back --display '{"clip": {"enabled": true, "axis": "y", "at": 12.5}}'
 ```
 
-## Listing parts
+## Annotations and Quick Edit views
 
-`--mode list` writes no image: it prints one row per placed part — its `ref`
-(what `--focus`, `--hide` and `scene.resolve(ref)` accept), its `name`, its exact
-`bounds` in model units, and the `triangleCount`/`vertexCount` of the display
-mesh a view would draw. `--focus`/`--hide` narrow the rows. A STEP list starts no
-browser, so it is the cheap way to learn what an assembly contains.
+A Quick Edit prompt carries a snapshot packet: inline JSON up to 1 KiB, or the
+absolute path of a `.snapshot.json`. Save inline JSON to a temporary
+`.snapshot.json` first. The packet holds:
 
-OUT's extension picks the format: a view writes `.png`, and a video writes
-`.mp4` or `.gif`. Other extensions are refused instead of writing PNG bytes under them.
+- `input`: the absolute path of the file the person looked at;
+- `jobs`: one per view they captured (the current view and each view they drew
+  in), each with the view's `camera`, its `display` and an output `label`; a robot's
+  carries its `jointValues`;
+- `annotation`: their ink, when they drew any. Each mark is in model coordinates,
+  on the part it was drawn on, and its `touches` lists what it was drawn over, most
+  first: faces and edges as refs where the viewer could name them, each with its
+  part. Read those to know what a mark is about;
+- `measurements`: Measure's dimensions, when they took any.
+
+Draw the view a person drew their ink in, with the ink on the model:
+
+```bash
+cadgen snapshot XBF/bracket.xbf tmp/quick_edit.png --annotation tmp/bracket.snapshot.json --camera authored
+```
+
+`--annotation FILE` draws the ink over the model, each mark on its part wherever the
+picture places that part (posed or exploded); it takes the packet or an annotation
+file. `--camera authored` draws exactly the view the last mark was drawn in (no fit),
+at its size and projection unless other flags say otherwise. Pass the job's
+`display` object as `--display` to draw in the person's mode, a robot job's
+`jointValues` as `--pose`, and the packet's `measurements` list (as a file, or inline
+JSON) as `--measurements` to draw the dimensions. A view without ink is drawn from
+its `camera`, given as `--camera '<its JSON>'`.
+
+Inspect supplied annotations before editing. A view without annotations is optional
+context: render it only when useful to the request. After an edit, draw the same
+view of the rebuilt document to see the change from where the person looked, with
+their ink still on it.
+
+## Mesh files, robots and drawings
+
+- **A mesh** (`.stl`, `.3mf`, `.glb`) takes every display mode, the grid, clip,
+  Explode (a file of several parts), Preview and annotations; `--pose` is refused: a
+  mesh has no mechanism. A GLB is drawn at rest, its clips not played; its materials
+  and base colour textures are drawn.
+- **A robot** (`.urdf`, `.sdf`, `.srdf`) is its links' visuals, each link one colour
+  of the Parts palette, where the viewer opens it. `--pose` names an SRDF group state
+  or gives joint values (degrees, metres) over that pose.
+- **A drawing** (`.dxf`) is drawn whole from above in its pens, as the viewer's
+  drawing pane draws it. It takes `--display` with `appearance` alone, and the size
+  flags; every other flag is refused by name.
 
 ## Output paths
 
-Name the file and you get that file:
-
-```bash
-cadgen step snapshot STEP/bracket.step tmp/review.png
-# then Read tmp/review.png
-```
-
-OUT (and an output's `path` in a JSON packet) is written exactly as given,
-relative to the working directory. Check the command's exit before reading. A
-refused request — an unknown key or value, a setting this kind of input cannot
-take, the wrong door, conflicting options, an unknown pose, clip or joint name —
-leaves an existing file untouched, for every job in a packet. Once the request is
-accepted the target is cleared before anything is built, so a failed build or
-render (and an occurrence ref the model does not have, which needs the built
-tree to check) leaves no file; successful output is written atomically.
-Reuse `tmp/review.png` during iteration, or name before/after images when both
-are needed for comparison.
-
-Pass a directory (`tmp/` as OUT, or an output `path` that is one) only when the name does not matter: a timestamped name is generated inside it, and that is the one case where you read the path from the `saved snapshot:` line.
+OUT is written exactly as given, relative to the working directory, and must end in
+`.png`. Check the command's exit status before reading it: a refused request
+(an unknown key or value, a pose out of range, a flag the input cannot take) and a
+failed build or render write nothing, and leave a file an earlier run wrote where it
+was. Reuse one name while iterating (`tmp/review.png`), or name before and after
+images when both are needed for a comparison.
 
 ## Targeted additions
 
 Add views only when the brief or a failure mode calls for them:
 
 - reference-image reproduction: one snapshot from the reference image's viewpoint for side-by-side comparison
-- `display.clip` with a camera facing the cut: shell, bore, internal cavity, passage, blind hole, enclosure, or wall/floor relationship (see [Clipped views](#clipped-views))
-- `display.mode: "solid"`: shaded CAD view with visible edge linework
-- `display.mode: "shaded"`: shaded surfaces without the edge overlay
-- `display.mode: "xray"`: translucent surfaces with hidden/occluded edges visible
-- `display.mode: "hidden-line"`: line-focused review with occluded edges suppressed
-- `display.mode: "wireframe"`: edge-only review for internal overlap or interference
-- `display.grid: true`: a measuring grid under the model in any display mode, for reading size and placement at a glance
-- labeled or annotated review: use supported CAD Viewer refs, selections, screenshots, or GUI review links
-
-Exploded or labeled review is an intent, not a render mode. Satisfy it through supported CAD Viewer mechanisms, supported JSON job settings, or the GUI link.
+- a clipped view with a camera facing the cut: shell, bore, internal cavity, passage, blind hole, enclosure, or wall/floor relationship ([clipped views](#clipped-views))
+- `--display xray`: translucent surfaces with hidden edges visible
+- `--display hidden-line`: line-focused review with occluded edges suppressed
+- `--display wireframe`: edge-only review for internal overlap or interference
+- `--display exploded=0.6`: an assembly's parts apart, to see what is inside
+- `--grid`: a measuring grid under the model, for reading size and placement at a glance
+- `--pose`: each configuration that matters, for an articulated model
 
 ## Diagnostic review
 
 Visual review is diagnostic, not authoritative. Convert every visual concern into a follow-up geometry check before using it as a validation claim:
 
 - hole pattern appears asymmetric -> measure hole centers and compare offsets
-- lid, child part, or occurrence appears offset -> inspect frames and mating deltas
+- lid, child part, or occurrence appears offset -> inspect placements and mating deltas
 - gusset, boss, standoff, rib, or plate may be floating -> inspect solid count, labels, connectivity, contact, or relevant distances
 - cavity, bore, or blind hole looks wrong -> review a clipped view, then measure wall thickness, depth, or through-condition
-- repeated pattern looks uneven -> measure pattern centers, angular spacing, or occurrence frames
+- repeated pattern looks uneven -> measure pattern centers, angular spacing, or placements
 
 Final reports name what the snapshots showed, or the documented skip reason, and which deterministic checks support any visual finding. The PNGs are for your review; the user sees the model in the viewer, so attach one only when they ask for an image.

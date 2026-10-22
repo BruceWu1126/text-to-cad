@@ -45,6 +45,6 @@ standalone static HTTP callers. This is an explicit transport API default,
 using ordinary fetch and URL-addressed caches; it is not a mutable process-wide
 workspace provider. Shared UI requires its injected service. `loadSource` is the
 static/source composition boundary and creates an HTTP provider when none is
-supplied; the docs hero composes its own explicitly. Hosts
+supplied. Hosts
 requiring custom credentials, native transfer or workspace isolation must pass
 a provider consistently to both loads and peeks.

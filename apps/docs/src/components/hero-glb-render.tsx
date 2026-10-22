@@ -1,52 +1,48 @@
 "use client";
 
-import { createHttpCadResourceProvider } from "@text-to-cad/core/client";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { Line2 } from "three/examples/jsm/lines/Line2.js";
-import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
-import {
-  animationClipDuration,
-  findAnimationClip,
-  firstAnimationClipId,
-} from "@text-to-cad/core/common/animationClock.js";
-import { CAD_SCENE_SCALE, buildModel } from "@text-to-cad/core/common/cadScene.js";
-import { loadSourceAnimation } from "@text-to-cad/core/common/animationRuntime.js";
+import { CAD_SCENE_SCALE } from "@text-to-cad/core/common/cadScene.js";
 import { renderModel } from "@text-to-cad/core/common/renderModel.js";
-import {
-  loadSource,
-  packageSourceFromBaseUrl,
-} from "@text-to-cad/core/common/source.js";
 import { cloneThemePresetSettings } from "@text-to-cad/core/common/themeSettings.js";
+import {
+  createGlbAnimationRuntime,
+  disposeGlbAnimationRuntime,
+  setGlbAnimationTime,
+} from "@text-to-cad/core/lib/render/glbAnimationRuntime.js";
+import { buildGlbDocumentFromBuffer, disposeGlbDocument } from "@text-to-cad/core/lib/render/glbMeshData.js";
 
-// The hero renders the planetary gear STEP the way every @text-to-cad/core client
-// renders a STEP: the model's render package (each component's mesh, as cadgen
-// made it) plus what cadgen resolved its sidecar into — the articulation of its
-// mates, and the clips' baked keyframes for choreography — as static files beside
-// the tree. No GLB export, no site-local gear math — the same clip the viewer's
-// Animation tool plays drives this scene.
-const HERO_PACKAGE_BASE_URL = "/hero/planetary";
-const HERO_ARTICULATION_URL = `${HERO_PACKAGE_BASE_URL}/articulation.json`;
-const HERO_ANIMATION_URL = `${HERO_PACKAGE_BASE_URL}/animation.json`;
-const HERO_STEP_CAD_PATH = "models/assemblies/STEP/planetary_gear_assembly/planetary_gear_assembly.step";
-const HERO_STEP_LABEL = "PLANETARY_GEAR_ASSEMBLY.STEP";
-const HERO_CLIP_ID = "meshCycle";
+// The hero plays the planetary gear as one GLB, exported from the model's document by
+// `cadgen export` (scripts/sync-hero-glb.mjs): its parts, colours and the `meshCycle` motion,
+// which the export baked into a clip. The page reads it the way the CAD Viewer reads any GLB
+// (`buildGlbDocumentFromBuffer`) and plays the clip the way the viewer does
+// (`glbAnimationRuntime`): no gear math of the site's own.
+const HERO_GLB_URL = "/hero/planetary.glb";
+const HERO_LABEL = "PLANETARY_GEAR_ASSEMBLY.GLB";
+const HERO_CLIP = "meshCycle";
 // The mesh cycle covers 1260 degrees of drive in one nominal pass; slowed so
 // the hero turns at a display pace rather than a demo pace.
 const HERO_CLIP_SPEED = 0.14;
+// A fold drawn as an edge: above the 28.5 degrees between a mesh's neighbouring facets on a
+// cylinder, so a bore draws its rims and no lines down its wall.
+const EDGE_CREASE_DEG = 35;
+const EDGE_OPACITY = 0.84;
+// The outline around each part, as the CAD scene draws one: its back faces pushed out along their
+// normals by this share of the model's radius, in the edge colour, behind the part.
+const SILHOUETTE_SCALE = 0.004;
+const SILHOUETTE_OPACITY = 0.9;
 
 type PreviewScheme = "dark" | "light";
-type HeroModel = ReturnType<typeof buildModel>;
-type HeroClip = ReturnType<typeof findAnimationClip>;
+type HeroGlbDocument = Awaited<ReturnType<typeof buildGlbDocumentFromBuffer>>;
 
-const STEP_PREVIEW_PALETTES = {
+const GLB_PREVIEW_PALETTES = {
   dark: {
     background: "#292929",
     border: "#414141",
-    fill: ["#c7d0d8", "#aeb9c3", "#d9dee3", "#8f9ba7"],
+    edge: "#202b38",
     headerBackground: "#303030",
     headerText: "#d4d4d4",
     keyLight: "#f6f8fb",
@@ -59,7 +55,7 @@ const STEP_PREVIEW_PALETTES = {
   light: {
     background: "#fafafa",
     border: "#e5e5e5",
-    fill: ["#d7dce0", "#cdd3d8", "#e4e7ea", "#bfc7ce"],
+    edge: "#2f3a4b",
     headerBackground: "#ffffff",
     headerText: "#737373",
     keyLight: "#ffffff",
@@ -79,30 +75,13 @@ function currentPreviewScheme(): PreviewScheme {
   return document.documentElement.classList.contains("dark") ? "dark" : "light";
 }
 
+// The viewport's lighting and backdrop: the workbench theme, lit for this page.
 function buildWorkbenchTheme(scheme: PreviewScheme) {
-  const palette = STEP_PREVIEW_PALETTES[scheme];
+  const palette = GLB_PREVIEW_PALETTES[scheme];
   const theme = cloneThemePresetSettings("workbench-light");
-  const materials =
-    theme.materials && typeof theme.materials === "object"
-      ? theme.materials
-      : {};
 
   return {
     ...theme,
-    materials: {
-      ...materials,
-      defaultColor: palette.fill[0],
-      fillColors: [...palette.fill],
-      overrideSourceColors: false,
-      saturation: 1,
-      contrast: 1,
-      brightness: 1,
-      tintStrength: 0,
-      roughness: 0.92,
-      metalness: 0,
-      clearcoat: 0,
-      envMapIntensity: 0,
-    },
     background: {
       type: "solid",
       solidColor: palette.background,
@@ -134,21 +113,107 @@ function buildWorkbenchTheme(scheme: PreviewScheme) {
   };
 }
 
-function buildWorkbenchEdges(scheme: PreviewScheme) {
+// An outline material: back faces pushed out along their normals, drawn flat behind the part.
+function silhouetteMaterial(color: string, offset: number) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      color: { value: new THREE.Color(color) },
+      opacity: { value: SILHOUETTE_OPACITY },
+      offset: { value: offset },
+    },
+    vertexShader: `
+      uniform float offset;
+      void main() {
+        vec3 displaced = position + normal * offset;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 color;
+      uniform float opacity;
+      void main() {
+        gl_FragColor = vec4(color, opacity);
+      }
+    `,
+    side: THREE.BackSide,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+  });
+}
+
+// The GLB's scene as a model `renderModel` frames and draws: placed in CAD space (millimetres, Z
+// up) by the document's own matrix, each part's colour kept on the matte workbench finish, and each
+// part's folds and outline drawn in the edge colour, riding with it as the clip moves it.
+function buildHeroModel(glb: HeroGlbDocument, scheme: PreviewScheme) {
+  const placed = new THREE.Group();
+  placed.matrix.fromArray(glb.cadRootMatrix);
+  placed.matrixAutoUpdate = false;
+  placed.add(glb.scene);
+  const root = new THREE.Group();
+  root.add(placed);
+
+  const bounds = glb.animatedBounds ?? glb.restBounds ?? { min: [0, 0, 0], max: [1, 1, 1] };
+  const radius = new THREE.Vector3(...bounds.max).sub(new THREE.Vector3(...bounds.min)).length() / 2;
+  const edgeColor = GLB_PREVIEW_PALETTES[scheme].edge;
+  const edgeMaterial = new LineMaterial({
+    color: edgeColor,
+    linewidth: 1,
+    transparent: true,
+    opacity: EDGE_OPACITY,
+  });
+  const outlineMaterial = silhouetteMaterial(edgeColor, radius * SILHOUETTE_SCALE);
+  const edgeGeometries: LineSegmentsGeometry[] = [];
+  const meshes: THREE.Mesh[] = [];
+  glb.scene.traverse((object: THREE.Object3D) => {
+    if ((object as THREE.Mesh).isMesh) {
+      meshes.push(object as THREE.Mesh);
+    }
+  });
+  for (const mesh of meshes) {
+    for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      if (material instanceof THREE.MeshStandardMaterial) {
+        material.roughness = 0.92;
+        material.metalness = 0;
+        material.envMapIntensity = 0;
+      }
+    }
+    const folds = new THREE.EdgesGeometry(mesh.geometry, EDGE_CREASE_DEG);
+    const lines = new LineSegmentsGeometry().fromEdgesGeometry(folds);
+    folds.dispose();
+    edgeGeometries.push(lines);
+    mesh.add(new LineSegments2(lines, edgeMaterial));
+    const outline = new THREE.Mesh(mesh.geometry, outlineMaterial);
+    outline.renderOrder = -1;
+    mesh.add(outline);
+  }
+
   return {
-    enabled: true,
-    color: scheme === "dark" ? "#202b38" : "#2f3a4b",
-    silhouette: true,
-    thickness: 1,
+    root,
+    bounds,
+    runtime: {
+      // Device pixels, as `renderModel` gives them on every resize.
+      syncScreenSpaceLineMaterials(width: number, height: number) {
+        edgeMaterial.resolution.set(width, height);
+      },
+    },
+    dispose() {
+      for (const geometry of edgeGeometries) {
+        geometry.dispose();
+      }
+      edgeMaterial.dispose();
+      outlineMaterial.dispose();
+      disposeGlbDocument(glb);
+    },
   };
 }
 
-export function HeroStepRender() {
+export function HeroGlbRender() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [scheme, setScheme] = useState<PreviewScheme>("dark");
-  const [status, setStatus] = useState("loading step");
-  const palette = STEP_PREVIEW_PALETTES[scheme];
+  const [status, setStatus] = useState("loading");
+  const palette = GLB_PREVIEW_PALETTES[scheme];
 
   useEffect(() => {
     const syncScheme = () => {
@@ -175,9 +240,9 @@ export function HeroStepRender() {
     }
 
     let disposed = false;
-    let cadModel: HeroModel | null = null;
+    let heroModel: ReturnType<typeof buildHeroModel> | null = null;
     let viewport: ReturnType<typeof renderModel> | null = null;
-    let clip: HeroClip = null;
+    let animation: ReturnType<typeof createGlbAnimationRuntime> = null;
     let clipDuration = 0;
     let clipElapsedSec = 0;
     const dragState = {
@@ -190,23 +255,21 @@ export function HeroStepRender() {
     };
 
     const beforeRender = ({ deltaSeconds }: { deltaSeconds: number }) => {
-      if (disposed || !cadModel) {
+      if (disposed || !heroModel) {
         return;
       }
-      if (clip) {
+      if (animation && clipDuration > 0) {
         clipElapsedSec =
           (clipElapsedSec + Math.max(deltaSeconds, 0) * HERO_CLIP_SPEED) %
           clipDuration;
-        cadModel.update({
-          callbacks: { animation: { clip, elapsedSec: clipElapsedSec } },
-        });
+        setGlbAnimationTime(animation, clipElapsedSec);
       }
 
       if (!dragState.active) {
         dragState.yaw += 0.0018;
       }
-      cadModel.root.rotation.x = dragState.pitch;
-      cadModel.root.rotation.z = dragState.yaw;
+      heroModel.root.rotation.x = dragState.pitch;
+      heroModel.root.rotation.z = dragState.yaw;
     };
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -246,54 +309,31 @@ export function HeroStepRender() {
     };
 
     const load = async () => {
+      let glb: HeroGlbDocument | null = null;
       try {
-        setStatus("loading step");
-        const resources = createHttpCadResourceProvider({ cache: "no-store" });
-        const [descriptor, articulation, heroAnimation] = await Promise.all([
-          resources.readJson(`${HERO_PACKAGE_BASE_URL}/assembly.json`),
-          resources.readJson(HERO_ARTICULATION_URL),
-          resources.readJson(HERO_ANIMATION_URL),
-        ]);
-        const source = await loadSource({
-          ...packageSourceFromBaseUrl(HERO_PACKAGE_BASE_URL, descriptor),
-          articulation,
-          sourceAnimation: heroAnimation,
-          cadPath: HERO_STEP_CAD_PATH,
-        }, { resources });
-        const animation = await loadSourceAnimation({ animation: source.animation });
-        const clips = (animation?.clips ?? {}) as Parameters<typeof findAnimationClip>[0];
+        setStatus("loading");
+        const response = await fetch(HERO_GLB_URL, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`${HERO_GLB_URL}: HTTP ${response.status}`);
+        }
+        glb = await buildGlbDocumentFromBuffer(await response.arrayBuffer(), {});
         if (disposed) {
+          disposeGlbDocument(glb);
           return;
         }
-        clip =
-          findAnimationClip(clips, HERO_CLIP_ID) ??
-          findAnimationClip(clips, firstAnimationClipId(clips));
+        const clips = (glb.clips ?? []) as THREE.AnimationClip[];
+        const clip = clips.find((candidate) => candidate.name === HERO_CLIP) ?? clips[0];
         if (!clip) {
-          throw new Error("hero sidecar declares no animation clips");
+          throw new Error("hero GLB carries no animation clip");
         }
-        clipDuration = animationClipDuration(clip);
+        clipDuration = clip.duration;
+        animation = createGlbAnimationRuntime(THREE, glb.scene, clip);
 
-        cadModel = buildModel(THREE, source, {
-          theme: buildWorkbenchTheme(scheme),
-          displayMode: "shaded_edges",
-          edgeSettings: buildWorkbenchEdges(scheme),
-          stepParameters: source.pose,
-          scale: CAD_SCENE_SCALE.CAD,
-          selection: {
-            showEdges: true,
-          },
-          edgeRendering: {
-            mode: "screen-space",
-            Line2,
-            LineGeometry,
-            LineMaterial,
-            LineSegments2,
-            LineSegmentsGeometry,
-          },
-        });
-        cadModel.root.rotation.x = dragState.pitch;
-        cadModel.root.rotation.z = dragState.yaw;
-        viewport = renderModel(THREE, cadModel, {
+        heroModel = buildHeroModel(glb, scheme);
+        glb = null;
+        heroModel.root.rotation.x = dragState.pitch;
+        heroModel.root.rotation.z = dragState.yaw;
+        viewport = renderModel(THREE, heroModel, {
           autoStart: true,
           beforeRender,
           canvas,
@@ -304,8 +344,11 @@ export function HeroStepRender() {
           scale: CAD_SCENE_SCALE.CAD,
           theme: buildWorkbenchTheme(scheme),
         });
-        setStatus(HERO_STEP_LABEL);
+        setStatus(HERO_LABEL);
       } catch (error) {
+        if (glb) {
+          disposeGlbDocument(glb);
+        }
         setStatus(error instanceof Error ? error.message : "render failed");
       }
     };
@@ -322,6 +365,7 @@ export function HeroStepRender() {
       canvas.removeEventListener("pointermove", handlePointerMove);
       canvas.removeEventListener("pointerup", handlePointerEnd);
       canvas.removeEventListener("pointercancel", handlePointerEnd);
+      disposeGlbAnimationRuntime(animation);
       viewport?.dispose();
     };
   }, [palette, scheme]);
@@ -334,7 +378,7 @@ export function HeroStepRender() {
       <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-hidden">
         <canvas
           ref={canvasRef}
-          aria-label="Light 3D render of a sample STEP planetary gear assembly"
+          aria-label="3D render of a sample planetary gear assembly, its gears turning"
           className="absolute inset-0 h-full w-full cursor-grab touch-none active:cursor-grabbing"
         />
       </div>

@@ -1,144 +1,107 @@
-# Supported exports
+# Exports
 
-Read this file when the user requests STL, 3MF, or native GLB output files from
-CAD geometry. A `.step` comes from running the model script
-([model contract](step-generation.md)); 2D DXF belongs to the `$dxf` skill.
-Native GLB exports are ordinary glTF 2.0 binary for external tools: Y-up, one
-material per distinct part or face colour.
+Read this file when the user asks for STEP, STL, 3MF or GLB files, a part on its own,
+a model in another pose, or a package of a model's sources. 2D DXF belongs to `$dxf`.
 
-## Declare the exports the model always has
+The `.xbf` is the model; every other format is a translation of it, written by one
+writer from the document alone. Two ways to ask for one, which write the same bytes:
 
-Stack `@stl`, `@glb` or `@threemf` on the model for maintained mesh outputs. For
-example, a project-root `bracket.py`:
+- **A decorator** declares a file every build of the model keeps current
+  ([decorators](model-contract.md#decorators-declare-files)):
 
-```python
-from cadgen import build123d as bd
-from cadgen import glb, step, stl
+  ```python
+  from cadgen.engine import glb, step, stl, threemf, xbf
+  import build123d as bd
 
 
-@step(out="STEP/bracket.step")
-@stl(out="STL/bracket.stl")
-@glb(out="GLB/bracket.glb")
-def bracket():
-    return bd.Box(40, 20, 6)
+  @xbf(out="XBF/bracket.xbf")
+  @step(out="STEP/bracket.step")
+  @stl(out="STL/bracket.stl")
+  @threemf(out="3MF/bracket.3mf")
+  @glb(out="GLB/bracket.glb")
+  def bracket():
+      return bd.Box(40, 20, 6)
+  ```
 
+- **`cadgen export`** writes files from a document once, by each destination's
+  suffix, reading the document a single time:
 
-if __name__ == "__main__":
-    bracket()
-```
+  ```bash
+  cadgen export XBF/bracket.xbf STL/bracket.stl GLB/bracket.glb 3MF/bracket.3mf
+  ```
 
-Every run writes the STEP and the declared meshes, and restores declared outputs
-that were deleted or edited. Mesh declarations alone create no sidecar, and the
-export commands below never read them. Stacking order does not matter.
+A source is an `.xbf`, or a `.step` read into a document first. A mesh is never a
+source: it has no B-rep. Each file is written beside its target and moved over it,
+so a failed export leaves the old file whole.
 
-## A model with no STEP
+## Formats
 
-A function with `@stl`, `@glb` or `@threemf` and no `@step` is a full model (same
-tree, record, no-op and composition: `spacer()` inside another model links like
-any child) that writes its meshes and no `.step` or sidecar. Its format's
-`snapshot` renders it, and `cadgen store why spacer.py` explains its freshness.
+- **STEP** (AP242): the assembly with its instance and product names, colours per
+  part and per painted face, materials' names and densities, and the element names on
+  every face, edge and vertex, so a STEP read back keeps them. It drops the rest of a
+  material's look and physical fields, a face's material (the face keeps its colour),
+  and the mechanism: a STEP is placements only, as built or as `--pose` puts them.
+- **GLB**: glTF 2.0, Y up, in metres. One mesh per part, a node per placement named
+  by its occurrence, a PBR material per look (with the glTF extensions for IOR,
+  transmission, clear coat, anisotropy and emission where a material has them), and
+  each of the model's motions as an animation of the same name
+  ([motions](kinematics.md#motions)): the one export that carries motion.
+- **3MF**: an object per part, a build item per placement, in millimetres, with
+  colours and materials through the materials extension.
+- **STL**: binary, every placed triangle, in millimetres.
+- **DXF**: of a planar document only (`$dxf`); a solid is refused.
+- **xbf**: from a STEP (converting a vendor file, below), or a part of a document
+  with `--part`.
 
-```python
-from cadgen import build123d as bd
-from cadgen import stl
+Mesh exports and the viewer draw the same meshes, made at one tolerance: FreeCAD's
+default (a chord deviation of 0.5% of the mean side of each part's bounding box, and
+28.5 degrees), configurable nowhere. A face the mesher leaves without triangles is left out, so a mesh export has
+a hole there; the snapshot of the document names such faces in a warning, and they
+are usually slivers a boolean left. Repair the face in the model.
 
-
-@stl(out="STL/spacer.stl", mesh_tolerance=4e-4)
-def spacer():
-    return bd.Cylinder(6, 3) - bd.Cylinder(2.5, 3)
-
-
-if __name__ == "__main__":
-    spacer()
-```
-
-Maintained draft/print variants can keep the model's stem in separate subfolders:
-
-```python
-@stl(out="STL/draft/bracket.stl", mesh_tolerance=8e-3)
-@stl(out="STL/print/bracket.stl", mesh_tolerance=4e-4)
-```
-
-## Tool
-
-One door per format (`cadgen stl build`, `cadgen 3mf build`, `cadgen glb build`),
-each taking a saved STEP/STP and an optional OUT (default: a sibling with the
-format's extension; an explicit OUT is relative to the working directory):
+## Poses and parts
 
 ```bash
-cadgen stl build STEP/model.step                     # writes STEP/model.stl
-cadgen stl build STEP/model.step meshes/model.stl    # one ad-hoc export
+cadgen export XBF/arm.xbf STEP/arm_folded.step --pose folded
+cadgen export XBF/arm.xbf STEP/arm_45.step --pose '{"elbow": 45}'
+cadgen export XBF/kit.xbf STL/wheel_2.stl XBF/wheel_2.xbf --part kit/axle.2/wheel
 ```
 
-An unchanged export reports `current`; `--force` re-exports without rebuilding
-the source model. A mesh door never writes a `.step`. `cadgen glb build
---animation CLIP` writes a clip into the GLB as glTF animation
-([exporting the clip inside a GLB](kinematics.md#exporting-the-clip-inside-a-glb)).
+- `--pose` places the mechanism's links at a configuration, or at joint and coupling
+  values, before anything is written ([kinematics](kinematics.md#reviewing-motion)).
+  A posed `.xbf` is refused: a pose is a request, never a document.
+- `--part OWNER` writes one part or assembly, named as a ref names it
+  ([references](inspection-and-validation.md#references)), as a document of its own,
+  its root at that occurrence's own frame: a printable part, or a robot link's mesh
+  in the link's frame. Its `.xbf` keeps the mechanism's share of it. An owner that
+  names several occurrences is refused, listing them.
+- Neither is declared or cached: each is an export of the moment.
 
-## Rendering a mesh file
-
-Each mesh format has a `snapshot` verb with `cadgen step snapshot`'s grammar:
+## A vendor STEP
 
 ```bash
-cadgen stl snapshot STL/bracket.stl tmp/bracket_mesh.png
-cadgen 3mf snapshot 3MF/bracket.3mf tmp/bracket_3mf.png
-cadgen glb snapshot meshes/bracket.glb tmp/bracket_glb.png
+cadgen export vendor/motor.step vendor/motor.xbf
 ```
 
-A mesh carries no CAD topology. Its snapshot door accepts `--display solid`
-(the default) or `--display parts` (each object or mesh its own colour), `--grid`
-for the measuring grid, and `--preview` for Preview's photographic view. Inline JSON
-and JSON files are the Viewer's display object: `mode`, `grid`, `appearance`,
-`camera`, `clip` and `exploded`. `display.clip` cuts it (`at` in the file's own
-unit: a GLB's metres, a 3MF's declared unit, an STL's own numbers) and
-`display.exploded` moves a GLB's nodes apart (a GLB of one is refused as it renders).
-The `shaded`, `xray`, `hidden-line` and `wireframe` modes are STEP-only and are
-refused by name, as `exploded` is for an STL or a 3MF.
-Mesh doors do not have
-`--focus`/`--hide`, `--kinematics`, or `--animation`/`--time`; meshes have no
-canonical CAD occurrences, kinematics,
-or document animation clips for those controls to act on. `cadgen step snapshot`
-refuses a mesh input and names the door that takes it.
+writes an xbf of the STEP: the same geometry, names, colours and materials, read
+many times faster by `read_xbf` than the STEP by `read_step`. Convert once, keep the
+xbf beside the STEP, and read the xbf in models
+([inputs](model-contract.md#inputs)).
 
-The picture is the scene the CAD Viewer draws for the same file, built by the same code:
-an STL or a 3MF is its objects in their colours, and a GLB is its own glTF scene (nodes,
-skins, morph targets and authored materials), so `--preview` shows the finish the
-file authored. A GLB's clips play in the viewer; its snapshot is the file at rest.
-
-For a mesh-only model, this is its required visual review. When a STEP is also
-produced, review that document and render the mesh when tessellation or external
-tool output is the question. Pure format conversion with unchanged geometry
-follows the skip cases in [snapshot review](snapshot-review.md).
-
-## Mesh tolerance
-
-Mesh exports are cadgen's mesh of each component's exact surfaces. Faces that
-meet share their boundary vertices, and identical inputs produce identical bytes.
-An export that names no tolerance is written at the display tolerance, from the
-very meshes the CAD Viewer and snapshots draw.
-
-A mesh decorator takes `mesh_tolerance=` and `mesh_angular_tolerance=`; an export
-command takes the same two as flags (the model's declarations are not read):
+## A package of the model
 
 ```bash
---mesh-tolerance FLOAT           # chord tolerance RELATIVE to each component's
-                                 # bounding diagonal (default 5e-4)
---mesh-angular-tolerance FLOAT   # max normal spread across a triangle edge,
-                                 # radians (default 0.35)
+cadgen export XBF/bracket.xbf bracket.cadz
 ```
 
-`--json` results report the effective pair.
+A `.cadz` zips the `.xbf` with its build closure's source files (the script and
+every module it reached) and its input files at their places relative to one another;
+`--no-inputs` leaves the inputs out. Extracted and built, it writes the same `.xbf`
+bytes again, but for the repository commit the original names.
 
-Linear tolerance is relative, not millimetres: for a chord deviation of X mm on a
-part whose bounding diagonal is D mm, pass X/D (0.1 mm on a 200 mm part is
-`5e-4`). Linear tolerance must be from `5e-5` to `0.05` and angular tolerance
-from `0.05` to `1.5708` radians, on flags and decorators alike; finer settings
-take minutes per curved face without visible gain. A value outside is refused
-before anything builds.
+## Other tools
 
-A face no mesher can cover (typically a sliver a boolean left, narrower than the
-chord tolerance) never fails the export: the part is written without it, and the
-result's `warnings` name it, for example `#o:4b1f9e2a7c03 pin: 1 face
-(f:pin.make_box1.2;M:pin.cut1) could not be meshed, so pin.stl has a hole in place of it: it is
-not watertight`. Repairing the face in the model, or a finer `--mesh-tolerance`,
-closes the hole.
+STL and 3MF files are in millimetres and a GLB in metres, so a URDF or SDF scales an
+STL or 3MF link mesh by `0.001` and takes a GLB as it is. A check of an export as a
+mesh is a snapshot of that file
+([mesh files](snapshot-review.md#mesh-files-robots-and-drawings)).

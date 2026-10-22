@@ -21,9 +21,10 @@ protocol relationship never imports Python or discovers an interpreter.
   resolved of it, and the bytes cadgen made — never source, never a build. A
   document the cadgen engine serves (an `.xbf`, or a STEP, which opens as one) is
   what the engine serves of it: its structure and one buffer per part
-  (`lib/xbf/xbfDocument.js`). A STEP render package on a static host (the docs
-  hero's) is its tree, each component's stored mesh, and what cadgen resolved the
-  document's sidecar (`<name>.step.json`) into, as static files beside it: the
+  (`lib/xbf/xbfDocument.js`). A STEP render package on a static host is its tree,
+  each component's stored mesh, and what cadgen resolved the document's sidecar
+  (`<name>.step.json`, the old pipeline's; no app draws one now) into, as static
+  files beside it: the
   articulation of its kinematics, the baked animation keyframes, and per occurrence
   what its appearance resolves to (material id and name, finish, base colour,
   opacity). The page reads no sidecar. A document ships no code, and no
@@ -101,8 +102,9 @@ protocol relationship never imports Python or discovers an interpreter.
   `lib/viewer/meshMeasure.js`, every number in the FILE's unit (`lib/viewer/sceneUnits.js`)
   and a mesh's measurement marked approximate. What a file's view offers is one rule,
   `viewFeaturesForKind` (`common/viewSettings.js`). `npm run check:boundaries` holds both callers
-  to the shared modules. A STEP render package's scene is `buildModel` (`common/cadScene.js`),
-  which the docs hero draws its static package with.
+  to the shared modules. A STEP render package's scene is `buildModel` (`common/cadScene.js`);
+  the docs hero is a GLB, read by `lib/render/glbMeshData.js` and played by
+  `lib/render/glbAnimationRuntime.js`, the viewer's own GLB path.
 - **Direct GLB stays native**: a direct GLB is its glTF scene graph (nodes, skins,
   morph targets, authored materials) with its translation, rotation, scale, skin and
   morph-weight tracks for a Three `AnimationMixer`, in the viewer and in a snapshot.

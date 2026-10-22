@@ -216,8 +216,8 @@ references do not promise to survive edits. Shared serialization handles quoting
 `formatPromptMessage(context, { attachmentPath })` is the one
 message a Quick Edit is, whether sent, queued or copied: what the person wrote;
 then `File: <path>`; then `References:` and one reference per line; then each
-JSON file by its label and path (`Views (cadgen snapshot --job): <job.json>`,
-`Annotation: <file.annotation.json>`), where `attachmentPath` says where it was saved.
+JSON file by its label and path (the views' `.snapshot.json`, an
+`.annotation.json`), where `attachmentPath` says where it was saved.
 No pictures are rendered, attached or sent.
 
 
@@ -258,7 +258,8 @@ written as one temporary `.snapshot.json` and named by path. Hosts use
 `resolvePromptMessage` to resolve an attachment's optional `inlineText` before its
 path, keeping destination binding inside the gesture. Drawing, selecting and typing
 keep data in memory. Nothing renders at the press. The agent saves inline JSON to
-a temporary file before calling `cadgen snapshot --job <file>`.
+a temporary file, then draws a view the ink was drawn in with
+`cadgen snapshot <document> <out.png> --annotation <file> --camera authored`.
 **Copy Prompt** is always there: the message goes through
 `ClipboardPort.writeText`, which takes a `Promise<string>` so the write starts
 inside the gesture while the files are still being made; its references name their

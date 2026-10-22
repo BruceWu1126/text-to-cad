@@ -1,7 +1,8 @@
 # Render Pipeline
 
 `@text-to-cad/core` exposes a staged render pipeline for shared viewer, docs, and generated
-snapshot browser-runtime work. A STEP render package (the docs hero's, on a static host) goes:
+snapshot browser-runtime work. A STEP render package on a static host goes (no app draws
+one now: the docs hero plays a GLB, below):
 
 ```js
 const source = await loadSource(input, sourceOptions);
@@ -404,13 +405,12 @@ Accepted input fields:
 - A caller that passes a `resolved` packet together with any source URL must also pass
   `resolved.inputPath`. Render asset caches are page-lifetime, so a resolved job has to name the
   source its cache entries belong to; a resolved job without `inputPath` is rejected rather than
-  cached under an unidentified source. Callers with no `resolved` packet (the docs hero
-  renderer) render one source per page and need nothing.
+  cached under an unidentified source. Callers with no `resolved` packet render one
+  source per page and need nothing.
 - `selectorRuntime` and `displayEdgeRuntime`: preloaded runtimes when a caller
   already owns sidecar loading.
 - `kinematics`: pose values for the model's kinematics — a declared preset name,
-  or `{dof: value}`. Same spelling as the `--kinematics` flag, the snapshot job
-  key and the sidecar section.
+  or `{dof: value}`.
 - `resolved.articulation`: cadgen-resolved model articulation
   (`.step.json`) URL, whose `kinematics` section is compiled here.
 - `quality.tessellation`: explicit STEP tolerances in every mode. When
@@ -774,37 +774,35 @@ Two names, two things, and they are not interchangeable:
 
 ## Examples
 
-Docs usage:
+Docs usage, the hero: one GLB cadgen exported, read and played the way the viewer reads
+and plays a GLB, and drawn by `renderModel` from a model of a root and its bounds:
 
 ```js
 import * as THREE from "three";
-import { loadSource, packageSourceFromBaseUrl } from "@text-to-cad/core/common/source.js";
-import { buildModel } from "@text-to-cad/core/common/cadScene.js";
+import { buildGlbDocumentFromBuffer } from "@text-to-cad/core/lib/render/glbMeshData.js";
+import { createGlbAnimationRuntime, setGlbAnimationTime } from "@text-to-cad/core/lib/render/glbAnimationRuntime.js";
 import { renderModel } from "@text-to-cad/core/common/renderModel.js";
 
-// A static package: its tree beside each component's mesh. `articulation` and
-// `sourceAnimation` are what cadgen resolved the model's sidecar into, as the package's files.
-const descriptor = await (await fetch("/models/part/assembly.json")).json();
-const source = await loadSource({
-  ...packageSourceFromBaseUrl("/models/part", descriptor),
-  cadPath: "models/part.step",
-  articulation,
-  controls: { drive: 180 },
-  sourceAnimation
-});
+const glb = await buildGlbDocumentFromBuffer(await (await fetch("/hero/planetary.glb")).arrayBuffer(), {});
+const placed = new THREE.Group();                 // the file in CAD space: millimetres, Z up
+placed.matrix.fromArray(glb.cadRootMatrix);
+placed.matrixAutoUpdate = false;
+placed.add(glb.scene);
+const root = new THREE.Group();
+root.add(placed);
 
-const model = buildModel(THREE, source, {
-  theme,
-  displayMode: "shaded_edges",
-  edgeSettings,
-  stepParameters: source.pose
-});
-
-const viewport = renderModel(THREE, model, {
+const clip = glb.clips.find((candidate) => candidate.name === "meshCycle");
+const animation = createGlbAnimationRuntime(THREE, glb.scene, clip);
+let elapsed = 0;
+const viewport = renderModel(THREE, { root, bounds: glb.animatedBounds }, {
   canvas,
   hostElement: canvas.parentElement,
   theme,
-  autoStart: true
+  autoStart: true,
+  beforeRender: ({ deltaSeconds }) => {
+    elapsed = (elapsed + deltaSeconds) % clip.duration;
+    setGlbAnimationTime(animation, elapsed);
+  }
 });
 ```
 

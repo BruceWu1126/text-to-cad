@@ -250,6 +250,8 @@ RULES: tuple[Rule, ...] = (
     Rule(("apps/mcp/**",), select(flags=["mcp", "packaging"])),
     Rule(("apps/api/**",), select(flags=["api"])),
     Rule(("apps/docs/**",), select(flags=["docs"])),
+    # The hero's GLB check holds the GLB to the motion its model's script declares.
+    Rule(("models-xbf/assemblies/src/planetary_gear_assembly/planetary_gear_assembly.py",), select(flags=["docs"])),
     # check-dependencies.mjs walks every app's source and runs in core-js, the cheapest job
     # that has it.
     Rule(("apps/docs/src/**",), select(flags=["core_js"])),

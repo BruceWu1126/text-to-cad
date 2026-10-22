@@ -1,128 +1,166 @@
-# Inspecting and checking saved CAD in Python
+# Inspecting and checking documents in Python
 
-Checks are small Python scripts against the saved STEP/STP; there is no
-inspection command. A check reads the last saved document, so it sees a source
-edit only after the model runs. Paths resolve from the working directory and
-expand `~`.
+Checks are small Python scripts against a document, an `.xbf` or a STEP; there is
+no inspection command beyond `cadgen where`. A check reads the document as the
+latest build wrote it, so it sees a source edit only after the model runs. Paths
+resolve from the working directory and expand `~`.
 
 ## Opening and selecting geometry
 
 ```python
-from cadgen import read_step, read_scene
+from cadgen.engine import read_xbf, select
 
-shape = read_step("STEP/bracket.step")  # native build123d geometry
-scene = read_scene("STEP/assembly.step")  # hierarchy and exact selector refs
+kit = read_xbf("XBF/kit.xbf")                        # the document as a build123d tree
+for part in kit.leaves:                               # every placed part
+    print(part.label, part.volume)
 
-print(scene.document_hash)
-for occurrence in scene.leaves():
-    print(occurrence.ref, occurrence.label, occurrence.prototype_id)
-
-housing = scene.resolve("#housing")
-print(housing.ref, housing.kind)
-solid_or_compound = housing.shape()
-for face in housing.entities("face"):
-    print(face.ref, face.shape().area)
+hand = select(kit, "kit/hand")[0]                     # an assembly: a Compound of its components
+tip = select(kit, "hand/finger.2/f:finger.tip.1")[0]  # a Face, world coordinates
+edges = select(kit, "hand/finger.2/f:finger.tip.1", kind="edge")   # that face's edges
+print(tip.label, tip.area, len(edges))
 ```
 
-- `scene.roots` and `occurrence.children` are tuples; `scene.leaves()` yields the
-  geometry occurrences, repeated copies included. A leaf can hold several solids.
-- `scene.resolve(ref)` returns a selection with `ref`, `kind`, `occurrence_ref`,
-  `shape()` and `entities(kind)`, for kinds `"face"`, `"edge"` and `"vertex"`;
-  each entity carries its own ref, the occurrence's token and the element's name.
-- `shape()` is caller-owned exact geometry in document world coordinates; a group
-  gives an unfused compound. Keep it when making several queries.
-- `prototype_id` names geometry shared within this scene, so a body-local check
-  can run once per prototype. It is not an identity across revisions.
-- A scene is bound to one document hash: reopen it after the file changes, and
-  keep it open rather than reopening (each open re-hashes the document). It shows
-  the saved placement, not sidecar poses or animation.
-- Inside a model, the document either function reads is a build input.
+- `read_xbf(path)` and `read_step(path)` read a document into a build123d compound
+  tree: each assembly a `Compound` of its components, each part named, coloured and
+  given its material as the file has them, each element keeping the file's name for
+  it.
+- `select(source, ref, kind=None)` returns a `ShapeList`, one shape per selector of
+  the ref: an element as a `Face`, `Edge` or `Vertex`, a part as its shape, an
+  assembly as a `Compound` of its components, all in world coordinates. With `kind`
+  (`"face"`, `"edge"` or `"vertex"`) it returns every such element under each
+  selector instead: of every part below an occurrence, or of an element (a face's
+  edges). Outside a build each shape's `label` is its canonical ref.
+- `source` is a document's path, a tree `read_xbf` or `read_step` returned, or a
+  model: outside a build, `select(bracket, ref)` builds the model through the
+  daemon first and reads its `.xbf`.
+- `bounding_box()` is the world-aligned envelope; `bounding_box(optimal=False)` is a
+  fast conservative one for curved geometry.
 
-### Reference syntax
+## References
+
+A ref names a part, an assembly or one element of a document by the engine's own
+names, resolved in the document as the latest build left it:
 
 ```text
-#o:4b1f9e2a7c03                                  an occurrence or subassembly, by its token
-#o:4b1f9e2a7c03/f:bracket.make_box1.6            a face of that leaf occurrence, by its name
-#housing/f:bracket.make_box1.6;M:bracket.cut1    a face of the occurrence labelled housing
-#housing/e:bracket.cut1~5d1e0c2f9a3b             an edge whose derivation is folded
-#f:bracket.make_box1.6                           a face, only when the scene has exactly one leaf
-#o:4b1f9e2a7c03/f:9d2e8c1b5a70                   a face named by its geometry (an imported file's)
-part.step#o:4b1f9e2a7c03                         a file-prefixed ref matching the opened STEP
+REF      = [FILE "#"] SELECTOR ("," SELECTOR)*
+SELECTOR = OWNER | [OWNER "/"] ELEMENT          no OWNER: the document's root
+OWNER    = SEGMENT ("/" SEGMENT)*               an occurrence's path, or its last segments
+SEGMENT  = LABEL | LABEL "." N | "QUOTED" ["." N]
+ELEMENT  = NAME | face N | edge N | vertex N    NAME: f:..., e:..., v:...
 ```
-
-An occurrence's token is `o:` and twelve lower-case hexadecimal characters,
-minted from its place in the tree (its parent's token, its name, its placement).
-An element's name is `f:`, `e:` or `v:` and how the model's operations made it,
-from what the CAD kernel reported. It starts at an element an operation made
-from nothing -- `f:bracket.make_box1.6`, the sixth face of the first `make_box`
-the function `bracket` called for that part -- and adds a step for each
-operation that made it out of another: `;M:bracket.cut1` when the first cut
-modified it (trimmed it, holed it), `;Gf:bracket.cut1` when the cut generated it
-from a face (a hole's rim, from the face it is cut in, with the cylinder's face
-after a `+`), `;Ge:part.extrude1` for an extrusion's side generated from a
-profile edge. An element the kernel reported nothing about is named from a named
-neighbour (`;U` from a face or edge it bounds, `;L` from its own edges or
-vertices), and the pieces of one face a cut split differ by a number in the
-step (`;M:bracket.cut1`, `;M2:bracket.cut1`). An operation
-is the function, then the build123d operation and how many times that function
-had called it in making the part, or the label of a shape the model labelled and
-made something else of (`f:boss.3`, in `plate + boss`; a part placed as it is
-keeps its own names, its label naming the occurrence). A name longer than 48
-characters is folded to its last operation and a digest
-(`e:bracket.cut1~5d1e0c2f9a3b`): copy it whole. An operation that leaves an
-element alone, or only moves the part, does not rename it, and lines are never
-in a name, so moving code renames nothing; a name changes when an operation
-starts or stops changing what it names. The viewer, the build's warnings and
-`resolve()` all name a face alike, and each entity of
-`scene.resolve("#occurrence").entities("face")` carries its name in its `ref`.
-An element no operation of the model's run
-made -- every element of an imported STEP -- is named by its geometry: `f:`,
-`e:` or `v:` and twelve hexadecimal characters, hashed from the element's shape
-within its body (a face's surface class, tight box and normal; an edge's curve
-class, end points and length; a vertex's point). `resolve()` also finds an
-element by that geometric name in a document whose elements are named by
-operations, measuring the body's geometry the first time it is asked. One
-reference per `resolve()` call. A group has no faces of its own:
-`scene.resolve("#group").entities("face")` enumerates its leaves' faces.
-
-Labels use letters, digits, `_` and `:`, and cannot start with a digit; other
-names stay reachable by occurrence token. Duplicate labels get numbered aliases
-in occurrence order (`#wheel_1`, `#wheel_2`), and the bare duplicate label
-raises, listing them.
-
-A copied reference's file prefix is the file's absolute path (quoted when it holds
-a space or `#`) and must name the opened document; a relative prefix may match
-the end of the document's path.
-
-### Which code made it
-
-`cadgen store where <file.step> <ref>` answers, for a STEP a model of this
-cadgen wrote, which operation at which line of the model's code made what the
-ref names -- a part's body, a face, an edge or a vertex -- and, for an element,
-which operation last modified it (a cut that trimmed a box's face, a fillet that
-shortened an edge), each as `file:line in function (operation)` with the
-operation's name. The ref is one the viewer copies or `resolve()` takes
-(`#o:…`, `#o:…/f:…`, `#label/e:…`). It reads the build's own account of the
-run, written with the model's record, so it speaks for the file's current bytes
-only: after an edit, run the model, then ask. `--json` returns the answer as
-data; the exit status is 0 when it knows and 1 when it does not (no build of
-this cadgen, other bytes, a body read from a file or built outside build123d's
-constructions), with the reason.
 
 ```text
-$ cadgen store where STEP/bracket.step "#bracket/f:bore.make_cylinder1.1;M:bore.cut1"
-document  /work/STEP/bracket.step
-ref       #o:624d1aa32b5a/f:bore.make_cylinder1.1;M:bore.cut1
-model     /work/src/bracket.py::bracket
-face      made by bracket.py:6 in bore (Solid.make_cylinder)   bore.make_cylinder1
-          last modified by bracket.py:6 in bore (cut)   bore.cut1
+kit/hand/finger.2                       the second component labelled finger in hand
+finger.2/face 7                         face 7 of it: the path may start at any level that names one occurrence
+palm/f:palm.body.3;M:palm.relief        a face of palm by its name
+/work/XBF/kit.xbf#palm,finger.1         two selectors, with the document's path first
+"m3/screw"/f:kit.screw.1                a label holding '/', ',' or a quote is JSON-quoted
+plate/face 3                            in a document of one part, its elements by the document's name
 ```
 
-The bore wall is the cylinder's face, trimmed by the cut that bored it. A name
-holds the operations that made the element what it is, so the same name answers
-across the builds of a model that leave those operations alone, `store where`
-spells a folded name out from the build's record, and a face of a placed child
-model is answered from that child's own build.
+- **An occurrence is named by the labels on the way to it.** Siblings sharing a
+  label are numbered among them, in component order, so a repeated part is always
+  reached by its path, never by a number across the document. A label naming several
+  occurrences is refused with their paths (`finger names 3 occurrences in kit.xbf:
+  hand/finger.1, hand/finger.2, hand/finger.3`).
+- **An element is named by its name or its number.** Numbers are the part's own
+  face, edge and vertex numbers, the ones the viewer and `cadgen where` show; a
+  name survives edits that a number does not. A bare element after an owner belongs
+  to that owner (`palm,f:palm.body.1`).
+- **`FILE` must be the document resolved in**: the same file, or the last segments of
+  its path. The viewer copies a ref with the file's absolute path first.
+- **A ref resolves now, never as it was.** An element a later build moved or resized
+  resolves where it is; one it deleted fails, naming it; one whose making changed
+  fails too, listing what its atom is named now (`plate.body.6 is now
+  f:plate.body.6`), never guessing.
+- **The canonical ref**, what `select` labels a shape with and `cadgen where`
+  answers, spells an element by its name under its part's label where that label
+  names one occurrence, else under the occurrence's path from the root.
+
+### Element names
+
+Every face, edge and vertex of a part is named by the feature history that made it,
+so it keeps its name until that history changes. A name is its kind, the element it
+starts from, and a step for each feature that made it out of another:
+`f:plate.body.3;M:plate.relief` is face 3 of `plate`'s `body`, modified by `relief`.
+
+- **A feature is the author's name for its result**: `relief = body - hole` in the
+  function `plate` is `plate.relief`. The calls one statement made on the way are
+  `<function>.<target>_<operation><n>` (`standoff.post_make_cylinder1`).
+- **A reassignment is told apart by its statement's shape**: `body = body - bore`
+  is `bracket.body_dnjoch`, the tag spelled from the statement with its numbers
+  masked. So a dimension edit keeps every name, and inserting a statement of another
+  shape renames none of the others.
+- **A result assigned nowhere** (a model's return expression) is
+  `<function>.<operation><n>` (`plate.fuse1`). A helper that builds a shape in its
+  `return` statement hands it to its caller, whose assignment names it.
+- **A label on a shape names what later features make of it** (`f:boss.3` in
+  `plate + boss`), and a placed part keeps its prototype's names: its label names the
+  occurrence.
+- **An element read from a file** keeps the name the file gives it (a STEP or an
+  `.xbf` this engine wrote names every face), else it is named by the read and its
+  number within its part: `motor = read_step(...)` in `rig` names face 12 of a
+  foreign STEP `f:rig.motor.12`.
+- A long name folds to its last feature and a digest (`f:plate.relief~5d1e0c2f9a3b`):
+  copy names whole.
+
+Renaming a variable renames that feature's elements and nothing else; moving code
+renames nothing.
+
+### Selecting in a model's body
+
+A body selects from the live shape it is building, by the names this build gives
+it; the selected element's parent is its part, so build123d operations on it act on
+that part:
+
+```python
+from cadgen.engine import select, xbf
+import build123d as bd
+
+from plate import plate
+
+
+@xbf
+def bracket():
+    base = plate()
+    top = select(base, "f:plate.body.6;M:plate.relief")[0]   # the face a person picked
+    return base + bd.Pos(top.center(bd.CenterOf.MASS)) * bd.Cylinder(4, 10)
+```
+
+A model never selects from a file its own build writes: the name is the same in the
+live shape.
+
+## Which code made it
+
+`cadgen where DOC REF` answers what a ref names, placed where its occurrence stands:
+
+- an element: its kind, number, name and canonical ref; the kernel's facts (a face's
+  area, centroid, surface type, exact box, radius; an edge's length, curve type, class
+  and endpoints; a vertex's position); and `made_by`: the feature that made it, its
+  operation, and the function, file and line of the call;
+- a part or an assembly: its volume, and its mass from each part's material density,
+  with the parts that have no material listed under `unweighed`.
+
+```text
+$ cadgen where XBF/bracket.xbf "bracket/face 7"
+{
+  "ref": "bracket/f:bracket.bore.1;M:bracket.body_dnjoch",
+  "kind": "face",
+  "ordinal": 7,
+  "area": 150.796...,
+  "surface": "cylinder",
+  "radius": 4.0,
+  "made_by": {"feature": "bracket.body_dnjoch", "operation": "cut", "function": "bracket",
+              "file": "/work/src/bracket.py", "line": 12},
+  ...
+}
+```
+
+The bore's wall is face 1 of the cylinder `bore`, modified by the cut whose result
+`body` took. `made_by` comes from the worker that built the document, while it lives;
+after the daemon restarts it is `null` until the model builds again. A ref of several
+selectors answers a list; one that names nothing is refused (exit 2). Without a REF,
+`cadgen where DOC` prints the document's build closure.
 
 ## Measurements
 
@@ -137,9 +175,6 @@ radius = circular_edge.radius
 size = shape.bounding_box().size
 ```
 
-The default `bounding_box()` searches for tight bounds and can be slow on curved
-geometry; `bounding_box(optimal=False)` is a fast conservative envelope.
-
 ```python
 from cadgen.geometry import closest_points, overlap_volume
 
@@ -151,17 +186,16 @@ volume = overlap_volume(solid_a, solid_b)
 contact and containment all give 0, so it does not measure penetration.
 `overlap_volume` is the exact intersection volume (mm³) of two finite, positively
 oriented solids, 0 for mere contact; pair bodies with
-`scene.resolve("#group").shape().solids()`.
-Kernel failures raise.
+`select(document, "group")[0].solids()`. Kernel failures raise.
 
 Two solids at `overlap_volume` 0 at most touch. A pair meant to overlap (a
 press-fit pin, a bearing in its bore) is named as such, not inferred from where it
 sits in the tree. A part meant to sit on, bolt to or bear against another measures
-`closest_points` distance 0 against it; above 0 is a gap, and the part floats.
-Over many parts, two `bounding_box(optimal=False)` envelopes that do not meet rule
-a pair out, leaving the exact queries for the pairs that remain. Both queries
-measure the saved placement: a part clear at rest can still pass through another
-in a pose or a clip ([reviewing motion](kinematics.md#reviewing-motion)).
+`closest_points` distance 0 against it; above 0 is a gap, and the part floats. Over
+many parts, two `bounding_box(optimal=False)` envelopes that do not meet rule a pair
+out, leaving the exact queries for the pairs that remain. Both measure the parts as
+built: a part clear there can still pass through another in a pose
+([reviewing motion](kinematics.md#reviewing-motion)).
 
 ## Geometry diagnostics
 
@@ -170,20 +204,28 @@ from cadgen.geometry import is_sound, topology_errors, boundary_edges, self_inte
 
 ok = shape.is_valid                       # bool: BRepCheck passes (build123d)
 clean = is_sound(shape)                   # bool: the boolean kernel's argument check passes, expensive
-issues = topology_errors(shape)            # tuple[GeometryIssue, ...]
+issues = topology_errors(shape)           # tuple[GeometryIssue, ...]
 free = boundary_edges(shell)              # tuple[Edge, ...]
 crossings = self_intersections(shape)     # tuple[GeometryIssue, ...], expensive
 ```
 
 A `GeometryIssue` has `code` (an OCCT `BRepCheck_*` or `BOPAlgo_SelfIntersect`
 status) and `entities`. An inconclusive check raises `GeometryError` rather than
-passing; none of these repair geometry. `is_sound` is `BRepAlgoAPI_Check`'s
-verdict, the gate a fuse or cut demands of an operand (`False` for a null or
-empty shape). A reversed solid can pass topology checks with negative volume and
-aggregate volumes can cancel, so signed volume is checked per solid; no free
-edges means closed, not manifold.
+passing; none of these repair geometry. `is_sound` is `BRepAlgoAPI_Check`'s verdict,
+the gate a fuse or cut demands of an operand (`False` for a null or empty shape). A
+reversed solid can pass topology checks with negative volume and aggregate volumes
+can cancel, so signed volume is checked per solid; no free edges means closed, not
+manifold.
+
+A face the mesher could not triangulate is named wherever the document is drawn:
+the snapshot warns with the part and the face, and the viewer leaves it out. It is
+usually a sliver a boolean left.
 
 ## Mass properties
+
+A part given a material (`part.material = materials.aluminium_6061`,
+[materials](build123d-modeling.md#colour-and-materials)) is weighed by
+`cadgen where DOC OWNER`. For explicit densities, a centre of mass or inertia:
 
 ```python
 from cadgen.geometry import mass_properties

@@ -7,17 +7,14 @@ from cadgen.eng_drawing import eng_drawing, Sheet
 ## Template
 
 ```python
-from pathlib import Path
-
-import cadgen
 from cadgen.eng_drawing import Sheet, eng_drawing
-# The facts the dimensions reference come from the model, not from this file.
-from enclosure import HOLES, L, H, W
+# The part, and the facts the dimensions reference, come from the model, not from this file.
+from enclosure import HOLES, L, H, W, enclosure
 
 
 @eng_drawing(out="../PDF/enclosure_drawing.pdf")
 def enclosure_drawing():
-    part = cadgen.read_step(Path(__file__).parent / "../STEP/enclosure.step")
+    part = enclosure()    # the model's body, run here; a big model: read_xbf its .xbf instead
     sheet = Sheet("A3", title="ENCLOSURE", part_number="ENC-001", material="ABS",
                   revision="A", general_tolerance="ISO 2768-m",
                   notes=["BREAK SHARP EDGES."])
@@ -50,11 +47,21 @@ argument list carries that, so the decorator is the whole surface.
 
 ## The part
 
-`cadgen.read_step(path)` returns build123d geometry and reads warm from the
-store. Anchor the path on the script
-(`Path(__file__).parent / "../STEP/part.step"`) — it resolves against the
-process's working directory otherwise. A live build123d shape works too; a
-drawing takes geometry, not a file.
+Call the model: outside a build a model is its function, so `enclosure()` runs its
+body in the drawing's process and returns the part, cold. For a big model, read the
+document its last build wrote instead (run `python enclosure.py` first):
+
+```python
+from pathlib import Path
+
+from cadgen.engine import read_xbf
+
+part = read_xbf(Path(__file__).parent / "../XBF/enclosure.xbf")
+```
+
+`read_step` reads a STEP that has no model the same way. Anchor the path on the
+script, since it resolves against the process's working directory otherwise. Any
+build123d shape works: a drawing takes geometry, not a file.
 
 ## `Sheet(size="A3", scale=1.0, title=..., part_number="", material="", revision="A", author="", units="mm", projection="THIRD ANGLE", notes=(), ink="mono", text_height=3.5, general_tolerance="", revisions=())`
 
