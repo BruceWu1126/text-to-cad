@@ -89,8 +89,8 @@
   },
   "grid": {
     "colour": "#4ea8cc",
-    "cells": 4.0,
-    "extent": 1.5,
-    "axes": false
+    "cells": 20.0,
+    "extent": 6.0,
+    "axes": true
   }
 }

@@ -353,6 +353,32 @@ class HeldTest(unittest.TestCase):
                                                                              "key": "0" * 32}]}, {})
 
 
+class GridPaperTest(unittest.TestCase):
+    """The viewer's grid rule (core's stageGrid.js): the round step and the cells of a model at rest."""
+
+    def test_the_step_is_the_round_number_nearest_on_a_log_scale(self) -> None:
+        from cadgen.engine.render.grid import round_step
+
+        for target, expected in ((1.0, (1.0, 1)), (1.4, (1.0, 1)), (1.5, (2.0, 2)), (3.0, (2.0, 2)), (3.3, (5.0, 5)),
+                                 (7.0, (5.0, 5)), (7.2, (10.0, 1)), (0.031, (0.02, 2)), (450.0, (500.0, 5))):
+            step, digit = round_step(target)
+            self.assertAlmostEqual(step, expected[0], msg=target)
+            self.assertEqual(digit, expected[1], target)
+
+    def test_the_paper_of_a_model_at_rest(self) -> None:
+        from cadgen.engine.render.grid import paper
+
+        sheet = paper((0, 0, 0), (100, 60, 30))  # its diagonal 120.4: framing 125.2, a step near 6.26
+        self.assertAlmostEqual(sheet.framing, float(np.linalg.norm((100, 60, 30))) * 1.04)
+        self.assertEqual((sheet.cell, sheet.every, sheet.major), (5.0, 10, 50.0))
+        self.assertAlmostEqual(sheet.fade_start, sheet.framing * 1.5)
+        self.assertAlmostEqual(sheet.fade_end, sheet.framing * 6.0)
+        small = paper((0, 0, 0), (0.1, 0.1, 0.1))  # each side at least 1, the radius at least 1: framing 2.08
+        self.assertEqual((small.cell, small.every), (0.1, 10))
+        two = paper((0, 0, 0), (30, 0, 0))  # framing 31.2: a step near 1.56 is 2, a major every 5th
+        self.assertEqual((two.cell, two.every, two.major), (2.0, 5, 10.0))
+
+
 class RenderProcessTest(unittest.TestCase):
     """The render process, as the daemon talks to it: a version held, frames answered with PNG
     bytes, and gone after a frame that leaves it over its memory cap."""

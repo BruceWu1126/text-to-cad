@@ -506,24 +506,11 @@ class Scene:
 
     # --- grid, explode, overlays -----------------------------------------------------------------
 
-    def grid(self, on: bool = True) -> None:
-        from OCP.Aspect import Aspect_GridDrawMode, Aspect_GridType
-        from OCP.gp import gp_Ax3, gp_Dir, gp_Pnt
+    def grid(self, on: bool = True) -> float:
+        """The viewer's measuring grid for the camera framed (``grid.py``; after ``frame``), or none."""
+        from cadgen.engine.render import grid
 
-        viewer = self.canvas.viewer
-        if not on:
-            viewer.DeactivateGrid()
-            return
-        low, high = self.rest_bounds()
-        size = float(max(high[:2] - low[:2]))
-        step = 10 ** math.floor(math.log10(max(size / LOOK.grid.cells, 1e-6)))
-        viewer.SetPrivilegedPlane(gp_Ax3(gp_Pnt(0, 0, float(low[2])), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0)))
-        viewer.SetRectangularGridValues(0, 0, step, step, 0)
-        viewer.SetRectangularGridGraphicValues(size * LOOK.grid.extent, size * LOOK.grid.extent, 0)
-        viewer.SetGridEcho(False)
-        viewer.ActivateGrid(Aspect_GridType.Aspect_GT_Rectangular, Aspect_GridDrawMode.Aspect_GDM_Lines)
-        grid = viewer.Grid()
-        grid.SetColors(_color(LOOK.grid.colour), _color(LOOK.grid.colour))
+        return grid.show(self, on)
 
     def explode(self, amount: float) -> float:
         from cadgen.engine.render.explode import offsets
