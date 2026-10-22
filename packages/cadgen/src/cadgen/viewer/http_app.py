@@ -760,7 +760,7 @@ class CadApp:
         and this one starts real work — a render that a development restart
         would throw away (``restart_is_safe`` waits for it as well).
 
-        The payload is already JSON bytes from the store's ``drawing`` index,
+        The payload is already JSON bytes, held in memory by the file's bytes,
         so it goes out through ``send_bytes`` rather than being decoded and
         re-encoded on the way past.
         """

@@ -1,6 +1,6 @@
 """The engine's verbs as functions, one per command; ``cadgen xbf`` is a thin argparse over them.
 
-    build(code, *, name=None, xbf=None, step=None, glb=None, stl=None, threemf=None) -> Built
+    build(code, *, name=None, xbf=None, step=None, glb=None, stl=None, threemf=None, dxf=None) -> Built
     export(source, *destinations, pose=None, part=None) -> list[Written]
     snapshot(source, out, *, display=None, camera=None, grid=False, preview=False, pose=None,
              width=None, height=None, annotation=None, measurements=None) -> Drawn
@@ -42,7 +42,7 @@ from typing import Any, Callable, Iterator, TypeVar, cast
 __all__ = ["Built", "Drawn", "EngineError", "Facts", "Report", "Served", "Written", "build", "daemon", "export",
            "observers", "serve", "snapshot", "status", "stop", "where"]
 
-KINDS = ("xbf", "step", "glb", "stl", "threemf")
+KINDS = ("xbf", "step", "glb", "stl", "threemf", "dxf")
 
 
 class EngineError(RuntimeError):
@@ -250,8 +250,8 @@ def _built(script: Path, functions: list[str] | None, *, code: str | None = None
 
 
 def build(code: str, *, name: str | None = None, xbf: Any = None, step: Any = None, glb: Any = None,
-          stl: Any = None, threemf: Any = None, verify: bool = False, log: Callable[[str], None] | None = None,
-          daemon: bool = True, progress: Any = None) -> Built:
+          stl: Any = None, threemf: Any = None, dxf: Any = None, verify: bool = False,
+          log: Callable[[str], None] | None = None, daemon: bool = True, progress: Any = None) -> Built:
     """Build source text, ``cadgen build SOURCE`` (law 12): ``code`` assigns its final shape to
     ``result``, and is built as ``name`` (``model`` by default) in the warm worker of that name.
     Code declares nothing, so its file flags are its declarations, additive among themselves:
@@ -263,7 +263,7 @@ def build(code: str, *, name: str | None = None, xbf: Any = None, step: Any = No
     disk. A script's models build by running the script, or by ``Model.build()``."""
     from cadgen.engine.build import code_script
 
-    outputs = _outputs({"xbf": xbf, "step": step, "glb": glb, "stl": stl, "threemf": threemf})
+    outputs = _outputs({"xbf": xbf, "step": step, "glb": glb, "stl": stl, "threemf": threemf, "dxf": dxf})
     name = name or "model"
     cwd = Path.cwd()
     script = code_script(name, cwd)
@@ -309,10 +309,11 @@ def _source(source: Any) -> dict[str, Any]:
 def export(source: Any, *destinations: Any, pose: Any = None, part: str | None = None, inputs: bool = True,
            log: Callable[[str], None] | None = None, daemon: bool = True) -> list[Written]:
     """Write a document to each destination, its kind from its suffix (``.xbf``, ``.step``,
-    ``.glb``, ``.stl``, ``.3mf``): the document of an ``.xbf``, of a ``.step`` read into one,
-    of a script's model (``script.py::model`` or a ``Model``, built first) or of built code
-    (a ``Built``). Several destinations read the document once. ``daemon=False`` does it in
-    this process, cold. A GLB carries every motion the document defines, as a clip.
+    ``.glb``, ``.stl``, ``.3mf``, and ``.dxf`` of a planar document): the document of an
+    ``.xbf``, of a ``.step`` read into one, of a script's model (``script.py::model`` or a
+    ``Model``, built first) or of built code (a ``Built``). Several destinations read the
+    document once. ``daemon=False`` does it in this process, cold. A GLB carries every motion
+    the document defines, as a clip.
 
     A ``.cadz`` destination packages an ``.xbf`` with its build closure's source files and,
     unless ``inputs`` is False, its inputs (``export.cadz``), in this process: no document is

@@ -19,8 +19,9 @@ SRC = ENGINE.parent.parent
 # rasteriser (a dependency of the cadgen wheel already).
 LIBRARIES = {"OCP", "build123d", "numpy", "PIL"}
 # By module, what one imports beyond those: the snapshot page's browser, which snapshot.py drives
-# for a mesh file (a GLB, STL or 3MF), the one picture OCCT does not draw.
-BESIDES = {"snapshot.py": {"playwright"}}
+# for a mesh file (a GLB, STL or 3MF), the one picture OCCT does not draw; and ezdxf, build123d's
+# own DXF library, which the DXF export writes and checks a drawing with.
+BESIDES = {"snapshot.py": {"playwright"}, "export/dxf.py": {"ezdxf"}}
 
 
 class StandaloneTest(unittest.TestCase):

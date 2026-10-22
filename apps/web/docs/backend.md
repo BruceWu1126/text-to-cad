@@ -273,12 +273,15 @@ not add one).
   ~150 bytes.
 - **`layers`** lists only layers that drew something, in first-seen order.
 
-The payload is derived data, cached in the store's `drawing` index under the
-document's content hash plus the extraction scheme, so a second request for
-unchanged bytes re-serves stored bytes without entering — or importing —
-ezdxf. See `packages/cadgen/STORE.md` §2.
+The route reads the file whole on every request and holds each answer in the
+viewer's memory by those bytes — the last 8, the one asked for least recently
+going first; nothing is written. A second request for unchanged bytes (the file
+touched, copied or put back) is answered from memory without entering — or
+importing — ezdxf, and other bytes are rendered from the bytes read, so an
+answer is always the payload of the bytes it is held by. Every DXF takes this one
+path, one a cadgen model wrote and a vendor's alike.
 
-Bytes the store has not drawn are rendered OFF the request
+Bytes it holds no answer for are rendered OFF the request
 (`cadgen/viewer/drawings.py`): the request starts the render on a thread of its
 own, or joins the one already running for those bytes, and waits on it at most
 2 s. A render that ends within that is the answer; one still running answers
@@ -288,8 +291,7 @@ share the host's few slots). The client bounds each request by how long the
 server stays silent — 10 s to the headers, then 10 s between parts of the body —
 never by how long a drawing takes, so a drawing that renders for a minute opens,
 and a server that stopped answering still fails. One render per drawing: every
-request for the same bytes joins it, and its answer is kept for 30 s after it
-ends, so the next request is answered even where the store could not keep it.
+request for the same bytes joins it, and its answer is held when it ends.
 Rendering is CPU-bound Python (~0.2 s for 2,000 lines of text, ~1 s for 6,000,
 ~3 s for 100,000 LINEs on a warm laptop) and still holds the GIL against the
 server's other threads while it runs. If drawings that size become routine, the

@@ -1,8 +1,9 @@
 """Models: the decorators, a model's identity, and what calling one does.
 
 A model is a parameterless function that returns a build123d shape, decorated with
-``@xbf`` and any of the derived-file decorators ``@step``, ``@glb``, ``@stl`` and
-``@threemf``. Its identity is ``script.py::function``. Every decorator takes ``out`` and
+``@xbf`` and any of the derived-file decorators ``@step``, ``@glb``, ``@stl``, ``@threemf``
+and ``@dxf`` (the drawing of a planar result: a sketch, a face, wires or edges). Its
+identity is ``script.py::function``. Every decorator takes ``out`` and
 nothing else: ``@xbf(out=None)`` makes the function a model, its document at ``out``
 (``XBF/<function>.xbf`` beside the script by default); a derived-file decorator declares a
 translation of the built document at ``out`` (``<function><suffix>`` beside the script by
@@ -42,12 +43,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-__all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration", "glb", "memo", "motion", "paint",
+__all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration", "dxf", "glb", "memo", "motion", "paint",
            "read_step", "read_xbf", "step", "stl", "threemf", "xbf", "models_in"]
 
 # The suffix each output kind writes, and the default file name's.
-SUFFIXES = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf"}
-_ACCEPTED = {"xbf": (".xbf",), "step": (".step", ".stp"), "glb": (".glb",), "stl": (".stl",), "threemf": (".3mf",)}
+SUFFIXES = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "dxf": ".dxf"}
+_ACCEPTED = {"xbf": (".xbf",), "step": (".step", ".stp"), "glb": (".glb",), "stl": (".stl",), "threemf": (".3mf",),
+             "dxf": (".dxf",)}
 KINDS = tuple(SUFFIXES)
 # Where a model's xbf is when its decorator names none: this folder beside the script.
 XBF_FOLDER = "XBF"
@@ -286,6 +288,11 @@ def _decorator(kind: str) -> Callable[..., Any]:
         decorate.__doc__ = ("Make a function a model: ``@xbf`` or ``@xbf(out=\"path.xbf\")`` (default "
                             "``XBF/<function>.xbf`` beside the script). The function takes no parameters and "
                             "returns a build123d shape.")
+    elif kind == "dxf":
+        decorate.__doc__ = ("Declare a drawing of a model's planar document: ``@dxf`` or ``@dxf(\"path.dxf\")`` "
+                            "(default ``<function>.dxf`` beside the script) -- its only argument. The model "
+                            "returns 2D build123d geometry on z=0: one shape is the layer CUT, a compound's "
+                            "labelled children a layer each.")
     else:
         decorate.__doc__ = (f"Declare a file derived from a model's document: ``@{kind}`` or ``@{kind}(\"path"
                             f"{SUFFIXES[kind]}\")`` -- its only argument; the file shows the model as its "
@@ -298,6 +305,7 @@ step = _decorator("step")
 glb = _decorator("glb")
 stl = _decorator("stl")
 threemf = _decorator("threemf")
+dxf = _decorator("dxf")
 
 
 # --- @memo: a function worth replaying -------------------------------------------------

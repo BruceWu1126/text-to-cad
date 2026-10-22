@@ -308,8 +308,8 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
     a script takes no file flags (law 11). ``code`` builds source text instead: ``script`` is
     then ``code_script(name, cwd)`` and ``functions`` the one name; code declares nothing, so
     its files are its flags, ``outputs`` (law 12): ``{kind: {"out": path or None}}``, the kinds
-    ``xbf``, ``step``, ``glb``, ``stl``, ``threemf``, each at its path from the working folder or,
-    with none, where a decorator with no path puts it there (``XBF/<name>.xbf``,
+    ``xbf``, ``step``, ``glb``, ``stl``, ``threemf``, ``dxf``, each at its path from the working
+    folder or, with none, where a decorator with no path puts it there (``XBF/<name>.xbf``,
     ``<name><suffix>``). Every file shows the model as its joints place it: a pose or a part is
     the ``export`` verb's, never a build's.
 
@@ -604,8 +604,10 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
                 if source is None:
                     source = export.Source.built(doc, tree, xbf)
                 size = export.translate(source, target.kind, target.path)
-                fresh = True
-                files[str(target.path)] = (signature, target.kind, _stat(target.path))
+                # A writer that found its bytes in the file left it there (a DXF): kept.
+                now = _stat(target.path)
+                fresh = now != stats[str(target.path)]
+                files[str(target.path)] = (signature, target.kind, now)
             seconds = time.perf_counter() - clock
             timings[target.kind] = round(seconds, 4)
             written[str(target.path)] = {"kind": target.kind, "written": fresh, "seconds": round(seconds, 4),

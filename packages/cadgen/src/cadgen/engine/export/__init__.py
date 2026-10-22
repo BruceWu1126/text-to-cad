@@ -1,7 +1,7 @@
 """Exports: a document translated to a file. One writer, one document, two triggers.
 
 ``translate(document, kind, path, *, pose=None, part=None)`` writes one
-file of ``kind`` (``KINDS``: ``xbf``, ``step``, ``glb``, ``stl``, ``threemf``) from a
+file of ``kind`` (``KINDS``: ``xbf``, ``step``, ``glb``, ``stl``, ``threemf``, ``dxf``) from a
 document: a ``Source`` -- the document a build made, held in the worker's memory
 (``Source.built``), or one read from an ``.xbf`` or a ``.step`` (``Source.read``). A
 derived file a decorator declares and a file ``cadgen xbf export`` asks for are the same
@@ -14,9 +14,11 @@ root at the subtree's frame. Meshes are never sources: there is no B-rep in them
 is written from a STEP (read into a document first), or from an xbf with ``part`` (a
 sub-assembly extracted); a posed xbf is refused, since a pose is a request, never a
 document. A GLB carries every motion the document defines as a glTF animation of the same
-name, baked by forward kinematics (``export/motion.py``); STEP, STL and 3MF ignore motions.
+name, baked by forward kinematics (``export/motion.py``); STEP, STL and 3MF ignore motions. A
+DXF is drawn from a planar document alone (``export/dxf.py``): a 3D one is refused.
 
-Every file is written to a temporary file beside its target and moved over it.
+Every file is written to a temporary file beside its target and moved over it; a DXF only
+when its bytes change.
 
 Importing this package imports no kernel: a kind's writer loads on its first use.
 """
@@ -65,6 +67,8 @@ KINDS: dict[str, Kind] = {
     "glb": Kind("glb", (".glb",), "cadgen.engine.export.glb:write"),
     "stl": Kind("stl", (".stl",), "cadgen.engine.export.stl:write"),
     "threemf": Kind("threemf", (".3mf",), "cadgen.engine.export.threemf:write"),
+    # A drawing replaces its file itself, and only when its bytes change.
+    "dxf": Kind("dxf", (".dxf",), "cadgen.engine.export.dxf:write", atomic=False),
 }
 # What a source file is read as: documents only.
 SOURCES = (".xbf", ".step", ".stp")

@@ -32,7 +32,7 @@ again, which re-read the file and the store and hashed the whole body for every
 ``KEPT_BODY_SECONDS``, or to make room under ``KEPT_BODIES_MAX_BYTES``; a part
 asked for after that runs the route, as every part once did.
 
-A drawing the store has not drawn yet renders off the request
+A drawing whose bytes the viewer holds no answer for renders off the request
 (``cadgen.viewer.drawings``): here a request waits on it only briefly
 (``DRAWING_HOLD_SECONDS``), since calls share a host's few slots, and the 202
 has the page ask again a moment later (``DRAWING_RETRY_MS``). So does a STEP or

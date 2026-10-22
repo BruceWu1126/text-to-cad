@@ -43,7 +43,7 @@ command: str | None = None
 SERVERS = frozenset({"viewer", "mcp", "daemon"})
 API = "cadgen.engine.api"
 # An engine kind as telemetry names a format (``analytics.KINDS``); a model's document is an xbf.
-KINDS = {"xbf": "xbf", "step": "step", "glb": "glb", "stl": "stl", "threemf": "3mf", "model": "xbf"}
+KINDS = {"xbf": "xbf", "step": "step", "glb": "glb", "stl": "stl", "threemf": "3mf", "dxf": "dxf", "model": "xbf"}
 MESHES = frozenset({"stl", "glb", "threemf"})
 
 

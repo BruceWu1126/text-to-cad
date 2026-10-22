@@ -455,6 +455,31 @@ class UnreadableDrawings(DrawingFixture):
         payload = build_drawing_payload(path)
         self.assertTrue(payload["primitives"])
 
+    def test_bytes_read_already_draw_what_their_file_draws(self) -> None:
+        """The viewer renders the bytes it read (``data``): an ASCII drawing with text, an R12
+        one whose header names a code page, a binary one, and a damaged one, recovered."""
+        def notes(doc, msp) -> None:
+            msp.add_line((0, 0), (10, 0))
+            msp.add_text("ÄÖÜ ß", height=2).set_placement((0, 2))
+
+        paths = [self.write_drawing("ascii.dxf", notes)]
+        for name, version, fmt in (("r12.dxf", "R12", "asc"), ("binary.dxf", "R2010", "bin")):
+            document = ezdxf.new(version)
+            notes(document, document.modelspace())
+            document.saveas(str(self.tmp / name), fmt=fmt)
+            paths.append(self.tmp / name)
+        damaged = self.write_drawing("broken.dxf", lambda doc, msp: msp.add_line((0, 0), (10, 10)))
+        damaged.write_text(damaged.read_text(encoding="utf-8").replace("\nENDSEC\n  0\nEOF\n", "\n"),
+                           encoding="utf-8")
+        for path in [*paths, damaged]:
+            with self.subTest(path=path.name):
+                self.assertEqual(build_drawing_payload(path, path.read_bytes()), build_drawing_payload(path))
+        r12 = build_drawing_payload(paths[1], paths[1].read_bytes())
+        self.assertIn("ÄÖÜ ß", json.dumps(r12, ensure_ascii=False), "decoded in the code page its header names")
+        garbage = b"this is not a DXF\n" * 20
+        with self.assertRaisesRegex(DrawingReadError, "garbage.dxf.*audit"):
+            build_drawing_payload(self.tmp / "garbage.dxf", garbage)
+
     def test_an_unknown_primitive_type_is_a_loud_failure_not_a_dropped_shape(self) -> None:
         path = self.write_drawing("kind.dxf", lambda doc, msp: msp.add_line((0, 0), (1, 1)))
         with mock.patch.object(
