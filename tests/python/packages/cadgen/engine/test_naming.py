@@ -120,13 +120,11 @@ def baked():
 """
 
 
-IMPORTS = """
-from pathlib import Path
-
+# The model that writes the STEP is a script of its own: a model reads no file its own build
+# writes, a sibling's included.
+SOURCE = """
 import build123d as bd
-from cadgen.engine import read_step, step, xbf
-
-HERE = Path(__file__).parent
+from cadgen.engine import step, xbf
 
 
 @xbf
@@ -137,6 +135,16 @@ def source():
     peg = bd.Pos(30, 0, 0) * bd.Cylinder(3, 8)
     peg.label = "peg"
     return bd.Compound(children=[plate, peg])
+"""
+
+
+IMPORTS = """
+from pathlib import Path
+
+import build123d as bd
+from cadgen.engine import read_step, xbf
+
+HERE = Path(__file__).parent
 
 
 @xbf
@@ -421,10 +429,10 @@ class PlacedPartsTest(NamingCase):
 
 
 class ImportedNamesTest(NamingCase):
-    def parts(self, name: str, **fields: str) -> list[dict[str, list[str]]]:
+    def parts(self, name: str, text: str = IMPORTS, **fields: str) -> list[dict[str, list[str]]]:
         found = []
         for part in range(2):
-            found.append(self.names(IMPORTS, name=name, part=part, **fields))
+            found.append(self.names(text, name=name, part=part, **fields))
         return found
 
     def test_an_imported_element_is_named_within_its_own_product(self) -> None:
@@ -456,7 +464,7 @@ class ImportedNamesTest(NamingCase):
 
     def test_an_imported_element_the_file_names_keeps_that_name(self) -> None:
         # The engine's own STEP names every face: read back, each keeps its name.
-        written = self.parts("source", file="source.step", lift=0)
+        written = self.parts("source", SOURCE)
         read = self.parts("imported", file="source.step", lift=0)
         for source, imported in zip(written, read):
             self.assertEqual(sorted(imported["faces"]), sorted(source["faces"]))

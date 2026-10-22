@@ -23,7 +23,9 @@ instead of running it. A part's material is a value set on the shape: ``part.mat
 ``connect_to``, as built where the joints place the parts; ``configuration(assembly, name,
 **values)`` names a configuration of it and ``motion(assembly, name, ...)`` a motion, which a
 GLB export bakes into a clip. ``read_step(path)`` and ``read_xbf(path)`` copy a file's geometry into
-the model, named, coloured and given its materials as the file has them.
+the model, named, coloured and given its materials as the file has them. ``select(source, ref,
+kind=None)`` is the geometry a ref names -- ``hand/finger.2/f:finger.tip.1``, ``base/face 3`` --
+as build123d shapes in world coordinates (``refs``).
 Importing this package imports no kernel: the names below load on first use. Imported by a
 script run by its path from inside a package (``python proj/parts/model.py``), it gives the
 script the package ``python -m proj.parts.model`` would (``model.as_package_module``).
@@ -34,7 +36,7 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = ["Material", "configuration", "glb", "materials", "memo", "motion", "paint", "read_step", "read_xbf", "report",
-           "step", "stl", "threemf", "track", "xbf"]
+           "select", "step", "stl", "threemf", "track", "xbf"]
 
 
 def _main_in_a_package() -> None:
@@ -70,6 +72,10 @@ def __getattr__(name: str) -> Any:
         from cadgen.engine import progress
 
         return getattr(progress, name)
+    if name == "select":
+        from cadgen.engine.refs import select
+
+        return select
     if name in __all__:
         from cadgen.engine import model
 
