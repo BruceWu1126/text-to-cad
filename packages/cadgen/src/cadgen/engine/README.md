@@ -172,7 +172,7 @@ def hinge():
 python SCRIPT.py                             every model of the script, as its decorators declare
 cadgen build SOURCE | - [--name N]           one model from source text (stdin with -), its files
     [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify] [--no-daemon]
-cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] [--no-daemon]
+cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] [--no-daemon] [--json]
                                              SRC an .xbf or a .step
 cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
                 [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
@@ -184,6 +184,11 @@ cadgen status [--json] | stop | daemon
 ```
 
 `python -m cadgen.engine VERB ...` takes the same verbs, the engine's own entry.
+
+A verb's `--json` (`build`, `export`, `snapshot`, `status`) prints its answer as one JSON object
+on stdout, and a failure as `{"ok": false, "error": ...}` there too, exit status 1, so a caller
+reading stdout always finds an answer (`cli.answered`); without `--json` a failure is its words
+on stderr, exit 2 for a request refused by name before anything ran and 1 for one that failed.
 
 `python SCRIPT.py` builds every model the script defines, each writing what its
 decorators declare and each child model it calls what that model declares (laws 10 and

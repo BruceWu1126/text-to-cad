@@ -161,6 +161,38 @@ class SnapshotTest(unittest.TestCase):
         self.assertIn("display.exploded", done.stderr)
         self.assertFalse(out.exists())
 
+    def test_a_failure_under_json_is_its_envelope_on_stdout(self) -> None:
+        """Under --json a verb says its failure as ``{"ok": false, "error": ...}`` on stdout, the result's
+        channel, and exits 1; without it, its words on stderr: 2 for a request refused before anything ran."""
+        import contextlib
+        import io
+
+        from cadgen.engine import cli
+        from cadgen.engine.snapshot import main as snapshot_main
+
+        def run(call) -> tuple[int, str, str]:
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                status = call()
+            return status, out.getvalue(), err.getvalue()
+
+        out = str(self.folder / "enveloped.png")
+        for argv, said, status in ((["snapshot", str(self.folder / "missing.xbf"), out], "no document", 2),
+                                   (["snapshot", str(self.document), out, "--display", "sideways"], "sideways", 2),
+                                   (["build", "result = 1", "--xbf", "a.txt"], "must end in .xbf", 1)):
+            with self.subTest(argv=argv):
+                code, printed, err = run(lambda: cli.main([*argv, "--json"]))
+                found = json.loads(printed)
+                self.assertEqual((code, set(found), found["ok"], err), (1, {"ok", "error"}, False, ""))
+                self.assertIn(said, found["error"])
+                code, printed, err = run(lambda: cli.main(argv))
+                self.assertEqual((code, printed), (status, ""))
+                self.assertIn(said, err)
+        # A format's own snapshot: what it does not draw, refused in the same envelope.
+        code, printed, _err = run(lambda: snapshot_main([str(self.document), out, "--json"], prog="cadgen dxf snapshot",
+                                                        suffixes=(".dxf",)))
+        self.assertEqual((code, json.loads(printed)), (1, {"ok": False, "error": f"{self.document} is not a .dxf file"}))
+
     def test_explode_an_annotation_and_measurements_are_asked_for_by_flags_and_checked(self) -> None:
         self.assertEqual(parse_display("exploded=0.6", grid=False), {"exploded": {"enabled": True, "amount": 0.6}})
         self.assertEqual(parse_display("hidden-line,exploded", grid=True),

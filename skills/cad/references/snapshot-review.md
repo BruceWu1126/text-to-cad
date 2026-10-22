@@ -89,7 +89,8 @@ list:
 `--pose` poses a document's mechanism first: a configuration's name, or joint and
 coupling values as JSON ([reviewing motion](kinematics.md#reviewing-motion)).
 
-`--json` prints what was drawn and each stage's milliseconds as one JSON object.
+`--json` prints what was drawn and each stage's milliseconds as one JSON object,
+and a failure as `{"ok": false, "error": ...}` on stdout, with exit status 1.
 
 ## Clipped views
 

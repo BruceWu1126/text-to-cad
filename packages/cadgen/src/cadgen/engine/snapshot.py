@@ -691,17 +691,23 @@ def build_parser(prog: str = "cadgen snapshot") -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None, prog: str = "cadgen snapshot", suffixes: tuple[str, ...] = ()) -> int:
     """``cadgen snapshot SRC OUT.png``; with ``suffixes``, a command that draws those files alone
     (``cadgen dxf snapshot`` draws a ``.dxf``), refusing any other SRC by name before anything renders."""
-    args = build_parser(prog).parse_args(argv)
-    if suffixes and Path(args.document).suffix.lower() not in suffixes:
-        print(f"{prog}: {args.document} is not a {' or '.join(suffixes)} file", file=sys.stderr)
-        return 2
-    return run(args, prog)
+    from cadgen.engine.cli import Failed, answered
+
+    def drawn(args: argparse.Namespace, prog: str) -> int:
+        if suffixes and Path(args.document).suffix.lower() not in suffixes:
+            raise Failed(f"{args.document} is not a {' or '.join(suffixes)} file", 2)
+        return run(args, prog)
+
+    return answered(drawn, build_parser(prog).parse_args(argv), prog)
 
 
 def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
+    """The verb run from its parsed flags; a failure raised as ``cli.Failed``, which the command
+    says (``cli.answered``)."""
     if "::" in args.document or args.document.endswith(".py"):
         return _run_model(args, prog)
     from cadgen.engine import api
+    from cadgen.engine.cli import Failed
 
     try:
         # The verb as a function (``api.snapshot``), which checks the flags as ``snapshot`` does.
@@ -710,11 +716,9 @@ def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
                               size_profile=args.size_profile, daemon=not args.no_daemon, annotation=args.annotation,
                               measurements=args.measurements).report
     except SnapshotRefused as error:
-        print(f"{prog}: {error}", file=sys.stderr)
-        return 2
+        raise Failed(str(error), 2) from None
     except Exception as error:  # noqa: BLE001 - a failed render is the command's answer
-        print(f"{prog}: {type(error).__name__}: {error}", file=sys.stderr)
-        return 1
+        raise Failed(f"{type(error).__name__}: {error}") from None
     if args.json:
         print(json.dumps(report))
     else:
@@ -728,6 +732,7 @@ def _run_model(args: argparse.Namespace, prog: str) -> int:
     """``cadgen snapshot SCRIPT.py::MODEL OUT.png``: the model built in its worker, its
     document drawn from that worker's memory (``api.snapshot``)."""
     from cadgen.engine import api
+    from cadgen.engine.cli import Failed
 
     try:
         drawn = api.snapshot(args.document, args.out, display=args.display, camera=args.camera, grid=args.grid,
@@ -735,11 +740,9 @@ def _run_model(args: argparse.Namespace, prog: str) -> int:
                              size_profile=args.size_profile, daemon=not args.no_daemon, annotation=args.annotation,
                              measurements=args.measurements)
     except (SnapshotRefused, ValueError) as error:
-        print(f"{prog}: {error}", file=sys.stderr)
-        return 2
+        raise Failed(str(error), 2) from None
     except api.EngineError as error:
-        print(f"{prog}: {error}", file=sys.stderr)
-        return 1
+        raise Failed(str(error)) from None
     if args.json:
         print(json.dumps(drawn.report))
     else:

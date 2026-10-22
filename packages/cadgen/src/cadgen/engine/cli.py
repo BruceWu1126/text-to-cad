@@ -5,7 +5,7 @@
     cadgen build SOURCE | - [--name N]               one model from source text (stdin with -), its files
         [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify]
         [--no-daemon]
-    cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] [--no-daemon]
+    cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] [--no-daemon] [--json]
     cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--camera PRESET|az:el|JSON|authored] [--grid]
         [--preview] [--pose NAME|JSON] [--annotation FILE] [--measurements FILE] [--width N] [--height N]
         [--size-profile P] [--json]
@@ -14,7 +14,10 @@
     cadgen where DOC [REF]                           a document's build closure, or what a ref names (``refs``)
 
 cadgen's command line runs each verb by its name (``parser_for``, ``run``); the engine's own entry,
-``python -m cadgen.engine VERB ...``, takes the same verbs as subcommands (``main``).
+``python -m cadgen.engine VERB ...``, takes the same verbs as subcommands (``main``). A verb's failure
+is said once where its command ends (``answered``): under ``--json`` as ``{"ok": false, "error": ...}``
+on stdout, exit 1; else its words on stderr, exit 2 for a request refused by name before anything ran
+and 1 for one that failed.
 """
 
 from __future__ import annotations
@@ -26,7 +29,8 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-__all__ = ["VERBS", "build_parser", "main", "parser_for", "run", "run_script", "weighed", "where_main", "where_parser"]
+__all__ = ["VERBS", "Failed", "answered", "build_parser", "main", "parser_for", "run", "run_script", "weighed",
+           "where_main", "where_parser"]
 
 FILE_FLAGS = ("xbf", "step", "glb", "stl", "threemf", "dxf")
 _SUFFIX = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "dxf": ".dxf"}
@@ -64,6 +68,7 @@ def _export_arguments(export: argparse.ArgumentParser) -> None:
                         help="one part or assembly, as a ref names it (hand/finger.2, palm; cadgen.engine.refs): that "
                              "subtree as a document of its own")
     export.add_argument("--no-daemon", action="store_true", help="export in this process (cold, no worker kept)")
+    export.add_argument("--json", action="store_true", help="print what was written as JSON")
 
 
 def _serve_arguments(serve: argparse.ArgumentParser) -> None:
@@ -124,7 +129,37 @@ def run(verb: str, argv: list[str] | None = None, prog: str | None = None) -> in
     """One verb run as a command of its own: its arguments parsed by ``parser_for``."""
     prog = prog or f"cadgen {verb}"
     args = parser_for(verb, prog).parse_args(argv)
-    return VERBS[verb][2](args, prog)
+    return answered(VERBS[verb][2], args, prog)
+
+
+class Failed(Exception):
+    """A verb's failure, said once where its command ends (``answered``): its words, and the status
+    the command exits with -- 2 for a request refused by name before anything ran, 1 for one that
+    failed -- unless it answers in JSON."""
+
+    def __init__(self, words: str, status: int = 1) -> None:
+        super().__init__(words)
+        self.status = status
+
+
+def answered(runner: Callable[[argparse.Namespace, str], int], args: argparse.Namespace, prog: str) -> int:
+    """A verb's run, and its failure said once: under ``--json`` as ``{"ok": false, "error": ...}``
+    on stdout -- the result's channel, so a caller reading stdout always finds an answer -- and the
+    status 1; else its words on stderr and its own status. A failure no verb expected is said in
+    JSON too, then raised as ever (its traceback the person's, and a crash the command reports)."""
+    as_json = bool(getattr(args, "json", False))
+    try:
+        return runner(args, prog)
+    except Failed as failure:
+        if as_json:
+            print(json.dumps({"ok": False, "error": str(failure)}, separators=(",", ":")))
+            return 1
+        print(f"{prog}: {failure}", file=sys.stderr)
+        return failure.status
+    except Exception as error:
+        if as_json:
+            print(json.dumps({"ok": False, "error": f"{type(error).__name__}: {error}"}, separators=(",", ":")))
+        raise
 
 
 def _pose(value: str | None) -> Any:
@@ -190,14 +225,14 @@ def _verified(found: dict[str, Any] | None) -> str:
     return "".join(lines)
 
 
-def _file_flags(args: argparse.Namespace, prog: str) -> dict[str, Any]:
+def _file_flags(args: argparse.Namespace) -> dict[str, Any]:
     """The file flags, each True (its default path) or a path ending in its kind's suffix."""
     flags = {}
     for kind in FILE_FLAGS:
         value = getattr(args, kind)
         if isinstance(value, str) and Path(value).suffix.lower() != _SUFFIX[kind] and not (
                 kind == "step" and Path(value).suffix.lower() == ".stp"):
-            raise SystemExit(f"{prog}: --{kind} {value}: the file must end in {_SUFFIX[kind]}")
+            raise Failed(f"--{kind} {value}: the file must end in {_SUFFIX[kind]}")
         flags[kind] = value
     return flags
 
@@ -224,13 +259,12 @@ def _build(args: argparse.Namespace, prog: str) -> int:
     """``cadgen build SOURCE``: code, its flags its declarations (law 12)."""
     from cadgen.engine import api
 
-    flags = _file_flags(args, prog)
+    flags = _file_flags(args)
     code = sys.stdin.read() if args.source == "-" else args.source
     try:
         built = api.build(code, name=args.name, **flags, verify=args.verify, log=_log, daemon=not args.no_daemon)
     except api.EngineError as error:
-        print(f"{prog}: {error}", file=sys.stderr)
-        return 1
+        raise Failed(str(error)) from None
     return _reported([built.report], built.report.get("wall", 0.0), None, args.json)
 
 
@@ -249,23 +283,26 @@ def run_script(script: Path) -> int:
 
 
 def _export(args: argparse.Namespace, prog: str) -> int:
-    """``cadgen export SRC DST...``: an ``.xbf`` or a ``.step`` written to each destination."""
+    """``cadgen export SRC DST...``: an ``.xbf`` or a ``.step`` written to each destination; with
+    ``--json``, what was written as one JSON object."""
     from cadgen.engine import api
     from cadgen.engine.export import SOURCES, ExportRefused
 
     if Path(args.source).suffix.lower() not in SOURCES:
-        print(f"{prog}: {args.source} is no document: an export reads an .xbf or a .step", file=sys.stderr)
-        return 2
+        raise Failed(f"{args.source} is no document: an export reads an .xbf or a .step", 2)
     try:
         written = api.export(args.source, *args.destinations, pose=_pose(args.pose), part=args.part,
                              inputs=not args.no_inputs, log=lambda text: print(text, file=sys.stderr),
                              daemon=not args.no_daemon)
     except (ExportRefused, ValueError) as error:
-        print(f"{prog}: {error}", file=sys.stderr)
-        return 2
+        raise Failed(str(error), 2) from None
     except api.EngineError as error:
-        print(f"{prog}: {error}", file=sys.stderr)
-        return 1
+        raise Failed(str(error)) from None
+    if args.json:
+        print(json.dumps({"ok": True, "source": str(Path(args.source).resolve()),
+                          "files": [{"path": str(row.path), "kind": row.kind, "bytes": row.bytes, "seconds": row.seconds}
+                                    for row in written]}))
+        return 0
     for row in written:
         print(f"wrote {_shown(row.path)} ({row.bytes / 1e6:.1f} MB) in {row.seconds:.2f}s")
     return 0
@@ -274,8 +311,7 @@ def _export(args: argparse.Namespace, prog: str) -> int:
 def _serve(args: argparse.Namespace, prog: str) -> int:
     path = Path(args.document).resolve()
     if not path.is_file():
-        print(f"{prog}: no document {args.document}", file=sys.stderr)
-        return 2
+        raise Failed(f"no document {args.document}", 2)
     three = args.three
     if three is None:
         from cadgen.engine.serve import find_three
@@ -298,8 +334,7 @@ def _serve(args: argparse.Namespace, prog: str) -> int:
     try:
         print(api.serve(path, args.port, three).url)
     except api.EngineError as error:
-        print(f"{prog}: {error}", file=sys.stderr)
-        return 1
+        raise Failed(str(error)) from None
     return 0
 
 
@@ -354,16 +389,13 @@ def _where(args: argparse.Namespace, prog: str) -> int:
 
     path = Path(args.document).resolve()
     if not path.is_file():
-        print(f"{prog}: no document {args.document}", file=sys.stderr)
-        return 2
+        raise Failed(f"no document {args.document}", 2)
     try:
         found = api.where(path, args.ref)
     except ValueError as error:
-        print(f"{prog}: {error}", file=sys.stderr)
-        return 2
+        raise Failed(str(error), 2) from None
     except api.EngineError as error:
-        print(f"{prog}: {error}", file=sys.stderr)
-        return 1
+        raise Failed(str(error)) from None
     print(json.dumps(found, indent=2))
     return 0
 
@@ -397,8 +429,7 @@ def _stop(_args: argparse.Namespace, prog: str) -> int:
         return 0
     # Stopped means gone: the next command starts a fresh daemon, never reaches this one.
     if not wait_gone():
-        print(f"{prog}: the engine daemon did not exit", file=sys.stderr)
-        return 1
+        raise Failed("the engine daemon did not exit")
     print(json.dumps(answer, indent=2))
     return 0
 
@@ -406,7 +437,7 @@ def _stop(_args: argparse.Namespace, prog: str) -> int:
 def main(argv: list[str] | None = None, prog: str = "python -m cadgen.engine") -> int:
     """The engine's own command: ``VERB [args]``, every verb of ``VERBS``."""
     args = build_parser(prog).parse_args(argv)
-    return VERBS[args.verb][2](args, f"{prog} {args.verb}")
+    return answered(VERBS[args.verb][2], args, f"{prog} {args.verb}")
 
 
 def _span(seconds: Any) -> str:
