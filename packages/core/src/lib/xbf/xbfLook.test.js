@@ -105,6 +105,8 @@ test("X-ray: the colour-only model, its ambient and lights at pi times their rad
     direction.forEach((value, at) => near(light.towards[at], -value / length));
   }
   assert.deepEqual([rig.exposure, rig.toneCurve], [1, "clamp"]);
+  assert.equal(rig.blend, "linear", "its see-through surfaces blended in linear light, as OCCT's frame buffer blends them");
+  assert.equal(xbfLookRig(look).blend, undefined, "the regular modes' rig blends as three does");
   const surface = xbfLookXraySurface(look);
   const highlight = xbfLookHighlight(0.08, 0.35);
   assert.deepEqual([surface.colorPower, surface.brdf, surface.finishes], [2, null, false]);

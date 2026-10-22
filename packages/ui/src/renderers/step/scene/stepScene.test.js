@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
+import { headlessSceneDress } from "@text-to-cad/core/common/headlessScene.js";
+import { resolveViewSceneSettings } from "@text-to-cad/core/common/sceneSettings.js";
+import { viewFeaturesForKind } from "@text-to-cad/core/common/viewSettings.js";
+import { renderWithSceneRig, sceneRigFor } from "@text-to-cad/core/lib/viewer/sceneRig.js";
 import { isKitScene, sceneFramingBounds } from "../../kit/scene.js";
 import { createStepScene, stepSceneView } from "./stepScene.js";
 
@@ -163,5 +167,21 @@ test("dispose is not terminal: a development remount builds again in the same sc
   assert.equal(view.displayRecords, scene.displayRecords);
   assert.equal(isKitScene(view), true);
   assert.equal(scene.keepsAuthoredFinish, undefined);
+  scene.dispose();
+});
+
+test("a STEP scene brings no rig of its own: its X-ray is drawn as three draws it, never through a rig's linear frame", () => {
+  const scene = createStepScene(THREE);
+  scene.build(source([mesh(1), mesh(2)]), identity, settings);
+  const { look } = headlessSceneDress(resolveViewSceneSettings({ display: { mode: "xray" }, features: viewFeaturesForKind("step") }));
+  assert.ok(look.surface.opacity < 1, "X-ray's see-through surfaces");
+  const view = stepSceneView(scene, false);
+  assert.equal(sceneRigFor(view, look), null, "the viewport puts up no rig, so the stage holds none");
+  const drawn = [];
+  const renderer = { render: (stage, camera) => drawn.push([stage, camera]) };
+  const stage = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera();
+  renderWithSceneRig(null, renderer, stage, camera);
+  assert.deepEqual(drawn, [[stage, camera]], "one draw of the stage, by three");
   scene.dispose();
 });

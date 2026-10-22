@@ -31,7 +31,7 @@ import {
 import { syncRuntimeStepClipPlane } from "../lib/viewer/modelRuntime.js";
 import { createSceneClip } from "../lib/viewer/sceneClip.js";
 import { disposeSectionCaps } from "../lib/viewer/sectionCaps.js";
-import { applySceneRig, sceneRigFor } from "../lib/viewer/sceneRig.js";
+import { applySceneRig, renderWithSceneRig, sceneRigFor } from "../lib/viewer/sceneRig.js";
 import {
   applyExplodedViewProgress,
   clearExplodedViewRecords,
@@ -636,7 +636,8 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
   }
   // A family's scene that brings its own lighting (`sceneContract.js`'s `rig`, or `rigFor` the look
   // it wears) is lit by it outside Render, in place of the theme's rig, as the viewer's viewport
-  // lights it (`sceneRig.js`): its environment is the scene's.
+  // lights it (`sceneRig.js`): its environment is the scene's, and it is drawn as the rig blends
+  // (`renderWithSceneRig`, in `captureModel`).
   const ownRig = photographicConfiguration ? null : sceneRigFor(model.scene, model.look);
   const sceneRig = ownRig ? applySceneRig(THREE, { scene, renderer }, ownRig) : null;
   // PMREM generation is synchronous, but `ready` stays a promise so a failure
@@ -699,6 +700,8 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     perspectiveCamera,
     studioRuntime,
     studioConfiguration,
+    // The scene's own rig, up on this stage (`applySceneRig`), or null.
+    sceneRig,
     // The grid as drawn, for the depth fit: the viewer fits its near and far planes to it too.
     gridBounds: floor?.gridBounds ?? null,
     context,
@@ -1014,7 +1017,8 @@ export async function captureModel(viewport, captureOptions = {}) {
     }
     stageStarted = performance.now();
     syncViewportAnnotation(viewport, job, { height });
-    // Render is drawn through its studio's frame, every sample of it; anything else is one draw.
+    // Render is drawn through its studio's frame, every sample of it; anything else is one draw, as
+    // the scene's own rig blends it.
     const studioFrame = viewport.studioRuntime?.photographicStudio?.frame || null;
     if (studioFrame) {
       studioFrame.renderStill(viewport.renderer, viewport.scene, renderCamera, {
@@ -1024,7 +1028,7 @@ export async function captureModel(viewport, captureOptions = {}) {
         })
       });
     } else {
-      viewport.renderer.render(viewport.scene, renderCamera);
+      renderWithSceneRig(viewport.sceneRig, viewport.renderer, viewport.scene, renderCamera);
     }
     if (outputTimings) outputTimings.drawSubmitMs = Math.round(performance.now() - stageStarted);
     // WebGL submission can return before GPU completion. PNG readback may

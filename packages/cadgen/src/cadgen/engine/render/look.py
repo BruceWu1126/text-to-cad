@@ -52,8 +52,11 @@ directional lights white (Phong reads a directional light's colour, not its inte
 
 The viewer draws it with three's own physical model under the same lights (at ``pi`` times each
 radiance, three's Lambertian surface dividing by ``pi``) and no environment, its colour squared
-and a GGX lobe as wide as the Phong highlight (core's ``lib/xbf/xbfLook.js``), and blends it as
-three blends a see-through surface.
+and a GGX lobe as wide as the Phong highlight (core's ``lib/xbf/xbfLook.js``), and blends it in
+linear light, as OCCT's sRGB frame buffer blends it (its rig's ``blend``: the faces drawn into a
+half-float target and encoded once, the edges drawn over them after, as OCCT draws them in a layer
+over the model; core's ``lib/viewer/sceneRig.js``). The two order the faces apart: three sorts
+each part back to front, OCCT draws them as displayed.
 
 Edges are unlit lines in their class's colour, 1 px; Hidden line's faces are unlit in the
 backdrop's colour, hiding what is behind them; Wireframe draws edges alone. The grid is the viewer's measuring grid (core's

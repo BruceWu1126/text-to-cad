@@ -19,9 +19,12 @@ import { SURFACE_BRDFS } from "../viewer/surfaceBrdf.js";
 // the look was physically based: no finish, a part's material its colour alone, under an ambient
 // term and directional lights of a radiance each (OCCT's Phong reads no intensity), no environment
 // (`xbfLookXrayRig`), each surface's colour raised to the look's power with a small white highlight
-// (`xbfLookXraySurface`), blended at the mode's opacity as three blends any see-through surface.
-// Three's physical lights divide a Lambertian surface's light by π, so a radiance `r` is a light of
-// intensity `π r` here; the highlight is three's GGX lobe sized to the Phong one (`xbfLookHighlight`).
+// (`xbfLookXraySurface`), blended at the mode's opacity in linear light, as OCCT's sRGB frame
+// buffer blends it (the rig's `blend`, which the stage draws through a linear frame of its own:
+// `../viewer/sceneRig.js`); three's canvas blends each layer after encoding it, which draws dark
+// see-through parts darker. Three's physical lights divide a Lambertian surface's light by π, so a
+// radiance `r` is a light of intensity `π r` here; the highlight is three's GGX lobe sized to the
+// Phong one (`xbfLookHighlight`).
 
 const HEX = /^#[0-9a-f]{6}$/i;
 const LOOK_VERSION = 4;
@@ -205,7 +208,8 @@ export function xbfLookRig(look) {
 /**
  * The rig a stage lights an engine document's scene with in X-ray (`xbfLookXray`): the look's
  * colour-only model, its ambient and its lights at `π` times their radiance, each shining from
- * where its direction comes, no environment, exposure 1 and the look's curve.
+ * where its direction comes, no environment, exposure 1 and the look's curve, its see-through
+ * surfaces blended in linear light as OCCT's are.
  */
 export function xbfLookXrayRig(look) {
   return Object.freeze({
@@ -218,7 +222,8 @@ export function xbfLookXrayRig(look) {
     })),
     environment: null,
     exposure: 2 ** look.exposure,
-    toneCurve: look.tone
+    toneCurve: look.tone,
+    blend: "linear"
   });
 }
 

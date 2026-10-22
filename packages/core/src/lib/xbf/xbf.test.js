@@ -10,7 +10,12 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import * as THREE from "three";
 
+import { headlessSceneDress } from "../../common/headlessScene.js";
+import { resolveViewSceneSettings } from "../../common/sceneSettings.js";
+import { viewFeaturesForKind } from "../../common/viewSettings.js";
+import { recordingRenderer } from "../viewer/__tests__/recordingRenderer.js";
 import { isKitScene } from "../viewer/sceneContract.js";
+import { applySceneRig, renderWithSceneRig, sceneRigFor } from "../viewer/sceneRig.js";
 import { fetchXbfElementFacts, loadXbfDocument, placeXbfFacts, waitForXbfVersion, xbfDocumentSource } from "./xbfDocument.js";
 import { parseXbfLook, xbfLookRig, xbfLookSurface, xbfLookXrayRig, xbfLookXraySurface } from "./xbfLook.js";
 import { XBF_EDGE_CLASS, readXbmPart, xbmTriangleFaceRows, xbmUnmeshedFaces } from "./xbm.js";
@@ -297,6 +302,44 @@ test("display modes: the edges a mode draws, Hidden line's depth-only surfaces a
   assert.deepEqual([mesh.visible, mesh.material[0].colorWrite], [true, true], "and back to Solid");
   scene.setEdgeLook({ enabled: true, visibility: "visible", color: "#c9d3de" });
   assert.equal(feature.material.color.getHexString(), "c9d3de", "a line drawing's light ink");
+  scene.dispose();
+  document.release();
+});
+
+test("X-ray draws an engine document in linear light, through its rig's half-float frame; every other mode as three draws it", async () => {
+  const document = await loadXbfDocument(URL_BASE, { fetch: engine().fetch });
+  const scene = createXbfScene(THREE, document);
+  const camera = new THREE.OrthographicCamera();
+  // The regular modes' rig lights with the look's image: a PMREM generator that needs no WebGL.
+  class PMREMGenerator {
+    fromEquirectangular() { return { texture: new THREE.Texture(), dispose() {} }; }
+    dispose() {}
+  }
+  const three = { ...THREE, PMREMGenerator };
+  for (const mode of ["solid", "shaded", "parts", "xray", "hidden-line", "wireframe"]) {
+    // Each mode's look as a stage resolves it (`headlessSceneDress`, the viewport's resolver's twin),
+    // the rig the scene asks for in it put up and the scene drawn by it.
+    const { look } = headlessSceneDress(resolveViewSceneSettings({ display: { mode }, features: viewFeaturesForKind("xbf", { parts: 3 }) }));
+    scene.setSurfaceLook(look);
+    const { renderer, draws } = recordingRenderer();
+    const stage = { scene: new THREE.Scene(), renderer };
+    stage.scene.add(scene.object3D);
+    const up = applySceneRig(three, stage, sceneRigFor(scene, look));
+    renderWithSceneRig(stage.sceneRig, renderer, stage.scene, camera);
+    if (mode === "xray") {
+      assert.equal(up.frame.target.texture.type, THREE.HalfFloatType);
+      const [surfaces, encode, over] = draws;
+      assert.deepEqual([surfaces.target, encode.target, over.target, draws.length], [up.frame.target, null, null, 3],
+        "X-ray: the surfaces into the linear target, encoded once, the edges over them");
+      assert.ok(surfaces.drawn.length > 0 && surfaces.drawn.every(object => object.isMesh), "every surface in linear light");
+      assert.ok(over.drawn.length > 0 && over.drawn.every(object => object.isLine), "every edge over the encoded surfaces");
+    } else {
+      assert.equal(up.frame, null, mode);
+      assert.deepEqual(draws.map(draw => [draw.scene, draw.target]), [[stage.scene, null]], `${mode}: as three draws it`);
+    }
+    up.dispose();
+    scene.object3D.removeFromParent();
+  }
   scene.dispose();
   document.release();
 });

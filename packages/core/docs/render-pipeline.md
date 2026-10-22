@@ -50,7 +50,20 @@ The stages keep ownership narrow:
   OCCT's PBR program does, which its look is defined by, in place of three's own physical model.
   A scene may light one look otherwise (the contract's `rigFor`, asked through `sceneRigFor`): an
   engine document's X-ray is its look's colour-only model, an ambient term and plain directional
-  lights, no environment, three's own surface model and no finish, as OCCT draws it by Phong.
+  lights, no environment, three's own surface model and no finish, as OCCT draws it by Phong. A
+  rig may blend in linear light too (`blend: "linear"`, an engine document's X-ray): its
+  see-through surfaces composite as OCCT's sRGB frame buffer composites them, where three's canvas
+  blends each layer after encoding it to sRGB and draws dark see-through parts too dark. Every
+  stage draws a scene by `renderWithSceneRig`, which for such a rig draws the surfaces into a
+  half-float target in linear light (XR-flagged, so each fragment keeps the rig's tone curve),
+  multisampled as the canvas is, encodes that to the canvas with its depth in one pass, and then
+  draws what three orders after the surfaces (transparent, a later `renderOrder`: the edges, a
+  highlight, ink) over it as three always has, so a line's antialiased pixels stay resolved in
+  sRGB, as OCCT's are (`drawnOverSurfaces`); every other scene, mode and rig is three's own draw.
+  The target is the drawing buffer's size and lives with the rig: about 60 bytes a pixel at 4×
+  MSAA (some 360 MB at 3024 × 1964) while X-ray is on. Neither renderer orders see-through faces
+  as the other: three sorts each object back to front and draws a two-sided one back faces first,
+  OCCT draws them as they were displayed, which is most of what still differs.
 - `captureModel` owns deterministic snapshot outputs without filesystem writes.
 
 The CAD skill's Python snapshot CLI remains responsible for job parsing, path

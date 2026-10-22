@@ -13,6 +13,7 @@ import { fitCameraDepthToBounds } from "@text-to-cad/core/common/renderOptions.j
 import {
   screenSpaceLineDeviceResolution
 } from "@text-to-cad/core/common/renderEdges.js";
+import { renderWithSceneRig } from "@text-to-cad/core/lib/viewer/sceneRig.js";
 import {
   resolveInteractionPixelRatioCap
 } from "@text-to-cad/core/lib/viewer/renderQuality.js";
@@ -550,10 +551,11 @@ export function useViewerRuntime({
               }
               const drawCamera = runtimeRef.current?.camera || camera;
               // Render's lighting is drawn through its studio's frame, which converges a still
-              // view over its next frames (`photographicStudio.js`); anything else is one draw.
+              // view over its next frames (`photographicStudio.js`); anything else is one draw, as
+              // the scene's own rig blends it (`sceneRig.js`).
               const studioFrame = runtimeRef.current?.photographicStudio?.frame;
               if (studioFrame) refining = studioFrame.render(renderer, scene, drawCamera, { still }).refining;
-              else renderer.render(scene, drawCamera);
+              else renderWithSceneRig(runtimeRef.current?.sceneRig, renderer, scene, drawCamera);
             },
             presentationRequestRef?.current,
           );
