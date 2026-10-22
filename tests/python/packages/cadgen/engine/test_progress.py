@@ -117,6 +117,47 @@ class AuthorTest(unittest.TestCase):
         self.assertEqual(reports[2]["progress"]["model"], "a.py::b", "no frame of its own: the build's last")
 
 
+class StagesTest(unittest.TestCase):
+    """The engine's stages, said where a build reaches them (``build.py``): a model's body, its names,
+    its document and each file it writes, a child's files after its target's."""
+
+    def test_a_build_says_each_stage_of_each_model_it_writes(self) -> None:
+        from cadgen.engine import api
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-stages-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        (folder / "kit.py").write_text(textwrap.dedent("""
+            import build123d as bd
+            from cadgen.engine import step, xbf
+
+            @xbf
+            def peg():
+                return bd.Cylinder(1, 4)
+
+            @xbf
+            @step
+            def kit():
+                return bd.Compound(children=[bd.Box(4, 4, 1), bd.Pos(0, 0, 2) * peg()], label="kit")
+        """), encoding="utf-8")
+        here = Path.cwd()
+        os.chdir(folder)
+        self.addCleanup(os.chdir, here)
+        frames: list[dict] = []
+        api.build_script(folder / "kit.py", ["kit"], daemon=False, progress=frames.append)
+        said = [(frame["phase"], frame["model"], frame["detail"], frame["done"], frame["total"],
+                 [Path(path).name for path in frame["outputs"]]) for frame in frames]
+        self.assertEqual(said, [
+            ("load", "kit.py", "", 0, None, []),
+            ("body", "kit.py::kit", "", 0, None, ["kit.xbf", "kit.step"]),
+            ("names", "kit.py::kit", "", 0, None, ["kit.xbf", "kit.step"]),
+            ("document", "kit.py::kit", "", 0, None, ["kit.xbf", "kit.step"]),
+            ("write", "kit.py::kit", "kit.xbf", 0, 2, ["kit.xbf", "kit.step"]),
+            ("write", "kit.py::kit", "kit.step", 1, 2, ["kit.xbf", "kit.step"]),
+            ("names", "kit.py::peg", "", 0, None, ["peg.xbf"]),
+            ("document", "kit.py::peg", "", 0, None, ["peg.xbf"]),
+            ("write", "kit.py::peg", "peg.xbf", 0, 1, ["peg.xbf"])])
+
+
 class BarTest(unittest.TestCase):
     FRAMES = [{"model": "hand.py", "phase": "load", "label": "Loading the script", "detail": "", "done": 0,
                "total": None, "determinate": False},

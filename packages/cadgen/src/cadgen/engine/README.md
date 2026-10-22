@@ -307,8 +307,8 @@ def hand():
 `track` counts the items done and names the one in flight (`label(item)`, or the item itself
 when it is a string); a sized iterable gives the count its total, and a lazy one is passed
 through lazily, counted without one. `report` names what runs now. A body the memo replays
-runs nothing, and says nothing. The engine's half is its stages, heard where they begin
-(`progress.install`): `load` (the script loads), `body` (a model's body runs: "Building
+runs nothing, and says nothing. The engine's half is its stages, said where the build reaches
+them (`build.py`, through `progress.current`): `load` (the script loads), `body` (a model's body runs: "Building
 geometry"), `names` (its result collected and its elements named), `document` (its XCAF document
 made) and `write` (each file written: its name the detail, counted of the model's files).
 

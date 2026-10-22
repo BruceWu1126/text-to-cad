@@ -32,12 +32,10 @@ own. The author's frames are at least ``INTERVAL`` apart: one that comes sooner 
 latest held is sent when the interval is up (or with the next frame), so a count is never left
 stale behind a long item and a build's last state is always its last frame.
 
-The stages are the engine's own steps, heard where they begin (``install``, once a process, as the
-memo installs itself on the kernel): the files each model writes, planned (``Model.plan``), give
-its frames their ``outputs``; a model's body (``BuildContext.root``) opens ``body``; its result
-collected and its elements named (``document.collect``) ``names``; its XCAF document made
-(``document.to_xcaf``) ``document``; and each file written (``document.save``,
-``export.translate``) ``write``, the file's name its detail.
+The stages are the engine's own steps, said where the build reaches them (``build.py``, through
+``current``): the files each model writes, planned, give its frames their ``outputs``; a model's
+body opens ``body``; its result collected and its elements named ``names``; its XCAF document made
+``document``; and each file written ``write``, the file's name its detail.
 
 Whoever runs the build takes the frames (``building``): a worker sends them over its pipe and its
 daemon passes them on (``daemon``); a terminal draws them as a bar (``Bar``); the build's
@@ -54,7 +52,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Sized, TextIO
 
-__all__ = ["INTERVAL", "PHASES", "Bar", "Progress", "building", "describe", "install", "report", "track"]
+__all__ = ["INTERVAL", "PHASES", "Bar", "Progress", "building", "current", "describe", "report", "track"]
 
 # Each phase, in the order a build passes them, and its words.
 PHASES = {"load": "Loading the script", "body": "Building geometry", "names": "Naming elements",
@@ -85,7 +83,6 @@ class Progress:
         self.tracks: list[list[Any]] = []  # each running ``track``'s [done, total], the innermost last
         # Per model, by its script and function: its name in a frame and the files its build writes.
         self.planned: dict[tuple[str, str], tuple[str, list[str]]] = {}
-        self.inside = 0  # inside a file's translation: the steps it takes are that file's writing
         self.sent = float("-inf")
         self.held = False
         self.timer: threading.Timer | None = None
@@ -173,8 +170,6 @@ class Progress:
               count: list[Any] | None = None) -> None:
         """A phase begins: its own frame, sent at once."""
         with self.lock:
-            if self.inside:
-                return
             self.phase = phase
             if model is not None:
                 self.model = model
@@ -261,15 +256,18 @@ _BUILDS: list[Progress] = []  # the builds running in this process, the newest l
 _LOCK = threading.Lock()
 
 
-def _current() -> Progress | None:
+def current() -> Progress | None:
+    """This process's build (``building``), whose frames the engine's stages are; None outside one."""
     return _BUILDS[-1] if _BUILDS else None
+
+
+_current = current
 
 
 @contextlib.contextmanager
 def building(progress: Progress) -> Iterator[Progress]:
     """Inside it, ``progress`` is this process's build: the author's calls and the engine's stages
     are its frames. It is closed after (``Progress.close``)."""
-    install()
     with _LOCK:
         _BUILDS.append(progress)
     try:
@@ -312,73 +310,6 @@ def track(items: Iterable[Any], *, label: Callable[[Any], str] | None = None) ->
             current.advance(count)
     finally:
         current.counted(count)
-
-
-# --- the stages, heard where they begin ----------------------------------------------------------
-
-_INSTALLED = False
-_INSTALLING = threading.Lock()
-
-
-def _heard(original: Callable[..., Any], before: Callable[[Progress, tuple, dict], None], *,
-           enclosing: bool = False) -> Callable[..., Any]:
-    """``original``, its stage begun before it runs; ``enclosing``: the stages of what it calls
-    are its own (a file's translation makes a document, and saves it)."""
-
-    def stage(*args: Any, **kwargs: Any) -> Any:
-        current = _current()
-        if current is None:
-            return original(*args, **kwargs)
-        try:
-            before(current, args, kwargs)
-        except Exception:  # noqa: BLE001 - saying where a build is never fails it
-            pass
-        if not enclosing:
-            return original(*args, **kwargs)
-        current.inside += 1
-        try:
-            return original(*args, **kwargs)
-        finally:
-            current.inside -= 1
-
-    stage.__wrapped__ = original  # type: ignore[attr-defined]
-    stage.__name__ = getattr(original, "__name__", "stage")
-    stage.__doc__ = getattr(original, "__doc__", None)
-    return stage
-
-
-def _planned(original: Callable[..., Any]) -> Callable[..., Any]:
-    def plan(self: Any, *args: Any, **kwargs: Any) -> Any:
-        targets = original(self, *args, **kwargs)
-        current = _current()
-        if current is not None:
-            current.plan(self, [str(target.path) for target in targets])
-        return targets
-
-    plan.__wrapped__ = original  # type: ignore[attr-defined]
-    plan.__doc__ = original.__doc__
-    return plan
-
-
-def install() -> None:
-    """Hear the engine's stages in this process (see the module): once, and nothing changes
-    outside a build."""
-    global _INSTALLED
-    with _INSTALLING:
-        if _INSTALLED:
-            return
-        from cadgen.engine import document, export, model
-
-        model.Model.plan = _planned(model.Model.plan)
-        model.BuildContext.root = _heard(model.BuildContext.root, lambda current, args, _kw: current.body(args[1]))
-        document.collect = _heard(document.collect, lambda current, args, kwargs: current.named(
-            str(args[1] if len(args) > 1 else kwargs.get("name"))))
-        document.to_xcaf = _heard(document.to_xcaf, lambda current, _args, _kw: current.stage("document"))
-        document.save = _heard(document.save, lambda current, args, kwargs: current.writing(
-            args[1] if len(args) > 1 else kwargs["path"]))
-        export.translate = _heard(export.translate, lambda current, args, kwargs: current.writing(
-            args[2] if len(args) > 2 else kwargs["path"]), enclosing=True)
-        _INSTALLED = True
 
 
 # --- in words, and on a terminal ---------------------------------------------------------------
