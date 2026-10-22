@@ -819,7 +819,8 @@ in the prompt as JSON. Larger packets are written to system temporary storage as
 one `.snapshot.json` and named by path. Drawing, selecting and typing write nothing.
 Captured 3D views preserve projection and lens. No PNG is rendered or attached.
 To render inline JSON, the receiving agent saves it to a temporary file first,
-then runs `cadgen snapshot --job <file>`.
+then draws a view with `cadgen snapshot <document> <out.png> --annotation <file>
+--camera authored`.
 
 
 Queue and Send clear the note and what it carries, and so close the box, once the

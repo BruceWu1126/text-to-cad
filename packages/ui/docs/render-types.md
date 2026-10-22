@@ -45,7 +45,7 @@ format. Pure data: no behaviour, no imports beyond the format enum.
 | `tools` | `select`, `pan`, `draw`, `orbit`, `screenshot`. Orbit and screenshot are true for every format WITH a viewport — they act on the viewport, not the geometry. `dxf` claims none of them: it has no viewport, and its tools (Select, Annotate, Measure) are its renderer's own, over a 2D canvas. |
 | `parts` | Per-part selection, hiding, isolate, assembly tree. |
 | `topology` | Face/edge/vertex references. Implies `parts`. |
-| `params` | `sidecar` (the model's `@step(pose=...)` block), or `null`. |
+| `params` | `sidecar` on the STEP row, else `null`: left from the sidecar the engine document replaced; nothing reads it (`parameterSourceKind` has no caller). |
 | `animations` | Has animation clips, so transport controls apply. |
 | `artifactManaged` | Builds a package before it can render. A format listed here that the backend cannot produce a package for blocks forever, so a format the viewer renders from its own file belongs out. |
 

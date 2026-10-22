@@ -59,6 +59,17 @@ scripts/bundle/bundle.sh
 ./.venv/bin/python -m cadgen.cli urdf validate --help
 ```
 
+The engine draws every snapshot with OCCT in an OpenGL context. On Linux with no
+screen (a server, a container, CI) that context is an X server's: install Xvfb,
+Mesa's software GL and the font the stills set their text in, and run the cadgen
+suite or a snapshot under `xvfb-run`, as CI's Linux job does. Without a display a
+snapshot fails, saying so.
+
+```bash
+sudo apt-get install -y xvfb libgl1-mesa-dri fonts-dejavu-core
+xvfb-run -a -s "-screen 0 1920x1080x24 +extension GLX" scripts/test/test-python.sh --select cadgen
+```
+
 ### Native Windows
 
 Use PowerShell for Python and npm commands. Git for Windows supplies Git Bash,
@@ -117,6 +128,28 @@ For CAD Viewer development:
 npm ci
 npm run build:packages
 ```
+
+### The engine daemon
+
+Every build, export and snapshot runs in cadgen's engine daemon: one per
+installation (the interpreter and the engine folder it runs), started by the first
+command that needs it and gone after an idle hour, so a worktree's checkout gets a
+daemon of its own. Its socket (on Windows, a port file) and lock live in the system
+temporary folder's `cadgen-engine`; `CADGEN_ENGINE_DIR` moves them, which gives a
+test, a benchmark or an experiment a daemon to itself. `cadgen status` lists its
+workers, one per model script, each with its memo, and what each is building;
+`cadgen stop` stops it. A running daemon keeps the engine code it started with:
+after editing `packages/cadgen/src/cadgen`, stop the daemon you started so the next
+build runs the new code. Never stop one you did not start.
+
+The engine's switches are environment variables, never script options (the
+engine's README, **The daemon and its workers** and **Body retention**):
+`CADGEN_ENGINE_WORKERS`, `CADGEN_ENGINE_WORKER_IDLE`,
+`CADGEN_ENGINE_WORKER_RSS_MB`, `CADGEN_ENGINE_IDLE`, `CADGEN_ENGINE_MEMO=0` (no memo
+hits), `CADGEN_ENGINE_BODIES=0` (no body replay), `CADGEN_ENGINE_MESH=processes|inline`
+and `CADGEN_ENGINE_THREE` (the three.js folder `cadgen serve` pages load). The
+engine writes nothing but the files models declare: there is no cache folder to
+clear, and a restart is cold but for each model's `.xbf`.
 
 The skills ship no launcher scripts: every operational verb is a `cadgen`
 subcommand (`cadgen <verb>`, or `python -m cadgen.cli <verb>` when the console
@@ -342,12 +375,12 @@ For manual skill prompts and model review, work inside this repository and keep
 samples and CAD/robot-description artifacts under `models/`. Create a scratch
 project in the fixture bucket it belongs in: a standalone part
 goes in the `models/examples/` cad-project, an assembly gets its own group in
-`models/assemblies/` (`src/<assembly>/`, outputs in `STEP/<assembly>/`), a
-drawing goes in `models/drawings/` — script in `src/`, artifact declared into a
+`models/assemblies/` (`src/<assembly>/`, documents in `XBF/<assembly>/`), a
+drawing goes in `models/drawings/` — script in `src/`, files declared into a
 format folder. For example:
 
 ```bash
-$EDITOR models/examples/src/my_test.py     # @step(out="../STEP/my_test.step")
+$EDITOR models/examples/src/my_test.py     # @xbf(out="../XBF/my_test.xbf")
 python models/examples/src/my_test.py
 ```
 
@@ -376,6 +409,12 @@ each operation's parameters and the keys of the shapes it was given, and answers
 a hit with the live object the first run made; its pressure tests are
 `tests/python/packages/cadgen/engine/test_memo.py` and `test_bodies.py`, and a
 change to it runs them first.
+
+Those numbers come from one batch, measured once every change that moves them is
+in the branch: on one machine with nothing else building, `main` and the branch side
+by side on the same models, each on a daemon of its own (`CADGEN_ENGINE_DIR`), cold
+and warm. The benchmarks are manual and write under `tmp/` (`scripts/bench/`); their
+output is never committed.
 
 A part is meshed at one tolerance, FreeCAD's default, by `BRepMesh_IncrementalMesh`
 as it is (`engine/mesh.py`): no check before it, no second pass, no repair. A change

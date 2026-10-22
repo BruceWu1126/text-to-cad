@@ -293,8 +293,9 @@ it, the file sidebar, Quick Edit at the top-right.
   under it the block references placed on it, a click picking one.
 - **Quick Edit** carries the picks and the ink (never the measurements: they are the
   person's); its views are the window on screen as a plan-view camera (`planCamera`: looking
-  straight down, `up` +Y, `orthographicHalfHeight` the window's half height), which `cadgen dxf
-  snapshot --job` frames again, drawing the job's annotation over the drawing.
+  straight down, `up` +Y, `orthographicHalfHeight` the window's half height). `cadgen
+  snapshot` draws a drawing whole and takes neither, so an agent reads the window and the ink
+  from the packet.
 
 - **The picture comes from the BACKEND.** `client.drawing(file)` is
   `GET /__cad/drawing` (`apps/web/docs/backend.md`), asked again while the server
@@ -595,9 +596,8 @@ cadgen engine document: an `.xbf`, and a `.step` or `.stp`, which the engine rea
 one. The strip is Select with its menu's chevron, Pencil and Shapes, Measure with its own, Explode for two or more
 parts, and Clip; the file sidebar an assembly's Model tree, then Position where the document
 carries a mechanism; and selection, hover, the menus, isolation, Escape and Quick Edit's chips
-follow the rules of [Selection and inspection tools](#selection-and-inspection-tools), as the
-STEP renderer this one replaced drew them. `XbfPanels.test.tsx` holds the panels to the controls
-that renderer drew.
+follow the rules of [Selection and inspection tools](#selection-and-inspection-tools).
+`XbfPanels.test.tsx` holds the panels to those controls.
 
 Underneath, the page reads the document from the engine (`useXbfScene.js`), and
 every face and edge is to hand from the start, so nothing waits on topology: under Faces and Edges
