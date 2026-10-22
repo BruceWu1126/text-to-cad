@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cadgen.engine import configuration, couple, xbf
+from cadgen.engine import configuration, couple, motion, xbf
 
 import math
 from collections.abc import Sequence
@@ -17,8 +17,9 @@ DISPLAY_NAME = "Mars rover concept vehicle"
 # - the vehicle is modeled in its display pose: suspension neutral, arm in a
 #   sampling hover, mast head level, solar wings deployed, HGA at 35 deg
 #
-# The mechanism is build123d joints on the top-level groups (`_connect` below),
-# with couplings and configurations in the model's body. Joint axes are built
+# The mechanism is build123d joints on the top-level groups (`_connect` below)
+# and the joints the clips need (`_clip_joints`), with couplings,
+# configurations and the four old clips as motions in the model's body. Joint axes are built
 # from the SAME derived constants the geometry uses, so re-deriving the layout
 # re-derives the pivots.
 
@@ -1048,11 +1049,11 @@ def power_rtg() -> bd.Compound:
 # carries its whole subtree, which is what makes the rocker-bogie chain three
 # joints instead of three hundred.
 #
-# What did NOT become kinematics, deliberately: the explode ramps, the accent
-# palette, the shell X-ray / emissive styling, the dust and RTG visibility
-# toggles, and the chassis heave/pitch/roll (one feature over sixteen groups,
-# not one joint). Those were presentation, as were the four animation clips,
-# which are not ported.
+# What did NOT become kinematics, deliberately: the accent palette, the shell
+# X-ray / emissive styling, the dust and RTG visibility toggles, and the
+# chassis pitch/roll. The four old clips are motions (`_clip_joints` and the
+# clips below): the chassis heaves on a prismatic joint of the terrain, and
+# every group slides off on a prismatic joint of its own for the explode.
 # ---------------------------------------------------------------------------
 
 _Y_AXIS = (0.0, 1.0, 0.0)
@@ -1091,6 +1092,8 @@ _PANEL_HINGE = (0.0, half_wid, belly_z + 10.0)
 _DIFFERENTIAL_PIVOT = (430.0, 0.0, 1235.0)
 _STEER_GEARS = {"steer_front_left": 1.0, "steer_front_right": 0.79,
                 "steer_rear_left": -1.0, "steer_rear_right": -0.79}
+# Wheel revolutions in one `driveAround` lap.
+_DRIVE_TURNS = 4
 
 
 def _mate(fixed: bd.Shape, moving: bd.Shape, label: str, origin: Vector3, direction: Vector3,
@@ -1134,10 +1137,13 @@ def _connect(groups: dict[str, bd.Shape]) -> None:
         center = (x0, _SIDE_SIGN[side] * y_wheel, axle_z)
         carrier = groups[f"bogie_{side}" if on_bogie else f"rocker_{side}"]
         _mate(carrier, groups[group_label], mate_name, center, _Z_AXIS, (-60, 60))
+    # Four turns each way: `driveAround` rolls the wheels four revolutions
+    # unwrapped (the old clip wrapped its angle at 360, a jump a joint's
+    # curve cannot take).
     for mate_name, group_label, x0, side, steer in _WHEEL_STATIONS:
         center = (x0, _SIDE_SIGN[side] * y_wheel, axle_z)
         carrier = groups[f"steering_{steer.removeprefix('steer_')}"] if steer else groups[f"bogie_{side}"]
-        _mate(carrier, groups[group_label], mate_name, center, _Y_AXIS, (-360, 360))
+        _mate(carrier, groups[group_label], mate_name, center, _Y_AXIS, (-_DRIVE_TURNS * 360, _DRIVE_TURNS * 360))
 
     # -- remote sensing mast -------------------------------------------------
     # Azimuth turns the column (the head rides it); elevation pitches the head.
@@ -1166,6 +1172,189 @@ def _connect(groups: dict[str, bd.Shape]) -> None:
     # -- cutaway hardware: the lid lifts, the left side panel swings clear ----
     _mate(chassis, groups["deck_lid"], "lid_lift", (575.0, 255.0, deck_z), _Z_AXIS, (0, 420), linear=True)
     _mate(chassis, groups["side_panel_left"], "panel_swing", _PANEL_HINGE, _X_AXIS, (-75, 0))
+
+
+# ---------------------------------------------------------------------------
+# The clips' joints: the chassis heave and the explode slides.
+#
+# `driveAround` heaves the whole body over the terrain, which stays put: the
+# chassis rides a prismatic joint of the terrain (`heave`), so the terrain is
+# the ground, and everything the chassis carries heaves with it -- the jointed
+# groups through their joints, the static ones (body, internals, payloads,
+# harness, dust, antennas, RTG) on their explode slides, which the chassis
+# holds and which stand at 0 but in `explodedAssembly`.
+#
+# `explodedAssembly` moved every group but the chassis and the terrain along
+# its own world vector, the jointed ones too, without their joints: a bogie
+# slides off its rocker by its own vector, not the rocker's plus its own. So a
+# jointed group's CONTENTS slide on a prismatic joint the group compound holds
+# (the group-compound slide): the compound stays a link of its own, posed by its
+# joint and holding the joints the groups hung on it turn on, and its parts --
+# the first the slide's rigid half, the rest fastened to it -- are a second
+# link the slide moves. The HGA mast holds the dish's joint, so it slides the
+# same way, its compound fastened to the chassis.
+# ---------------------------------------------------------------------------
+
+_HEAVE_RANGE = (-40.0, 40.0)
+# Each group's direction and length per mm of the explode's 520 mm peak, the old
+# clip's vectors.
+_EXPLODE_VECTORS = {
+    "body_core": (0, 0, 0.35), "body_shell": (0, 0, 0.5),
+    "deck_lid": (0, 0, 1.15), "side_panel_left": (0, 0.9, 0.15),
+    "access_panels": (0, -0.8, 0.1), "thermal_control": (0, -0.35, 0.75),
+    "internals_avionics": (0, 0, 0.85), "internals_power": (0.15, -0.2, 0.75),
+    "science_payloads": (-0.2, 0.15, 0.95), "cable_harness": (0, 0, 0.3),
+    "dust_covers": (0, 0, -0.4), "dust_layer": (0, 0, 1.35),
+    "rocker_left": (0, 0.45, 0), "rocker_right": (0, -0.45, 0),
+    "bogie_left": (0, 0.6, 0), "bogie_right": (0, -0.6, 0),
+    "differential": (0, 0, 0.9),
+    "steering_front_left": (0.15, 0.75, 0.1), "steering_front_right": (0.15, -0.75, 0.1),
+    "steering_rear_left": (-0.15, 0.75, 0.1), "steering_rear_right": (-0.15, -0.75, 0.1),
+    "wheel_front_left": (0.15, 1, 0), "wheel_front_right": (0.15, -1, 0),
+    "wheel_middle_left": (0, 1, 0), "wheel_middle_right": (0, -1, 0),
+    "wheel_rear_left": (-0.15, 1, 0), "wheel_rear_right": (-0.15, -1, 0),
+    "mast_base": (0, 0, 0.7), "mast_head": (0, 0, 1.25),
+    "arm_azimuth": (0.5, 0, 0.35), "arm_shoulder": (0.8, 0, 0.5),
+    "arm_elbow": (1.05, 0, 0.6), "arm_wrist": (1.25, 0, 0.68),
+    "arm_turret": (1.45, 0, 0.78),
+    "antenna_hga_mast": (-0.3, 0.5, 0.5), "antenna_hga_dish": (-0.45, 0.75, 0.85),
+    "antenna_uhf": (-0.35, -0.6, 0.6), "antenna_whips": (-0.5, -0.8, 0.45),
+    "solar_wing_left": (0, 0.85, 0.3), "solar_wing_right": (0, -0.85, 0.3),
+    "power_rtg": (-0.95, 0, 0.15),
+}
+_EXPLODE_PEAK = 520.0
+# The groups no joint moves: each slides on a joint of the chassis, whole.
+_STATIC_GROUPS = (
+    "body_core", "body_shell", "access_panels", "thermal_control", "internals_avionics", "internals_power",
+    "science_payloads", "cable_harness", "dust_covers", "dust_layer", "antenna_uhf", "antenna_whips", "power_rtg",
+)
+
+
+def _parent_world(node: bd.Shape) -> bd.Location:
+    parent = node.parent
+    return parent.global_location if parent is not None else bd.Location()
+
+
+def _jointable(part: bd.Shape) -> bd.Shape:
+    """``part`` able to hold a joint: `transformed` makes a plain ``bd.Shape``, which has no
+    joints dict of its own (a Solid's or a Compound's); give it an empty one."""
+    if not hasattr(part, "joints"):
+        part.joints = {}
+    return part
+
+
+def _slide(label: str, holder: bd.Shape, lead: bd.Shape, direction: Vector3, limits: tuple[float, float],
+           riders: Sequence[bd.Shape] = ()) -> None:
+    """``lead`` on a prismatic joint of ``holder`` along the world ``direction`` (its axis
+    through the world origin, in the holder's parent frame), ``riders`` fastened to ``lead``.
+    The rigid half stands where the joint holds it at 0: the holder's axes at the axis origin,
+    in ``lead``'s parent frame."""
+    lead, riders = _jointable(lead), [_jointable(rider) for rider in riders]
+    world = bd.Plane(origin=(0.0, 0.0, 0.0), z_dir=direction).location
+    plane = bd.Plane(_parent_world(holder).inverse() * world)
+    bd.LinearJoint(label, holder, axis=bd.Axis(plane.origin, plane.z_dir), linear_range=limits)
+    holder_world = holder.global_location
+    held = bd.Location(holder_world.position).inverse() * holder_world     # its turn, at the origin
+    bd.RigidJoint(label, lead, _parent_world(lead).inverse() * held)
+    for index, rider in enumerate(riders):
+        bd.RigidJoint(f"{label}_{index}", lead, bd.Location())
+        bd.RigidJoint(f"{label}_{index}", rider, bd.Location())
+
+
+def _clip_joints(groups: dict[str, bd.Shape]) -> None:
+    """``heave`` (the chassis on the terrain) and an ``explode_<group>`` slide per group."""
+    chassis = groups["chassis_frame"]
+    _slide("heave", groups["terrain"], chassis, _Z_AXIS, _HEAVE_RANGE)
+    for label, vector in _EXPLODE_VECTORS.items():
+        group_ = groups[label]
+        name, limits = f"explode_{label}", (0.0, math.ceil(v_len(vector) * _EXPLODE_PEAK))
+        if label in _STATIC_GROUPS:
+            _slide(name, chassis, group_, v_norm(vector), limits)
+            continue
+        if label == "antenna_hga_mast":
+            bd.RigidJoint("antenna_hga_mast_rides", chassis, bd.Location())
+            bd.RigidJoint("antenna_hga_mast_rides", group_, bd.Location())
+        parts = list(group_.children)
+        _slide(name, group_, parts[0], v_norm(vector), limits, parts[1:])
+
+
+# ---------------------------------------------------------------------------
+# The clips: motions of time over the joints
+# ---------------------------------------------------------------------------
+
+def _sine(u: float) -> float:
+    return 0.5 - 0.5 * math.cos(math.tau * u)
+
+
+def _smooth(u: float) -> float:
+    c = min(1.0, max(0.0, u))
+    return c * c * (3 - 2 * c)
+
+
+def _bump(u: float, start: float, end: float) -> float:
+    """0 -> 1 -> 0 across ``start``..``end`` of the master ramp."""
+    return 0.0 if u <= start or u >= end else _sine((u - start) / (end - start))
+
+
+def _drive_around(t: float) -> dict:
+    """A lap: the body heaves over the terrain, the rockers split, the bogies pitch, the
+    corners steer (the `steer` gearing), every wheel rolls four turns, and the mast looks
+    into the turn."""
+    u = t / 18
+    steer = 34 * math.sin(u * math.tau * 2)
+    values = {
+        "heave": 18 * math.sin(u * math.tau * 10),
+        "rocker_split": 6 * math.sin(u * math.tau * 5),
+        "bogie_pitch": 8 * math.sin(u * math.tau * 5 + 1.1),
+        "steer": steer,
+        "mast_yaw": -1.6 * steer,
+        "mast_pitch": 8 * math.sin(u * math.tau),
+    }
+    for name, *_rest in _WHEEL_STATIONS:
+        values[name] = u * _DRIVE_TURNS * 360
+    return values
+
+
+def _arm(azim: float, shoulder: float, elbow: float, wrist: float, turret: float) -> dict:
+    return {"arm_azim": azim, "arm_shoulder": shoulder, "arm_elbow": elbow, "arm_wrist": wrist,
+            "arm_turret": turret}
+
+
+def _arm_cycle(t: float) -> dict:
+    """Reach out, dwell over the target while the turret indexes tools, come back; the
+    mast watches. Angles are deltas from the modelled sampling hover."""
+    u = t / 12
+    reach = _bump(u, 0, 0.86)
+    turret = 90 * _smooth((u - 0.3) / 0.25) - 90 * _smooth((u - 0.62) / 0.2)
+    return {**_arm(-18 * reach, -30 * reach, 40 * reach, -25 * reach, turret),
+            "mast_yaw": -14 * reach, "mast_pitch": 22 * reach}
+
+
+def _deploy_sequence(t: float) -> dict:
+    """Staged the way the real thing would come alive: wings out, HGA up, mast raised and
+    panned, arm checked out, deck opened."""
+    u = t / 20
+    wings = _smooth(u / 0.22)
+    hga = _smooth((u - 0.2) / 0.18)
+    mast = _smooth((u - 0.36) / 0.18)
+    arm = _bump(u, 0.5, 0.78)
+    cutaway = _bump(u, 0.74, 1)
+    return {
+        # folded (-82 deg on the left hinge) out to the modelled deploy angle, this model's zero
+        "solar_deploy": -82 * (1 - wings),
+        "hga_elev": -15 + 50 * hga,
+        "mast_yaw": 150 * mast * math.sin(u * math.tau),
+        "mast_pitch": -60 * (1 - mast),
+        **_arm(-12 * arm, -22 * arm, 30 * arm, -18 * arm, 180 * arm),
+        # the deck lid lifts clear and the port panel swings out
+        "cutaway": cutaway,
+    }
+
+
+def _exploded_assembly(t: float) -> dict:
+    """One ramp out and back, each group along its own direction, at the 520 mm peak."""
+    d = _sine(t / 12) * _EXPLODE_PEAK
+    return {f"explode_{label}": v_len(vector) * d for label, vector in _EXPLODE_VECTORS.items()}
 
 
 # One control each, driving several joints by ratio: name -> (range, ratios).
@@ -1261,12 +1450,18 @@ def mars_rover_concept():
         solar_wing(-1.0, "right"),
         power_rtg(),
     ]
-    _connect({child.label: child for child in children})
+    by_label = {child.label: child for child in children}
+    _connect(by_label)
+    _clip_joints(by_label)
     rover = group("mars_rover_concept", children)
     for name, (limits, ratios) in _COUPLINGS.items():
         couple(rover, name, range=limits, **ratios)
     for name, values in _POSES.items():
         configuration(rover, name, **values)
+    motion(rover, "driveAround", _drive_around, duration=18)
+    motion(rover, "armCycle", _arm_cycle, duration=12)
+    motion(rover, "deploySequence", _deploy_sequence, duration=20)
+    motion(rover, "explodedAssembly", _exploded_assembly, duration=12)
     return rover
 
 

@@ -21,7 +21,7 @@ python -m cadgen.engine snapshot ../../XBF/planetary_gear_assembly/planetary_gea
 | `flying_car/flying_car.py` | `flying_car.xbf` | Four-rotor flying car concept |
 | `link_robot/link_robot.py` | `link_robot.xbf` | A base, two placements of `link_arm()` and a spare `link_pin()`: one pin B-rep placed five times, two levels deep |
 | `lunar_rover_corner_assembly/lunar_rover_corner_assembly.py` | `lunar_rover_corner_assembly.xbf` | Lunar rover corner: wheel, hub motor, suspension |
-| `mars_rover_concept/mars_rover_concept.py` | `mars_rover_concept.xbf` | Mars rover on terrain: 27 joints, 7 couplings, 4 configurations |
+| `mars_rover_concept/mars_rover_concept.py` | `mars_rover_concept.xbf` | Mars rover on terrain: 69 joints, 7 couplings, 4 configurations, 4 motions |
 | `mechanical_iris_aperture/mechanical_iris_aperture.py` | `mechanical_iris_aperture.xbf` | Labeled mechanical iris aperture |
 | `miniature_spiral_staircase/miniature_spiral_staircase.py` | `miniature_spiral_staircase.xbf` | Labeled miniature spiral staircase |
 | `motorcycle_fidgets/motorcycle_{helmet,seat,shock,wheel}_fidget.py` | `motorcycle_*_fidget.xbf` | Four Cherry MX switch fidgets; the group shares `lib/mx_switch_socket.py` and `lib/color.py` |
@@ -85,9 +85,29 @@ python -m cadgen.engine snapshot ../../XBF/planetary_gear_assembly/planetary_gea
   `couple(...)`: `drive`, `steer`, `crab`, `rocker_split`, `bogie_pitch`,
   `solar_deploy`, `cutaway`. Its 4 poses are configurations: `stowed`,
   `deployed`, `arm_reach`, `cutaway_open`. Limits are offsets from the display
-  pose, as before. The four animation clips (`driveAround`, `armCycle`,
-  `deploySequence`, `explodedAssembly`) are dropped: no consumer needs a clip,
-  and the chassis heave and the explode are no joint's.
+  pose, as before. Its four clips are motions (no `loop`, as before), functions
+  of time with the old clips' numbers: `driveAround` (18 s), `armCycle` (12 s),
+  `deploySequence` (20 s) and `explodedAssembly` (12 s). For them the rover
+  gains 42 prismatic joints:
+  - `heave`: the chassis rides the terrain, which is the ground now and stays
+    put while the body heaves over it; every group the chassis carries heaves
+    with it, through its joints or its explode slide.
+  - `explode_<group>`, one per group but the terrain and the chassis, each along
+    the old clip's vector, at that vector's length times `sine(t/12) * 520`. A
+    static group slides whole on a joint of the chassis. A jointed group (and the
+    HGA mast, which holds the dish's joint) slides off its joint without dragging
+    the groups hung on it: the group compound holds the slide, its parts ride it
+    (the first the rigid half, the rest fastened), and the compound stays posed
+    by its own joint and holds its children's. Every part reaches the old
+    clip's place.
+  - Deliberate differences: `driveAround` rolls the wheels four turns
+    unwrapped, where the old clip wrapped the angle at 360 (a jump a joint's
+    curve cannot take), so the six wheel joints range over +-1440 deg, four
+    turns each way (+-360 before; `drive` keeps 0..360); the mast pitches about
+    its head pivot as it heaves with the body, where the old clip pitched it
+    about the unheaved pivot (at most 2.5 mm apart). `deploySequence` also
+    thinned the dust layer's opacity as the deck opened, which no joint does:
+    the dust layer stays as built.
 - `miniature_spiral_staircase`: the `_highres` STL, 3MF and GLB at
   `mesh_tolerance=4e-4` are dropped. The engine meshes at one tolerance
   (FreeCAD's), configurable nowhere.
