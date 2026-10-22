@@ -24,7 +24,9 @@ instead of running it. A part's material is a value set on the shape: ``part.mat
 **values)`` names a configuration of it and ``motion(assembly, name, ...)`` a motion, which a
 GLB export bakes into a clip. ``read_step(path)`` and ``read_xbf(path)`` copy a file's geometry into
 the model, named, coloured and given its materials as the file has them.
-Importing this package imports no kernel: the names below load on first use.
+Importing this package imports no kernel: the names below load on first use. Imported by a
+script run by its path from inside a package (``python proj/parts/model.py``), it gives the
+script the package ``python -m proj.parts.model`` would (``model.as_package_module``).
 """
 
 from __future__ import annotations
@@ -33,6 +35,26 @@ from typing import Any
 
 __all__ = ["Material", "configuration", "glb", "materials", "memo", "motion", "paint", "read_step", "read_xbf", "step",
            "stl", "threemf", "xbf"]
+
+
+def _main_in_a_package() -> None:
+    """A ``__main__`` run by its path (no spec, no package) from a folder holding an
+    ``__init__.py`` takes its package now, before its own relative imports run."""
+    import os
+    import sys
+
+    main = sys.modules.get("__main__")
+    file = getattr(main, "__file__", None)
+    if getattr(main, "__spec__", True) is not None or getattr(main, "__package__", None) or \
+            not isinstance(file, str) or not file.endswith(".py") or \
+            not os.path.isfile(os.path.join(os.path.dirname(os.path.abspath(file)), "__init__.py")):
+        return
+    from cadgen.engine.model import as_package_module
+
+    as_package_module(main)
+
+
+_main_in_a_package()
 
 
 def __getattr__(name: str) -> Any:

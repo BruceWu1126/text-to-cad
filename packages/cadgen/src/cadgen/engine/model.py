@@ -16,7 +16,8 @@ The decorated function is a ``Model``: ``.build()``, ``.export(*destinations)``,
 ``.snapshot(out)`` and ``.document`` run the engine's verbs on it, through the daemon.
 Run as a program (``python model.py [flags]``), a model script asks the daemon to build
 it, as ``cadgen xbf build model.py [flags]`` does: the script's own process builds
-nothing, and exits with the build's status.
+nothing, and exits with the build's status. A script inside a package is that package's
+module (``module_of``), in a build and run by its path alike (``as_package_module``).
 
 Called inside a build, a model is a child: its body runs in the same run, with the
 same memo, and its result is a sub-assembly of whatever the caller makes of it,
@@ -194,6 +195,63 @@ class Model:
 
 def _normalized(path: Path) -> str:
     return os.path.normpath(os.path.abspath(path))
+
+
+# --- a script as Python's import system has it --------------------------------------------
+
+
+def module_of(script: Path) -> tuple[str, str | None, Path | None]:
+    """The module Python's import system makes of a script: its name, its package, and the
+    folder its package imports from. Inside a package -- the script's folder, and each folder
+    above it up to the topmost, holding an ``__init__.py`` -- that is its dotted name
+    (``proj.parts.model``; a package's own ``__init__.py`` is the package), the package, and the
+    folder above the topmost package; anywhere else, its stem, None and None. A dot in a folder's
+    name ends the package below that folder, and a dot in the script's stem leaves it loose: no
+    dotted name can spell either."""
+    script = Path(script).resolve()
+    names: list[str] = []
+    folder = script.parent
+    if "." not in script.stem:
+        while "." not in folder.name and folder.parent != folder and (folder / "__init__.py").is_file():
+            names.append(folder.name)
+            folder = folder.parent
+    if not names:
+        return script.stem, None, None
+    package = ".".join(reversed(names))
+    return (package if script.name == "__init__.py" else f"{package}.{script.stem}"), package, folder
+
+
+def seat(script: Path, root: Path | None) -> None:
+    """The module search path a script's imports resolve on: its folder first, as ``python
+    script.py`` has it, so a module beside it imports by its own name; then its package's root
+    (``module_of``), as ``python -m`` has it, so the package imports by its name. Each is moved
+    there if the path holds it already."""
+    import sys
+
+    for folder in ([str(root)] if root is not None else []) + [str(Path(script).resolve().parent)]:
+        if folder in sys.path:
+            sys.path.remove(folder)
+        sys.path.insert(0, folder)
+
+
+def as_package_module(main: Any) -> None:
+    """``python proj/parts/model.py``: a script run by its path from inside a package is given,
+    the moment it imports the engine, what ``python -m proj.parts.model`` gives it -- its
+    module's spec and package (``module_of``) and its package's root on the module search path
+    (``seat``) -- so its relative imports, and the package by its name, resolve below that
+    import as they do under ``-m`` and in the worker that builds it (``build.load_script``). It
+    is still ``__main__``. A loose script is left as Python ran it."""
+    import importlib.util
+
+    script = Path(main.__file__).resolve()
+    name, package, root = module_of(script)
+    if package is None:
+        return
+    spec = importlib.util.spec_from_file_location(name, script)
+    if spec is None:
+        return
+    seat(script, root)
+    main.__spec__, main.__package__ = spec, package
 
 
 def _run_as_program(script: Path) -> None:

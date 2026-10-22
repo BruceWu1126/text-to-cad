@@ -96,18 +96,27 @@ def _first_party_modules() -> list[str]:
 
 
 def load_script(script: Path) -> Any:
-    """The script as a fresh module named by its stem, after every first-party module a
-    previous build loaded is forgotten: the model's code as it is on disk now. No
-    bytecode is written."""
+    """The script as a fresh module, after every first-party module a previous build loaded is
+    forgotten: the model's code as it is on disk now, imported as Python imports it. Its
+    folder comes first on the module search path (``model.seat``). A script inside a package
+    (``model.module_of``) is imported by its dotted name (``proj.parts.model``), as ``python -m``
+    imports it: its packages first, from their root, which the search path holds next, so a
+    relative import, a module beside it by its own name and the package by its name all
+    resolve. A loose script is the module its stem names. No bytecode is written."""
+    from cadgen.engine.model import module_of, seat
+
     sys.dont_write_bytecode = True
     for name in _first_party_modules():
         sys.modules.pop(name, None)
     importlib.invalidate_caches()
-    folder = str(script.parent)
-    if folder in sys.path:
-        sys.path.remove(folder)
-    sys.path.insert(0, folder)
-    name = script.stem
+    name, package, root = module_of(script)
+    seat(script, root)
+    if package is not None:
+        module = importlib.import_module(name)
+        found = getattr(module, "__file__", None)
+        if not found or Path(found).resolve() != Path(script).resolve():
+            raise BuildError(f"{script} is module {name} of its package, but importing {name} finds {found}")
+        return module
     spec = importlib.util.spec_from_file_location(name, script)
     if spec is None or spec.loader is None:
         raise BuildError(f"cannot load {script}")
