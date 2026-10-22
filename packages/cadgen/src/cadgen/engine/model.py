@@ -14,10 +14,12 @@ bottom, and the xbf, when declared, is always written first.
 
 The decorated function is a ``Model``: ``.build()``, ``.export(*destinations)``,
 ``.snapshot(out)`` and ``.document`` run the engine's verbs on it, through the daemon.
-Run as a program (``python model.py [flags]``), a model script asks the daemon to build
-it, as ``cadgen xbf build model.py [flags]`` does: the script's own process builds
-nothing, and exits with the build's status. A script inside a package is that package's
-module (``module_of``), in a build and run by its path alike (``as_package_module``).
+Run as a program (``python model.py``), a model script asks the daemon to build every
+model it defines, as their decorators declare: the script's own process builds nothing,
+and exits with the build's status. It takes no options (law 11): the decorators are the
+whole definition of what a script writes, and the engine's switches are environment
+variables. A script inside a package is that package's module (``module_of``), in a
+build and run by its path alike (``as_package_module``).
 
 Called inside a build, a model is a child: its body runs in the same run, with the
 same memo, and its result is a sub-assembly of whatever the caller makes of it,
@@ -25,7 +27,9 @@ labelled with the child's function name when its body gave it no label. A model 
 a pure function of its source, so a second call in one build hands back a new
 placement of the same result -- new objects sharing the first call's geometry --
 rather than running the body again: a child used four times is one prototype placed
-four times. Called outside a build, a model is its function.
+four times. A child writes the files it declares, as a target does: once a build, from
+its own document (``BuildContext.children``, ``build``). Called outside a build, a model
+is its function.
 """
 
 from __future__ import annotations
@@ -49,6 +53,10 @@ KINDS = tuple(SUFFIXES)
 XBF_FOLDER = "XBF"
 
 _CONTEXT = threading.local()
+# Every model defined since a build began, by its identity (``script::function``): a body
+# a replay ran is known by its name alone, and this says which of them are models
+# (``BuildContext.children``). A build forgets them before it loads the script.
+_MODELS: dict[str, "Model"] = {}
 
 
 @dataclass(frozen=True)
@@ -94,6 +102,7 @@ class Model:
         self.script = Path(source).resolve()
         self.outputs: list[Output] = []
         self.__xbf_model__ = True
+        _MODELS[f"{self.script}::{self.name}"] = self
         if getattr(function, "__module__", None) == "__main__":
             _run_as_program(self.script)
 
@@ -125,46 +134,22 @@ class Model:
         ``<function><suffix>``) beside the script."""
         return [(target.kind, target.path) for target in self.plan()]
 
-    def plan(self, outputs: dict[str, dict[str, Any]] | None = None, *, cwd: Path | None = None) -> list[Target]:
-        """The files a build of this model writes, the xbf first. ``outputs`` (``{kind:
-        {"out": path or None}}``) selects and overrides: only the kinds it names are
-        written, each at its path (relative to ``cwd``), else the declared one, else the
-        default; a kind given None is written only where the model declares it, and ``{}``
-        writes nothing. ``outputs`` None is what the decorators declare."""
-        declared = {output.kind: output for output in self.outputs}
-        if outputs is not None:
-            unknown = sorted(set(outputs) - set(KINDS))
-            if unknown:
-                raise ValueError(f"no output kind {', '.join(unknown)}; the kinds are {', '.join(KINDS)}")
-            # A kind given None is written only where the model declares it.
-            order = [output.kind for output in self.outputs if output.kind in outputs]
-            order += [kind for kind in KINDS if outputs.get(kind) is not None and kind not in order]
-        else:
-            order = [output.kind for output in self.outputs]
-        found = []
-        for kind in sorted(order, key=lambda kind: kind != "xbf"):
-            output = declared.get(kind)
-            given = dict((outputs or {}).get(kind) or {})
-            out = given.pop("out", None)
-            if given:
-                raise ValueError(f"{kind} takes no {', '.join(sorted(given))}; it takes out alone")
-            if out is not None:
-                check_output(kind, out, f"--{kind}")
-                path = Path(out)
-                path = Path(_normalized(path if path.is_absolute() else (cwd or Path.cwd()) / path))
-            else:
-                path = self._path(kind, output.out if output is not None else None)
-            found.append(Target(kind, path))
-        return found
+    def plan(self) -> list[Target]:
+        """The files a build of this model writes: what its decorators declare (law 10), the
+        xbf first, then the derived files in the order the decorators are written."""
+        return [Target(output.kind, self._path(output.kind, output.out))
+                for output in sorted(self.outputs, key=lambda output: output.kind != "xbf")]
 
     # --- the verbs, through the daemon (``cadgen.engine.api``) -----------------------------
 
-    def build(self, **flags: Any) -> Any:
-        """Build this model (``cadgen xbf build script.py::model``); ``flags`` are the
-        build's (``xbf=``, ``step=``, ...)."""
+    def build(self, *, verify: bool = False, log: Callable[[str], None] | None = None, daemon: bool = True) -> Any:
+        """Build this model, through the daemon (``daemon=False``: in this process): it and every
+        child model it calls write what their decorators declare, as ``python script.py`` builds
+        every model of the script (``api.build_script``); a ``Report``. ``verify`` runs every body
+        the memo would replay and compares its result with the logged one."""
         from cadgen.engine import api
 
-        return api.build(self, **flags)
+        return api.build_script(self.script, [self.name], verify=verify, log=log, daemon=daemon)
 
     def export(self, *destinations: Any, pose: Any = None, part: str | None = None) -> Any:
         """Build this model, then write its document to each destination (by suffix)."""
@@ -255,9 +240,10 @@ def as_package_module(main: Any) -> None:
 
 
 def _run_as_program(script: Path) -> None:
-    """``python model.py [flags]``: the daemon builds the script, as ``cadgen xbf build
-    model.py [flags]`` does (``::name`` in the flags selects a model), and this process
-    exits with the build's status, building nothing itself."""
+    """``python model.py``: the daemon builds every model the script defines, as their
+    decorators declare, and this process exits with the build's status, building nothing
+    itself (``cli.run_script``). Like any Python script it takes no options (law 11): what it
+    is given past its name is the script's own ``sys.argv``, never the build's."""
     if getattr(_run_as_program, "running", False) or os.environ.get("CADGEN_ENGINE_WORKER") == "1":
         return
     import sys
@@ -266,12 +252,9 @@ def _run_as_program(script: Path) -> None:
     if argv0 != Path(script).resolve():
         return  # the script was not run as a program (``python -c``, an embedding)
     _run_as_program.running = True  # type: ignore[attr-defined]
-    from cadgen.engine.cli import main
+    from cadgen.engine.cli import run_script
 
-    args = [f"{script}{arg}" if arg.startswith("::") else arg for arg in sys.argv[1:]]
-    targets = [arg for arg in args if arg.startswith(f"{script}::")]
-    rest = [arg for arg in args if arg not in targets]
-    raise SystemExit(main(["build", *(targets or [str(script)]), *rest], prog=f"python {Path(script).name}"))
+    raise SystemExit(run_script(script))
 
 
 def _decorator(kind: str) -> Callable[..., Any]:
@@ -365,8 +348,8 @@ def memo(function: Any = None, /, **options: Any) -> Any:
     """Mark a function worth replaying: ``@memo``, bare. Its arguments are keyed by value
     (plain values, build123d's value types, materials, shapes the engine made); it returns
     geometry (a shape, or a tuple, list or dict of shapes); it writes nothing outside
-    itself. ``cadgen xbf build --verify`` runs every call the engine would replay and
-    compares what it makes with what was logged."""
+    itself. A verifying build (``Model.build(verify=True)``, ``cadgen build SOURCE --verify``)
+    runs every call the engine would replay and compares what it makes with what was logged."""
     if options or function is None:
         raise TypeError("@memo takes no arguments: write @memo")
     if isinstance(function, Model):
@@ -601,6 +584,14 @@ class BuildContext:
         self.symbols: Any = None
         self.key_seconds = 0.0
         self.fallbacks: dict[str, list[str]] = {}
+        # The script the build loaded (``build`` sets it): a model of another file is closed
+        # over as a build of its own script closes it (``modules``).
+        self.script: Path | None = None
+        # The models the running target's body called, each once, in the order first called
+        # (``child``): with those a replay ran, what the build writes after the run (``children``).
+        self.called: dict[str, Model] = {}
+        # Per script of a child model from another file: the resolution its closure is made with.
+        self.others: dict[Path, Any] = {}
 
     def source(self, model: Model) -> str:
         """What a model's body is made of: the symbols its function reaches, a module's
@@ -624,9 +615,29 @@ class BuildContext:
         return found
 
     def modules(self, model: Model) -> tuple[dict[str, str], bool]:
-        """A model's closure by file (``sources.Symbols.modules``), worked out with its key."""
+        """A model's closure by file (``sources.Symbols.modules``), worked out with its key. A
+        child model of another script is closed over as a build of that script closes it: from
+        its folder, over the modules of this load that its script imports
+        (``sources.closure_files``), so its document is the one a build of its own writes."""
         self.source(model)
-        return self.symbols.modules(model.function)
+        if self.script is None or model.script == self.script:
+            return self.symbols.modules(model.function)
+        symbols = self.others.get(model.script)
+        if symbols is None:
+            import sys
+
+            from cadgen.engine.sources import Symbols, closure_files
+
+            module = getattr(model.function, "__module__", None) or model.script.stem
+            own = set(closure_files(model.script, module, self.resolved))
+
+            def imported(name: str) -> bool:
+                file = getattr(sys.modules.get(name), "__file__", None)
+                return bool(file) and Path(file).resolve() in own
+
+            loaded = {name for name in self.loaded or () if imported(name)}
+            symbols = self.others[model.script] = Symbols(self.resolved, loaded, model.script.parent)
+        return symbols.modules(model.function)
 
     def __enter__(self) -> "BuildContext":
         self.previous = getattr(_CONTEXT, "build", None)
@@ -667,6 +678,7 @@ class BuildContext:
 
     def child(self, model: Model) -> Any:
         key = str(model.script) + "::" + model.name
+        self.called.setdefault(key, model)
         found = self.results.get(key)
         if found is not None:
             from cadgen.engine.kernel import memo
@@ -679,6 +691,25 @@ class BuildContext:
         if not made.__dict__.get("label"):
             made.label = model.name
         return made
+
+    def children(self, model: Model, run: Any, before: set[str]) -> list[tuple[Model, Any]]:
+        """The models that ran as children in ``model``'s run, each once, in the order they
+        first ran, each with a new placement of its result as its body returned it: those
+        its body called (``child``), and those a replay ran without a call -- the bodies
+        ``run`` ran or replayed that it had not before (``before``), the models among them
+        known by identity (``_MODELS``)."""
+        key = str(model.script) + "::" + model.name
+        names = list(self.called) + [name for name in run.statuses if name not in before and name not in self.called]
+        found = []
+        for name in names:
+            child = self.called.get(name) or _MODELS.get(name)
+            if name == key or child is None:
+                continue  # the target itself, or a @memo call
+            held = self.results.get(name)
+            made = instance(held[1]) if held is not None else run.placement(name)
+            if made is not None:
+                found.append((child, made))
+        return found
 
     def memo(self, marked: Memo, args: tuple, kwargs: dict) -> Any:
         """A ``@memo`` call: a body named by the function and its arguments' digest, run or

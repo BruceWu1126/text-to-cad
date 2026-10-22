@@ -1,7 +1,6 @@
 """The engine's verbs as functions, one per command; ``cadgen xbf`` is a thin argparse over them.
 
-    build(target=None, *, code=None, name=None, xbf=None, step=None, glb=None, stl=None,
-          threemf=None) -> Report | Built
+    build(code, *, name=None, xbf=None, step=None, glb=None, stl=None, threemf=None) -> Built
     export(source, *destinations, pose=None, part=None) -> list[Written]
     snapshot(source, out, *, display=None, camera=None, grid=False, preview=False, pose=None,
              width=None, height=None, annotation=None, measurements=None) -> Drawn
@@ -11,9 +10,11 @@
 
 Every one goes through the daemon (``client``), so the warm worker of the script, of the code
 (by its ``name``) or of the document does the work and keeps what it made in memory for the
-next call. A file flag (``xbf=``, ``step=``, ...) is ``True`` for the model's declared (or
-default) path, or a path. A build writes the model as its joints place it; a pose, a part and a
-picture are the ``export`` and ``snapshot`` verbs', which are never cached.
+next call. ``build`` takes code only (law 12): code declares nothing, so its file flags (``xbf=``,
+``step=``, ...) are its declarations, ``True`` for the default path or a path. A script's models
+build as their decorators declare: by running the script (``python model.py``), or from Python
+by ``Model.build()`` (``build_script``), a ``Report``. A build writes the model as its joints place
+it; a pose, a part and a picture are the ``export`` and ``snapshot`` verbs', never cached.
 """
 
 from __future__ import annotations
@@ -36,9 +37,20 @@ class EngineError(RuntimeError):
     """A request the engine refused or could not run: its words."""
 
 
+def _files(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Every file a model's build wrote or kept: the model's own, then each child model's
+    (``child_models``, the models its run ran, each of which writes its own files)."""
+    found = dict(report.get("files") or {})
+    for child in (report.get("child_models") or {}).values():
+        found.update(child.get("files") or {})
+    return found
+
+
 @dataclass
 class Report:
-    """A build of one script: each model's report (``models``), in order."""
+    """A build of one script: each model's report (``models``), in order; each holds the
+    reports of the child models its run ran (``child_models``), each of which wrote its own
+    files."""
 
     models: list[dict[str, Any]]
     wall: float = 0.0
@@ -50,7 +62,7 @@ class Report:
 
     @property
     def files(self) -> dict[str, dict[str, Any]]:
-        return {path: row for report in self.models for path, row in (report.get("files") or {}).items()}
+        return {path: row for report in self.models for path, row in _files(report).items()}
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
         return iter(self.models)
@@ -105,7 +117,8 @@ class Built:
 
     @property
     def files(self) -> dict[str, dict[str, Any]]:
-        return dict(self.report.get("files") or {})
+        """Every file the build wrote or kept: the code's, then each child model's."""
+        return _files(self.report)
 
     @property
     def document(self) -> Any:
@@ -151,14 +164,7 @@ def _ask(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] | Non
 
 
 def _target(target: Any) -> tuple[Path, list[str] | None]:
-    """A build's target: a ``Model``, ``script.py``, ``script.py::model`` or a path."""
-    from cadgen.engine.model import Model
-
-    if isinstance(target, Model):
-        return target.script, [target.name]
-    if isinstance(target, tuple):  # (script, [models] or None): one run of several models
-        script, functions = target
-        return _target(script)[0], list(functions) if functions else None
+    """An export's or a snapshot's script source: ``script.py`` or ``script.py::model``."""
     text = os.fspath(target)
     script, _sep, function = text.partition("::")
     path = Path(script).resolve()
@@ -182,32 +188,15 @@ def _outputs(flags: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
     return found or None
 
 
-def build(target: Any = None, *, code: str | None = None, name: str | None = None, xbf: Any = None,
-          step: Any = None, glb: Any = None, stl: Any = None, threemf: Any = None, verify: bool = False,
-          log: Callable[[str], None] | None = None, daemon: bool = True) -> "Report | Built":
-    """Build a script's models (``target``: ``script.py``, ``script.py::model`` or a ``Model``)
-    or ``code`` (source text assigning its final shape to ``result``, built as ``name``,
-    ``model`` by default). With no file flags a script writes what its decorators declare; a
-    flag selects and overrides (``xbf=True`` alone writes only the xbf). Code writes only the
-    files its flags name, each with its path. ``verify`` runs every body the memo would
-    replay and compares it with the logged one (``build.build``). Returns once every file is
-    on disk."""
-    from cadgen.engine.build import BuildError, code_script
+def _built(script: Path, functions: list[str] | None, *, code: str | None = None, name: str | None = None,
+           outputs: dict[str, dict[str, Any]] | None = None, verify: bool = False,
+           log: Callable[[str], None] | None = None, daemon: bool = True) -> tuple[list[dict[str, Any]], Any, float]:
+    """One build -- of code, or of a script's models -- in the warm worker that holds it, or in
+    this process: its reports, whether the worker was started for it, and its wall time."""
+    from cadgen.engine.build import BuildError
 
-    outputs = _outputs({"xbf": xbf, "step": step, "glb": glb, "stl": stl, "threemf": threemf})
     shown = log or (lambda _text: None)
     cwd = Path.cwd()
-    if code is not None:
-        if target is not None:
-            raise EngineError("build takes a target or code, not both")
-        name = name or "model"
-        script, functions = code_script(name, cwd), [name]
-    else:
-        if target is None:
-            raise EngineError("build takes a target (script.py[::model]) or code")
-        if name is not None:
-            raise EngineError("name= names code: a script's models are named by their functions")
-        script, functions = _target(target)
     started = time.perf_counter()
     if not daemon:
         from cadgen.engine import build as engine_build
@@ -223,12 +212,41 @@ def build(target: Any = None, *, code: str | None = None, name: str | None = Non
             shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")
 
         answer = _ask({"op": "build", "script": str(script), "functions": functions, "cwd": str(cwd),
-                       "outputs": outputs, "code": code, "name": name,
-                       "verify": verify}, relay)
+                       "outputs": outputs, "code": code, "name": name, "verify": verify}, relay)
         reports, fresh = answer["done"], answer.get("worker", {}).get("fresh")
-    wall = time.perf_counter() - started
-    if code is not None:
-        return Built(name or "model", script, {**reports[0], "wall": round(wall, 4)}, cwd)
+    return reports, fresh, time.perf_counter() - started
+
+
+def build(code: str, *, name: str | None = None, xbf: Any = None, step: Any = None, glb: Any = None,
+          stl: Any = None, threemf: Any = None, verify: bool = False, log: Callable[[str], None] | None = None,
+          daemon: bool = True) -> Built:
+    """Build source text, ``cadgen build SOURCE`` (law 12): ``code`` assigns its final shape to
+    ``result``, and is built as ``name`` (``model`` by default) in the warm worker of that name.
+    Code declares nothing, so its file flags are its declarations, additive among themselves:
+    ``True`` writes the kind where a decorator with no path puts it, in the working folder
+    (``XBF/<name>.xbf``, ``<name>.step``, ...), a path writes it there; no flag, no file. A child
+    model the code calls writes the files it declares (law 10). ``verify`` runs every body the
+    memo would replay and compares it with the logged one (``build.build``); ``daemon=False``
+    builds in this process. Returns once every file is on disk. A script's models build by
+    running the script, or by ``Model.build()``."""
+    from cadgen.engine.build import code_script
+
+    outputs = _outputs({"xbf": xbf, "step": step, "glb": glb, "stl": stl, "threemf": threemf})
+    name = name or "model"
+    cwd = Path.cwd()
+    script = code_script(name, cwd)
+    reports, _fresh, wall = _built(script, [name], code=code, name=name, outputs=outputs, verify=verify, log=log,
+                                   daemon=daemon)
+    return Built(name, script, {**reports[0], "wall": round(wall, 4)}, cwd)
+
+
+def build_script(script: Path, functions: list[str] | None = None, *, verify: bool = False,
+                 log: Callable[[str], None] | None = None, daemon: bool = True) -> Report:
+    """A script's models -- ``functions``, or every one it defines -- each built as its
+    decorators declare, and every child model each calls as its own declare (law 10): what
+    ``python script.py`` (every model) and ``Model.build()`` (one) ask. A script takes no file
+    flags: its decorators are the whole definition of what it writes (law 11)."""
+    reports, fresh, wall = _built(Path(script).resolve(), functions, verify=verify, log=log, daemon=daemon)
     return Report(reports, round(wall, 4), fresh)
 
 

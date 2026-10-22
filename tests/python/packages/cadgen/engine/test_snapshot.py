@@ -239,21 +239,23 @@ class SnapshotTest(unittest.TestCase):
         with self.assertRaisesRegex(SnapshotRefused, "is a mesh and has none"):
             snapshot(self.folder / "stand.glb", self.folder / "posed.png", pose="raised", daemon=False)
 
-    def test_a_model_is_drawn_from_its_worker_and_nothing_else_is_written(self) -> None:
+    def test_a_model_is_drawn_from_its_worker_and_the_picture_is_the_snapshot_s_one_file(self) -> None:
         from cadgen.engine import api
 
         gl()
         folder = Path(tempfile.mkdtemp(prefix="engine-drawn-")).resolve()
         self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
         script = folder / "stand.py"
-        # No @xbf: the picture is drawn from the document the worker holds, and no file but it is written.
+        # No @xbf: the picture is drawn from the document the worker holds. The build writes what the
+        # model declares (law 10), its GLB; the snapshot, no file but the picture.
         script.write_text(textwrap.dedent(MODEL).replace("@xbf\ndef stand", "@glb\ndef stand")
                           .replace("import paint, xbf", "import glb, paint, xbf"), encoding="utf-8")
         drawn = api.snapshot(f"{script}::stand", folder / "stand.png", display="xray", camera="iso", width=200,
                              height=150, daemon=False)
         self.assertEqual((drawn.width, drawn.height), (200, 150))
         self.drawn(folder / "stand.png", (200, 150))
-        self.assertEqual(sorted(path.name for path in folder.rglob("*") if path.is_file()), ["stand.png", "stand.py"])
+        self.assertEqual(sorted(path.name for path in folder.rglob("*") if path.is_file()),
+                         ["stand.glb", "stand.png", "stand.py"])
 
     def test_a_model_taken_from_its_file_is_drawn_from_that_file(self) -> None:
         from cadgen.engine import api

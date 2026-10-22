@@ -18,10 +18,13 @@ inputs as they are, without materials.
 Each model declares its xbf alone. The import reads fixed STEP inputs committed in
 `../STEP/`, exported once from the enclosure and the fixture; no model writes them
 (re-export one with `cadgen xbf export ../XBF/NAME.xbf ../STEP/NAME.step`).
-Build from this folder, in any order:
+Build from this folder, in any order: each script builds every model it defines.
 
 ```
-python -m cadgen.engine build l_bracket.py electronics_enclosure_base.py basic_shape_mating_test_fixture.py electronics_enclosure_base_import.py
+python l_bracket.py
+python electronics_enclosure_base.py
+python basic_shape_mating_test_fixture.py
+python electronics_enclosure_base_import.py
 ```
 
 The fixture's `AssemblyHelper` frames are build123d joints: a `RigidJoint` on

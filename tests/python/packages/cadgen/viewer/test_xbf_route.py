@@ -67,8 +67,9 @@ class XbfRouteTest(unittest.TestCase):
         os.environ.update({"CADGEN_ENGINE_DIR": str(cls.state), "CADGEN_ENGINE_MESH": "inline", "CADGEN_ENGINE_IDLE": "60"})
         (cls.base / "models.py").write_text(textwrap.dedent(MODEL), encoding="utf-8")
         env = {**os.environ, "PYTHONPATH": str(SRC)}
-        done = subprocess.run([sys.executable, "-m", "cadgen.engine", "build", "--no-daemon", "models.py"], cwd=cls.base,
-                              env=env, capture_output=True, text=True, timeout=300)
+        # Built as a script runs: through this test's own engine daemon.
+        done = subprocess.run([sys.executable, "models.py"], cwd=cls.base, env=env, capture_output=True, text=True,
+                              timeout=300)
         assert done.returncode == 0, done.stderr
         cls.document = cls.base / "XBF" / "block.xbf"
         cls.step = cls.base / "pair.step"

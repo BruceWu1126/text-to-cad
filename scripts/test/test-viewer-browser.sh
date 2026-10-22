@@ -205,8 +205,8 @@ if ! (cd "$project" && "$PYTHON" hinge.py && "$PYTHON" hinge_grown.py \
   exit 1
 fi
 
-# An engine document: a plate with a hole and a peg placed on it, built by the engine in this
-# process. Its script goes once it is built, as the hinge's does.
+# An engine document: a plate with a hole and a peg placed on it, built as a model script runs
+# (through this test's own engine daemon). Its script goes once it is built, as the hinge's does.
 cat > "$project/smoke_xbf.py" <<'XBF'
 import build123d as bd
 from cadgen.engine import xbf
@@ -220,7 +220,7 @@ def smoke():
     peg.label = "peg"
     return bd.Compound(children=[plate, peg], label="smoke")
 XBF
-if ! (cd "$project" && "$PYTHON" -m cadgen.engine build --no-daemon smoke_xbf.py && rm smoke_xbf.py) >"$log" 2>&1 \
+if ! (cd "$project" && "$PYTHON" smoke_xbf.py && rm smoke_xbf.py) >"$log" 2>&1 \
    || [ ! -f "$project/smoke.xbf" ]; then
   echo "FAIL: the engine document fixture did not build" >&2
   sed 's/^/    /' "$log" >&2

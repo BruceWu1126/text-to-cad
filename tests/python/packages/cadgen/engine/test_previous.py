@@ -408,7 +408,7 @@ class ClosureTest(unittest.TestCase):
             other = self.folder / "elsewhere"
             archive.extractall(other)
         (other / "XBF/plate.xbf").unlink()
-        done = subprocess.run([sys.executable, "-m", "cadgen.engine", "build", "plate.py", "--no-daemon"], cwd=other,
+        done = subprocess.run([sys.executable, "-B", "-c", "import plate; plate.plate.build(daemon=False)"], cwd=other,
                               capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual((other / "XBF/plate.xbf").read_bytes(), original)

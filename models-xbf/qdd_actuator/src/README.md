@@ -4,7 +4,7 @@
 |-------------------|--------------------------------------------|---------------------------------------------------------------|
 | qdd_actuator.py   | XBF/qdd_actuator.xbf                       | Quasi-direct-drive actuator, 4.5:1 planetary, 153 occurrences |
 
-Build from this folder: `python -m cadgen.engine build qdd_actuator.py::qdd_actuator`.
+Build from this folder: `python qdd_actuator.py`.
 
 The makers (`make_stator`, `make_rotor`, `make_cross_roller_bearing`,
 `make_torque_sensor`, `make_driver_pcb`, `make_encoder_pcb`, `make_retainer_screws`)

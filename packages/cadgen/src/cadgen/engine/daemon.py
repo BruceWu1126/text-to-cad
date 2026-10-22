@@ -231,6 +231,13 @@ same pipe, even while a build runs."""
             self.process.kill()
 
 
+def _written(report: dict[str, Any]) -> list[str]:
+    """Every file a build's report names: its model's, and each child model's
+    (``child_models``: the models its run ran, each of which wrote its own)."""
+    return [*(report.get("files") or {}),
+            *(path for child in (report.get("child_models") or {}).values() for path in child.get("files") or {})]
+
+
 def _read_exactly(stream: Any, size: int) -> bytes:
     chunks = []
     while size:
@@ -350,7 +357,7 @@ class Daemon:
                     done = answer.get("done")
                     # An export from a script built it first: that worker holds the xbf now.
                     for row in (done.get("reports") or []) if isinstance(done, dict) else []:
-                        for path in row.get("files") or {}:
+                        for path in _written(row):
                             if path.endswith(".xbf"):
                                 self.builders[os.path.normcase(path)] = worker
                     send(answer)
@@ -402,7 +409,8 @@ class Daemon:
                             worker.held.append(server.hold(list(order["served"])))
                         answer = worker.build(order, send)
                         for report in answer.get("done") or []:
-                            for path in report.get("files") or {}:
+                            # Its children's too: the worker that built a child's xbf holds its trace.
+                            for path in _written(report):
                                 if path.endswith(".xbf"):
                                     self.builders[os.path.normcase(path)] = worker
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}

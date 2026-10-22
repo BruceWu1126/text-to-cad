@@ -118,16 +118,28 @@ def hinge():
    target its result is assigned to, or a label), never from a line or a file:
    moving code renames nothing, and the file holds no line to go stale. A line
    is what the worker serves, now.
+10. **A file decorator defines an output file.** Whenever the model it decorates
+   runs in a build -- the build's target, or a child another model's body calls --
+   that file is written, once per build, from the model's own document: a declared
+   file is what the code that last ran makes, whichever model ran it (**Exports**).
+11. **A model script is Python.** `python model.py` takes no options and behaves like
+   any Python script; its decorators are the whole definition of what it writes, so
+   the script says what is on disk after it runs, and nothing on a command line can
+   say otherwise. Engine switches are environment variables, never script options.
+12. **`cadgen build` takes code only.** Its one argument is source text, which declares
+   nothing: its flags (`--xbf/--step/--glb/--stl/--threemf`, `--name`) are its only
+   declarations, additive among themselves. A script is built by running it (law 11),
+   so there is one way to build each.
 
 ## Layout
 
 | Module | What it is |
 | --- | --- |
-| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `@memo` and its calls; `python model.py` asking the daemon; a script's module and package (`module_of`); `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
+| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run, and the models a target's run ran (`BuildContext.children`); `@memo` and its calls; `python model.py` asking the daemon; a script's module and package (`module_of`); `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
 | `api.py` | the verbs as functions, through the daemon: `build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop`, `daemon` (`cadgen.build`, ...) |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
-| `build.py` | one build: load the script (as Python imports it: a package's module by its dotted name) or code afresh, one memo run, document, element names, files |
+| `build.py` | one build: load the script (as Python imports it: a package's module by its dotted name) or code afresh, one memo run, document, element names, files: every model's that ran |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in |
@@ -139,15 +151,15 @@ def hinge():
 | `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document (`service.py`); the scene (`occt.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, connect-or-start; a worker's memory cap |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
-| `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`), and `cadgen where` (`where_main`) |
+| `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`), `python model.py`'s run (`run_script`), and `cadgen where` (`where_main`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
 
 ## CLI
 
 ```
-cadgen xbf build SCRIPT[::MODEL] ...             every model of the script, or one
-cadgen xbf build --code 'SOURCE' | - [--name N]  one model from source text (stdin with -)
-    [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--json] [--no-daemon] [--verify]
+python SCRIPT.py                                 every model of the script, as its decorators declare
+cadgen xbf build SOURCE | - [--name N]           one model from source text (stdin with -), its files
+    [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--json] [--verify] [--no-daemon]
 cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-inputs] [--no-daemon]
 cadgen xbf snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
                     [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
@@ -161,11 +173,15 @@ cadgen where DOC [REF]                      the build closure; with REF: PART/fa
 These are the commands as invoked today: `where` is the first verb at the top level, and
 the `xbf` level disappears at the cutover (`cadgen build`, `cadgen export`, ...).
 
-`SCRIPT` alone builds every decorated function in it; `python SCRIPT [flags]` is the
-same build (the script's own process builds nothing: it asks the daemon, and exits with
-the build's status). The build returns once every file is on disk. If the document is
-unchanged, the xbf is not rewritten, nor is a derived file whose options and stat are
-what the build left (**Exports**).
+`python SCRIPT.py` builds every model the script defines, each writing what its
+decorators declare and each child model it calls what that model declares (laws 10 and
+11): the script's own process builds nothing, it asks the daemon, prints each model's
+report and exits with the build's status. It takes no options, as any Python script that
+reads none: what follows its name is the script's own `sys.argv`. The engine's switches
+are the environment variables below; from Python, `Model.build(verify=, daemon=)` builds one
+model of a script (a `Report`). The build returns once every file is on disk. If the
+document is unchanged, the xbf is not rewritten, nor is a derived file whose options and
+stat are what the build left (**Exports**).
 
 A script is plain Python, loaded afresh by each build as Python imports it
 (`build.load_script`), its folder first on the module search path as `python SCRIPT` has
@@ -311,8 +327,9 @@ bytes and draws them with the mesh renderers the viewer's GLB and mesh tabs call
 `headlessScene.js` families); `--pose` is refused for it, a mesh has no mechanism. `SRC` may be a script's model too
 (`SCRIPT.py::MODEL`, `cadgen.snapshot(model, ...)`, `Model.snapshot`): the model is built in its
 worker and drawn from the document that worker holds, served by a server of the worker's over its
-one mesh cache, whether or not the model declares an xbf; nothing but OUT is written. A picture is
-never a declaration: no decorator and no build flag draws one.
+one mesh cache, whether or not the model declares an xbf; the build writes what the model
+declares (law 10), and the snapshot nothing but OUT. A picture is never a declaration: no
+decorator and no build flag draws one.
 
 ## Exports
 
@@ -384,34 +401,48 @@ the built document (`<function><suffix>` beside the script). No decorator takes 
 a model's material, colours, joints, the pose its joints connect its parts at, its
 configurations and its motions are written in its body. Every declared file shows the model as
 built: where its joints' `connect_to` placed the parts. A model that wants a second pose on
-every build is a second model function with other joint values. A child model's files are
-written only when it is built as a target. A model with no `@xbf` writes its derived files and
-nothing else.
+every build is a second model function with other joint values. A model with no `@xbf` writes
+its derived files and nothing else.
 
-**Build flags** are additive and select and override on a script: no flag writes what the
-decorators declare; `--xbf` alone writes the xbf alone; `--xbf --step out.step --glb` the xbf,
-the STEP at `out.step` and the GLB where the model declares it (or its default). A flag with a
-path builds one model.
-A build whose request names its own files is not taken from the previous document (its files
-say nothing of the options they were written with); the memo replays it as ever. The xbf is
-saved first and the viewer woken with it: the worker waits for the daemon to hold the patch
-(`{"op": "patched"}` on its pipe) before it writes a derived file.
+**Every model that runs writes its files** (law 10). A child model -- one another model's body
+calls, in its file or another -- writes the files it declares after its target's are written,
+once per build, from its own document: the result its body returned, before its caller placed
+or labelled it, its closure the one a build of its own script makes (its folder, the modules its
+script imports). So its xbf is the one its own build writes, byte for byte; a later build of it
+takes that file (**Build closure**), and a file whose bytes are unchanged is kept. A child called
+twice is one model, written once; a child that is also a target of the build writes as the
+target; a child run inside a replayed body writes as one its caller ran; one that ran before its
+caller raised writes all the same. A child writes what its decorators declare, never what
+code's flags name: those are the code's own (law 12). A model taken from its file ran nothing,
+and nor did its children. The target's report holds each child's under its identity
+(`child_models`: its files, parts and timings; `--json` prints it with the target's), and a
+child whose file cannot be written fails the build. A part is written free
+(`document.unchecked`): OCCT marks a shape put in a compound as no longer free, which would
+make a child's part, placed in its caller's assembly, other bytes than its own build's.
 
-**Code** (`--code SOURCE`, `-` for stdin, `--name N`, default `model`) is one model with no
-decorators: the code assigns its final shape to `result` (refused by name otherwise), its files
-are the flags alone and each takes a path, it runs in the warm worker of its name, and its
-elements are named from its assignment targets with `N` as the function (`f:N.body.3`). Its
-source is held in memory only (`sources.MEMORY`), under the path `(code)/N.py` of the working
-folder, which no file holds, so its provenance is live only. `--xbf F` gives it the cold cache
-as any model has.
+The xbf is saved first and the viewer woken with it: the worker waits for the daemon to hold
+the patch (`{"op": "patched"}` on its pipe) before it writes a derived file.
+
+**Code** (`cadgen xbf build SOURCE`, `-` reading it from stdin; `--name N`, default `model`) is
+one model with no decorators (law 12): the code assigns its final shape to `result` (refused by
+name otherwise), it runs in the warm worker of its name, and its elements are named from its
+assignment targets with `N` as the function (`f:N.body.3`). It declares nothing, so its file flags
+are its declarations, additive among themselves: each writes its kind at `F`, or with no `F`
+where a decorator with no path puts it, in the working folder (`--xbf` is `XBF/N.xbf`, `--step`
+`N.step`); no flag, no file. A child model it calls writes what that model declares (law 10).
+Its source is held in memory only (`sources.MEMORY`), under the path `(code)/N.py` of the working
+folder, which no file holds, so its provenance is live only. `--xbf` gives it the cold cache as
+any model has. `--json` prints the report, `--verify` verifies its bodies (**Memo functions**),
+`--no-daemon` builds in this process.
 
 **Functions** (`api`, also `cadgen.build`, `cadgen.export`, `cadgen.snapshot`, `cadgen.serve`,
-`cadgen.where`): one per command, each through the daemon. `build(target)` returns a `Report`,
-`build(code=...)` a `Built` (`.files`, `.report`, `.document` and `.shape` asked of the worker
-that holds them, `.export(...)`); `export(source, *destinations, pose=, part=, inputs=)` a list of
-`Written`; `snapshot(source, out, ...)` a `Drawn`; `where(doc)` the build closure an xbf holds,
-`where(doc, ref)` an element's facts. A `Model` builds, exports and draws itself the same way
-(`.build()`, `.export()`, `.snapshot()`), and `.document` is its xbf as last built, read-only
+`cadgen.where`): one per command, each through the daemon. `build(code, name=, xbf=, ...)` takes
+code, as its command does, and returns a `Built` (`.files`, `.report`, `.document` and `.shape`
+asked of the worker that holds them, `.export(...)`); `export(source, *destinations, pose=, part=,
+inputs=)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`; `where(doc)` the build
+closure an xbf holds, `where(doc, ref)` an element's facts. A `Model` builds, exports and draws
+itself the same way (`.build(verify=, daemon=)`, a `Report`: it and its children, as declared;
+`.export()`, `.snapshot()`), and `.document` is its xbf as last built, read-only
 (`.document.closure` its closure).
 
 ## Kinematics
@@ -943,10 +974,10 @@ candidates (tom's six stages, movement's three layers: 1.3–3 s each, and twice
 edit), while per-part markers measured under 0.1 s. Nested `@xbf` is never needed for caching:
 the operation-level memo handles every kernel call in any model, markers or not.
 
-`cadgen xbf build --verify` runs every body the memo would replay -- a model's and every
-`@memo` call's -- and compares each fresh result with the logged one: per shape its
-class, label, colour, paints, material and placement, and each leaf's geometry (the same
-TShape, else the same binary BRep digest). The report's `verify` gives each body checked
+A verifying build (`Model.build(verify=True)`, `cadgen xbf build SOURCE --verify`) runs every
+body the memo would replay -- a model's and every `@memo` call's -- and compares each fresh
+result with the logged one: per shape its class, label, colour, paints, material and
+placement, and each leaf's geometry (the same TShape, else the same binary BRep digest). The report's `verify` gives each body checked
 as `same`, `differs: <where>`, or `follows <function>` for one whose result holds a body
 that differs. A function whose result differs is marked to run on every call for the
 worker's life (`memo.always()`), the bodies that call it with it, and a model that calls it

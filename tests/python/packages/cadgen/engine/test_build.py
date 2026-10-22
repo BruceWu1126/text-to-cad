@@ -279,6 +279,110 @@ class BuildTest(EngineCase):
         self.assertFalse([name for name in _files(self.folder) if name.endswith(".json")])
 
 
+BRACKET = """
+import build123d as bd
+from cadgen.engine import stl, xbf
+
+
+@xbf
+@stl
+def bracket():
+    return bd.Box(10, 4, 2) - bd.Cylinder(1, 5)
+"""
+
+RIG = """
+import build123d as bd
+from cadgen.engine import stl, xbf
+from bracket import bracket
+
+
+@stl
+def peg():
+    return bd.Cylinder(1, 6)
+
+
+@xbf
+def rig():
+    left = bracket()
+    right = bracket().moved(bd.Location((0, 20, 0)))
+    right.label = "right"
+    {last}
+    return bd.Compound(children=[left, right, peg()], label="rig")
+"""
+
+
+class ChildFilesTest(EngineCase):
+    """A file decorator defines an output file (law 11): every model that runs in a build, its
+    target or a child another model's body calls, writes the files it declares, once."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.folder / "bracket.py").write_text(textwrap.dedent(BRACKET), encoding="utf-8")
+        self.script = self.folder / "rig.py"
+        self.write(text=RIG.replace("{last}", "pass"))
+
+    def rig(self, *functions: str) -> list[dict]:
+        reports = engine_build.build(self.script, list(functions) or None, cwd=self.folder)
+        self.assertTrue(all(report["ok"] for report in reports), reports)
+        return reports
+
+    def test_every_model_that_runs_writes_its_files_once(self) -> None:
+        [report] = self.rig("rig")
+        # A child of another file and one of the same file with no @xbf, the bracket called twice:
+        # each written once, after the target, reported under it, and only declared files.
+        children = report["child_models"]
+        self.assertEqual(list(children), ["bracket.py::bracket", "rig.py::peg"])
+        self.assertEqual([Path(path).name for path in children["bracket.py::bracket"]["files"]],
+                         ["bracket.xbf", "bracket.stl"])
+        self.assertEqual(_files(self.folder), {"bracket.py", "rig.py", "XBF/rig.xbf", "XBF/bracket.xbf", "bracket.stl",
+                                               "peg.stl"})
+        self.assertEqual(document.load(self.folder / "XBF/bracket.xbf").name, "bracket", "its own document")
+        # A target the build also runs as a child writes once, as the target.
+        peg, rig = self.rig()
+        self.assertEqual((peg["model"], list(rig["child_models"])), ("rig.py::peg", ["bracket.py::bracket"]))
+        # A child that ran before its caller failed writes its files all the same.
+        (self.folder / "bracket.stl").unlink()
+        self.write(text=RIG.replace("{last}", "raise ValueError('no rig')"))
+        [failed] = engine_build.build(self.script, ["rig"], cwd=self.folder)
+        self.assertIn("no rig", failed["error"])
+        self.assertTrue(failed["child_models"]["bracket.py::bracket"]["files"][str(self.folder / "bracket.stl")]["written"])
+
+    def test_a_child_s_files_are_its_own_build_s_and_a_warm_build_keeps_them(self) -> None:
+        from cadgen.engine import api
+        from cadgen.engine.kernel import memo
+
+        self.rig("rig")
+        written = (self.folder / "XBF/bracket.xbf").read_bytes()
+        # Replayed, its children replayed too: kept, and a file gone is written again alone.
+        (self.folder / "bracket.stl").unlink()
+        [warm] = self.rig("rig")
+        self.assertEqual(warm["bodies"]["bracket.py::bracket"], "replayed")
+        self.assertEqual({Path(path).name: row["written"] for path, row in api.Report([warm]).files.items()},
+                         {"rig.xbf": False, "bracket.xbf": False, "bracket.stl": True, "peg.stl": False})
+
+        def fresh() -> None:
+            memo.clear()
+            engine_build._WRITTEN.clear()
+            engine_build._PARTS.clear()
+
+        # The bracket's own build, in a fresh process, takes the file its parent's build wrote:
+        # the same closure; and built cold, it writes the same bytes.
+        fresh()
+        [own] = engine_build.build(self.folder / "bracket.py", None, cwd=self.folder)
+        self.assertEqual(own["cache"], {"used": True, "from": "file"})
+        fresh()
+        (self.folder / "XBF/bracket.xbf").unlink()
+        engine_build.build(self.folder / "bracket.py", None, cwd=self.folder)
+        self.assertEqual((self.folder / "XBF/bracket.xbf").read_bytes(), written)
+
+    def test_code_s_flags_are_its_own_files_and_its_children_write_their_declarations(self) -> None:
+        code = "from bracket import bracket\nresult = bracket()\n"
+        [plug] = engine_build.build(engine_build.code_script("plug", self.folder), ["plug"], cwd=self.folder,
+                                    outputs={"step": {"out": "plug.step"}}, code=code)
+        self.assertEqual((plug["ok"], list(plug["child_models"])), (True, ["bracket.py::bracket"]))
+        self.assertEqual(_files(self.folder), {"bracket.py", "rig.py", "plug.step", "XBF/bracket.xbf", "bracket.stl"})
+
+
 KIT = """
 import build123d as bd
 from cadgen.engine import materials, paint, step, xbf

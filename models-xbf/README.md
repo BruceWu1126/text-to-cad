@@ -6,8 +6,8 @@ migration of `models/` is rehearsed. When everything migrates, these fold back
 into `models/` and this folder goes away. `models/` itself is untouched.
 
 Each model keeps the layout it had in `models/`: its sources in `src/`, and
-everything a build writes in `XBF/` beside them (the `.xbf` document, its
-`.xbf.json` sidecar). A model declares its xbf and no export: STEP, GLB, STL and 3MF are
+everything a build writes in `XBF/` beside them (the `.xbf` documents). A model
+declares its xbf and no export: STEP, GLB, STL and 3MF are
 translations of the xbf, written on demand by `cadgen xbf export`. `XBF/` is
 gitignored; nothing else is written anywhere. `tom` also reads vendor STEP from a local,
 gitignored `tom/STEP/imported/` (its `src/README.md` says how to populate it) and builds from
@@ -19,13 +19,15 @@ From a model's `src/` folder, with the engine's environment (OCP, build123d,
 numpy and cadgen on the path):
 
 ```
-python -m cadgen.engine build SCRIPT.py::FUNCTION     # or SCRIPT.py: every model in it
+python SCRIPT.py                                      # every model in it, as its decorators declare
 python -m cadgen.engine snapshot ../XBF/NAME.xbf OUT.png
 ```
 
-`build` runs in the script's warm worker (the daemon starts on demand; `python
--m cadgen.engine stop` stops it), so a second build of an unchanged model
-replays it from memory. `snapshot` needs cadgen's built browser runtime
+A model script is Python and takes no options (the engine's law 11): running it asks
+the engine's daemon to build every model it defines, each writing what its decorators
+declare, and the script's own process builds nothing. The build runs in the script's
+warm worker (the daemon starts on demand; `python -m cadgen.engine stop` stops it), so
+a second build of an unchanged model replays it from memory. `snapshot` needs cadgen's built browser runtime
 (`scripts/bundle/bundle.sh`, or `CADGEN_BROWSER_RUNTIME_DIR` pointing at one).
 `python -m cadgen.engine serve ../XBF/NAME.xbf` shows a
 document in the browser.
@@ -56,8 +58,8 @@ The migration a user makes, and nothing more:
   nothing else. A big piece of a model -- a layer of an assembly, a stage of a
   derivation -- can be a `@memo` function: called in the model's body it is a
   sub-assembly of that build, it writes no file, and a later build whose edit
-  does not reach it replays it instead of running it. `cadgen xbf build --verify`
-  checks every replayed call against a fresh run.
+  does not reach it replays it instead of running it. A verifying build
+  (`MODEL.build(verify=True)` from Python) checks every replayed call against a fresh run.
 
 ### When to use `@memo`
 
@@ -101,8 +103,8 @@ Each model's `src/README.md` says what was ported and what was dropped.
 
 Since 2026-10-21 tom's stages and the movement's layers are `@memo` functions; the
 motorbike's parts and qdd's makers are plain functions in one body. The same element
-names in every document, one xbf per model. `--verify` finds one function whose fresh run differs from
-its logged one: tom's `tom2_symmetric_yokes` (47 misses on a second run, an
+names in every document, one xbf per model. A verifying build (`tom.build(verify=True)`) finds one
+function whose fresh run differs from its logged one: tom's `tom2_symmetric_yokes` (47 misses on a second run, an
 intermediate yoke's geometry; the arm tom writes is unchanged).
 
 Since 2026-10-21 tom reads the parts of Tom rev3 it uses as xbf extracted from the

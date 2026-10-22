@@ -10,8 +10,8 @@ The two main documents of `models/moonwatch`, ported to `cadgen.engine`:
 | keyless_works.py  | `@memo` layer of the movement             | Stem, winding/sliding pinions, setting lever, yoke, motion works |
 | chrono_works.py   | `@memo` layer of the movement             | Column wheel, levers, lateral clutch, runners, hammers          |
 
-Build from this folder: `python -m cadgen.engine build case.py movement.py`. The
-two models are the only files a build writes.
+Build from this folder: `python case.py` and `python movement.py`. The two models
+are the only files the builds write.
 
 Only the three layers are `@memo`: each holds seconds of kernel work (movement_base
 alone is ~130 s cold), so an edit to one layer runs it and replays the other two, and
