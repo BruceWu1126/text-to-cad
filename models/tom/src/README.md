@@ -25,8 +25,8 @@ src/
 The model reads 139 MB of vendor and recovered STEP and xbf from `STEP/imported/`, resolved
 relative to this model's folder (`Path(__file__).resolve().parents[2] / "STEP" /
 "imported"`, `VENDOR_DIR`). They are tom-cad's read-only data and are never committed
-here (`models-xbf/tom/STEP/` is gitignored; tom-cad's copy is 536 MB). Before the first build, put a copy beside
-`src/`, from `models-xbf/tom`:
+here (`models/tom/STEP/` is gitignored; tom-cad's copy is 536 MB). Before the first build, put a copy beside
+`src/`, from `models/tom`:
 
 ```
 mkdir -p STEP
@@ -45,7 +45,7 @@ write into), and make it read-only as in tom-cad: `chmod -R a-w STEP/imported`.
 uses are extracted once, each to `STEP/imported/parts/<occurrence>.xbf`, and read with
 `read_xbf` into one dict, `rev3`, so their elements are named `arm_with_inline_wrist.rev3.N`
 and a servo's details stay one prototype across the parts that carry a servo. From
-`models-xbf/tom/STEP/imported` (the first command parses the STEP, about 40 s; the rest
+`models/tom/STEP/imported` (the first command parses the STEP, about 40 s; the rest
 reuse the daemon's read):
 
 ```
@@ -65,7 +65,7 @@ commands one per line.
 
 ## Build
 
-From `models-xbf/tom`, with `src` on `PYTHONPATH` (the stages import `lib`, `purchased`, ...
+From `models/tom`, with `src` on `PYTHONPATH` (the stages import `lib`, `purchased`, ...
 as top-level packages):
 
 ```
@@ -87,7 +87,7 @@ replays from the worker's memory (1 s), and a restarted daemon takes the file wh
   `common_base_plate` -- are `@memo`: one xbf, and an edit to the root (its layout
   layers in `lib/`) replays the whole stage chain; each of the six holds seconds of
   kernel work, which is what earns a `@memo` (1.3-3 s per edit; see "When to use
-  `@memo`" in `models-xbf/README.md`). The stages `tom` does not call
+  `@memo`" in `models/README.md`). The stages `tom` does not call
   (`tom2_500mm`, `tom2_600mm_solid`, `diagonal_lightning_current`, `legacy/base_clamp`)
   are plain functions: their helpers are what the root reads. The `purchased/` and
   `hardware/` readers stay plain: each is one `read_step`, which the kernel memo already

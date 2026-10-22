@@ -23,9 +23,8 @@ Each block is 10 mm. Every letter is 30 mm wide, 40 mm tall and extruded 20 mm i
 O. TEXTTOCAD's "TO" is the lighter blue. There is no background plate or support
 geometry.
 
-`profiles.json` is the vector generator's exact front outlines, copied from
-`models/branding/src/profiles.json`, which `scripts/brand/generate-logos.mjs`
-writes; copy it again after regenerating the vectors. The models read it through
+`profiles.json` is the vector generator's exact front outlines, which
+`scripts/brand/generate-logos.mjs` writes here. The models read it through
 `lib/logo_shape.py`, so a change to it rebuilds the logos.
 
 The port: `from cadgen import step` -> `from cadgen.engine import step, xbf`, each

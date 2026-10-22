@@ -1,9 +1,8 @@
 # Manual validation models
 
-`models/tests` ported to `cadgen.engine`: the three cases its README lists. **CI
-tests must never read, import, build, or depend on anything here**, as for
-`models/tests`: automated tests make their own small fixtures in fresh temporary
-directories.
+`models/tests` ported to `cadgen.engine`: the three cases its README listed. **CI
+tests must never read, import, build, or depend on anything here**: automated tests
+make their own small fixtures in fresh temporary directories.
 
 Agents may use these models for manual browser reviews, reproducing edge cases,
 checking exports and debugging new features. They are small and quick to rebuild.

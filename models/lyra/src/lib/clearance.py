@@ -15,7 +15,7 @@ adjacent smoothstep blend stays clear:
 
 Run after editing poses:
 
-    python -m lib.clearance   (from models-xbf/lyra/src)
+    python -m lib.clearance   (from models/lyra/src)
 
 Exits nonzero if any named pose or animation path dips below zero.
 """

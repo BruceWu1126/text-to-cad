@@ -31,7 +31,7 @@ It writes each picture, ``metrics.json`` (``hue`` beside the rows) and a contact
 (Chromium, OCCT and the ΔE map side by side, at most 1800 px wide), and prints both tables.
 
     PYTHONPATH=packages/cadgen/src .venv/bin/python scripts/bench/occt_parity.py \\
-        --doc fixture=path/to/bench.xbf --doc motorbike=models-xbf/motorbike/XBF/motorbike.xbf \\
+        --doc fixture=path/to/bench.xbf --doc motorbike=models/motorbike/XBF/motorbike.xbf \\
         --out tmp/bench/occt-parity/after
 
 ``--only chromium`` keeps the OCCT pictures already in ``--out`` (the reference does not move

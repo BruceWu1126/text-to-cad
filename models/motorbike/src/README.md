@@ -5,7 +5,7 @@
 composes by CALLING it (`frame()`, `seat()`, …). The bike is one body and one xbf; a
 part called twice is one prototype placed twice. No part is a `@memo`: the kernel
 memo already caches their kernel calls and a marker per part saved under 0.1 s of
-an edit (see "When to use `@memo`" in `models-xbf/README.md`). Shared code lives in
+an edit (see "When to use `@memo`" in `models/README.md`). Shared code lives in
 `src/lib/`.
 
 | Script               | What it is                | Description                                              |

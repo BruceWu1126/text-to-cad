@@ -10,7 +10,7 @@ The makers (`make_stator`, `make_rotor`, `make_cross_roller_bearing`,
 `make_torque_sensor`, `make_driver_pcb`, `make_encoder_pcb`, `make_retainer_screws`)
 are plain functions in one body, like the repeated helpers (`make_ball_bearing(z)`,
 the gears): the kernel memo caches their kernel calls, and a `@memo` on the seven
-saved under 0.1 s of an edit (see "When to use `@memo`" in `models-xbf/README.md`).
+saved under 0.1 s of an edit (see "When to use `@memo`" in `models/README.md`).
 
 Materials: `_label(shape, name, *details, color=, material=)` gives every part a
 material beside its colour, from the concept materials under the palette, each a

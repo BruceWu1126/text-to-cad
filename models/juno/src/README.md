@@ -50,7 +50,7 @@ ground. Soles stand at z = -874.6 as built.
   `danceLoop`, `handstandLoop`, `kickLoop`). They move the whole body: root
   bounce, toe and palm pivots, IK-anchored feet. A motion poses joints from a
   fixed ground, and the project needs no demo clip, so they are dropped.
-- Per-link STEP files. The xbf replaces them, and `cadgen xbf export` writes one
+- Per-link STEP files. The xbf replaces them, and `cadgen export` writes one
   on demand.
 - The 28 one-link scripts. Each link is a model of `juno.py` now, so no model
   calls another.

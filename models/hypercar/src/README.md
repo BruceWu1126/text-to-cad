@@ -14,11 +14,8 @@ Build from this folder: `python hypercar.py`.
 python hypercar.py
 python -m cadgen.engine snapshot ../XBF/hypercar.xbf open.png --pose open
 python -m cadgen.engine snapshot ../XBF/hypercar.xbf half.png --pose '{"doors": 0.5}'
+cadgen export ../XBF/hypercar.xbf half.step --pose '{"doors": 0.5}'
 ```
-
-A posed STEP export (`cadgen xbf export ../XBF/hypercar.xbf half.step --pose
-'{"doors": 0.5}'`) ran over 20 minutes on one core in the daemon's documents
-worker and was stopped; the posed snapshots take seconds.
 
 ## How it is built
 

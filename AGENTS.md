@@ -91,7 +91,7 @@ path, the rehearsal, and local/manual fallbacks.
   agent plugin manifests. The repository root is the plugin package; its skills are
   `skills/` directly. Installers take it from the `latest` branch, which
   `scripts/release/plugin_branch.py` builds from this tree at each release.
-- `models/`: sample and durable CAD/robot-description fixtures.
+- `models/`: the corpus of engine models, plain files, each built with `python model.py`; nothing installs it.
 - `apps/web/`: the CAD Viewer's React client (its backend is `cadgen.viewer`).
 - `apps/mcp/`: the CAD app agent hosts render: tabs in Codex, cards in Claude Desktop (its server is `cadgen mcp`).
 - `packages/core`: `@text-to-cad/core`, shared CAD/runtime/client code without React.

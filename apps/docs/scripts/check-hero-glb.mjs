@@ -21,7 +21,7 @@ import { buildGlbDocumentFromBuffer, isPlayableGlbAnimationClip } from "@text-to
 const docsRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const repoRoot = path.resolve(docsRoot, "..", "..");
 // The model the hero shows, and the file its export is served from.
-export const HERO_MODEL = "models-xbf/assemblies/src/planetary_gear_assembly/planetary_gear_assembly.py";
+export const HERO_MODEL = "models/assemblies/src/planetary_gear_assembly/planetary_gear_assembly.py";
 export const HERO_GLB = path.join(docsRoot, "public/hero/planetary.glb");
 const HERO_PAGE = path.join(docsRoot, "src/components/hero-glb-render.tsx");
 // Every tracked file stays under 5 MiB (scripts/github-workflows/check-builds.sh).

@@ -42,7 +42,7 @@ python -m cadgen.engine snapshot ../../XBF/planetary_gear_assembly/planetary_gea
 - `@step(out="../../STEP/<group>/<name>.step")` became
   `@xbf(out="../../XBF/<group>/<name>.xbf")`, imported first. `build123d` is
   imported directly. Nothing else reads these models' STEP, so no model declares
-  one; `cadgen xbf export` writes one on demand.
+  one; `cadgen export` writes one on demand.
 - No model calls another. `link_robot`'s arm and pin and `research_humanoid`'s
   hands are plain functions called in the one body (the hand models' two scripts
   are gone). The engine places a part used twice as one prototype.

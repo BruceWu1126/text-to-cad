@@ -18,7 +18,7 @@ alone is ~130 s cold), so an edit to one layer runs it and replays the other two
 a leaf edit costs about 4.5 s. The groups of parts inside a layer (`lib/mvt_*.py`,
 `_plate_parts` ... `_chrono_bridge_parts`) are plain functions: marking each of the
 19 added nothing beyond the layers (see "When to use `@memo`" in
-`models-xbf/README.md`). The case stays one body: `lib/case.py`'s band builder leaves
+`models/README.md`). The case stays one body: `lib/case.py`'s band builder leaves
 `_BAND_CHAMFER_APPLIED` in its module for the polish builder to read, state a replay
 would not set, so no builder of the case is a `@memo`.
 
