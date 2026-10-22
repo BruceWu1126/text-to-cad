@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from cadgen.engine import materials, xbf
+
 from math import sqrt
 
 import build123d as bd
-from cadgen.engine import materials, xbf
 
 
 # Units: millimeters.

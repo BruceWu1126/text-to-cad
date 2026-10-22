@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
-import build123d as bd
 from cadgen.engine import dxf
+
+import build123d as bd
 
 WIDTH_MM = 80.0
 HEIGHT_MM = 50.0

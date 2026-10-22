@@ -3,11 +3,12 @@ motion works + chronograph works, all authored in the shared MOVEMENT local
 frame (see `lib/spec.py`), so composition is identity — no re-posing here.
 """
 
+from cadgen.engine import xbf
+
 import chrono_works
 import keyless_works
 import movement_base
 import build123d as bd
-from cadgen.engine import xbf
 
 # Composition is by FUNCTION: each layer is a `@memo` function of a sibling file,
 # and calling it inside this body runs it in the same build as a sub-assembly.

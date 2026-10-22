@@ -8,9 +8,10 @@ the servo-centre pose, upper arm standing and forearm level (lib.joint_zero).
 Its mates become build123d joints on the parts (lib.joints) and its finishes
 materials (lib.materials).
 """
+from cadgen.engine import xbf
+
 import sys
 
-from cadgen.engine import xbf
 from stages.tom2_symmetric_yokes import tom2_symmetric_yokes
 from lib.current_arm_parts import configuration,build_current_arm
 from lib.current_arm_stock import component_stock

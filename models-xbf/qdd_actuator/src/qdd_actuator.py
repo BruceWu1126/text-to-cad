@@ -24,10 +24,11 @@ exploded translations are documented per-part static Locations along +/-Z.
 
 from __future__ import annotations
 
+from cadgen.engine import Material, materials, xbf
+
 import math
 
 import build123d as bd
-from cadgen.engine import Material, materials, xbf
 
 # ---------------------------------------------------------------------------
 # Gear stage parameters (module-1.0 concept teeth, trapezoidal with backlash)

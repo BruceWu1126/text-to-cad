@@ -32,8 +32,9 @@ OCCURRENCE ORDER IS FROZEN — top to bottom below.
 
 from __future__ import annotations
 
-import build123d as bd
 from cadgen.engine import motion, xbf
+
+import build123d as bd
 
 from center_stand import center_stand
 from engine import engine

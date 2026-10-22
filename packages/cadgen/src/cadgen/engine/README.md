@@ -7,8 +7,8 @@ each a translation of that document. A drawing is a model like any other: its bo
 returns 2D geometry (a sketch, a face, wires or edges), and `@dxf` declares its DXF.
 
 ```python
+from cadgen.engine import xbf, step   # first: the import that hands `python arm.py` to the daemon
 import build123d as bd
-from cadgen.engine import xbf, step
 
 @xbf                      # XBF/arm.xbf beside the script; @xbf(out="path.xbf") to choose
 @step("arm.step")         # also @glb, @stl, @threemf, @dxf; stacked or alone; out= is every decorator's only argument
@@ -186,6 +186,15 @@ are the environment variables below; from Python, `Model.build(verify=, daemon=)
 model of a script (a `Report`). The build returns once every file is on disk. If the
 document is unchanged, the xbf is not rewritten, nor is a derived file whose options and
 stat are what the build left (**Exports**).
+
+The script asks at its import of the engine (`model.run_at_import`), when its source shows a
+model -- a function decorated with one of the engine's file decorators, imported from
+`cadgen.engine` or reached through it as a module -- so the asking process imports nothing
+else: not build123d, not the script's own modules, which the worker that runs the script has
+loaded already. A model script imports the engine first, then. One that imports build123d (or
+anything heavy) above the engine builds alike, only slower: about 2.3 s of build123d paid in the
+asking process on every run, a no-op's whole cost. A script whose source does not show its models
+(a decorator applied by a call, say) asks when its first model's decorator runs.
 
 A script is plain Python, loaded afresh by each build as Python imports it
 (`build.load_script`), its folder first on the module search path as `python SCRIPT` has

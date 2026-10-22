@@ -307,6 +307,32 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(sorted(str(path.relative_to(self.folder)) for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/block.xbf", "block.py", "peg.stl"])
 
+    def test_a_model_script_asks_at_its_import_of_the_engine(self) -> None:
+        # The asking process runs nothing past the engine's import -- not build123d, not the body
+        # of the script -- and the worker runs it all; a script that shows no model is plain Python.
+        self.script.write_text(textwrap.dedent("""
+            from cadgen.engine import xbf
+            import os, sys
+            from pathlib import Path
+            with Path(__file__).with_name("ran.txt").open("a") as ran:
+                ran.write(f"{os.environ.get('CADGEN_ENGINE_WORKER', 'asker')} {'build123d' in sys.modules}\\n")
+            import build123d as bd
+
+            @xbf
+            def block():
+                return bd.Box(1, 2, 3)
+            """), encoding="utf-8")
+        done = self.run_script("block.py")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(set((self.folder / "ran.txt").read_text(encoding="utf-8").splitlines()), {"1 True"},
+                         "the script ran in the worker alone, past the engine's import")
+        self.assertTrue((self.folder / "XBF" / "block.xbf").is_file())
+        (self.folder / "tool.py").write_text("from cadgen.engine import select\nimport sys\n"
+                                             "print('ran', 'build123d' in sys.modules)\n", encoding="utf-8")
+        done = self.run_script("tool.py")
+        self.assertEqual((done.returncode, done.stdout.strip()), (0, "ran False"), done.stderr)
+
+
     def test_the_viewer_moves_before_a_derived_file_is_written(self) -> None:
         # A deliberately slow STL writer, put in place in the worker by the model's own module.
         slow = textwrap.dedent("""
@@ -386,6 +412,34 @@ class DaemonTest(unittest.TestCase):
         while any(self.state.glob("*.sock")) and time.monotonic() < deadline:
             time.sleep(0.1)
         self.assertFalse(any(self.state.glob("*.sock")), "the idle daemon left")
+
+
+class DeclaresModelsTest(unittest.TestCase):
+    """Which sources hand ``python script.py`` to the daemon at their import of the engine."""
+
+    def declares(self, source: str) -> bool:
+        if str(SRC) not in sys.path:
+            sys.path.insert(0, str(SRC))
+        from cadgen.engine.model import declares_models
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-declares-"))
+        self.addCleanup(shutil.rmtree, folder, True)
+        script = folder / "model.py"
+        script.write_text(textwrap.dedent(source), encoding="utf-8")
+        return declares_models(script)
+
+    def test_an_engine_decorator_by_name_or_through_the_module(self) -> None:
+        self.assertTrue(self.declares("from cadgen.engine import xbf\n@xbf\ndef a():\n    pass\n"))
+        self.assertTrue(self.declares("from cadgen.engine import step as S\n@S('a.step')\ndef a():\n    pass\n"))
+        self.assertTrue(self.declares("import cadgen.engine as ce\n@ce.dxf(out='a.dxf')\ndef a():\n    pass\n"))
+        self.assertTrue(self.declares("import cadgen.engine\n@cadgen.engine.glb\ndef a():\n    pass\n"))
+        self.assertTrue(self.declares("from cadgen import engine\n@engine.xbf\ndef a():\n    pass\n"))
+
+    def test_no_engine_decorator_is_no_model(self) -> None:
+        self.assertFalse(self.declares("from cadgen.engine import select\nselect('a.xbf', 'b')\n"))
+        self.assertFalse(self.declares("from cadgen.engine import memo\nfrom other import step\n"
+                                       "@step\ndef a():\n    pass\n@memo\ndef b():\n    pass\n"))
+        self.assertFalse(self.declares("import other as ce\nimport cadgen.engine\n@ce.xbf\ndef a():\n    pass\n"))
 
 
 if __name__ == "__main__":

@@ -245,18 +245,88 @@ def _run_as_program(script: Path) -> None:
     """``python model.py``: the daemon builds every model the script defines, as their
     decorators declare, and this process exits with the build's status, building nothing
     itself (``cli.run_script``). Like any Python script it takes no options (law 11): what it
-    is given past its name is the script's own ``sys.argv``, never the build's."""
-    if getattr(_run_as_program, "running", False) or os.environ.get("CADGEN_ENGINE_WORKER") == "1":
+    is given past its name is the script's own ``sys.argv``, never the build's. It happens at
+    the script's import of the engine when its source shows a model (``run_at_import``), else
+    when its first model's decorator runs."""
+    if not _is_program(script):
         return
-    import sys
-
-    argv0 = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
-    if argv0 != Path(script).resolve():
-        return  # the script was not run as a program (``python -c``, an embedding)
     _run_as_program.running = True  # type: ignore[attr-defined]
     from cadgen.engine.cli import run_script
 
     raise SystemExit(run_script(script))
+
+
+def _is_program(script: Path) -> bool:
+    """Whether ``script`` is the program this process runs (``python script.py``), outside a
+    worker and not already asking the daemon (not ``python -c``, not an embedding)."""
+    if getattr(_run_as_program, "running", False) or os.environ.get("CADGEN_ENGINE_WORKER") == "1":
+        return False
+    import sys
+
+    argv0 = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
+    return argv0 == Path(script).resolve()
+
+
+def run_at_import(file: str) -> None:
+    """``python model.py`` whose ``__main__`` (``file``) is importing the engine: when the
+    script's source declares a model -- a function decorated with one of the engine's file
+    decorators, imported from it by name or reached through it as a module -- the build goes to
+    the daemon now (``_run_as_program``), before the script's next line, so this process never
+    imports build123d nor the script's own modules, which the worker that runs it has loaded
+    already. A script that imports them above the engine builds alike, having paid for them; a
+    script whose models its source does not show (``declares_models``) asks when its first
+    model's decorator runs."""
+    script = Path(file).resolve()
+    if _is_program(script) and declares_models(script):
+        _run_as_program(script)
+
+
+def declares_models(script: Path) -> bool:
+    """Whether ``script``'s source decorates a function with one of the engine's file decorators
+    (``KINDS``): a name imported from ``cadgen.engine`` (``from cadgen.engine import xbf``, ``as``
+    any name) or an attribute of the engine imported as a module (``import cadgen.engine as ce``,
+    ``@ce.step(...)``). Read, never run."""
+    import ast
+
+    try:
+        tree = ast.parse(Path(script).read_bytes(), filename=str(script))
+    except (OSError, SyntaxError, ValueError):
+        return False
+    engines = {"cadgen.engine", "cadgen.engine.model"}
+    names: set[str] = set()
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and not node.level:
+            for alias in node.names:
+                if node.module in engines and alias.name in KINDS:
+                    names.add(alias.asname or alias.name)
+                elif node.module == "cadgen" and alias.name == "engine":
+                    modules.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in engines:
+                    modules.add(alias.asname or alias.name)
+    if not names and not modules:
+        return False
+
+    def dotted(node: ast.expr) -> str | None:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            head = dotted(node.value)
+            return f"{head}.{node.attr}" if head else None
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for decorator in node.decorator_list:
+                found = dotted(decorator.func if isinstance(decorator, ast.Call) else decorator)
+                if found is None:
+                    continue
+                module, _dot, name = found.rpartition(".")
+                if (not module and name in names) or (module in modules and name in KINDS):
+                    return True
+    return False
 
 
 def _decorator(kind: str) -> Callable[..., Any]:

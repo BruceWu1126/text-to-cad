@@ -9,9 +9,9 @@ Both are fixed inputs committed in `../STEP/`, exported once from the two
 source models; no model writes them.
 """
 
-from pathlib import Path
-
 from cadgen.engine import read_step, xbf
+
+from pathlib import Path
 
 ENCLOSURE_STEP = Path(__file__).parent / "../STEP/electronics_enclosure_base.step"
 FIXTURE_STEP = Path(__file__).parent / "../STEP/basic_shape_mating_test_fixture.step"

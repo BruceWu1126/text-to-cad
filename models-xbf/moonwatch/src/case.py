@@ -4,8 +4,9 @@ z = 0 at the case-middle / caseback joint plane, +Z through the crystal,
 crown at +X (see `lib/spec.py`).
 """
 
-import build123d as bd
 from cadgen.engine import paint, xbf
+
+import build123d as bd
 
 from lib import case as C
 from lib import materials as M

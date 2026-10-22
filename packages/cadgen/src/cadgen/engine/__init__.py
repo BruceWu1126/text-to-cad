@@ -27,6 +27,9 @@ the model, named, coloured and given its materials as the file has them. ``selec
 kind=None)`` is the geometry a ref names -- ``hand/finger.2/f:finger.tip.1``, ``base/face 3`` --
 as build123d shapes in world coordinates (``refs``).
 Importing this package imports no kernel: the names below load on first use. Imported by a
+model script run as a program, it asks the daemon to build the script there and then
+(``model.run_at_import``): a script imports the engine before build123d, so the asking process
+never loads it. Imported by a
 script run by its path from inside a package (``python proj/parts/model.py``), it gives the
 script the package ``python -m proj.parts.model`` would (``model.as_package_module``).
 """
@@ -81,3 +84,19 @@ def __getattr__(name: str) -> Any:
 
         return getattr(model, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _run_main_as_program() -> None:
+    """``python model.py``: a model script asks the daemon to build it the moment it imports the
+    engine, so this process never loads build123d (``model.run_at_import``). Last, once every
+    name above can load."""
+    import sys
+
+    file = getattr(sys.modules.get("__main__"), "__file__", None)
+    if isinstance(file, str) and file.endswith(".py"):
+        from cadgen.engine.model import run_at_import
+
+        run_at_import(file)
+
+
+_run_main_as_program()

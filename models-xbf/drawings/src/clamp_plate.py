@@ -6,8 +6,9 @@
 
 from __future__ import annotations
 
-import build123d as bd
 from cadgen.engine import dxf
+
+import build123d as bd
 
 from lib import clamp_plate_profile
 
