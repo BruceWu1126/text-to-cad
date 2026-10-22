@@ -99,6 +99,22 @@ from pathlib import Path
 from cadgen.engine.export import translate
 translate(Path(sys.argv[1]), None, Path(sys.argv[2]))
 """
+# Two axles labelled alike, a wheel on each: two occurrences at the path kit2/axle/wheel.
+AXLES = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+def axle(y):
+    wheel = bd.Pos(0, y, 0) * bd.Cylinder(10, 4)
+    wheel.label = "wheel"
+    return bd.Compound(children=[wheel], label="axle")
+
+
+@xbf
+def kit2():
+    return bd.Compound(children=[axle(0), axle(50)], label="kit2")
+"""
 
 
 def _glb_json(path: Path) -> dict:
@@ -302,6 +318,21 @@ class ExportTest(unittest.TestCase):
         self.assertIsNone(document.Loaded(rack).mechanism)
         with self.assertRaisesRegex(ExportRefused, "no part 'nothing'"):
             translate(self.xbf, None, self.folder / "nothing.step", part="nothing")
+
+    def test_a_path_two_occurrences_share_is_refused_naming_them_in_the_ref_grammar(self) -> None:
+        """``--part kit2/axle/wheel`` took the first of two wheels at that path, silently. Refused
+        now, each listed as the ref grammar tells them apart, until --part reads that grammar."""
+        (self.folder / "axles.py").write_text(textwrap.dedent(AXLES), encoding="utf-8")
+        (report,) = engine_build.build(self.folder / "axles.py", ["kit2"], cwd=self.folder)
+        self.assertTrue(report["ok"], report)
+        out = self.folder / "one.step"
+        for part, named in (("kit2/axle/wheel", "kit2/axle.1/wheel, kit2/axle.2/wheel"),
+                            ("axle", "kit2/axle.1, kit2/axle.2")):
+            with self.assertRaises(ExportRefused) as refused:
+                translate(self.folder / "XBF/kit2.xbf", None, out, part=part)
+            self.assertIn(f"--part {part!r} names 2 occurrences a plain path cannot tell apart: {named} in the ref "
+                          "grammar; --part reads plain paths until it moves onto that grammar", str(refused.exception))
+        self.assertFalse(out.exists())
 
     def test_what_is_no_document_or_no_new_one_is_refused_by_name(self) -> None:
         with self.assertRaisesRegex(ExportRefused, "only with --part"):

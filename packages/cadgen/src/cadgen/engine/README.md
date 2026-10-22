@@ -494,7 +494,10 @@ target and moved over it; a DXF only when its bytes change.
   `--part` (an occurrence's path, `board/rack`, or a node's name) writes that subtree as a
   document of its own, its root at the subtree's frame, an xbf of it with the mechanism's share
   of it (the links wholly inside, the pairs between them, their configurations). Every assembly
-  of a posed or parted document is an assembly of its own placement.
+  of a posed or parted document is an assembly of its own placement. A path several occurrences
+  share (siblings labelled alike: `kit2/axle/wheel` twice) is refused, each listed as the ref
+  grammar tells them apart (`kit2/axle.1/wheel, kit2/axle.2/wheel`), until `--part` reads that
+  grammar (**References**); a name several nodes bear is refused with their paths.
 - `--pose` (on `export` and `snapshot`) and `--part` (on `export`) are the verbs' alone: ad hoc, never cached, never
   declared.
 - **A `.cadz`** (`export/cadz.py`) packages an xbf for delivery: the xbf, its build closure's
