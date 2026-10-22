@@ -1475,7 +1475,7 @@ def _writer() -> str:
 
 
 def written_format(writer: str | None) -> str | None:
-    """The xbf format a document's writer names (``xbf/3``), or None for another program's."""
+    """The xbf format a document's writer names (``xbf/4``), or None for another program's."""
     import re
 
     found = re.match(r"cadgen\.engine (xbf/[0-9]+) \(cadgen ", writer or "")
