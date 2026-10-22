@@ -305,6 +305,7 @@ class ChangesRunWhatCanBreak(unittest.TestCase):
             "scripts/bundle/bundle.sh": GATED - {"core-js", "web", "mcp", "api", "docs"},
             "scripts/brand/generate-logos.mjs": {"docs", "skills"},
             "scripts/bench/occt_parity.py": {"skills"},
+            "scripts/bench/old-engine-numbers.json": {"skills"},
         }
         for path, expected in cases.items():
             with self.subTest(path=path):
