@@ -60,7 +60,8 @@ defines.
 | a `--job` file's `kinematics`, a STEP job's `selection`, `animation`, `video`, `quality`, `mode`, `output.viewLabels` | a job's pose is `jointValues` (as `--pose` takes it); a document's hidden and isolated parts are its `display.hidden` and `display.isolated` |
 | snapshot `--kinematics` | `--pose` |
 | snapshot `--animation`, `--time`, `--video` | none: export a GLB and play its clips |
-| snapshot `--mode list`, `--focus`, `--hide` | none: list parts with `read_xbf(path).leaves`, and pick them with `select` |
+| snapshot `--mode list` | none: list parts with `read_xbf(path).leaves`, and pick them with `select` |
+| snapshot `--focus`, `--hide` | `--display '{"isolated": ["lid"]}'` and `--display '{"hidden": ["lid"]}'` (part refs); a Quick Edit packet given to `--annotation` or `--job` carries the person's own |
 | `cadgen store why`, `store where`, `store forget`, `store gc`, `store info` | none: no store. `cadgen where DOC` prints a document's build closure, `cadgen where DOC REF` what made an element |
 | `cadgen daemon status` | `cadgen status` (and `cadgen stop`) |
 | `CADGEN_CACHE_DIR`, `CADGEN_STORE_MAX`, `CADGEN_DAEMON_STATE_DIR` | none; `CADGEN_ENGINE_DIR` moves the engine daemon's socket |
