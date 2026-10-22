@@ -1455,6 +1455,9 @@ Why that holds, checked:
 - **`--verify` reads it as `same`.** A leaf whose BRep differs only in order measures alike
   (**Memo functions**): a verification reports it `same`, never `differs`.
 
+The snapshot's part listing (0.7's `--mode list`) is gone by decision: `read_xbf` and `read_step`
+(a document's tree) and `cadgen where DOC REF` (what a ref names) are the facts route.
+
 ## Build closure
 
 A model's xbf is its cache, as a FreeCAD document is its own: opened, it is what was last
