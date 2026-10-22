@@ -3,16 +3,20 @@ from the engine's meshes, the render process the daemon keeps warm per served do
 pictures of the material fixture.
 
 Every test that draws makes an OpenGL context (`render/context.py`) and is skipped, saying why,
-where none can be made. macOS draws on a hidden Cocoa window. Linux needs an X server with GLX --
-under Xvfb: `xvfb-run -a scripts/test/test-python.sh tests/python/packages/cadgen/engine/test_render.py`
--- or an OCCT built with EGL; Windows draws on a hidden window. Only macOS is proven.
+where none can be made -- but fails on CI with an X display, which was set up to draw
+(`tests/python/support/opengl.py`). macOS draws on a hidden Cocoa window. Linux needs an X server
+with GLX -- under Xvfb: `xvfb-run -a scripts/test/test-python.sh tests/python/packages/cadgen/engine/test_render.py`
+-- or an OCCT built with EGL; Windows draws on a hidden window.
 
 The golden pictures (`render_golden/*.png`) are the material fixture (`test_materials.py`'s bench,
 its pane hinged on the plate for a pose) at 320x240, drawn on macOS: one per display mode, and Explode,
 Clip, a pose, and an annotation with a measurement; and `cap.png`, Clip's cap on a box holding
 another (`CapTest`). A picture matches its golden when at most 1.5%
 of its pixels are more than 32 levels from every golden pixel within one pixel of them (anti-aliasing
-and drivers apart, a line a pixel over still matches). A deliberate change to the look makes them
+and drivers apart, a line a pixel over still matches). Where a platform's OpenGL draws a row apart,
+the row has a golden of that platform's own (`render_golden/<platform>/<row>.png`), held to the same
+bound; a row missed in CI prints the picture it drew (`GOLDEN <platform>/<row>`, base64), that
+platform's golden once a person has looked at it. A deliberate change to the look makes them
 again: `CADGEN_RENDER_GOLDENS=write scripts/test/test-python.sh tests/python/packages/cadgen/engine/test_render.py`.
 """
 
@@ -35,11 +39,13 @@ import numpy as np
 
 from cadgen.engine.render import context
 from cadgen.engine.snapshot import SnapshotRefused, Still, parse_display
+from tests.python.support import opengl
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 GOLDEN = Path(__file__).resolve().parent / "render_golden"
 WRITE = os.environ.get("CADGEN_RENDER_GOLDENS") == "write"
 SIZE = (320, 240)
+PLATFORM = context.platform()  # a row a platform draws apart has a golden of its own there
 
 # The material fixture: a steel block, a brushed aluminium plate, a PLA part with a lacquered top,
 # a glass pane, and two placements of one bracket apart by a look alone. Its pane is hinged on the
@@ -95,10 +101,8 @@ ROWS = {
 
 
 def gl() -> None:
-    """Skip, saying why, where no OpenGL context can be made."""
-    reason = context.available()
-    if reason is not None:
-        raise unittest.SkipTest(f"no OpenGL context: {reason}")
+    """Skip, saying why, where no OpenGL context can be made (on CI with a display, fail)."""
+    opengl.require(context.available())
 
 
 def pixels(data: bytes) -> np.ndarray:
@@ -163,17 +167,21 @@ def served(document: Path) -> tuple[dict, dict[str, bytes]]:
 
 class ContextTest(unittest.TestCase):
     def test_a_linux_with_no_display_is_refused_naming_xvfb(self) -> None:
-        refused = context._REFUSED
-        self.addCleanup(setattr, context, "_REFUSED", refused)
-        context._REFUSED = None
         environment = {key: value for key, value in os.environ.items() if key != "DISPLAY"}
         with mock.patch.object(context, "platform", return_value="linux"), \
                 mock.patch.object(context, "_has_xlib", return_value=True), mock.patch.dict(os.environ, environment, clear=True):
             with self.assertRaisesRegex(context.Unavailable, "Xvfb"):
                 context.driver()
-            with self.assertRaisesRegex(context.Unavailable, "Xvfb"):
-                context.driver()  # refused once, refused at once after
             self.assertIn("Xvfb", context.available())
+
+    def test_a_refused_connection_is_asked_again_at_the_next_canvas(self) -> None:
+        # One refused connection (an X server busy for a moment) fails that canvas, not the process's.
+        gl()
+        with mock.patch("OCP.Aspect.Aspect_DisplayConnection", side_effect=RuntimeError("Can not connect")):
+            with self.assertRaisesRegex(context.Unavailable, "Can not connect"):
+                context.driver()
+        context.Canvas(16, 16).close()
+        self.assertIsNone(context.available())
 
     def test_a_canvas_draws_at_the_size_asked_whatever_its_window(self) -> None:
         gl()
@@ -222,11 +230,16 @@ class HeldTest(unittest.TestCase):
                 data, report = self.draw(**row)
                 found = drawn(data, SIZE)
                 self.assertEqual((report["renderer"], report["width"], report["height"]), ("occt", *SIZE))
-                golden = GOLDEN / f"{name}.png"
+                own = GOLDEN / PLATFORM / f"{name}.png"
+                golden = own if own.is_file() else GOLDEN / f"{name}.png"
                 if WRITE:
                     golden.write_bytes(data)
                     continue
                 share = mismatch(found, pixels(golden.read_bytes()))
+                if share > 0.015 and os.environ.get("GITHUB_ACTIONS") == "true":
+                    import base64
+
+                    print(f"GOLDEN {PLATFORM}/{name} {base64.b64encode(data).decode()}")
                 self.assertLessEqual(share, 0.015, f"{name}: {share:.1%} of its pixels are not the golden's")
         if not WRITE:
             self.assertEqual(sorted(path.stem for path in GOLDEN.glob("*.png")), sorted([*ROWS, "cap"]),
@@ -559,9 +572,14 @@ class DaemonRenderTest(unittest.TestCase):
         self.build(14)  # the worker's patch reaches the render process: the new part alone
         version = f"{(self.folder / 'XBF/pair.xbf').stat().st_mtime_ns}-{(self.folder / 'XBF/pair.xbf').stat().st_size}"
         deadline = time.monotonic() + 60
-        while time.monotonic() < deadline and self.renders()[0]["version"] != version:
+        seen: list[list[dict]] = []  # each render listing while waiting: what a missed patch leaves to read
+        while time.monotonic() < deadline and not (seen and seen[-1] and seen[-1][0]["version"] == version):
+            seen.append(self.renders())
             time.sleep(0.1)
-        render = self.renders()[0]
+        self.assertTrue(seen[-1] and seen[-1][0]["version"] == version,
+                        f"the patch to {version} did not reach the render process: first listing {seen[0]}, last "
+                        f"listed {next((s for s in reversed(seen) if s), None)}, last {seen[-1]}")
+        render = seen[-1][0]
         self.assertEqual((render["version"], render["held"]["made"], render["held"]["kept"]), (version, 1, 1))
         edited = self.snapshot("edited.png")
         self.assertEqual(edited["process"]["pid"], pid, "the same process, patched")

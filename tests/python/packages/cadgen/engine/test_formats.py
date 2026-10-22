@@ -15,11 +15,10 @@ port was written; the port must agree to 1e-9.
 
 The pictures (`formats_golden/*.png`, 320x240, macOS) match as `test_render.py`'s do: at most 1.5%
 of the pixels more than 32 levels from every golden pixel within one pixel. Where a platform's
-OpenGL draws a row apart -- Linux CI's llvmpipe sets a drawing's hairlines a pixel off over more
-than that -- the row has a golden of the platform's own (`formats_golden/<platform>/<row>.png`),
+OpenGL draws a row apart past that bound, the row has a golden of the platform's own (`formats_golden/<platform>/<row>.png`),
 held to the same bound. A row missed in CI prints the picture it drew (`GOLDEN <platform>/<row>`,
 base64), which is that platform's golden once a person has looked at it. A test that draws makes
-an OpenGL context and is skipped, saying why, where none can be made. A deliberate change to the
+an OpenGL context and is skipped, saying why, where none can be made (on CI with a display, fails). A deliberate change to the
 look makes them again: `CADGEN_RENDER_GOLDENS=write`.
 """
 
@@ -43,6 +42,7 @@ from cadgen.engine import formats
 from cadgen.engine.formats.buffer import buffer, feature_edges
 from cadgen.engine.render import context
 from cadgen.engine.snapshot import SnapshotRefused, Still, snapshot
+from tests.python.support import opengl
 
 GOLDEN = Path(__file__).resolve().parent / "formats_golden"
 PLATFORM = context.platform()
@@ -287,9 +287,8 @@ EOF
 
 
 def gl() -> None:
-    reason = context.available()
-    if reason is not None:
-        raise unittest.SkipTest(f"no OpenGL context: {reason}")
+    """Skip, saying why, where no OpenGL context can be made (on CI with a display, fail)."""
+    opengl.require(context.available())
 
 
 def pixels(data: bytes) -> np.ndarray:

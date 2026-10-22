@@ -26,6 +26,7 @@ from cadgen.engine.render import context
 from cadgen.engine.serve import Server
 from cadgen.engine.snapshot import (SnapshotRefused, authored, parse_annotation, parse_camera, parse_display,
                                     parse_measurements, snapshot)
+from tests.python.support import opengl
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 
@@ -51,10 +52,8 @@ def peg():
 
 
 def gl() -> None:
-    """Skip, saying why, where no OpenGL context can be made."""
-    reason = context.available()
-    if reason is not None:
-        raise unittest.SkipTest(f"no OpenGL context: {reason}")
+    """Skip, saying why, where no OpenGL context can be made (on CI with a display, fail)."""
+    opengl.require(context.available())
 
 
 class SnapshotTest(unittest.TestCase):

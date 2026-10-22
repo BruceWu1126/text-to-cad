@@ -28,7 +28,8 @@ def _record() -> None:
     if not folder or not os.path.isdir(folder):
         return
     argv = " ".join(getattr(sys, "orig_argv", sys.argv))
-    role = next((name for name in ("daemon", "worker", "reader") if f"cadgen.engine.{name}" in argv), "process")
+    roles = {"daemon": "daemon", "worker": "worker", "reader": "reader", "render.service": "render"}
+    role = next((role for module, role in roles.items() if f"cadgen.engine.{module}" in argv), "process")
     path = os.path.join(folder, f"{role}-{os.getpid()}.txt")
     started = time.time()
 

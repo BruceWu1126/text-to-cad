@@ -26,6 +26,7 @@ import numpy as np
 from cadgen.engine import build as engine_build
 from cadgen.engine import cli, document, mechanism
 from cadgen.engine.serve import Server
+from tests.python.support import opengl
 
 HINGE = """
 import build123d as bd
@@ -255,9 +256,7 @@ class HingeTest(_Folder):
             with self.assertRaisesRegex(SnapshotRefused, words):
                 snapshot(path, out, pose=pose, size=(160, 120), daemon=False)
             self.assertFalse(out.exists(), "a refused snapshot leaves no picture at OUT")
-        reason = context.available()
-        if reason is not None:
-            self.skipTest(f"the pose is refused; drawing it needs an OpenGL context: {reason}")
+        opengl.require(context.available(), "the pose is refused; drawing it needs an OpenGL context")
         rest = snapshot(path, self.folder / "rest.png", camera="front", size=(160, 120), daemon=False)
         raised = snapshot(path, self.folder / "raised.png", camera="front", size=(160, 120), daemon=False, pose="raised")
         self.assertIsNone(rest["pose"])

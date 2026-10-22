@@ -22,7 +22,7 @@ and is encoded as a PNG in memory (``png``); ``tile`` draws one rectangle of the
 the whole frame's projection.
 
 ``available()`` says whether a canvas can be made here, and why not when it cannot: what a test
-skips on. Only the macOS path is proven; ``test_render.py`` says what the first Linux and Windows
+skips on (and, on CI with an X display, fails on). Only the macOS path is proven; ``test_render.py`` says what the first Linux and Windows
 runs must show.
 """
 
@@ -165,16 +165,11 @@ def _windows_window(width: int, height: int) -> Any:
 
 # --- the driver and the canvas ---------------------------------------------------------------
 
-_REFUSED: str | None = None
-
-
 def driver() -> Any:
     """An OpenGL driver: a core profile (PBR and the path tracer need one), drawing into frame
-    buffers, never swapping a window's. Raises ``Unavailable``, by name (and, once refused, at
-    once for the rest of the process)."""
-    global _REFUSED
-    if _REFUSED is not None:
-        raise Unavailable(_REFUSED)
+    buffers, never swapping a window's. Raises ``Unavailable``, by name. A refusal is asked again
+    at the next canvas, never remembered: an X server that refused one connection (Xvfb busy,
+    say) is no reason to draw nothing for the rest of the process."""
     try:
         if platform() == "linux" and _has_xlib() and not os.environ.get("DISPLAY"):
             raise Unavailable("no X display for OpenGL: OCP's Linux build draws through GLX on an X server. Run "
@@ -191,12 +186,11 @@ def driver() -> Any:
         if not made.InitContext():
             raise Unavailable(f"OCCT could not make an OpenGL context on {platform()}"
                               + (" (does the X server have GLX? Xvfb +extension GLX)" if platform() == "linux" else ""))
-    except Unavailable as error:
-        _REFUSED = str(error)
+    except Unavailable:
         raise
     except Exception as error:  # noqa: BLE001 - OCCT raises its own failures; each is this refusal
-        _REFUSED = f"OCCT could not make an OpenGL context on {platform()}: {type(error).__name__}: {error}"
-        raise Unavailable(_REFUSED) from None
+        raise Unavailable(f"OCCT could not make an OpenGL context on {platform()}: {type(error).__name__}: "
+                          f"{error}") from None
     return made
 
 

@@ -23,6 +23,7 @@ import numpy as np
 
 from cadgen.engine import build as engine_build
 from cadgen.engine import cli, document, mechanism
+from tests.python.support import opengl
 
 # The spec's finger: four bones along +X, a knuckle across each joint between two, straight as
 # built, and one control curling all three knuckles.
@@ -310,9 +311,7 @@ class FingerTest(_Folder):
         by_hand = mechanism.posed_structure(structure, BY_HAND)
         np.testing.assert_allclose([i["matrix"] for i in coupled["instances"]],
                                    [i["matrix"] for i in by_hand["instances"]], atol=1e-9)
-        reason = context.available()
-        if reason is not None:
-            self.skipTest(f"the posed structure is checked; drawing it needs an OpenGL context: {reason}")
+        opengl.require(context.available(), "the posed structure is checked; drawing it needs an OpenGL context")
         drawn = {}
         for name, pose in (("rest", None), ("coupled", {"index_curl": 0.6}), ("by_hand", BY_HAND)):
             report = snapshot(path, self.folder / f"{name}.png", camera="front", size=(160, 120), daemon=False,
