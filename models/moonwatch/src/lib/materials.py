@@ -38,6 +38,11 @@ RUBY = Material("Ruby", 3980.0, family="other", standard="synthetic corundum, Al
                 description="Ruby Jewel (synthetic corundum)", roughness=0.05, ior=1.77,
                 transmission=0.8, coat=1.0, coat_roughness=0.03)
 PRINT_INK = Material("Matte Print", family="other", description="printed ink, no density", roughness=0.85)
+# The dial's lacquer and lume: coatings, no density of their own.
+BLACK_LACQUER = Material("Black Lacquer", family="other", description="Black Lacquer", roughness=0.52,
+                         coat=0.35, coat_roughness=0.15)
+LUME = Material("Lume Plot", family="other", description="Lume Plot (luminous paint)", roughness=0.65,
+                coat=0.15, coat_roughness=0.3)
 
 FINISHES = {
     # old finish name: material (a catalogue entry in the finish, or the project's own)
@@ -69,9 +74,55 @@ FINISHES = {
     "ruby_jewel": RUBY,
     "satin_steel": _finish(materials.stainless_304, "Satin Steel", metallic=0.95, roughness=0.3,
                            anisotropy=0.4, coat=0.1, coat_roughness=0.2),
+    # the dial, the hands and the bracelet's polished centre links
+    "black_lacquer": BLACK_LACQUER,
+    "dial_polished_furniture": _finish(materials.stainless_316, "Dial Polished Furniture", metallic=0.95,
+                                       roughness=0.1, anisotropy=0.0, coat=0.2, coat_roughness=0.08),
+    "lume_plot": LUME,
+    # painted steel hands
+    "painted_hand": _finish(materials.steel_1018, "Painted Hand", metallic=0.25, roughness=0.28,
+                            coat=0.6, coat_roughness=0.1),
+    "polished_link": _finish(materials.stainless_316, "Polished Link", metallic=0.88, roughness=0.22,
+                             anisotropy=0.0, coat=0.15, coat_roughness=0.1),
 }
 
 MODEL_MATERIAL_ASSIGNMENTS = {
+    "bracelet": [
+        {"targets": ["#end_link_12", "#end_link_6",
+                     *[f"#link_{side}_r{row}_{part}" for side, rows in (("12", 6), ("6", 5))
+                       for row in range(1, rows + 1) for part in ("left", "right")],
+                     "#clasp_body", "#clasp_cover", "#clasp_spring_blade", "#clasp_hinge_knuckle"],
+         "material": "brushed_steel"},
+        {"targets": [*[f"#link_{side}_r{row}_center" for side, rows in (("12", 6), ("6", 5))
+                       for row in range(1, rows + 1)],
+                     "#clasp_pusher_right", "#clasp_pusher_left", "#clasp_flip_lock"],
+         "material": "polished_link"},
+        {"targets": ["#spring_bar_12", "#spring_bar_6", *[f"#pin_12_j{k}" for k in range(1, 8)],
+                     *[f"#pin_6_j{k}" for k in range(1, 7)]],
+         "material": "satin_steel"},
+    ],
+    "dial": [
+        {"targets": ["#dial_plate", "#subdial_floor:minutes30", "#subdial_floor:hours12", "#subdial_floor:seconds"],
+         "material": "black_lacquer"},
+        {"targets": ["#dial_foot:upper", "#dial_foot:lower"], "material": "brass_part"},
+        {"targets": ["#index_frame:batons"], "material": "dial_polished_furniture"},
+        {"targets": ["#hand:hour_lume", "#hand:minute_lume", "#index_lume"], "material": "lume_plot"},
+        {"targets": ["#subdial_print:minutes30", "#subdial_print:hours12", "#subdial_print:seconds",
+                     "#minute_track"],
+         "material": "matte_print"},
+        {"targets": ["#hand:hour", "#hand:minute", "#hand:chrono_seconds", "#hand:sub_minutes30",
+                     "#hand:sub_hours12", "#hand:sub_seconds"],
+         "material": "painted_hand"},
+        {"targets": ["#hub:hour", "#hub:minute", "#hand:chrono_cap"], "material": "polished_steel"},
+    ],
+    # The sampler had no assignments: each coupon takes its movement counterpart's finish.
+    "finishing_sampler": [
+        {"targets": ["#striped_bridge_coupon", "#perlage_plate_coupon"], "material": "copper_plate"},
+        {"targets": ["#bridge_jewel"], "material": "ruby_jewel"},
+        {"targets": ["#blued_screw"], "material": "blued_screw"},
+        {"targets": ["#snailed_wheel", "#train_wheel"], "material": "gilt_wheel"},
+        {"targets": ["#pinion", "#heart_cam"], "material": "polished_steel"},
+    ],
     "case": [
         {"targets": ["#bezel_insert"], "material": "bezel_anodized"},
         {"targets": ["#case_middle", "#caseback"], "material": "brushed_steel"},

@@ -1,17 +1,27 @@
-# moonwatch models (case and movement)
+# moonwatch models
 
-The two main documents of `models/moonwatch`, ported to `cadgen.engine`:
+Every document of `models/moonwatch`, ported to `cadgen.engine`:
 
-| Script            | What it is                                | Description                                                     |
-|-------------------|-------------------------------------------|-----------------------------------------------------------------|
-| case.py           | model -> XBF/case.xbf                     | Case cluster: middle, bezel stack, crystal, caseback, crown, pushers, lugs |
-| movement.py       | model -> XBF/movement.xbf                 | Complete movement = movement_base + keyless_works + chrono_works (sub-assemblies) |
-| movement_base.py  | `@memo` layer of the movement             | Main plate, barrel, going train, bridges, escapement, balance  |
-| keyless_works.py  | `@memo` layer of the movement             | Stem, winding/sliding pinions, setting lever, yoke, motion works |
-| chrono_works.py   | `@memo` layer of the movement             | Column wheel, levers, lateral clutch, runners, hammers          |
+| Script               | What it is                                | Description                                                     |
+|----------------------|-------------------------------------------|-----------------------------------------------------------------|
+| case.py              | model -> XBF/case.xbf                     | Case cluster: middle, bezel stack, crystal, caseback, crown, pushers, lugs |
+| dial.py              | model -> XBF/dial.xbf                     | Three-register step dial, applied indices, printed tracks, full hand stack at 10:09:38 |
+| bracelet.py          | model -> XBF/bracelet.xbf                 | Flat three-link bracelet, end links, fold-over clasp            |
+| finishing_sampler.py | model -> XBF/finishing_sampler.xbf        | Standing coupon exercising the shared finishing vocabulary      |
+| movement.py          | model -> XBF/movement.xbf                 | Complete movement = movement_base + keyless_works + chrono_works (sub-assemblies) |
+| movement_base.py     | `@memo` layer of the movement             | Main plate, barrel, going train, bridges, escapement, balance  |
+| keyless_works.py     | `@memo` layer of the movement             | Stem, winding/sliding pinions, setting lever, yoke, motion works |
+| chrono_works.py      | `@memo` layer of the movement             | Column wheel, levers, lateral clutch, runners, hammers          |
+| moonwatch.py         | model -> XBF/moonwatch.xbf, XBF/moonwatch.glb | The full watch: case + dial/hands + movement + bracelet, its mechanism, and its four clips |
 
-Build from this folder: `python case.py` and `python movement.py`. The two models
-are the only files the builds write.
+Build from this folder: `python case.py`, `python dial.py`, `python bracelet.py`,
+`python finishing_sampler.py`, `python movement.py`, `python moonwatch.py`. The models'
+files are the only files the builds write.
+
+The case, dial and bracelet are plain functions in `lib/watch.py` (each with its
+finishes set), which their models return and the full watch composes; `moonwatch.py`
+composes the movement from the same three `@memo` layers `movement.py` does. No model
+calls another.
 
 Only the three layers are `@memo`: each holds seconds of kernel work (movement_base
 alone is ~130 s cold), so an edit to one layer runs it and replays the other two, and
@@ -52,14 +62,44 @@ finish keeps the original's metallic, roughness and clearcoat (`coat`,
 Every finish has `color=None`, so parts keep their authored colours, and a
 transmissive part's colour is its tint. One face finish is painted: the bezel
 ring is polished steel and its snailed top annulus satin (`paint(ring, faces,
-FINISHES["satin_steel"])` in `case.py`). The chronograph works, which had no
+FINISHES["satin_steel"])` in `lib/watch.py`). The chronograph works, which had no
 assignments in the original, take the base's finishes by the same rules
-(`MODEL_MATERIAL_ASSIGNMENTS["chrono_works"]`), so every part of both
-documents has a material.
+(`MODEL_MATERIAL_ASSIGNMENTS["chrono_works"]`), so every part of every
+document has a material.
 
-## Not ported
+## The full watch
 
-`moonwatch.py` (the full watch: its `KINEMATICS` mates and couplings and its
-`ANIMATION` clips), `dial.py`, `bracelet.py` and `finishing_sampler.py`. The
-animation is dropped by decision (the xbf has no animation). The four are kept, with
-their old sources, in `../unported/`.
+`moonwatch.py` is one model composing the four in its body, the movement cased by the
+flip about X and the MOVT_Z_OFFSET lift. The old `KINEMATICS` and `ANIMATION` are
+build123d joints, placed where the parts stand and paired by label:
+
+- **Mates.** The six hands turn on the dial (revolute; lume, hubs and the chrono cap
+  fastened to theirs), the going train, escapement and balance in the movement
+  (cylindrical: the turn, and the tier slide the showcase fans them by; pinions,
+  pallet stones, arbor, staff, impulse jewel and the 16 timing screws fastened), the
+  chronograph runner and coupling wheel in the chronograph works (revolute), the crown
+  on the case middle (cylindrical: winding turn and setting travel) and the two pushers
+  (prismatic, inward along their axes). The stem is no longer fastened to the crown: it
+  stays with the movement, which the clips lift out of the case.
+- **Couplings and poses.** The gear ratios are two couplings, `running` (seconds of
+  time) and `chrono` (seconds of chronograph running), and the old poses are
+  configurations (`one_minute`, `half_hour`, `chrono_at_10min`, `start_pressed`,
+  `reset_pressed`, `winding`, `setting`; `rest` is the watch as built).
+- **The clips' joints.** Each part or group the old clips translated slides on a
+  prismatic joint from the case middle along its own direction (`lift_*`); the
+  movement rises on one (`movement_rise`) and flips on a revolute about X through its
+  centre (`movement_flip`, on an inner `caliber` compound); its tiers fan on prismatic
+  joints in its own frame (`tier_*`, each group's first part the lead, the rest
+  fastened to it).
+- **Clips.** `running`, `reveal`, `showcase` and `grand_tour` are motions, functions of
+  time over those joints, which the declared `@glb` bakes into clips (animation is a
+  GLB export's alone; the xbf keeps the definitions). A joint carries one direction:
+  where the old showcase moved the face stack sideways and the reveal lifted it, both
+  lift it now (the showcase higher, clear of the rising movement), and the crown and
+  pushers, whose joints are their own travel, stay in the case.
+
+New finishes for the dial, hands and bracelet follow the same rules as the case's:
+`black_lacquer` and `lume_plot` are own materials (coatings, no density),
+`painted_hand` is Steel 1018, `dial_polished_furniture` and `polished_link` Stainless
+316. The finishing sampler, which had no assignments, takes each coupon's movement
+counterpart's finish; the movement ring the full watch adds is satin steel.
