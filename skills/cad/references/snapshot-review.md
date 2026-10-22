@@ -102,6 +102,16 @@ millimetres) and `invert`; the cut is capped. Look straight at the cut:
 cadgen snapshot XBF/housing.xbf tmp/cut.png --camera back --display '{"clip": {"enabled": true, "axis": "y", "at": 12.5}}'
 ```
 
+Hide and isolate leave parts out, as the viewer's do: `display.hidden` is a list of
+part refs (an occurrence's path: `lid`, `hand/finger.2`; an assembly hides every part
+below it) the picture leaves out, `display.isolated` the parts it alone draws. A Quick
+Edit packet given to `--annotation` carries the person's own, which `--display` may
+override:
+
+```bash
+cadgen snapshot XBF/housing.xbf tmp/inside.png --display '{"mode": "solid", "hidden": ["lid"]}'
+```
+
 ## Annotations and Quick Edit views
 
 A Quick Edit prompt carries a snapshot packet: inline JSON up to 1 KiB, or the
@@ -148,8 +158,8 @@ their ink still on it.
   of the Parts palette, where the viewer opens it. `--pose` names an SRDF group state
   or gives joint values (degrees, metres) over that pose.
 - **A drawing** (`.dxf`) is drawn whole from above in its pens, as the viewer's
-  drawing pane draws it. It takes `--display` with `appearance` alone, and the size
-  flags; every other flag is refused by name.
+  drawing pane draws it. It takes `--display` with `appearance` alone (`--display dark`,
+  or `{"appearance": "dark"}`), and the size flags; every other flag is refused by name.
 
 ## Output paths
 

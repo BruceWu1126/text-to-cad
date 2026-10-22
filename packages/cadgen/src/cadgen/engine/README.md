@@ -398,8 +398,12 @@ daemon's meshes, or `--no-daemon` a server of this process), and OCCT draws it f
 (`render/`, below), in the look the viewer resolves for the same display settings. `--display` takes
 a mode (`solid`, `shaded`, `parts`, `xray`, `hidden-line`, `wireframe`), `exploded=A` (the parts
 moved apart as the viewer's Explode moves them, by an amount from 0 to 1; with a mode,
-`hidden-line,exploded=0.6`), or the display object (`mode`, `grid`, `appearance`, `camera`,
-`clip`, `exploded`: `{"enabled", "amount"}`, 0.5 unless given); `--json` reports what was drawn
+`hidden-line,exploded=0.6`), `light` or `dark` (the appearance, all a drawing takes), or the display
+object (`mode`, `grid`, `appearance`, `camera`, `clip`, `exploded`: `{"enabled", "amount"}`, 0.5
+unless given; `hidden` and `isolated`: lists of part refs, an occurrence's path in the refs
+grammar, which every look -- Preview, X-ray, Explode, Clip -- leaves out or alone draws, as the
+viewer's hide and isolate do, and which a Quick Edit packet given to `--annotation` carries; a ref
+that names nothing is refused by name); `--json` reports what was drawn
 and each stage's milliseconds (`serveMs`, `meshMs`, `sceneMs` when a scene is made, `presentMs`,
 `frameMs`, `drawMs`, `renderMs`, `totalMs`; a file no document: `readMs` its reader, `openMs` its
 render process opening it). `parts` and `exploded` for a document that places one

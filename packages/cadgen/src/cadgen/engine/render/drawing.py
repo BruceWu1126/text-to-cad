@@ -23,7 +23,7 @@ import numpy as np
 __all__ = ["Held", "refusals"]
 
 REFUSED = {"mode": "display.mode", "grid": "the grid", "clip": "Clip", "exploded": "Explode",
-           "camera": "display.camera (a lens)"}
+           "camera": "display.camera (a lens)", "hidden": "display.hidden", "isolated": "display.isolated"}
 
 
 def refusals(still: Any, name: str) -> None:

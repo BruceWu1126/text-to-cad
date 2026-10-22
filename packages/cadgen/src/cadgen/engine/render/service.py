@@ -260,7 +260,7 @@ class Held:
         """``still`` (a ``snapshot.Still``) drawn: the PNG's bytes and what was drawn."""
         from cadgen.engine.mechanism import posed_structure
         from cadgen.engine.render.occt import FOCAL_LENGTH
-        from cadgen.engine.snapshot import SnapshotRefused, exploded_amount, refusals
+        from cadgen.engine.snapshot import SnapshotRefused, exploded_amount, hidden_instances, refusals
 
         if self.structure is None:
             raise RuntimeError("the renderer holds no document")
@@ -276,6 +276,7 @@ class Held:
                 raise SnapshotRefused(f"--pose: {error}") from None
             posed = shown["kinematics"]["pose"]
         refusals(still, shown, self.path.name)
+        hidden = hidden_instances(shown, still.display, self.path.name)
         clock = time.perf_counter()
         scene, fresh = self._scene(still.preview, still.size)
         if fresh:
@@ -283,6 +284,7 @@ class Held:
         scene.canvas.width, scene.canvas.height = still.size
         # The pose moves the instances: the structure and matrices the scene places them by.
         scene.structure, scene.matrices = shown, [_matrix(instance["matrix"]) for instance in shown["instances"]]
+        scene.hidden = hidden  # hidden and isolated parts: every look leaves them out
         clock = time.perf_counter()
         scene.clear_overlays(keep=self.kept.get(still.preview, ()))
         scene.grid(False)

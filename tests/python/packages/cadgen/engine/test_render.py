@@ -256,6 +256,45 @@ class HeldTest(unittest.TestCase):
             self.assertEqual(sorted(path.stem for path in GOLDEN.glob("*.png")), sorted([*ROWS, "cap"]),
                              "a golden per row, and the cap's")
 
+    def test_hidden_and_isolated_parts_are_left_out_of_every_look(self) -> None:
+        # From one camera: the block isolated and the block hidden together cover what the whole
+        # bench does, and overlap only along the block's outline; a ref naming nothing is refused.
+        view = {"position": [140, -110, 90], "target": [40, 0, 0], "up": [0, 0, 1], "orthographicHalfHeight": 45}
+
+        def covered(display: dict) -> np.ndarray:
+            found = pixels(self.draw(display=display, camera=view, exact=True)[0]).astype(int)
+            return np.abs(found - found[2, 2]).max(-1) > 24  # off the backdrop, by its corner
+
+        block = covered({"mode": "solid", "isolated": ["block"]})
+        others = covered({"mode": "solid", "hidden": ["block"]})
+        only_block = block & ~others  # where the block alone stands, in the solid look
+        self.assertGreater(only_block.sum(), 1000)
+        for mode in ("solid", "xray", "wireframe"):
+            with self.subTest(mode=mode):
+                whole = covered({"mode": mode})
+                alone = covered({"mode": mode, "isolated": ["block"]})
+                rest = covered({"mode": mode, "hidden": ["block"]})
+                self.assertGreater(alone.sum(), 200, "the block alone is drawn")
+                self.assertLess((alone & ~block).mean(), 0.005, "and nothing but the block")
+                self.assertLess((rest & only_block).sum(), only_block.sum() * 0.02, "hidden, the block is gone")
+                if mode != "xray":  # X-ray blends its parts by what else is drawn: shades, not silhouettes
+                    self.assertLess((whole ^ (alone | rest)).mean(), 0.01, "together the whole bench")
+        exploded = covered({"mode": "solid", "exploded": {"enabled": True, "amount": 0.5}, "hidden": ["block"]})
+        self.assertLess(exploded.sum(), covered({"mode": "solid", "exploded": {"enabled": True, "amount": 0.5}}).sum())
+        with self.assertRaisesRegex(SnapshotRefused, "display.hidden: .*nope"):
+            covered({"hidden": ["nope"]})
+        with self.assertRaisesRegex(SnapshotRefused, "leave nothing of"):
+            covered({"isolated": []})
+        # A Quick Edit packet carries what the viewer hid and isolated; --display reads the same.
+        from cadgen.engine.snapshot import packet_visibility
+
+        packet = {"annotation": {"marks": []}, "views": [], "hidden": ["block"], "isolated": ["bench"]}
+        self.assertEqual(packet_visibility(packet), {"hidden": ["block"], "isolated": ["bench"]})
+        self.assertEqual(packet_visibility({"marks": []}), {}, "an annotation file holds none")
+        self.assertEqual(parse_display('{"hidden": ["block"]}', False), {"hidden": ["block"]})
+        with self.assertRaisesRegex(SnapshotRefused, "display.isolated is a list of part refs"):
+            parse_display('{"isolated": "block"}', False)
+
     def test_rows_differ_where_they_should(self) -> None:
         """Each row draws something of its own: the goldens cannot all be one picture."""
         solid = pixels(self.draw(**ROWS["solid"])[0])

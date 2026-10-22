@@ -189,6 +189,9 @@ class Scene:
         self.offsets: dict[int, np.ndarray] = {}
         self.sources: dict[tuple, Any] = {}
         self.shown: list[Any] = []
+        # The instances a picture leaves out (``display.hidden``, ``display.isolated``): not
+        # shown, framed, capped or shadowed.
+        self.hidden: frozenset[int] = frozenset()
         self.carriers: dict[int, Any] = {}  # each prototype's cap carrier, made on the first clip (``clip.py``)
         self.caps: list[Any] = []  # the carriers shown, each an instance's (``clip.py``)
         self.overlays: list[Any] = []
@@ -352,6 +355,8 @@ class Scene:
         edges = not preview and mode != "shaded"
         on_top = mode in ("xray", "wireframe")
         for index, instance in enumerate(self.structure["instances"]):
+            if index in self.hidden:
+                continue
             p = instance["prototype"]
             part = self.parts[p]
             trsf = _trsf(self.placement(index))
@@ -403,6 +408,8 @@ class Scene:
     def placed_points(self) -> np.ndarray:
         chunks = []
         for index, instance in enumerate(self.structure["instances"]):
+            if index in self.hidden:
+                continue
             positions = self.meshes[self.prototypes[instance["prototype"]]["key"]].positions
             if len(positions):
                 m = self.placement(index)
@@ -465,7 +472,8 @@ class Scene:
             from cadgen.engine.render.explode import placed_box
 
             boxes = [placed_box(self.boxes[i["prototype"]], self.placement(n))
-                     for n, i in enumerate(self.structure["instances"]) if i["prototype"] in self.boxes]
+                     for n, i in enumerate(self.structure["instances"])
+                     if i["prototype"] in self.boxes and n not in self.hidden]
             lo, hi = np.min([b[0] for b in boxes], 0), np.max([b[1] for b in boxes], 0)
             points = np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
         else:
@@ -1027,7 +1035,8 @@ class Scene:
         self.staged = self._placed()
 
     def _placed(self) -> bytes:
-        return np.round(np.concatenate([self.placement(i).ravel() for i in range(len(self.matrices))]), 6).tobytes()
+        shown = [i for i in range(len(self.matrices)) if i not in self.hidden]  # a part hidden is no shadow
+        return np.round(np.concatenate([self.placement(i).ravel() for i in shown] or [np.zeros(1)]), 6).tobytes()
 
     def restage(self) -> None:
         """Preview's floor shadow baked again when the parts moved since it was (a pose, Explode),

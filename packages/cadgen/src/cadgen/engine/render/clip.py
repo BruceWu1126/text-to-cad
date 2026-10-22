@@ -173,6 +173,8 @@ def apply(scene: Any, clip: dict[str, Any] | None) -> float:
     lists: dict[tuple[float, float, float], Any] = {}
     hollowed: set[int] = set()
     for index, instance in enumerate(scene.structure["instances"]):
+        if index in getattr(scene, "hidden", ()):
+            continue
         p = instance["prototype"]
         carrier = _carrier(scene, p)
         if carrier is None:

@@ -57,7 +57,10 @@ __all__ = ["SnapshotRefused", "Still", "add_parser", "authored", "build_parser",
            "parse_annotation", "parse_camera", "parse_display", "parse_measurements", "parse_pose", "run", "snapshot"]
 
 DISPLAY_MODES = ("solid", "shaded", "parts", "xray", "hidden-line", "wireframe")
-DISPLAY_KEYS = frozenset({"mode", "grid", "appearance", "camera", "clip", "exploded"})
+DISPLAY_KEYS = frozenset({"mode", "grid", "appearance", "camera", "clip", "exploded", "hidden", "isolated"})
+# What the viewer's hide and isolate leave out of a picture: each a list of part refs (``refs``), the
+# display object's and a Quick Edit packet's alike.
+VISIBILITY = ("hidden", "isolated")
 APPEARANCES = ("light", "dark")
 EXPLODED_KEYS = frozenset({"enabled", "amount"})
 # Explode's amount when a request names none: the viewer's own default.
@@ -167,9 +170,60 @@ def parse_display(value: str | None, grid: bool) -> dict[str, Any]:
         raise SnapshotRefused(f"display.mode {display['mode']!r} is no display mode; the modes are {', '.join(DISPLAY_MODES)}")
     if "grid" in display and not isinstance(display["grid"], bool):
         raise SnapshotRefused("display.grid is true or false")
+    _visibility(display)
     if grid:
         display["grid"] = True
     return display
+
+
+def _visibility(display: dict[str, Any]) -> None:
+    for field in VISIBILITY:
+        if field in display and (not isinstance(display[field], list)
+                                 or not all(isinstance(ref, str) and ref.strip() for ref in display[field])):
+            raise SnapshotRefused(f"display.{field} is a list of part refs (an occurrence's path: hand/finger.2)")
+
+
+def packet_visibility(value: Any) -> dict[str, list[str]]:
+    """What a Quick Edit packet (``--annotation``'s, ``_packet``) hides and isolates, as the viewer
+    had it: its ``hidden`` and ``isolated`` part refs; nothing for an annotation file."""
+    if value is None:
+        return {}
+    found = _load(value, "--annotation")
+    if not _packet(found):
+        return {}
+    taken = {field: found[field] for field in VISIBILITY if found.get(field) is not None}
+    _visibility(taken)
+    return taken
+
+
+def hidden_instances(structure: dict[str, Any], display: dict[str, Any], name: str) -> frozenset[int]:
+    """The instances a picture leaves out: those ``display.hidden``'s refs name, and, where
+    ``display.isolated`` is given, every one its refs do not. A ref is a part or an assembly
+    (every part below it), in the refs grammar; one that names nothing, or an element, is refused
+    by name, and so is a choice that leaves nothing to draw."""
+    if not display.get("hidden") and display.get("isolated") is None:
+        return frozenset()
+    from cadgen.engine import refs
+
+    def named(field: str) -> set[int]:
+        found: set[int] = set()
+        for ref in display.get(field) or ():
+            try:
+                hits = refs.resolve_structure(structure, ref)
+            except refs.RefError as error:
+                raise SnapshotRefused(f"display.{field}: {error}") from None
+            for hit in hits:
+                if hit.kind is not None:
+                    raise SnapshotRefused(f"display.{field}: {ref!r} names {hit.kind} {hit.ordinal} of a part; "
+                                          "it takes parts and assemblies")
+                found.update(node.payload["instance"] for node in hit.node.parts() if "instance" in node.payload)
+        return found
+
+    every = set(range(len(structure.get("instances") or [])))
+    drawn = (named("isolated") if display.get("isolated") is not None else set(every)) - named("hidden")
+    if not drawn:
+        raise SnapshotRefused(f"display.hidden and display.isolated leave nothing of {name} to draw")
+    return frozenset(every - drawn)
 
 
 def parse_camera(value: str | None) -> Any:
@@ -534,6 +588,9 @@ def _snapshot(document: Path, out: Path, *, display: dict[str, Any] | None, came
         raise SnapshotRefused(f"a snapshot is a .png; {out.name} is not one")
     framed, exact, view = authored(camera, annotation, annotation_source, document)
     display = dict(display or {})
+    # What the viewer hid and isolated when the packet was written, unless the display says.
+    for field, refs in packet_visibility(annotation_source).items():
+        display.setdefault(field, refs)
     if view is not None and view.lens and "camera" not in display:
         display["camera"] = dict(view.lens)  # the view's projection
     size = size or (view.size if view is not None and view.size else DEFAULT_SIZE)
@@ -593,7 +650,8 @@ def _arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument("out", metavar="OUT.png", help="the .png to write")
     parser.add_argument("--display", help="a mode (solid, shaded, parts, xray, hidden-line, wireframe), exploded=AMOUNT "
                                           "(the parts moved apart, 0 to 1; with a mode: hidden-line,exploded=0.6), or "
-                                          "the display JSON object (mode, grid, appearance, camera, clip, exploded), or "
+                                          "the display JSON object (mode, grid, appearance, camera, clip, exploded, "
+                                          "hidden, isolated: part refs the picture leaves out, or alone draws), or "
                                           "a JSON file of it; a drawing takes appearance alone: light or dark, as the word "
                                           "or as {\"appearance\": ...}")
     parser.add_argument("--grid", action="store_true", help="draw the measuring grid")
