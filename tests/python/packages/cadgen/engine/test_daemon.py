@@ -117,6 +117,31 @@ class PatcherTest(unittest.TestCase):
         self.assertEqual(len(sent[0]["patch"]["meshes"]), 1, "the changed part alone")
 
 
+class ConnectTest(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "a stale socket file is a Unix daemon's")
+    def test_a_connect_to_a_stale_socket_fails_and_leaves_no_socket_open(self) -> None:
+        import gc
+        import socket
+        import warnings
+        from unittest import mock
+
+        from cadgen.engine import client
+
+        engine = tempfile.mkdtemp(prefix="eng-", dir="/tmp")  # a short socket path
+        self.addCleanup(shutil.rmtree, engine, True)
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": engine}):
+            path = client._daemon.socket_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            stale.bind(str(path))
+            stale.close()  # the file stays, and nothing listens on it
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", ResourceWarning)
+                self.assertIsNone(client._connect())
+                gc.collect()
+        self.assertEqual([w for w in caught if issubclass(w.category, ResourceWarning)], [])
+
+
 class DaemonTest(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-daemon-")).resolve()

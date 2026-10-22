@@ -24,15 +24,19 @@ def _connect() -> socket.socket | None:
         if not path.exists():
             return None
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        if len(str(path).encode()) < 100:
-            client.connect(str(path))
-        else:
-            previous = os.getcwd()
-            os.chdir(path.parent)
-            try:
-                client.connect(path.name)
-            finally:
-                os.chdir(previous)
+        try:
+            if len(str(path).encode()) < 100:
+                client.connect(str(path))
+            else:
+                previous = os.getcwd()
+                os.chdir(path.parent)
+                try:
+                    client.connect(path.name)
+                finally:
+                    os.chdir(previous)
+        except OSError:
+            client.close()  # a failed connect leaves no socket open
+            raise
         return client
     except (OSError, ValueError):
         return None
