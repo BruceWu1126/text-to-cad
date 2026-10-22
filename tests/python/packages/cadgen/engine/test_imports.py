@@ -167,13 +167,16 @@ class ImportTest(unittest.TestCase):
                 # The process's peak memory, in the platform's unit: the two runs compare alike.
                 try:
                     import resource
-                except ImportError:  # Windows: PROCESS_MEMORY_COUNTERS.PeakWorkingSetSize
+                except ImportError:  # Windows: PROCESS_MEMORY_COUNTERS.PeakPagefileUsage
                     import ctypes
                     from ctypes import wintypes
 
                     class Counters(ctypes.Structure):
                         _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
-                                    ("PeakWorkingSetSize", ctypes.c_size_t), ("rest", ctypes.c_size_t * 7)]
+                                    *((name, ctypes.c_size_t) for name in (
+                                        "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage",
+                                        "QuotaPagedPoolUsage", "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage",
+                                        "PagefileUsage", "PeakPagefileUsage"))]
 
                     counters = Counters()
                     counters.cb = ctypes.sizeof(Counters)
@@ -184,7 +187,9 @@ class ImportTest(unittest.TestCase):
                     info.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
                     info.restype = wintypes.BOOL
                     assert info(current(), ctypes.byref(counters), counters.cb), ctypes.WinError()
-                    return counters.PeakWorkingSetSize
+                    # The peak committed private memory: the working set's peak is set by the imports'
+                    # mapped libraries, which a parse's heap stays under (both runs read 0 growth).
+                    return counters.PeakPagefileUsage
                 return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
             before = peak()
