@@ -318,6 +318,17 @@ def main() -> int:
     protocol = os.fdopen(os.dup(1), "wb")
     os.dup2(2, 1)  # the model's prints go where the daemon reads logs from
     sys.stdout = sys.stderr
+    # The daemon's requests come on a handle of the worker's own, and standard input is the null
+    # device. On Windows a thread blocked reading a pipe holds every other call on that pipe --
+    # GetFileType, which a DLL's C runtime asks of the standard handles as the DLL loads (numpy's
+    # OpenBLAS, say) -- so a model's first import would wait for the daemon's next request, which
+    # waits for the build: a worker that never builds. And a model reading its input reads none
+    # of the protocol.
+    asked = os.fdopen(os.dup(0), "rb")
+    null = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(null, 0)
+    os.close(null)
+    sys.stdin = open(os.devnull, encoding="utf-8")  # noqa: SIM115 - standard input, for the worker's life
 
     lock = threading.Lock()
 
@@ -344,7 +355,7 @@ def main() -> int:
         """Every request as it comes: a ``where`` answered here and now, the rest queued
         for the build loop."""
         try:
-            for line in sys.stdin:
+            for line in asked:
                 if not line.strip():
                     continue
                 request = json.loads(line)
