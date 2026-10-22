@@ -842,8 +842,21 @@ class PictureTest(FixtureTest):
         [drawn] = draw_pictures(job_pictures(packet), daemon=False)
         self.assertEqual((drawn["camera"], drawn["width"], drawn["height"]), ("plan", 320, 240))
         found, whole = pixels(window.read_bytes()), pixels(self.draw(path)[0])
-        self.assertGreater(mismatch(found, whole), 0.05, "the window, not the whole drawing")
         red, green, blue = found[..., 0], found[..., 1], found[..., 2]
+        # The window, not the whole drawing, each measured against the picture itself, so no renderer's
+        # line weight decides it: the stroke, its window's width long, spans three quarters of the
+        # picture's width (the whole drawing fitted, a third); and the sheet's own lines (its
+        # unsaturated ink), zoomed on its sparse middle, are a quarter of the whole drawing's share
+        # from the same renderer (fitted, nine tenths).
+        stroked = np.where((np.minimum(red, blue) - green > 120).any(0))[0]
+        self.assertTrue(0.7 < (stroked.max() - stroked.min() + 1) / found.shape[1] < 0.85,
+                        "the stroke spans the window's width, not the whole drawing's")
+
+        def lines(picture: np.ndarray) -> float:
+            off = np.abs(picture - picture[0, 0]).max(-1) > 32
+            return float((off & (picture.max(-1) - picture.min(-1) <= 40)).mean())
+
+        self.assertLess(lines(found), 0.5 * lines(whole), "the window, not the whole drawing")
         for what, inked, at_least in (("the stroke", np.minimum(red, blue) - green > 120, 300),
                                       ("the words", green - np.maximum(red, blue) > 60, 20),
                                       ("the dimension", blue - np.maximum(red, green) > 60, 20)):
