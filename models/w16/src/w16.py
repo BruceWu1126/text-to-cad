@@ -4,7 +4,8 @@ Thirteen systems, each a `@memo` stage in its own file under `src/`, composed
 here by CALLING them (occurrence order = the original's explode order). The
 museum section is one flag, `lib/spec.py:SECTIONED`, read by every system: the
 cutaway is the model's own geometry. The engine is one xbf (`XBF/w16.xbf`) and
-one GLB (`XBF/w16.glb`), whose `crank` clip is the `crank` motion below.
+one GLB (`XBF/w16.glb`), whose `crank`, `explode` and `running_reveal` clips are the
+motions below.
     block          block + main caps + shells
     crank          crankshaft, damper, flywheel
     pistons        16 x piston/rings/pin/circlips/rod/cap/bolts/shells
@@ -40,7 +41,7 @@ from pistons import pistons
 from turbos import turbos
 from valvetrain import valvetrain
 
-from lib import kinematics
+from lib import explode, kinematics
 from lib.palette import apply_finishes
 
 # Order here IS the occurrence order.
@@ -68,8 +69,16 @@ def w16():
     engine = bd.Compound(children=systems, label="w16")
     apply_finishes(engine)
     kinematics.author_joints(engine)
-    # One full four-stroke cycle, 720 deg in 6 s, looping: the pistons and rods in
-    # the firing order, the cams at half speed, 64 valves and their followers, the
-    # oil pump, the turbo rotors and every accessory pulley.
-    cycle = kinematics.crank_cycle(kinematics.turbos(engine))
-    return motion(engine, "crank", cycle, duration=kinematics.CRANK_SECONDS, loop="loop")
+    explode.author(engine)
+    turbo_tags = kinematics.turbos(engine)
+    # One full four-stroke cycle, 720 deg in 6 s: the pistons and rods in the firing
+    # order, the cams at half speed, 64 valves and their followers, the sprockets, the oil
+    # pump, the turbo rotors and every accessory pulley. It ends where it starts, so a
+    # player repeats it exactly (a motion has no loop of its own).
+    motion(engine, "crank", kinematics.crank_cycle(turbo_tags), duration=kinematics.CRANK_SECONDS)
+    # The staged explode, 12 s with the engine running throughout, and the running
+    # cutaway, 24 s: the bodywork off, held and back on while the engine runs, ending where
+    # it starts (`lib/explode.py`).
+    motion(engine, "explode", explode.explode_clip(turbo_tags), duration=explode.EXPLODE_SECONDS)
+    return motion(engine, "running_reveal", explode.running_reveal_clip(turbo_tags),
+                  duration=explode.REVEAL_SECONDS)
