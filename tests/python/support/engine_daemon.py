@@ -31,6 +31,7 @@ JOURNAL = "CADGEN_TEST_JOURNAL"
 GRACE_SECONDS = 30.0
 HELD_SECONDS = 10.0
 TIMEOUT_SECONDS = 300.0
+STACK_LINES = 30  # a thread's innermost frames: where it waits
 
 
 def watched(env: dict[str, str], cleanup: Callable[..., Any]) -> dict[str, str]:
@@ -175,9 +176,13 @@ def report(env: dict[str, str], started: float, read: dict[str, list[bytes]]) ->
                 lines.append(f"  {line}")
         stacks = Path(folder or "") / f"{role}-{pid}.stacks.txt"
         if stacks.is_file() and stacks.stat().st_size:
-            lines.append("  stacks (the last dump):")
+            lines.append("  stacks (the last dump; each thread's innermost frames first):")
             dumps = stacks.read_text(encoding="utf-8", errors="replace").split("Timeout (")
-            lines.extend("    " + line for line in ("Timeout (" + dumps[-1]).splitlines()[-60:])
+            for thread in ("Timeout (" + dumps[-1]).split("\n\n"):
+                frames = thread.strip("\n").splitlines()
+                lines.extend("    " + line for line in frames[:STACK_LINES])
+                if len(frames) > STACK_LINES:
+                    lines.append(f"    ... {len(frames) - STACK_LINES} outer frames")
     state = _state(env)
     if state is not None:
         listing = sorted(state.iterdir()) if state.is_dir() else []
