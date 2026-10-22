@@ -542,7 +542,10 @@ def _render(job: dict[str, Any], runtime: Path, size: tuple[int, int],
 
 DOCUMENTS = (".xbf", ".step", ".stp")
 # A mesh file and the family the snapshot page draws it with (``headlessScene.js``).
-MESH_KINDS = {".glb": "glb", ".stl": "stl", ".3mf": "3mf"}
+MESH_KINDS = {".glb": "glb"}
+# The files no document that OCCT draws, each read by its reader (``formats``).
+FILES = (".stl", ".3mf")
+MESHES = (".stl", ".3mf")
 
 
 @dataclass
@@ -684,7 +687,7 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
     started = time.perf_counter()
     document, out = Path(document).resolve(), Path(out).resolve()
     suffix = document.suffix.lower()
-    if suffix not in DOCUMENTS and suffix not in MESH_KINDS:
+    if suffix not in DOCUMENTS and suffix not in MESH_KINDS and suffix not in FILES:
         raise SnapshotRefused(f"{document.name} is neither a document (.xbf, .step) nor a mesh (.glb, .stl, .3mf)")
     if source is None and not document.is_file():
         raise SnapshotRefused(f"no document {document}")
@@ -696,12 +699,9 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
         display["camera"] = dict(view.lens)  # the view's projection
     size = size or (view.size if view is not None and view.size else DEFAULT_SIZE)
     still = Still(display, framed, exact, preview, tuple(size), pose, annotation, measurements)
-    if suffix in MESH_KINDS:
+    if suffix in MESH_KINDS or suffix in MESHES:
         if pose is not None:
             raise SnapshotRefused(f"--pose poses a document's mechanism; {document.name} is a mesh and has none")
-        if exploded_amount(still.display) and suffix != ".glb":
-            raise SnapshotRefused(f"display.exploded moves a model's parts apart; {document.name} is one mesh. "
-                                  "Remove display.exploded.")
     if not out.parent.is_dir():
         out.parent.mkdir(parents=True, exist_ok=True)
     if suffix in MESH_KINDS:
@@ -725,10 +725,16 @@ def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, st
             raise RuntimeError(answer["failed"])
         data, report = base64.b64decode(answer["png"]), answer["report"]
     else:
+        from cadgen.engine.formats import FormatError
         from cadgen.engine.render.service import draw_here
 
-        data, report = draw_here(document, still, source=source)
+        try:
+            data, report = draw_here(document, still, source=source)
+        except FormatError as error:
+            raise SnapshotRefused(str(error)) from None
     _warn(report.get("unmeshed") or {})
+    for warning in report.get("warnings") or []:
+        print(f"warning: {document.name}: {warning}", file=sys.stderr)
     write_png(out, data)
     report["timings"]["totalMs"] = round((time.perf_counter() - started) * 1000)
     return {"ok": True, "document": str(document), "output": str(out), **report, "bytes": out.stat().st_size}

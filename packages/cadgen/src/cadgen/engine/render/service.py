@@ -33,7 +33,13 @@ the next snapshot starts another. A render process is no worker: it does not cou
 workers' cap.
 
 **In process** (``draw_here``): ``--no-daemon`` and a model drawn from its worker's memory serve
-the document from a server of this process, as the snapshot page's path does, and draw it once.
+the document from a server of this process, and draw it once.
+
+**A file that is not a document** -- a mesh file (``formats/``) -- is read by its
+reader in the process that draws it, into a structure and part buffers as a document's are: a
+render process of its own per file in the daemon
+(``{"op": "open", "path"}`` answered ``{"opened": {...}}``, again whenever a file it read has
+changed: ``formats.stale``), or once in this process (``draw_here``).
 
 Nothing is written: the verb writes the one PNG it is given.
 """
@@ -54,7 +60,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-__all__ = ["Held", "Renders", "draw_here", "frame_camera", "main"]
+__all__ = ["Held", "Renders", "draw_here", "frame_camera", "holder", "main"]
 
 
 def _matrix(values: list[float]) -> np.ndarray:
@@ -168,12 +174,30 @@ class Held:
         self.scenes: dict[bool, Any] = {}  # Preview or not: a scene
         self.kept: dict[bool, list[Any]] = {}  # what Preview's look shows for good (its floor)
         self.last: tuple[dict[str, Any], tuple[int, int]] | None = None  # the modes' last display and size
+        # A file read by its reader (``open``): how it poses (a robot's), what it read, what it warned.
+        self.kind: str | None = None
+        self.poser: Any = None
+        self.files: dict[str, Any] = {}
+        self.warnings: list[str] = []
 
-    def hold(self, structure: dict[str, Any], buffers: dict[str, bytes]) -> dict[str, Any]:
+    def open(self) -> dict[str, Any]:
+        """The file at ``path`` read by its reader (``formats.read``: a mesh file, a robot) and held
+        as a document is: what ``hold`` answers, the files read and their stamps, the warnings."""
+        from cadgen.engine import formats
+
+        started = time.perf_counter()
+        found = formats.read(self.path)
+        read = round((time.perf_counter() - started) * 1000)
+        self.kind, self.poser, self.files, self.warnings = found.kind, found.pose, found.files, found.warnings
+        held = self.hold(found.structure, found.buffers, found.shapes)
+        return {**held, "readMs": read, "kind": found.kind, "files": found.files, "warnings": found.warnings}
+
+    def hold(self, structure: dict[str, Any], buffers: dict[str, bytes], shapes: dict[str, Any] | None = None) -> dict[str, Any]:
         """A version of the document: its structure and the meshes of the parts this lacks. The
-        shapes of every part it shares with the last are kept and the new are made now; a scene of
-        the modes that was drawn is made again from them now too, its presentations computed for
-        the display it last showed, so the next picture waits on neither."""
+        shapes of every part it shares with the last are kept and the new are made now (``shapes``:
+        those a reader made already, by key: a GLB's textured parts); a scene of the modes that was
+        drawn is made again from them now too, its presentations computed for the display it last
+        showed, so the next picture waits on neither."""
         from cadgen.engine.mesh import Mesh
         from cadgen.engine.render.occt import prototype_shapes
 
@@ -188,7 +212,9 @@ class Held:
         made = 0
         for found, prototype in wanted.items():
             if found not in self.shapes:
-                self.shapes[found] = prototype_shapes(prototype, Mesh.from_bytes(self.buffers[found[0]]))
+                given = (shapes or {}).get(found[0])
+                self.shapes[found] = given if given is not None else \
+                    prototype_shapes(prototype, Mesh.from_bytes(self.buffers[found[0]]))
                 made += 1
         for gone in set(self.shapes) - set(wanted):
             del self.shapes[gone]
@@ -242,8 +268,10 @@ class Held:
         timings: dict[str, int] = {}
         shown, posed = self.structure, None
         if still.pose is not None:
+            if self.kind is not None and self.poser is None:
+                raise SnapshotRefused(f"--pose poses a mechanism; {self.path.name} is a mesh and has none")
             try:
-                shown = posed_structure(self.structure, still.pose)
+                shown = (self.poser or posed_structure)(self.structure, still.pose)
             except ValueError as error:  # mechanism.KinematicsError: what the pose names wrong, by name
                 raise SnapshotRefused(f"--pose: {error}") from None
             posed = shown["kinematics"]["pose"]
@@ -301,16 +329,37 @@ class Held:
                       "parts": len(self.structure["prototypes"]), "instances": len(shown["instances"]),
                       "unmeshed": unmeshed, "pose": posed, "exploded": exploded_amount(display) or None,
                       "renderer": "occt", **({"font": ", ".join(sorted(scene.fonts))} if scene.fonts else {}),
-                      "timings": timings}
+                      **({"kind": self.kind, "warnings": self.warnings} if self.kind else {}), "timings": timings}
+
+
+def holder(path: Path) -> Any:
+    """What holds the file at ``path`` that is no document, for ``open`` and ``draw``."""
+    return Held(Path(path))
+
+
+def foreign(path: Path) -> bool:
+    """Whether ``path`` is a file a reader of ``formats`` reads, not a document the engine serves."""
+    from cadgen.engine import formats
+
+    return Path(path).suffix.lower() in formats.KINDS
 
 
 def draw_here(document: Path, still: Any, *, source: Any = None) -> tuple[bytes, dict[str, Any]]:
     """A document drawn in this process: served by a server of its own (from ``source``, a build's
     document in this process's memory, over its one mesh cache; else read from its file), every
-    part meshed there, drawn once."""
+    part meshed there, drawn once. A file no document (``foreign``) is read by its reader, here."""
     from cadgen.engine.serve import MESHES, Server
 
     started = time.perf_counter()
+    if source is None and foreign(document):
+        held = holder(document)
+        try:
+            opened = held.open()
+            data, report = held.draw(still)
+        finally:
+            held.close()
+        report["timings"] = {"readMs": opened["readMs"], **report["timings"]}
+        return data, report
     if source is not None:
         server = Server(port=0, mesh_mode="inline", cache=MESHES)
         ident = server.put(document, source.structure,
@@ -377,6 +426,7 @@ def main() -> int:
     protocol = os.fdopen(os.dup(1), "wb")
     os.dup2(2, 1)  # anything printed goes where the daemon reads logs from
     sys.stdout = sys.stderr
+    from cadgen.engine.formats import FormatError
     from cadgen.engine.render.context import pool
     from cadgen.engine.snapshot import SnapshotRefused, Still
     from cadgen.engine.worker import resident_mb, rss_cap_mb
@@ -399,10 +449,22 @@ def main() -> int:
                 for key, size in request.get("meshes") or []:
                     buffers[key] = payload[at:at + size]
                     at += size
-                if held is None or held.path != Path(request["path"]):
+                if held is None or held.path != Path(request["path"]) or getattr(held, "kind", None):
+                    if held is not None:
+                        held.close()
                     held = Held(Path(request["path"]))
                 with pool():
                     _write(protocol, {"id": ident, "held": held.hold(request["structure"], buffers)})
+                continue
+            if op == "open":  # a file no document, read by its reader here
+                if held is not None:
+                    held.close()
+                held = None
+                opened = holder(Path(request["path"]))
+                with pool():
+                    answer = opened.open()
+                held = opened
+                _write(protocol, {"id": ident, "opened": answer})
                 continue
             if op != "frame":
                 _write(protocol, {"id": ident, "failed": f"unknown request {op!r}"})
@@ -421,7 +483,7 @@ def main() -> int:
             _write(protocol, {"id": ident, "done": report}, data)
             if retire:
                 return 0
-        except SnapshotRefused as error:
+        except (SnapshotRefused, FormatError) as error:
             _write(protocol, {"id": ident, "refused": str(error)})
         except Exception as error:  # noqa: BLE001 - the renderer answers every request
             _write(protocol, {"id": ident, "failed": "".join(traceback.format_exception_only(type(error), error)).strip(),
@@ -464,6 +526,7 @@ class RenderProcess:
         self.used = time.monotonic()  # when it last drew: idle as long as a worker may be, it is stopped
         self.meshed: dict[str, Any] | None = None  # the engine's account of the meshing its last version took
         self.held: dict[str, Any] | None = None  # what it made and kept of its last version's parts
+        self.files: dict[str, Any] = {}  # a file no document: every file its reader read, stamped
         self.said: list[str] = []  # its last lines on stderr, for a failure's report
         threading.Thread(target=self._stderr, daemon=True).start()
         ready = _read(self.process.stdout)
@@ -561,9 +624,50 @@ class Renders:
         render.meshed = {key: meshed.get(key) for key in ("parts", "meshed", "seconds", "triangles", "mode")}
         return timings
 
+    def _file(self, path: Path, still: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
+        """A picture of a file no document (``foreign``): its render process, which reads it with
+        its reader, opened again whenever a file it read has changed, asked for a frame."""
+        from cadgen.engine.formats import stale
+
+        timings: dict[str, int] = {}
+        for attempt in (1, 2):
+            render = self._process(f"file:{path}", path)
+            try:
+                with render.lock:
+                    if render.version is None or stale(render.files):
+                        clock = time.perf_counter()
+                        answer, _payload = render.ask({"op": "open", "path": str(path)})
+                        if "refused" in answer:
+                            raise Refused(answer["refused"])
+                        if "opened" not in answer:
+                            raise RuntimeError(answer.get("failed") or f"the renderer could not read {path.name}")
+                        opened = answer["opened"]
+                        render.version, render.files, render.held = "opened", opened["files"], opened
+                        timings.update(openMs=round((time.perf_counter() - clock) * 1000), readMs=opened["readMs"])
+                    answer, data = render.ask({"op": "frame", "still": still})
+            except Gone:
+                if attempt == 2:
+                    raise
+                continue
+            break
+        if "refused" in answer:
+            raise Refused(answer["refused"])
+        if "done" not in answer:
+            raise RuntimeError(answer.get("failed") or "the renderer drew nothing")
+        report = answer["done"]
+        render.frames += 1
+        render.rss = (report.get("process") or {}).get("rssMb")
+        if report.get("retired"):
+            render.retired = True
+        report["timings"] = {**timings, **report.get("timings", {})}
+        return data, report
+
     def draw(self, path: Path, still: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
         """A picture of the served document at ``path``: its render process started, or patched
-        to the version served, and asked for a frame. Raises ``Refused`` by name."""
+        to the version served, and asked for a frame. Raises ``Refused`` by name. A file no
+        document is read and drawn by a render process of its own (``_file``)."""
+        if foreign(Path(path)):
+            return self._file(Path(path).resolve(), still)
         started = time.perf_counter()
         ident = self.server.add(Path(path))
         doc = self.server.document(ident)

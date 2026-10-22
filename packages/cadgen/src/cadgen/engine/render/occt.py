@@ -353,7 +353,7 @@ class Scene:
             rgba = instance.get("color") or self.prototypes[p].get("color")
             rgba = tuple(rgba) if rgba else None
             if mode == "parts":
-                rgba = PARTS[index % len(PARTS)]
+                rgba = PARTS[instance.get("palette", index) % len(PARTS)]
             if faces:
                 for group in part.faces:
                     color = rgba if group is None or mode == "parts" else group
