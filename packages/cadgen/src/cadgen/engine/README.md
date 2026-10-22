@@ -438,7 +438,9 @@ projection -- is a job of the packet. `--camera authored` draws the picture from
 last mark, exactly (no fit), at its size and projection unless the flags say otherwise: from the
 packet given as `--annotation`, else the newest packet beside the annotation file that draws this
 document; with none, it is refused by name. A face the mesher left without triangles is named in a
-warning. Nothing is written but OUT.
+warning. Nothing is written but OUT. OUT may be a folder -- one that is there, or a path ending in a
+separator -- and the picture is then `<SRC's stem>_<UTC time>.png` in it (a model's name for a model,
+`snapshot.picture_path`), the path the verb prints and reports (`output`).
 
 **The OCCT stills.** A document is drawn by OCCT's own OpenGL renderer from the engine's meshes
 (`render/`): one presentation per part and look, each

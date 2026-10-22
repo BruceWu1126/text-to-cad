@@ -381,11 +381,13 @@ def snapshot(source: Any, out: Any, *, display: Any = None, camera: Any = None, 
     worker holds in memory, whether or not an xbf of it is on disk. ``annotation`` (the viewer's
     annotation: its file's path, its object, or the Quick Edit packet that carries it) and
     ``measurements`` are drawn over the model; ``camera="authored"`` draws it from the view the
-    annotation's ink was drawn in, which the packet holds. A snapshot refused or failed leaves no
-    picture at ``out`` (``snapshot.nothing_left``)."""
+    annotation's ink was drawn in, which the packet holds. ``out`` a folder (a path ending in a
+    separator, or one that is there) is given a name inside it, the source's stem and the time
+    (``snapshot.picture_path``). A snapshot refused or failed leaves no picture at ``out``
+    (``snapshot.nothing_left``)."""
     from cadgen.engine import snapshot as drawing
 
-    out = Path(os.fspath(out)).resolve()
+    out = drawing.picture_path(out, source)
     with drawing.nothing_left(out):
         return _snapshot(source, out, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
                          width=width, height=height, size_profile=size_profile, daemon=daemon, annotation=annotation,

@@ -161,6 +161,33 @@ class SnapshotTest(unittest.TestCase):
         self.assertIn("display.exploded", done.stderr)
         self.assertFalse(out.exists())
 
+    def test_an_out_that_is_a_folder_is_given_the_source_s_stem_and_the_time(self) -> None:
+        import re
+
+        from cadgen.engine import api
+        from cadgen.engine.snapshot import picture_path
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-out-folder-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        timed = r"_\d{8}T\d{6}Z\.png"
+        self.assertRegex(picture_path(folder, self.document).name, rf"^stand{timed}$")  # a folder that is there
+        fresh = picture_path(f"{folder / 'stills'}{os.sep}", self.document)  # a separator: a folder to be
+        self.assertEqual(fresh.parent, folder / "stills")
+        self.assertRegex(picture_path(folder, f"{folder / 'stand.py'}::post").name, rf"^post{timed}$")  # a model's name
+        self.assertEqual(picture_path(folder / "named.png", self.document), folder / "named.png")
+        # A packet's pictures share one time, told apart by their job and output where they have several.
+        self.assertEqual(picture_path(folder, self.document, at="T", job=(1, 3), output=(0, 2)).name, "stand_j2_1_T.png")
+        self.assertEqual(picture_path(folder, self.document, at="T", job=(0, 1), output=(0, 1)).name, "stand_T.png")
+        (folder / "file.png").write_bytes(b"x")
+        with self.assertRaisesRegex(SnapshotRefused, "names a folder"):
+            picture_path(f"{folder / 'file.png'}{os.sep}", self.document)
+        # The verb writes there, and says where.
+        gl()
+        drawn = api.snapshot(self.document, f"{folder / 'stills'}{os.sep}", width=160, height=120, daemon=False)
+        self.assertEqual(drawn.path.parent, folder / "stills")
+        self.assertRegex(drawn.path.name, rf"^stand{timed}$")
+        self.assertEqual((Path(drawn.report["output"]), drawn.path.read_bytes()[:4]), (drawn.path, b"\x89PNG"))
+
     def test_a_failure_under_json_is_its_envelope_on_stdout(self) -> None:
         """Under --json a verb says its failure as ``{"ok": false, "error": ...}`` on stdout, the result's
         channel, and exits 1; without it, its words on stderr: 2 for a request refused before anything ran."""

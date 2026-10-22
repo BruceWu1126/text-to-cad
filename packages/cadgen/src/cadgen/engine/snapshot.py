@@ -54,7 +54,8 @@ from typing import Any, Iterator
 from cadgen.engine.atomic_replace import replace_atomic
 
 __all__ = ["SnapshotRefused", "Still", "add_parser", "authored", "build_parser", "draw", "main", "options",
-           "parse_annotation", "parse_camera", "parse_display", "parse_measurements", "parse_pose", "run", "snapshot"]
+           "parse_annotation", "parse_camera", "parse_display", "parse_measurements", "parse_pose", "picture_path", "run",
+           "snapshot"]
 
 DISPLAY_MODES = ("solid", "shaded", "parts", "xray", "hidden-line", "wireframe")
 DISPLAY_KEYS = frozenset({"mode", "grid", "appearance", "camera", "clip", "exploded", "hidden", "isolated"})
@@ -506,6 +507,48 @@ def refusals(still: Still, structure: dict[str, Any], name: str) -> None:
                               "Remove display.exploded.")
 
 
+def stamp() -> str:
+    """The time a generated picture name carries: UTC, to the second (``20261022T174512Z``)."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def names_a_folder(text: str) -> bool:
+    """Whether OUT names a folder to write a generated name into: a trailing separator says so (a
+    folder that need not exist yet), else a folder that is there. A trailing separator on a file
+    that is there is refused: it names a folder, and what cannot become one."""
+    path = Path(text).expanduser()
+    if text.endswith(("/", "\\")):
+        if path.exists() and not path.is_dir():
+            raise SnapshotRefused(f"{text} ends in a separator, which names a folder, and {path} is a file")
+        return True
+    return path.is_dir()
+
+
+def stem_of(source: Any) -> str:
+    """What a generated picture name starts with: the drawn file's stem, or a model's name."""
+    named = getattr(source, "name", None)
+    if isinstance(named, str) and not isinstance(source, Path):
+        return named  # a Model, built code
+    script, _sep, model = os.fspath(source).partition("::")
+    return model or Path(script).stem or "snapshot"
+
+
+def picture_path(out: Any, source: Any, *, at: str | None = None, job: tuple[int, int] = (0, 1),
+                 output: tuple[int, int] = (0, 1)) -> Path:
+    """Where a picture is written: OUT as given, or -- OUT a folder (``names_a_folder``) -- a name
+    made inside it, ``<stem>[_j<m>][_<n>]_<UTC time>.png`` (``stem_of`` the source; the job's place
+    in a packet of several, and the output's in a job of several, where they tell pictures apart;
+    ``at`` the one time every picture of a run shares)."""
+    text = os.fspath(out)
+    if not names_a_folder(text):
+        return Path(text).expanduser().resolve()
+    told = [f"j{job[0] + 1}"] if job[1] > 1 else []
+    told += [str(output[0] + 1)] if output[1] > 1 else []
+    return (Path(text).expanduser() / f"{'_'.join([stem_of(source), *told, at or stamp()])}.png").resolve()
+
+
 def write_png(out: Path, data: bytes) -> None:
     """The one file a snapshot writes: beside ``out`` first, then moved over it."""
     temporary = out.with_name(f".{out.stem}.{os.getpid()}.tmp.png")
@@ -647,7 +690,8 @@ def _arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument("document", metavar="SRC", help="a document (.xbf, .step), a mesh file (.glb, .stl, .3mf), a "
                                                         "robot (.urdf, .sdf, .srdf), a drawing (.dxf), or "
                                                         "SCRIPT.py::MODEL (built first, drawn from its worker)")
-    parser.add_argument("out", metavar="OUT.png", help="the .png to write")
+    parser.add_argument("out", metavar="OUT.png", help="the .png to write, or a folder (one that is there, or a path "
+                                                       "ending in a separator) to write <SRC's stem>_<UTC time>.png into")
     parser.add_argument("--display", help="a mode (solid, shaded, parts, xray, hidden-line, wireframe), exploded=AMOUNT "
                                           "(the parts moved apart, 0 to 1; with a mode: hidden-line,exploded=0.6), or "
                                           "the display JSON object (mode, grid, appearance, camera, clip, exploded, "
@@ -707,7 +751,7 @@ def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
     if "::" in args.document or args.document.endswith(".py"):
         return _run_model(args, prog)
     from cadgen.engine import api
-    from cadgen.engine.cli import Failed
+    from cadgen.engine.cli import Failed, _shown
 
     try:
         # The verb as a function (``api.snapshot``), which checks the flags as ``snapshot`` does.
@@ -723,7 +767,7 @@ def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
         print(json.dumps(report))
     else:
         timings = report["timings"]
-        print(f"wrote {args.out} ({report['width']}x{report['height']}, {report['displayMode']}"
+        print(f"wrote {_shown(report['output'])} ({report['width']}x{report['height']}, {report['displayMode']}"
               f"{', preview' if report['preview'] else ''}) in {timings['totalMs'] / 1000:.2f}s")
     return 0
 
@@ -732,7 +776,7 @@ def _run_model(args: argparse.Namespace, prog: str) -> int:
     """``cadgen snapshot SCRIPT.py::MODEL OUT.png``: the model built in its worker, its
     document drawn from that worker's memory (``api.snapshot``)."""
     from cadgen.engine import api
-    from cadgen.engine.cli import Failed
+    from cadgen.engine.cli import Failed, _shown
 
     try:
         drawn = api.snapshot(args.document, args.out, display=args.display, camera=args.camera, grid=args.grid,
@@ -746,5 +790,6 @@ def _run_model(args: argparse.Namespace, prog: str) -> int:
     if args.json:
         print(json.dumps(drawn.report))
     else:
-        print(f"wrote {args.out} ({drawn.width}x{drawn.height}) in {drawn.report['timings']['totalMs'] / 1000:.2f}s")
+        print(f"wrote {_shown(drawn.path)} ({drawn.width}x{drawn.height}) in "
+              f"{drawn.report['timings']['totalMs'] / 1000:.2f}s")
     return 0

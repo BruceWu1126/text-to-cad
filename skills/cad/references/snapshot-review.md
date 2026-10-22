@@ -169,7 +169,9 @@ their ink still on it.
 ## Output paths
 
 OUT is written exactly as given, relative to the working directory, and must end in
-`.png`. Check the command's exit status before reading it: a refused request
+`.png`; a folder instead (one that is there, or a path ending in `/`) gets a
+generated name inside it, `<SRC's stem>_<UTC time>.png` (`tmp/stills/bracket_20261022T174512Z.png`),
+which the command prints. Check the command's exit status before reading it: a refused request
 (an unknown key or value, a pose out of range, a flag the input cannot take) and a
 failed build or render write nothing, and leave a file an earlier run wrote where it
 was. Reuse one name while iterating (`tmp/review.png`), or name before and after
