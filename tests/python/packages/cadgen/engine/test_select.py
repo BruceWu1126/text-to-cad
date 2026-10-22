@@ -475,7 +475,8 @@ class WhereTest(unittest.TestCase):
         label, point = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertTrue(label.startswith("hand/finger.3/f:"))
         self.assertEqual(point, [8.0, 0.0, 12.0])
-        status = json.loads(subprocess.run([sys.executable, "-m", "cadgen.engine", "status"], cwd=self.folder,
+        status = json.loads(subprocess.run([sys.executable, "-m", "cadgen.engine", "status", "--json"],
+                                           cwd=self.folder,
                                            env=self.env, capture_output=True, text=True, timeout=120).stdout)
         self.assertIn("hand.py", [Path(worker["script"]).name for worker in status["workers"]])
 
