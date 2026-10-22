@@ -247,7 +247,10 @@ target and moved over it.
   and materials' names and densities are the xbf's. OCCT's writer drops the look (metallic,
   roughness, emissive and the rest: a material reads back matte), every physical field but the
   density, a face's material (the face keeps its colour), the mechanism and its configurations,
-  and the model's key and provenance.
+  and the model's key and provenance. The writer's two run-dependent choices are settled
+  before it writes: the header's time stamp is `step.WRITTEN_STAMP` (the xbf's date), and the
+  colour presentations, which it keeps in a map keyed by shape, are put in the order of the
+  shapes they style, so the same document is the same STEP in any process on any day.
 - **GLB**: one mesh per prototype, a node per placement named by its path, a PBR material per
   look (a paint is a primitive of its own) with an extension for each part of the look past
   metallic-roughness (`KHR_materials_ior`, `_transmission`, `_volume`, `_clearcoat`,

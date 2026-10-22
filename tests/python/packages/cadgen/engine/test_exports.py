@@ -67,6 +67,40 @@ def board():
 """
 
 
+# Six parts, each its own colour, a painted face and a material, and three instances of a
+# seventh: a colour presentation per styled shape, which OCCT's writer keeps in a map.
+KIT = """
+import build123d as bd
+from cadgen.engine import materials, paint, xbf
+
+
+@xbf
+def kit():
+    looks = [(0.9, 0.2, 0.1), (0.1, 0.8, 0.2), (0.2, 0.3, 0.9), (0.7, 0.7, 0.1), (0.5, 0.1, 0.6), (0.1, 0.5, 0.5)]
+    parts = []
+    for index, rgb in enumerate(looks):
+        part = bd.Pos(index * 20, 0, 0) * bd.Box(10, 10, 4 + index)
+        part.color = bd.Color(*rgb)
+        part = paint(part, part.faces().sort_by(bd.Axis.Z)[-1], (rgb[2], rgb[0], rgb[1]))
+        part.material = (materials.aluminium, materials.steel)[index % 2]
+        part.label = f"part{index}"
+        parts.append(part)
+    peg = bd.Cylinder(2, 10)
+    peg.color = bd.Color(0.3, 0.6, 0.6)
+    pegs = [peg.moved(bd.Location((x, 30, 0))) for x in (0, 10, 20)]
+    for index, placed in enumerate(pegs):
+        placed.label = f"peg{index}"
+    return bd.Compound(children=[*parts, bd.Compound(children=pegs, label="rack")], label="kit")
+"""
+# A STEP written in a process of its own: its colour presentations' order is the map's there.
+EXPORT = """
+import sys
+from pathlib import Path
+from cadgen.engine.export import translate
+translate(Path(sys.argv[1]), None, Path(sys.argv[2]))
+"""
+
+
 def _glb_json(path: Path) -> dict:
     data = path.read_bytes()
     length, kind = struct.unpack_from("<I4s", data, 12)
@@ -486,6 +520,35 @@ class StepTest(unittest.TestCase):
             self.assertEqual(document.Loaded(path).instances[-1].path[-1], "凸台-拉伸4", escaped)
             self.assertEqual(document.Loaded(path).prototypes[-1].name, "凸台-拉伸4", escaped)
         self.assertEqual(document.step_name("caf\\X\\E9 \\X4\\0001F600\\X0\\"), "café 😀")
+
+
+    def test_a_step_is_the_same_bytes_in_every_process_and_on_every_day(self) -> None:
+        import subprocess
+        import sys
+
+        from cadgen.engine.export.step import WRITTEN_STAMP
+
+        (self.folder / "kit.py").write_text(textwrap.dedent(KIT), encoding="utf-8")
+        (report,) = engine_build.build(self.folder / "kit.py", ["kit"], cwd=self.folder)
+        self.assertTrue(report["ok"], report)
+        written = []
+        # Twenty-six hours apart: the two processes' local dates always differ.
+        for zone in ("Etc/GMT+12", "Etc/GMT-14"):
+            out = self.folder / f"kit-{zone.replace('/', '-')}.step"
+            done = subprocess.run([sys.executable, "-c", EXPORT, str(self.folder / "XBF/kit.xbf"), str(out)],
+                                  env={**os.environ, "TZ": zone}, capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            written.append(out)
+        first, second = (path.read_bytes() for path in written)
+        self.assertEqual(first, second)
+        self.assertIn(f"'{WRITTEN_STAMP}'".encode(), first[:1024])
+        self.assertEqual(first.count(b"MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION"), 7)
+        # Reordered, every presentation still styles its own shape: the xbf's looks read back.
+        looks = {p.name: (p.color, p.material and p.material.name) for p in document.Loaded(written[0]).prototypes}
+        built = {p.name: (p.color, p.material and p.material.name)
+                 for p in document.Loaded(self.folder / "XBF/kit.xbf").prototypes}
+        self.assertEqual(sorted(looks), [*(f"part{i}" for i in range(6)), "peg0"])
+        self.assertEqual(looks, built)
 
 
 if __name__ == "__main__":
