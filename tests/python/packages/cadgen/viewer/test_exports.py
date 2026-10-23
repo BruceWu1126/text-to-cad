@@ -112,6 +112,20 @@ class ExportsTest(unittest.TestCase):
             with self.jobs.artifact(ready["id"]):
                 pass
 
+    def test_a_long_session_keeps_exporting_and_forgotten_requests_never_regenerate(self):
+        self.finish.set()
+        first = self.request("first")
+        for index in range(130):
+            request = first if index == 0 else {**first, "requestId": f"request-{index:016d}"}
+            ident = self.jobs.create(request)["id"]
+            self.settled(ident)
+            self.jobs.release(ident)
+        self.assertLessEqual(len(self.jobs.jobs), 128)
+        with self.assertRaises(ExportError) as caught:
+            self.jobs.create(first)
+        self.assertEqual(caught.exception.status, 410)
+        self.assertEqual(len(self.calls), 130)
+
     def test_stale_epoch_closed_formats_and_nonfinite_pose_are_refused(self):
         for change in ({"epoch": "old"}, {"format": "cadz"}, {"format": []}, {"output": "/tmp/unasked"}):
             with self.assertRaises(ExportError):

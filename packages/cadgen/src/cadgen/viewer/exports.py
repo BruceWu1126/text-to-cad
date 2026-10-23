@@ -186,6 +186,12 @@ class ExportJobs(Jobs):
                 return self._submit(request_id, normalized)
             if sum(j.get("bytes", 0) for j in self.jobs.values() if j["state"] == "ready") >= MAX_RETAINED_BYTES:
                 raise ExportError("Export storage is full. Release a previous export first.", 429)
+            # A released, expired, failed or cancelled job holds no file: past the history bound
+            # it is forgotten (its request ID stays a tombstone), so the session keeps exporting.
+            for ident in [i for i, j in self.jobs.items() if j["state"] in TERMINAL and not j["directory"] and not j["readers"]]:
+                if len(self.jobs) < 128:
+                    break
+                self.jobs.pop(ident)
             self._start()
             spec["format"] = kind
             return self._submit(request_id, normalized, spec=spec, expiresAt=0, readers=0,
