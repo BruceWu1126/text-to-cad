@@ -15,13 +15,13 @@ MODEL_LABEL = "mechanical_iris_aperture_assembly"
 
 # Plain RGB(A) tuples / sRGB hex strings: build123d's Shape.color setter
 # builds the Color on assignment.
-BRUSHED_STEEL = (0.64, 0.67, 0.68, 1.0)
-STEEL_HIGHLIGHT = (0.76, 0.78, 0.78, 1.0)
-GRAPHITE = (0.0, 0.0, 0.0, 1.0)
-BRASS = (0.95, 0.68, 0.25, 1.0)
-GUNMETAL = (0.13, 0.15, 0.17, 1.0)
-DARK_GRAY = (0.06, 0.065, 0.07, 1.0)
-APERTURE_BLACK = (0.0, 0.0, 0.0, 1.0)
+BRUSHED_STEEL = "#d1d6d7"
+STEEL_HIGHLIGHT = "#e2e5e5"
+GRAPHITE = "#000000"
+BRASS = "#f9d789"
+GUNMETAL = "#656c73"
+DARK_GRAY = "#45484b"
+APERTURE_BLACK = "#000000"
 
 BASE_OD = 160.0
 BASE_ID = 52.0

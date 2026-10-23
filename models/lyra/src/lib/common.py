@@ -22,12 +22,12 @@ import build123d as bd
 # Palette: warm pearl composite shells over a graphite structural core,
 # machined-aluminum joint hardware, near-black soft-touch tactile pads, and
 # a restrained amber accent on small functional details. No logos.
-PEARL = (0.91, 0.905, 0.89)     # warm-white composite shells
-GRAPHITE = (0.15, 0.16, 0.18)   # structural cores / phalanx links
-ALU = (0.87, 0.89, 0.93)        # machined-aluminum rims, pins, flange
-PAD = (0.10, 0.10, 0.11)        # soft-touch tactile pad rubber
-AMBER = (0.83, 0.50, 0.16)      # amber accent (sensor ring, tensioners)
-SENSOR = (0.03, 0.06, 0.12)     # gloss midnight sensor glass
+PEARL = "#f5f4f2"     # warm-white composite shells
+GRAPHITE = "#6c6f76"   # structural cores / phalanx links
+ALU = "#f0f2f7"        # machined-aluminum rims, pins, flange
+PAD = "#59595d"        # soft-touch tactile pad rubber
+AMBER = "#ebbc6f"      # amber accent (sensor ring, tensioners)
+SENSOR = "#304561"     # gloss midnight sensor glass
 # Plain RGB tuples: build123d's ``Shape.color`` setter builds the Color on
 # assignment.
 

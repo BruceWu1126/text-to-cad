@@ -24,7 +24,7 @@ def finishing_sampler():
     bridge = bridge - stripes
     bridge, applied = F.anglage_top(bridge, S.ANGLAGE_WIDTH)
     bridge = bridge - bd.Pos(4.0, 2.0, 0) * F.jewel_countersink_cut()
-    bridge.color = bd.Color(*S.COPPER_GOLD)
+    bridge.color = bd.Color(S.COPPER_GOLD)
     bridge.label = "striped_bridge_coupon"
     parts.append(bridge)
 
@@ -41,7 +41,7 @@ def finishing_sampler():
     # perlage plate coupon
     plate = bd.Pos(0, -11.0, -0.6) * F._box(14.0, 8.0, 1.2)
     plate = plate - [bd.Pos(0, -11.0, 0) * s for s in F.perlage_cutter(14.0, 8.0)]
-    plate.color = bd.Color(*S.COPPER_GOLD)
+    plate.color = bd.Color(S.COPPER_GOLD)
     plate.label = "perlage_plate_coupon"
     parts.append(plate)
 

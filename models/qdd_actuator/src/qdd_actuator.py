@@ -283,31 +283,31 @@ PLANET_EXPLODE_RADIAL = 14.0
 # Plain RGB(A) tuples / sRGB hex strings, not bd.Color objects: build123d's
 # Shape.color setter builds the Color on assignment, and a module-level
 # bd.Color(...) would import the CAD kernel when the module loads.
-AL_BODY = (0.13, 0.135, 0.15)  # black-anodized housing
-AL_COVER = (0.115, 0.12, 0.13)  # black-anodized rear cover
-AL_BRIGHT = (0.78, 0.79, 0.81)  # machined aluminum (flange, carrier)
-AL_RETAINER = (0.85, 0.20, 0.01)  # saturated anodized-orange accent ring
-STEEL = (0.62, 0.63, 0.66)
-STEEL_POLISHED = (0.76, 0.77, 0.79)
-STEEL_RACE = (0.24, 0.25, 0.29)  # dark bearing-steel races vs aluminum
-STEEL_ROLLER = (0.85, 0.86, 0.88)
-LAMINATION = (0.30, 0.31, 0.34)
-COPPER = (0.80, 0.45, 0.18)
-ROTOR_DARK = (0.24, 0.25, 0.28)
-MAGNET_N = (0.10, 0.10, 0.12)  # alternating pole colors: dark / nickel
-MAGNET_S = (0.68, 0.69, 0.71)
-FERRITE = (0.25, 0.08, 0.10)
-PCB_GREEN = (0.05, 0.30, 0.14)
-IC_BLACK = (0.08, 0.08, 0.09)
-CAP_GRAY = (0.22, 0.24, 0.30)
-PLASTIC_BLACK = (0.07, 0.07, 0.08)
-GUNMETAL = (0.34, 0.35, 0.38)  # connector coupling nuts
-PIN_GOLD = (0.80, 0.64, 0.25)  # connector contacts
-BLACK_OXIDE = (0.20, 0.20, 0.22)  # socket-head fasteners
-RUBBER = (0.04, 0.04, 0.04)
-TITANIUM = (0.60, 0.59, 0.64)
-GAUGE_GOLD = (0.85, 0.72, 0.35)
-TUBE_BLACK = (0.32, 0.33, 0.35)  # dark gunmetal, reads against the cover
+AL_BODY = "#65676c"  # black-anodized housing
+AL_COVER = "#5f6165"  # black-anodized rear cover
+AL_BRIGHT = "#e5e6e8"  # machined aluminum (flange, carrier)
+AL_RETAINER = "#ed7c19"  # saturated anodized-orange accent ring
+STEEL = "#ced0d4"
+STEEL_POLISHED = "#e2e3e6"
+STEEL_RACE = "#868993"  # dark bearing-steel races vs aluminum
+STEEL_ROLLER = "#edeff1"
+LAMINATION = "#95979e"
+COPPER = "#e7b376"
+ROTOR_DARK = "#868990"
+MAGNET_N = "#595961"  # alternating pole colors: dark / nickel
+MAGNET_S = "#d7d8db"
+FERRITE = "#895059"
+PCB_GREEN = "#3f9569"
+IC_BLACK = "#505055"
+CAP_GRAY = "#818695"
+PLASTIC_BLACK = "#4b4b50"
+GUNMETAL = "#9ea0a6"  # connector coupling nuts
+PIN_GOLD = "#e7d189"  # connector contacts
+BLACK_OXIDE = "#7c7c81"  # socket-head fasteners
+RUBBER = "#383838"
+TITANIUM = "#cbcad1"
+GAUGE_GOLD = "#eddda0"
+TUBE_BLACK = "#999ba0"  # dark gunmetal, reads against the cover
 
 # ---------------------------------------------------------------------------
 # Concept materials: what each part is made of, in the finish its colour above

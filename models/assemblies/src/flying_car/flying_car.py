@@ -16,16 +16,16 @@ DISPLAY_NAME = "Roadable VTOL flying car concept"
 MODEL_LABEL = "roadable_vtol_flying_car_concept"
 
 COLORS = {
-    "pearl_body": (0.82, 0.86, 0.84, 1.0),
-    "graphite": (0.03, 0.035, 0.04, 1.0),
-    "dark_glass": (0.08, 0.16, 0.24, 0.58),
-    "warm_lens": (1.0, 0.74, 0.28, 1.0),
-    "red_lens": (0.95, 0.08, 0.05, 1.0),
-    "titanium": (0.52, 0.56, 0.58, 1.0),
-    "brushed_aluminum": (0.72, 0.74, 0.73, 1.0),
-    "rotor_blue": (0.24, 0.42, 0.56, 1.0),
-    "safety_orange": (1.0, 0.35, 0.06, 1.0),
-    "rubber": (0.005, 0.006, 0.007, 1.0),
+    "pearl_body": "#eaefec",
+    "graphite": "#303538",
+    "dark_glass": "#506f8694",
+    "warm_lens": "#ffdf90",
+    "red_lens": "#f9503f",
+    "titanium": "#bfc5c8",
+    "brushed_aluminum": "#dddfde",
+    "rotor_blue": "#86adc5",
+    "safety_orange": "#ffa045",
+    "rubber": "#101214",
 }
 
 Vector3 = tuple[float, float, float]
@@ -59,14 +59,14 @@ ROTOR_Z = DUCT_Z + 0.9
 
 def style(shape: bd.Shape, label: str, color_name: str) -> bd.Shape:
     shape.label = label
-    shape.color = bd.Color(*COLORS[color_name])
+    shape.color = bd.Color(COLORS[color_name])
     return shape
 
 
 def group(label: str, children: Sequence[bd.Shape], color_name: str | None = None) -> bd.Compound:
     compound = bd.Compound(obj=list(children), children=list(children), label=label)
     if color_name is not None:
-        compound.color = bd.Color(*COLORS[color_name])
+        compound.color = bd.Color(COLORS[color_name])
     return compound
 
 
