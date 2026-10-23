@@ -186,6 +186,18 @@ def _target(target: Any) -> tuple[Path, list[str] | None]:
     return path, [function] if function else None
 
 
+_RUN: list[str] = []
+
+
+def _run() -> str:
+    """This process's run: its pid and a token of its own (a pid is used again), made on its
+    first build; a forked child makes its own. The worker serves one run's calls of a script
+    from one load while its files stand as they were (``build.build``)."""
+    if not _RUN or not _RUN[0].startswith(f"{os.getpid()}:"):
+        _RUN[:] = [f"{os.getpid()}:{os.urandom(8).hex()}"]
+    return _RUN[0]
+
+
 def _built(script: Path, functions: list[str] | None, *, verify: bool = False, profile: bool = False,
            log: Callable[[str], None] | None = None, daemon: bool = True,
            progress: Any = None) -> tuple[list[dict[str, Any]], Any, float]:
@@ -222,7 +234,7 @@ def _built(script: Path, functions: list[str] | None, *, verify: bool = False, p
                 shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")
 
             answer = _ask({"op": "build", "script": str(script), "functions": functions, "cwd": str(cwd),
-                           "verify": verify, "profile": profile}, relay, frames)
+                           "verify": verify, "profile": profile, "run": _run()}, relay, frames)
             reports, fresh = answer["done"], answer.get("worker", {}).get("fresh")
     finally:
         if bar is not None:

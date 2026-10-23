@@ -288,6 +288,8 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
                 elif "settled" in message:
                     if message.get("op", "build") == "build":
                         self.on_settled(self)
+                elif "collected" in message:
+                    pass  # the worker collected while idle (``worker.py``): nothing waits on it
                 elif "where" in message:
                     waiting = self.asked.pop(str(message.get("id")), None)
                     if waiting is not None:
@@ -820,7 +822,8 @@ class Daemon:
                         fresh = worker.builds == 0
                         order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
                                  "cwd": request.get("cwd"), "verify": bool(request.get("verify")),
-                                 "profile": bool(request.get("profile")), "acknowledged": True}
+                                 "profile": bool(request.get("profile")), "acknowledged": True,
+                                 "run": request.get("run")}
                         server = self.server
                         if server is not None:
                             # The worker sends each served document it builds back as a patch,

@@ -444,6 +444,13 @@ guess, no refusal; the operating system does the rest.
 - **A memory cap.** A worker whose resident memory is over `CADGEN_ENGINE_WORKER_RSS_MB` after
   a build (default: a quarter of the machine's memory, at least 2 GiB; `0` for no cap) is
   retired: the report says so (`retired`), and the worker exits once it has answered.
+- **Collected when idle.** A worker builds with Python's cyclic collector off and collects once
+  no request has come for half a second, so a script's calls one after another never wait on
+  it. A worker over its memory cap collects before it measures again.
+- **One load per run.** The calls one `python model.py` process makes of its script are served
+  from one load of it while every file the load read stands as it was, the load made no kernel
+  call and every call since took its models from their keys. Anything else loads the script
+  again: another run, an edit, a body that ran.
 
 The meshing pool starts with the first page or view, never with a build. A build serves its
 document, so the daemon's server starts with the first `python model.py`; its meshing pool

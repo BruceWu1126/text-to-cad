@@ -684,6 +684,7 @@ class Symbols:
         self._closures: dict[tuple[str, Path], str] = {}
         self._stars: dict[str, str | None] = {}
         self._reached: dict[int, tuple] = {}
+        self._files: dict[str, str | None] = {}  # per module name, ``_module_file``
 
     # --- the key -------------------------------------------------------------------------
 
@@ -811,13 +812,18 @@ class Symbols:
                        for name, found in named.items()} for file, named in rows.items()}
 
     def _module_file(self, name: str | None) -> str | None:
-        """The file a first-party module was loaded from, or None."""
-        if not name or not self._first_party_module(name):
+        """The file a first-party module was loaded from, or None; once per name (a resolution
+        is made against one load)."""
+        if not name:
             return None
-        file = getattr(sys.modules.get(name), "__file__", None)
-        if not file:
-            return None
-        return str(Path(file).resolve())
+        if name in self._files:
+            return self._files[name]
+        found = None
+        if self._first_party_module(name):
+            file = getattr(sys.modules.get(name), "__file__", None)
+            found = str(Path(file).resolve()) if file else None
+        self._files[name] = found
+        return found
 
     # --- what is first-party ---------------------------------------------------------------
 
