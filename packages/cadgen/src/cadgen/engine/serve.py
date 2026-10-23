@@ -1353,6 +1353,10 @@ class Server:
             if parts == ["api", "look", "environment"]:
                 return self.send(handler, 200, LOOK.environment_path.read_bytes(), "image/vnd.radiance")
             ident, pose = self.poses.get(parts[2], (parts[2], None)) if len(parts) >= 3 else ("", None)
+            if parts[:2] == ["api", "doc"] and ident and not self.holds(ident):
+                lost = self.lost(ident)  # a document the engine knows but holds no more: what rebuilds it
+                if lost is not None:
+                    return self.send(handler, 404, json.dumps(lost).encode(), "application/json")
             if parts[:2] == ["api", "doc"] and self.holds(ident):
                 if len(parts) == 4 and parts[3] == "version":
                     after = (query.get("after") or [None])[0]
@@ -1389,6 +1393,8 @@ class Server:
             self.error(handler, 404, "not found")
         except (BrokenPipeError, ConnectionResetError):
             pass
+        except NotHeld as error:  # its worker gone and its bytes evicted: the command that builds it again
+            self.send(handler, 404, json.dumps(error.payload()).encode(), "application/json")
         except ValueError as error:  # a pose refused by name (``mechanism.KinematicsError``), a body not JSON
             self.error(handler, 400, str(error))
         except Exception as error:  # noqa: BLE001 - a request's failure is its answer

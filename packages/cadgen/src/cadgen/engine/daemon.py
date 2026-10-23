@@ -922,6 +922,8 @@ class Daemon:
                                 if path.endswith(".xbf"):
                                     self.builders[file_id(path)] = worker
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
+                        # The program that asked: what a document it built names to build it again.
+                        answer["program"] = request.get("program")
                         self._built(worker, answer)
                         send(answer)
                         return

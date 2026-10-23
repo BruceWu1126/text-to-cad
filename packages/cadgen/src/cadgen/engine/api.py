@@ -186,6 +186,13 @@ def _target(target: Any) -> tuple[Path, list[str] | None]:
     return path, [function] if function else None
 
 
+def _program() -> str | None:
+    """The program this process runs, ``__main__``'s file: what a document it builds names as the
+    command that builds it again (``models.Models.missing``); None where it has no file."""
+    found = getattr(sys.modules.get("__main__"), "__file__", None)
+    return os.path.abspath(found) if isinstance(found, str) and os.path.isfile(found) else None
+
+
 _RUN: list[str] = []
 
 
@@ -234,7 +241,8 @@ def _built(script: Path, functions: list[str] | None, *, verify: bool = False, p
                 shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")
 
             answer = _ask({"op": "build", "script": str(script), "functions": functions, "cwd": str(cwd),
-                           "verify": verify, "profile": profile, "run": _run()}, relay, frames)
+                           "verify": verify, "profile": profile, "run": _run(), "program": _program()},
+                          relay, frames)
             reports, fresh = answer["done"], answer.get("worker", {}).get("fresh")
     finally:
         if bar is not None:
