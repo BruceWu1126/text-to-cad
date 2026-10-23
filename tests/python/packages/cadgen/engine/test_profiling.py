@@ -11,17 +11,29 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from cadgen import build
+from cadgen import build, stop
 from cadgen.engine import cli
 from cadgen.engine.profiling import describe
 
 
 class ProfilingTest(unittest.TestCase):
-    def setUp(self) -> None:
+    @classmethod
+    def setUpClass(cls) -> None:
         temporary = tempfile.TemporaryDirectory(prefix="engine-profile-")
-        self.addCleanup(temporary.cleanup)
-        self.folder = Path(temporary.name).resolve()
+        cls.addClassCleanup(temporary.cleanup)
+        cls.root = Path(temporary.name).resolve()
+        state = tempfile.TemporaryDirectory(prefix="eng-", dir="/tmp" if os.name != "nt" else None)
+        cls.addClassCleanup(state.cleanup)
+        cls.enterClassContext(mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": state.name}))
+        # A warm worker keeps its cwd open on Windows. Stop this class's own engine
+        # before removing any fixture directory; all cases still share its warm daemon.
+        cls.addClassCleanup(stop)
+
+    def setUp(self) -> None:
+        self.folder = self.root / self._testMethodName
+        self.folder.mkdir()
         self.enterContext(contextlib.chdir(self.folder))
 
     def assert_profile(self, report: dict, *, worker: bool = True) -> dict:
