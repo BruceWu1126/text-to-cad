@@ -22,18 +22,34 @@ class EngineClient:
                 self.endpoint = answer
             return self.endpoint
 
-    def call(self, method, path, body=b'', headers=None):
-        endpoint = self.connect()
-        parsed = urlsplit(endpoint['url'])
-        conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=600)
-        try:
-            conn.request(method, path, body=body, headers={**(headers or {}),
-                         'Authorization': 'Bearer ' + endpoint['token']})
-            response = conn.getresponse()
-            return response.status, dict(response.getheaders()), response.read()
-        except (OSError, http.client.HTTPException):
-            with self.lock:
+    def _forget(self, endpoint):
+        with self.lock:
+            if self.endpoint is endpoint:
                 self.endpoint = None
-            raise
-        finally:
-            conn.close()
+
+    def call(self, method, path, body=b'', headers=None):
+        # An engine restarted since the endpoint was read refuses its old token (same --port) or
+        # its old port: either is refused before any route runs, so it is asked again once.
+        for attempt in (1, 2):
+            endpoint = self.connect()
+            parsed = urlsplit(endpoint['url'])
+            conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=600)
+            try:
+                conn.request(method, path, body=body, headers={**(headers or {}),
+                             'Authorization': 'Bearer ' + endpoint['token']})
+                response = conn.getresponse()
+                answer = response.status, dict(response.getheaders()), response.read()
+            except ConnectionRefusedError:
+                self._forget(endpoint)
+                if attempt == 2:
+                    raise
+                continue
+            except (OSError, http.client.HTTPException):
+                self._forget(endpoint)
+                raise
+            finally:
+                conn.close()
+            if attempt == 1 and answer[0] == 403 and b'engine token required' in answer[2]:
+                self._forget(endpoint)
+                continue
+            return answer
