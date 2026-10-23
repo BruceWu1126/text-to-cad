@@ -19,7 +19,7 @@ import { AnimationTimeControl, formatSeconds } from "./AnimationTimeControl.js";
  * which puts the model back at rest, idle while it is; its body the routine, where there are
  * several, then Play or Pause, the scrubber and the Playback settings (Speed, Loop, Autoplay:
  * `PlaybackMenu.jsx`). Preview's routine is its own (`useRendererShell`). The runtime's `noun` names
- * the section and its controls: "Animation" (a GLB's clips), or "Motion" (an engine document's
+ * the section and its controls: "Animation" (a mesh file's clips), or "Motion" (an engine document's
  * motions, `xbf/useXbfMotion.js`). Each routine in the dropdown says its duration.
  *
  * @param {{ runtime: object, autoplay: boolean, onAutoplayChange(value: boolean): void, disabled?: boolean }} props
