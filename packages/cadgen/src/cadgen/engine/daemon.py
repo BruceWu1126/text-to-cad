@@ -47,7 +47,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from cadgen.engine.addresses import document_id
 from cadgen.engine.atomic_replace import replace_atomic
+from cadgen.engine.ids import canonical, file_id
 
 __all__ = ["IDLE_SECONDS", "Pool", "lock", "lock_path", "main", "socket_path", "state_dir", "worker_cap",
            "worker_idle"]
@@ -311,14 +313,14 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
             self.process.stdin.write((json.dumps(request) + "\n").encode())
             self.process.stdin.flush()
 
-    def where(self, path: str, key: str, kind: str, ordinal: int, timeout: float = 10.0) -> dict[str, Any] | None:
-        """What made one element of a document this worker built, as its last build of it
-        named the element (``build.made_by``); None when it did not build it, or is gone."""
+    def where(self, doc: str, key: str, kind: str, ordinal: int, timeout: float = 10.0) -> dict[str, Any] | None:
+        """What made one element of a document (``doc``, its id) this worker built, as its last
+        build of it named the element (``build.made_by``); None when it did not build it, or is gone."""
         ident = f"where{next(self.questions)}"
         waiting: "queue.Queue[Any]" = queue.Queue(1)
         self.asked[ident] = waiting
         try:
-            self._write({"id": ident, "op": "where", "path": path, "key": key, "kind": kind, "ordinal": ordinal})
+            self._write({"id": ident, "op": "where", "doc": doc, "key": key, "kind": kind, "ordinal": ordinal})
             return waiting.get(timeout=timeout)
         except (OSError, ValueError, queue.Empty):
             return None
@@ -587,8 +589,8 @@ class Daemon:
         self.stopping = threading.Event()
         self.server = None
         self.token = secrets.token_hex(16) if WINDOWS else ""
-        # Per xbf a build wrote (its path, ``os.path.normcase``d), the worker that built
-        # it last: the one that holds its provenance (``provenance``).
+        # Per document a build made (its id: each xbf's ``file_id``, each model's ``model_id``),
+        # the worker that built it last: the one that holds its provenance (``provenance``).
         self.builders: dict[str, Worker] = {}
         self.renders = None  # the served documents' render processes (``render.service.Renders``)
         self.serving = threading.Lock()
@@ -602,8 +604,7 @@ class Daemon:
     def connected(self, worker: Worker) -> bool:
         """A page watching any document this worker built keeps its memo warm."""
         server = self.server
-        return server is not None and any(self.builders.get(os.path.normcase(str(path))) is worker
-                                          for path in server.watched())
+        return server is not None and any(self.builders.get(ident) is worker for ident in server.watched())
 
     def _start(self, script: str, environment: dict[str, str], cwd: str | None) -> Worker:
         return Worker(script, environment, self.patched, self.settled, cwd=cwd, on_progress=self.progressed)
@@ -658,16 +659,13 @@ class Daemon:
     def release(self, worker: Worker) -> None:
         self.pool.release(worker)
 
-    def provenance(self, path: str, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
-        """What made one element of a served document, asked of the worker that built it
-        (``Worker.where``): None for a document no live worker built -- one served cold."""
-        from cadgen.engine.addresses import key as document_key
-
-        resolved = str(document_key(path))
-        worker = self.builders.get(os.path.normcase(resolved))
+    def provenance(self, ident: str, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
+        """What made one element of a served document (by its id), asked of the worker that built
+        it (``Worker.where``): None for a document no live worker built -- one served cold."""
+        worker = self.builders.get(ident)
         if worker is None or not self.pool.holds(worker):
             return None
-        return worker.where(resolved, key, kind, ordinal)
+        return worker.where(ident, key, kind, ordinal)
 
     def patched(self, header: dict[str, Any], payload: bytes, arrived: float) -> None:
         """A worker's document for a served path, put in place of the one served, and sent on to
@@ -676,7 +674,7 @@ class Daemon:
         if server is not None:
             server.patch(header, payload, arrived)
             if self.renders is not None and header.get("path"):
-                self.renders.patched(Path(header["path"]))
+                self.renders.patched(file_id(header["path"]))
 
     def serve(self, request: dict[str, Any]) -> Any:
         """The daemon's server, started on the first request that needs one."""
@@ -712,11 +710,12 @@ class Daemon:
         """The worker a request goes to (its key) and the folder that worker starts in."""
         source = request.get("source") or {}
         if "path" in source:
-            builder = self.builders.get(os.path.normcase(str(Path(source["path"]).resolve())))
+            builder = self.builders.get(file_id(source["path"]))
             if builder is not None and self.pool.holds(builder):
                 return builder.script, None
             return "documents", request.get("cwd")
-        return request.get("script") or source["script"], None
+        # A script's worker is keyed by its canonical path: a process key, not a document's id.
+        return canonical(request.get("script") or source["script"]), None
 
     def _call(self, request: dict[str, Any], order: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
         """An export or a result asked of the worker the request routes to; its answer sent."""
@@ -743,7 +742,7 @@ class Daemon:
                         # The lease excludes a rebuild: validate the generation here,
                         # including a rebuild that produced identical geometry.
                         with self.models.lock:
-                            model = self.models.records.get(expected.get("address"))
+                            model = self.models.records.get(document_id(expected.get("address") or ""))
                             matches = (model is not None and model["worker"] is worker
                                        and f"{model['version']}-0" == expected["modelRevision"])
                         if not matches:
@@ -760,7 +759,7 @@ class Daemon:
                     for row in (done.get("reports") or []) if isinstance(done, dict) else []:
                         for path in _written(row):
                             if path.endswith(".xbf"):
-                                self.builders[os.path.normcase(path)] = worker
+                                self.builders[file_id(path)] = worker
                     if not request.get("expected"):
                         self._built(worker, answer)
                     send(answer)
@@ -789,11 +788,11 @@ class Daemon:
         if op == "model_info":
             self.models.prune()
             with self.models.lock:
-                record = self.models.records.get(request["address"])
+                record = self.models.records.get(document_id(request["address"]))
                 if record is None:
                     send({"failed": f"no live model {request['address']}; build it before inspecting"})
                 else:
-                    send({"model": {key: record[key] for key in ("address", "source", "builtAt", "version", "files")}})
+                    send({"model": {key: record[key] for key in ("id", "address", "source", "builtAt", "version", "files")}})
             return
         if op == "model_source":
             send({"ok": True, "source": self.models.resolve(request["address"])})
@@ -835,7 +834,7 @@ class Daemon:
                             # Its children's too: the worker that built a child's xbf holds its trace.
                             for path in _written(report):
                                 if path.endswith(".xbf"):
-                                    self.builders[os.path.normcase(path)] = worker
+                                    self.builders[file_id(path)] = worker
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
                         self._built(worker, answer)
                         send(answer)

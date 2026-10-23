@@ -1,6 +1,7 @@
 """Serving documents over HTTP: the structure as JSON, each part as one binary buffer.
 
-``GET /api/docs`` lists the documents served; ``GET /api/doc/<id>`` is one document's
+``GET /api/docs`` lists the documents served, each by its id (``ids``: a file's ``file_id``,
+a model's ``model_id``, by which every map here is keyed); ``GET /api/doc/<id>`` is one document's
 structure (``document.Loaded.structure``): its parts with their names, keys, colours,
 materials and element names, its instances with world matrices, its tree, and its version, and
 for each part already meshed the faces its mesher left without triangles
@@ -87,7 +88,8 @@ from cadgen.engine.render.look import LOOK
 
 __all__ = ["MeshCache", "PARALLEL_BYTES", "Served", "Server", "find_three"]
 
-from cadgen.engine.addresses import key as document_key, parse as model_address
+from cadgen.engine.addresses import document_id, key as document_key
+from cadgen.engine.ids import file_id
 
 PAGE = Path(__file__).resolve().parent / "page"
 # A part whose shape bytes reach this is meshed with the kernel's face parallelism inside
@@ -420,9 +422,11 @@ class Server:
                  host: str = "127.0.0.1", mesh_mode: str | None = None,
                  provenance: Callable[[str, str, str, int], dict[str, Any] | None] | None = None,
                  cache: MeshCache | None = None, isolated: bool = False, http_factory=None) -> None:
+        # Every document by its id (``ids``): a file's ``file_id``, a model's ``model_id``. A model
+        # registered but not opened yet is a loader (its address, its load and its version) until
+        # a page asks for it.
         self.served: dict[str, Served] = {}
-        self.idents: dict[Path | str, str] = {}
-        self.model_loaders: dict[str, tuple[Callable, int]] = {}
+        self.model_loaders: dict[str, tuple[str, Callable, int]] = {}
         self.model_versions: dict[str, int] = {}
         self.model_locks: dict[str, threading.Lock] = {}
         # The daemon's server and a worker's snapshot serve from the process's one cache
@@ -437,11 +441,11 @@ class Server:
         self.on_close = lambda: None
         self.provenance = provenance
         self.load_lock = threading.RLock()
-        self.held: dict[Path, int] = {}
+        self.held: dict[str, int] = {}
         self.changed = threading.Condition()
         self.watch_lock = threading.Lock()
-        self.watchers: dict[Path | str, int] = {}
-        self.synced: dict[Path | str, float] = {}
+        self.watchers: dict[str, int] = {}
+        self.synced: dict[str, float] = {}
         self.generation = 0
         self.topologies: "OrderedDict[str, Any]" = OrderedDict()
         self.topology_lock = threading.Lock()
@@ -457,9 +461,9 @@ class Server:
         # as it stands (by its state): it is read again once the file changes.
         self.rereading: set[str] = set()
         self.unreadable: dict[str, tuple | None] = {}
-        # Per served path, its build: the last progress frame of the build writing it now, the
-        # last build of it that failed, and a count that moves with either (``build_of``).
-        self.builds: dict[Path, dict[str, Any]] = {}
+        # Per served document (its id), its build: the last progress frame of the build writing it
+        # now, the last build of it that failed, and a count that moves with either (``build_of``).
+        self.builds: dict[str, dict[str, Any]] = {}
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -517,12 +521,13 @@ class Server:
     # --- documents -------------------------------------------------------------------
 
     def add(self, path: Path) -> str:
+        """Serve the document at ``path`` (or a live model's address): its id."""
         path = document_key(path)
-        ident = hashlib.blake2b(str(path).encode(), digest_size=6).hexdigest()
+        ident = document_id(path)
         if isinstance(path, str):
-            if path not in self.idents:
+            if not self.holds(ident):
                 raise ValueError(f"no live model {path}")
-            return self.idents[path]
+            return ident
         if path.suffix.lower() in FOREIGN:
             # Read outside the lock: a STEP's read is long, and every other document is served
             # meanwhile. Two first opens of one file share its one read (``_foreign``).
@@ -533,38 +538,46 @@ class Server:
             with self.load_lock:
                 if ident not in self.served:
                     self.served[ident] = served
-                    self.idents[path] = ident
             return ident
         with self.load_lock:
             if ident not in self.served:
                 self.served[ident] = self._read(ident, path)  # a document that cannot be read is the caller's error
-                self.idents[path] = ident
         return ident
 
-    def put(self, path: Path, structure: dict[str, Any], shapes: dict[str, Any]) -> str:
-        """Serve a document held in memory (a build's, which a worker draws): its structure
-        and each part's shape (or shape bytes) by key. No file is read for it."""
+    def put(self, path: Path | str, structure: dict[str, Any], shapes: dict[str, Any]) -> str:
+        """Serve a document held in memory (a build's, which a worker draws), at ``path`` (a
+        file, or a model's address): its structure and each part's shape (or shape bytes) by
+        key. No file is read for it. Its id."""
         path = document_key(path)
-        ident = hashlib.blake2b(str(path).encode(), digest_size=6).hexdigest()
+        ident = document_id(path)
         with self.load_lock:
             self.served[ident] = Served(ident, path, structure, _stat(path), dict(shapes),
                                         {p["key"]: p["name"] for p in structure["prototypes"]})
-            self.idents[path] = ident
         self._changed()
         return ident
 
-    def register_model(self, address: str, load: Callable, version: int) -> str:
-        ident = hashlib.blake2b(address.encode(), digest_size=6).hexdigest()
+    def holds(self, ident: str) -> bool:
+        """Whether a document of this id is served, or registered to be (a live model's)."""
+        return ident in self.served or ident in self.model_loaders
+
+    def path_of(self, ident: str) -> Path | str:
+        """The path (or a model's address) of a document served or registered."""
         with self.load_lock:
-            self.idents[address] = ident
-            self.model_loaders[ident] = (load, version)
+            found = self.served.get(ident)
+            if found is not None:
+                return found.path
+            return self.model_loaders[ident][0]
+
+    def register_model(self, ident: str, address: str, load: Callable, version: int) -> str:
+        """A live model's document, by its id, opened on demand: ``load`` asks its worker."""
+        with self.load_lock:
+            self.model_loaders[ident] = (address, load, version)
             self.model_locks.setdefault(ident, threading.Lock())
         self._changed()
         return ident
 
-    def forget_model(self, address: str) -> None:
+    def forget_model(self, ident: str) -> None:
         with self.load_lock:
-            ident = self.idents.pop(address, None)
             self.served.pop(ident, None)
             self.model_loaders.pop(ident, None)
             self.model_versions.pop(ident, None)
@@ -574,15 +587,15 @@ class Server:
         return [{"id": ident, "path": str(doc.path)} for ident, doc in self.served.items()]
 
     def versions(self) -> dict[str, str]:
-        """Every served path and the version served of it."""
+        """Every served document's id and the version served of it."""
         with self.load_lock:
-            return {str(doc.path): doc.version for doc in self.served.values()}
+            return {ident: doc.version for ident, doc in self.served.items()}
 
     def served_keys(self) -> dict[str, list[str]]:
-        """Every served path and the keys of the parts the document served of it holds:
-        what a build of it changed is what these lack."""
+        """Every served document's id and the keys of the parts it holds: what a build of it
+        changed is what these lack."""
         with self.load_lock:
-            return {str(doc.path): sorted(doc.shapes) for doc in self.served.values()}
+            return {ident: sorted(doc.shapes) for ident, doc in self.served.items()}
 
     def shape_keys(self) -> list[str]:
         """The keys of every part whose shape a served document holds."""
@@ -669,15 +682,15 @@ class Server:
         if ident in self.model_loaders:
             # No kernel work on the HTTP thread: the loader asks the owning worker.
             with self.model_locks[ident]:
-                load, version = self.model_loaders[ident]
+                address, load, version = self.model_loaders[ident]
                 if self.model_versions.get(ident) != version:
                     structure, shapes = load()
-                    self.put(structure["address"], structure, shapes)
+                    self.put(address, structure, shapes)
                     self.model_versions[ident] = version
             return self.served[ident]
         with self.load_lock:
             doc = self.served[ident]
-            if self.held.get(doc.path):
+            if self.held.get(ident):
                 return doc
             stat = _stat(doc.path)
             if stat is None or stat == doc.stat:
@@ -710,25 +723,35 @@ class Server:
                     self.served[ident] = fresh
         self._changed()
 
-    def hold(self, paths: list[str]) -> list[Path]:
-        """Paths a build is writing: their files are not read again until ``release``."""
-        held = []
+    def _ids(self, texts: Any) -> list[str]:
+        """The served documents among ``texts`` (ids, paths, or model addresses), by id."""
+        found = []
+        for text in texts:
+            try:
+                ident = document_id(text)
+            except (OSError, ValueError):
+                continue
+            if self.holds(ident):
+                found.append(ident)
+        return found
+
+    def hold(self, documents: list[str]) -> list[str]:
+        """Documents a build is writing (ids or paths): their files are not read again until
+        ``release``. The ids held."""
         with self.load_lock:
-            for text in paths:
-                path = document_key(text)
-                if path in self.idents:
-                    self.held[path] = self.held.get(path, 0) + 1
-                    held.append(path)
+            held = self._ids(documents)
+            for ident in held:
+                self.held[ident] = self.held.get(ident, 0) + 1
         return held
 
-    def release(self, paths: list[Path]) -> None:
+    def release(self, held: list[str]) -> None:
         with self.load_lock:
-            for path in paths:
-                left = self.held.get(path, 0) - 1
+            for ident in held:
+                left = self.held.get(ident, 0) - 1
                 if left > 0:
-                    self.held[path] = left
+                    self.held[ident] = left
                 else:
-                    self.held.pop(path, None)
+                    self.held.pop(ident, None)
         self._changed()
 
     def _changed(self) -> None:
@@ -743,8 +766,8 @@ class Server:
         a path not served."""
         started = time.perf_counter()
         path = document_key(header["path"])
-        ident = self.idents.get(path)
-        if ident is None:
+        ident = file_id(path)
+        if ident not in self.served:
             return None
         view = memoryview(payload)
         at = 0
@@ -814,79 +837,68 @@ class Server:
     def building(self, frame: dict[str, Any]) -> None:
         """A build's progress frame (``progress.py``): each served document among its
         ``outputs`` is being built, as the frame says, and its pages are woken."""
-        paths = []
-        for text in frame.get("outputs") or []:
-            try:
-                paths.append(document_key(text))
-            except (OSError, ValueError):
-                continue
         with self.load_lock:
-            hit = [path for path in paths if path in self.idents]
-            for path in hit:
-                state = self.builds.setdefault(path, {"building": None, "failed": None, "progress": 0})
+            hit = self._ids(frame.get("outputs") or [])
+            for ident in hit:
+                state = self.builds.setdefault(ident, {"building": None, "failed": None, "progress": 0})
                 state.update(building=frame, failed=None, progress=state["progress"] + 1)
         if hit:
             self._changed()
 
     def built(self, outcomes: dict[str, dict[str, Any] | None]) -> None:
-        """Builds that answered: per path they wrote, None when its model built, else what failed
-        (``{"model", "error", "progress"}``). Those served are built no longer; their pages are woken."""
+        """Builds that answered: per document they wrote (a path, or a model's id), None when its
+        model built, else what failed (``{"model", "error", "progress"}``). Those served are built
+        no longer; their pages are woken."""
         hit = False
         with self.load_lock:
             for text, failed in outcomes.items():
-                try:
-                    path = document_key(text)
-                except (OSError, ValueError):
-                    continue
-                if path not in self.idents:
-                    continue
-                state = self.builds.setdefault(path, {"building": None, "failed": None, "progress": 0})
-                state.update(building=None, failed=failed, progress=state["progress"] + 1)
-                hit = True
+                for ident in self._ids([text]):
+                    state = self.builds.setdefault(ident, {"building": None, "failed": None, "progress": 0})
+                    state.update(building=None, failed=failed, progress=state["progress"] + 1)
+                    hit = True
         if hit:
             self._changed()
 
-    def build_of(self, path: Path) -> dict[str, Any]:
-        """A served document's build: ``building``, ``failed`` and their ``progress`` count."""
+    def build_of(self, ident: str) -> dict[str, Any]:
+        """A served document's build, by its id: ``building``, ``failed`` and their ``progress`` count."""
         with self.load_lock:
-            return dict(self.builds.get(path) or {"building": None, "failed": None, "progress": 0})
+            return dict(self.builds.get(ident) or {"building": None, "failed": None, "progress": 0})
 
     def wait(self, ident: str, after: str | None, seconds: float, progress: int | None = None) -> Served:
         """The document once its version is not ``after``, or its build's ``progress`` count is
         not ``progress`` (when given), or after ``seconds``."""
-        path = next(path for path, value in self.idents.items() if value == ident)
         with self.watch_lock:
-            self.watchers[path] = self.watchers.get(path, 0) + 1
-            self.synced[path] = time.monotonic()
+            self.watchers[ident] = self.watchers.get(ident, 0) + 1
+            self.synced[ident] = time.monotonic()
         try:
             return self._wait(ident, after, seconds, progress)
         finally:
             with self.watch_lock:
-                left = self.watchers[path] - 1
+                left = self.watchers[ident] - 1
                 if left:
-                    self.watchers[path] = left
+                    self.watchers[ident] = left
                 else:
-                    del self.watchers[path]
-                self.synced[path] = time.monotonic()
+                    del self.watchers[ident]
+                self.synced[ident] = time.monotonic()
             self.touch()
 
-    def sync(self, path: Path | str) -> None:
-        """A connected app's heartbeat, even when its document version has not changed."""
-        path = document_key(path)
-        if path in self.idents:
+    def sync(self, document: str) -> None:
+        """A connected app's heartbeat (its document's id, path or address), even when its
+        document version has not changed."""
+        for ident in self._ids([document]):
             with self.watch_lock:
-                self.synced[path] = time.monotonic()
+                self.synced[ident] = time.monotonic()
             self.touch()
 
-    def watched(self) -> set[Path | str]:
-        """Documents with an outstanding version read or a sync in the last LIVE seconds.
+    def watched(self) -> set[str]:
+        """The ids of documents with an outstanding version read or a sync in the last LIVE seconds.
 
         This lock is independent of document loading and the worker pool: retirement must
         not wait for a document's reader, nor take their locks in the opposite order.
         """
         now = time.monotonic()
         with self.watch_lock:
-            self.synced = {path: at for path, at in self.synced.items() if now - at < LIVE}
+            self.synced = {ident: at for ident, at in self.synced.items() if now - at < LIVE}
             return set(self.watchers) | self.synced.keys()
 
     def _wait(self, ident: str, after: str | None, seconds: float, progress: int | None) -> Served:
@@ -896,7 +908,7 @@ class Server:
             doc = self.document(ident)
             left = deadline - time.monotonic()
             if after is None or doc.version != after or left <= 0 or (
-                    progress is not None and self.build_of(doc.path)["progress"] != progress):
+                    progress is not None and self.build_of(ident)["progress"] != progress):
                 return doc
             with self.changed:
                 # Woken by a patch, a release or a build's progress; the file is looked at twice a second.
@@ -1010,13 +1022,13 @@ class Server:
             if parts == ["api", "look", "environment"]:
                 return self.send(handler, 200, LOOK.environment_path.read_bytes(), "image/vnd.radiance")
             ident, pose = self.poses.get(parts[2], (parts[2], None)) if len(parts) >= 3 else ("", None)
-            if parts[:2] == ["api", "doc"] and (ident in self.served or ident in self.model_loaders):
+            if parts[:2] == ["api", "doc"] and self.holds(ident):
                 if len(parts) == 4 and parts[3] == "version":
                     after = (query.get("after") or [None])[0]
                     seconds = min(float((query.get("wait") or ["0"])[0] or 0), WAIT_LIMIT)
                     given = (query.get("progress") or [""])[0]
                     doc = self.wait(ident, after, seconds, int(given) if given.isdigit() else None)
-                    build = self.build_of(doc.path)
+                    build = self.build_of(ident)
                     return self.json(handler, {"version": doc.version, "patch": doc.patch, **build})
                 doc = self.document(ident)
                 if len(parts) == 3:
@@ -1107,7 +1119,7 @@ class Server:
         if self.provenance is None:
             return None
         try:
-            found = self.provenance(str(doc.path), key, kind, ordinal)
+            found = self.provenance(doc.ident, key, kind, ordinal)
         except Exception:  # noqa: BLE001 - provenance never fails the facts
             return None
         prototype = next((p for p in doc.structure["prototypes"] if p["key"] == key), None)

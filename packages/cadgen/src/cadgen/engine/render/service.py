@@ -786,11 +786,10 @@ class Renders:
         report["mesh"] = render.meshed
         return data, report
 
-    def patched(self, path: Path) -> None:
-        """A served document was patched: its render process, if it has one, is sent the new
-        version now, off the patch's thread, so the next picture is warm."""
-        ident = self.server.idents.get(Path(path).resolve())
-        render = self.processes.get(ident) if ident else None
+    def patched(self, ident: str) -> None:
+        """A served document (by its id) was patched: its render process, if it has one, is sent
+        the new version now, off the patch's thread, so the next picture is warm."""
+        render = self.processes.get(ident)
         if render is None or not render.alive():
             return
 
