@@ -69,7 +69,7 @@ ADAPTERS: dict[str, frozenset[str]] = {
     # The person's telemetry choice: status, on or off.
     "telemetry": frozenset({"action"}),
     # The engine's verbs (cadgen.engine.cli), each a command of its own.
-    "export": frozenset({"source", "destinations", "pose", "part", "json"}),
+    "export": frozenset({"source", "destinations", "json"}),
     "snapshot": SNAPSHOT,
     "serve": frozenset({"document", "port", "three"}),
     "inspect": frozenset({"document", "ref", "query"}),

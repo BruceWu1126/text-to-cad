@@ -233,13 +233,10 @@ class DocumentTest(_Folder):
                             for text in report["kinematics"]["warnings"]), report.get("kinematics"))
         self.assertNotIn("far", document.Loaded(self.xbf).mechanism.motions)
 
-    def test_a_part_of_one_link_and_a_step_carry_no_motion(self) -> None:
+    def test_a_step_carries_no_motion(self) -> None:
         from cadgen.engine.export import translate
 
         self.arm()
-        part = self.folder / "link.xbf"
-        translate(self.xbf, None, part, part="link")
-        self.assertEqual(document.Loaded(part).mechanism, None, "a part of one link holds no pair, and no motion")
         whole = self.folder / "whole.step"
         translate(self.xbf, None, whole)
         self.assertIsNone(document.Loaded(whole).mechanism, "STEP carries no mechanism and no motion")
@@ -533,13 +530,13 @@ class GlbTest(_Folder):
         translate(self.xbf, None, again)
         self.assertEqual(again.read_bytes(), out.read_bytes(), "the same document bakes the same bytes")
 
-    def test_a_posed_glb_keeps_its_clips_and_the_other_exports_ignore_motions(self) -> None:
+    def test_a_glb_keeps_its_clips_and_the_other_exports_ignore_motions(self) -> None:
         from cadgen.engine.export import translate
 
         self.arm()
-        posed = self.folder / "raised.glb"
-        translate(self.xbf, None, posed, pose="raised")
-        self.assertEqual([animation["name"] for animation in _glb(posed)[0]["animations"]], ["lift", "nod", "wave"])
+        moved = self.folder / "moved.glb"
+        translate(self.xbf, None, moved)
+        self.assertEqual([animation["name"] for animation in _glb(moved)[0]["animations"]], ["lift", "nod", "wave"])
         moving = {kind: self.folder / f"moving{suffix}" for kind, suffix in (("stl", ".stl"), ("threemf", ".3mf"))}
         for path in moving.values():
             translate(self.xbf, None, path)

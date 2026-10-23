@@ -225,7 +225,7 @@ export interface CadActivity {
 }
 
 export type ExportFormat = 'step' | 'glb' | 'stl' | 'threemf' | 'dxf' | 'xbf' | 'original';
-export interface ExportSource { doc: string; revision: string; part: string | null; pose: Record<string, number> | null }
+export interface ExportSource { doc: string; revision: string }
 export interface ExportOption { format: ExportFormat; label: string; extension: string; reason: string | null }
 export interface ExportRequest { requestId: string; epoch: string; source: ExportSource; format: ExportFormat }
 export interface ExportJob {

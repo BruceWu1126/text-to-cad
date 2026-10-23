@@ -1,19 +1,17 @@
 """Exports: a document translated to a file. One writer, one document, two triggers.
 
-``translate(document, kind, path, *, pose=None, part=None)`` writes one
+``translate(document, kind, path)`` writes one
 file of ``kind`` (``KINDS``: ``xbf``, ``step``, ``glb``, ``stl``, ``threemf``, ``dxf``) from a
 document: a ``Source`` -- the document a build made, held in the worker's memory
 (``Source.built``), or one read from an ``.xbf`` or a ``.step`` (``Source.read``). A
 derived file a decorator declares and a file ``cadgen export`` asks for are the same
-call, so the same document and the same options write the same bytes.
+call, so the same document writes the same bytes.
 
-``pose`` (a configuration's name or ``{joint: value}``) places the mechanism's links by
-forward kinematics before anything is written; ``part`` (one part or assembly as a ref's
-owner names it, ``refs``: ``hand/finger.2``, ``palm``) writes that subtree alone, as a
-document of its own: its root at the subtree's frame. Meshes are never sources: there is
-no B-rep in them. An xbf is written from a STEP (read into a document
-first), or from an xbf with ``part`` (a sub-assembly extracted); a posed xbf is refused,
-since a pose is a request, never a document. A GLB carries every configuration sequence the document defines as a glTF
+The file holds the document as its code built it: every part, placed where the document
+places it, in its colours, with its motion. No translation selects a part or a state: a
+posed or partial file is a function in the model's code. Meshes are never sources: there is
+no B-rep in them. An xbf is written from a STEP (read into a document first); an xbf is
+never written from another, which already is the document. A GLB carries every configuration sequence the document defines as a glTF
 animation of the same name, baked by forward kinematics (``export/motion.py``), and, from a build's source, every
 ``animation()`` its code made (``export/animation.py``): the document holds none, so a GLB
 exported from the xbf alone carries the configuration sequences only. STEP, STL and 3MF ignore both. A
@@ -183,8 +181,8 @@ class Source:
                 self._bytes[key] = found
         return found
 
-    def view(self, pose: Any = None, part: str | None = None) -> "View":
-        return View.of(self, pose=pose, part=part)
+    def view(self) -> "View":
+        return View.of(self)
 
     def shape(self) -> Any:
         """The document as a build123d compound tree: an assembly node a ``Compound`` of its
@@ -261,20 +259,14 @@ class Placed:
 
 @dataclass
 class View:
-    """A document as one translation writes it: posed (``pose``) and cut to a subtree
-    (``part``), or as it is. ``tree`` is the structure's tree from the root written (its
-    nodes' ``instance`` indices the structure's), ``root`` that root's occurrence in the
-    document, ``rerooted`` the matrix that takes the document's frame to the root's."""
+    """A document as one translation writes it: as it is. ``tree`` is the structure's tree
+    (its nodes' ``instance`` indices the structure's)."""
 
     source: Source
     name: str
     placements: list[Placed]
     tree: dict[str, Any]
-    root: tuple[int, ...]
-    rerooted: Any
-    posed: bool
-    parted: bool
-    matrices: list[Any]  # every instance's world matrix in the root's frame, by instance index
+    matrices: list[Any]  # every instance's world matrix, by instance index
 
     @property
     def prototypes(self) -> list[dict[str, Any]]:
@@ -288,42 +280,19 @@ class View:
         return list(found)
 
     @classmethod
-    def of(cls, source: Source, *, pose: Any = None, part: str | None = None) -> "View":
+    def of(cls, source: Source) -> "View":
         import numpy as np
 
         structure = source.structure
         instances = structure["instances"]
-        columns = [instance["matrix"] for instance in instances]
-        if pose is not None:
-            from cadgen.engine import mechanism
-
-            try:
-                values, _named = mechanism.resolve(structure.get("kinematics"), pose)
-                mechanism.link_worlds(structure["kinematics"], values)
-                columns = mechanism.posed_instances(structure, values)
-            except ValueError as error:
-                raise ExportRefused(f"--pose: {error}") from None
-        matrices = [np.array(values, dtype=float).reshape(4, 4).T for values in columns]
-        tree, root, name = structure["tree"], (), structure["name"]
-        rerooted = np.eye(4)
-        if part is not None:
-            tree, root = _subtree(structure, str(part))
-            name = tree["name"]
-            if "children" in tree:
-                world = source.world(root)
-                if world is None:
-                    raise ExportRefused(f"--part {part}: the document does not say where {name!r} stands")
-            else:
-                world = np.array(instances[tree["instance"]]["matrix"], dtype=float).reshape(4, 4).T
-            rerooted = np.linalg.inv(world)
-            matrices = [rerooted @ matrix for matrix in matrices]
+        matrices = [np.array(instance["matrix"], dtype=float).reshape(4, 4).T for instance in instances]
+        tree = structure["tree"]
         placements = []
         for index in _instances(tree):
             instance = instances[index]
-            names = instance["path"].split("/")
-            placements.append(Placed(instance["prototype"], matrices[index], names[len(root):] if root else names,
+            placements.append(Placed(instance["prototype"], matrices[index], instance["path"].split("/"),
                                      tuple(instance["color"]) if instance.get("color") else None, index))
-        return cls(source, name, placements, tree, root, rerooted, pose is not None, part is not None, matrices)
+        return cls(source, structure["name"], placements, tree, matrices)
 
 
 def _instances(node: dict[str, Any]) -> list[int]:
@@ -332,33 +301,10 @@ def _instances(node: dict[str, Any]) -> list[int]:
     return [index for child in node["children"] for index in _instances(child)]
 
 
-def _subtree(structure: dict[str, Any], part: str) -> tuple[dict[str, Any], tuple[int, ...]]:
-    """The node ``part`` names, as a ref's owner names one (``refs``): ``hand/finger.2``, the second
-    component labelled ``finger`` of ``hand``; ``palm``, where one occurrence is so labelled; the
-    root's name may be left off. A ref naming nothing, several occurrences, an element or a
-    document is refused by name; the node's occurrence is its child indices from the root."""
-    from cadgen.engine import refs
-
-    try:
-        file, selectors = refs.parse(part)
-    except refs.RefError as error:
-        raise ExportRefused(f"--part {part!r}: {error}") from None
-    if file is not None or len(selectors) != 1 or selectors[0].owner is None or selectors[0].element is not None:
-        raise ExportRefused(f"--part {part!r} names one part or assembly, as a ref's owner does (hand/finger.2, "
-                            "palm): no element, no document")
-    try:
-        [hit] = refs.resolve_structure(structure, part)
-    except refs.RefError as error:
-        raise ExportRefused(f"--part: {error}") from None
-    steps = hit.node.path()
-    occurrence = tuple(parent.children.index(child) for parent, child in zip(steps, steps[1:]))
-    return hit.node.payload, occurrence
-
-
 # --- the one call ------------------------------------------------------------------------------
 
 
-def translate(document: Any, kind: str | None, path: Any, *, pose: Any = None, part: str | None = None) -> int:
+def translate(document: Any, kind: str | None, path: Any) -> int:
     """Write ``document`` (a ``Source``, or the path of an ``.xbf``/``.step``) to ``path``
     as ``kind`` (from the suffix when None); returns the file's size."""
     path = Path(path)
@@ -368,12 +314,9 @@ def translate(document: Any, kind: str | None, path: Any, *, pose: Any = None, p
     if path.suffix.lower() not in KINDS[kind].suffixes:
         raise ExportRefused(f"{path.name}: a {kind} export ends in {' or '.join(KINDS[kind].suffixes)}")
     source = document if isinstance(document, Source) else Source.read(document)
-    if kind == "xbf":
-        if pose is not None:
-            raise ExportRefused("a posed xbf is refused: a pose is a request, never a document")
-        if not source.foreign and part is None and source.path is not None and source.path.suffix.lower() == ".xbf":
-            raise ExportRefused("an xbf is written from another xbf only with --part: the document already is one")
-    view = source.view(pose=pose, part=part)
+    if kind == "xbf" and not source.foreign and source.path is not None and source.path.suffix.lower() == ".xbf":
+        raise ExportRefused("an xbf is not written from another xbf: the document already is one")
+    view = source.view()
     path.parent.mkdir(parents=True, exist_ok=True)
     spec = KINDS[kind]
     if not spec.atomic:

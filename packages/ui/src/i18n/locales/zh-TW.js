@@ -6,12 +6,6 @@
 export default {
   "export.button": "匯出",
   "export.heading": "匯出模型",
-  "export.scope": "範圍",
-  "export.whole": "整個模型",
-  "export.selection": "選取的零件／組件",
-  "export.position": "位置",
-  "export.authored": "原始位置",
-  "export.current": "目前位置",
   "export.preview": "預覽會匯出原始模型。",
   "export.geometry": "可見性、裁切和爆炸視圖不影響匯出。GLB 包含模型中的動畫。",
   "export.format": "格式",

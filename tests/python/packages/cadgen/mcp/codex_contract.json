@@ -653,16 +653,6 @@
         "minItems": 1,
         "type": "array"
        },
-       "part": {
-        "minLength": 1,
-        "type": "string"
-       },
-       "pose": {
-        "type": [
-         "object",
-         "string"
-        ]
-       },
        "requestId": {
         "description": "Unique 16\u2013100 character request ID. Reuse only for an identical start in this session.",
         "minLength": 1,
@@ -748,16 +738,6 @@
      "operationId": {
       "minLength": 1,
       "type": "string"
-     },
-     "part": {
-      "minLength": 1,
-      "type": "string"
-     },
-     "pose": {
-      "type": [
-       "object",
-       "string"
-      ]
      },
      "requestId": {
       "description": "Unique 16\u2013100 character request ID. Reuse only for an identical start in this session.",

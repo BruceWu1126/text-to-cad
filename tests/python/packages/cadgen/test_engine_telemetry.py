@@ -125,14 +125,16 @@ class EngineTelemetryTest(unittest.TestCase):
         self.assertFalse(self.settings.with_name(analytics.SPOOL).exists(), "the spool is the sender's now")
 
     def test_an_export_counts_a_build_of_each_destination_and_a_snapshot_its_source(self) -> None:
-        exported = facts("export", source="xbf", pose=True, outputs=[
+        exported = facts("export", source="xbf", outputs=[
             {"kind": "step", "seconds": 0.1}, {"kind": "threemf", "seconds": 0.2}, {"kind": "dxf", "seconds": 0.1}])
         self.assertEqual(engine_telemetry.counts(exported, "command"), {
             "builds": [{"kind": kind, "via": "command", "outcome": "ok", "seconds": 0.5 / 3, "cached": False}
-                       for kind in ("step", "3mf", "dxf")],
-            "features": ["kinematics"]})
+                       for kind in ("step", "3mf", "dxf")]})
         drawn = engine_telemetry.counts(facts("snapshot", source="model", found=True, pose=False), "script")
         self.assertEqual(drawn, {"snapshots": [{"format": "xbf", "ok": True, "seconds": 0.5}]})
+        # A snapshot at a pose is the one use of kinematics a verb tells: an export has no pose.
+        posed = engine_telemetry.counts(facts("snapshot", source="model", found=True, pose=True), "script")
+        self.assertEqual(posed["features"], ["kinematics"])
         # Every kind the stills draw is counted by its name, from the facts the verb tells (``api._facts``):
         # drawings and robot descriptions as documents and meshes are.
         from cadgen.engine import api

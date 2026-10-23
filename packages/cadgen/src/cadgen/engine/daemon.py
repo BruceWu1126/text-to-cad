@@ -799,7 +799,7 @@ class Daemon:
             return
         if op == "export":
             order = {"id": 1, "op": "export", "source": request["source"], "destinations": request["destinations"],
-                     "pose": request.get("pose"), "part": request.get("part"), "cwd": request.get("cwd"),
+                     "cwd": request.get("cwd"),
                      "draw": request.get("draw"), "draw_still": request.get("draw_still"),
                      "expected": request.get("expected"), "inspect": request.get("inspect"), "original": request.get("original")}
             return self._call(request, order, send)

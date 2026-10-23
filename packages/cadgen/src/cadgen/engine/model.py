@@ -223,11 +223,11 @@ class Model:
 
         return api.build_script(self.script, [self.name], verify=verify, profile=profile, log=log, daemon=daemon)
 
-    def export(self, *destinations: Any, pose: Any = None, part: str | None = None) -> Any:
+    def export(self, *destinations: Any) -> Any:
         """Build this model, then write its document to each destination (by suffix)."""
         from cadgen.engine import api
 
-        return api.export(self, *destinations, pose=pose, part=part)
+        return api.export(self, *destinations)
 
     def snapshot(self, out: Any, **options: Any) -> Any:
         """Build this model, then draw its document, from the worker's memory, into ``out``
@@ -476,7 +476,7 @@ def mechanism_state(assembly: Any, name: str, **values: Any) -> Any:
     joints are build123d's, placed with ``connect_to``; the values they were connected at are
     the as-built state, and a joint a mechanism state does not name stays as built. The
     document keeps every mechanism state; the viewer offers them as presets, ``--pose NAME``
-    poses a snapshot or an export at one, and a configuration sequence's waypoint may name
+    draws a snapshot at one, and a configuration sequence's waypoint may name
     one. A mechanism state never changes the build: every file shows the model as built.
     Returns ``assembly``."""
     from cadgen.engine import mechanism

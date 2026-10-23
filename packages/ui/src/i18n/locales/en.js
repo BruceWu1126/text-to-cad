@@ -8,12 +8,6 @@
 export default {
   "export.button": "Export",
   "export.heading": "Export model",
-  "export.scope": "Scope",
-  "export.whole": "Whole model",
-  "export.selection": "Selected part/assembly",
-  "export.position": "Position",
-  "export.authored": "As authored",
-  "export.current": "Current position",
   "export.preview": "Preview exports the authored model.",
   "export.geometry": "Visibility, clipping and explode do not affect the export. GLB includes authored animations.",
   "export.format": "Format",

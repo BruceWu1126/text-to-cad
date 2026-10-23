@@ -1,6 +1,6 @@
 """The engine's verbs as functions, one per command; ``cli`` is a thin argparse over them.
 
-    export(source, *destinations, pose=None, part=None) -> list[Written]
+    export(source, *destinations) -> list[Written]
     snapshot(source, out, *, display=None, camera=None, grid=False, preview=False, pose=None,
              width=None, height=None, annotation=None, measurements=None) -> Drawn
     snapshot(source=None, *, job, the same flags) -> list[Drawn]
@@ -12,8 +12,9 @@ Every one goes through the daemon (``client``), so the warm worker of the script
 document does the work and keeps what it made in memory for the next call. No verb builds
 source text: a script's models build when called by the script (``python model.py``), or from
 Python by ``Model.build()`` (``build_script``), a ``Report``. A build writes the model as its
-joints place it; a pose, a part and a picture are the ``export`` and ``snapshot`` verbs', never
-cached.
+joints place it, and ``export`` writes that document as it is: a posed or partial file is a
+function in the model's code. A picture, and the state a mechanism is drawn in, are
+``snapshot``'s, never cached.
 
 The engine counts nothing. After each build, ``export`` and ``snapshot`` it calls every
 function in ``observers``, in the verb's thread, with one plain dict of what the verb did
@@ -154,8 +155,8 @@ class Built:
         document has them."""
         return self.document.shape()
 
-    def export(self, *destinations: Any, pose: Any = None, part: str | None = None) -> list[Written]:
-        return export(self, *destinations, pose=pose, part=part)
+    def export(self, *destinations: Any) -> list[Written]:
+        return export(self, *destinations)
 
 
 # --- reaching the daemon ---------------------------------------------------------------------
@@ -272,14 +273,15 @@ def _source(source: Any, *, scripts: bool = False) -> dict[str, Any]:
     return {"path": str(path)}
 
 
-def export(source: Any, *destinations: Any, pose: Any = None, part: str | None = None,
+def export(source: Any, *destinations: Any,
            log: Callable[[str], None] | None = None, daemon: bool = True,
            progress: Callable[[dict], None] | None = None) -> list[Written]:
     """Write a document to each destination, its kind from its suffix (``.xbf``, ``.step``,
     ``.glb``, ``.stl``, ``.3mf``, and ``.dxf`` of a planar document): the document of an
-    ``.xbf``, of a ``.step`` read into one, or of a ``Model`` (built first). Several destinations read the document once. ``part`` is one part or assembly as
-    a ref's owner names it (``refs``). ``daemon=False`` does it in this process, cold. A GLB
-    carries every configuration sequence the document defines, as a clip."""
+    ``.xbf``, of a ``.step`` read into one, or of a ``Model`` (built first). Several destinations read the document once. The
+    file holds what the code built: no option selects a part or a state (``README``, the law
+    of options). ``daemon=False`` does it in this process, cold. A GLB carries every
+    configuration sequence the document defines, as a clip."""
     from cadgen.engine.export import ExportRefused, kind_of
 
     if not destinations:
@@ -290,8 +292,7 @@ def export(source: Any, *destinations: Any, pose: Any = None, part: str | None =
     spec = _source(source)
     cwd = str(source.cwd) if isinstance(source, Built) else os.getcwd()
     shown = log or (lambda _text: None)
-    order = {"op": "export", "source": spec, "destinations": [str(path) for path in resolved], "pose": pose,
-             "part": part, "cwd": cwd}
+    order = {"op": "export", "source": spec, "destinations": [str(path) for path in resolved], "cwd": cwd}
     done = _exported(order, spec, shown, daemon, progress)
     return [Written(Path(row["path"]), row["kind"], row["bytes"], row["seconds"]) for row in done["files"]]
 
@@ -554,7 +555,7 @@ def daemon() -> int:
 #               "sdf", "srdf", "model" (a script's model) or "other"
 #     found     snapshot: the source file is there (a model's always is)
 #     outputs   export: each destination, {kind, seconds (None for one not written)}
-#     pose      export, snapshot: a pose was asked for
+#     pose      snapshot: a pose was asked for
 #
 # The facts of a verb another verb runs are its caller's: only the outermost one tells.
 
@@ -638,6 +639,7 @@ def _facts(verb: str, args: tuple, kwargs: dict[str, Any], heard: dict[str, Any]
         # A job's is the file it draws, which it says as it starts (``snapshot(job=)``).
         source = heard.get("source") or (args[0] if args else kwargs.get("source"))
         found["source"] = _kind(source)
+    if verb == "snapshot":
         found["pose"] = kwargs.get("pose") is not None
     if verb == "export":
         if error is None:

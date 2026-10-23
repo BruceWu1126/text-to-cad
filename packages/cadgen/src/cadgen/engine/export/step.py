@@ -3,8 +3,8 @@
 The assembly with its instance and product names, colours per part and per painted face,
 material names and densities (the writer's material mode), and the element names on face
 and edge sub-shape labels (``write.stepcaf.subshapes.name``). A document as built is
-written from its XCAF document itself; a posed one, or a subtree, from the view made a
-document again (``tree.tree_of``), every placement its own. The mechanism, its
+written from its XCAF document itself; one held without it (a foreign STEP's), from the
+view made a document again (``tree.tree_of``). The mechanism, its
 configurations and the model's provenance are never in a STEP: the kernel has no writer
 for them.
 
@@ -38,7 +38,7 @@ WRITTEN_STAMP = "2000-01-01T00:00:00"
 
 def write(view: Any, path: Path) -> None:
     doc = view.source.xcaf
-    if doc is None or view.posed or view.parted:
+    if doc is None:
         from cadgen.engine import document
         from cadgen.engine.export.tree import tree_of
 

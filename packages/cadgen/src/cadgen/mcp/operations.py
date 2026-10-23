@@ -36,8 +36,8 @@ SNAPSHOT = {"source": STRING, "output": STRING, "packet": JSON_VALUE,
             "height": {"type": "integer", "minimum": 1}, "size_profile": STRING,
             "annotation": JSON_VALUE, "measurements": JSON_VALUE}
 START = {
-    "cad_export": obj({"source": STRING, "destinations": {"type": "array", "minItems": 1, "maxItems": 32, "items": STRING},
-                       "pose": {"type": ["object", "string"]}, "part": STRING}, ("source", "destinations")),
+    "cad_export": obj({"source": STRING, "destinations": {"type": "array", "minItems": 1, "maxItems": 32, "items": STRING}},
+                      ("source", "destinations")),
     "cad_snapshot": obj(SNAPSHOT),
     "cad_inspect": obj({"source": STRING, "ref": STRING, "query": {"type": "string", "enum": ["closure", "geometry", "build"]}}, ("source",)),
 }

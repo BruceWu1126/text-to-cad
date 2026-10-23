@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import math
 import os
 import re
 import shutil
@@ -22,18 +21,12 @@ from cadgen.jobs import Jobs, JobError as ExportError, STATUS_SECONDS, MAX_JOBS,
 ARTIFACT_SECONDS = 3600
 MAX_RETAINED_BYTES = 4 * 1024**3
 def specification(payload):
-    if not isinstance(payload, dict) or set(payload) - {"doc", "revision", "part", "pose"}:
-        raise ExportError("Export source is {doc, revision, part?, pose?}.")
+    # The document as its code built it: no part, no pose (the law of options).
+    if not isinstance(payload, dict) or set(payload) != {"doc", "revision"}:
+        raise ExportError("Export source is {doc, revision}.")
     if not all(isinstance(payload.get(k), str) and payload[k] for k in ("doc", "revision")):
         raise ExportError("Export requires the displayed document and revision.")
-    part, pose = payload.get("part"), payload.get("pose")
-    if part is not None and (not isinstance(part, str) or not part or len(part) > 4096):
-        raise ExportError("Select one part or assembly.")
-    if pose is not None and (not isinstance(pose, dict) or len(pose) > 1024 or any(
-            not isinstance(k, str) or not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v)
-            for k, v in pose.items())):
-        raise ExportError("Position must contain finite joint values.")
-    return {"doc": payload["doc"], "revision": payload["revision"], "part": part, "pose": pose}
+    return {"doc": payload["doc"], "revision": payload["revision"]}
 
 
 class ExportJobs(Jobs):
@@ -131,7 +124,6 @@ class ExportJobs(Jobs):
         source, expected, _name = self._source(spec)
         answer = request({"op": "export", "source": source, "expected": expected,
                           "destinations": [str(target)] if target else [], "inspect": target is None,
-                          "part": spec.get("part"), "pose": spec.get("pose"),
                           "original": spec.get("format") == "original"}, on_progress=progress)
         if not answer or "failed" in answer:
             raise ExportError((answer or {}).get("failed", "The export worker disconnected."))
@@ -177,8 +169,6 @@ class ExportJobs(Jobs):
             raise ExportError("Invalid export format or request identity.")
         if payload["epoch"] != self.epoch:
             raise ExportError("The export session restarted. Open Export again.", 409)
-        if kind == "original" and (spec["part"] is not None or spec["pose"] is not None):
-            raise ExportError("Download original uses the whole authored XBF.")
         normalized = json.dumps(payload, sort_keys=True)
         with self.changed:
             self._prune()
@@ -199,7 +189,7 @@ class ExportJobs(Jobs):
 
     def _perform(self, job, progress):
         _source, _expected, name = self._source(job["spec"])
-        stem = (re.sub(r"[^\w .-]", "_", name)[:100].strip(" .") or "export") + ("-part" if job["spec"]["part"] else "")
+        stem = (re.sub(r"[^\w .-]", "_", name)[:100].strip(" .") or "export")
         filename = stem + FORMATS[job["spec"]["format"]]
         directory = Path(tempfile.mkdtemp(prefix="cadgen-download-", dir=self.root))
         with self.changed:

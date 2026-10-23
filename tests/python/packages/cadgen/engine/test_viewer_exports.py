@@ -41,7 +41,7 @@ class ViewerExportsTest(unittest.TestCase):
                     _export({**request, "source": {"script": str(script), "function": "part"},
                              "expected": {"digest": "old"}}, lambda _: None)
 
-    def test_planar_dxf_and_no_posed_xbf(self):
+    def test_planar_dxf_and_no_xbf_of_an_xbf(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder).resolve()
             script = root / "plate.py"
@@ -53,9 +53,9 @@ class ViewerExportsTest(unittest.TestCase):
                        "destinations": [], "inspect": True}
             rows = _export(request, lambda _: None)["formats"]
             self.assertIsNone(next(r for r in rows if r["format"] == "dxf")["reason"])
-            with self.assertRaises(ValueError):
-                _export({**request, "inspect": False, "pose": {}, "destinations": [str(root / "posed.xbf")]}, lambda _: None)
-            self.assertFalse((root / "posed.xbf").exists())
+            with self.assertRaisesRegex(ExportRefused, "not written from another xbf"):
+                _export({**request, "inspect": False, "destinations": [str(root / "again.xbf")]}, lambda _: None)
+            self.assertFalse((root / "again.xbf").exists())
 
 class ViewerExportHttpTest(unittest.TestCase):
     def setUp(self):

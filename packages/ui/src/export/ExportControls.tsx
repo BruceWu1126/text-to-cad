@@ -138,8 +138,6 @@ export function ExportControls({ service, downloads, file, children }: {
   const [source, setSource] = useState<ExportView | null>(null);
   const [snapshot, setSnapshot] = useState<ExportView | null>(null);
   const [open, setOpen] = useState(false);
-  const [scope, setScope] = useState('whole');
-  const [position, setPosition] = useState('authored');
   const [format, setFormat] = useState('step');
   const [options, setOptions] = useState<{ epoch: string; formats: ExportOption[] } | null>(null);
   const [error, setError] = useState('');
@@ -148,9 +146,8 @@ export function ExportControls({ service, downloads, file, children }: {
   const reportActivity = useCallback((id: string, busy: boolean) => setActivity(old => old[id] === busy ? old : { ...old, [id]: busy }), []);
   const [attempts, setAttempts] = useState<ExportRecord[]>(() => downloads?.restore?.() || []);
   useEffect(() => { downloads?.remember?.(attempts); }, [attempts, downloads]);
-  const spec = useMemo<ExportSource | null>(() => snapshot ? { doc: snapshot.doc, revision: snapshot.revision,
-    part: scope === 'selection' ? snapshot.part : null, pose: position === 'current' ? snapshot.pose : null } : null,
-  [snapshot, scope, position]);
+  // The document as its code built it: the file holds what the code made, never a selection or a pose.
+  const spec = useMemo<ExportSource | null>(() => snapshot ? { doc: snapshot.doc, revision: snapshot.revision } : null, [snapshot]);
   useEffect(() => {
     setOptions(null); setError('');
     if (!open || !spec || !service) return;
@@ -164,15 +161,15 @@ export function ExportControls({ service, downloads, file, children }: {
   }, [options, selected]);
   const displayed = source?.file === file ? source : null;
   const changeOpen = (next: boolean) => {
-    if (next) { setSnapshot(displayed); setScope('whole'); setPosition('authored'); setReveal(n => n + 1); }
+    if (next) { setSnapshot(displayed); setReveal(n => n + 1); }
     setOpen(next);
   };
   const begin = () => {
     if (!selected || selected.reason || !spec || !snapshot || !options) return;
-    // The exact displayed revision and options, as the menu showed them.
+    // The exact displayed revision, as the menu showed it.
     const request: ExportRequest = { requestId: crypto.randomUUID(), epoch: options.epoch, source: spec, format: selected.format };
     const stem = (snapshot.name.split('::').pop() || 'model').replace(/\.[^.]+$/, '').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').slice(0, 100);
-    const filename = (stem || 'model') + (spec.part ? '-part' : '') + selected.extension;
+    const filename = (stem || 'model') + selected.extension;
     setAttempts(old => [...old, { request, filename, delivered: false }]);
     setReveal(n => n + 1); setOpen(false);
   };
@@ -187,8 +184,6 @@ export function ExportControls({ service, downloads, file, children }: {
     <PopoverContent align="end" className="w-72 space-y-3 p-3 text-tiny" aria-label={t('export.heading')}>
       <p className="text-muted-foreground">{t('export.heading')}</p>
       {snapshot ? <>
-        <label className="block space-y-1"><span>{t('export.scope')}</span><Select value={scope} onValueChange={setScope}><SelectTrigger size="sm" className="text-tiny" aria-label={t('export.scope')}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="whole">{t('export.whole')}</SelectItem><SelectItem value="selection" disabled={!snapshot.part}>{t('export.selection')}</SelectItem></SelectContent></Select></label>
-        <label className="block space-y-1"><span>{t('export.position')}</span><Select value={position} onValueChange={setPosition}><SelectTrigger size="sm" className="text-tiny" aria-label={t('export.position')}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="authored">{t('export.authored')}</SelectItem><SelectItem value="current" disabled={!snapshot.pose || snapshot.preview}>{t('export.current')}</SelectItem></SelectContent></Select></label>
         <p className="text-muted-foreground">{snapshot.preview ? t('export.preview') + ' ' : ''}{t('export.geometry')}</p>
         {options ? <label className="block space-y-1"><span>{t('export.format')}</span><Select value={format} onValueChange={setFormat}><SelectTrigger size="sm" className="text-tiny" aria-label={t('export.format')}><SelectValue /></SelectTrigger><SelectContent>{options.formats.filter(row => !row.reason).map(row => <SelectItem key={row.format} value={row.format}>{row.format === 'original' ? t('export.original') : row.label}</SelectItem>)}</SelectContent></Select></label>
           : !error ? <p role="status" className="flex items-center gap-2 text-muted-foreground"><Spinner className="size-3" />{t('export.checking')}</p> : null}
