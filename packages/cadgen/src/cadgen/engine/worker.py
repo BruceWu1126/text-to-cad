@@ -38,8 +38,14 @@ says how many parts the build meshed (``meshed``).
 
 A worker whose resident memory is over its cap after a build (``CADGEN_ENGINE_WORKER_RSS_MB``,
 by default a quarter of the machine's memory) is retired: its reports say so (``retired``),
-and it exits once it has answered. The daemon starts a fresh one for the next build, a
-restart: a model whose xbf holds its closure unchanged is taken in seconds.
+and the daemon, once it has taken the worker's documents from it (``models.Models.drain``),
+closes its stdin. The daemon starts a fresh one for the next build, a restart: a model whose
+xbf holds its closure unchanged is taken in seconds.
+
+A request may carry bytes after its line (``{"bytes": N}``, the frame's form): an export of a
+document the daemon holds and no worker does (``{"document", "structure", "shapes"}``: its shape
+bytes, ``[key, size]`` each, in order) reads them in place of a file, so the documents worker
+exports, inspects and draws it with no worker of its script started.
 
 A build runs with the cyclic collector off, and the worker collects once it is idle: the memo
 keeps every live result of the last builds, millions of objects, and a full collection walks
@@ -256,9 +262,9 @@ def rss_cap_mb() -> float | None:
 
 def retirement(reports: list[dict[str, Any]], resident: float | None = None) -> bool:
     """After a build: this worker's resident memory (``resident``, else measured now) against its
-    cap. Over it, each report says so (``retired``) and the worker is retired: it exits once it
-    has answered, and the next build is a fresh worker's -- a restart, which takes a model's xbf
-    when nothing changed."""
+    cap. Over it, each report says so (``retired``) and the worker is retired: the daemon drains
+    and stops it once it has answered, and the next build is a fresh worker's -- a restart, which
+    takes a model's xbf when nothing changed."""
     resident, cap = resident if resident is not None else resident_mb(), rss_cap_mb()
     if resident is None or cap is None or resident <= cap:
         return False
@@ -473,7 +479,6 @@ def main() -> int:
         ident = request.get("id")
         op = request.get("op")
         if op in ("export", "result"):
-            retire = False
             try:
                 cwd = request.get("cwd")
                 os.chdir(cwd or home)
@@ -485,7 +490,8 @@ def main() -> int:
                         done = _export(request, lambda text: send({"id": ident, "log": text}))
                     said.attach(done.get("reports") or [])
                     resident = resident_after_build()
-                    retire = retirement(done.get("reports") or [], resident) if done.get("reports") else False
+                    if done.get("reports"):
+                        retirement(done["reports"], resident)  # said in its reports; the daemon retires it
                     send({"id": ident, "done": done, "rssMb": None if resident is None else round(resident)})
                 else:
                     answer, payload = _result(request)
@@ -500,8 +506,6 @@ def main() -> int:
             finally:
                 leave()
                 send({"id": ident, "settled": True, "op": op})
-            if retire:
-                return 0
             owed = True
             continue
         if op != "build":
@@ -511,7 +515,6 @@ def main() -> int:
         patcher = Patcher(request, lambda message, payload: send({"id": ident, **message}, payload),
                           acknowledged=bool(request.get("acknowledged")))
         document.SAVED_LISTENERS.append(patcher.saved)
-        retire = False
         try:
             cwd = request.get("cwd")
             os.chdir(cwd or home)
@@ -527,7 +530,7 @@ def main() -> int:
             said.attach(reports)
             patcher.finish(reports)
             resident = resident_after_build()
-            retire = retirement(reports, resident)
+            retirement(reports, resident)  # said in its reports: the daemon drains it, then retires it
             # Its memory now, which the daemon's status shows (``rssMb``).
             send({"id": ident, "done": reports, "rssMb": None if resident is None else round(resident)})
         except BuildError as error:
@@ -540,8 +543,6 @@ def main() -> int:
             leave()
             document.SAVED_LISTENERS.remove(patcher.saved)
             send({"id": ident, "settled": True})
-        if retire:
-            return 0  # over its memory cap: gone, with all it held
         owed = True  # answered: the cycles the build left, collected once idle
     return 0
 

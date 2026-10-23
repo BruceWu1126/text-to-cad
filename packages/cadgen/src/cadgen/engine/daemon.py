@@ -7,13 +7,17 @@ script with a live worker waits for it while it is busy. One for a script with n
 when fewer than the cap are alive; at the cap the least recently used idle worker no page
 watches is retired first (its stdin closed: it exits), and when every idle worker is watched the
 new one starts past the cap; with every worker busy, the build waits, first come first served,
-for the first to come free. Nothing is refused, and nothing is predicted: no memory
-budget, no admission. A worker idle ``CADGEN_ENGINE_WORKER_IDLE`` seconds (by default the
-daemon's own idle time, an hour) is retired, and so is one over its memory cap after a build
-(``worker.retirement``). A retired script's next build is a fresh worker's, a restart.
+for the first to come free. Nothing is refused, and nothing is predicted: no admission. A
+worker idle ``CADGEN_ENGINE_WORKER_IDLE`` seconds (by default the daemon's own idle time, an
+hour) is retired, and so is one over its memory cap after a build (``worker.retirement``).
+Before a worker is stopped, every ``pointer`` document of it the server does not hold is taken
+from it (``models.Models.drain``): a document outlives its worker. A retired script's next build
+is a fresh worker's, a restart.
 
 It also serves documents over HTTP (``serve``), holding each loaded document and its
-parts' tessellations in its memory, and draws them (``draw``): each served document a
+parts' tessellations in its memory under one budget (``serve.memory_budget``,
+``CADGEN_ENGINE_MEMORY_MB``; past it, or on the system's memory-pressure signal, what is held
+is evicted: ``serve.Server.trim``), and draws them (``draw``): each served document a
 snapshot asks for gets a render process of its own (``render/service.py``), started on its
 first picture, sent every version the document is patched to, gone with the daemon or after
 the workers' idle time, and held to their memory cap; render processes are not workers, and
@@ -417,14 +421,18 @@ class Pool:
     new worker starts past the cap: the count cap never retires a watched worker (connected means
     warm); its memory cap may. With every worker busy the request waits, and so does every request
     that needs a slot after it. A worker idle ``idle`` seconds is retired (``retire_idle``), as is one that is
-    gone or over its memory cap when let go. ``start(key, environment, cwd)`` starts a worker."""
+    gone or over its memory cap when let go. ``start(key, environment, cwd)`` starts a worker;
+    ``drain(worker)`` is asked of every worker retired, out of the pool and before it is stopped
+    (the daemon's: its documents taken from it, ``models.Models.drain``)."""
 
     def __init__(self, cap: int, idle: float, start: Callable[[str, dict[str, str], str | None], Any],
-                 connected: Callable[[Any], bool] = lambda worker: False) -> None:
+                 connected: Callable[[Any], bool] = lambda worker: False,
+                 drain: Callable[[Any], None] = lambda worker: None) -> None:
         self.cap = max(1, int(cap))
         self.idle = idle
         self.start = start
         self.connected = connected
+        self.drain = drain
         self.lock = threading.Condition()
         self.live: dict[str, Any] = {}  # by key
         self.starting: set[str] = set()  # the keys whose worker is being started, each holding a slot
@@ -443,7 +451,7 @@ class Pool:
         if ticket.worker is not None:
             return ticket.worker
         if ticket.victim is not None:
-            ticket.victim.stop()  # the worker whose slot this is exits before the new one starts
+            self._stop(ticket.victim)  # the worker whose slot this is exits before the new one starts
         try:
             worker = self.start(script, environment, cwd)
         except BaseException:
@@ -470,7 +478,15 @@ class Pool:
                     self._note(worker, "RSS" if worker.retired else "exited")
             self._grant()
         if gone:
-            worker.stop()
+            self._stop(worker)
+
+    def _stop(self, worker: Any) -> None:
+        """A worker retired: drained (``drain``), then stopped. A drain that fails stops it all the same."""
+        try:
+            self.drain(worker)
+        except Exception:  # noqa: BLE001 - what the drain could not take is evicted
+            pass
+        worker.stop()
 
     def retire_idle(self, now: float | None = None) -> list[Any]:
         """Retire workers idle ``idle`` seconds with no connected document; the retired."""
@@ -484,7 +500,7 @@ class Pool:
             if gone:
                 self._grant()
         for worker in gone:
-            worker.stop()
+            self._stop(worker)
         return gone
 
     def holds(self, worker: Any) -> bool:
@@ -582,7 +598,7 @@ class Daemon:
     def __init__(self, idle: float, cap: int | None = None, retire_after: float | None = None) -> None:
         self.idle = idle
         self.pool = Pool(cap or worker_cap(), retire_after if retire_after is not None else worker_idle(idle),
-                         self._start, self.connected)
+                         self._start, self.connected, lambda worker: self.models.drain(worker))
         self.workers_lock = threading.Lock()  # each worker's ``held``
         self.born = time.time()
         self.last = time.monotonic()
