@@ -510,6 +510,12 @@ retirement's reason is `LRU` (room at the cap), `idle`, `RSS` (over its memory c
 `environment` (a build asked for the script with another `PYTHONPATH`, `PATH` or `VIRTUAL_ENV`:
 its worker is replaced in its slot) or `exited` (it died).
 
+`cadgen stop` stops every server of the installation, whatever protocol it speaks: the socket and
+lock names carry the protocol (`daemon._tag`), and `daemon.endpoints()` lists this one's and each
+older one's, so a cadgen that bumps `PROTOCOL` still stops the server an earlier one started. Both
+`stop` and `status` remove the socket and lock of a dead server (nothing answers and nobody holds
+its lock) and say so on stderr; `status` names an older protocol's live server, which `stop` stops.
+
 ## Progress
 
 A build says where it is (`progress.py`). The author's half is cadgen's own API, unchanged:

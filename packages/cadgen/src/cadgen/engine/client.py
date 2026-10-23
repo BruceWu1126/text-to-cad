@@ -8,21 +8,24 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from cadgen.engine import daemon as _daemon
 
-__all__ = ["request"]
+__all__ = ["request", "sweep"]
 
 DAEMON_MODULE = "cadgen.engine.daemon"  # the enclosing distribution may supply an application host
 
 
-def _connect() -> socket.socket | None:
+def _connect(address: Path | None = None) -> socket.socket | None:
+    """A connection to the daemon at ``address`` (its socket, on Windows its port file; by default
+    this protocol's), or None when none answers there."""
     try:
         if _daemon.WINDOWS:
-            port, _token = _daemon.port_path().read_text(encoding="utf-8").split()
+            port, _token = (address or _daemon.port_path()).read_text(encoding="utf-8").split()
             return socket.create_connection(("127.0.0.1", int(port)), timeout=5)
-        path = _daemon.socket_path()
+        path = address or _daemon.socket_path()
         if not path.exists() or not _daemon.socket_folder_ok(path):
             return None
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -70,14 +73,14 @@ def connect(*, start: bool = True, timeout: float = 60.0) -> socket.socket | Non
     raise ConnectionError("the engine server did not start")
 
 
-def wait_gone(timeout: float = 60.0) -> bool:
-    """Wait until the daemon is gone: its socket no longer connects and its lock, held
-    until its workers have stopped, is free."""
+def wait_gone(timeout: float = 60.0, endpoint: _daemon.Endpoint | None = None) -> bool:
+    """Wait until the daemon (by default this protocol's) is gone: its socket no longer connects
+    and its lock, held until its workers have stopped, is free."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        found = _connect()
+        found = _connect(endpoint.address if endpoint else None)
         if found is None:
-            held = _daemon.lock()
+            held = _daemon.lock(endpoint.lock if endpoint else None)
             if held is not None:
                 held.close()
                 return True
@@ -95,8 +98,13 @@ def request(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] = 
     connection = connect(start=start)
     if connection is None:
         return None
+    return _exchange(connection, message, on_log, on_progress)
+
+
+def _exchange(connection: socket.socket, message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] = lambda _m: None,
+              on_progress: Callable[[dict[str, Any]], None] | None = None, address: Path | None = None) -> dict[str, Any]:
     if _daemon.WINDOWS:
-        message = {**message, "token": _daemon.port_path().read_text(encoding="utf-8").split()[1]}
+        message = {**message, "token": (address or _daemon.port_path()).read_text(encoding="utf-8").split()[1]}
     with connection:
         connection.settimeout(None)
         stream = connection.makefile("rwb")
@@ -113,3 +121,61 @@ def request(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] = 
                 continue
             return answer
     raise ConnectionError("the engine server closed the connection")
+
+
+def sweep(*, stop: bool) -> dict[str, list[str]]:
+    """Every daemon of this installation, whatever protocol it speaks (``daemon.endpoints``): with
+    ``stop``, each live one stopped and waited for until gone (``stopped``, its socket or port file);
+    a live one left running listed in ``running``. The socket and lock files of a dead one -- nothing
+    answers there and nobody holds its lock -- are removed (``removed``). A daemon starting or
+    stopping holds its lock before it listens and until it has left, so its files are never taken."""
+    found: dict[str, list[str]] = {"stopped": [], "running": [], "removed": []}
+    for endpoint in _daemon.endpoints():
+        connection = _connect(endpoint.address)
+        if connection is not None:
+            if not stop:
+                connection.close()
+                found["running"].append(str(endpoint.address))
+                continue
+            _exchange(connection, {"op": "stop"}, address=endpoint.address)
+            if not wait_gone(endpoint=endpoint):
+                raise ConnectionError(f"the engine server at {endpoint.address} did not exit")
+            found["stopped"].append(str(endpoint.address))
+            _remove_dead(endpoint)  # the lock file a stopped daemon leaves is part of its stop, not stale
+            continue
+        found["removed"] += _remove_dead(endpoint)
+    return found
+
+
+def _remove_dead(endpoint: _daemon.Endpoint) -> list[str]:
+    """The files of ``endpoint`` removed when its daemon is dead: its lock free (taken here while
+    they go, so no daemon starts between) and nothing answering at its address."""
+    present = [path for path in (endpoint.address, endpoint.lock) if path.exists() or path.is_symlink()]
+    if not present:
+        return []
+    held = _daemon.lock(endpoint.lock)
+    if held is None:
+        return []  # a daemon holds it: starting, stopping or running
+    removed: list[str] = []
+    try:
+        answering = _connect(endpoint.address)
+        if answering is not None:
+            answering.close()
+            return []
+        for path in present:
+            if _daemon.WINDOWS and path == endpoint.lock:
+                continue  # an open file is not removed on Windows: after the lock is let go
+            try:
+                path.unlink()
+                removed.append(str(path))
+            except FileNotFoundError:
+                pass
+    finally:
+        held.close()
+    if _daemon.WINDOWS and endpoint.lock in present:
+        try:
+            endpoint.lock.unlink()
+            removed.append(str(endpoint.lock))
+        except OSError:
+            pass
+    return removed

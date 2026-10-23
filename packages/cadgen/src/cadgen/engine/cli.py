@@ -339,8 +339,10 @@ def _server(_args: argparse.Namespace, _prog: str) -> int:
 
 
 def _status(args: argparse.Namespace, _prog: str) -> int:
-    from cadgen.engine.client import request
+    from cadgen.engine.client import request, sweep
 
+    swept = sweep(stop=False)
+    _told_swept(swept)
     answer = request({"op": "status"}, start=False)
     if answer is None:
         print("null" if args.json else "no engine server is running")
@@ -352,17 +354,33 @@ def _status(args: argparse.Namespace, _prog: str) -> int:
     return 0
 
 
-def _stop(_args: argparse.Namespace, prog: str) -> int:
-    from cadgen.engine.client import request, wait_gone
+def _told_swept(swept: dict[str, list[str]]) -> None:
+    """What a sweep found besides this protocol's server, on stderr (stdout is the answer's): the
+    stale files it removed, and a server of an older protocol, which ``stop`` stops."""
+    for path in swept["removed"]:
+        print(f"removed stale engine file {path}", file=sys.stderr)
+    from cadgen.engine.daemon import socket_path, port_path, WINDOWS
 
-    answer = request({"op": "stop"}, start=False)
-    if answer is None:
+    current = str(port_path() if WINDOWS else socket_path())
+    for address in swept["running"]:
+        if address != current:
+            print(f"an engine server of an older cadgen runs at {address}; cadgen stop stops it", file=sys.stderr)
+
+
+def _stop(_args: argparse.Namespace, prog: str) -> int:
+    from cadgen.engine.client import sweep
+
+    # Every server of this installation, whatever protocol it speaks; stopped means gone: the next
+    # command starts a fresh one, never reaches these.
+    try:
+        swept = sweep(stop=True)
+    except ConnectionError as error:
+        raise Failed(str(error)) from None
+    _told_swept(swept)
+    if not swept["stopped"]:
         print("no engine server is running")
         return 0
-    # Stopped means gone: the next command starts a fresh daemon, never reaches this one.
-    if not wait_gone():
-        raise Failed("the engine server did not exit")
-    print(json.dumps(answer, indent=2))
+    print(json.dumps({"ok": True, "stopped": swept["stopped"]}, indent=2))
     return 0
 
 

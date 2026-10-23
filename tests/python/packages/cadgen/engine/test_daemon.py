@@ -294,6 +294,66 @@ class ConnectTest(unittest.TestCase):
         self.assertEqual([w for w in caught if issubclass(w.category, ResourceWarning)], [])
 
 
+class SweepTest(unittest.TestCase):
+    """``cadgen stop`` reaches every server of the installation, whatever protocol it speaks, and
+    ``stop`` and ``status`` take away the files of a dead one."""
+
+    def setUp(self) -> None:
+        self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
+        self.addCleanup(shutil.rmtree, self.state, True)
+        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
+                                          "CADGEN_ENGINE_IDLE": "60"}, self.addCleanup)
+
+    def cli(self, *args: str) -> subprocess.CompletedProcess:
+        return engine_daemon.run([sys.executable, "-m", "cadgen.engine", *args], env=self.env)
+
+    @unittest.skipIf(os.name == "nt", "a stale socket file is a Unix daemon's")
+    def test_a_dead_server_s_socket_and_lock_are_removed_and_said(self) -> None:
+        import socket
+        from unittest import mock
+
+        from cadgen.engine import daemon
+
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)}):
+            path, lock = daemon.socket_path(), daemon.lock_path()
+        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stale.bind(str(path))
+        stale.close()  # the file stays, and nothing listens on it
+        lock.write_text("", encoding="utf-8")
+        done = self.cli("status")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.strip(), "no engine server is running")
+        self.assertIn(f"removed stale engine file {path}", done.stderr)
+        self.assertIn(f"removed stale engine file {lock}", done.stderr)
+        self.assertEqual(list(self.state.iterdir()), [])
+
+    def test_a_server_of_an_older_protocol_is_still_stopped(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine import client, daemon
+
+        older = daemon.PROTOCOL - 1 or 1
+        # The server a cadgen of an older protocol started: the same installation, its own socket.
+        server = subprocess.Popen([sys.executable, "-c", "import sys; from cadgen.engine import daemon; "
+                                   f"daemon.PROTOCOL = {older}; sys.exit(daemon.main())"], env=self.env,
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: server.poll() is None and server.kill())
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)}), \
+                mock.patch.object(daemon, "PROTOCOL", older + 1):
+            address = (daemon.port_path if daemon.WINDOWS else daemon.socket_path)(older)
+            deadline = time.monotonic() + 60
+            while (found := client._connect(address)) is None:
+                self.assertIsNone(server.poll(), "the older server exited before it listened")
+                self.assertLess(time.monotonic(), deadline, "the older server listened")
+                time.sleep(0.05)
+            found.close()
+            self.assertIsNone(client.request({"op": "status"}, start=False), "this protocol's server is another")
+            swept = client.sweep(stop=True)
+        self.assertEqual(swept["stopped"], [str(address)])
+        self.assertEqual(server.wait(timeout=60), 0)
+        self.assertFalse(address.exists())
+
+
 class LongStatePathTest(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "a socket's path limit is a Unix socket's")
     def test_a_state_folder_past_the_socket_path_limit_works_and_nobody_changes_folder(self) -> None:
