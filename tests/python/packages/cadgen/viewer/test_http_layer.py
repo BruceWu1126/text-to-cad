@@ -552,6 +552,15 @@ class MethodHandling(HttpLayerTestCase):
                 self.assertEqual(headers["content-length"], "0")
                 self.assertNotIn("content-type", {k.lower() for k in headers})
 
+    def test_a_route_asked_with_its_other_method_answers_405_naming_its_own(self):
+        for method, path, allowed in (("GET", "/__cad/pick", "POST"), ("GET", "/__cad/reveal", "POST"),
+                                      ("GET", "/__cad/analytics/activity", "POST"), ("POST", "/__cad/server", "GET, HEAD")):
+            with self.subTest(method=method, path=path):
+                status, headers, body = self.fixture.request(method, path, headers={"x-cadgen-viewer": "1"})
+                self.assertEqual(status, 405)
+                self.assertEqual(headers["allow"], allowed)
+                self.assertEqual(json.loads(body), {"ok": False, "error": "Method not allowed"})
+
     def test_unknown_post_route_is_json_404(self):
         status, headers, body = self.fixture.request(
             "POST", "/__cad/export", headers={"x-cadgen-viewer": "1"}

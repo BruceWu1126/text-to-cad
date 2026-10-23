@@ -73,7 +73,7 @@ KINDS: dict[str, Kind] = {
 # What a source file is read as: documents only.
 SOURCES = (".xbf", ".step", ".stp")
 MESHES = (".glb", ".stl", ".3mf")
-# The date of every entry of a zip the package writes (a 3MF, a .cadz): a file is a function of
+# The date of every entry of a zip the package writes (a 3MF): a file is a function of
 # what it holds, never of the clock it was written by (zipfile stamps each entry with the time).
 ZIP_DATE = (1980, 1, 1, 0, 0, 0)
 

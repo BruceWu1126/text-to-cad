@@ -187,6 +187,14 @@ def _working_folder() -> str:
         return os.path.expanduser("~")
 
 
+# Routes one method reaches: the other one answers 405 naming it, never a 404 that reads as no route.
+_GET_ONLY_ROUTES = frozenset({"/__cad/server", "/__cad/catalog", "/__cad/folder", "/__cad/search", "/__cad/models",
+                              "/__cad/thumbnail", "/__cad/drawing", "/__cad/robot", "/__cad/xbf", "/__cad/asset",
+                              "/__cad/version"})
+_POST_ONLY_ROUTES = frozenset({"/__cad/pick", "/__cad/reveal", "/__cad/clipboard",
+                               "/__cad/analytics/activity"})
+
+
 class CadApp:
     """``handle(request, response)`` writes exactly one response.
 
@@ -429,6 +437,9 @@ class CadApp:
                     response.send_json(200, language.read())
                 elif pathname == "/__cad/version":
                     response.send_json(200, self._version())
+                elif pathname in _POST_ONLY_ROUTES:
+                    response.send_bytes(405, b'{"ok":false,"error":"Method not allowed"}',
+                                        "application/json", [("allow", "POST")])
                 else:
                     # An unrecognised /__cad/* path is a bad API call, not a
                     # page: a 404 a client doing res.json() can read, never the
@@ -506,9 +517,7 @@ class CadApp:
                         return
                     status, body = self.prompt_files.create(request.body())
                     response.send_json(status, body)
-                elif pathname in {"/__cad/server", "/__cad/catalog", "/__cad/folder", "/__cad/search",
-                                  "/__cad/models", "/__cad/thumbnail", "/__cad/drawing", "/__cad/robot",
-                                  "/__cad/xbf", "/__cad/asset", "/__cad/version"}:
+                elif pathname in _GET_ONLY_ROUTES:
                     response.send_bytes(405, b'{"ok":false,"error":"Method not allowed"}',
                                         "application/json", [("allow", "GET, HEAD")])
                 else:

@@ -91,17 +91,6 @@ many times faster by `read_xbf` than the STEP by `read_step`. Convert once, keep
 xbf beside the STEP, and read the xbf in models
 ([inputs](model-contract.md#inputs)).
 
-## A package of the model
-
-```bash
-cadgen export XBF/bracket.xbf bracket.cadz
-```
-
-A `.cadz` zips the `.xbf` with its build closure's source files (the script and
-every module it reached) and its input files at their places relative to one another;
-`--no-inputs` leaves the inputs out. Extracted and built, it writes the same `.xbf`
-bytes again.
-
 ## Other tools
 
 STL and 3MF files are in millimetres and a GLB in metres, so a URDF or SDF scales an

@@ -218,7 +218,8 @@ installation identity and therefore a different engine.
 The injected application also serves `/mcp`, the Streamable HTTP MCP transport
 (2025-11-25 and the previously supported protocol revisions). Initialization returns
 an opaque `Mcp-Session-Id`. Every subsequent request identifies that session;
-DELETE releases it, and a missing/expired session must initialize again. JSON replies
+DELETE releases it, and a missing/expired session must initialize again (the stdio shim
+does so for its host). JSON replies
 are used; GET returns 405 because this server has no unsolicited SSE events.
 Each session owns its tool server, view registry and immutable UI resource. `cad_http`
 dispatches into the same application in process. It is listed for every host, even
@@ -260,7 +261,7 @@ is explicitly restarted. Session state is memory only and is recreated after res
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
 | `refs.py` | references to geometry: the ref grammar, occurrence paths, resolution by name in the latest build, `select` (**References**) |
-| `export/` | `translate` and the kind registry (`__init__`); an xbf packaged with its closure's files (`cadz`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a planar document's drawing through build123d's DXF exporter, with the drawing checks (`dxf`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
+| `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a planar document's drawing through build123d's DXF exporter, with the drawing checks (`dxf`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a STEP read in a reader process, held by its bytes; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
@@ -279,7 +280,7 @@ is explicitly restarted. Session state is memory only and is recreated after res
 python SCRIPT.py                             the models the script explicitly calls
 cadgen build SOURCE | - [--name N]           one model from source text (stdin with -), its files
     [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify] [--profile] [--no-daemon]
-cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] [--no-daemon] [--json]
+cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-daemon] [--json]
                                              SRC an .xbf or a .step
 cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
                 [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
@@ -683,7 +684,7 @@ source or rebuilds a model. Scope is the whole model or one canonical part/assem
 reference; position is authored or an explicit joint-value map. Clip, visibility and
 explode are not geometry inputs. DXF requires a planar drawing; XBF refuses a pose.
 An existing whole XBF uses a separate original-byte download. There is no source bundle
-or CADZ in this interface.
+in this interface.
 
 The enclosing distribution owns the HTTP queue, the browser download and temporary
 artifact lifetime; the standalone engine owns inspection, revision validation and
@@ -750,11 +751,6 @@ target and moved over it; a DXF only when its bytes change.
   (`kit2/axle.1/wheel, kit2/axle.2/wheel`).
 - `--pose` (on `export` and `snapshot`) and `--part` (on `export`) are the verbs' alone: ad hoc, never cached, never
   declared.
-- **A `.cadz`** (`export/cadz.py`) packages an xbf for delivery: the xbf, its build closure's
-  source files (the script and every module the closure lists) and, unless `--no-inputs`, its
-  inputs, zipped at their places relative to one another, with sorted entries and one fixed
-  date. Extracted and built, a drift-free model writes the xbf's bytes again. Self-contained
-  delivery is this export, never a property of the document.
 
 **Motions in a GLB.** Each motion (**Motions**) is baked into a glTF animation of its name:
 CUBICSPLINE translation and rotation channels for each placement it moves, over one key time

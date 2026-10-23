@@ -162,7 +162,7 @@ restarting an engine you own, then rerunning the launcher. Vite handles client H
 captures the displayed revision, whole model or one selected part/assembly, and
 as-authored or current position. Preview exports as authored. Only supported formats
 are offered: STEP, GLB, STL, 3MF, planar DXF and eligible XBF; an existing whole XBF
-has **Download original XBF**. Source and outputs stay separate; no CADZ is offered.
+has **Download original XBF**. Source and outputs stay separate.
 
 **Export and download** submits the job; nothing is asked first. When the file is
 ready the page hands it to the browser as a plain download (`src/host/downloads.ts`: a

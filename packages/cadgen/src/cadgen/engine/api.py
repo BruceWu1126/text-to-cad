@@ -348,7 +348,7 @@ def _source(source: Any, *, scripts: bool = False) -> dict[str, Any]:
     return {"path": str(path)}
 
 
-def export(source: Any, *destinations: Any, pose: Any = None, part: str | None = None, inputs: bool = True,
+def export(source: Any, *destinations: Any, pose: Any = None, part: str | None = None,
            log: Callable[[str], None] | None = None, daemon: bool = True,
            progress: Callable[[dict], None] | None = None) -> list[Written]:
     """Write a document to each destination, its kind from its suffix (``.xbf``, ``.step``,
@@ -356,41 +356,21 @@ def export(source: Any, *destinations: Any, pose: Any = None, part: str | None =
     ``.xbf``, of a ``.step`` read into one, of a ``Model`` (built first) or of built code (a
     ``Built``). Several destinations read the document once. ``part`` is one part or assembly as
     a ref's owner names it (``refs``). ``daemon=False`` does it in this process, cold. A GLB
-    carries every motion the document defines, as a clip.
-
-    A ``.cadz`` destination packages an ``.xbf`` with its build closure's source files and,
-    unless ``inputs`` is False, its inputs (``export.cadz``), in this process: no document is
-    read, only the files the closure names."""
+    carries every motion the document defines, as a clip."""
     from cadgen.engine.export import ExportRefused, kind_of
-    from cadgen.engine.export import cadz
 
     if not destinations:
         raise ExportRefused("export names at least one destination")
     resolved = [Path(os.fspath(destination)).resolve() for destination in destinations]
-    packages = [path for path in resolved if path.suffix.lower() == cadz.SUFFIX]
-    resolved = [path for path in resolved if path.suffix.lower() != cadz.SUFFIX]
     for destination in resolved:
         kind_of(destination)
-    written: list[Written] = []
-    if packages:
-        if pose is not None or part is not None:
-            raise ExportRefused("a .cadz packages the document as built: --pose and --part are another export's")
-        text = os.fspath(source) if isinstance(source, (str, os.PathLike)) else ""
-        if not text.lower().endswith(".xbf"):
-            raise ExportRefused("a .cadz is made from an .xbf: export the model's xbf first")
-        for package in packages:
-            clock = time.perf_counter()
-            size = cadz.write(Path(text), package, inputs=inputs)
-            written.append(Written(package, "cadz", size, round(time.perf_counter() - clock, 4)))
-        if not resolved:
-            return written
     spec = _source(source)
     cwd = str(source.cwd) if isinstance(source, Built) else os.getcwd()
     shown = log or (lambda _text: None)
     order = {"op": "export", "source": spec, "destinations": [str(path) for path in resolved], "pose": pose,
              "part": part, "cwd": cwd}
     done = _exported(order, spec, shown, daemon, progress)
-    return written + [Written(Path(row["path"]), row["kind"], row["bytes"], row["seconds"]) for row in done["files"]]
+    return [Written(Path(row["path"]), row["kind"], row["bytes"], row["seconds"]) for row in done["files"]]
 
 
 def _exported(order: dict[str, Any], spec: dict[str, Any], shown: Callable[[str], None], daemon: bool,
@@ -653,7 +633,7 @@ observers: list[Callable[[dict[str, Any]], None]] = []
 _HEARD = threading.local()  # what the daemon's answers said while a verb ran in this thread (``_heard``)
 _ENGINE = os.path.dirname(os.path.abspath(__file__)) + os.sep
 _SUFFIXES = {".xbf": "xbf", ".step": "step", ".stp": "step", ".glb": "glb", ".stl": "stl", ".3mf": "threemf",
-             ".cadz": "cadz", ".dxf": "dxf", ".urdf": "urdf", ".sdf": "sdf", ".srdf": "srdf"}
+             ".dxf": "dxf", ".urdf": "urdf", ".sdf": "sdf", ".srdf": "srdf"}
 _FRAME = re.compile(r'  File "(?P<file>[^"]+)", line (?P<line>\d+), in (?P<function>\S.*)')
 _TYPE = re.compile(r"(?P<type>[A-Za-z_][A-Za-z0-9_.]*)(?::|$)")
 _DIED = re.compile(r"exited \((?P<status>-?\d+)\) during the build")  # the daemon's word (``daemon.Worker.build``)

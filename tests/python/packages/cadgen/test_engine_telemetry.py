@@ -126,8 +126,7 @@ class EngineTelemetryTest(unittest.TestCase):
 
     def test_an_export_counts_a_build_of_each_destination_and_a_snapshot_its_source(self) -> None:
         exported = facts("export", source="xbf", pose=True, outputs=[
-            {"kind": "step", "seconds": 0.1}, {"kind": "threemf", "seconds": 0.2}, {"kind": "dxf", "seconds": 0.1},
-            {"kind": "cadz", "seconds": 0.0}])
+            {"kind": "step", "seconds": 0.1}, {"kind": "threemf", "seconds": 0.2}, {"kind": "dxf", "seconds": 0.1}])
         self.assertEqual(engine_telemetry.counts(exported, "command"), {
             "builds": [{"kind": kind, "via": "command", "outcome": "ok", "seconds": 0.5 / 3, "cached": False}
                        for kind in ("step", "3mf", "dxf")],

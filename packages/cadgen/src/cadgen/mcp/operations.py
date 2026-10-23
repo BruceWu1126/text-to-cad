@@ -13,7 +13,7 @@ import math
 import re
 from pathlib import Path
 
-from cadgen.jobs import Jobs, JobError
+from cadgen.jobs import TERMINAL, Jobs, JobError
 
 
 def obj(properties, required=()):
@@ -42,13 +42,13 @@ START = {
                       "outputs": obj({"model": {"type": "boolean", "enum": [True]}, **{k: STRING for k in FORMATS}}),
                       "verify": BOOL, "profile": BOOL}, ("code", "name", "cwd", "outputs")),
     "cad_export": obj({"source": STRING, "destinations": {"type": "array", "minItems": 1, "maxItems": 32, "items": STRING},
-                       "pose": {"type": ["object", "string"]}, "part": STRING, "inputs": BOOL}, ("source", "destinations")),
+                       "pose": {"type": ["object", "string"]}, "part": STRING}, ("source", "destinations")),
     "cad_snapshot": obj(SNAPSHOT),
     "cad_inspect": obj({"source": STRING, "ref": STRING, "query": {"type": "string", "enum": ["closure", "geometry", "build"]}}, ("source",)),
 }
 DESCRIPTIONS = {
     "cad_build": "Build Python source assigning result, in the named working directory. Declare a live model and/or absolute file outputs. Does not select a script or execute its __main__; imported code and called decorated models may write their declared outputs.",
-    "cad_export": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf/.cadz). Reuses the Python export operation, including building a script model source first. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts.",
+    "cad_export": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf). Reuses the Python export operation, including building a script model source first. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts.",
     "cad_snapshot": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. Paths must be absolute on the engine host. A script model source may build first. A failed packet removes its requested pictures.",
     "cad_inspect": "Read closure, geometry (requires ref), or build metadata of an existing file or live model. Never builds source or writes declared model outputs; an unbuilt or expired model must be explicitly built first. Defaults to geometry with a ref, otherwise closure.",
 }
@@ -56,7 +56,7 @@ DESCRIPTIONS = {
 
 def catalog():
     return [{"name": name, "title": name.removeprefix("cad_").capitalize() + " CAD",
-             "description": description + " Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status lasts up to 24 hours in this MCP session; restart loses it. Running file writes cannot be cancelled.",
+             "description": description + " Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
              "inputSchema": {**obj({**COMMON, **START[name]["properties"]}), "anyOf": [
                  obj({"action": {"type": "string", "enum": ["start"]}, "requestId": COMMON["requestId"],
                       **START[name]["properties"]}, ("requestId", *START[name]["required"])),
@@ -150,7 +150,32 @@ def serial(value):
     return value
 
 
+# What a session keeps of finished operations: the most recent, at most this many and this many
+# bytes of reports, so a session never refuses new work for history it holds (each report is
+# already cut to REPORT_BYTES), and the request IDs that named them, for ``request_conflict``.
+HISTORY_JOBS = 64
+HISTORY_BYTES = 32 * 1024 * 1024
+HISTORY_REQUESTS = 2048
+REPORT_BYTES = 2 * 1024 * 1024
+
+
 class Operations(Jobs):
+    def _prune(self):
+        super()._prune()
+        finished = [job for job in self.jobs.values() if job["state"] in TERMINAL]
+        kept = sum(job.get("kept", 0) for job in finished)
+        for job in sorted(finished, key=lambda job: job["finishedAt"]):
+            if len(finished) < HISTORY_JOBS and kept <= HISTORY_BYTES:
+                break
+            self.jobs.pop(job["id"], None)
+            finished.remove(job)
+            kept -= job.get("kept", 0)
+        # A request ID whose operation is gone still answers "expired" until it is the oldest.
+        for request_id in [r for r, ident in self.requests.items() if ident not in self.jobs]:
+            if len(self.requests) < HISTORY_REQUESTS:
+                break
+            del self.requests[request_id]
+
     def call(self, name, arguments):
         try:
             checked(arguments, obj({**COMMON, **START[name]["properties"]}))
@@ -185,7 +210,7 @@ class Operations(Jobs):
 
     def public(self, job):
         result = super().public(job)
-        if len(json.dumps(result).encode()) <= 2 * 1024 * 1024:
+        if len(json.dumps(result).encode()) <= REPORT_BYTES:
             return result
         # MCP transports have bounded messages. Never silently omit a long report.
         summary = result.get("result") or {}
@@ -199,6 +224,12 @@ class Operations(Jobs):
 
     def _finished(self, job):
         job.pop("arguments", None)
+        # Keep only what status can send: a long report is held as its summary, never in full.
+        public = self.public(job)
+        job.update({k: public[k] for k in ("result", "error") if k in public})
+        if "progress" not in public:
+            job.pop("progress", None)
+        job["kept"] = len(json.dumps(public).encode())
 
     def _perform(self, job, progress):
         from cadgen.engine import api

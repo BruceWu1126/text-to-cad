@@ -119,6 +119,23 @@ class OperationsTest(unittest.TestCase):
             sessions._expire()
             self.assertNotIn('s', sessions.sessions)
 
+    def test_a_long_session_keeps_bounded_history_and_never_refuses_for_it(self):
+        # 128 finished operations once refused every later start for a day ("history is full").
+        from cadgen.mcp import operations
+        jobs = Operations()
+        source = str(Path('/tmp/part.xbf').resolve())
+        with patch('cadgen.engine.api.inspect', return_value={'long': 'x' * (3 * 1024 * 1024)}):
+            answers = [self.finish(jobs, jobs.call('cad_inspect', {'requestId': f'history-request-{i:04d}', 'source': source}))
+                       for i in range(operations.HISTORY_JOBS * 2 + 5)]
+        self.assertTrue(all(answer['state'] == 'succeeded' for answer in answers))
+        self.assertTrue(answers[-1]['result']['truncated'])
+        with jobs.changed:
+            self.assertLessEqual(len(jobs.jobs), operations.HISTORY_JOBS)
+            self.assertLessEqual(sum(job['kept'] for job in jobs.jobs.values()), operations.HISTORY_BYTES)
+            self.assertTrue(all(len(json.dumps(job.get('result'))) < 10000 for job in jobs.jobs.values()))
+        again = jobs.call('cad_inspect', {'requestId': 'history-request-0000', 'source': source})
+        self.assertEqual((again['state'], again['status']), ('rejected', 410))
+
     def test_snapshot_accepts_inline_packet_and_returns_picture_artifacts(self):
         from cadgen.engine.api import Drawn
         with tempfile.TemporaryDirectory() as directory:

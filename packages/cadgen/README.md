@@ -214,8 +214,10 @@ Failure results state this explicitly; reports over 2 MiB are explicitly marked
 truncated and can be obtained through the Python API or CLI.
 There is no separate job tool or generic HTTP jobs API.
 
-Status is in session memory for up to 24 hours, bounded to 128 operations and 4096
-request identities; a restart loses it. Expired identities never replay writes.
+Status is in session memory for up to 24 hours: the 64 most recent finished operations
+(32 MiB of reports at most) and the 2048 most recent request identities, the oldest
+dropped rather than new work refused; a restart loses it. A remembered identity whose
+operation was dropped answers 410 and never replays writes.
 `jobs.py` owns admission, progress, waiting and cancellation for both agent
 operations and viewer exports. Viewer exports additionally own temporary artifact
 expiry, revision checks and download delivery; running cancellation discards that

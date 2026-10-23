@@ -631,7 +631,7 @@
     "openWorldHint": true,
     "readOnlyHint": false
    },
-   "description": "Build Python source assigning result, in the named working directory. Declare a live model and/or absolute file outputs. Does not select a script or execute its __main__; imported code and called decorated models may write their declared outputs. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status lasts up to 24 hours in this MCP session; restart loses it. Running file writes cannot be cancelled.",
+   "description": "Build Python source assigning result, in the named working directory. Declare a live model and/or absolute file outputs. Does not select a script or execute its __main__; imported code and called decorated models may write their declared outputs. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
    "inputSchema": {
     "additionalProperties": false,
     "anyOf": [
@@ -906,7 +906,7 @@
     "openWorldHint": true,
     "readOnlyHint": false
    },
-   "description": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf/.cadz). Reuses the Python export operation, including building a script model source first. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status lasts up to 24 hours in this MCP session; restart loses it. Running file writes cannot be cancelled.",
+   "description": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf). Reuses the Python export operation, including building a script model source first. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
    "inputSchema": {
     "additionalProperties": false,
     "anyOf": [
@@ -927,9 +927,6 @@
         "maxItems": 32,
         "minItems": 1,
         "type": "array"
-       },
-       "inputs": {
-        "type": "boolean"
        },
        "part": {
         "minLength": 1,
@@ -1022,9 +1019,6 @@
       "description": "Session epoch returned by start; required for status/cancel.",
       "minLength": 1,
       "type": "string"
-     },
-     "inputs": {
-      "type": "boolean"
      },
      "operationId": {
       "minLength": 1,
@@ -1119,7 +1113,7 @@
     "openWorldHint": true,
     "readOnlyHint": false
    },
-   "description": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. Paths must be absolute on the engine host. A script model source may build first. A failed packet removes its requested pictures. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status lasts up to 24 hours in this MCP session; restart loses it. Running file writes cannot be cancelled.",
+   "description": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. Paths must be absolute on the engine host. A script model source may build first. A failed packet removes its requested pictures. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
    "inputSchema": {
     "additionalProperties": false,
     "anyOf": [
@@ -1412,7 +1406,7 @@
     "openWorldHint": false,
     "readOnlyHint": true
    },
-   "description": "Read closure, geometry (requires ref), or build metadata of an existing file or live model. Never builds source or writes declared model outputs; an unbuilt or expired model must be explicitly built first. Defaults to geometry with a ref, otherwise closure. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status lasts up to 24 hours in this MCP session; restart loses it. Running file writes cannot be cancelled.",
+   "description": "Read closure, geometry (requires ref), or build metadata of an existing file or live model. Never builds source or writes declared model outputs; an unbuilt or expired model must be explicitly built first. Defaults to geometry with a ref, otherwise closure. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
    "inputSchema": {
     "additionalProperties": false,
     "anyOf": [
