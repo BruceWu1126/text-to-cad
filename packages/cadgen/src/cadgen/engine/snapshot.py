@@ -572,12 +572,12 @@ def names_a_folder(text: str) -> bool:
 
 
 def stem_of(source: Any) -> str:
-    """What a generated picture name starts with: the drawn file's stem, or a model's name."""
+    """What a generated picture name starts with: the drawn file's stem, a model's name, or a
+    document's id."""
     named = getattr(source, "name", None)
     if isinstance(named, str) and not isinstance(source, Path):
-        return named  # a Model, built code
-    script, _sep, model = os.fspath(source).partition("::")
-    return model or Path(script).stem or "snapshot"
+        return named  # a Model
+    return Path(os.fspath(source)).stem or "snapshot"
 
 
 def picture_path(out: Any, source: Any, *, at: str | None = None, job: tuple[int, int] = (0, 1),
@@ -656,10 +656,9 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
 
 def _checked(document: Path, out: Path, source: Any = None) -> str:
     """What a picture draws and where it goes, checked before anything renders: SRC a file the
-    stills draw, and there (unless a build's ``source`` holds it), OUT a ``.png``. SRC's suffix."""
-    from cadgen.engine.addresses import parse as model_address
-
-    if model_address(document) is not None:
+    stills draw, and there (unless a build's ``source`` holds it), or a document's id, OUT a
+    ``.png``. SRC's suffix (an id's document is drawn as an ``.xbf``)."""
+    if _by_id(document):
         if out.suffix.lower() != ".png":
             raise SnapshotRefused(f"a snapshot is a .png; {out.name} is not one")
         return ".xbf"
@@ -698,13 +697,12 @@ def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, st
     """A document drawn by OCCT from the engine's meshes, or a file from what its reader read
     (``render/service.py``): by the daemon's render process for it, warm, or in this process
     (``--no-daemon``, a model's own document from its worker's memory). The answer is the PNG's
-    bytes; this writes the one file."""
-    from cadgen.engine.addresses import parse as model_address
-
-    if model_address(document) is not None and source is None:
+    bytes; this writes the one file. A document named by its id is drawn by the engine from what
+    it holds (``api._source``): read, never built."""
+    if _by_id(document) and source is None:
         from cadgen.engine import api
 
-        spec = api._source(str(document), scripts=True)
+        spec = api._source(str(document))
         return api._exported({"op": "export", "source": spec, "destinations": [],
                               "draw_still": {"out": str(out), "still": still.as_json()},
                               "cwd": os.getcwd()}, spec, lambda _text: None, daemon)["drawn"]
@@ -743,8 +741,11 @@ def _written(document: Path, out: Path, data: bytes, report: dict[str, Any], sta
 # --- a job: a Quick Edit packet's views, drawn ---------------------------------------------------
 
 
-def _model(text: str) -> bool:
-    return "::" in text or text.endswith(".py")
+def _by_id(document: Any) -> bool:
+    """Whether a picture's document is named by its id: drawn from what the engine holds."""
+    from cadgen.engine.ids import is_id
+
+    return is_id(os.fspath(document))
 
 
 def job_input(job: Any) -> str | None:
@@ -868,10 +869,9 @@ def job_pictures(job: Any, source: Any = None, *, display: Any = None, camera: A
         named = source if source is not None else view.get("input") or shared.get("input")
         if not named:
             raise SnapshotRefused(f"{where} names no input, and no SRC is given")
-        from cadgen.engine.addresses import parse as model_address
-
-        address = model_address(os.fspath(named))
-        document = Path(str(address)) if address else Path(os.fspath(named)).expanduser().resolve()
+        document = Path(os.fspath(named))
+        if not _by_id(document):
+            document = document.expanduser().resolve()
         drawing = document.suffix.lower() == ".dxf"
         settings = _settings(view.get("output"), f"{where}.output", drawing)
         tight, padding = settings.get("tightFrame", True), float(settings.get("padding", PADDING))
@@ -964,7 +964,7 @@ def draw_pictures(pictures: list[tuple[Path, Path, Still]], *, daemon: bool = Tr
 
 def _draw_staged(staged: list[tuple[Path, Path, Path, Still]], daemon: bool) -> list[dict[str, Any]]:
     """Each picture of a job drawn into its staged file (``draw_pictures``)."""
-    if daemon or any(_model(str(document)) for document, _out, _stage, _still in staged):
+    if daemon or any(_by_id(document) for document, _out, _stage, _still in staged):
         return [_occt(document, stage, still, daemon, None, time.perf_counter())
                 for document, _out, stage, still in staged]
     from cadgen.engine.formats import FormatError
@@ -1001,8 +1001,8 @@ def _arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.usage = "%(prog)s SRC OUT.png [options] | --job PACKET [SRC] [options]"
     parser.add_argument("document", metavar="SRC", nargs="?",
                         help="a document (.xbf, .step), a mesh file (.glb, .stl, .3mf), a robot (.urdf, .sdf, .srdf), "
-                             "a drawing (.dxf), or SCRIPT.py::MODEL (built first, drawn from its worker); with --job, "
-                             "a file drawn in place of every job's input")
+                             "a drawing (.dxf), or a document id (a model's, which python SCRIPT.py prints: drawn "
+                             "from what the engine holds); with --job, a file drawn in place of every job's input")
     parser.add_argument("out", metavar="OUT.png", nargs="?",
                         help="the .png to write, or a folder (one that is there, or a path ending in a separator) to "
                              "write <SRC's stem>_<UTC time>.png into")
@@ -1075,8 +1075,8 @@ def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
         return _run_job(args, prog)
     if args.document is None or args.out is None:
         raise Failed("the following arguments are required: SRC, OUT.png (or --job PACKET)", 2)
-    if "::" in args.document or args.document.endswith(".py"):
-        return _run_model(args, prog)
+    if _by_id(args.document):
+        return _run_held(args, prog)
     from cadgen.engine import api
     from cadgen.engine.cli import _shown
 
@@ -1099,9 +1099,9 @@ def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
     return 0
 
 
-def _run_model(args: argparse.Namespace, prog: str) -> int:
-    """``cadgen snapshot SCRIPT.py::MODEL OUT.png``: the model built in its worker, its
-    document drawn from that worker's memory (``api.snapshot``)."""
+def _run_held(args: argparse.Namespace, prog: str) -> int:
+    """``cadgen snapshot ID OUT.png``: the document the engine holds of that id, drawn from the
+    memory of the worker holding it (``api.snapshot``); nothing is built."""
     from cadgen.engine import api
     from cadgen.engine.cli import Failed, _shown
 

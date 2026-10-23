@@ -176,7 +176,9 @@ class Model:
 
         # Decoration only declares. The caller's control flow reaches this build,
         # and resumes after it; importing the engine never runs or exits a script.
-        program = self.function.__module__ == "__main__"
+        # A call the program's own code makes (``python caller.py``) is reported, wherever the
+        # model is defined: ``caller.py`` calling ``parts.cube()`` prints cube's id and view.
+        program = sys._getframe(1).f_globals.get("__name__") == "__main__"
         previous = getattr(_CONTEXT, "program", False)
         _CONTEXT.program = program
         try:

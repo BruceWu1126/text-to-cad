@@ -395,8 +395,8 @@ class Bar:
             model = str(frame.get("model") or "")
             if model != self.model or frame.get("phase") != self.phase:
                 self._finished()
-                if model != self.model and "::" in model:
-                    self._commit(model)
+                if model != self.model and model and frame.get("phase") != "load":
+                    self._commit(model)  # a model's stages begin under its name; the script loading has none
                 self.model, self.phase = model, frame.get("phase")
                 self.label = str(frame.get("label") or self.phase or "")
                 self.began = time.monotonic()

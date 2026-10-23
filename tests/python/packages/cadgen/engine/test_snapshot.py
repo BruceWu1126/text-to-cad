@@ -209,7 +209,8 @@ class SnapshotTest(unittest.TestCase):
         self.assertRegex(picture_path(folder, self.document).name, rf"^stand{timed}$")  # a folder that is there
         fresh = picture_path(f"{folder / 'stills'}{os.sep}", self.document)  # a separator: a folder to be
         self.assertEqual(fresh.parent, folder / "stills")
-        self.assertRegex(picture_path(folder, f"{folder / 'stand.py'}::post").name, rf"^post{timed}$")  # a model's name
+        ident = "6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"
+        self.assertRegex(picture_path(folder, ident).name, rf"^{ident}{timed}$")  # a document's id
         self.assertEqual(picture_path(folder / "named.png", self.document), folder / "named.png")
         # A packet's pictures share one time, told apart by their job and output where they have several.
         self.assertEqual(picture_path(folder, self.document, at="T", job=(1, 3), output=(0, 2)).name, "stand_j2_1_T.png")
@@ -446,8 +447,12 @@ class SnapshotTest(unittest.TestCase):
             with self.subTest(said=said), self.assertRaisesRegex(SnapshotRefused, said):
                 job_pictures(broken)
         self.assertEqual(stale.read_bytes(), b"an earlier run's", "a refused job writes nothing, and takes nothing away")
-        model = f"{self.folder / 'stand.py'}::stand"
-        self.assertEqual(str(job_pictures(packet, model)[0][0]), model)
+        # A document's id is drawn in place of the job's input, as the engine holds it; a script never is.
+        ident = "6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"
+        self.assertEqual(str(job_pictures(packet, ident)[0][0]), ident)
+        for script in (self.folder / "stand.py", f"{self.folder / 'stand.py'}::stand"):
+            with self.subTest(script=str(script)), self.assertRaisesRegex(SnapshotRefused, "is neither a document"):
+                job_pictures(packet, script)
         import contextlib
         import io
 
@@ -501,7 +506,7 @@ class SnapshotTest(unittest.TestCase):
         # model declares (law 10), its GLB; the snapshot, no file but the picture.
         script.write_text(textwrap.dedent(MODEL).replace("@xbf(\"XBF/stand.xbf\")\ndef stand", "@glb(\"stand.glb\")\ndef stand")
                           .replace("import paint, xbf", "import glb, paint, xbf"), encoding="utf-8")
-        drawn = api.snapshot(f"{script}::stand", folder / "stand.png", display="xray", camera="iso", width=200,
+        drawn = api.snapshot(_model(script, "stand"), folder / "stand.png", display="xray", camera="iso", width=200,
                              height=150, daemon=False)
         self.assertEqual((drawn.width, drawn.height), (200, 150))
         self.drawn(folder / "stand.png", (200, 150))
@@ -525,11 +530,21 @@ class SnapshotTest(unittest.TestCase):
             held.clear()
         memo.clear()
         self.addCleanup(memo.clear)
-        drawn = api.snapshot(f"{script}::stand", folder / "stand.png", camera="iso", width=200, height=150,
+        drawn = api.snapshot(_model(script, "stand"), folder / "stand.png", camera="iso", width=200, height=150,
                              daemon=False)
         self.assertEqual((drawn.width, drawn.height), (200, 150))
         self.drawn(folder / "stand.png", (200, 150))
         self.assertEqual(xbf.stat().st_mtime_ns, written, "taken, not written again")
+
+
+def _model(script: Path, name: str):
+    """The ``Model`` a script defines, as the program importing it has it (Python's own import)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(f"{script.stem}_{name}_model", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, name)
 
 
 class AccessTest(unittest.TestCase):

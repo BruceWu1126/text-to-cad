@@ -10,6 +10,9 @@ ordinary Python scripts call decorated models explicitly.
     cadgen status [--json] | stop | daemon
     cadgen inspect DOC [REF]                           a document's build closure, or what a ref names (``refs``)
 
+SRC and DOC are an on-disk CAD file's path or a document's id (``ids``): a model's id is what
+``python SCRIPT.py`` prints for it. A script is never a source: no verb imports or builds one.
+
 cadgen's command line runs each verb by its name (``parser_for``, ``run``); the engine's own entry,
 ``python -m cadgen.engine VERB ...``, takes the same verbs as subcommands (``main``). A verb's failure
 is said once where its command ends (``answered``): under ``--json`` as ``{"ok": false, "error": ...}``
@@ -31,7 +34,8 @@ __all__ = ["VERBS", "Failed", "answered", "build_parser", "main", "parser_for", 
 
 
 def _export_arguments(export: argparse.ArgumentParser) -> None:
-    export.add_argument("source", metavar="SRC", help="a model address (SCRIPT::NAME), an .xbf, or a .step")
+    export.add_argument("source", metavar="SRC", help="an .xbf, a .step, or a document id (a model's, which "
+                                                      "python SCRIPT.py prints)")
     export.add_argument("destinations", nargs="+", metavar="DST",
                         help=".xbf (from a STEP, or with --part), .step, .glb, .stl, .3mf or .dxf (of a planar "
                              "document)")
@@ -46,7 +50,7 @@ def _export_arguments(export: argparse.ArgumentParser) -> None:
 
 
 def _serve_arguments(serve: argparse.ArgumentParser) -> None:
-    serve.add_argument("document", help="a model address (SCRIPT::NAME), an .xbf, or a STEP")
+    serve.add_argument("document", help="an .xbf, a STEP, or a document id")
     serve.add_argument("--port", type=int, default=0)
     serve.add_argument("--three", help="the three.js package folder (default: the nearest node_modules/three)")
 
@@ -62,7 +66,7 @@ def _no_arguments(_parser: argparse.ArgumentParser) -> None:
 def _inspect_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--query", choices=("closure", "geometry", "build"),
                         help="inspect closure, geometry (requires REF), or build metadata; never builds a model")
-    parser.add_argument("document", help="a model address (SCRIPT::NAME), or an .xbf")
+    parser.add_argument("document", help="an .xbf, a STEP, or a document id")
     parser.add_argument("ref", nargs="?", help="[FILE#][OWNER/]ELEMENT or [FILE#]OWNER (cadgen.engine.refs): OWNER a "
                                                "part's or an assembly's label, or its occurrence path (hand/finger.2); "
                                                "ELEMENT an element name (f:..., e:..., v:...) or face N (edge, vertex). "
@@ -234,10 +238,11 @@ def _export(args: argparse.Namespace, prog: str) -> int:
     from cadgen.engine import api
     from cadgen.engine.export import SOURCES, ExportRefused
 
-    from cadgen.engine.addresses import key, parse
+    from cadgen.engine.addresses import key
+    from cadgen.engine.ids import is_id
 
-    if parse(args.source) is None and Path(args.source).suffix.lower() not in SOURCES:
-        raise Failed(f"{args.source} is no document: an export reads an .xbf or a .step", 2)
+    if not is_id(args.source) and Path(args.source).suffix.lower() not in SOURCES:
+        raise Failed(f"{args.source} is no document: an export reads an .xbf, a .step or a document id", 2)
     try:
         written = api.export(args.source, *args.destinations, pose=_pose(args.pose), part=args.part,
                              log=lambda text: print(text, file=sys.stderr),
@@ -257,15 +262,12 @@ def _export(args: argparse.Namespace, prog: str) -> int:
 
 
 def _serve(args: argparse.Namespace, prog: str) -> int:
-    from cadgen.engine.addresses import key
-
-    path = key(args.document)
-    if isinstance(path, Path) and not path.is_file():
-        raise Failed(f"no document {args.document}", 2)
     from cadgen.engine import api
 
     try:
-        print(api.serve(path, args.port, args.three).url)
+        print(api.serve(args.document, args.port, args.three).url)
+    except ValueError as error:
+        raise Failed(str(error), 2) from None
     except api.EngineError as error:
         raise Failed(str(error)) from None
     return 0

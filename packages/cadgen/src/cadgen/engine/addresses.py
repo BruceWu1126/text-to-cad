@@ -1,91 +1,36 @@
-"""Document addresses: file paths and script.py::name, and the document id each names.
+"""Document names: an on-disk CAD file's path, or a document's id, and the id each names.
 
-Names select documents; #owner/element selects geometry inside the document. A path is keyed
-by its canonical spelling (``ids.canonical``), a script's too. Every document is known inside
-the engine by its id (``document_id``). Nothing here reads, builds, or persists a model.
+Every verb, tool and ref names a document one of two ways: an on-disk CAD file by its path, or any
+document by its id (``ids``) -- a model's, which ``python script.py`` prints, or a file's. A Python
+script is never a document: nothing here reads, imports or builds one. A path is keyed by its
+canonical spelling (``ids.canonical``); ``#owner/element`` selects geometry inside the document.
+Nothing here reads, builds, or persists a model.
 """
 from __future__ import annotations
 
 import os
-import re
-from dataclasses import dataclass
 from pathlib import Path
 
-from cadgen.engine.ids import canonical, file_id, is_id, model_id
+from cadgen.engine.ids import canonical, file_id, is_id
 
-_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
-
-
-@dataclass(frozen=True)
-class ModelAddress:
-    script: Path
-    name: str
-
-    def __str__(self) -> str:
-        return f"{self.script}::{self.name}"
-
-
-def parse(value: str | os.PathLike) -> ModelAddress | None:
-    text = os.fspath(value)
-    if "::" not in text:
-        return None
-    source, name = text.rsplit("::", 1)
-    if not _NAME.fullmatch(name):
-        raise ValueError("a model address ends in ::NAME, with NAME a Python identifier")
-    script = Path(source).expanduser()
-    if script.suffix.lower() != ".py":
-        raise ValueError("a model address is script.py::NAME")
-    return ModelAddress(Path(canonical(script)), name)
+__all__ = ["document_id", "is_id", "key", "split"]
 
 
 def key(value: str | os.PathLike) -> Path | str:
-    """File keys stay Paths; model keys are canonical addresses, never fake files."""
-    found = parse(value)
-    return str(found) if found is not None else Path(canonical(Path(value).expanduser()))
+    """A document's key: an id stays itself, a path is its canonical ``Path``."""
+    text = os.fspath(value)
+    if is_id(text):
+        return text
+    return Path(canonical(Path(text).expanduser()))
 
 
 def document_id(value: str | os.PathLike) -> str:
-    """The id of the document ``value`` names: an id itself, a model address's model, else a file's."""
-    if is_id(value):
-        return value
-    found = parse(value)
-    if found is not None:
-        return model_id(found.script, found.name)
-    return file_id(Path(value).expanduser())
+    """The id of the document ``value`` names: an id itself, else the file's at that path."""
+    text = os.fspath(value)
+    return text if is_id(text) else file_id(Path(text).expanduser())
 
 
 def split(value: str | os.PathLike) -> tuple[str, str | None]:
+    """``FILE#REF`` as ``(the document's key, the ref)``; the ref None where there is no ``#``."""
     source, separator, ref = os.fspath(value).partition("#")
     return str(key(source)), ref if separator else None
-
-
-def declarations(script: Path) -> list[str]:
-    """List a script's model declarations without importing or executing it."""
-    import ast
-
-    tree = ast.parse(script.read_bytes(), filename=str(script))
-    names, modules = set(), set()
-    engines = {"cadgen", "cadgen.engine", "cadgen.engine.model"}
-    kinds = {"model", "xbf", "step", "glb", "stl", "threemf", "dxf"}
-    for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.module in engines and not node.level:
-            for item in node.names:
-                if item.name in kinds:
-                    names.add(item.asname or item.name)
-                if node.module == "cadgen" and item.name == "engine":
-                    modules.add(item.asname or item.name)
-        elif isinstance(node, ast.Import):
-            for item in node.names:
-                if item.name in engines:
-                    modules.add(item.asname or item.name)
-    found = []
-    for node in tree.body:
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        for decorator in node.decorator_list:
-            text = ast.unparse(decorator.func if isinstance(decorator, ast.Call) else decorator)
-            module, dot, name = text.rpartition(".")
-            if not dot and name in names or module in modules and name in kinds:
-                found.append(node.name)
-                break
-    return found

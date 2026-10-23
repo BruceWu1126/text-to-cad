@@ -660,8 +660,11 @@ class DaemonRenderTest(unittest.TestCase):
         self.assertEqual(edited["process"]["pid"], pid, "the same process, patched")
         self.assertFalse({"meshMs", "holdMs", "sceneMs"} & set(edited["timings"]), "patched before it was asked")
         self.assertNotEqual((self.folder / "edited.png").read_bytes(), (self.folder / "first.png").read_bytes())
-        # A model is drawn from the document its worker holds, in that worker.
-        done = self.cli("snapshot", "pair.py::pair", "model.png", "--width", "200", "--height", "150", "--json")
+        # A model, by its id, is drawn from the document its worker holds, in that worker.
+        from cadgen.engine.ids import model_id
+
+        done = self.cli("snapshot", model_id(self.folder / "pair.py", "pair"), "model.png", "--width", "200", "--height",
+                        "150", "--json")
         self.assertEqual(done.returncode, 0, done.stderr)
         model = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertEqual((model["renderer"], "process" in model), ("occt", False))

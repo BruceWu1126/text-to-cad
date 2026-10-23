@@ -510,8 +510,11 @@ class BuildFilesTest(unittest.TestCase):
 
         script = self.write("board.py", BOARD.format(lift=6))
         out = self.folder / "made/board.stl"
-        # The address selects the declared model, built before exporting.
-        self.assertEqual(api.export(f"{script}::board", out, daemon=False)[0].path, out)
+        # A script is never a source, whatever names it: refused as any file that is no document.
+        for named in (script, f"{script}::board"):
+            with self.assertRaisesRegex(ExportRefused, "is no document"):
+                api.export(named, out, daemon=False)
+        self.assertFalse(out.exists())
         spec = importlib.util.spec_from_file_location("board_script", script)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)

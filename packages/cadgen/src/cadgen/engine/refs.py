@@ -15,8 +15,10 @@ its atom is named now -- never picking one.
     ELEMENT   = NAME | ("face" | "edge" | "vertex") " " N    NAME: f:..., e:..., v:... (``trace.ELEMENT_NAME``)
 
 ``FILE`` is the document, everything before the first ``#`` (JSON-quoted when it holds one, or a
-quote); a source given as a path or a model must be that document (an absolute ``FILE`` the same
-file, a relative one the last segments of its path). An occurrence is named by the labels on the
+quote): an on-disk CAD file's absolute path, the last segments of its path, or a document's id
+(``ids``; a model's id, which ``python script.py`` prints, or a file's). A source given as a path,
+an id or a model must be that document (an absolute ``FILE`` the same file, a relative one the
+last segments of its path, an id that id). A script is never a ``FILE``. An occurrence is named by the labels on the
 way to it: ``hand/finger.2`` is the second component labelled ``finger`` of ``hand``, a label
 its siblings do not share needs no number (``hand/palm``), and an owner may start at any level
 (``finger.2``, ``palm``) when what it names is one occurrence. A path whose first segment names the
@@ -31,9 +33,10 @@ The canonical ref of each thing resolved (``Hit.ref``): the element's name, else
 under its part's owner -- the part's label where that names it alone, else its path from the
 root -- or, in a document of one part, under the document's name.
 
-``select(source, ref, kind=None)`` resolves a ref against an xbf or a STEP (a path), a shape tree
-(``read_xbf``'s, ``read_step``'s, or a live shape in a model's body) or a model (in a build, its
-result in this run; outside one, built warm through the daemon, then its xbf read). Inside a
+``select(source, ref, kind=None)`` resolves a ref against an xbf or a STEP (a path), a document id
+(the document the engine holds, read from its worker, never built), a shape tree (``read_xbf``'s,
+``read_step``'s, or a live shape in a model's body) or a model (in a build, its result in this run;
+outside one, built warm through the daemon, then its document read). Inside a
 build the read is the model's own call, keyed by the file's bytes as ``read_xbf`` is; a file a
 model of the build writes is never read (``reader.written_by_build``).
 """
@@ -551,12 +554,14 @@ def _element_ref(root: Node, part: Node, kind: str, ordinal: int, name: str | No
 
 
 def _same_document(file: str, document: Path) -> bool:
-    """Whether a ref's ``FILE`` is the document: the same file, or the last segments of its path."""
-    from cadgen.engine.addresses import parse
+    """Whether a ref's ``FILE`` is the document: the same id, the same file, or the last segments
+    of its path. A document known by its id alone (a model's) is named by that id alone."""
+    from cadgen.engine.ids import file_id, is_id
 
-    given_model, held_model = parse(file), parse(document)
-    if given_model is not None or held_model is not None:
-        return given_model == held_model
+    if is_id(str(document)):
+        return file == str(document)
+    if is_id(file):
+        return file == file_id(document)
     given = Path(file).expanduser()
     if given.is_absolute():
         return os.path.normcase(str(given.resolve())) == os.path.normcase(str(document.resolve()))
@@ -590,7 +595,10 @@ def resolve_structure(structure: dict[str, Any], ref: str, document: Path | None
         held = prototypes[node.payload["prototype"]].get(f"{kind}Names") or {}
         return {int(ordinal): text for ordinal, text in held.items()}
 
-    shown = os.path.basename(str(document)) if document is not None else str(structure.get("name") or "the document")
+    from cadgen.engine.ids import is_id
+
+    shown = (os.path.basename(str(document)) if document is not None and not is_id(str(document))
+             else str(structure.get("name") or "the document"))
     return resolve(root, selectors, _Names(named, lambda _node, _kind: None), shown)
 
 
@@ -812,11 +820,11 @@ def _document(source: Any) -> Path | None:
         if _in_build():
             return None
         found = next((target.path for target in source.plan() if target.kind == "xbf"), None)
-        return found if found is not None else Path(source.address)
+        return found if found is not None else Path(source.id)
     if isinstance(source, (str, os.PathLike)):
         from cadgen.engine.addresses import key
 
-        return Path(key(source))
+        return Path(key(source))  # an id stays itself: ``Path(id)``, which names no file
     if isinstance(source, Shape):
         if source.__dict__.get("_wrapped") is None:
             raise RefError("select from an empty shape")
@@ -825,8 +833,10 @@ def _document(source: Any) -> Path | None:
 
 
 def _tree(source: Any, document: Path | None) -> Any:
-    """The tree a source is: a document read, a model built warm through the daemon first and its
-    xbf read (outside a build) or its result in this run (a child), or the shape given."""
+    """The tree a source is: a document read, a model built warm through the daemon first (this
+    program's own call) and its document read (outside a build) or its result in this run (a
+    child), the document an id names as the engine holds it (never built), or the shape given."""
+    from cadgen.engine.ids import is_id
     from cadgen.engine.model import Model
 
     if isinstance(source, Model):
@@ -838,18 +848,15 @@ def _tree(source: Any, document: Path | None) -> Any:
 
             failed = next(found for found in report.models if not found.get("ok"))
             raise EngineError(failed.get("error") or f"the build of {source.identity} failed")
-    if document is not None:
-        from cadgen.engine.addresses import parse as address
+    if document is not None and is_id(str(document)):
         from cadgen.engine import api
 
-        target = address(document)
-        if target is not None:
-            if not isinstance(source, Model):
-                report = api.build_script(target.script, [target.name])
-                if not report.ok:
-                    raise api.EngineError(next(row["error"] for row in report.models if not row.get("ok")))
-            spec = api._source(str(target))
-            return api.Built(target.name, Path(spec["script"]), {}, Path.cwd()).shape
+        if isinstance(source, Model):
+            return api.Built(source.name, source.script, {}, Path.cwd()).shape
+        found = api._ask({"op": "document", "id": str(document)})["document"]
+        if "path" in found:
+            return _read(Path(found["path"]))
+        return api.Built(found["function"], Path(found["script"]), {}, Path.cwd()).shape
     return source if document is None else _read(document)
 
 
@@ -880,14 +887,18 @@ def select(source: Any, ref: str, kind: str | None = None) -> Any:
     tree = _tree(source, document)
     building = _in_build()
     run = _current_run() if building else None
-    root = shape_tree(tree, document.stem if document is not None else "")
+    from cadgen.engine.ids import is_id
+
+    known = document is not None and is_id(str(document))
+    root = shape_tree(tree, (str(getattr(tree, "label", "") or "") if known else document.stem) if document is not None else "")
     world = _World()
 
     def count(node: Node, kind: str) -> int:
         return world.map(node, kind).Extent()
 
     names = _Names(_shape_names(run), count)
-    shown = os.path.basename(str(document)) if document is not None else (f"shape {root.segment}" if root.label else "the shape")
+    shown = (os.path.basename(str(document)) if document is not None and not known
+             else f"shape {root.segment}" if root.label else "the shape")
     hits = resolve(root, selectors, names, shown)
     one_part = len(root.parts()) == 1
     labelled = not building

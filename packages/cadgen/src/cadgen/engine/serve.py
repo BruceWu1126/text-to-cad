@@ -89,7 +89,7 @@ from cadgen.engine.render.look import LOOK
 __all__ = ["MeshCache", "PARALLEL_BYTES", "Served", "Server", "find_three"]
 
 from cadgen.engine.addresses import document_id, key as document_key
-from cadgen.engine.ids import file_id
+from cadgen.engine.ids import canonical, file_id, is_id
 
 PAGE = Path(__file__).resolve().parent / "page"
 # A part whose shape bytes reach this is meshed with the kernel's face parallelism inside
@@ -427,6 +427,9 @@ class Server:
         # a page asks for it.
         self.served: dict[str, Served] = {}
         self.model_loaders: dict[str, tuple[str, Callable, int]] = {}
+        # Every on-disk file a page or a launcher opened, by its id: its canonical path (``remember``).
+        # Process memory only: what a page's ``/<id>`` names, never a record on disk.
+        self.files: dict[str, str] = {}
         self.model_versions: dict[str, int] = {}
         self.model_locks: dict[str, threading.Lock] = {}
         # The daemon's server and a worker's snapshot serve from the process's one cache
@@ -521,13 +524,14 @@ class Server:
     # --- documents -------------------------------------------------------------------
 
     def add(self, path: Path) -> str:
-        """Serve the document at ``path`` (or a live model's address): its id."""
+        """Serve the document at ``path`` (or a live model's id): its id."""
         path = document_key(path)
         ident = document_id(path)
         if isinstance(path, str):
             if not self.holds(ident):
-                raise ValueError(f"no live model {path}")
+                raise ValueError(f"no document {path} is held")
             return ident
+        self.remember(path)
         if path.suffix.lower() in FOREIGN:
             # Read outside the lock: a STEP's read is long, and every other document is served
             # meanwhile. Two first opens of one file share its one read (``_foreign``).
@@ -546,7 +550,7 @@ class Server:
 
     def put(self, path: Path | str, structure: dict[str, Any], shapes: dict[str, Any]) -> str:
         """Serve a document held in memory (a build's, which a worker draws), at ``path`` (a
-        file, or a model's address): its structure and each part's shape (or shape bytes) by
+        file, or a model's id): its structure and each part's shape (or shape bytes) by
         key. No file is read for it. Its id."""
         path = document_key(path)
         ident = document_id(path)
@@ -561,17 +565,37 @@ class Server:
         return ident in self.served or ident in self.model_loaders
 
     def path_of(self, ident: str) -> Path | str:
-        """The path (or a model's address) of a document served or registered."""
+        """The path of a file served, or the id of a model served or registered."""
         with self.load_lock:
             found = self.served.get(ident)
             if found is not None:
                 return found.path
-            return self.model_loaders[ident][0]
+            if ident in self.model_loaders:
+                return ident
+            raise KeyError(ident)
 
-    def register_model(self, ident: str, address: str, load: Callable, version: int) -> str:
-        """A live model's document, by its id, opened on demand: ``load`` asks its worker."""
+    def remember(self, path: Path | str) -> str:
+        """An on-disk file a page or a launcher opens, known by its id from now on: its id."""
+        found = canonical(path)
+        ident = file_id(found)
         with self.load_lock:
-            self.model_loaders[ident] = (address, load, version)
+            self.files[ident] = found
+        return ident
+
+    def file_of(self, ident: str) -> str | None:
+        """The canonical path of the on-disk file of id ``ident`` this server knows, else None."""
+        with self.load_lock:
+            found = self.files.get(ident)
+            served = self.served.get(ident)
+        if found is None and served is not None and not isinstance(served.path, str):
+            found = str(served.path)
+        return found
+
+    def register_model(self, ident: str, label: str, load: Callable, version: int) -> str:
+        """A live model's document, by its id, opened on demand: ``load`` asks its worker.
+        ``label`` names it (its function's name)."""
+        with self.load_lock:
+            self.model_loaders[ident] = (label, load, version)
             self.model_locks.setdefault(ident, threading.Lock())
         self._changed()
         return ident
@@ -682,10 +706,10 @@ class Server:
         if ident in self.model_loaders:
             # No kernel work on the HTTP thread: the loader asks the owning worker.
             with self.model_locks[ident]:
-                address, load, version = self.model_loaders[ident]
+                _label, load, version = self.model_loaders[ident]
                 if self.model_versions.get(ident) != version:
                     structure, shapes = load()
-                    self.put(address, structure, shapes)
+                    self.put(ident, structure, shapes)
                     self.model_versions[ident] = version
             return self.served[ident]
         with self.load_lock:
@@ -724,7 +748,7 @@ class Server:
         self._changed()
 
     def _ids(self, texts: Any) -> list[str]:
-        """The served documents among ``texts`` (ids, paths, or model addresses), by id."""
+        """The served documents among ``texts`` (ids or paths), by id."""
         found = []
         for text in texts:
             try:
@@ -1007,8 +1031,8 @@ class Server:
                 if handler.command != "HEAD":
                     handler.wfile.write(body)
                 return
-            if not parts:
-                return self.file(handler, PAGE / "index.html")
+            if not parts or (len(parts) == 1 and is_id(parts[0])):
+                return self.file(handler, PAGE / "index.html")  # ``/<id>``: the document's page
             if parts[0] == "page" and len(parts) == 2:
                 return self.file(handler, PAGE / parts[1])
             if parts[0] == "three" and self.three is not None:

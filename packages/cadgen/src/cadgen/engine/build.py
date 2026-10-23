@@ -409,7 +409,6 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
     load_seconds = loaded - started
     for report, (model, result, body, children) in zip(reports, results):
         report["id"] = model.id
-        report["address"] = model.address
         report["source"] = {"script": str(model.script), "name": model.name}
         if result is not None:
             report["timings"] = {"load": round(load_seconds, 4), "body": round(body, 4)}
@@ -608,7 +607,6 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
                              files, tree)
     report["files"] = {str(target.path): written[str(target.path)] for target in plan}
     report["id"] = model.id
-    report["address"] = model.address
     report["source"] = {"script": str(model.script), "name": model.name}
 
 

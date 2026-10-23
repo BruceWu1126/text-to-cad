@@ -14,7 +14,6 @@ const HEADER_BYTES = 80;
 const CLASSES = { 1: "feature", 2: "tangent", 3: "seam", 5: "boundary", 6: "non-manifold" };
 const EDGE_PIXELS = 5;
 const VERTEX_PIXELS = 7;
-const params = new URLSearchParams(location.search);
 const view = document.getElementById("view");
 const statusLine = document.getElementById("status");
 const titleLine = document.getElementById("title");
@@ -652,7 +651,8 @@ async function poll(doc) {
 }
 
 async function start() {
-  let doc = params.get("doc");
+  // The page of one document is ``/<id>``; ``/`` shows the last one served.
+  let doc = /^\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(location.pathname) ? location.pathname.slice(1) : null;
   if (!doc) {
     const listing = await (await fetch("/api/docs")).json();
     doc = listing.length ? listing[listing.length - 1].id : null;

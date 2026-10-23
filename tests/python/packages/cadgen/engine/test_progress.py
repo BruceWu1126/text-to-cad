@@ -350,7 +350,7 @@ class DaemonProgressTest(unittest.TestCase):
         from urllib.parse import urlsplit, parse_qs
         page = urlsplit(served.stdout.strip())
         query = parse_qs(page.query)
-        base, ident, token = f"{page.scheme}://{page.netloc}", query["doc"][0], query["token"][0]
+        base, ident, token = f"{page.scheme}://{page.netloc}", page.path.strip("/"), query["token"][0]
         route = f"{base}/api/doc/{ident}/version"
 
         def get(query: str) -> dict:
