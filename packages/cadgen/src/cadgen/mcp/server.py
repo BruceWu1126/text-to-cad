@@ -803,7 +803,8 @@ class Server:
         token = headers.pop(_APP_TOKEN_HEADER, "")
         app = not self.text and secrets.compare_digest(token.encode("utf-8"), self._app_token.encode("utf-8"))
         if token and not app:
-            raise ToolFailed("Invalid CAD app capability.", "bad_request")
+            # A view opened in an earlier session (the engine restarted under its host) holds that one's.
+            raise ToolFailed("This CAD view was opened before CAD restarted: close it and open CAD again.", "bad_request")
         reply = self.tunnel.serve(method=str(arguments.get("method") or "GET"), url=str(arguments.get("url") or ""),
                                   headers=headers, body=body, agent=not app)
         if app:

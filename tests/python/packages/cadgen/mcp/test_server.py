@@ -554,7 +554,9 @@ class InlineServerTest(_Session):
         self.assertEqual(agent("HEAD", "/__cad/analytics")["structuredContent"]["status"], 405)
         self.assertEqual(agent("GET", "/__cad/analytics")["structuredContent"]["status"], 200)
         # A wrong capability is refused, not served as the agent; another session's is wrong here.
-        self.assertTrue(agent("GET", "/__cad/server", headers={"x-cadgen-app": token[:-1] + "x"})["isError"])
+        stale = agent("GET", "/__cad/server", headers={"x-cadgen-app": token[:-1] + "x"})
+        self.assertTrue(stale["isError"])
+        self.assertIn("open CAD again", stale["content"][0]["text"])
         other = Server(page=AppPage(self.tmp / "app"), recents=RecentStore(self.tmp / "state-other"))
         other.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": self.offered,
                                                      "clientInfo": self.client}), None)
