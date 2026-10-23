@@ -175,7 +175,7 @@ function whose fresh run differs from its logged one: tom's `tom2_symmetric_yoke
 intermediate yoke's geometry; the arm tom writes is unchanged).
 
 Since 2026-10-21 tom reads the parts of Tom rev3 it uses as xbf extracted from the
-recovered `tom.step` (`cadgen export ... --part`), not the whole file: cold 165 s ->
+recovered `tom.step` (extracted once, `tom/src/README.md`), not the whole file: cold 165 s ->
 107 s, the worker 2.1 -> 1.9 GB after it; edits, no-op and restart unchanged (9 s, 1 s, 6 s).
 
 Known engine gaps these surface: a shape that carries a build123d joint makes

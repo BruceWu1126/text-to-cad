@@ -44,24 +44,19 @@ write into), and make it read-only as in tom-cad: `chmod -R a-w STEP/imported`.
 `recovered/tom_rev3/tom.step` (354 MB). It does not read that file: the eight occurrences it
 uses are extracted once, each to `STEP/imported/parts/<occurrence>.xbf`, and read with
 `read_xbf` into one dict, `rev3`, so their elements are named `arm_with_inline_wrist.rev3.N`
-and a servo's details stay one prototype across the parts that carry a servo. From
-`models/tom/STEP/imported` (the first command parses the STEP, about 40 s; the rest
-reuse the daemon's read):
+and a servo's details stay one prototype across the parts that carry a servo. They were
+extracted from `recovered/tom_rev3/tom.step` with the retired `cadgen export --part`; `export`
+now writes a document whole (cadgen's law 22), so extracting one again is a model of its own:
+an `@xbf` function that reads `tom.step` (`read_step`) and returns that occurrence
+(`base_link/shoulder_yaw_servo`, `base_link/m8_thumbscrew`, `shoulder_yaw_assembly`,
+`shoulder_pitch_assembly/shoulder_pitch_assembly_screws`, `upper_arm_assembly`,
+`elbow_assembly`, `forearm_assembly`, `gripper/gripper_screws`).
 
-```
-for p in base_link/shoulder_yaw_servo base_link/m8_thumbscrew shoulder_yaw_assembly \
-         shoulder_pitch_assembly/shoulder_pitch_assembly_screws upper_arm_assembly \
-         elbow_assembly forearm_assembly gripper/gripper_screws; do
-  cadgen export recovered/tom_rev3/tom.step parts/${p##*/}.xbf --part $p
-done
-```
-
-Every one of them stands at the arm's origin in `tom.step`, so `--part` (which writes a
-subtree at its own frame) leaves its parts where they were. What the stage never used is
+Every one of them stands at the arm's origin in `tom.step`, so each subtree at its own
+frame leaves its parts where they were. What the stage never used is
 never read: the Pi HAT stack, its carrier and hardware, the shoulder pitch yoke, the
 gripper's frame, servo and claws, and the camera assembly. The stage still reads the arm's
-kinematics sidecar, `recovered/tom_rev3/tom.step.json`. `parts/README.md` lists the same
-commands one per line.
+kinematics sidecar, `recovered/tom_rev3/tom.step.json`.
 
 ## Build
 

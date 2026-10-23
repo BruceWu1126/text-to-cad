@@ -147,8 +147,9 @@ def arm():
 - A rest value of 0 was the artifact as written; now the as-built state is the
   value each joint is connected at, so connecting at 0, with both frames on the axis,
   keeps the parts where they were built.
-- `poses` become `mechanism_state(assembly, name, **values)`, and a pose is drawn or
-  written with `--pose` ([kinematics](kinematics.md)).
+- `poses` become `mechanism_state(assembly, name, **values)`; a pose is drawn with
+  `--pose`, and a posed file is a model returning `posed(assembly, name)`
+  ([kinematics](kinematics.md)).
 - A coupling is a constraint among two or more joints, its range their limits
   (`limits=` is gone: give the joints the limits instead), made by the function named after
   the pair its joints make: `gear_pair` (revolute joints), `rack_and_pinion_pair` (a

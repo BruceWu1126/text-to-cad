@@ -2,7 +2,7 @@
 ordinary Python scripts call decorated models explicitly.
 
     python SCRIPT.py                                 the models the script explicitly calls
-    cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--json]
+    cadgen export SRC DST [DST ...] [--json]
     cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--camera PRESET|az:el|JSON|authored] [--grid]
         [--preview] [--pose NAME|JSON] [--annotation FILE] [--measurements FILE] [--width N] [--height N]
         [--size-profile P] [--json]
@@ -37,14 +37,8 @@ def _export_arguments(export: argparse.ArgumentParser) -> None:
     export.add_argument("source", metavar="SRC", help="an .xbf, a .step, or a document id (a model's, which "
                                                       "python SCRIPT.py prints)")
     export.add_argument("destinations", nargs="+", metavar="DST",
-                        help=".xbf (from a STEP, or with --part), .step, .glb, .stl, .3mf or .dxf (of a planar "
-                             "document)")
-    export.add_argument("--pose", help="a configuration's name, or joint and coupling values as JSON "
-                                       "('{\"elbow\": 45}', '{\"curl\": 0.6}'): the mechanism posed there; as built "
-                                       "without it")
-    export.add_argument("--part", metavar="OWNER",
-                        help="one part or assembly, as a ref names it (hand/finger.2, palm; cadgen.engine.refs): that "
-                             "subtree as a document of its own")
+                        help=".xbf (from a STEP), .step, .glb, .stl, .3mf or .dxf (of a planar document): the "
+                             "document as its code built it")
     export.add_argument("--json", action="store_true", help="print what was written as JSON")
 
 
@@ -144,12 +138,6 @@ def answered(runner: Callable[[argparse.Namespace, str], int], args: argparse.Na
         raise
 
 
-def _pose(value: str | None) -> Any:
-    from cadgen.engine.snapshot import parse_pose
-
-    return parse_pose(value)
-
-
 def _shown(path: Any) -> str:
     """A path relative to the working folder, or whole where none can be: on Windows, a path on
     another drive than the folder's."""
@@ -247,7 +235,7 @@ def _export(args: argparse.Namespace, prog: str) -> int:
     if not is_id(args.source) and Path(args.source).suffix.lower() not in SOURCES:
         raise Failed(f"{args.source} is no document: an export reads an .xbf, a .step or a document id", 2)
     try:
-        written = api.export(args.source, *args.destinations, pose=_pose(args.pose), part=args.part,
+        written = api.export(args.source, *args.destinations,
                              log=lambda text: print(text, file=sys.stderr))
     except (ExportRefused, ValueError) as error:
         raise Failed(str(error), 2) from None

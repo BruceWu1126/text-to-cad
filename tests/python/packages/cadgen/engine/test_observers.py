@@ -71,7 +71,8 @@ class ObserversTest(unittest.TestCase):
         self.assertEqual((error["type"], error["engine"], error["refused"], error["here"]), ("ValueError", False, False, False))
         self.assertEqual([(Path(frame["file"]).name, frame["function"]) for frame in error["frames"]],
                          [("secret.py", "secret_broken")], "the model's frames, its file as Python has it")
-        self.assertEqual((exported["verb"], exported["ok"], exported["source"], exported["pose"]), ("export", True, "xbf", False))
+        self.assertEqual((exported["verb"], exported["ok"], exported["source"]), ("export", True, "xbf"))
+        self.assertNotIn("pose", exported, "an export has no pose to tell")
         self.assertEqual([output["kind"] for output in exported["outputs"]], ["step", "threemf"])
         self.assertIsNone(exported["error"])
         self.assertEqual((drawn["verb"], drawn["ok"], drawn["source"], drawn["found"]), ("snapshot", False, "xbf", False))

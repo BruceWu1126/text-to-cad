@@ -10,7 +10,7 @@ import { ViewerMobileContext } from '../../dist/file-viewer/responsive.js';
 Object.assign(globalThis, { React });
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
-const source = { doc: 'doc', revision: 'v1', file: '/part.xbf', name: 'part.xbf', part: null, pose: null, preview: false };
+const source = { doc: 'doc', revision: 'v1', file: '/part.xbf', name: 'part.xbf', preview: false };
 function Document() { useExportView(source); return <div>Model</div>; }
 function mount(service: any, downloads: any, locale = 'en', phone = false) {
   // The overlay renders inside the viewer, which says whether its width is a phone's.
@@ -90,7 +90,7 @@ it('a ready job is one plain download; a dismissed toast still downloads again u
 
 it('a restored request reconnects by identity and downloads only what it never handed over', async () => {
   const { service } = server();
-  const request = (id: string) => ({ requestId: id, epoch: 'epoch', source: { doc: 'doc', revision: 'v1', part: null, pose: null }, format: 'step' });
+  const request = (id: string) => ({ requestId: id, epoch: 'epoch', source: { doc: 'doc', revision: 'v1' }, format: 'step' });
   service.create.mockImplementation(async value => ({ ...value, id: value.requestId, filename: `${value.requestId}.step`, state: 'ready', stage: 'Ready to save', sequence: 1, createdAt: Date.now() / 1000, finishedAt: Date.now() / 1000, expiresAt: later(), bytes: 5 }));
   const downloads = { save: vi.fn(), remember: vi.fn(), restore: () => [
     { request: request('handed-over'), filename: 'one.step', delivered: true },
@@ -105,7 +105,7 @@ it('a restored request reconnects by identity and downloads only what it never h
 it('an expired artifact offers no download but Export again; Remove releases it', async () => {
   const { service } = server();
   service.create.mockImplementation(async value => ({ ...value, id: value.requestId, filename: 'old.step', state: 'ready', stage: 'Ready to save', sequence: 1, createdAt: 1, finishedAt: 2, expiresAt: Date.now() / 1000 - 1, bytes: 5 }));
-  const downloads = { save: vi.fn(), restore: () => [{ request: { requestId: 'old', epoch: 'epoch', source: { doc: 'doc', revision: 'v1', part: null, pose: null }, format: 'step' }, filename: 'old.step', delivered: true }] };
+  const downloads = { save: vi.fn(), restore: () => [{ request: { requestId: 'old', epoch: 'epoch', source: { doc: 'doc', revision: 'v1' }, format: 'step' }, filename: 'old.step', delivered: true }] };
   mount(service, downloads);
   expect(await screen.findByText('Expired')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Download again' })).toBeNull();

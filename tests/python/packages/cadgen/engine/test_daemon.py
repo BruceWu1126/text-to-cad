@@ -928,8 +928,6 @@ if __name__ == '__main__':
         done = self.cli("export", "pair.step", "back.xbf")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertTrue((self.folder / "back.xbf").is_file())
-        done = self.cli("export", "XBF/pair.xbf", "made.stl", "--part", "peg")
-        self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.cli("export", "pair.glb", "x.step").returncode, 2, "a mesh is no source")
         self.assertEqual(self.cli("export", "pair.py::pair", "x.step").returncode, 2, "a script is no source")
         (self.folder / "plug.py").write_text(textwrap.dedent(PLUG), encoding="utf-8")

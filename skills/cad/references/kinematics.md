@@ -188,18 +188,34 @@ vanishing, a part spinning for show) is an animation of the GLB, not a helper jo
 
 ## Reviewing motion
 
-A pose is drawn or written on demand, never declared:
+A pose is drawn on demand, never declared:
 
 ```bash
 cadgen snapshot XBF/hinge.xbf tmp/open.png --pose open
 cadgen snapshot XBF/hinge.xbf tmp/elbow_45.png --pose '{"elbow": 45}'
-cadgen export XBF/hinge.xbf STEP/hinge_open.step --pose open
 ```
 
 `--pose` takes a mechanism state's name, or joint and coupling values as JSON (the
 rest as built). An unknown state, joint or coupling, a value out of range,
-and a coupling's joint set alone are refused by name before anything renders or is
-written.
+and a coupling's joint set alone are refused by name before anything renders.
+
+### Posed files
+
+A posed or partial file is a function, never an option: `cadgen export` writes the
+document as its code built it. `posed(assembly, state)` (`cadgen.ap242`, beside
+`mechanism_state`) returns a copy of the assembly with every part where the named
+state, or a mapping of joint label to value, puts it, by the forward kinematics the
+viewer and snapshot use. The copy keeps its joints, couplings, states and sequences,
+the asked values its as-built state, so its viewer Position and motions still work.
+An unknown state or joint is refused by name.
+
+```python
+from cadgen.ap242 import posed
+
+@step(out="../STEP/hinge_open.step")
+def hinge_open():
+    return posed(hinge(), "open")
+```
 
 The viewer's Position poses a document live: a slider per coupling and per joint no
 coupling moves, and the mechanism states as presets. To watch a sequence, open the GLB the model

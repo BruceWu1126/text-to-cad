@@ -70,7 +70,7 @@ def hermite(first: np.ndarray, second: np.ndarray, span: float, s: float) -> np.
 
 class _Motion:
     """One motion's true placements over its clip: every moving instance's world matrix in
-    the view's frame at ``t``."""
+    the document's frame at ``t``."""
 
     def __init__(self, view: Any, name: str, candidates: list[int]) -> None:
         from cadgen.engine import mechanism
@@ -85,7 +85,6 @@ class _Motion:
         self.base = {index: np.array(structure["instances"][index]["matrix"], dtype=float).reshape(4, 4).T
                      for index in candidates if index in owner}
         self.owner = owner
-        self.rerooted = np.asarray(view.rerooted, dtype=float)
         # The instances whose link stands anywhere else than as built, at a key or between keys.
         moved_links: set[int] = set()
         breaks = self.timeline.breaks
@@ -108,7 +107,7 @@ class _Motion:
         translations, rotations = [], []
         for index in self.instances:
             link = self.owner[index]
-            matrix = self.rerooted @ worlds[link] @ self.unrest[link] @ self.base[index]
+            matrix = worlds[link] @ self.unrest[link] @ self.base[index]
             translations.append(matrix[:3, 3])
             rotations.append(quaternion(matrix))
         return np.array(translations).reshape(-1, 3), np.array(rotations).reshape(-1, 4)

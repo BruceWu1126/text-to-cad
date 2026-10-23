@@ -4,16 +4,14 @@ move, named after the AP242 pair it is written as. Validated by name, a joint of
 does not relate refused; its range derived from its joints' limits; kept in the document's
 mechanism as AP242's couplers (``:6 "couplings"``: gear and rack-and-pinion couplers, a screw pair)
 and read back identically; served in the structure's ``kinematics.couplings``; forward kinematics
-at a coupling's value the joints set by hand, on ``--pose`` of an export and a snapshot; a door's
+at a coupling's value the joints set by hand, in the sampler, a snapshot's ``--pose`` and a
+``posed`` model; a door's
 turn and travel from one screw pair; mechanism states and configuration sequences naming a coupling
 resolved to pair values at document time; a warm edit patched to the cold build's bytes, the
 elements' names unchanged."""
 
 from __future__ import annotations
 
-import contextlib
-import io
-import json
 import os
 import shutil
 import tempfile
@@ -21,11 +19,12 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 from cadgen.engine import build as engine_build
-from cadgen.engine import cli, document, mechanism
+from cadgen.engine import document, mechanism
 from tests.python.support import opengl
 
 # The spec's finger: four bones along +X, a knuckle across each joint between two, straight as
@@ -155,18 +154,20 @@ def hand():
 """
 
 
-def _vertices(loaded: document.Loaded, name: str) -> np.ndarray:
-    """Every vertex of the instance named ``name``, where the document places it."""
+def _vertices(loaded: document.Loaded, name: str, pose: Any = None) -> np.ndarray:
+    """Every vertex of the instance named ``name``, where the document places it, or where
+    ``pose`` does (``mechanism.posed_structure``, as the viewer and the snapshot pose it)."""
     from OCP.BRep import BRep_Tool
     from OCP.TopAbs import TopAbs_VERTEX
     from OCP.TopExp import TopExp
     from OCP.TopoDS import TopoDS
     from OCP.TopTools import TopTools_IndexedMapOfShape
 
-    instance = next(i for i in loaded.instances if i.path[-1] == name)
+    index, instance = next((at, i) for at, i in enumerate(loaded.instances) if i.path[-1] == name)
     mapped = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(loaded.prototypes[instance.prototype].shape, TopAbs_VERTEX, mapped)
-    matrix = np.array(instance.matrix).reshape(4, 4).T
+    matrix = np.array(instance.matrix if pose is None else
+                      mechanism.posed_structure(loaded.structure(), pose)["instances"][index]["matrix"]).reshape(4, 4).T
     points = [BRep_Tool.Pnt_s(TopoDS.Vertex_s(mapped.FindKey(at))) for at in range(1, mapped.Extent() + 1)]
     return np.array(sorted((matrix @ np.array([p.X(), p.Y(), p.Z(), 1.0]))[:3].tolist() for p in points))
 
@@ -195,25 +196,17 @@ def _couplers(loaded: document.Loaded) -> dict[str, list[tuple]]:
     return found
 
 
-def _run(*argv: str) -> tuple[int, str]:
-    out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = cli.main(list(argv))
-    return code, err.getvalue()
+# The finger posed by a model of its own: a posed file is a function, never an export's option.
+POSED = """
+from cadgen.ap242 import posed
+from cadgen.engine import xbf
+from index_finger import index_finger
 
 
-def _refused(source, out, pose: str) -> str:
-    """The words a pose named wrong is refused with, by the export itself, before anything is written:
-    through the seam (``daemon=False``); through the daemon it keeps its type as well (``api._failed``)."""
-    from cadgen.engine import api
-    from cadgen.engine.cli import _pose
-    from cadgen.engine.export import ExportRefused
-
-    try:
-        api.export(source, out, pose=_pose(pose), daemon=False)
-    except (ExportRefused, ValueError) as error:
-        return str(error)
-    raise AssertionError(f"{pose} was not refused")
+@xbf("XBF/posed_finger.xbf")
+def posed_finger():
+    return posed(index_finger(), {pose})
+"""
 
 
 class _Folder(unittest.TestCase):
@@ -337,23 +330,17 @@ class FingerTest(_Folder):
             self.assertAlmostEqual(values[label][0], by_hand[label][0], places=12)
         np.testing.assert_allclose(mechanism.posed_instances(structure, values),
                                    mechanism.posed_instances(structure, by_hand), atol=1e-9)
-        # A posed STEP: the distal bone where the joints set by hand on the bare finger put it,
+        # A posed model: the distal bone where the joints set by hand on the bare finger put it,
         # and moved from as built.
-        posed = {}
-        for name, pose in (("coupled", '{"index_curl": 0.6}'), ("by_hand", json.dumps(BY_HAND))):
-            if name == "by_hand":
-                self.build("index_finger", BARE)
-            out = self.folder / f"{name}.step"
-            code, err = _run("export", str(path), str(out), "--pose", pose)
-            self.assertEqual(code, 0, err)
-            posed[name] = _vertices(document.Loaded(out), "distal")
-        np.testing.assert_allclose(posed["coupled"], posed["by_hand"], atol=1e-6)
-        self.assertGreater(np.abs(posed["coupled"] - _vertices(document.Loaded(path), "distal")).max(), 10.0)
+        self.build("posed_finger", POSED.format(pose='{"index_curl": 0.6}'))
+        coupled = _vertices(document.Loaded(self.folder / "XBF/posed_finger.xbf"), "distal")
+        self.build("index_finger", BARE)
+        np.testing.assert_allclose(coupled, _vertices(document.Loaded(path), "distal", BY_HAND), atol=1e-6)
+        self.assertGreater(np.abs(coupled - _vertices(document.Loaded(path), "distal")).max(), 10.0)
 
     def test_what_a_coupling_pose_names_wrong_is_refused_by_name_before_anything_is_written(self) -> None:
         self.finger()
-        path = str(self.folder / self.XBF)
-        out = self.folder / "refused.step"
+        out = self.folder / "XBF/posed_finger.xbf"
         for pose, words in (('{"index_curl": 1.5}', ["coupling 'index_curl' at 1.5 is outside its range [0, 1]"]),
                             ('{"index_pip": 10}',
                              ["joint 'index_pip' moves only with its coupling 'index_curl'; set 'index_curl'"]),
@@ -361,7 +348,7 @@ class FingerTest(_Folder):
                              ["joint 'index_pip' moves only with its coupling 'index_curl'"]),
                             ('{"index_curl": [0.5, 1]}', ["coupling 'index_curl' takes a number"]),
                             ('{"crul": 1}', ["names no joint 'crul'", "its couplings: index_curl"])):
-            err = _refused(path, out, pose)
+            err = self.build("posed_finger", POSED.format(pose=pose), ok=False)["error"]
             for word in words:
                 self.assertIn(word, err, pose)
             self.assertFalse(out.exists(), pose)
@@ -450,21 +437,16 @@ class DoorTest(_Folder):
         values, _named = mechanism.resolve(kinematics, {"left": -35, "right": 35})
         np.testing.assert_allclose(values["door_left"], (-35.0, 20.0), atol=1e-9)
         np.testing.assert_allclose(values["door_right"], (35.0, 20.0), atol=1e-9)
-        half = self.folder / "half.step"
-        code, err = _run("export", str(self.folder / "XBF/hypercar.xbf"), str(half), "--pose",
-                         '{"left": -35, "right": 35}')
-        self.assertEqual(code, 0, err)
+        car = self.folder / "XBF/hypercar.xbf"
+        half = {door: _vertices(document.Loaded(car), door, {"left": -35, "right": 35})
+                for door in ("door_left", "door_right")}
         # Its joint is posed through it alone; the car with no coupling poses them by hand.
-        by_hand = self.folder / "by_hand.step"
-        pose = '{"door_left": [-35, 20], "door_right": [35, 20]}'
-        err = _refused(str(self.folder / "XBF/hypercar.xbf"), by_hand, pose)
-        self.assertIn("joint 'door_left' moves only with its coupling 'left'", err)
+        pose = {"door_left": [-35, 20], "door_right": [35, 20]}
+        with self.assertRaisesRegex(mechanism.KinematicsError, "joint 'door_left' moves only with its coupling 'left'"):
+            mechanism.resolve(kinematics, pose)
         self.build("hypercar", HYPERCAR.split("    screw_pair(car")[0] + "    return car\n")
-        self.assertEqual(_run("export", str(self.folder / "XBF/hypercar.xbf"), str(by_hand), "--pose",
-                              pose)[0], 0)
         for door in ("door_left", "door_right"):
-            np.testing.assert_allclose(_vertices(document.Loaded(half), door),
-                                       _vertices(document.Loaded(by_hand), door), atol=1e-6)
+            np.testing.assert_allclose(half[door], _vertices(document.Loaded(car), door, pose), atol=1e-6)
 
 
 class ConstraintTest(_Folder):
@@ -550,16 +532,6 @@ class HarvestTest(_Folder):
         values, _named = mechanism.resolve(kinematics, {"hand/index:curl": 0.5})
         self.assertEqual([values[label] for label in ("hand/index/proximal:pip", "hand/index/middle:dip",
                                                       "hand/middle/proximal:pip")], [(50.0,), (35.0,), (0.0,)])
-        # A part of the document keeps a coupling whose joints it holds whole: a coupler relates two
-        # pairs, and the part holds one of this one's (the knuckle between the middle and distal
-        # bones; the proximal stands with the palm), so it keeps the pair and no coupling.
-        from cadgen.engine.export import translate
-
-        part = self.folder / "index.xbf"
-        translate(path, None, part, part="hand/index")
-        kept = document.Loaded(part).mechanism
-        self.assertEqual([pair.label for pair in kept.pairs], ["hand/index/middle:dip"])
-        self.assertEqual(kept.couplings, {})
 
 
 if __name__ == "__main__":

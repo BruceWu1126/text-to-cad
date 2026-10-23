@@ -5,12 +5,6 @@
 export default {
   "export.button": "내보내기",
   "export.heading": "모델 내보내기",
-  "export.scope": "범위",
-  "export.whole": "전체 모델",
-  "export.selection": "선택한 부품/어셈블리",
-  "export.position": "위치",
-  "export.authored": "작성된 상태",
-  "export.current": "현재 위치",
   "export.preview": "미리보기에서는 작성된 상태의 모델을 내보냅니다.",
   "export.geometry": "표시 상태, 클리핑, 분해도는 내보내기에 영향을 주지 않습니다. GLB에는 작성된 애니메이션이 포함됩니다.",
   "export.format": "형식",

@@ -94,8 +94,9 @@ filesystem.
 `CadViewer` combines that port with `CadWorkspaceService.exports` (`ExportService`).
 Both are required to show Export. A host whose page cannot make a browser download
 omits the port: the MCP host has no HTTP origin (every request is a `cad_http` call), so
-it has no Export. The XBF renderer publishes only displayed revision,
-selection and joint values. `FileViewer.navbarActions` and `overlay` are named
+it has no Export. The XBF renderer publishes only the displayed document and revision:
+Export writes the document as its code built it, so the menu offers formats alone, never a
+selection or a pose. `FileViewer.navbarActions` and `overlay` are named
 composition slots: the first is in the navbar's right group; the second is in the
 relative viewport below it. The generic FileViewer knows nothing about export jobs.
 

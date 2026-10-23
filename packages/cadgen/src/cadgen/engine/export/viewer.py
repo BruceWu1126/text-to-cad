@@ -32,11 +32,11 @@ def check(source, expected: dict) -> None:
         raise ExportRefused("The source changed. Open Export again to use the displayed revision.")
 
 
-def options(source, *, pose=None, part=None, original_allowed=True) -> list[dict]:
+def options(source, *, original_allowed=True) -> list[dict]:
     from cadgen.engine.export import ExportRefused
     from cadgen.engine.export.dxf import dxf_bytes
 
-    view = source.view(pose=pose, part=part)
+    view = source.view()
     rows = [{"format": kind, "label": label, "extension": extension, "reason": None}
             for kind, label, extension in (("step", "STEP", ".step"), ("glb", "GLB", ".glb"),
                                            ("stl", "STL", ".stl"), ("threemf", "3MF", ".3mf"),
@@ -47,12 +47,9 @@ def options(source, *, pose=None, part=None, original_allowed=True) -> list[dict
                 dxf_bytes(view)
             except ExportRefused as error:
                 row["reason"] = str(error)
-        if row["format"] == "xbf":
-            if pose is not None:
-                row["reason"] = "XBF stores the authored document, not a requested pose."
-            elif source.path and source.path.suffix.lower() == ".xbf" and part is None and not source.foreign:
-                row["reason"] = "Use Download original XBF, or select a part to extract."
-    if original_allowed and source.path and source.path.suffix.lower() == ".xbf" and part is None and pose is None:
+        if row["format"] == "xbf" and source.path and source.path.suffix.lower() == ".xbf" and not source.foreign:
+            row["reason"] = "Use Download original XBF."
+    if original_allowed and source.path and source.path.suffix.lower() == ".xbf":
         rows.append({"format": "original", "label": "Download original XBF", "extension": ".xbf", "reason": None})
     return rows
 

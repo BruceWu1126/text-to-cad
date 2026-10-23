@@ -142,9 +142,12 @@ once from a document (an `.xbf` or a `.step`).
 
 ```bash
 cadgen export XBF/bracket.xbf STL/bracket.stl GLB/bracket.glb 3MF/bracket.3mf
-cadgen export XBF/arm.xbf STEP/arm_folded.step --pose folded
-cadgen export XBF/assembly.xbf STL/standoff_left.stl --part standoff_left
 ```
+
+An export writes the document as its code built it, and takes no option that picks a
+part or a state. A file of one part is that part's own model; a posed file is a model
+returning the assembly posed (`posed(arm(), "folded")`,
+[kinematics](references/kinematics.md#posed-files)).
 
 A GLB carries each of the model's motions as an animation clip: animation exists
 only there. Meshes are made at one tolerance everywhere, FreeCAD's default. See

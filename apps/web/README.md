@@ -166,9 +166,10 @@ restarting an engine you own, then rerunning the launcher. Vite handles client H
 ## Export and job status
 
 **Export** sits at the top-right of the navbar. For STEP, XBF and held models it
-captures the displayed revision, whole model or one selected part/assembly, and
-as-authored or current position. Preview exports as authored. Only supported formats
-are offered: STEP, GLB, STL, 3MF, planar DXF and eligible XBF; an existing whole XBF
+captures the displayed revision and writes the document as its code built it: every
+part, as authored. The menu chooses a format alone; a posed or partial file is a function
+in the model's code. Only supported formats
+are offered: STEP, GLB, STL, 3MF, planar DXF and eligible XBF; an existing XBF
 has **Download original XBF**. Source and outputs stay separate.
 
 **Export and download** submits the job; nothing is asked first. When the file is

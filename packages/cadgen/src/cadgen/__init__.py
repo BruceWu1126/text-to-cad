@@ -7,7 +7,7 @@ The root exports exactly the engine's surface -- ``model``, the decorators (``xb
 documents as functions (``export``, ``snapshot``, ``inspect``) and ``__version__``; process
 control (``cadgen serve``, ``status``, ``stop``, ``server``) is the ``cadgen`` command's alone. Two
 namespaces hold the standards' names: ``cadgen.ap242`` the mechanism's (``mechanism_state``,
-``configuration_sequence``, ``gear_pair``, ``rack_and_pinion_pair``, ``screw_pair``) and
+``configuration_sequence``, ``gear_pair``, ``rack_and_pinion_pair``, ``screw_pair``, ``posed``) and
 ``cadgen.gltf`` a GLB's own ``animation``. Every name loads on first use: ``import cadgen``
 imports no CAD kernel, and ``import build123d`` binds a module the kernel loads into on its
 first attribute (``_internal/lazy_kernel.py``).

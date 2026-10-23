@@ -43,7 +43,7 @@ and a failure as `{"ok": false, "error": ...}` with exit status 1, as every comm
   part and per painted face, materials' names and densities, and the element names on
   every face, edge and vertex, so a STEP read back keeps them. It drops the rest of a
   material's look and physical fields, a face's material (the face keeps its colour),
-  and the mechanism: a STEP is placements only, as built or as `--pose` puts them.
+  and the mechanism: a STEP is placements only, as built.
 - **GLB**: glTF 2.0, Y up, in metres. One mesh per part, a node per placement named
   by its occurrence, a PBR material per look (with the glTF extensions for IOR,
   transmission, clear coat, anisotropy and emission where a material has them), and
@@ -55,8 +55,7 @@ and a failure as `{"ok": false, "error": ...}` with exit status 1, as every comm
   colours and materials through the materials extension.
 - **STL**: binary, every placed triangle, in millimetres.
 - **DXF**: of a planar document only (`$dxf`); a solid is refused.
-- **xbf**: from a STEP (converting a vendor file, below), or a part of a document
-  with `--part`.
+- **xbf**: from a STEP (converting a vendor file, below).
 
 Mesh exports and the viewer draw the same meshes, made at one tolerance: FreeCAD's
 default (a chord deviation of 0.5% of the mean side of each part's bounding box, and
@@ -66,21 +65,23 @@ are usually slivers a boolean left. Repair the face in the model.
 
 ## Poses and parts
 
-```bash
-cadgen export XBF/arm.xbf STEP/arm_folded.step --pose folded
-cadgen export XBF/arm.xbf STEP/arm_45.step --pose '{"elbow": 45}'
-cadgen export XBF/kit.xbf STL/wheel_2.stl XBF/wheel_2.xbf --part kit/axle.2/wheel
+An export takes a document and destinations, nothing else: the file holds what the
+code built, every part where it stands, in its colours, with its motion. A posed or
+partial file is a function in the model's code, never an option.
+
+```python
+@step(out="../STEP/arm_folded.step")
+def arm_folded():
+    return posed(arm(), "folded")              # or posed(arm(), {"elbow": 45})
+
+@stl(out="../STL/wheel.stl")
+def wheel():
+    return wheel_part()                         # the part's own function, in its own frame
 ```
 
-- `--pose` places the mechanism's links at a configuration, or at joint and coupling
-  values, before anything is written ([kinematics](kinematics.md#reviewing-motion)).
-  A posed `.xbf` is refused: a pose is a request, never a document.
-- `--part OWNER` writes one part or assembly, named as a ref names it
-  ([references](inspection-and-validation.md#references)), as a document of its own,
-  its root at that occurrence's own frame: a printable part, or a robot link's mesh
-  in the link's frame. Its `.xbf` keeps the mechanism's share of it. An owner that
-  names several occurrences is refused, listing them.
-- Neither is declared or cached: each is an export of the moment.
+`posed` is `cadgen.ap242`'s ([kinematics](kinematics.md#posed-files)). A printable
+part, or a robot link's mesh in the link's frame, is the function that makes that
+part, declared with its own file.
 
 ## A vendor STEP
 

@@ -5,12 +5,6 @@
 export default {
   "export.button": "エクスポート",
   "export.heading": "モデルをエクスポート",
-  "export.scope": "範囲",
-  "export.whole": "モデル全体",
-  "export.selection": "選択した部品／アセンブリ",
-  "export.position": "位置",
-  "export.authored": "作成時の状態",
-  "export.current": "現在の位置",
   "export.preview": "プレビューでは作成時のモデルをエクスポートします。",
   "export.geometry": "表示状態、クリップ、分解表示は出力に影響しません。GLB には作成したアニメーションが含まれます。",
   "export.format": "形式",

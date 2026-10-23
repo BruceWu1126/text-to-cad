@@ -1,13 +1,12 @@
 """Kinematics: build123d's joints harvested into the xbf's mechanism (AP242's links, pairs,
 ground and configurations) and read back; a chain's links and a prismatic pair; a pair the
-built tree contradicts refused by name; poses by a configuration's name and by joint values
-placing a part where the closed form says, in a posed STEP that carries no mechanism; what a pose
-names wrong refused by name; the structure's ``kinematics`` the same from the file and from the
+built tree contradicts refused by name; ``posed`` by a configuration's name and by joint values
+placing a part where the closed form and the sampler say, a model of its own whose STEP carries no
+mechanism and whose xbf keeps it at the asked values; what a pose names wrong refused by name; the structure's ``kinematics`` the same from the file and from the
 build; a document served at a pose; the mechanism subtree AP242's names and nothing else."""
 
 from __future__ import annotations
 
-import contextlib
 import io
 import json
 import math
@@ -18,6 +17,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from typing import Any
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 
 from cadgen.engine import build as engine_build
-from cadgen.engine import cli, document, mechanism
+from cadgen.engine import document, mechanism
 from cadgen.engine.serve import Server
 from tests.python.support import opengl
 
@@ -92,19 +92,20 @@ def _arm_tip(q: float) -> np.ndarray:
     return np.array([40 + 120 * s + 10 * c, 10, 20 + 120 * c - 10 * s])
 
 
-def _vertices(loaded: document.Loaded, name: str) -> np.ndarray:
-    """Every vertex of the instance named ``name``, where the document places it."""
+def _vertices(loaded: document.Loaded, name: str, matrices: list | None = None) -> np.ndarray:
+    """Every vertex of the instance named ``name``, where the document places it (or where
+    ``matrices``, the structure's instance matrices at a pose, do)."""
     from OCP.TopAbs import TopAbs_VERTEX
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
     from OCP.BRep import BRep_Tool
     from OCP.TopoDS import TopoDS
 
-    instance = next(i for i in loaded.instances if i.path[-1] == name)
+    index, instance = next((at, i) for at, i in enumerate(loaded.instances) if i.path[-1] == name)
     shape = loaded.prototypes[instance.prototype].shape
     mapped = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(shape, TopAbs_VERTEX, mapped)
-    matrix = np.array(instance.matrix).reshape(4, 4).T
+    matrix = np.array(instance.matrix if matrices is None else matrices[index]).reshape(4, 4).T
     points = []
     for at in range(1, mapped.Extent() + 1):
         point = BRep_Tool.Pnt_s(TopoDS.Vertex_s(mapped.FindKey(at)))
@@ -116,25 +117,25 @@ def _has_point(points: np.ndarray, point: np.ndarray) -> bool:
     return bool(np.min(np.linalg.norm(points - point, axis=1)) < 1e-6)
 
 
-def _run(*argv: str) -> tuple[int, str, str]:
-    out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = cli.main(list(argv))
-    return code, out.getvalue(), err.getvalue()
+def _sampled(path: Path, pose: Any) -> list:
+    """Every instance's matrix at ``pose``, as the viewer and the snapshot pose a document
+    (``mechanism.posed_structure``)."""
+    posed = mechanism.posed_structure(document.Loaded(path).structure(), pose)
+    return [instance["matrix"] for instance in posed["instances"]]
 
 
-def _refused(source, out, pose: str) -> str:
-    """The words a pose named wrong is refused with, by the export itself, before anything is written:
-    through the seam (``daemon=False``); through the daemon it keeps its type as well (``api._failed``)."""
-    from cadgen.engine import api
-    from cadgen.engine.cli import _pose
-    from cadgen.engine.export import ExportRefused
+# A posed file is a model of its own: the hinge at a state, never an export's option.
+POSED = """
+from cadgen.ap242 import posed
+from cadgen.engine import step, xbf
+from hinge import hinge
 
-    try:
-        api.export(source, out, pose=_pose(pose), daemon=False)
-    except (ExportRefused, ValueError) as error:
-        return str(error)
-    raise AssertionError(f"{pose} was not refused")
+
+@xbf("XBF/{name}.xbf")
+@step(out="{name}.step")
+def {name}():
+    return posed(hinge(), {state})
+"""
 
 
 class _Folder(unittest.TestCase):
@@ -199,48 +200,36 @@ class HingeTest(_Folder):
         self.assertTrue(report["files"][str(self.folder / "XBF/hinge.xbf")]["written"])
         self.assertEqual(document.Loaded(self.folder / "XBF/hinge.xbf").mechanism.configurations["flat"], {"elbow": (-5.0,)})
 
-    def test_poses_by_name_and_by_value_place_the_arm_where_the_closed_form_says(self) -> None:
+    def test_posed_places_the_arm_where_the_sampler_and_the_closed_form_say(self) -> None:
         self.hinge()
-        path = str(self.folder / "XBF/hinge.xbf")
-        for pose, q in (("raised", 90.0), ('{"elbow": 45}', 45.0), ("flat", 0.0)):
-            out = self.folder / f"posed-{q:g}.step"
-            code, _out, err = _run("export", path, str(out), "--pose", pose)
-            self.assertEqual(code, 0, err)
-            posed = document.Loaded(out)
-            self.assertTrue(_has_point(_vertices(posed, "arm"), _arm_tip(q)), pose)
-            self.assertFalse(_has_point(_vertices(posed, "arm"), _arm_tip(30)), pose)
-            self.assertTrue(_has_point(_vertices(posed, "base"), np.array([50.0, 30.0, 10.0])), "the ground stays")
-            # The STEP carries none of the mechanism: OCCT writes no AP242 kinematics.
-            text = out.read_text(encoding="utf-8", errors="replace")
+        hinge = self.folder / "XBF/hinge.xbf"
+        for name, state, q in (("raised", '"raised"', 90.0), ("by_value", '{"elbow": 45}', 45.0)):
+            self.build(name, POSED.format(name=name, state=state))
+            made = document.Loaded(self.folder / f"XBF/{name}.xbf")
+            arm = next(at for at, instance in enumerate(made.instances) if instance.path[-1] == "arm")
+            # The posed model's arm is where the sampler poses the hinge's.
+            np.testing.assert_allclose(made.instances[arm].matrix, _sampled(hinge, json.loads(state))[arm], atol=1e-9)
+            self.assertTrue(_has_point(_vertices(made, "arm"), _arm_tip(q)), name)
+            self.assertTrue(_has_point(_vertices(made, "base"), np.array([50.0, 30.0, 10.0])), "the ground stays")
+            # Its xbf keeps the mechanism, the asked values its as-built state, its states as they were.
+            self.assertAlmostEqual(made.mechanism.as_built["elbow"][0], q, places=9)
+            self.assertEqual(made.mechanism.configurations, {"flat": {"elbow": (0.0,)}, "raised": {"elbow": (90.0,)}})
+            # The STEP is placed alike and carries none of the mechanism: OCCT writes no AP242 kinematics.
+            step = self.folder / f"{name}.step"
+            self.assertTrue(_has_point(_vertices(document.Loaded(step), "arm"), _arm_tip(q)), name)
+            text = step.read_text(encoding="utf-8", errors="replace")
             self.assertEqual([word for word in ("_PAIR", "MECHANISM", "KINEMATIC") if word in text], [])
-        # The build's own STEP is as built, and carries none either.
-        built = document.Loaded(self.folder / "hinge.step")
-        self.assertTrue(_has_point(_vertices(built, "arm"), _arm_tip(30)))
-        self.assertNotIn("MECHANISM", (self.folder / "hinge.step").read_text(encoding="utf-8", errors="replace"))
-        # A mesh export at a pose: the arm's node placed as the pair places it.
-        glb = self.folder / "posed.glb"
-        self.assertEqual(_run("export", path, str(glb), "--pose", "raised")[0], 0)
-        data = glb.read_bytes()
-        length = int.from_bytes(data[12:16], "little")
-        nodes = json.loads(data[20:20 + length])["nodes"]
-        arm = np.array(next(node for node in nodes if node.get("name") == "arm")["matrix"]).reshape(4, 4).T
-        np.testing.assert_allclose((arm @ np.array([120.0, 10.0, 10.0, 1.0]))[:3], _arm_tip(90), atol=1e-6)
+        # The hinge's own STEP is as built.
+        self.assertTrue(_has_point(_vertices(document.Loaded(self.folder / "hinge.step"), "arm"), _arm_tip(30)))
 
-    def test_what_a_pose_names_wrong_is_refused_by_name_before_anything_is_written(self) -> None:
+    def test_what_a_pose_names_wrong_is_refused_by_name(self) -> None:
         self.hinge()
-        path = str(self.folder / "XBF/hinge.xbf")
-        out = self.folder / "refused.step"
-        for pose, words in (('{"elbw": 10}', ["'elbw'", "elbow"]), ('{"elbow": 150}', ["'elbow'", "150", "[-10, 120]"]),
-                            ("folded", ["'folded'", "flat, raised"]), ('{"elbow": [1, 2]}', ["'elbow'", "a number"])):
-            err = _refused(path, out, pose)
+        for state, words in (('{"elbw": 10}', ["'elbw'", "elbow"]), ('{"elbow": 150}', ["'elbow'", "150", "[-10, 120]"]),
+                             ('"folded"', ["'folded'", "flat, raised"]), ('{"elbow": [1, 2]}', ["'elbow'", "a number"])):
+            report = self.build("refused", POSED.format(name="refused", state=state), ok=False)
             for word in words:
-                self.assertIn(word, err, pose)
-            self.assertFalse(out.exists(), pose)
-        # Through the daemon the refusal keeps its type too: the command exits 2, as it does here.
-        code, _out, err = _run("export", path, str(out), "--pose", "folded")
-        self.assertEqual(code, 2, err)
-        self.assertIn("no configuration 'folded'", err)
-        self.assertFalse(out.exists())
+                self.assertIn(word, report["error"], state)
+            self.assertFalse((self.folder / "refused.step").exists(), state)
 
     def test_a_configuration_naming_no_joint_fails_the_build_and_one_out_of_range_warns(self) -> None:
         # The one harvest error: a configuration naming a joint its assembly does not hold.
@@ -451,11 +440,8 @@ class NestedTest(_Folder):
         self.assertTrue(_has_point(_vertices(loaded, "arm"), _arm_tip(30)))
         self.assertEqual(loaded.structure()["kinematics"],
                          document.tree_structure(document.saved(path), path)["kinematics"])
-        for pose, q in (('{"elbow": 90}', 90.0), ('{"elbow": -10}', -10.0)):
-            out = self.folder / "posed.step"
-            code, _out, err = _run("export", str(path), str(out), "--pose", pose)
-            self.assertEqual(code, 0, err)
-            self.assertTrue(_has_point(_vertices(document.Loaded(out), "arm"), _arm_tip(q)), pose)
+        for pose, q in (({"elbow": 90}, 90.0), ({"elbow": -10}, -10.0)):
+            self.assertTrue(_has_point(_vertices(loaded, "arm", _sampled(path, pose)), _arm_tip(q)), pose)
 
     def test_a_mounted_sub_assembly_carries_its_inner_pairs_base(self) -> None:
         # The plate holds the inner pair's moving joint and no pair moves it: it is the
@@ -466,10 +452,20 @@ class NestedTest(_Folder):
         links = {link.name: link.members for link in found.links}
         self.assertEqual(links, {"base": [(0,)], "sub": [(1,), (1, 0)], "wheel": [(1, 1)]})
         self.assertEqual({pair.label: pair.links for pair in found.pairs}, {"mount": (0, 1), "spin": (1, 2)})
-        out = self.folder / "posed.step"
-        code, _out, err = _run("export", str(path), str(out), "--pose", '{"mount": 90}')
-        self.assertEqual(code, 0, err)
-        plate = _vertices(document.Loaded(out), "plate")
+        # ``posed`` moves the sub-assembly and the plate inside it once, as the sampler does.
+        self.build("mounted_up", """
+from cadgen.ap242 import posed
+from cadgen.engine import xbf
+from mounted import mounted
+
+
+@xbf("XBF/mounted_up.xbf")
+def mounted_up():
+    return posed(mounted(), {"mount": 90})
+""")
+        plate = _vertices(document.Loaded(self.folder / "XBF/mounted_up.xbf"), "plate")
+        np.testing.assert_allclose(plate, _vertices(document.Loaded(path), "plate", _sampled(path, {"mount": 90})),
+                                   atol=1e-9)
         # A quarter turn about +X through z 10: the plate's corner (15, 15, 11) stands at (15, -1, 25).
         self.assertTrue(_has_point(plate, np.array([15.0, -1.0, 25.0])), plate)
         self.assertFalse(_has_point(plate, np.array([15.0, 15.0, 11.0])), "the plate left where it was built")

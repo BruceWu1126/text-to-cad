@@ -253,8 +253,6 @@ class _Animation:
 
         structure = view.source.structure
         self.duration = resolved.duration
-        self.reroot = np.asarray(view.rerooted, dtype=float)
-        self.unroot = np.linalg.inv(self.reroot)
         placed = {item.instance: item for item in shown}
         index_of = _occurrences(structure)
         corners: dict[int, np.ndarray] = {}
@@ -275,10 +273,10 @@ class _Animation:
             return (low + high) / 2 if np.all(np.isfinite(low)) else None
 
         def point(value: Any) -> np.ndarray:
-            return (self.reroot @ np.array([*value, 1.0]))[:3]
+            return np.asarray(value, dtype=float)
 
         def vector(value: Any) -> np.ndarray:
-            return self.reroot[:3, :3] @ np.asarray(value, dtype=float)
+            return np.asarray(value, dtype=float)
 
         groups: dict[tuple, _Group] = {}
         members: dict[tuple, list[int]] = {}
@@ -328,8 +326,7 @@ class _Animation:
                     item.translations.append(_Keyed(keys, track.interpolation))
                 elif track.path == "rotation":
                     if extra[0] == "quaternion":
-                        frame = self.reroot[:3, :3]
-                        keys = tuple((t, quaternion(_about(frame @ _rotation(np.asarray(value)) @ frame.T, np.zeros(3))))
+                        keys = tuple((t, quaternion(_about(_rotation(np.asarray(value)), np.zeros(3))))
                                      for t, value in track.keys)
                         pivot = point(extra[1]) if extra[1] is not None else item.centre
                         item.rotations.append((_Keyed(keys, track.interpolation, quaternion=True), None, pivot))
@@ -371,9 +368,6 @@ class _Animation:
             for index in placed:
                 if owner.get(index) in moved:
                     self.link[index] = owner[index]
-                    # A posed part moves from as built, as a motion's does, whatever the export's --pose.
-                    self.base[index] = self.reroot @ np.array(
-                        structure["instances"][index]["matrix"], dtype=float).reshape(4, 4).T
 
     def paths(self, index: int) -> dict[str, tuple[set[str], set[float]]]:
         """The paths the animation changes on an instance: per path, its channels' interpolations
@@ -403,7 +397,7 @@ class _Animation:
         held = self.held_at.setdefault(t, {})
         found = self.base[index]
         if index in self.link:
-            found = self.reroot @ self.pose.deltas(t)[self.link[index]] @ self.unroot @ found
+            found = self.pose.deltas(t)[self.link[index]] @ found
         for item in reversed(self.of.get(index, ())):
             key = id(item)
             moved = held.get(key)

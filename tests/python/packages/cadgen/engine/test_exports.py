@@ -1,8 +1,8 @@
 """Exports: a document translated to STEP, GLB, STL, 3MF and xbf by one writer
 (``export.translate``), whether a decorator declares the file or ``cadgen export`` asks
 for it. The STEP reads back through the engine's own reader with its names, colours,
-materials and instance tree; the meshes are parsed and counted; a pose moves a placement and
-a part is a subtree of its own; a build keeps a file its document did not change, writes only
+materials and instance tree; the meshes are parsed and counted; a posed model's STEP is the
+same bytes in every process; a build keeps a file its document did not change, writes only
 the files its flags select, and code built from text writes the files its flags name."""
 
 from __future__ import annotations
@@ -100,17 +100,11 @@ from pathlib import Path
 from cadgen.engine.export import translate
 translate(Path(sys.argv[1]), None, Path(sys.argv[2]))
 """
-EXPORT_POSED = """
-import sys
-from pathlib import Path
-from cadgen.engine.export import translate
-translate(Path(sys.argv[1]), None, Path(sys.argv[2]), pose=sys.argv[3])
-"""
 # Three hinges of one base and one lid, each placed apart, each lid on a joint of its own: a
-# sub-assembly repeated, posed three ways.
+# sub-assembly repeated, posed three ways by a model of its own.
 HINGES = """
 import build123d as bd
-from cadgen.ap242 import mechanism_state
+from cadgen.ap242 import mechanism_state, posed
 from cadgen.engine import xbf
 
 PLATE = bd.Box(10, 10, 2)
@@ -135,22 +129,11 @@ def hinges():
     row = bd.Compound(children=[hinge(0), hinge(1), hinge(2)], label="hinges")
     mechanism_state(row, "open", flap0=30, flap1=60, flap2=90)
     return row
-"""
-# Two axles labelled alike, a wheel on each: two occurrences at the path kit2/axle/wheel.
-AXLES = """
-import build123d as bd
-from cadgen.engine import xbf
 
 
-def axle(y):
-    wheel = bd.Pos(0, y, 0) * bd.Cylinder(10, 4)
-    wheel.label = "wheel"
-    return bd.Compound(children=[wheel], label="axle")
-
-
-@xbf("XBF/kit2.xbf")
-def kit2():
-    return bd.Compound(children=[axle(0), axle(50)], label="kit2")
+@xbf("XBF/hinges_open.xbf")
+def hinges_open():
+    return posed(hinges(), "open")
 """
 
 
@@ -312,77 +295,9 @@ class ExportTest(unittest.TestCase):
         self.assertEqual(count, sum(held[placed.prototype].triangles for placed in view.placements))
         self.assertEqual(len(data), 84 + 50 * count)
 
-    def test_a_pose_moves_the_placements_its_mechanism_moves(self) -> None:
-        out = self.folder / "open.glb"
-        translate(self.xbf, None, out, pose="open")
-        nodes = {node["name"]: node for node in _glb_json(out)["nodes"] if "mesh" in node}
-        built = {node["name"]: node for node in _glb_json(self.folder / "board.glb")["nodes"] if "mesh" in node}
-        self.assertEqual(nodes["hinge/base"]["matrix"], built["hinge/base"]["matrix"])
-        self.assertNotEqual(nodes["hinge/lid"]["matrix"], built["hinge/lid"]["matrix"])
-        from cadgen.engine import mechanism
-
-        structure = self.loaded.structure()
-        values, _named = mechanism.resolve(structure["kinematics"], "open")
-        lid = next(at for at, i in enumerate(structure["instances"]) if i["path"].endswith("lid"))
-        np.testing.assert_allclose(nodes["hinge/lid"]["matrix"], mechanism.posed_instances(structure, values)[lid],
-                                   atol=1e-6)
-        with self.assertRaisesRegex(ExportRefused, "no configuration 'shut'"):
-            translate(self.xbf, None, self.folder / "shut.glb", pose="shut")
-        self.assertFalse((self.folder / "shut.glb").exists())
-
-    def test_a_part_is_its_subtree_as_a_document_of_its_own(self) -> None:
-        rack = self.folder / "rack.xbf"
-        translate(self.xbf, None, rack, part="rack")
-        loaded = document.Loaded(rack)
-        self.assertEqual(loaded.name, "rack")
-        self.assertEqual([i.path for i in loaded.instances], [["rack", "peg0"], ["rack", "peg1"], ["rack", "peg2"]])
-        # Its root is the subtree's frame: the rack's lift is not in it.
-        self.assertEqual([i.matrix[12:15] for i in loaded.instances], [[-10.0, 0.0, 0.0], [0.0, 0.0, 0.0],
-                                                                      [10.0, 0.0, 0.0]])
-        self.assertEqual(len(loaded.prototypes), 1)
-        self.assertEqual(loaded.prototypes[0].face_names, next(p for p in self.loaded.prototypes
-                                                               if p.name == "peg0").face_names)
-        self.assertRegex(loaded.writer or "", r"^cadgen\.engine xbf/5")
-        step = self.folder / "rack.step"
-        translate(self.xbf, None, step, part="board/rack")
-        self.assertEqual([i.path for i in document.Loaded(step).instances], [i.path for i in loaded.instances])
-        # A subtree's share of the mechanism goes with it into its xbf.
-        hinge = self.folder / "hinge.xbf"
-        translate(self.xbf, None, hinge, part="hinge")
-        found = document.Loaded(hinge).mechanism
-        self.assertEqual([pair.label for pair in found.pairs], ["flap"])
-        self.assertEqual(found.configurations, {"open": {"flap": (60.0,)}})
-        self.assertIsNone(document.Loaded(rack).mechanism)
-        with self.assertRaisesRegex(ExportRefused, "--part: board has no part or assembly nothing"):
-            translate(self.xbf, None, self.folder / "nothing.step", part="nothing")
-        with self.assertRaisesRegex(ExportRefused, "names one part or assembly"):
-            translate(self.xbf, None, self.folder / "face.step", part="rack/peg0/face 1")
-
-    def test_a_part_is_read_by_the_ref_grammar_and_a_path_two_occurrences_share_is_refused(self) -> None:
-        """``--part kit2/axle/wheel`` took the first of two wheels at that path, silently. A part is
-        an owner of the ref grammar now: ``kit2/axle.2/wheel`` names the second axle's wheel, and a
-        path two occurrences share is refused with each as the grammar tells them apart."""
-        (self.folder / "axles.py").write_text(textwrap.dedent(AXLES), encoding="utf-8")
-        (report,) = engine_build.build(self.folder / "axles.py", ["kit2"], cwd=self.folder)
-        self.assertTrue(report["ok"], report)
-        out = self.folder / "one.step"
-        for part, named in (("kit2/axle/wheel", "kit2/axle.1/wheel, kit2/axle.2/wheel"),
-                            ("axle", "kit2/axle.1, kit2/axle.2")):
-            with self.assertRaises(ExportRefused) as refused:
-                translate(self.folder / "XBF/kit2.xbf", None, out, part=part)
-            self.assertIn(f"--part: {part} names 2 occurrences in kit2: {named}", str(refused.exception))
-        self.assertFalse(out.exists())
-        second = self.folder / "second.xbf"
-        translate(self.folder / "XBF/kit2.xbf", None, second, part="kit2/axle.2/wheel")
-        self.assertEqual(document.Loaded(second).name, "wheel")
-        translate(self.folder / "XBF/kit2.xbf", None, self.folder / "axle.xbf", part="axle.1")
-        self.assertEqual(document.Loaded(self.folder / "axle.xbf").name, "axle")
-
     def test_what_is_no_document_or_no_new_one_is_refused_by_name(self) -> None:
-        with self.assertRaisesRegex(ExportRefused, "only with --part"):
+        with self.assertRaisesRegex(ExportRefused, "not written from another xbf"):
             translate(self.xbf, None, self.folder / "again.xbf")
-        with self.assertRaisesRegex(ExportRefused, "a posed xbf is refused"):
-            translate(self.xbf, None, self.folder / "posed.xbf", pose="open")
         with self.assertRaisesRegex(ExportRefused, "is a mesh"):
             translate(self.folder / "board.glb", None, self.folder / "back.step")
         with self.assertRaisesRegex(ExportRefused, "an export is one of"):
@@ -520,7 +435,7 @@ class BuildFilesTest(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("board_script", script)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        written = api.export(module.board, out, self.folder / "made/rack.3mf", part=None, daemon=False)
+        written = api.export(module.board, out, self.folder / "made/rack.3mf", daemon=False)
         self.assertEqual([row.path for row in written], [out, self.folder / "made/rack.3mf"])
         self.assertTrue(out.is_file())
         self.assertIn("XBF/board.xbf", self.files(), "the model's document was built")
@@ -672,19 +587,19 @@ class StepTest(unittest.TestCase):
         from cadgen.engine import mechanism
 
         (self.folder / "hinges.py").write_text(textwrap.dedent(HINGES), encoding="utf-8")
-        (report,) = engine_build.build(self.folder / "hinges.py", ["hinges"], cwd=self.folder)
+        (report,) = engine_build.build(self.folder / "hinges.py", ["hinges_open"], cwd=self.folder)
         self.assertTrue(report["ok"], report)
         xbf = self.folder / "XBF/hinges.xbf"
         written = []
         for seed in ("1", "2"):
             out = self.folder / f"open-{seed}.step"
-            done = subprocess.run([sys.executable, "-c", EXPORT_POSED, str(xbf), str(out), "open"],
+            done = subprocess.run([sys.executable, "-c", EXPORT, str(self.folder / "XBF/hinges_open.xbf"), str(out)],
                                   env={**os.environ, "PYTHONHASHSEED": seed}, capture_output=True, text=True)
             self.assertEqual(done.returncode, 0, done.stderr)
             written.append(out)
         first, second = (path.read_bytes() for path in written)
         self.assertEqual(first, second)
-        # Each hinge's lid stands where the pose puts it, read back from the file.
+        # Each hinge's lid stands where the sampler poses the hinges' own, read back from the file.
         structure = document.Loaded(xbf).structure()
         values, _named = mechanism.resolve(structure["kinematics"], "open")
         posed = mechanism.posed_instances(structure, values)

@@ -181,13 +181,14 @@ class ExportsTest(unittest.TestCase):
         self.assertEqual(caught.exception.status, 410)
         self.assertEqual(len(self.calls), 130)
 
-    def test_stale_epoch_closed_formats_and_nonfinite_pose_are_refused(self):
+    def test_stale_epoch_closed_formats_and_a_part_or_a_pose_are_refused(self):
         for change in ({"epoch": "old"}, {"format": "zip"}, {"format": []}, {"output": "/tmp/unasked"}):
             with self.assertRaises(ExportError):
                 self.jobs.create({**self.request(), **change})
-        for pose in ({"joint": float("nan")}, {"joint": True}, {"joint": "45"}):
+        # The file holds the document as its code built it: no part, no pose.
+        for extra in ({"pose": {"joint": 45}}, {"part": "hinge/lid"}, {"part": None, "pose": None}):
             with self.assertRaises(ExportError):
-                specification({"doc": "d", "revision": "v", "pose": pose})
+                specification({"doc": "d", "revision": "v", **extra})
 
     def test_route_download_and_no_requested_server_path(self):
         self.finish.set()
@@ -210,9 +211,6 @@ class ExportsTest(unittest.TestCase):
         disposition = dict(response.stream_file.call_args.args[3])["content-disposition"]
         self.assertEqual(disposition, "attachment; filename=\"_____ v2.step\"; filename*=UTF-8''%E3%83%96%E3%83%A9%E3%82%B1%E3%83%83%E3%83%88%20v2.step")
         self.jobs.release(ident)
-        part = self.jobs.create({**self.request("two"), "source": {"doc": "d", "revision": "v", "part": "hinge/lid"}})
-        self.assertEqual(self.settled(part["id"])["filename"], "ブラケット v2-part.step")
-        self.jobs.release(part["id"])
 
 
 if __name__ == "__main__":

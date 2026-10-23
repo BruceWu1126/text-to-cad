@@ -344,7 +344,7 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         if "document" not in source_spec:  # a held document's revision the daemon checked
             check(source, request["expected"])
         if request.get("inspect"):
-            return {"reports": [], "files": [], "formats": options(source, pose=request.get("pose"), part=request.get("part"), original_allowed="version" in request["expected"])}
+            return {"reports": [], "files": [], "formats": options(source, original_allowed="version" in request["expected"])}
     files = []
     for destination in request["destinations"]:
         clock = time.perf_counter()
@@ -357,7 +357,7 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
             from cadgen.engine.export.viewer import original
             size = original(source, target, request["expected"])
         else:
-            size = export.translate(source, None, target, pose=request.get("pose"), part=request.get("part"))
+            size = export.translate(source, None, target)
         seconds = time.perf_counter() - clock
         files.append({"path": str(target), "kind": export.kind_of(target), "bytes": size,
                       "seconds": round(seconds, 4)})

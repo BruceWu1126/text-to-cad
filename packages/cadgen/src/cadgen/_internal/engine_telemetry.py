@@ -164,7 +164,7 @@ def counts(facts: dict[str, Any], via: str) -> dict[str, Any]:
         ok = outcome == "ok"
         snapshots.append({"format": KINDS[facts["source"]], "ok": ok, "seconds": seconds,
                           **({} if ok else {"reason": _snapshot_failure(facts, error, outcome)})})
-    if verb in ("export", "snapshot") and facts.get("pose"):
+    if verb == "snapshot" and facts.get("pose"):
         features.append("kinematics")
     health = {name: 1 for name, happened in (("workers", worker.get("fresh") is True),
                                              ("crashes", worker.get("died") is not None),
