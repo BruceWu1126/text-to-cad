@@ -515,8 +515,7 @@ Vite and Next consume their `dist` exports. `npm ci` without a
 workspace filter installs the whole workspace.
 
 Create this worktree's `.venv` with `requirements-dev.txt` when Python is
-needed. For web development, invoke Vite from a folder of models (a relative
-`?file=` resolves against it):
+needed. For web development, invoke Vite from a folder of models (the home shows it):
 
 ```bash
 cd <a folder of models>
@@ -524,17 +523,17 @@ VIEWER_PYTHON=<checkout>/.venv/bin/python \
   npm --prefix <checkout>/apps/web run dev -- --host 127.0.0.1
 ```
 
-Vite requests an API-only page session (`--new`) on the installation's engine.
-Closing Vite leaves that engine and other sessions running. `VIEWER_PYTHON`
+Vite announces itself to the installation's engine with an API-only launch.
+Closing Vite leaves that engine and its other clients running. `VIEWER_PYTHON`
 must name an interpreter that satisfies cadgen's Python floor and imports this
 checkout. The backend opens any file by its absolute path. The web app owns
 URL/history and browser preferences. FileViewer
 state is scoped by file and renderer; each CAD render session owns its
 cache provider and worker lease.
 
-`cadgen viewer` ensures the installation's engine, opens its page and exits.
-`--json` prints the authenticated session URL without opening a browser. `--new`
-creates a page session, with its own starting folder, on the same engine and port.
+`cadgen viewer [FILE ...]` ensures the installation's engine, opens its one page -- each
+FILE's at `/<id>`, else the home -- and exits. `--json` prints the authenticated launch record
+without opening a browser. Each launch's folder becomes the folder the home shows.
 An explicit `--host` or `--port` pins the engine listener; a conflict with an
 already-running engine fails. There is no fixed default port or viewer process.
 A checkout serves its local web build; `CADGEN_VIEWER_DIST` and
@@ -564,8 +563,8 @@ kinematics are the `packages/ui` browser specs' on every PR). Backend tests live
 Nothing in `cadgen.viewer` imports the CAD kernel at module scope.
 
 The engine is keyed by the Python installation, so the CLI, page and each host's
-stdio shim share it. Different installations have different engines. Page sessions
-reuse the same starting folder and client build unless `--new` is given. Python
+stdio shim share it. Different installations have different engines. There is one page per
+engine, every document at `/<id>`, and no page sessions. Python
 source edits require restarting your test engine with `cadgen stop`; it does not
 re-execute under active pages. Never stop an instance you did not start. See
 `apps/web/README.md` for the launcher contract and catalog/link behavior.
@@ -1124,13 +1123,12 @@ VIEWER_PYTHON=<checkout>/.venv/bin/python \
 ```
 
 The spawned backend opens any file by its absolute path; the folder it starts
-in is only where a relative `?file=` resolves. Its resolver takes `INIT_CWD`, then
+in is only the folder the home shows. Its resolver takes `INIT_CWD`, then
 the process working directory, skipping either when it is inside `apps/web`. Vite's
 fallback is `<checkout>/apps`. npm sets `INIT_CWD` to the invocation directory,
 so `--prefix` selects the app while keeping your folder. The page is the bare
-origin and `?file=` names a file, for example
-`http://127.0.0.1:5173/?file=/abs/models/STEP/part.step`, or
-`?file=STEP/part.step` from `/abs/models`.
+origin, the home; a document's page is `/<id>` (`http://127.0.0.1:5173/<id>`), a file's id
+given by `cadgen viewer FILE --json` or by opening it from the home.
 
 Vite defaults to port 5173 and fails if it is taken; select another with
 `--port`. See [the app's launcher contract](apps/web/README.md#launching) for

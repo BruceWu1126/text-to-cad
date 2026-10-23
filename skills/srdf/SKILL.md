@@ -43,12 +43,13 @@ validation don't replace this.
 - Otherwise run the CAD Viewer, from any folder:
 
   ```bash
-  cadgen viewer --host 127.0.0.1 --json
+  cadgen viewer --host 127.0.0.1 --json FILE [FILE ...]
   ```
 
-  The command ensures this installation's engine, prints a page-session URL and
-  exits. Read `url` from its one JSON line (never guess the port). Add each file's
-  URL-encoded absolute path with `&file=`, preserving the URL's token query.
+  The command ensures this installation's engine, registers each file and prints
+  its page, `/<id>`, then exits. Read each file's `url` from `documents` in its one
+  JSON line (never guess the port); the URL carries its token query. A model's page is the
+  `view:` line `python SCRIPT.py` prints; a script is never a document.
   Return that link to the user. If it fails to launch, say so.
 
 Keep the SRDF beside its uniquely matching URDF (same robot name). Review

@@ -285,7 +285,7 @@ what a user gets is the wheel the release builds from it.
 ## CAD Viewer
 
 The app-facing playbook lives in `apps/web/README.md`: launcher contract
-(reuse, ports, `--new`), dev vs prod, and the catalog/link-verification
+(reuse, ports, `/<id>` pages), dev vs prod, and the catalog/link-verification
 gotchas. The repo-side half — the lightweight-worktree recipe and
 root workspace dependencies — lives in `CONTRIBUTING.md` under "Viewer Development
 In This Repo". Read them before starting, stopping, or debugging a Viewer.

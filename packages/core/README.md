@@ -200,9 +200,12 @@ error presentation.
 a new request so development restart polling observes identity changes and
 connection failures.
 
-Files are named by absolute path. The catalog holds the files on screen:
-`resolveEntry(file)` reads one (a file the server lacks is an
-`isMissingFileError`), and `createRenderSession({ file })` keeps the displayed
+Files are named by absolute path, and a document the engine holds by its id alone (a model's)
+by that id. The catalog holds the documents on screen, each row carrying its document's `id`,
+by which rows join: one file however its path is spelled (a symlink, a case variant) is one row.
+`resolveEntry(file)` reads one, asking by `?id=` for an id and by `?file=` for a path (one the
+server lacks is an `isMissingFileError`, in the engine's words for an id it does not hold),
+`entryOf(file)` is the row the catalog has, and `createRenderSession({ file })` keeps the displayed
 file's entry current as polling refreshes it. A cancelled or older request
 cannot overwrite a newer file revision. `folder(path)` lists one folder and
 `search(path, query)` finds the CAD files under it, for the explorer.

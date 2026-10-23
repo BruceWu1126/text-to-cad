@@ -31,8 +31,8 @@ extension):
   newer card retires the older ones.
 
 A client that renders no MCP Apps never loads this page: its `cad_show` answers
-with the model's link in this machine's CAD Viewer, started if none runs
-(`cadgen/mcp/browser.py`), and opens no browser. `CADGEN_MCP_PRESENTATION=inline`
+with the model's page in this machine's CAD Viewer, `/<id>` (the file registered by its id, as
+a launch registers it), started if none runs (`cadgen/mcp/browser.py`), and opens no browser. `CADGEN_MCP_PRESENTATION=inline`
 tells the shim that a client renders apps without advertising them, as the
 reference host `basic-host` does.
 
@@ -49,8 +49,9 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
 
 - **One page, told what to show.** Every surface loads this one page. The tool
   that opened it returns a *launch* — `page` (`home` or `viewer`) and `model`, a
-  file's absolute path or none — and the page renders it: the shared CAD viewer
-  showing that file, or the home. Agents name models by absolute path only, and
+  file's absolute path, a model's document id, or none — and the page renders it: the shared
+  CAD viewer showing that document, or the home. Agents name a file by its absolute path and a
+  model by the id its script printed (a script is never a document), and
   nothing here branches on a surface's name but one: `surface: file` (below).
 - **A launch is enough to start.** It also carries what the server is — its
   `protocol`, `version` and `platform` — and the home's carries its `recents`,

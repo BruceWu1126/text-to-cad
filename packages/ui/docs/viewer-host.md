@@ -6,7 +6,13 @@ effects. No shared feature discovers Electron, browser clipboard, a backend URL,
 persistent storage or page navigation. DOM, canvas, workers and layout remain
 shared. Missing optional methods mean an operation is unsupported.
 
-`FileSource.collections`, when supplied by a host, lists transient named documents in the explorer and home. The CAD adapter reads the engine’s live in-memory models; these entries never enter saved recents or thumbnail storage. Model addresses (`script.py::name`) are document identities alongside file paths. Opening a Python script lists its declarations without executing it; choosing a declaration requests its build.
+A view shows a file by its absolute path, or a document the engine holds by its id alone (a
+model's: a lower-case UUID, `cadgen.engine.ids`). A file's metadata may carry `navigationPath`,
+the on-disk file to browse from and act on; null says the document has no file of its own (a
+model's): its view has no Select File and no file menu, its navbar names it by its `name`, and it
+never enters saved recents or thumbnail storage. A file's Select File (the explorer its name
+opens) is rooted at that file's folder. Python scripts are never documents: no view opens one,
+and no folder lists one.
 
 The host contains `files`, optional native `fileActions`, `clipboard`,
 `promptContext`, the optional `promptFiles`, `navigation` (the optional `openFile(path)` and
@@ -153,7 +159,7 @@ Where there is no navbar (a view shown small) the renderer draws them over its v
 command is the same capture: to a composer destination it delivers the view and
 the selection through `promptContext.deliver`. Neither route detects the platform.
 
-`navigation.openFile(path)` shows a file, by its absolute path, in this view: a pick
+`navigation.openFile(path)` shows a file, by its absolute path (or a document by its id), in this view: a pick
 in the explorer, a renderer's link. `navigation.home()`, where the host has a home,
 shows it in this view: from a file, the app menu's Back to files (the menu the navbar's
 logo opens) leads to it; over the home the same navbar has the logo and its menu, with no
@@ -168,12 +174,16 @@ where no browser does (the CAD app's views), hands it as `history` (`ViewerHisto
 draws Back and Forward over it, over a file and over the home alike. What the history holds is
 the host's (the CAD app's: every file the view showed and the home, a step like a file, the
 agent's shows and the person's moves alike); the web hands none, its page having the
-browser's, where the home is a step too. `onShown(path | null)` says which file the catalog
-has on screen (null for the home, or a file still resolving or missing), for a host that
-names its page after it or records it. The host decides what showing a file means,
-because only the host knows which view shows it: the web viewer is one page per machine
-and writes the file into its URL (`?file=`, a new history entry, so the browser's back
-and forward move between files, and a bare URL is the home), and the CAD app, which
+browser's, where the home is a step too. `onShown(path | null, id | null)` says which file the
+catalog has on screen, by its own path (a model by its id), and its document's id (null for the
+home, or a file still resolving or missing), for a host that names its page after it or records
+it. `CadViewer` joins the catalog's rows by that id (`client.entryOf`), not by the path the host
+asked for, so a symlinked or case-variant spelling of one file is one row. The host decides what
+showing a file means, because only the host knows which view shows it: the web viewer is one
+page per engine and addresses every document by path, `/<id>` (a file opened by its path is asked
+for its id first; a new history entry, so the browser's back and forward move between documents,
+and `/` is the home, which also shows the folder of the most recent launch: `CadViewer`'s
+`start`), and the CAD app, which
 renders in Codex (the sidebar, a tab beside each thread and a file handler) and inline in
 Claude Desktop and other MCP Apps hosts, shows it in the view that asked or, from the
 home, launches it.
@@ -225,8 +235,9 @@ them all. Producers freeze resource and selection identity before
 asynchronous capture. Blob URLs are delivery leases, never portable identity.
 
 A reference contains a workspace-file identity (the file's absolute path,
-`/`-separated: `/a/b.step`, `C:/a/b.step`; validation rejects any other spelling)
-or HTTP(S) URL plus a tagged
+`/`-separated: `/a/b.step`, `C:/a/b.step`; validation rejects any other spelling), a
+`cad-model` identity (a document the engine holds by its id alone: `path` is the id), or an
+HTTP(S) URL plus a tagged
 selection: `whole-resource`, `text-range`, or `cad-selector`. Text positions are
 zero-based UTF-16 with an exclusive end. CAD selectors use core's validated
 cadgen grammar, not STEP entity numbers. Preserve a revision when available;
@@ -509,8 +520,9 @@ never resizes it.
 
 A file that will not open leaves the navbar over a page of the host's
 (`presentation.error`). `CadViewer`'s says "File does not exist" and the file's path
-when it is missing (`isMissingFileError`), and "Could not open that file" and the
-reason otherwise, each with a Go home button where the host has a home.
+when it is missing (`isMissingFileError`) -- for a document named by its id, "This model is no
+longer held" and the engine's words, which name the command that builds it again -- and "Could
+not open that file" and the reason otherwise, each with a Go home button where the host has a home.
 
 The viewport's edges and corners are the shell's, never the host's: the tool strip at the
 top centre, ending in the view's own controls (Display and Preview, a 3D view's), the tool in
@@ -541,8 +553,8 @@ view with no host clipboard gets no icon. Each host makes its port copy wherever
 web falls back to the page's copy command when the browser refuses the asynchronous
 clipboard, and so does the CAD app when its host grants its frame no clipboard.
 
-A copied reference names its file by its absolute path (`<path>#<selector>`), and so
-does a copied Quick Edit: every view spells a file the same way, so a reference pasted
+A copied reference names its file by its absolute path (`<path>#<selector>`), a model by its
+document id (`<id>#<selector>`), and so does a copied Quick Edit: every view spells a file the same way, so a reference pasted
 into a chat or a tool says exactly which file it means.
 
 Nothing of the viewer sits at the bottom centre. A host whose own control floats over

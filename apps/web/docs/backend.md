@@ -38,23 +38,24 @@ Repository setup and editable-install instructions live in
 `CONTRIBUTING.md`.
 
 The launcher connects to this installation's engine, starting it if needed, and
-exits after printing or opening its page-session URL. `--json` prints the URL
-without opening a browser. An explicit host or port must match a running engine.
-`--new` creates another page session on the same listener; otherwise the engine
-reuses a session with the same starting folder and built client. Each session's
-home uses its own starting folder. Always use the printed URL, including its token
-query; the browser exchanges the token for a same-site HTTP-only cookie.
+exits after printing or opening its page's URL: `/<id>` for each FILE it names (an on-disk CAD
+file it registers by the id of its canonical path, or a document id the engine holds), else the
+home, `/`. `--json` prints the launch record without opening a browser. An explicit host or port
+must match a running engine. There is one page per engine and no page session: each launch's
+folder becomes the folder the home shows, replacing the last. Always use the printed URL,
+including its token query; the browser exchanges the token for a same-site HTTP-only cookie. An
+old page session's link (`/s/...`) and a document named by query (`/?doc=`, `/?file=`) answer
+with the home.
 
 `cadgen stop` stops the installation's whole engine, including its workers and
-sessions. Closing a page, a Vite process or a host's stdio shim does not stop it.
+MCP sessions. Closing a page, a Vite process or a host's stdio shim does not stop it.
 Python source edits require restarting your own test engine. There is no viewer
 server process, source re-exec, detached launch log or per-port shutdown route.
 
 ## Development
 
 After the root workspace dependencies and shared packages are built, invoke
-Vite from the folder a developer's relative links should resolve against,
-outside `apps/web`:
+Vite from the folder the home should show, outside `apps/web`:
 
 ```bash
 cd <a folder of models>
@@ -62,27 +63,27 @@ VIEWER_PYTHON=<checkout>/.venv/bin/python \
   npm --prefix <checkout>/apps/web run dev -- --host 127.0.0.1
 ```
 
-The page session starts in the first of `INIT_CWD` and the process working
-directory that is outside `apps/web`; otherwise Vite starts it in `<checkout>/apps`. npm preserves its
+The launch's folder is the first of `INIT_CWD` and the process working
+directory that is outside `apps/web`; otherwise Vite launches in `<checkout>/apps`. npm preserves its
 invocation directory in `INIT_CWD`, so the command above chooses that folder
-while `--prefix` locates the app. The folder is `serverInfo.start`: the page
-resolves a relative `?file=` against it, and it bounds nothing.
+while `--prefix` locates the app. The folder is `serverInfo.start`: the home shows it,
+and it bounds nothing.
 
 Vite serves the client from source with HMR. It spawns
-`python -m cadgen.viewer --new --api-only --json` and proxies `/__cad` to that
-authenticated engine session. `VIEWER_PYTHON` selects its interpreter; the
+`python -m cadgen.viewer --api-only --json` (a launch) and proxies `/__cad` to that
+authenticated engine. `VIEWER_PYTHON` selects its interpreter; the
 default is `python3`. `VIEWER_BACKEND_URL` attaches to a backend you started
 separately. The app needs no production build in this mode, but shared package
 imports still resolve to their compiled `dist/` exports.
 
 Vite defaults to port 5173 and refuses to roll to another port; pass `--port`
-when needed. The development session's API-only mode does not serve a SPA; its engine is shared. See the [app README](../README.md) for the
+when needed. The API-only launch does not serve a SPA; its engine is shared. See the [app README](../README.md) for the
 complete development and launcher contract.
 
 ## Files by absolute path
 
-There is no served directory. Every `?file=` — and every path in a request body
-— names a file by its absolute path (`/models/a.step`; on Windows `C:/models/a.step`
+There is no served directory. The page addresses each document by its id (`/<id>`); every
+request's `?file=` — and every path in a request body — names a file by its absolute path (`/models/a.step`; on Windows `C:/models/a.step`
 or `C:\models\a.step`), anywhere on the machine; a relative one is a 400
 (`cadgen.viewer.backend`). Nothing is refused for where it is: no root, no
 containment, and no rule about hidden folders on the way to a named file. A
@@ -92,9 +93,14 @@ browser send a GET, and a GET must never send the machine to the network.
 A view shows one file and browses from that file's folder, one folder at a
 time, so nothing walks a tree to show it. `GET /__cad/catalog?file=<abs>` is
 that file's row (`scanner.catalog_entry`) — `file` is its absolute path with
-`/` separators, `url` where its bytes are served — or no row for a file that is
-not a CAD file, is gone, or has a hidden name; with no `file`, the catalog is
-empty. A row is computed from the file when it is asked for, so it is never
+`/` separators, `url` where its bytes are served, `id` its document's id (the id of its
+canonical path, so a symlink and its target, or two case spellings, are one row) — or no row
+for a file that is not a CAD file, is gone, or has a hidden name; with no `file`, the catalog is
+empty. A row asked for registers the file by its id. `GET /__cad/catalog?id=<uuid>` is the row
+of the document of that id: a file registered (by a launch or a row), or in Recents; else a model
+the engine holds (`file` is its id, `name` its function, `sourcePath` null: it has no file to
+browse); else no row and `missing`, the engine's words for why, naming the command that builds
+it again. A script is never a row. A row is computed from the file when it is asked for, so it is never
 stale. It also carries `revision`, a digest of its entries that moves whenever
 anything a client would see in them does: a host that cannot afford to read the
 catalog on a timer (the CAD app relays every request through its host's few
@@ -132,8 +138,9 @@ answer.
 
 A STEP (`.step`, `.stp`) and an `.xbf` open in the engine document renderer
 (`@text-to-cad/ui`'s `renderers/xbf`), drawn from what the cadgen engine serves
-of them (`cadgen.viewer.documents`). `GET /__cad/xbf?file=<abs>` acquires the
-file in the already-running engine and answers `{doc, url}`, where `url` is
+of them (`cadgen.viewer.documents`). `GET /__cad/xbf?file=<abs or id>` acquires the
+file, or the document of that id as the engine holds it (never built), in the already-running
+engine and answers `{doc, url}`, where `url` is
 `/__cad/api/doc/<doc>` on this same origin. The engine reads a file once and
 holds it. XBF and STEP reads run in child processes; their kernel objects never
 enter the HTTP process. A request waits at most two seconds before returning
@@ -159,12 +166,13 @@ fetch every read of it is made with (the CAD app's goes over its tunnel).
 
 | Route | Purpose |
 |---|---|
-| `GET /__cad/server` | Server identity: `identityToken`, `platform` (which file manager Reveal opens), `user`, `start` (where relative links resolve), `pick` (a file chooser exists), `port`, `pid`. |
-| `GET /__cad/catalog?file=...` | One file's catalog row and its `revision`. |
+| `GET /__cad/server` | Server identity: `identityToken`, `platform` (which file manager Reveal opens), `user`, `start` (the folder of the most recent launch, which the home shows), `pick` (a file chooser exists), `port`, `pid`. |
+| `GET /__cad/catalog?file=...` | One file's catalog row, with its document `id`, and its `revision`. |
+| `GET /__cad/catalog?id=...` | The row of the document of that id, or none and `missing`. |
 | `GET /__cad/folder?path=...` | One folder's subfolders and CAD files. |
 | `GET /__cad/search?path=...&q=...` | The CAD files under a folder whose path holds `q`, bounded. |
 | `GET /__cad/asset?file=...` | A CAD file's bytes. |
-| `GET /__cad/xbf?file=...` | A STEP or an `.xbf`, served by the cadgen engine: `{doc, url}`, `202 {state: "reading", retryMs}` while the engine reads it, or the engine's refusal (400). `&held=1`: `{held}`, without starting a read. |
+| `GET /__cad/xbf?file=...` | A STEP, an `.xbf` or a document id, served by the cadgen engine: `{doc, url}`, `202 {state: "reading", retryMs}` while the engine reads it, or the engine's refusal (400). `&held=1`: `{held}`, without starting a read. |
 | `GET /__cad/api/...` | Direct engine routes: document structure, part buffers, element facts, groups, volume, look, image and version wait. |
 | `GET /__cad/drawing?file=...` | A `.dxf` flattened to 2D render primitives; the DXF pane's only source. |
 | `GET /__cad/recents` | The model library every CAD view shares. |
