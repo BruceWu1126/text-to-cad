@@ -40,6 +40,8 @@ export default {
   "export.downloaded": "已开始下载",
 
   "app.start.notAnswering": "CAD 查看器没有响应",
+  "app.engine.notRunning": "引擎没有运行。",
+  "app.engine.runAgain": "请再次运行 cadgen viewer。",
 
   "file.opening": "正在打开…",
   "file.missing": "文件不存在",

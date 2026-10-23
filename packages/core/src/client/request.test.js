@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { requestViewerJson } from "./request.js";
+import { isEngineGone, requestViewerJson } from "./request.js";
 
 const url = "/__cad/artifact?file=part.step";
 
@@ -105,4 +105,14 @@ test("a bounded GET is bounded by the server's silence: a long answer that keeps
     assert.match(error.failure.detail, /stopped sending its answer for 10 seconds/);
     return true;
   });
+});
+
+test("an engine gone is nothing answering, or an engine that does not know this page's token", async () => {
+  const failed = (reply) => requestViewerJson(url, {}, "catalog", { fetch: reply }).catch((error) => error);
+  assert.equal(isEngineGone(await failed(async () => { throw new TypeError("Failed to fetch"); })), true);
+  const refused = async () => new Response(JSON.stringify({ error: "engine token required" }), { status: 403 });
+  assert.equal(isEngineGone(await failed(refused)), true);
+  const other = async () => new Response(JSON.stringify({ error: "Host is not a local name" }), { status: 403 });
+  assert.equal(isEngineGone(await failed(other)), false);
+  assert.equal(isEngineGone(new Error("Failed to fetch")), false);
 });

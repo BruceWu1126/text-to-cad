@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from cadgen.viewer.engine_app import LINK_GONE_PAGE
 from tests.python.support import engine_daemon
 
 
@@ -23,6 +24,8 @@ class LauncherTest(unittest.TestCase):
         self.dist = self.root / 'dist'
         self.dist.mkdir()
         (self.dist / 'index.html').write_text('<html>viewer</html>', encoding='utf-8')
+        (self.dist / 'assets').mkdir()
+        (self.dist / 'assets' / 'app.js').write_text('export {}', encoding='utf-8')
         self.env = engine_daemon.watched({**os.environ, 'CADGEN_ENGINE_DIR': str(self.root / 'engine'),
                    'CADGEN_STATE_DIR': str(self.root / 'state'), 'CADGEN_ENGINE_MESH': 'inline'}, self.addCleanup)
         self.addCleanup(self.stop_engine)
@@ -104,9 +107,14 @@ class LauncherTest(unittest.TestCase):
 
     def test_every_route_requires_token_and_keeps_host_and_post_gates(self):
         launch = self.launch()
-        for route in ('/', '/__cad/server', '/api/docs', '/__cad/api/docs', '/mcp'):
+        for route in ('/', '/assets/app.js', '/__cad/server', '/api/docs', '/__cad/api/docs', '/mcp'):
             self.assertEqual(self.get(launch, route, token=False)[0], 403, route)
             self.assertEqual(self.get(launch, route, headers={'Host': 'evil.example'})[0], 403, route)
+        # A navigation without the token is refused too, with a static page saying the link is gone
+        # (no script, no asset), never the raw JSON.
+        status, headers, body = self.get(launch, '/', token=False, headers={'Sec-Fetch-Dest': 'document'})
+        self.assertEqual((status, headers['content-type'], body), (403, 'text/html; charset=utf-8', LINK_GONE_PAGE))
+        self.assertNotIn(b'<script', body)
         status, headers, _ = self.get(launch, urlsplit(launch['url']).path+'?token='+launch['token'], token=False)
         self.assertEqual(status, 302)
         self.assertIn('HttpOnly', headers['set-cookie'])

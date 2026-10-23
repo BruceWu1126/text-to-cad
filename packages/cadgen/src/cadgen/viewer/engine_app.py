@@ -22,6 +22,16 @@ from .scanner import to_posix_path
 from .http_app import CadApp, RAW_FILE_HEADERS, host_is_allowed
 
 
+# What a navigation without this engine's token is answered with (``EngineApp._refused``).
+LINK_GONE_PAGE = (
+    '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+    '<meta name="viewport" content="width=device-width, initial-scale=1"><title>CAD</title>'
+    '<style>body{font:15px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem}</style>'
+    '</head><body><h1>This CAD Viewer link no longer works</h1>'
+    '<p>Its engine was restarted or stopped. Open the viewer again, from your agent or with '
+    '<code>cadgen viewer</code>, for a fresh link.</p></body></html>\n'
+).encode('utf-8')
+
 class DocumentResponse:
     """Adapt the engine's socket-shaped writer to the application's response, in process."""
     def __init__(self, request):
@@ -201,7 +211,7 @@ class EngineApp:
         expected = self.token.encode()
         if not any(secrets.compare_digest(str(value).encode('utf-8', 'surrogateescape'), expected)
                    for value in supplied if value):
-            return response.send_json(403, {'error': 'engine token required'})
+            return self._refused(request, response)
         if request.query.get('token') == self.token and request.method == 'GET':
             query = {k: v for k, v in request.query if k != 'token'}
             location = request.path + ('?' + urlencode(query) if query else '')
@@ -217,6 +227,20 @@ class EngineApp:
         if request.method == 'GET' and is_id(request.path[1:]) and self.server.holds(request.path[1:]):
             self.server.warm()  # a build's view link opened: its meshing pool starts as the page loads
         return self.default_app().handle(request, response)
+
+    def _refused(self, request, response):
+        """A request without this engine's token: refused, 403, whatever it asks for -- a route, a
+        page or an asset. A tab left open from an engine that stopped, or reloaded under one started
+        since, navigates with a token this engine never issued: it is told so in a static page of a
+        few lines (``LINK_GONE_PAGE``: no script, no asset, nothing of the person's), never raw JSON.
+        Every other refusal is the JSON error."""
+        navigation = (request.header('sec-fetch-dest') == 'document' or 'text/html' in request.header('accept')) \
+            and request.method == 'GET' and not request.path.startswith('/__cad/') and request.path != '/mcp'
+        if navigation:
+            return response.send_bytes(403, LINK_GONE_PAGE, 'text/html; charset=utf-8',
+                                       [('referrer-policy', 'no-referrer'),
+                                        ('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'")])
+        return response.send_json(403, {'error': 'engine token required'})
 
     def mcp(self):
         with self.lock:

@@ -129,6 +129,11 @@ header. Every route, including documents, requires it. The loopback Host check,
 cross-site POST guard and raw-file response headers remain. Binding `--host`
 off loopback exposes these same authenticated routes; anyone with the token has
 local-file access. Keep the URL private. Vite remains on its own strict port, 5173.
+A refused navigation (a tab reloaded after its engine stopped, or under a newer one) is answered
+403 with a static page of a few lines, no script and no asset, saying the link no longer works
+and that opening the viewer again (from the agent, or `cadgen viewer`) gives a fresh one. A
+loaded page whose engine stops under it says the engine is not running, in the person's
+language, over the page until a read answers again.
 
 A page closing never stops the engine. Active requests and document version waits
 keep it alive; it exits after its idle hour. Code changes in a checkout require

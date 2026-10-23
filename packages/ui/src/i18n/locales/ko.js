@@ -39,6 +39,8 @@ export default {
   "export.downloaded": "다운로드를 시작했습니다",
 
   "app.start.notAnswering": "CAD 뷰어가 응답하지 않습니다",
+  "app.engine.notRunning": "엔진이 실행 중이 아닙니다.",
+  "app.engine.runAgain": "cadgen viewer를 다시 실행하세요.",
 
   "file.opening": "여는 중…",
   "file.missing": "파일이 없습니다",

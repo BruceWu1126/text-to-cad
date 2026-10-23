@@ -57,6 +57,8 @@ export interface CadCatalogSnapshot {
   hydrated: boolean;
   refreshing: boolean;
   error: string;
+  /** The last read failed because the engine is gone (`isEngineGone`); cleared by the next that answers. */
+  engineGone: boolean;
   /** The server's digest of the last catalog applied ('' before one is): what a change watcher compares. */
   catalogRevision: string;
 }

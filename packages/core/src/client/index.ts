@@ -4,7 +4,7 @@ export { encodeBase64 } from "./base64.js";
 export { crashOf, createCrashReporter, scriptFileOf } from "./crash.js";
 export * from "./origin.js";
 export type * from "./types.js";
-export { requestViewerJson, ViewerRequestError, serverErrorMessage } from "./request.js";
+export { requestViewerJson, ViewerRequestError, serverErrorMessage, isEngineGone } from "./request.js";
 
 export { createHttpCadResourceProvider, cadResourceCacheKey } from './resources.js';
 
