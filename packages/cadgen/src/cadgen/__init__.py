@@ -5,7 +5,7 @@ The root exports the engine's surface -- the decorators (``xbf``, ``step``, ``gl
 ``threemf``, ``dxf``), ``memo``, materials (``Material``, ``materials``, ``paint``), the mechanism
 (``configuration``, ``motion``, ``couple``), the readers (``read_step``, ``read_xbf``,
 ``read_mesh``), ``select``, progress (``report``, ``track``) -- and its verbs as functions
-(``build``, ``export``, ``snapshot``, ``serve``, ``inspect``, ``status``, ``stop``, ``daemon``),
+(``export``, ``snapshot``, ``serve``, ``inspect``, ``status``, ``stop``, ``daemon``),
 every name loaded on first use: ``import cadgen`` imports no CAD kernel.
 """
 
@@ -37,8 +37,8 @@ del _install_font_guard
 
 # The engine counts nothing (its law 3: it imports nothing of cadgen): it tells what each of its verbs did to
 # the functions in cadgen.engine.api.observers. cadgen's telemetry is one, appended here for the reason the
-# font guard is installed here: every route into the engine -- `python model.py`, a `cadgen build`, `export`
-# or `snapshot`, `cadgen.build()` -- comes through this package first. Appended as the engine's verbs are
+# font guard is installed here: every route into the engine -- `python model.py`, a `cadgen export` or
+# `snapshot`, `cadgen.export()` -- comes through this package first. Appended as the engine's verbs are
 # imported, never sooner: a process that uses no engine imports none of it.
 _install_engine_telemetry()
 del _install_engine_telemetry
@@ -51,7 +51,7 @@ del _install_engine_host
 # The engine's surface (``cadgen.engine.__all__``) and its verbs as functions (``cadgen.engine.api``).
 _ENGINE = ("model", "xbf", "memo", "step", "glb", "stl", "threemf", "dxf", "Material", "materials", "paint", "configuration",
            "motion", "couple", "read_step", "read_xbf", "read_mesh", "select", "report", "track")
-_VERBS = ("build", "export", "snapshot", "serve", "inspect", "status", "stop", "daemon")
+_VERBS = ("export", "snapshot", "serve", "inspect", "status", "stop", "daemon")
 
 __all__ = [
     "__version__",
@@ -100,7 +100,7 @@ if TYPE_CHECKING:
         srgb_to_linear as srgb_to_linear,
     )
     from cadgen.engine import materials
-    from cadgen.engine.api import build, daemon, export, serve, snapshot, status, stop, inspect
+    from cadgen.engine.api import daemon, export, serve, snapshot, status, stop, inspect
     from cadgen.engine.materials import Material
     from cadgen.engine.mechanism import couple
     from cadgen.engine.model import (

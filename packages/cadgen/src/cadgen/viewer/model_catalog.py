@@ -14,10 +14,7 @@ def in_memory() -> list[dict]:
 def entry(value: str) -> dict | None:
     address = parse(value)
     if address is not None:
-        if address.script is not None:
-            if not address.script.is_file() or address.name not in declarations(address.script):
-                return None
-        elif not any(row["address"] == str(address) for row in in_memory()):
+        if not address.script.is_file() or address.name not in declarations(address.script):
             return None
         return {"file": str(address), "kind": "xbf", "sourceFormat": "model", "url": "", "hash": "model", "bytes": 0}
     script = Path(value)

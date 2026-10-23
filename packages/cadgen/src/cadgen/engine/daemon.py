@@ -404,7 +404,7 @@ def _shared(environment: dict[str, str]) -> dict[str, str]:
 
 
 class Pool:
-    """The daemon's live workers, one per key (a script's path, ``code::<name>``, ``documents``),
+    """The daemon's live workers, one per key (a script's path, ``documents``),
     at most ``cap`` of them (see the module): ``lease`` a key's worker for one request, and
     ``release`` it after. Requests are granted first come first served: one whose key has a live
     worker takes it when it is free; one that needs a worker of its own takes a slot under the cap,
@@ -643,8 +643,8 @@ class Daemon:
         return f"{error}, at {frame.get('model')}: {describe(frame)}" if frame else str(error)
 
     def lease(self, script: str, environment: dict[str, str], cwd: str | None = None) -> Worker:
-        """The warm worker of a script (by its path), of code (``code::<name>``) or of the
-        documents no worker built (``documents``), for one request: waiting its turn in the
+        """The warm worker of a script (by its path) or of the documents no worker built
+        (``documents``), for one request: waiting its turn in the
         pool, started when none is alive (``Pool``). ``release`` it after."""
         return self.pool.lease(script, environment, cwd)
 
@@ -703,9 +703,6 @@ class Daemon:
 
     def _routed(self, request: dict[str, Any]) -> tuple[str, str | None]:
         """The worker a request goes to (its key) and the folder that worker starts in."""
-        if request.get("code") is not None or "code" in (request.get("source") or {}):
-            name = request.get("name") or (request.get("source") or {}).get("code") or "model"
-            return f"code::{name}", request.get("cwd")
         source = request.get("source") or {}
         if "path" in source:
             builder = self.builders.get(os.path.normcase(str(Path(source["path"]).resolve())))
@@ -801,9 +798,9 @@ class Daemon:
                      "expected": request.get("expected"), "inspect": request.get("inspect"), "original": request.get("original")}
             return self._call(request, order, send)
         if op == "result":
-            order = {"id": 1, "op": "result", "script": request["script"], "code": request["name"],
+            order = {"id": 1, "op": "result", "script": request["script"], "name": request["name"],
                      "cwd": request.get("cwd")}
-            return self._call({**request, "code": None if request.get("source_kind") == "script" else request["name"]}, order, send)
+            return self._call(request, order, send)
         if op == "build":
             with self.busy_lock:
                 self.busy += 1
@@ -816,8 +813,7 @@ class Daemon:
                         worker = self.lease(key, request.get("env") or {}, cwd)
                         fresh = worker.builds == 0
                         order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
-                                 "cwd": request.get("cwd"), "outputs": request.get("outputs"),
-                                 "code": request.get("code"), "shape": request.get("shape"), "verify": bool(request.get("verify")),
+                                 "cwd": request.get("cwd"), "verify": bool(request.get("verify")),
                                  "profile": bool(request.get("profile")), "acknowledged": True}
                         server = self.server
                         if server is not None:

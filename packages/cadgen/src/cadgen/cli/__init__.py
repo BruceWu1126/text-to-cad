@@ -3,7 +3,7 @@
 Every subcommand is also reachable as ``python -m cadgen.<module>``; this is the friendly
 front door, not a second implementation. A subcommand's parser lives in its own module and
 owns its arguments, so the console and module entry points cannot drift. The engine's verbs
-(``build``, ``export``, ``snapshot``, ``serve``, ``inspect``, ``status``, ``stop``, ``daemon``) are
+(``export``, ``snapshot``, ``serve``, ``inspect``, ``status``, ``stop``, ``daemon``) are
 ``cadgen.engine.cli``'s, each run by its name; the robot validators' parsers are DERIVED from
 the verb function's signature (``cadgen._internal.cli_from_function``).
 
@@ -30,8 +30,7 @@ import sys
 #
 # A model script builds by running it (``python <model>.py``): no command takes its place.
 _COMMANDS: dict[str, tuple[str, str]] = {
-    # The engine (cadgen.engine): code built, documents exported, drawn and served, its daemon.
-    "build": ("cadgen.cli.build", "build source text into the files its flags name"),
+    # The engine (cadgen.engine): documents exported, drawn and served, its daemon.
     "export": ("cadgen.cli.export", "write an .xbf or a .step to STEP, GLB, STL, 3MF, DXF or xbf"),
     "snapshot": ("cadgen.cli.snapshot", "render any supported file to an image"),
     "serve": ("cadgen.cli.serve", "serve a document over HTTP and print its URL"),

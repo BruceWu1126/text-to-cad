@@ -233,119 +233,19 @@ def _model_traceback(error: BaseException) -> str:
     return "".join(lines).rstrip()
 
 
-def code_script(name: str, cwd: Path) -> Path:
-    """The path code built from source text is known by (``cadgen build SOURCE``): never a
-    file on disk, a name in the working folder's ``(code)`` folder, ``<name>.py``."""
-    return Path(cwd).resolve() / CODE_FOLDER / f"{name}.py"
-
-
-CODE_FOLDER = "(code)"
-_CODE_NAME = __import__("re").compile(r"[A-Za-z_][A-Za-z0-9_]*")
-
-
-def code_source(name: str, code: str) -> str:
-    """Code's source as the module it is run as: a function ``name`` whose body is the code,
-    ending in ``return result``. Every line is indented once, but the lines inside a string
-    that spans lines, whose text the code's own. The code assigns its final shape to
-    ``result``; code that does not is refused by name."""
-    import ast
-    import io
-    import tokenize
-
-    if not _CODE_NAME.fullmatch(name or ""):
-        raise BuildError(f"--name {name!r} is no Python identifier")
-    try:
-        tree = ast.parse(code, filename="<code>")
-    except SyntaxError as error:
-        raise BuildError(f"the code does not parse: {error}") from None
-    assigned = any(isinstance(node, ast.Name) and node.id == "result" and isinstance(node.ctx, ast.Store)
-                   for node in ast.walk(tree))
-    if not assigned:
-        raise BuildError("the code assigns no `result`: code assigns its final shape to `result`")
-    inside: set[int] = set()
-    try:
-        for token in tokenize.generate_tokens(io.StringIO(code).readline):
-            if token.type == tokenize.STRING and token.end[0] > token.start[0]:
-                inside.update(range(token.start[0] + 1, token.end[0] + 1))
-    except (tokenize.TokenError, IndentationError):
-        pass
-    lines = code.splitlines()
-    body = [line if number in inside or not line.strip() else "    " + line
-            for number, line in enumerate(lines, start=1)]
-    return f"def {name}():\n" + "\n".join(body) + "\n    return result\n"
-
-
-def load_code(script: Path, name: str, code: str, outputs: dict[str, dict[str, Any]] | None) -> Any:
-    """Code built from source text, as a fresh module held in memory only: its function
-    ``name`` a model whose outputs are the flags' (``outputs``). Its source is kept where the
-    engine's readers find a file's (``sources.MEMORY``, ``linecache``), never on disk."""
-    import linecache
-    import types
-
-    from cadgen.engine import sources
-    from cadgen.engine.model import Model, Output
-
-    text = code_source(name, code)
-    _from_source()
-    for module_name in _first_party_modules():
-        sys.modules.pop(module_name, None)
-    importlib.invalidate_caches()
-    for folder in (str(script.parent.parent),):
-        if folder in sys.path:
-            sys.path.remove(folder)
-        sys.path.insert(0, folder)
-    sources.MEMORY[str(script)] = text.encode("utf-8")
-    linecache.cache[str(script)] = (len(text), None, text.splitlines(True), str(script))
-    module_name = f"_cadgen_code_{name}"
-    module = types.ModuleType(module_name)
-    module.__file__ = str(script)
-    sys.modules[module_name] = module
-    try:
-        exec(compile(text, str(script), "exec"), module.__dict__)  # noqa: S102 - the author's code, as a script runs
-    except BaseException:
-        sys.modules.pop(module_name, None)
-        raise
-    model = Model(module.__dict__[name])
-    model._address = f"code::{name}"
-    model.outputs = [Output(kind, given["out"]) for kind, given in (outputs or {}).items()]
-    module.__dict__[name] = model
-    return module
-
-
-def _declared(name: str, outputs: dict[str, dict[str, Any]] | None, base: Path) -> dict[str, dict[str, Any]]:
-    """Code's flags as its declarations (law 12): each kind at its path from ``base``, the
-    working folder, or where a decorator with no path puts it there."""
-    from cadgen.engine.model import KINDS, SUFFIXES, XBF_FOLDER, check_output
-
-    declared = {}
-    for kind, given in (outputs or {}).items():
-        if kind not in KINDS:
-            raise BuildError(f"no output kind {kind}; the kinds are {', '.join(KINDS)}")
-        out = (given or {}).get("out")
-        try:
-            check_output(kind, out, f"--{kind}")
-        except (TypeError, ValueError) as error:
-            raise BuildError(str(error)) from None
-        default = Path(XBF_FOLDER) / f"{name}.xbf" if kind == "xbf" else Path(name + SUFFIXES[kind])
-        declared[kind] = {"out": os.path.normpath(os.path.abspath(base / (out or default)))}
-    return declared
-
-
 def build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
-          cwd: Path | None = None, outputs: dict[str, dict[str, Any]] | None = None, code: str | None = None,
-          verify: bool = False, profile: bool = False, shape: dict | None = None) -> list[dict[str, Any]]:
+          cwd: Path | None = None, verify: bool = False, profile: bool = False) -> list[dict[str, Any]]:
     """Run a build, optionally profiling this execution in its worker (or explicit cold caller).
 
     The profile covers the whole request, including child models and output processing.
     Each top-level report carries that same request-wide profile, never a cached profile.
     """
     if not profile:
-        return _build(script, functions, log=log, cwd=cwd, outputs=outputs, code=code, verify=verify, shape=shape)
+        return _build(script, functions, log=log, cwd=cwd, verify=verify)
     from cadgen.engine.profiling import Profile
 
-    with Profile(project=Path(script).parent if code is None else Path(cwd or Path.cwd()),
-                 supplied_shape=shape is not None) as measured:
-        reports = _build(script, functions, log=log, cwd=cwd, outputs=outputs, code=code, verify=verify, shape=shape)
+    with Profile(project=Path(script).parent) as measured:
+        reports = _build(script, functions, log=log, cwd=cwd, verify=verify)
     summary = measured.report()
     for report in reports:
         report["profile"] = summary
@@ -353,21 +253,15 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
 
 
 def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
-          cwd: Path | None = None, outputs: dict[str, dict[str, Any]] | None = None, code: str | None = None,
-          verify: bool = False, shape: dict | None = None) -> list[dict[str, Any]]:
+          cwd: Path | None = None, verify: bool = False) -> list[dict[str, Any]]:
     """Build the script's models (``functions``, or every model it defines); one report
     per model, holding those of the child models its run ran, each of which wrote its own
     files (``child_models``). Raises BuildError for a script or function that is not there;
     a body that raises is its model's report (``ok`` false, ``error`` the model's traceback).
 
     A script's models write what their decorators declare (``Model.plan``) and nothing else:
-    a script takes no file flags (law 11). ``code`` builds source text instead: ``script`` is
-    then ``code_script(name, cwd)`` and ``functions`` the one name; code declares nothing, so
-    its files are its flags, ``outputs`` (law 12): ``{kind: {"out": path or None}}``, the kinds
-    ``xbf``, ``step``, ``glb``, ``stl``, ``threemf``, ``dxf``, each at its path from the working
-    folder or, with none, where a decorator with no path puts it there (``XBF/<name>.xbf``,
-    ``<name><suffix>``). Every file shows the model as its joints place it: a pose or a part is
-    the ``export`` verb's, never a build's.
+    a script takes no file flags (law 11). Every file shows the model as its joints place it: a
+    pose or a part is the ``export`` verb's, never a build's.
 
     ``verify``: every body the memo would replay -- a model's, a ``@memo`` call's -- runs
     instead, and its fresh result is compared with the logged one; the report's
@@ -377,25 +271,12 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
     from cadgen.engine.kernel import determinism, memo
     from cadgen.engine.model import _MODELS, BuildContext, models_in
 
-    if shape is not None:
-        from cadgen.engine.shape_input import build as build_shape
-
-        if not functions or len(functions) != 1:
-            raise BuildError("a shape build names one model")
-        return build_shape(shape, Path(script), functions[0], outputs, Path(cwd or Path.cwd()), log)
-
-    script = Path(script).resolve() if code is None else Path(script)
-    if code is None and not script.is_file():
+    script = Path(script).resolve()
+    if not script.is_file():
         raise BuildError(f"no script {script}")
-    if code is None and outputs:
-        raise BuildError("file flags declare code's files; a script's models write what their decorators declare")
-    if code is not None:
-        if not functions or len(functions) != 1:
-            raise BuildError("code is one model: name it with --name")
-        outputs = _declared(functions[0], outputs, Path(cwd or Path.cwd()))
     determinism.install()
     memo.install()
-    shown = _shown(script, cwd) if code is None else "<code>"
+    shown = _shown(script, cwd)
     reports: list[dict[str, Any]] = []
     started = time.perf_counter()
     # Per target: the model, its result (None: it wrote nothing), its body's seconds, and the
@@ -408,14 +289,14 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
         run.verify = verify
         _MODELS.clear()  # the models this build defines, known by name to what its replays ran
         try:
-            module = load_script(script) if code is None else load_code(script, functions[0], code, outputs)
+            module = load_script(script)
         except BuildError:
             raise
         except Exception as error:  # noqa: BLE001 - the model's own error, reported
             return [{"ok": False, "model": f"{shown}", "error": _model_traceback(error)}]
         loaded = time.perf_counter()
         context.loaded = set(_first_party_modules())
-        context.base = script.parent if code is None else Path(cwd or Path.cwd())
+        context.base = script.parent
         context.script = script
         models = models_in(vars(module), script)
         if functions:
@@ -525,8 +406,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
     load_seconds = loaded - started
     for report, (model, result, body, children) in zip(reports, results):
         report["address"] = model.address
-        report["source"] = {"script": str(model.script), "name": model.name,
-                             "kind": "code" if model.address.startswith("code::") else "script"}
+        report["source"] = {"script": str(model.script), "name": model.name}
         if result is not None:
             report["timings"] = {"load": round(load_seconds, 4), "body": round(body, 4)}
             _written(model, result, run, report, log, model.plan(), context)
@@ -724,8 +604,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
                              files, tree)
     report["files"] = {str(target.path): written[str(target.path)] for target in plan}
     report["address"] = model.address
-    report["source"] = {"script": str(model.script), "name": model.name,
-                         "kind": "code" if model.address.startswith("code::") else "script"}
+    report["source"] = {"script": str(model.script), "name": model.name}
 
 
 def held(script: Path | None = None, name: str | None = None, *, path: Path | None = None) -> Any:

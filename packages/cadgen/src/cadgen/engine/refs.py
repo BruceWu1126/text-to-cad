@@ -844,13 +844,12 @@ def _tree(source: Any, document: Path | None) -> Any:
 
         target = address(document)
         if target is not None:
-            if target.script is not None and not isinstance(source, Model):
+            if not isinstance(source, Model):
                 report = api.build_script(target.script, [target.name])
                 if not report.ok:
                     raise api.EngineError(next(row["error"] for row in report.models if not row.get("ok")))
             spec = api._source(str(target))
-            return api.Built(target.name, Path(spec["script"]), {}, Path.cwd(),
-                             source_kind="code" if target.script is None else "script").shape
+            return api.Built(target.name, Path(spec["script"]), {}, Path.cwd()).shape
     return source if document is None else _read(document)
 
 

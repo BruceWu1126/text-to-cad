@@ -64,15 +64,13 @@ INTERVAL = 0.1
 class Progress:
     """One build's progress (see the module): its state, and each frame of it sent to ``send``.
 
-    ``script`` and ``cwd`` are the build's, which name its models as their reports do; ``code``
-    says the build is of source text, whose script is named ``<code>``."""
+    ``script`` and ``cwd`` are the build's, which name its models as their reports do."""
 
     def __init__(self, send: Callable[[dict[str, Any]], None], *, script: Path | str | None = None,
-                 cwd: Path | str | None = None, code: bool = False) -> None:
+                 cwd: Path | str | None = None) -> None:
         self.send = send
         self.script = Path(script) if script is not None else None
         self.cwd = Path(cwd) if cwd is not None else None
-        self.code = code
         self.started = time.monotonic()
         self.lock = threading.Lock()
         self.model = ""
@@ -153,12 +151,10 @@ class Progress:
     # --- the engine's stages -----------------------------------------------------------------
 
     def name(self, script: Path | str | None, function: str | None = None) -> str:
-        """A model as its report names it: its script relative to the build's folder (``<code>``
-        for source text), and its function."""
+        """A model as its report names it: its script relative to the build's folder, and its
+        function."""
         if script is None:
             shown = ""
-        elif self.code and self.script is not None and Path(script).resolve() == self.script.resolve():
-            shown = "<code>"
         else:
             try:
                 shown = os.path.relpath(script, self.cwd or Path.cwd())

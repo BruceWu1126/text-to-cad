@@ -55,21 +55,8 @@ _DIGESTS: "OrderedDict[tuple, str]" = OrderedDict()
 _IMPORTS: "OrderedDict[str, tuple]" = OrderedDict()
 
 
-# Source no file holds: code built from text (``build.load_code``), by its path, read
-# here in place of the disk. In memory only.
-MEMORY: dict[str, bytes] = {}
-
-
-def _source_bytes(path: Path) -> bytes:
-    held = MEMORY.get(str(path))
-    return held if held is not None else Path(path).read_bytes()
-
-
 def digest(path: Path) -> str:
     """A file's bytes, hashed once per version of the file."""
-    held = MEMORY.get(str(path))
-    if held is not None:
-        return hashlib.sha256(held).hexdigest()
     stat = os.stat(path)
     version = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
     found = _DIGESTS.get(version)
@@ -86,7 +73,7 @@ def _imports(path: Path, file_digest: str) -> tuple:
     if found is None:
         rows = []
         try:
-            tree = ast.parse(_source_bytes(path), filename=str(path))
+            tree = ast.parse(Path(path).read_bytes(), filename=str(path))
         except SyntaxError:
             tree = ast.Module(body=[], type_ignores=[])
         for node in ast.walk(tree):
@@ -199,7 +186,7 @@ def _facts(path: Path, file_digest: str) -> tuple[dict, str | None, tuple, dict,
     found = _FACTS.get(file_digest)
     if found is None:
         try:
-            tree = ast.parse(_source_bytes(path), filename=str(path))
+            tree = ast.parse(Path(path).read_bytes(), filename=str(path))
         except (SyntaxError, ValueError, OSError):
             tree = ast.Module(body=[], type_ignores=[])
         spots: dict[tuple[str, int], str] = {}
@@ -789,8 +776,8 @@ class Symbols:
                 buckets.setdefault(str(file), []).append(f"bytes {file_digest}")
         found = {}
         for file, rows in buckets.items():
-            if file in MEMORY or not first_party_file(file):
-                continue  # code built from text: its source's digest is the build's
+            if not first_party_file(file):
+                continue
             found[file] = hashlib.sha256("\n".join(sorted(rows)).encode()).hexdigest()[:32]
         return found, unkeyable
 
@@ -812,7 +799,7 @@ class Symbols:
                 continue
             owner = owners.get(pair)
             file = self._module_file(owner) or root
-            if file in MEMORY or not first_party_file(file):
+            if not first_party_file(file):
                 continue
             name = str(pair[0])
             for prefix in ((f"{owner}:", f"{owner}.") if owner else ()):
@@ -830,7 +817,7 @@ class Symbols:
         file = getattr(sys.modules.get(name), "__file__", None)
         if not file:
             return None
-        return str(file) if str(file) in MEMORY else str(Path(file).resolve())
+        return str(Path(file).resolve())
 
     # --- what is first-party ---------------------------------------------------------------
 
