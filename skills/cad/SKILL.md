@@ -21,7 +21,7 @@ Use the installed local skill files for the current interface.
 | **Find the code that made a face or an edge** | `cadgen inspect <document> <ref>`. | [Which code made it](references/inspection-and-validation.md#which-code-made-it) |
 | **Measure or check geometry** | A Python check: `read_xbf`, `select` and `cadgen.geometry`. | [Inspection](references/inspection-and-validation.md) |
 | **See a model or a pose** | `cadgen snapshot`. | [Snapshots](references/snapshot-review.md) |
-| **Articulate a model** | build123d joints in the body, then `configuration`, `couple` and `motion`. | [Kinematics](references/kinematics.md) |
+| **Articulate a model** | build123d joints in the body, then `mechanism_state`, `gear_pair` / `rack_and_pinion_pair` / `screw_pair` and `configuration_sequence`. | [Kinematics](references/kinematics.md) |
 | **Explode, reveal or showcase a model in a GLB** | `animation` in the body, with `@glb` stacked on `@xbf`. | [Animation](references/animation.md) |
 | **Open an existing XBF, STEP/STP, STL, 3MF or GLB** | Show it to the user. | [Show the model](#show-the-model) |
 | **Source or commands written for an older cadgen fail** | Their migration. | [Migrations](references/migrations.md) |
@@ -98,7 +98,7 @@ built src/bracket.py::bracket cold in 2.33s: bodies 1 run; 6 misses, 0 hits; bod
 - `@model` declares a document without a file. Every file decorator implies a model.
 - `@step`, `@glb`, `@stl`, `@threemf` and `@dxf` declare translations of the
   document; `@xbf` explicitly saves that document. Every file decorator requires `out=` (or a positional output path) and takes nothing else:
-  materials, colours, joints, configurations and motions are written in the body. A
+  materials, colours, joints, mechanism states and configuration sequences are written in the body. A
   model without `@xbf` writes its other declared files and keeps its document in memory.
 - The script's worker keeps every kernel operation it ran, keyed by its inputs, so an
   edit runs what it reaches and replays the rest, and an unchanged model rewrites

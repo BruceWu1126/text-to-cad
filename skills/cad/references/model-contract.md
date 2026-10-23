@@ -60,7 +60,7 @@ python src/bracket.py
   `@dxf("part.dxf")` declare translations; DXF requires planar geometry.
 - **Every file decorator requires `out`**, its only argument, as a positional
   path or `out="..."`. Relative paths are relative to the script. `None` and omitted
-  paths fail. Materials, colours, joints, configurations and motions belong in the body.
+  paths fail. Materials, colours, joints, mechanism states and configuration sequences belong in the body.
 - **A declared file is written whenever its model runs in a build**, as the build's
   target or as a child another model calls, once per build, from that model's own
   document. The `.xbf` comes first (an open viewer shows it at once), then the files

@@ -2,14 +2,14 @@
 
 Read this file when the user asks for an explode, a reveal, a showcase, a turntable, a part that
 appears or disappears, or any movement that is not the mechanism's own. For joints,
-configurations, couplings and motions, read [Kinematics](kinematics.md) first.
+mechanism states, couplings and configuration sequences, read [Kinematics](kinematics.md) first.
 
 ## Motion or animation
 
 Two layers, each true to its format:
 
-- **A motion** (`motion(...)`) is the mechanism's: joint values over time, kept in the `.xbf`
-  as STEP AP242's configuration sequence. Every GLB of the model carries it as a clip,
+- **A configuration sequence** (`configuration_sequence(...)`, a motion in the viewer) is the
+  mechanism's: joint values over time, kept in the `.xbf` as STEP AP242's configuration sequence. Every GLB of the model carries it as a clip,
   including one `cadgen export` writes from the `.xbf` later, and the viewer's Position poses
   the same joints. A robot's gait, a door's opening, an engine's running belong here.
 - **An animation** (`animation(...)`) is the GLB's: glTF channels (translation, rotation,
@@ -36,15 +36,15 @@ The rules:
 
 ```python
 import build123d as bd
-from cadgen import animation, configuration, glb, motion, xbf
+from cadgen import animation, configuration_sequence, glb, mechanism_state, xbf
 
 
 @xbf(out="../XBF/hinged_box_showcase.xbf")
 @glb(out="../XBF/hinged_box_showcase.glb")
 def hinged_box_showcase():
     ...                                                            # body, a hinged lid, a latch, two feet
-    configuration(box, "open", hinge=100)
-    motion(box, "open_close", [(0, "shut"), (1.5, "open"), (3, "shut")])   # every GLB's clip
+    mechanism_state(box, "open", hinge=100)
+    configuration_sequence(box, "open_close", [(0, "shut"), (1.5, "open"), (3, "shut")])   # every GLB's clip
 
     show = animation(box, "showcase", duration=4)                  # this GLB's alone
     show.pose(at={0: "shut", 1.5: "open", 3.5: "shut"})            # the hinge, through forward kinematics
@@ -79,7 +79,7 @@ Helpers compile to channels:
 - **`.stagger(parts, by=, step=, start=, each=)`**: each part in turn moved `by`, `step` seconds
   apart.
 - **`.hide(parts, at=)`**: a `STEP` scale to 0.
-- **`.pose(at={t: configuration or joint values}, interpolation=)`**: the mechanism driven
+- **`.pose(at={t: mechanism state or joint values}, interpolation=)`**: the mechanism driven
   inside the animation, its links placed by forward kinematics, the joint values eased between
   the keys. It stands at its first pose before its first time.
 
@@ -101,11 +101,11 @@ act after `.pose`, so an explode moves a posed part.
 Each of these fails the build, by name:
 
 - a part no occurrence is (the error lists the nearest names) or a glob matching nothing;
-- a configuration or joint the mechanism lacks, in `.pose`;
+- a mechanism state or joint the mechanism lacks, in `.pose`;
 - two channels of one path on one part overlapping in time, or two `.pose` calls overlapping;
 - a part whose translation, rotation or scale would be `STEP` by one channel and eased by another;
 - a time outside `0` to `duration`;
-- an animation with a motion's name.
+- an animation with a configuration sequence's name.
 
 ## Reviewing
 

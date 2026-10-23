@@ -30,7 +30,7 @@ const GLB_MAGIC = 0x46546c67; // "glTF"
 const JSON_CHUNK = 0x4e4f534a; // "JSON"
 const BIN_CHUNK = 0x004e4942; // "BIN\0"
 
-// The motion the model declares: `motion(assembly, "meshCycle", ..., duration=6, ...)`. Its clip is the
+// The motion the model declares: `configuration_sequence(assembly, "meshCycle", ..., duration=6, ...)`. Its clip is the
 // motion once; the page repeats it.
 function declaredMotion(source) {
   const call = /\bmotion\(\s*\w+\s*,\s*"([^"]+)"([\s\S]*?)\)\s*$/m.exec(source);
