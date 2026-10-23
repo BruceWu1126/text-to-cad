@@ -181,8 +181,7 @@ if __name__ == "__main__":
   included. If a drawing comes out as hundreds of short `LINE`s, something fell
   back to the sampled path: check the union inputs rather than accepting it.
 - **Why did it (not) rebuild?** The run's report says how each body went (`run` or
-  `replayed`) and what changed (`rebuilt: ../src/bracket.py changed`);
-  `cadgen inspect <id>`, the id the run printed, prints what the drawing was built
-  from.
+  `replayed`); `cadgen inspect <id>`, the id the run printed, prints what the drawing
+  was built from.
 - **Kept current**: an `exports.py` beside the drawings calls `export(drawing, path)`
   for each, the model function itself, with paths anchored on `__file__`.

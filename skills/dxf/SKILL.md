@@ -13,7 +13,7 @@ repository link is only for provenance and release review.
 ## Setup
 
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
-one installation, and its engine, with the CAD app's server:
+one installation, and its engine server, with the CAD app's:
 
 - `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen`
 - `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 python`
