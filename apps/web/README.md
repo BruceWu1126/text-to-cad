@@ -107,6 +107,9 @@ record without opening a browser; `--no-open` prints only the URL. There is no
 foreground viewer server and no `--detach` or `viewer stop`. `cadgen stop` stops
 the installation's engine and all its clients; never stop an engine you did not start.
 
+`cadgen serve DOC` also starts or reuses this engine, prints the document URL and
+exits. It has no `--foreground` or standalone server mode.
+
 The engine binds loopback on an OS-assigned port. `--port N` pins its HTTP port
 and `--host ADDRESS` pins its bind address. If the running engine has a different
 port or address, the launch fails with that conflict; it never replaces a server

@@ -9,7 +9,7 @@ ordinary Python scripts call decorated models explicitly.
     cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--camera PRESET|az:el|JSON|authored] [--grid]
         [--preview] [--pose NAME|JSON] [--annotation FILE] [--measurements FILE] [--width N] [--height N]
         [--size-profile P] [--json]
-    cadgen serve DOC [--port N] [--three DIR] [--foreground]
+    cadgen serve DOC [--port N] [--three DIR]
     cadgen status [--json] | stop | daemon
     cadgen where DOC [REF]                           a document's build closure, or what a ref names (``refs``)
 
@@ -34,7 +34,7 @@ __all__ = ["VERBS", "Failed", "answered", "build_parser", "main", "parser_for", 
 
 FILE_FLAGS = ("xbf", "step", "glb", "stl", "threemf", "dxf")
 _SUFFIX = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "dxf": ".dxf"}
-# Where a file flag with no path writes, in the working folder: where a decorator with none puts it.
+# Where a file flag with no path writes, in the working folder.
 _DEFAULT = {"xbf": "XBF/<name>.xbf", "step": "<name>.step", "glb": "<name>.glb", "stl": "<name>.stl",
             "threemf": "<name>.3mf", "dxf": "<name>.dxf"}
 
@@ -76,7 +76,6 @@ def _serve_arguments(serve: argparse.ArgumentParser) -> None:
     serve.add_argument("document", help="a model address (SCRIPT::NAME or code::NAME), an .xbf, or a STEP")
     serve.add_argument("--port", type=int, default=0)
     serve.add_argument("--three", help="the three.js package folder (default: the nearest node_modules/three)")
-    serve.add_argument("--foreground", action="store_true", help="serve from this process until interrupted")
 
 
 def _status_arguments(status: argparse.ArgumentParser) -> None:
@@ -311,29 +310,10 @@ def _serve(args: argparse.Namespace, prog: str) -> int:
     path = key(args.document)
     if isinstance(path, Path) and not path.is_file():
         raise Failed(f"no document {args.document}", 2)
-    if isinstance(path, str) and args.foreground:
-        raise Failed("a model lives in the engine; serve it without --foreground", 2)
-    three = args.three
-    if three is None:
-        from cadgen.engine.serve import find_three
-
-        found = find_three()
-        three = str(found) if found else None
-    if args.foreground:
-        from cadgen.engine.serve import Server
-
-        server = Server(port=args.port, three=three)
-        ident = server.add(path)
-        print(f"{server.url}/?doc={ident}", flush=True)
-        try:
-            server.http.serve_forever()
-        except KeyboardInterrupt:
-            pass
-        return 0
     from cadgen.engine import api
 
     try:
-        print(api.serve(path, args.port, three).url)
+        print(api.serve(path, args.port, args.three).url)
     except api.EngineError as error:
         raise Failed(str(error)) from None
     return 0

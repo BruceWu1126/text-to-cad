@@ -164,7 +164,8 @@ def hinge():
     worker; once its last sync expires, ordinary idle retirement applies.
 
 15. **One HTTP owner per installation.** The daemon serves page sessions and document
-    reads on one authenticated listener. A launcher exits after handing its client the
+    reads on one authenticated listener. Both `serve` and `viewer` start or reuse it;
+    neither command has a standalone serving mode. A launcher exits after handing its client the
     engine URL; closing a client never stops the engine. Each page has its own catalog root.
     No page replaces or re-executes the engine; stopping it is an explicit engine operation.
 16. **No kernel in request threads.** Reading XBF/STEP, meshing, topology facts and poses
@@ -188,6 +189,7 @@ def hinge():
 ## Architecture
 
 One server per installation owns the worker pool, served documents and HTTP listener.
+`cadgen serve` and `cadgen viewer` launch or reuse that server and return its URL.
 The background process is implemented in `daemon.py`; warm workers remain separate.
 A Python shape build sends plain metadata and binary geometry encoded as JSON (`shape_input.py`);
 only the worker reconstructs it, then calls the same writer as a source build.
@@ -268,7 +270,7 @@ cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera 
                 [--width W --height H | --size-profile P] [--no-daemon] [--json]
 cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
                                              every picture a Quick Edit packet (or a job file) names
-cadgen serve DOC [--port N] [--three DIR] [--foreground]
+cadgen serve DOC [--port N] [--three DIR]
 cadgen where DOC [REF]                       the build closure; with REF (**References**): an element's facts and
                                              what made it, or a part's or an assembly's volume and mass
 cadgen status [--json] | stop | daemon
@@ -1129,7 +1131,7 @@ of its call, and, for a name that folds its derivation, the derivation spelled
 out. It comes from the trace of the worker that built the document, asked over
 the worker's pipe (a `where` request, answered by the worker's reading thread,
 during a build too) and never from a file: a document served cold, with no live
-worker that built it (a daemon started again, `serve --foreground`), answers
+worker that built it (for example, after a daemon restart), answers
 `made_by: null`, and so does an element the served version names otherwise than
 that worker's last build. The line is the call's in the run that named the part.
 `cadgen where DOC REF` serves the document on demand and resolves `REF` (**References**):

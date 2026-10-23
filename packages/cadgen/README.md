@@ -168,7 +168,8 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     (the engine's **Architecture** and **The daemon and its workers**).
 
 20. **One engine serves the installation.** A page never replaces or re-executes it. Page sessions and document reads share its
-    authenticated HTTP listener. Launchers exit; clients closing never stop it. Kernel
+    authenticated HTTP listener. `serve` and `viewer` always start or reuse it, with no
+    standalone serving mode. Launchers exit; clients closing never stop it. Kernel
     operations run in child processes, never in the engine's request threads. Each
     page session keeps its own root; each MCP session owns its views and resource. The
     stdio shim owns only connection metadata. Sidebar sharing stays in memory, and host

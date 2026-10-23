@@ -71,7 +71,7 @@ ADAPTERS: dict[str, frozenset[str]] = {
                         "no_daemon"}),
     "export": frozenset({"source", "destinations", "no_inputs", "pose", "part", "no_daemon", "json"}),
     "snapshot": SNAPSHOT,
-    "serve": frozenset({"document", "port", "three", "foreground"}),
+    "serve": frozenset({"document", "port", "three"}),
     "where": frozenset({"document", "ref"}),
     "status": frozenset({"json"}),
     "stop": frozenset(),

@@ -53,7 +53,8 @@ The document is what the viewer follows build by build, what refs and
 | --- | --- |
 | `@step(out=..., kinematics=..., materials=..., animation=...)` | `@step(out=...)`: `out` is every decorator's only argument; the rest is written in the body (below) |
 | `@stl(mesh_tolerance=..., mesh_angular_tolerance=...)`, `--mesh-tolerance` | none: every mesh is made at FreeCAD's default tolerance |
-| `python model.py --force`, `--json`, `--verbose`, `--profile` | `python model.py` takes no options. `CADGEN_ENGINE_MEMO=0` builds without memo hits; `Model.build()` returns the report as data; `Model.build(verify=True)` checks every replay |
+| `python model.py --force`, `--json`, `--verbose` | `python model.py` takes no options. `CADGEN_ENGINE_MEMO=0` builds without memo hits; `Model.build()` returns the report as data; `Model.build(verify=True)` checks every replay |
+| `python model.py --profile` | no replacement: build reports include phase timings, but the engine has no function-level profiler |
 | `python model.py --no-daemon` | `Model.build(daemon=False)` from Python |
 | `cadgen step build IN.step OUT.step` | `cadgen export IN.step OUT.step`, or `OUT.xbf` to read it in models |
 | `cadgen step compile` | none: the viewer and snapshots read a STEP as it is |
@@ -67,6 +68,7 @@ The document is what the viewer follows build by build, what refs and
 | snapshot `--focus`, `--hide` | `--display '{"isolated": ["lid"]}'` and `--display '{"hidden": ["lid"]}'` (part refs); a Quick Edit packet given to `--annotation` or `--job` carries the person's own |
 | `cadgen store why`, `store where`, `store forget`, `store gc`, `store info` | none: no store. `cadgen where DOC` prints a document's build closure, `cadgen where DOC REF` what made an element |
 | `cadgen daemon status` | `cadgen status` (and `cadgen stop`) |
+| `cadgen serve DOC --foreground` | `cadgen serve DOC`: start or reuse the installation's server, print its URL, and exit |
 | `CADGEN_CACHE_DIR`, `CADGEN_STORE_MAX`, `CADGEN_DAEMON_STATE_DIR` | none; `CADGEN_ENGINE_DIR` moves the engine daemon's socket |
 | `read_scene(path).resolve(ref).shape()` | `select(path, ref)[0]` |
 | `cadgen.revolute`, `slider`, `cylindrical`, `fastened`, `MateTarget`, `AssemblyHelper` | build123d joints in the body |
