@@ -1,91 +1,172 @@
-# The model contract
+# Models
 
-Read this file when authoring or rebuilding a model script, composing models into
-assemblies, deciding what a build runs, or reading files into a model.
+Read this file when writing or editing a model script, composing models into
+assemblies, choosing what to mark `@memo`, reading files into a model, or working out
+why a run ran what it ran.
 
-## A model script is Python
+## Contents
 
-A model is a parameterless function that returns a build123d shape, decorated with
-`@model` or a file decorator such as `@xbf`. Calling it builds it:
+- [A model is a function](#a-model-is-a-function)
+- [Parameters, configurations and `@memo`](#parameters-configurations-and-memo)
+- [Assemblies call their parts](#assemblies-call-their-parts)
+- [What a run runs](#what-a-run-runs)
+- [Inputs](#inputs)
+- [Documents and the engine](#documents-and-the-engine)
+- [Progress and the report](#progress-and-the-report)
+
+## A model is a function
 
 ```python
-from cadgen.engine import glb, step, xbf
+# src/plate.py
 import build123d as bd
+from cadgen import model
 
-THICKNESS = 6.0
+WIDTH, DEPTH, THICKNESS = 60.0, 40.0, 4.0
 
 
-@xbf(out="../XBF/bracket.xbf")
-@step(out="../STEP/bracket.step")
-@glb(out="../GLB/bracket.glb")
-def bracket():
-    body = bd.Box(40, 20, THICKNESS)
-    body.label = "bracket"
+@model
+def plate():
+    body = bd.Box(WIDTH, DEPTH, THICKNESS)
+    body.label = "plate"
     return body
 
 
 if __name__ == "__main__":
-    bracket()
+    plate()
 ```
 
-```bash
-python src/bracket.py
-```
-
-- **Decoration only declares.** Imports and function definitions never build or
-  exit the script. `python model.py` runs normal Python; each explicit model call
-  builds that model and its children, writes its declared outputs, and returns.
-  Keep executable calls under `if __name__ == "__main__":` so imports are safe.
-  Watchers never change which calls execute. The engine consumes no script
-  arguments; engine switches are environment variables ([the engine server](#the-engine-server)).
-- **A script is plain Python, loaded afresh by each build.** Its folder is first on
-  the module search path, so a module beside it imports by its own name. A script
-  inside a package (its folder holds an `__init__.py`) is that package's module, so
-  its relative imports (`from ..lib.dims import WIDTH`) work under
-  `python proj/parts/block.py` and `python -m proj.parts.block` alike. An edit to any
-  module the script imports is read on the next build.
-- **`import build123d as bd` costs nothing until it is used.** cadgen makes the import
-  of `build123d` (and `OCP`) lazy in the environment it is installed in: the module binds
-  at once and the kernel loads on the first attribute anything reads from it, in the
-  worker that builds the model. `from build123d import Box` reads the name, so it loads
-  the kernel at that line; so does a kernel value made at module level (a `bd.Color`
-  palette, a `bd.Align.CENTER` default). Write build123d attribute-style.
+- **`@model` declares, a call builds.** Importing the script or defining the function
+  builds nothing. A call the script's `__main__` makes builds the model in the engine
+  and prints its `id:` and `view:`; a call another model's body makes builds it as a
+  child, in the same run. Python decides which calls run; cadgen reads no script
+  arguments.
 - **A model takes no parameters and returns a build123d shape**: a part, or a
-  `Compound` of labelled children (an assembly). A drawing returns 2D geometry
-  (`$dxf`). A variant is a second model function; values shared between models live
-  in module constants (`THICKNESS = 6.0`) that the others import.
-- **A body that raises fails its model**: the report shows the model's frames, the
-  files its last good build wrote stay, and the script exits 1.
+  `Compound` of labelled children (an assembly). A 2D drawing returns 2D geometry and
+  belongs to `$dxf`.
+- **A script is plain Python, loaded afresh by each run.** Its folder is first on the
+  module search path, so a module beside it imports by its own name. A script inside a
+  package (its folder holds an `__init__.py`) is that package's module, so its relative
+  imports (`from ..lib.dims import WIDTH`) work under `python proj/parts/block.py` and
+  `python -m proj.parts.block` alike. An edit to any module it imports is read on the
+  next run.
+- **`import build123d as bd` costs nothing until it is used.** cadgen makes the import of
+  `build123d` (and `OCP`) lazy: the module binds at once and the kernel loads on the
+  first attribute anything reads from it, in the worker that builds the model. `from
+  build123d import Box` reads the name, so it loads the kernel at that line; so does a
+  kernel value made at module level (a `bd.Color` palette, a `bd.Align.CENTER`
+  default). Write build123d attribute-style.
+- **A body that raises fails its model**: the run prints the model's frames, exits 1,
+  and the page says the run failed.
+- **Called from a plain script** (a check, a drawing), a model is built in the engine
+  and its call returns the result as a build123d tree: every assembly a `Compound`,
+  every part placed, named, coloured and given its material.
 
-## Decorators declare models and files
+## Parameters, configurations and `@memo`
 
-- `@model` declares a model with no file output. File decorators also declare a model.
+A model has no parameters, so a part's dimensions are the arguments of a `@memo`
+helper, and each set of values is a model of its own: a configuration, with its own
+id and page.
 
-- `@xbf("XBF/part.xbf")` declares the native document. `@step("part.step")`,
-  `@glb("part.glb")`, `@stl("part.stl")`, `@threemf("part.3mf")` and
-  `@dxf("part.dxf")` declare translations; DXF requires planar geometry.
-- **Every file decorator requires `out`**, its only argument, as a positional
-  path or `out="..."`. Relative paths are relative to the script. `None` and omitted
-  paths fail. Materials, colours, joints, mechanism states and configuration sequences belong in the body.
-- **A declared file is written whenever its model runs in a build**, as the build's
-  target or as a child another model calls, once per build, from that model's own
-  document. The `.xbf` comes first (an open viewer shows it at once), then the files
-  derived from it.
-- **The same code writes the same bytes.** A document that did not change is not
-  rewritten (`kept`), nor is a derived file the build left as it was; two builds of
-  the same code are the same files on any machine, on any day.
-- A model without `@xbf` writes its other files and no document; it builds and
-  composes like any other.
+```python
+# src/standoff.py
+import build123d as bd
+from cadgen import memo, model
 
-## What a build runs
 
-Each script has a warm worker in the daemon, and the worker keeps every kernel
-operation its models ran, keyed by its inputs. A hit hands back the objects the
-first run made; a miss makes everything downstream of it miss. So an edit costs
-what it changed, and an element keeps the name its feature history gave it.
+@memo
+def standoff_body(height, outer_d, bore_d):
+    post = bd.Cylinder(outer_d / 2, height) - bd.Cylinder(bore_d / 2, height)
+    post.label = "standoff"
+    return post
 
-Above that, a body (a model's, or a `@memo` call's) is skipped, its last run
-replayed, while what it is made of is unchanged:
+
+@model
+def standoff_m3():
+    return standoff_body(12, 8, 3.4)
+
+
+@model
+def standoff_m4():
+    return standoff_body(16, 10, 4.5)
+```
+
+`@memo` marks a function the engine may replay instead of running. A call of it in a
+run is keyed by its code and its arguments, and a later run with the same key replays
+it, names and all; a second call with the same arguments in one run is a new placement
+of the first one's result. Outside a run it is its function. Its contract:
+
+- **Arguments by value**: numbers, strings, bools, `None`, tuples, lists and dicts of
+  them, enums and paths; build123d's `Location`, `Vector`, `Axis`, `Plane`, `Color`
+  and `Rotation`; a `Material`; a shape this run made. A call given anything else (a
+  callable, an arbitrary object) runs every time.
+- **Geometry back**: a shape, or a tuple, list or dict of shapes. A call returning
+  anything else runs every time.
+- **No methods**, and **pure**: it reads only what its key holds and changes nothing
+  outside itself. A global it sets for another function, or an argument it mutates, is
+  not seen, and a replay leaves it undone.
+- **Return an assigned name.** A `@memo` function names what its `return` statement makes
+  in itself, so marking a helper that returns `body - holes` renames those elements
+  once; marking one that returns `body` renames nothing.
+- **Mark stages, not loops.** Mark a part's parametric helper and a whole sub-assembly
+  stage; leave unmarked a helper a part's body calls many times over (a rib in a loop,
+  a hole in a pattern): the engine already keeps every kernel operation, and a memo call
+  per tiny shape only adds keys.
+
+Each call that runs every time is named, with why, in the report's
+`retention.fallbacks` ([progress and the report](#progress-and-the-report)).
+
+## Assemblies call their parts
+
+```python
+# src/assembly.py
+import build123d as bd
+from cadgen import model
+
+from plate import THICKNESS, plate
+from standoff import standoff_m3
+
+PITCH = 30.0
+
+
+@model
+def assembly():
+    base = plate()
+    post = standoff_m3()
+    z = (THICKNESS + post.bounding_box().size.Z) / 2
+    left = bd.Pos(-PITCH / 2, 0, z) * post
+    right = bd.Pos(PITCH / 2, 0, z) * post
+    left.label, right.label = "standoff_left", "standoff_right"
+    return bd.Compound(children=[base, left, right], label="assembly")
+
+
+if __name__ == "__main__":
+    assembly()
+```
+
+- **A child builds in the same run**, in the caller's worker, and returns what its body
+  returned, before the caller placed or labelled it. It keeps its own document and id. A
+  child called twice is one model, built once.
+- **Running a child's script alone builds the child** and leaves the assemblies that use
+  it as they were: run the assembly to update them.
+- **A placement shares its shape.** `Pos(...) * part`, `part.moved(...)` and
+  `part.located(...)` place the same geometry again, so a part used ten times is one
+  part placed ten times, in memory and in every file. A model that needs a B-rep of its
+  own copies it with `BRepBuilderAPI_Copy`.
+- **Label every placement**: the label names the occurrence in refs, the viewer's tree,
+  a STEP's instances and a GLB's nodes. Siblings sharing a label are numbered among them
+  (`finger.2`).
+- **A child's mechanism stays in its own document.** An assembly's joints are written in
+  the assembly's body, on the parts it places ([kinematics](kinematics.md)).
+
+## What a run runs
+
+Each script has a warm worker in the engine, and the worker keeps every kernel
+operation its models ran, keyed by its inputs. A hit hands back the objects the first
+run made; a miss makes everything downstream of it miss. So an edit costs what it
+changed, and an element keeps the name its feature history gave it.
+
+Above that, a body (a model's, or a `@memo` call's) is replayed, not run, while what it
+is made of is unchanged:
 
 - the code it reaches: the functions it calls, by their code (not their lines or
   docstrings), and the values it reads (module constants, defaults, data classes),
@@ -93,278 +174,126 @@ replayed, while what it is made of is unchanged:
 - every file it reads, by its bytes ([inputs](#inputs));
 - the engine's own code and versions.
 
-A comment, a blank line or a docstring re-runs nothing. An edit to a constant
-re-runs the bodies that read it and the bodies that hold their results. A changed
-input file re-runs the body that reads it. What the engine cannot see is yours to
-keep out of a body: the clock, environment variables, randomness, a file only
-tested for (`Path.exists`), a folder listed (`glob`, `os.listdir`), and state one
-body leaves in a module for another. A body must be a function of its inputs.
+A comment, a blank line or a docstring re-runs nothing. An edit to a constant re-runs
+the bodies that read it and the bodies that hold their results. A changed input file
+re-runs the body that reads it. What the engine cannot see is yours to keep out of a
+body: the clock, environment variables, randomness, a file only tested for
+(`Path.exists`), a folder listed (`glob`, `os.listdir`), and state one body leaves in a
+module for another. A body must be a function of its inputs.
 
-After the daemon restarts (it exits after an idle hour), a model's cache is its own
-`.xbf`: the document carries its build closure (the script and function, a digest
-of each module the model reaches, each input file's digest, the engine and library
-versions), and a build whose closure is unchanged takes the document whole and runs
-nothing. `cadgen inspect XBF/bracket.xbf` prints that closure. Anything else builds,
-and the report says why: `rebuilt: ../src/lib/arm_parts.py changed`.
+A run after the engine restarted, or after the script's worker retired, starts a fresh
+worker and builds cold. Every run says why it built what it built:
+`rebuilt: src/lib/arm_parts.py changed`.
 
-A verifying build runs every body the engine would replay and compares each fresh
-result with the logged one; from Python,
-`python -c "import bracket; print(bracket.bracket.build(verify=True).models[0]['verify'])"`.
-A body whose result differs is marked to run on every call for the worker's life.
-`CADGEN_ENGINE_BODIES=0` turns replay off, and `CADGEN_ENGINE_MEMO=0` every memo hit.
-
-## Children and assemblies
-
-A model in another script is a child: import it and call it in the body.
-
-```python
-# src/assembly.py
-from cadgen.engine import step, xbf
-import build123d as bd
-
-from plate import THICKNESS, plate
-from standoff import HEIGHT, standoff
-
-PITCH = 30.0
-
-
-@xbf(out="../XBF/assembly.xbf")
-@step(out="../STEP/assembly.step")
-def assembly():
-    base = plate()
-    post = standoff()
-    z = (THICKNESS + HEIGHT) / 2
-    left = bd.Pos(-PITCH / 2, 0, z) * post
-    right = bd.Pos(PITCH / 2, 0, z) * post
-    left.label, right.label = "standoff_left", "standoff_right"
-    return bd.Compound(children=[base, left, right], label="assembly")
-```
-
-- **A child builds in the same run**, in the caller's worker, and returns what its
-  body returned, before the caller placed or labelled it. It writes the files it
-  declares after its caller's: running the assembly writes `XBF/plate.xbf`,
-  `XBF/standoff.xbf` and their exports too. A child called twice is one model,
-  written once. Importing a model builds nothing.
-- **Running a child's script alone builds the child** and leaves the assemblies
-  that use it as they were: run the assembly to update them.
-- **A placement shares its shape.** `Pos(...) * part`, `part.moved(...)` and
-  `part.located(...)` make a new placement of the same geometry, so a part used ten
-  times is one part placed ten times, in memory and in the document. A model that
-  needs a B-rep of its own copies it with `BRepBuilderAPI_Copy`.
-- **Label every placement**: the label names the occurrence in refs, the viewer's
-  tree, the STEP's instances and the GLB's nodes. Labels that siblings share are
-  numbered among them (`finger.2`).
-- **A child's mechanism stays in its own document.** An assembly's joints are
-  authored in the assembly's body, on the parts it places ([kinematics](kinematics.md)).
-- **Outside a build a model is its function**: `bracket()` called from plain Python
-  runs the body there and returns the shape, cold. A drawing script uses this
-  (`$engineering-drawing`); for a big model, read its document with `read_xbf`
-  instead.
-
-## Memo functions
-
-`@memo` marks a function the engine may replay instead of running. Called in a
-build, a call is a body of its own, keyed by its code and its arguments; a later
-build with the same key replays it, names and all. It writes no file.
-
-```python
-from cadgen.engine import memo, xbf
-import build123d as bd
-
-
-@memo
-def frame(length):
-    rails = [bd.Pos(0, y, 0) * bd.Box(length, 10, 10) for y in (-40, 40)]
-    return bd.Compound(children=rails, label="frame")
-
-
-@xbf("XBF/rig.xbf")
-def rig():
-    base = frame(200)
-    ...
-```
-
-- **Mark rarely.** The memo already keeps every kernel call of any model, so a
-  replay saves only the Python cost of those hits (0.1 to 0.4 ms each). Mark a
-  function holding seconds of kernel work that an edit elsewhere leaves alone,
-  roughly a thousand kernel calls or more: whole sub-assembly stages (measured: 1.3
-  to 3 s each, twice as fast on an edit). Never mark per part, or a helper called
-  many times: those measured under 0.1 s. A nested `@xbf` is never needed for
-  caching.
-- **Arguments by value**: numbers, strings, bools, `None`, tuples, lists and dicts
-  of them, enums and paths; build123d's `Location`, `Vector`, `Axis`, `Plane`,
-  `Color` and `Rotation`; a `Material`; a shape this build made. A call given
-  anything else runs every time, as does one returning anything but geometry (a
-  shape, or a tuple, list or dict of shapes). Each is named in the report's
-  `retention.fallbacks`.
-- **No methods**, and **pure**: it reads only what its key holds and changes
-  nothing outside itself. A global it sets for another function, or an argument it
-  mutates, is not seen, and a replay leaves it undone.
-- **Return an assigned name.** A `@memo` function names what its `return` statement
-  makes in itself, so marking a helper that returns `body - holes` renames those
-  elements once; one that returns `body` renames nothing.
+`bracket.build(verify=True)` runs every body the engine would replay and compares each
+fresh result with the logged one (`.models[0]["verify"]`); a body whose result differs
+runs on every call for the worker's life. `bracket.build(profile=True)` adds function
+timings of the run as it happened. `CADGEN_ENGINE_BODIES=0` turns replay off, and
+`CADGEN_ENGINE_MEMO=0` every memo hit.
 
 ## Inputs
 
-What a body reads is an input of its build, by the file's bytes, and a changed file
+What a body reads is an input of its run, by the file's bytes, and a changed file
 re-runs the body that read it:
 
-- **`read_xbf(path)` and `read_step(path)`** copy a document's geometry into the
-  model as a build123d compound tree: each assembly a `Compound`, each part named,
-  coloured and given its material as the file has them, each element keeping the
-  name the file gives it. An `.xbf`'s joints, configurations and motions are not
-  imported: a part is a part.
-- **A vendor STEP is converted once**: `cadgen export vendor.step vendor.xbf` writes
-  an xbf of it, which reads many times faster than parsing the STEP (seconds against
-  most of a minute for a large assembly) and keeps its names. Keep it beside the
-  STEP and read the xbf. The conversion is yours: the engine writes nothing beside an
-  input.
-- **`read_mesh(path)`** reads an `.stl` as data, never a shape: `vertices`,
-  `triangles`, `name` and `bounding_box()`. A document holds B-rep alone, so a mesh
-  is measured and built from, never placed in a model:
-
-  ```python
-  from pathlib import Path
-
-  from cadgen.engine import read_mesh, xbf
-  import build123d as bd
-
-  HERE = Path(__file__).resolve().parent
-
-
-  @xbf("XBF/enclosure.xbf")
-  def enclosure():
-      pcb = read_mesh(HERE / "scans/pcb.stl").bounding_box()   # an input, by the scan's bytes
-      return bd.Box(pcb.size.X + 6, pcb.size.Y + 6, pcb.size.Z + 4)
-  ```
-
+- **`read_step(path)` and `read_xbf(path)`** copy a document's geometry into the model as
+  a build123d compound tree: each assembly a `Compound`, each part named, coloured and
+  given its material as the file has them, each element keeping the name the file gives
+  it. An xbf's joints, mechanism states and sequences are not imported: a part is a
+  part.
+- **A vendor STEP is converted once**: `cadgen export vendor.step vendor.xbf` writes an
+  xbf of it, which `read_xbf` reads many times faster than `read_step` parses the STEP
+  (seconds against most of a minute for a large assembly), with the same names. Keep the
+  xbf beside the STEP and read the xbf.
+- **`read_mesh(path)`** reads an `.stl` as data, never a shape: `vertices`, `triangles`,
+  `name` and `bounding_box()`. A document holds B-rep alone, so a mesh is measured and
+  built from, never placed in a model.
 - **Every file the body's Python opens** for reading is an input too: `open`,
   `json.load`, `Path.read_text`, `np.loadtxt`. A file opened only for writing is not.
-- **A read past the engine runs the body on every build**: build123d's
-  `import_step`, `import_brep` and `import_stl`, and OCCT's readers driven directly,
-  read files in C++ where the engine cannot hear them. Use `read_step`, `read_xbf`
-  or `read_mesh`.
-- **A model never reads a file its own build writes**: its own `.xbf` or export, a
-  child's or a sibling's. Such a read is refused. Select from the live shape instead
-  ([references](inspection-and-validation.md#references)).
+- **A read past the engine runs the body on every run**: build123d's `import_step`,
+  `import_brep` and `import_stl`, and OCCT's readers driven directly, read files where
+  the engine cannot hear them. Use `read_step`, `read_xbf` or `read_mesh`.
+- **Compose project models by calling them.** A file the project exported is a
+  deliverable, not an input: reading it ties a model to an export's moment.
 
-Anchor paths on the script, so a build reads the same file from any working folder:
+Anchor paths on the script, so a run reads the same file from any working folder:
 
 ```python
 from pathlib import Path
 
-from cadgen.engine import read_xbf, xbf
 import build123d as bd
+from cadgen import model, read_mesh, read_xbf
 
 HERE = Path(__file__).resolve().parent
 
 
-@xbf("XBF/rig.xbf")
+@model
 def rig():
     motor = read_xbf(HERE / "../vendor/motor.xbf")
     motor.label = "motor"
-    return bd.Compound(children=[bd.Box(120, 80, 6), bd.Pos(0, 0, 20) * motor], label="rig")
+    pcb = read_mesh(HERE / "../scans/pcb.stl").bounding_box()   # an input, by the scan's bytes
+    tray = bd.Box(pcb.size.X + 6, pcb.size.Y + 6, 6)
+    tray.label = "tray"
+    return bd.Compound(children=[tray, bd.Pos(0, 0, 20) * motor], label="rig")
 ```
 
-## In-memory models and shapes made elsewhere
+## Documents and the engine
 
-A model is a Python script: decorated functions declare models, explicit calls build
-them, and `python script.py` runs the program. No command builds source text. A bare
-`@model` keeps its document in the engine's memory with no file. Each model's document has an
-id, which the build prints (`id:`, beside `view:`, its page): derived from the script's path
-and the function's name, so functions in different scripts do not clash. `cadgen serve`,
-`snapshot`, `export` and `inspect` take that id (or a CAD file's path) and read the document
-the engine holds, as it is: no verb imports, runs or builds a script, so editing the script
-changes nothing until Python runs it again. An in-memory model keeps no files or restart cache:
-once its worker retires or the engine restarts, its id is refused with the command that builds
-it again. Running the script again updates the same document and its open viewers.
+Every model a run builds is one document in the engine, with one id: a UUID derived
+from the script's path and the function's name, the same in every process
+(`bracket.id` in Python). Two scripts may use the same function name. The page is
+`/<id>` on the engine's address; `cadgen export`, `snapshot` and `inspect`, and the
+CAD app's tools, take the id and read the document as the engine holds it. No command
+imports, runs or builds a script: editing the script changes nothing until Python runs
+it again.
 
-```python
-# parts/bracket.py
-import build123d as bd
-from cadgen import model
-
-
-@model
-def bracket():
-    return bd.Box(10, 20, 3)
-
-
-if __name__ == "__main__":
-    bracket()
-```
-
-```bash
-python parts/bracket.py               # prints id: and view: (its page, <engine>/<id>)
-ID=...                                # the id: line it printed
-cadgen snapshot "$ID" bracket.png
-cadgen export "$ID" bracket.step
-```
-
-A shape already made in Python -- a quick probe, a shape from another library -- is
-built the same way: wrap the shape in a decorated function and call it.
+- **The engine never reruns code.** A document it no longer holds (the engine restarted,
+  or it dropped the document under its memory budget) is refused with the command that
+  brings it back, `python <the program that built it>`, by the page, `cadgen inspect`
+  and `cad_show` alike. Running it updates the same document and its open pages.
+- **`@model(store="memory")`** keeps a document in its worker's memory alone: no record,
+  no Recents entry, gone when its worker retires or the engine exits. It suits a
+  throwaway probe. The default, for a script on disk, records the script, so the
+  document is listed in Recents and comes back by its printed command.
+- **A shape made elsewhere** (a probe in a REPL, a shape from another library) is shown
+  the same way: wrap it in a `@model` function in a `.py` file and call it.
+- `cadgen status` lists the workers and the documents the engine holds (`--json` as
+  data); `cadgen stop` stops the engine and any older one still running. At most
+  `CADGEN_ENGINE_WORKERS` workers live (default: the machine's cores); a worker idle for
+  `CADGEN_ENGINE_WORKER_IDLE` seconds, or over `CADGEN_ENGINE_WORKER_RSS_MB` after a run,
+  is retired, and its script's next run starts cold. `CADGEN_ENGINE_DIR` moves the
+  engine's socket and lock (one engine per folder).
 
 ## Progress and the report
 
-A build says where it is: on a terminal, `python model.py` draws a bar on stderr,
-each finished stage a line, and the viewer's build card shows the same. Nothing in
-the model says it: while a model's body runs, the bar names each `@memo` call and
-each child model it calls, by its function's name, as it begins, and counts it when
-it ends. A long body split into `@memo` stages (`finger`, `palm_loft`) shows each:
+A run says where it is: on a terminal, `python model.py` draws a bar on stderr, and the
+viewer's page shows the same. Nothing in the model says it: while a body runs, the bar
+names each `@memo` call and each child model it calls, by its function's name, as it
+begins, and counts it when it ends. A long body split into `@memo` stages (`finger`,
+`palm_loft`) shows each:
 
 ```text
 src/hand.py::hand
     building geometry  finger
 ```
 
-Each model's report says how it built, then each file:
+Each model's report says how it built, then its children:
 
 ```text
 built src/assembly.py::assembly warm in 0.17s: bodies 3 run; 11 misses, 0 hits; body 0.01s, ...
-  rebuilt: ../src/plate.py changed
-  XBF/assembly.xbf (written, 0.0 MB)
+  rebuilt: src/plate.py changed
   src/plate.py::plate, a child
-    XBF/plate.xbf (written, 0.0 MB)
+  id: b48e875e-f53d-5535-ada3-a2a300690f6f
+  view: http://127.0.0.1:61135/b48e875e-f53d-5535-ada3-a2a300690f6f?token=...
 ```
 
 `cold` is a fresh worker, `warm` one that built the script before; `bodies` counts
-those run, replayed or loaded from the file, and `misses` and `hits` the kernel's
-memo. `Model.build()` returns the same report as data, a dict per model: `memo`,
-`bodies` (each `run`, `replayed` or `loaded`), `cache` (`used`, `from`, `reason`,
-`changed`), `retention` (each body's `fallbacks`, the reasons it runs on every
-build, and the files it `reads`), `timings`, `files` and `child_models`:
+those run or replayed, and `misses` and `hits` the kernel's memo. `assembly.build()`
+returns the same report as data, a dict per model in `.models`: `id`, `memo`, `bodies`
+(each `run` or `replayed`), `cache` (`reason`, `changed`), `retention` (each body's
+`fallbacks`, the reasons it runs on every run, and the files it `reads`), `timings` and
+`child_models`:
 
 ```bash
 python -c "import bracket; print(bracket.bracket.build().models[0]['retention'])"
 ```
-
-## The engine server
-
-One engine server (a daemon) per installation, started by the first build and gone after an idle
-hour. It keeps a warm worker per model script, each with its own memo, and builds of different scripts run at once.
-
-- `cadgen status` lists the workers: each one's script, builds, memory and what it
-  is building now (`--json` as data). `cadgen stop` stops the server and its
-  workers.
-- At most `CADGEN_ENGINE_WORKERS` workers live (default: the machine's cores); at
-  the cap the least recently used idle one is retired. A worker idle for
-  `CADGEN_ENGINE_WORKER_IDLE` seconds, or over `CADGEN_ENGINE_WORKER_RSS_MB` of
-  memory after a build (default: a quarter of the machine's, at least 2 GiB; `0` for
-  no cap), is retired, and its script's next build starts cold. Its documents stay
-  served: the daemon takes them first, and holds them under one memory budget
-  (`CADGEN_ENGINE_MEMORY_MB`, default a quarter of the machine's) that never evicts one a
-  page watches. `@model(store="memory")` (or `store="memory"` on a file decorator) keeps a
-  document in its worker alone: it expires with the worker.
-- A document no longer held (`cadgen status`: `evicted`, `expired`) is never rebuilt for
-  you: `cadgen status`, `cadgen inspect` and its page print the command that builds it
-  again, `python` and the program that built it. Run it.
-- `CADGEN_ENGINE_IDLE` sets the daemon's idle time in seconds, and
-  `CADGEN_ENGINE_DIR` where it keeps its socket and lock (one daemon per folder). A
-  build asked with another `PYTHONPATH`, `PATH` or `VIRTUAL_ENV` replaces its
-  script's worker.
-- Nothing else is written: no cache folder, and no record of a build beside the
-  `.xbf`.
-
-A successful server-backed build reports its model's id and localhost viewer URL,
-including when it writes files. To build a shape made elsewhere, wrap the shape in a
-decorated function: its document and exports are a model's like any other.

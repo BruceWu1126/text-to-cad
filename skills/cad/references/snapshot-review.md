@@ -1,18 +1,29 @@
 # Snapshots
 
-Read this file when choosing visual checks for a document or a file the viewer
-opens.
+Read this file when choosing visual checks for a model or a file the viewer opens.
 
-`cadgen snapshot SRC OUT.png` draws SRC as the CAD Viewer draws it, rendered by
-OCCT, into a PNG. SRC is a document (`.xbf`, `.step`), a mesh (`.stl`, `.3mf`,
-`.glb`), a robot (`.urdf`, `.sdf`, `.srdf`), a drawing (`.dxf`), or a model's document id
-(the `id:` its build printed: drawn from the document its worker holds, as it is, and
-nothing is built). A script is never a source. Nothing is written but OUT.
+## Contents
+
+- [Views](#views)
+- [Choosing views](#choosing-views)
+- [Display, camera and size](#display-camera-and-size)
+- [Clipped views](#clipped-views)
+- [Annotations and Quick Edit views](#annotations-and-quick-edit-views)
+- [Mesh files, robots and drawings](#mesh-files-robots-and-drawings)
+- [Output paths](#output-paths)
+- [Targeted additions](#targeted-additions)
+- [Diagnostic review](#diagnostic-review)
+
+`cadgen snapshot SRC OUT.png` draws SRC as the CAD Viewer draws it, rendered by OCCT,
+into a PNG. SRC is a model's id (the `id:` line its run printed: drawn from the document
+the engine holds, as it is, and nothing is built), a document file (`.xbf`, `.step`), a
+mesh (`.stl`, `.3mf`, `.glb`), a robot (`.urdf`, `.sdf`, `.srdf`) or a drawing (`.dxf`). A
+script is never a source. Nothing is written but OUT.
 
 ```bash
-cadgen snapshot XBF/bracket.xbf tmp/review.png
-cadgen snapshot XBF/bracket.xbf tmp/review.png --display hidden-line --grid --camera top
-cadgen snapshot "$ID" tmp/review.png --preview    # ID: the id: line python src/bracket.py printed
+cadgen snapshot "$ID" tmp/review.png
+cadgen snapshot "$ID" tmp/review.png --display hidden-line --grid --camera top
+cadgen snapshot "$ID" tmp/review.png --preview
 ```
 
 A face the mesher left without triangles is drawn without it and named in a
@@ -26,7 +37,7 @@ Skip saved snapshots only when no visible geometry was created or updated, or no
 - pure format/export requests where geometry is unchanged
 - source changes that do not alter visible geometry
 - inspection-only tasks (for example direct measurement questions) that create or update nothing
-- failed Python builds before a valid document exists
+- a failed run, before a valid document exists
 
 When skipping, report the reason and the deterministic evidence that still ran.
 
@@ -40,10 +51,10 @@ side view for a pattern or silhouette, or a clipped view for internal geometry. 
 fixed set of views proves every face or feature is correct.
 
 ```bash
-cadgen snapshot XBF/part.xbf tmp/iso.png
-cadgen snapshot XBF/part.xbf tmp/below_behind.png --camera 225:-30
-cadgen snapshot XBF/part.xbf tmp/top.png --camera top
-cadgen snapshot XBF/part.xbf tmp/front.png --camera front
+cadgen snapshot "$ID" tmp/iso.png
+cadgen snapshot "$ID" tmp/below_behind.png --camera 225:-30
+cadgen snapshot "$ID" tmp/top.png --camera top
+cadgen snapshot "$ID" tmp/front.png --camera front
 ```
 
 With no flags a snapshot is the `solid` display, Light appearance, an orthographic
@@ -85,8 +96,10 @@ list:
 
 `--width` and `--height` set the size in pixels instead, up to 8192.
 
-`--pose` poses a document's mechanism first: a configuration's name, or joint and
-coupling values as JSON ([reviewing motion](kinematics.md#reviewing-motion)).
+`--pose` draws a document's mechanism posed: a mechanism state's name, or joint and
+coupling values as JSON ([reviewing motion](kinematics.md#reviewing-motion)). It is how
+the picture is drawn; a file of the pose is a posed model
+([exports](exports.md#posed-files-and-parts-on-their-own)).
 
 `--json` prints what was drawn and each stage's milliseconds as one JSON object,
 and a failure as `{"ok": false, "error": ...}` on stdout, with exit status 1.
@@ -99,7 +112,7 @@ relation to a floor. `display.clip` takes `enabled`, `axis` (`x`, `y` or `z`), `
 millimetres) and `invert`; the cut is capped. Look straight at the cut:
 
 ```bash
-cadgen snapshot XBF/housing.xbf tmp/cut.png --camera back --display '{"clip": {"enabled": true, "axis": "y", "at": 12.5}}'
+cadgen snapshot "$ID" tmp/cut.png --camera back --display '{"clip": {"enabled": true, "axis": "y", "at": 12.5}}'
 ```
 
 Hide and isolate leave parts out, as the viewer's do: `display.hidden` is a list of
@@ -109,7 +122,7 @@ Edit packet given to `--annotation` carries the person's own, which `--display` 
 override:
 
 ```bash
-cadgen snapshot XBF/housing.xbf tmp/inside.png --display '{"mode": "solid", "hidden": ["lid"]}'
+cadgen snapshot "$ID" tmp/inside.png --display '{"mode": "solid", "hidden": ["lid"]}'
 ```
 
 ## Annotations and Quick Edit views
@@ -118,7 +131,7 @@ A Quick Edit prompt carries a snapshot packet: inline JSON up to 1 KiB, or the
 absolute path of a `.snapshot.json`. Save inline JSON to a temporary
 `.snapshot.json` first. The packet holds:
 
-- `input`: the absolute path of the file the person looked at;
+- `input`: what the person looked at: a model's id, or a file's absolute path;
 - `jobs`: one per view they captured (the current view and each view they drew
   in), each with the view's `camera`, its `display` and an output `label`; a posed
   document's or a robot's carries its pose as `jointValues`. A document's display
@@ -134,7 +147,7 @@ absolute path of a `.snapshot.json`. Save inline JSON to a temporary
 Draw the view a person drew their ink in, with the ink on the model:
 
 ```bash
-cadgen snapshot XBF/bracket.xbf tmp/quick_edit.png --annotation tmp/bracket.snapshot.json --camera authored
+cadgen snapshot "$ID" tmp/quick_edit.png --annotation tmp/bracket.snapshot.json --camera authored
 ```
 
 `--annotation FILE` draws the ink over the model, each mark on its part wherever the
@@ -153,7 +166,7 @@ into the files its outputs name:
 
 ```bash
 cadgen snapshot --job tmp/bracket.snapshot.json
-cadgen snapshot --job tmp/bracket.snapshot.json XBF/bracket.xbf   # the same views of the rebuilt document
+cadgen snapshot --job tmp/bracket.snapshot.json "$ID"   # the same views, of the document as it is now
 ```
 
 `--job` takes a packet, a job (`{input, camera, display, jointValues, outputs, ...}`)
@@ -169,9 +182,9 @@ sizes an output that gives no size. Every job is checked before anything renders
 and a failure writes none of its pictures, leaving existing ones unchanged. `--json` prints each picture's report.
 
 Inspect supplied annotations before editing. A view without annotations is optional
-context: render it only when useful to the request. After an edit, draw the same
-view of the rebuilt document to see the change from where the person looked, with
-their ink still on it.
+context: render it only when useful to the request. After an edit, run the script and
+draw the same view again to see the change from where the person looked, with their ink
+still on it.
 
 ## Mesh files, robots and drawings
 
@@ -190,10 +203,11 @@ their ink still on it.
 
 OUT is written exactly as given, relative to the working directory, and must end in
 `.png`; a folder instead (one that is there, or a path ending in `/`) gets a
-generated name inside it, `<SRC's stem>_<UTC time>.png` (`tmp/stills/bracket_20261022T174512Z.png`),
+generated name inside it, `<SRC's stem>_<UTC time>.png` (a model's name for a model:
+`tmp/stills/bracket_20261022T174512Z.png`),
 which the command prints. Check the command's exit status before reading it: a refused request
 (an unknown key or value, a pose out of range, a flag the input cannot take) and a
-failed build or render write nothing, and leave a file an earlier run wrote where it
+failed render write nothing, and leave a file an earlier run wrote where it
 was. Reuse one name while iterating (`tmp/review.png`), or name before and after
 images when both are needed for a comparison.
 
@@ -208,7 +222,7 @@ Add views only when the brief or a failure mode calls for them:
 - `--display wireframe`: edge-only review for internal overlap or interference
 - `--display exploded=0.6`: an assembly's parts apart, to see what is inside
 - `--grid`: a measuring grid under the model, for reading size and placement at a glance
-- `--pose`: each configuration that matters, for an articulated model
+- `--pose`: each mechanism state that matters, for an articulated model
 
 ## Diagnostic review
 

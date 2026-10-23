@@ -1,47 +1,61 @@
 # Kinematics: joints, mechanism states, couplings and configuration sequences
 
-Read this file when the user asks to articulate, pose or animate a model, or when
-designing or reviewing joints, couplings, named poses, posed exports or motions. For an
-explode, a reveal, a showcase or any movement that is not the mechanism's, read
-[Animation](animation.md) too: that is a GLB's `animation()`, not a configuration sequence.
+Read this file when the user asks to articulate or pose a mechanism, or when designing
+or reviewing joints, couplings, named poses, posed files or the mechanism's own
+motions. An explode, a reveal, a showcase or any movement that is not the mechanism's
+is a GLB's `animation()`: read [Animation](animation.md) instead.
 
-An assembly's mechanism is written in its body, and the document keeps it:
+## Contents
+
+- [The mechanism is written in the body](#the-mechanism-is-written-in-the-body)
+- [Joints place parts and make the mechanism](#joints-place-parts-and-make-the-mechanism)
+- [Mechanism states](#mechanism-states)
+- [Couplings](#couplings)
+- [Configuration sequences](#configuration-sequences)
+- [Reviewing motion](#reviewing-motion)
+
+## The mechanism is written in the body
+
+Give a model kinematics only when it is a mechanism: parts that move relative to each
+other in use (a hinge, a robot arm, a gearbox, a lead screw). An assembly's mechanism
+is written in its body, and its document keeps it:
 
 - **Joints** are build123d's: `RevoluteJoint`, `LinearJoint`, `CylindricalJoint`,
   `BallJoint` and `RigidJoint`, connected with `connect_to`. The values they are
   connected at are the **as-built state**, the pose every file of the model shows.
 
-The functions that say more are named after the STEP AP242 entities they write, and
-are `cadgen.ap242`'s (`from cadgen.ap242 import mechanism_state, gear_pair`):
+The functions that say more are `cadgen.ap242`'s, named after the STEP AP242 entities
+they write (`from cadgen.ap242 import mechanism_state, gear_pair`):
 
 - **Mechanism states** name other poses: `mechanism_state(assembly, name, **values)`.
 - **Couplings** make joints move together by ratio, one function per pair the document
   writes: `gear_pair`, `rack_and_pinion_pair` and `screw_pair(assembly, name, **joints)`.
-- **Configuration sequences** are definitions over time:
+- **Configuration sequences** are the mechanism's motions over time:
   `configuration_sequence(assembly, name, ...)`. The viewer calls them motions.
+- **`posed(assembly, state)`** returns the assembly placed at a named state: the body of
+  a posed model ([below](#mechanism-states)).
 
-None of them moves the build. The `.xbf` keeps the mechanism, its states, couplings and
-sequence definitions; a STEP, STL or 3MF is placements only. A GLB export bakes each
-configuration sequence into an animation clip of its name: the one place one is played
-back.
+None of the first three moves the build. The document keeps the mechanism, its states,
+couplings and sequences; a STEP, STL or 3MF export is placements only, and a GLB export
+bakes each configuration sequence into an animation clip of its name.
 
 ## Joints place parts and make the mechanism
 
-Build each part where it stands, give the parent the moving joint on an `Axis`, and
-give the child a `RigidJoint` on the plane of that same axis. Connected at 0, the
-child stays where it was built; connected at another value, it moves there, and that
-value is as built:
+Build each part where it stands, give the parent the moving joint on an `Axis`, and give
+the child a `RigidJoint` on the plane of that same axis. Connected at 0, the child stays
+where it was built; connected at another value, it moves there, and that value is as
+built:
 
 ```python
-from cadgen.ap242 import configuration_sequence, mechanism_state
-from cadgen.engine import glb, xbf
+# src/hinge.py
 import build123d as bd
+from cadgen import model
+from cadgen.ap242 import configuration_sequence, mechanism_state
 
 ELBOW = bd.Axis((40, 0, 20), (0, -1, 0))   # +angle lifts the arm
 
 
-@xbf(out="../XBF/hinge.xbf")
-@glb(out="../GLB/hinge.glb")
+@model
 def hinge():
     base = bd.Box(100, 60, 20, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
     arm = bd.Pos(40, 0, 20) * bd.Box(120, 20, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.MIN))
@@ -53,42 +67,61 @@ def hinge():
     mechanism_state(assembly, "closed", elbow=0)
     mechanism_state(assembly, "open", elbow=90)
     return configuration_sequence(assembly, "cycle", [(0, "closed"), (2, "open"), (5, "closed")])
+
+
+if __name__ == "__main__":
+    hinge()
 ```
 
-- **`connect_to` on the joint that stays**: `parent.joints[name].connect_to(child.joints[name], angle=..., position=..., angles=...)`
-  moves the child's part. Connect parts before putting them in the compound that
-  holds them.
-- **Values are degrees and millimetres.** A joint's `angular_range` or
-  `linear_range` is its limits; a pose or a mechanism state outside them is refused.
+- **`connect_to` on the joint that stays**:
+  `parent.joints[name].connect_to(child.joints[name], angle=..., position=..., angles=...)`
+  moves the child's part. Connect parts before putting them in the compound that holds
+  them.
+- **Values are degrees and millimetres.** A joint's `angular_range` or `linear_range` is
+  its limits; a pose or a mechanism state outside them is refused.
 - **A pair is named by its moving joint's label** (`elbow`). A label two pairs share
   takes the path of the part that holds it (`hand/left:knuckle`).
-- **Links are parts that move as one**: parts whose rigid joints are connected are
-  one link, and a part below a jointed sub-assembly moves with it. The ground is every
-  link no `connect_to` moved, and every part no joint places.
-- **A nested assembly is paired by label.** build123d's `connect_to` cannot place a
-  part inside a nested assembly: put each part where it stands, author the two joints
-  there with one label, and the engine pairs the moving joint with the `RigidJoint`
-  of the same label nearest it in the tree. Two rigid joints of one label fasten their
-  parts.
-- **The document keeps what STEP AP242 can say, and nothing else.** A pair the
-  built parts contradict (its part moved after `connect_to`, connected after its
-  compound was made, a rigid joint off the joint's axis, or two parts rigid joints
-  make one body) fails the build by name: fix where the part stands. Pairs closing
-  a loop are kept and not posed. A mechanism state, configuration sequence or coupling
-  naming a joint the assembly does not hold fails the build, as does a coupling driving a
-  joint its pair does not relate.
-- **No mates vocabulary**: placement and motion are build123d's joints, and nothing
-  else. A gear ratio between two joints is a coupling (below); a cam, a non-linear
-  linkage or any other relation a ratio cannot say is a configuration sequence's
-  function of time.
+- **Links are parts that move as one**: parts whose rigid joints are connected are one
+  link, and a part below a jointed sub-assembly moves with it. The ground is every link
+  no `connect_to` moved, and every part no joint places.
+- **A nested assembly is paired by label.** build123d's `connect_to` cannot place a part
+  inside a nested assembly: put each part where it stands, write the two joints there
+  with one label, and the engine pairs the moving joint with the `RigidJoint` of the same
+  label nearest it in the tree. Two rigid joints of one label fasten their parts.
+- **The document keeps what STEP AP242 can say, and nothing else.** A pair the built
+  parts contradict (its part moved after `connect_to`, connected after its compound was
+  made, a rigid joint off the joint's axis, or two parts rigid joints make one body)
+  fails the run by name: fix where the part stands. Pairs closing a loop are kept and not
+  posed. A mechanism state, configuration sequence or coupling naming a joint the
+  assembly does not hold fails the run, as does a coupling driving a joint its pair does
+  not relate.
+- **No helper joints.** A joint exists because the mechanism moves there. A prismatic
+  joint per part only to slide it out for an explode is an animation's job
+  ([animation](animation.md)), and the viewer's Position would show a slider for each.
 
 ## Mechanism states
 
 `mechanism_state(assembly, name, **values)` names a pose by joint label, the joints it
 leaves out as built, and returns the assembly. A cylindrical joint takes
 `(angle, distance)` and a ball joint its three angles; a coupling takes its value
-(`curl=0.5`). Mechanism states are what the viewer's Position lists as its
-configurations, and what `--pose` names.
+(`curl=0.5`). Mechanism states are what the viewer's Position lists as presets, and what
+a snapshot's `--pose` names.
+
+A file of the mechanism in another pose is a model of its own: `posed(assembly, state)`
+returns the assembly with its parts placed at that state.
+
+```python
+# src/hinge_poses.py
+from cadgen import model
+from cadgen.ap242 import posed
+
+from hinge import hinge
+
+
+@model
+def hinge_open():
+    return posed(hinge(), "open")
+```
 
 ## Couplings
 
@@ -110,15 +143,16 @@ joint none. Two joints of other kinds (two slides, a slide and a cylindrical joi
 turn) have no pair: drive them by a configuration sequence.
 
 ```python
-from cadgen.ap242 import configuration_sequence, gear_pair
-from cadgen.engine import xbf
+# src/index_finger.py
 import build123d as bd
+from cadgen import model
+from cadgen.ap242 import configuration_sequence, gear_pair
 
 CURL = {"index_mcp": 90, "index_pip": 100, "index_dip": 70}           # degrees at a full curl
 BONES = {"base": 30, "proximal": 40, "middle": 25, "distal": 20}     # lengths along +X
 
 
-@xbf("XBF/index_finger.xbf")
+@model
 def index_finger():
     bones, x = [], -BONES["base"]
     for name, length in BONES.items():
@@ -136,11 +170,11 @@ def index_finger():
                                                    (3, {"index_curl": 0})])
 ```
 
-`--pose '{"index_curl": 0.6}'` poses the knuckles at 54, 60 and 42 degrees; its
-range, `[0, 1]`, is where every knuckle stays within its own. The viewer shows the
-coupling's slider and none of its joints', and setting one of its joints alone is
-refused. A planetary stage turns its carrier and planets from the sun, ranged by the
-sun's limits; a pinion drives a rack; a lead screw advances 2 mm a turn:
+`--pose '{"index_curl": 0.6}'` poses the knuckles at 54, 60 and 42 degrees; its range,
+`[0, 1]`, is where every knuckle stays within its own. The viewer shows the coupling's
+slider and none of its joints', and setting one of its joints alone is refused. A
+planetary stage turns its carrier and planets from the sun, ranged by the sun's limits;
+a pinion drives a rack; a lead screw advances 2 mm a turn:
 
 ```python
 gear_pair(assembly, "drive", sun=1.0, carrier=24 / 84, planet1=-0.952, planet2=-0.952, planet3=-0.952)
@@ -150,7 +184,8 @@ screw_pair(assembly, "feed", lead_screw=2.0)                        # its value:
 
 ## Configuration sequences
 
-A configuration sequence is a definition in the body, beside the mechanism states:
+A configuration sequence is the mechanism's motion: joint values over time, written in
+the body beside the mechanism states:
 
 ```python
 configuration_sequence(arm, "cycle", [(0, "folded"), (2, "reach"), (5, "folded")])  # waypoints, eased
@@ -162,75 +197,58 @@ configuration_sequence(arm, "nod", lambda t: {"elbow": 45 + 20 * math.sin(t)}, d
 `configuration_sequence(assembly, name, waypoints_or_fn=None, *, sweep=None,
 duration=None, ease="cubic")` takes one of:
 
-- waypoints `[(t, pose), ...]`: seconds from 0, increasing, each pose a
-  mechanism state's name or `{joint: value}` (the rest as built); the last time is the
-  duration;
+- waypoints `[(t, pose), ...]`: seconds from 0, increasing, each pose a mechanism
+  state's name or `{joint: value}` (the rest as built); the last time is the duration;
 - `sweep={joint: (from, to)}` with `duration`;
-- a function `t -> {joint: value}` with `duration`, kept as samples close enough to
-  it (1e-3 radian, 1e-3 of the model's size), the same code always the same samples.
+- a function `t -> {joint: value}` with `duration`, kept as samples close enough to it
+  (1e-3 radian, 1e-3 of the model's size), the same code always the same samples.
 
-`ease` is `cubic` (each step eased in and out, every joint arriving together at
-every waypoint) or `linear` (constant speed). A sequence is a finite clip, and a player
-repeats it: one that comes back writes its way back as waypoints. A coupling's name
-poses in waypoints and sweeps like a joint's. A sequence naming a mechanism state or joint
-the assembly lacks fails the build. The CAD Viewer plays an `.xbf`'s sequences from its Motion
-section (play, pause, scrub, loop, speed), so `cadgen viewer` is where to review one.
+`ease` is `cubic` (each step eased in and out, every joint arriving together at every
+waypoint) or `linear` (constant speed). A sequence is a finite clip, and a player repeats
+it: one that comes back writes its way back as waypoints. A coupling's name poses in
+waypoints and sweeps like a joint's. A sequence naming a mechanism state or a joint the
+assembly lacks fails the run.
 
-Every `@glb` and `cadgen export ... model.glb` carries each sequence as a glTF
-animation of its name, keyed so it stays within 1e-3 of the model's size of the true
-motion, its duration in the animation's `extras.cadgen`. Blender, three.js and the
-CAD Viewer's GLB view play it, repeating. Neither the decorator nor the export takes an argument
-for it.
+- **Prefer waypoints.** A sequence of waypoints is a few numbers in the document and a
+  few keys in a GLB; a function of time is sampled on every run that runs its body.
+- **A sequence costs nothing outside a GLB**: STEP, STL and 3MF carry no motion.
+- Every GLB exported from the model carries each sequence as a glTF animation of its
+  name, keyed within 1e-3 of the model's size of the true motion. Blender, three.js and
+  the CAD Viewer play it, repeating.
 
-A configuration sequence moves joints only. What the mechanism does not do (parts flying apart, a cover
-vanishing, a part spinning for show) is an animation of the GLB, not a helper joint:
+A configuration sequence moves joints only. What the mechanism does not do (parts flying
+apart, a cover vanishing, a part spinning for show) is an animation of the GLB:
 [Animation](animation.md).
 
 ## Reviewing motion
 
-A pose is drawn on demand, never declared:
+A pose is drawn on demand:
 
 ```bash
-cadgen snapshot XBF/hinge.xbf tmp/open.png --pose open
-cadgen snapshot XBF/hinge.xbf tmp/elbow_45.png --pose '{"elbow": 45}'
+cadgen snapshot "$ID" tmp/open.png --pose open
+cadgen snapshot "$ID" tmp/elbow_45.png --pose '{"elbow": 45}'
 ```
 
-`--pose` takes a mechanism state's name, or joint and coupling values as JSON (the
-rest as built). An unknown state, joint or coupling, a value out of range,
-and a coupling's joint set alone are refused by name before anything renders.
+`--pose` takes a mechanism state's name, or joint and coupling values as JSON (the rest
+as built): it says how the picture is drawn. An unknown state, joint or coupling, a
+value out of range and a coupling's joint set alone are refused by name before anything
+renders.
 
-### Posed files
+On the model's page, Position poses the document live: a slider per coupling and per
+joint no coupling moves, and the mechanism states as presets. The Motion tool plays the
+document's configuration sequences (play, pause, scrub, loop, speed), so the page is
+where to review one.
 
-A posed or partial file is a function, never an option: `cadgen export` writes the
-document as its code built it. `posed(assembly, state)` (`cadgen.ap242`, beside
-`mechanism_state`) returns a copy of the assembly with every part where the named
-state, or a mapping of joint label to value, puts it, by the forward kinematics the
-viewer and snapshot use. The copy keeps its joints, couplings, states and sequences,
-the asked values its as-built state, so its viewer Position and motions still work.
-An unknown state or joint is refused by name.
-
-```python
-from cadgen.ap242 import posed
-
-@step(out="../STEP/hinge_open.step")
-def hinge_open():
-    return posed(hinge(), "open")
-```
-
-The viewer's Position poses a document live: a slider per coupling and per joint no
-coupling moves, and the mechanism states as presets. To watch a sequence, open the GLB the model
-declares (or one `cadgen export` wrote) in the viewer: its clips play there.
-
-A pose or a clip shows motion; it does not measure it. Checks on the `.xbf` measure
+A pose or a motion shows movement; it does not measure it. A check of the model measures
 the parts as built, so a part that clears there can still pass through another
-mid-motion. Measure a pose by exporting it and checking that STEP:
+mid-motion. Measure a pose by checking its posed model:
 
 ```python
-from cadgen.engine import read_step
 from cadgen.geometry import overlap_volume
 
-posed = read_step("STEP/hinge_open.step")
+from hinge_poses import hinge_open
+
+posed = hinge_open()
 parts = {part.label: part for part in posed.leaves}
-arm, base = parts["arm"], parts["base"]
-print(overlap_volume(arm.solids()[0], base.solids()[0]))   # 0: the open arm clears the base
+print(overlap_volume(parts["arm"].solids()[0], parts["base"].solids()[0]))   # 0: the open arm clears the base
 ```

@@ -3,6 +3,13 @@
 Read this file when placing assembly parts, defining mating datums or checking
 alignment.
 
+## Contents
+
+- [Transforms and local frames](#transforms-and-local-frames)
+- [Native joints](#native-joints)
+- [Child models and imported components](#child-models-and-imported-components)
+- [Alignment and measurement checks](#alignment-and-measurement-checks)
+
 ## Transforms and local frames
 
 ```python
@@ -32,15 +39,15 @@ joint that stays, with the moving part's joint as its argument.
 For example, `src/enclosure.py` seats a lid on a base with a gasket gap:
 
 ```python
-from cadgen.engine import xbf
 import build123d as bd
+from cadgen import model
 
 BASE_HEIGHT = 30.0
 LID_THICKNESS = 3.0
 GASKET_GAP = 0.5
 
 
-@xbf(out="../XBF/enclosure.xbf")
+@model
 def enclosure():
     base = bd.Box(80, 50, BASE_HEIGHT)
     lid = bd.Box(80, 50, LID_THICKNESS)
@@ -56,7 +63,7 @@ The joint kinds are `RigidJoint` for fixed placement, `RevoluteJoint` for rotati
 `BallJoint` for spherical orientation. Use a `Location` for rigid and ball joint
 frames and an `Axis` for revolute, linear and cylindrical joints. Two parts whose
 rigid joints are connected move as one; a moving joint makes a pair the viewer's
-Position, `--pose` and the model's motions drive ([kinematics](kinematics.md)).
+Position, a snapshot's `--pose` and the model's motions drive ([kinematics](kinematics.md)).
 
 Connect parts before putting them in the compound that holds them. `connect_to`
 cannot place a part inside a nested assembly: there, put each part where it stands
@@ -68,7 +75,7 @@ assembly's body, on the parts it places.
 
 A project model is composed by calling it; `read_xbf` reads a vendor part converted
 once from its STEP (`cadgen export vendor.step vendor.xbf`), and `read_step` a STEP
-as it is. Both are inputs, like every file a build reads
+as it is. Both are inputs, like every file a run reads
 ([inputs](model-contract.md#inputs)). An imported part keeps its vendor's origin and
 orientation; a snapshot or `cadgen inspect` shows them and its functional features, and the
 measured offsets or joint frames go in the source.
@@ -82,10 +89,11 @@ means: a check names the mating features and states the relationship in Python
 For example, for the enclosure's two mating faces:
 
 ```python
-from cadgen.engine import read_xbf
 import build123d as bd
 
-doc = read_xbf("XBF/enclosure.xbf")
+from enclosure import enclosure
+
+doc = enclosure()
 parts = {part.label: part for part in doc.leaves}
 fixed = parts["base"].faces().sort_by(bd.Axis.Z)[-1]     # the base's top
 moving = parts["lid"].faces().sort_by(bd.Axis.Z)[0]      # the lid's underside

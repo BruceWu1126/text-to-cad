@@ -1,8 +1,16 @@
 # build123d modeling patterns
 
-Read this file when constructing or repairing native CAD geometry. Model scripts
-return build123d shapes; see the [model contract](model-contract.md) for how they
-build and compose.
+Read this file when constructing or repairing native CAD geometry. Models return
+build123d shapes; see [models](model-contract.md) for how they run and compose.
+
+## Contents
+
+- [Selecting edges and faces](#selecting-edges-and-faces)
+- [Labels and assemblies](#labels-and-assemblies)
+- [Colour and materials](#colour-and-materials)
+- [Placement and frame pitfalls](#placement-and-frame-pitfalls)
+- [Kernel pitfalls](#kernel-pitfalls)
+- [Validity and visual artifacts](#validity-and-visual-artifacts)
 
 ## Selecting edges and faces
 
@@ -52,7 +60,7 @@ the engine stores it linear. `shape.color`, `paint` and `Material(color=)` take 
 same values and store the same colour:
 
 ```python
-from cadgen.engine import Material, materials, paint
+from cadgen import Material, materials, paint
 
 body.color = "#2E3742"
 glass.color = "#38414D6B"                            # alpha (6B: 0.42) is opacity
@@ -77,7 +85,7 @@ paint(body, body.faces().filter_by(bd.Axis.Z)[-1:], materials.aluminium_6061.but
   whole-model default.
 - **`paint(part, faces, color_or_material)`** gives faces a colour or a material of
   their own.
-- A material's density weighs the model (`cadgen inspect DOC OWNER`), its look is
+- A material's density weighs the model (`cadgen inspect <id> OWNER`), its look is
   drawn in the viewer's Solid, Shaded and Preview modes, and a GLB carries it. A STEP
   keeps a material's name and density only, and a face's colour.
 
@@ -119,8 +127,8 @@ handles placement itself.
 - **Many tools:** batching independent cuts avoids rebuilding the same
   intersection network; overlapping tools may need staged cuts, and oversized
   tool extents create needless intersections. On large spline surfaces even a
-  batched cut can dominate a build; `report()` labels in the body show which stage
-  the time goes to.
+  batched cut can dominate a run; split the body into `@memo` stages and the progress
+  bar names the stage the time goes to.
 - **Near tangency or coincident boundaries:** a Boolean can return successfully
   with the wrong region or solid count; a direct profile construction of the same
   shape can avoid the intersection.
