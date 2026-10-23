@@ -21,9 +21,9 @@ const STATE_TEXT: Record<ExportJob['state'], string> = {
 };
 
 /** Each toast owns one job subscription and hands its file to the browser once; siblings never cancel each other. */
-function ExportToast({ attempt, service, downloads, reveal, onDelivered, onRemove, onActivity }: {
+function ExportToast({ attempt, service, downloads, reveal, onDelivered, onRemove, onActivity, onExportAgain }: {
   attempt: ExportRecord; service: ExportService; downloads: DownloadPort; reveal: number;
-  onDelivered(): void; onRemove(): void; onActivity(id: string, busy: boolean): void;
+  onDelivered(): void; onRemove(): void; onActivity(id: string, busy: boolean): void; onExportAgain(): void;
 }) {
   const { t } = useI18n();
   const [job, setJob] = useState<ExportJob | null>(null);
@@ -73,8 +73,10 @@ function ExportToast({ attempt, service, downloads, reveal, onDelivered, onRemov
             setJob(found);
           }
           if (!active(found)) {
-            if (found.state === 'ready' && !delivered.current && !cancelWanted.current) deliver(found);
-            return;
+            if (found.state !== 'ready') return;
+            if (!delivered.current && !cancelWanted.current) deliver(found);
+            // Ready, its status waits for the file to go: fetched whole by the browser, or past its
+            // window (`cadgen/viewer/exports.py`). Then Download again becomes Export again.
           }
         } catch (failure) {
           if (signal.aborted) return;
@@ -109,7 +111,8 @@ function ExportToast({ attempt, service, downloads, reveal, onDelivered, onRemov
   useEffect(() => { onActivity(attempt.request.requestId, busy); }, [onActivity, attempt.request.requestId, busy]);
   if (hidden) return null;
   const failure = error || job?.error;
-  const title = !job ? (failure ? t('export.failed') : t('export.submitting')) : t(expired ? 'export.expired' : STATE_TEXT[job.state]);
+  const title = !job ? (failure ? t('export.failed') : t('export.submitting'))
+    : t(job.fetched ? 'export.fetched' : expired ? 'export.expired' : STATE_TEXT[job.state]);
   const seconds = Math.max(0, Math.floor(((job?.finishedAt || now / 1000) - (job?.createdAt || now / 1000))));
   const ready = job?.state === 'ready' && !expired;
   return <section className="rounded-lg border border-border bg-popover p-3 text-tiny text-popover-foreground shadow-lg" aria-label={t('export.toast', { name: job?.filename || attempt.filename })} data-export-toast="">
@@ -125,6 +128,7 @@ function ExportToast({ attempt, service, downloads, reveal, onDelivered, onRemov
     <div className="mt-2 flex justify-end gap-2">
       {busy ? <Button size="xs" variant="outline" className="text-tiny" disabled={job?.state === 'cancelling'} onClick={() => { void cancel(); }}>{t('export.cancel')}</Button> : null}
       {ready ? <Button size="xs" className="text-tiny" onClick={again}>{t('export.again')}</Button> : null}
+      {expired ? <Button size="xs" className="text-tiny" onClick={onExportAgain}>{t('export.exportAgain')}</Button> : null}
       {!busy ? <Button size="xs" variant="ghost" className="text-tiny" onClick={() => { void remove(); }}>{t('export.remove')}</Button> : null}
     </div>
   </section>;
@@ -201,7 +205,10 @@ export function ExportControls({ service, downloads, file, children }: {
   const overlay = enabled && attempts.length ? <div className="pointer-events-none absolute inset-x-2 top-2 z-40 flex max-h-[calc(100%-1rem)] flex-col items-end overflow-y-auto" aria-label={t('export.jobs')}><div className="pointer-events-auto flex w-80 max-w-full flex-col gap-2">
     {attempts.map(attempt => <ExportToast key={attempt.request.requestId} attempt={attempt} service={service!} downloads={downloads!} reveal={reveal} onActivity={reportActivity}
       onDelivered={() => setAttempts(old => old.map(row => row.request.requestId === attempt.request.requestId ? { ...row, delivered: true } : row))}
-      onRemove={() => setAttempts(old => old.filter(row => row.request.requestId !== attempt.request.requestId))} />)}
+      onRemove={() => setAttempts(old => old.filter(row => row.request.requestId !== attempt.request.requestId))}
+      // The file is gone (downloaded, or past its window): the same export run again, in its place.
+      onExportAgain={() => setAttempts(old => old.map(row => row.request.requestId === attempt.request.requestId
+        ? { request: { ...row.request, requestId: crypto.randomUUID() }, filename: row.filename, delivered: false } : row))} />)}
   </div></div> : null;
   return <ExportContext.Provider value={enabled ? setSource : null}>{children({ navbar, overlay })}</ExportContext.Provider>;
 }

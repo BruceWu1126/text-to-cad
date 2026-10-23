@@ -38,6 +38,8 @@ export default {
   "export.failed": "匯出失敗",
   "export.expired": "已過期",
   "export.downloaded": "已開始下載",
+  "export.fetched": "已下載",
+  "export.exportAgain": "重新匯出",
 
   "app.start.notAnswering": "CAD 檢視器沒有回應",
   "app.engine.notRunning": "引擎沒有在執行。",

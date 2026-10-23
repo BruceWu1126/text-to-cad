@@ -37,6 +37,8 @@ export default {
   "export.failed": "エクスポートに失敗しました",
   "export.expired": "期限切れです",
   "export.downloaded": "ダウンロードを開始しました",
+  "export.fetched": "ダウンロードしました",
+  "export.exportAgain": "もう一度エクスポート",
 
   "app.start.notAnswering": "CAD ビューアーが応答しません",
   "app.engine.notRunning": "エンジンが動いていません。",

@@ -181,13 +181,16 @@ page makes.
 Multiple exports queue independently, each with a persistent toast at the top-right
 under the navbar and its own **Cancel**. A queued cancellation is immediate; an
 in-flight kernel operation finishes before its output is discarded. **Download again**
-fetches the same artifact; closing a toast only hides it, and **Export → Show exports**
-restores it, so a file can be downloaded again until it expires.
+fetches the same artifact while it is kept; once it is gone the button is **Export again**,
+which runs the same export anew. Closing a toast only hides it, and **Export → Show exports**
+restores it.
 
 The queue accepts up to 16 unfinished jobs per viewer session, executes them in order,
-and retains at most 4 GiB of completed downloads. Artifacts expire one hour after
-completion, on **Remove**, or when the engine stops; an active transfer holds its file
-until it finishes. Job metadata lasts 24 hours (up to 128 records), with bounded
+and retains at most 4 GiB of completed downloads. An artifact is deleted as soon as the
+browser has fetched it whole (the server saw its GET end; a range or a broken transfer keeps
+it), ten minutes after completion if nobody fetched it, on **Remove**, or when the engine
+stops; an active transfer holds its file until it finishes. Job records last as long as the
+engine serving the page, the page session (up to 128 records), with bounded
 request-ID tombstones for the session so an expired request cannot regenerate a file.
 Private temporary folders left by a crash are reaped after a day by the next export.
 There is no durable job registry; a server restart ends these jobs.

@@ -100,18 +100,44 @@ it('a restored request reconnects by identity and downloads only what it never h
   expect(screen.getAllByRole('button', { name: 'Download again' })).toHaveLength(2);
 });
 
-it('an expired artifact offers no download; Remove releases it', async () => {
+it('an expired artifact offers no download but Export again; Remove releases it', async () => {
   const { service } = server();
   service.create.mockImplementation(async value => ({ ...value, id: value.requestId, filename: 'old.step', state: 'ready', stage: 'Ready to save', sequence: 1, createdAt: 1, finishedAt: 2, expiresAt: Date.now() / 1000 - 1, bytes: 5 }));
   const downloads = { save: vi.fn(), restore: () => [{ request: { requestId: 'old', epoch: 'epoch', source: { doc: 'doc', revision: 'v1', part: null, pose: null }, format: 'step' }, filename: 'old.step', delivered: true }] };
   mount(service, downloads);
   expect(await screen.findByText('Expired')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Download again' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Export again' })).toBeTruthy();
   const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: 'Remove' }));
   expect(service.release).toHaveBeenCalledWith('old');
   await waitFor(() => expect(screen.queryByRole('region', { name: 'Export old.step' })).toBeNull());
   expect(downloads.save).not.toHaveBeenCalled();
+});
+
+it('once the browser has fetched the file it is gone: Download again becomes Export again, which runs it again', async () => {
+  const { service, jobs, waiting, finish } = server();
+  const downloads = { save: vi.fn(), remember: vi.fn() };
+  mount(service, downloads);
+  const user = userEvent.setup();
+  await exportOnce(user);
+  await waitFor(() => expect(jobs.size).toBe(1));
+  const [id] = [...jobs.keys()];
+  await finish(id);
+  expect(await screen.findByRole('button', { name: 'Download again' })).toBeTruthy();
+  // The ready job's status is asked again; it answers when the server deletes the fetched file.
+  await waitFor(() => expect(service.status).toHaveBeenCalledTimes(2));
+  await act(async () => waiting.get(id)!({ ...jobs.get(id), state: 'expired', stage: 'Export downloaded', fetched: true, sequence: 2,
+    finishedAt: Date.now() / 1000, expiresAt: later() }));
+  expect(await screen.findByText('Downloaded')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Download again' })).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Export again' }));
+  await waitFor(() => expect(service.create).toHaveBeenCalledTimes(2));
+  const [first, again] = service.create.mock.calls.map(call => call[0]);
+  expect(again).toEqual({ ...first, requestId: expect.any(String) });
+  expect(again.requestId).not.toBe(first.requestId);
+  expect(screen.getAllByRole('region', { name: 'Export part.step' })).toHaveLength(1);
+  expect(downloads.save).toHaveBeenCalledTimes(1);
 });
 
 it('the toast speaks the page language, never the server stage', async () => {

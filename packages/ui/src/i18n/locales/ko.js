@@ -37,6 +37,8 @@ export default {
   "export.failed": "내보내기 실패",
   "export.expired": "만료됨",
   "export.downloaded": "다운로드를 시작했습니다",
+  "export.fetched": "다운로드됨",
+  "export.exportAgain": "다시 내보내기",
 
   "app.start.notAnswering": "CAD 뷰어가 응답하지 않습니다",
   "app.engine.notRunning": "엔진이 실행 중이 아닙니다.",

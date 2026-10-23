@@ -246,6 +246,8 @@ export interface ExportJob {
   state: 'queued' | 'running' | 'cancelling' | 'cancelled' | 'failed' | 'ready' | 'expired';
   stage: string; sequence: number; createdAt: number; finishedAt: number; expiresAt: number;
   bytes?: number; error?: string;
+  /** Expired because the browser fetched the whole file (it is deleted then), not by its window. */
+  fetched?: boolean;
 }
 export interface ExportService {
   options(source: ExportSource, signal: AbortSignal): Promise<{ epoch: string; formats: ExportOption[] }>;

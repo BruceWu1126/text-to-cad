@@ -84,13 +84,68 @@ class ExportsTest(unittest.TestCase):
             with self.jobs.artifact(ident):
                 pass
         self.assertEqual(caught.exception.status, 410)
+        # The record lives as long as the engine (the page session), never only a day: a reload
+        # finds its export expired, and asking again by its request is that record, not a new run.
         self.now += 86400
-        with self.assertRaises(ExportError):
-            self.jobs.get(ident)
-        with self.assertRaises(ExportError) as caught:
-            self.jobs.create(self.request())
-        self.assertEqual(caught.exception.status, 410)
+        self.assertEqual(self.jobs.get(ident)["state"], "expired")
+        self.assertEqual(self.jobs.create(self.request())["id"], ident)
         self.assertEqual(len(self.calls), 1)
+
+    def download(self, ident, *, gone=False, headers=None):
+        response = Mock(gone=gone)
+        request = SimpleNamespace(path=f"/__cad/exports/{ident}/file", method="GET", query={},
+                                  header=lambda name, default="": (headers or {}).get(name, default))
+        self.jobs.handle(request, response)
+        return response
+
+    def test_a_file_the_browser_fetched_whole_is_deleted_at_once(self):
+        self.finish.set()
+        ident = self.jobs.create(self.request())["id"]
+        self.settled(ident)
+        path = Path(self.download(ident).stream_file.call_args.args[0])
+        self.assertFalse(path.exists())
+        job = self.jobs.get(ident)
+        self.assertEqual((job["state"], job["fetched"]), ("expired", True))
+        self.assertEqual(list(Path(self.tmp.name).iterdir()), [])
+        self.assertEqual(self.download(ident).send_json.call_args.args[0], 410)
+
+    def test_a_part_or_a_broken_transfer_keeps_the_file_for_another_fetch(self):
+        self.finish.set()
+        ident = self.jobs.create(self.request())["id"]
+        self.settled(ident)
+        self.download(ident, headers={"range": "bytes=0-1"})
+        self.download(ident, gone=True)
+        self.assertEqual(self.jobs.get(ident)["state"], "ready")
+        self.download(ident)
+        self.assertEqual(self.jobs.get(ident)["state"], "expired")
+
+    def test_an_unfetched_file_is_kept_ten_minutes_then_deleted(self):
+        self.finish.set()
+        ident = self.jobs.create(self.request())["id"]
+        ready = self.settled(ident)
+        self.assertEqual(ready["expiresAt"], self.now + 600)
+        with self.jobs.artifact(ident) as path:
+            pass
+        self.now += 599
+        self.assertEqual(self.jobs.get(ident)["state"], "ready")
+        self.assertTrue(path.exists())
+        self.now += 1
+        job = self.jobs.get(ident)
+        self.assertEqual((job["state"], job.get("fetched")), ("expired", None))
+        self.assertFalse(path.exists())
+
+    def test_a_ready_job_s_status_waits_for_its_file_to_go(self):
+        self.finish.set()
+        ident = self.jobs.create(self.request())["id"]
+        ready = self.settled(ident)
+        answered = []
+        waiter = threading.Thread(target=lambda: answered.append(self.jobs.get(ident, ready["sequence"], 25)))
+        waiter.start()
+        with self.jobs.changed:  # the waiter is parked on the job's sequence before the fetch ends
+            self.assertTrue(self.jobs.changed.wait_for(lambda: waiter.is_alive(), 10))
+        self.download(ident)
+        waiter.join(10)
+        self.assertEqual(answered[0]["state"], "expired")
 
     def test_engine_stop_removes_every_artifact_and_discards_running_work(self):
         from cadgen.viewer.engine_app import EngineApp
@@ -138,24 +193,22 @@ class ExportsTest(unittest.TestCase):
         self.finish.set()
         ident = self.jobs.create(self.request())["id"]
         self.settled(ident)
-        response = Mock()
+        sent = []
+        response = Mock(gone=False)
+        response.stream_file.side_effect = lambda path, *_rest: sent.append(path.read_bytes())
         self.jobs.handle(SimpleNamespace(path=f"/__cad/exports/{ident}/file", method="GET", query={}), response)
-        args = response.stream_file.call_args.args
-        self.assertEqual(args[0].read_bytes(), b"model")
-        self.assertIn("attachment;", dict(args[3])["content-disposition"])
+        self.assertEqual(sent, [b"model"])
+        self.assertIn("attachment;", dict(response.stream_file.call_args.args[3])["content-disposition"])
         self.jobs.release(ident)
 
-    def test_plain_download_names_the_file_for_every_browser_and_serves_it_repeatedly(self):
+    def test_plain_download_names_the_file_for_every_browser(self):
         self.finish.set()
         self.jobs._source = lambda spec: ({}, {}, "ブラケット v2")
         ident = self.jobs.create(self.request())["id"]
         self.settled(ident)
-        for _ in range(2):  # a toast's Download again, or the browser's own retry
-            response = Mock()
-            self.jobs.handle(SimpleNamespace(path=f"/__cad/exports/{ident}/file", method="GET", query={}), response)
-            disposition = dict(response.stream_file.call_args.args[3])["content-disposition"]
-            self.assertEqual(disposition, "attachment; filename=\"_____ v2.step\"; filename*=UTF-8''%E3%83%96%E3%83%A9%E3%82%B1%E3%83%83%E3%83%88%20v2.step")
-        self.assertEqual(self.jobs.get(ident)["state"], "ready")
+        response = self.download(ident)
+        disposition = dict(response.stream_file.call_args.args[3])["content-disposition"]
+        self.assertEqual(disposition, "attachment; filename=\"_____ v2.step\"; filename*=UTF-8''%E3%83%96%E3%83%A9%E3%82%B1%E3%83%83%E3%83%88%20v2.step")
         self.jobs.release(ident)
         part = self.jobs.create({**self.request("two"), "source": {"doc": "d", "revision": "v", "part": "hinge/lid"}})
         self.assertEqual(self.settled(part["id"])["filename"], "ブラケット v2-part.step")

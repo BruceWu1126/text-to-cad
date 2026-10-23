@@ -40,6 +40,8 @@ export default {
   "export.failed": "Export failed",
   "export.expired": "Expired",
   "export.downloaded": "Download started",
+  "export.fetched": "Downloaded",
+  "export.exportAgain": "Export again",
 
   // The page before the viewer answers (`apps/web`'s starting view).
   "app.start.notAnswering": "The CAD Viewer is not answering",
