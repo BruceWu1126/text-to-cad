@@ -147,6 +147,9 @@ class Model:
         source = inspect.getsourcefile(function) or inspect.getfile(function)
         self.script = Path(canonical(source))
         self.outputs: list[Output] = []
+        # Where its document is kept (``STORES``): ``pointer`` by default; ``memory`` when asked.
+        self.store = "pointer"
+        self._store_given: str | None = None
         self.__xbf_model__ = True
         _MODELS[f"{self.script}::{self.name}"] = self
 
@@ -190,6 +193,17 @@ class Model:
         if _caller_discards_model_result():
             return None
         return api.Built(self.name, self.script, built.models[0], Path.cwd()).shape
+
+    def stored(self, store: str | None) -> "Model":
+        """The store a decorator gives (``store=``), checked: one store per model."""
+        if store is None:
+            return self
+        if store not in STORES:
+            raise ValueError(f"store is one of {', '.join(map(repr, STORES))}, not {store!r}")
+        if self._store_given is not None and self._store_given != store:
+            raise TypeError(f"model {self.name!r} declares two stores, {self._store_given!r} and {store!r}")
+        self.store = self._store_given = store
+        return self
 
     def _path(self, kind: str, out: Any) -> Path:
         if out is None:
@@ -312,29 +326,42 @@ def as_package_module(main: Any) -> None:
     main.__spec__, main.__package__ = spec, package
 
 
-def model(function: Any) -> Model:
-    """Declare a model without an output file. A call builds its document."""
-    return function if isinstance(function, Model) else Model(function)
+# Where a model's document is kept: ``pointer``, held by the engine, which knows the program that
+# builds it again; ``memory``, kept in its worker's memory only, gone when the worker is.
+STORES = ("pointer", "memory")
+
+
+def model(function: Any = None, /, *, store: str | None = None) -> Any:
+    """Declare a model without an output file. A call builds its document. ``@model(store=...)``
+    says where its document is kept (``STORES``)."""
+    if function is None:
+        if store is not None and store not in STORES:
+            raise ValueError(f"store is one of {', '.join(map(repr, STORES))}, not {store!r}")
+        return lambda target: model(target, store=store)
+    return (function if isinstance(function, Model) else Model(function)).stored(store)
 
 
 def _decorator(kind: str) -> Callable[..., Any]:
-    def decorate(out: Any) -> Any:
+    def decorate(out: Any, *, store: str | None = None) -> Any:
         if out is None:
             raise TypeError(f"@{kind} requires an output path")
         check_output(kind, out, f"@{kind}(out=...)")
+        if store is not None and store not in STORES:
+            raise ValueError(f"store is one of {', '.join(map(repr, STORES))}, not {store!r}")
 
         def apply(target: Any) -> Model:
             model = target if isinstance(target, Model) else Model(target)
             if any(output.kind == kind for output in model.outputs):
                 raise TypeError(f"model {model.name!r} declares @{kind} twice")
             model.outputs.insert(0, Output(kind, os.fspath(out)))
-            return model
+            return model.stored(store)
 
         return apply
 
     decorate.__name__ = kind
     decorate.__qualname__ = kind
-    decorate.__doc__ = (f"Declare an explicit output: @{kind}(out='path{SUFFIXES[kind]}'). "
+    decorate.__doc__ = (f"Declare an explicit output: @{kind}(out='path{SUFFIXES[kind]}'), where its "
+                        "document is kept with store= (pointer, the default, or memory). "
                         "The output path is required; decoration builds nothing.")
     return decorate
 
@@ -873,8 +900,8 @@ from types import ModuleType as _ModuleType
 
 
 class _ModelModule(_ModuleType):
-    def __call__(self, function: Any) -> Model:
-        return model(function)
+    def __call__(self, function: Any = None, /, **options: Any) -> Any:
+        return model(function, **options)
 
 
 _sys.modules[__name__].__class__ = _ModelModule
