@@ -183,9 +183,13 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     delivered in UI-only launch metadata. Only the person can opt in through a page
     or the telemetry CLI. See the engine's **Architecture**.
 
-21. **Python functions own operations; decorators and CLIs expose them.** Every
-    successful server-backed build reports its id and localhost viewer URL,
-    including a build with file outputs. A cold `daemon=False` build has no served URL.
+21. **Operations on documents are Python functions the CLI exposes; process control is the
+    CLI's alone.** `export`, `snapshot` and `inspect` are functions of the root
+    (`cadgen.export`, ...) and commands that call them; serving, the engine's status, stopping it
+    and running it (`cadgen serve`, `status`, `stop`, `daemon`) are commands only, with no
+    function of the root. Every successful server-backed build reports its id and localhost
+    viewer URL, including a build with file outputs. A cold `daemon=False` build has no served
+    URL.
 
 
 ## Agent operations

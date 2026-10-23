@@ -12,8 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from cadgen import stop
-from cadgen.engine.api import build_script
+from cadgen.engine.api import build_script, stop
 from cadgen.engine.profiling import describe
 
 

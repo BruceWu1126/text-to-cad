@@ -3,8 +3,9 @@ and the files they declare.
 
 The root exports the engine's surface -- ``model``, the decorators (``xbf``, ``step``, ``glb``,
 ``stl``, ``threemf``, ``dxf``), ``memo``, materials (``Material``, ``materials``, ``paint``), the
-readers (``read_step``, ``read_xbf``, ``read_mesh``) -- and its verbs as functions (``export``, ``snapshot``, ``serve``, ``inspect``, ``status``,
-``stop``, ``daemon``). Two namespaces hold the rest: ``cadgen.ap242`` the mechanism's AP242 names
+readers (``read_step``, ``read_xbf``, ``read_mesh``) -- and its operations on documents as
+functions (``export``, ``snapshot``, ``inspect``); process control (``serve``, ``status``,
+``stop``, ``daemon``) is the ``cadgen`` command's alone. Two namespaces hold the rest: ``cadgen.ap242`` the mechanism's AP242 names
 (``mechanism_state``, ``configuration_sequence``, ``gear_pair``, ``rack_and_pinion_pair``,
 ``screw_pair``) and ``cadgen.gltf`` a GLB's own ``animation``. Every name loads on first use:
 ``import cadgen`` imports no CAD kernel.
@@ -49,10 +50,11 @@ from cadgen._internal.engine_host import install as _install_engine_host
 _install_engine_host()
 del _install_engine_host
 
-# The engine's surface (``cadgen.engine.__all__``) and its verbs as functions (``cadgen.engine.api``).
+# The engine's surface (``cadgen.engine.__all__``) and its operations on documents as functions
+# (``cadgen.engine.api``).
 _ENGINE = ("model", "xbf", "memo", "step", "glb", "stl", "threemf", "dxf", "Material", "materials", "paint",
            "read_step", "read_xbf", "read_mesh")
-_VERBS = ("export", "snapshot", "serve", "inspect", "status", "stop", "daemon")
+_VERBS = ("export", "snapshot", "inspect")
 
 __all__ = [
     "__version__",
@@ -101,7 +103,7 @@ if TYPE_CHECKING:
         srgb_to_linear as srgb_to_linear,
     )
     from cadgen.engine import materials
-    from cadgen.engine.api import daemon, export, serve, snapshot, status, stop, inspect
+    from cadgen.engine.api import export, inspect, snapshot
     from cadgen.engine.materials import Material
     from cadgen.engine.model import (
         dxf,
