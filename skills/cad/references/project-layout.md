@@ -36,13 +36,15 @@ this is a good default; a one-off part can be one script in a flat folder.
   vendor/                 # vendor STEP files, each with the xbf converted from it
     motor.step
     motor.xbf
-  STEP/  STL/  GLB/  3MF/ # files written on request, by cadgen export or exports.py
+  STEP/  STL/  GLB/  3MF/  DXF/   # files written on request, by cadgen export or exports.py
   tmp/                    # ignored scratch: checks, snapshots
 ```
 
 Runs write nothing, so the output folders exist only once someone asks for files.
 `exports.py` ([standing deliverables](exports.md#standing-deliverables-exportspy)) is the
-one script in a project that writes files.
+one script in a project that writes files. The output folders are generated on request
+and gitignored by default; commit them only when the person asks for the files in the
+repository (a repository published for people who print or order the parts).
 
 ## Starting a project
 
@@ -70,6 +72,18 @@ if __name__ == "__main__":
 
 ```bash
 python src/plate.py
+```
+
+and a `.gitignore` beside `src/`:
+
+```gitignore
+/STEP/
+/STL/
+/GLB/
+/3MF/
+/DXF/
+/tmp/
+__pycache__/
 ```
 
 A second run replays the model and changes nothing. Then a part with configurations,
@@ -147,17 +161,9 @@ check their parts before the root takes them in.
 
 ## Version control
 
-Every exported file is reproducible from the code and its inputs, so a project can
-ignore them and keep the code and its inputs, unless a file is a pinned deliverable:
-
-```gitignore
-/STEP/
-/STL/
-/GLB/
-/3MF/
-/tmp/
-__pycache__/
-```
+Every exported file is reproducible from the code and its inputs, so the project's
+`.gitignore` ([starting a project](#starting-a-project)) keeps the output folders out
+unless the person asks for the files in the repository.
 
 Vendor STEP files are irreplaceable inputs: commit them. The xbf converted from one is
 made again by one `cadgen export`. A file that starts with `version https://git-lfs` is a

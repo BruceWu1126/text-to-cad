@@ -23,7 +23,8 @@ destination is written from the document the engine holds, by its suffix:
 cadgen export "$ID" STEP/bracket.step STL/bracket.stl GLB/bracket.glb 3MF/bracket.3mf
 ```
 
-`$ID` is the `id:` line the model's run printed. The source can also be a file the
+`$ID` is the `id:` line the model's run printed. The output folders are generated on
+request and gitignored by default ([version control](project-layout.md#version-control)). The source can also be a file the
 engine reads as a document, an `.xbf` or a `.step`:
 
 ```bash
