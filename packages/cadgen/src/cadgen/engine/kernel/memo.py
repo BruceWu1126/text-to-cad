@@ -202,6 +202,7 @@ FACE_COLORS = "xbf_face_colors"
 FACE_MATERIALS = "xbf_face_materials"
 CONFIGURATIONS = "xbf_configurations"  # an assembly's poses by name (``mechanism.configuration``)
 COUPLINGS = "xbf_couplings"  # and its couplings by name (``mechanism.couple``)
+ANIMATIONS = "xbf_animations"  # and its animations by name (``animations.animation``): plain values
 
 
 class _Unkeyable(Exception):
@@ -2984,9 +2985,10 @@ def _shape_key(shape: Any, state: _Run) -> int:
         _normalize(state_dict.get("joints") or {}, state),  # a hit hands back the joints the first run held
         # and the configurations an assembly was given (``mechanism.configuration``): a hit of an
         # operation on it hands back what the first run held, so a configuration is its input,
-        # and a coupling (``mechanism.couple``) too.
+        # and a coupling (``mechanism.couple``) too, and an animation (``animations.animation``).
         _normalize(state_dict.get(CONFIGURATIONS) or {}, state),
         _normalize(state_dict.get(COUPLINGS) or {}, state),
+        _normalize(state_dict.get(ANIMATIONS) or {}, state),
     )
     children = tuple(_shape_key(child, state) for child in state_dict.get("_NodeMixin__children") or ())
     return _intern((placed, attrs, children))

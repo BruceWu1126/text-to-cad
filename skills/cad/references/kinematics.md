@@ -1,7 +1,9 @@
 # Kinematics: joints, configurations, couplings and motions
 
 Read this file when the user asks to articulate, pose or animate a model, or when
-designing or reviewing joints, couplings, named poses, posed exports or motions.
+designing or reviewing joints, couplings, named poses, posed exports or motions. For an
+explode, a reveal, a showcase or any movement that is not the mechanism's, read
+[Animation](animation.md) too: that is a GLB's `animation()`, not a motion.
 
 An assembly's mechanism is written in its body, and the document keeps it:
 
@@ -158,6 +160,10 @@ animation of its name, keyed so it stays within 1e-3 of the model's size of the 
 motion, its duration in the animation's `extras.cadgen`. Blender, three.js and the
 CAD Viewer's GLB view play it, repeating. Neither the decorator nor the export takes an argument
 for it.
+
+A motion moves joints only. What the mechanism does not do (parts flying apart, a cover
+vanishing, a part spinning for show) is an animation of the GLB, not a helper joint:
+[Animation](animation.md).
 
 ## Reviewing motion
 

@@ -18,9 +18,12 @@ root node shows them in glTF's frame, Y up and metres, as cadgen's other GLBs do
 Every motion of the document is an animation of the same name (``export/motion.py``):
 CUBICSPLINE translation and rotation channels for each placement it moves, over one shared
 key time accessor, its duration in the animation's ``extras`` (``{"cadgen": {"duration":
-seconds}}``). A clip is the motion once; a player repeats it. A placement any motion moves
-stands by translation and rotation, as glTF asks of an animated node; every other one by its
-matrix.
+seconds}}``). A clip is the motion once; a player repeats it. After them, a built source's
+animations (``animation()``, ``export/animation.py``), each one glTF animation of its name: STEP,
+LINEAR or CUBICSPLINE translation, rotation and scale channels on the nodes its references
+place, their duration in ``extras`` as a motion's. A GLB written from an xbf alone has none of
+them: the document holds no animation. A placement anything moves stands by translation and
+rotation, as glTF asks of an animated node; every other one by its matrix.
 """
 
 from __future__ import annotations
@@ -235,14 +238,20 @@ def _size(held: dict[int, Any], shown: list[Any]) -> float:
 
 def _animations(view: Any, held: dict[int, Any], shown: list[Any], node_of: dict[int, int], nodes: list[dict],
                 add: Any, accessors: list[dict]) -> list[dict]:
-    """Every motion baked into an animation (see the module docstring); the nodes it moves
-    are given translation and rotation in place of their matrices."""
-    if not node_of or not (view.source.structure.get("kinematics") or {}).get("motions"):
+    """Every motion baked into an animation, then every ``animation()`` of a built source (see the
+    module docstring); the nodes they move are given translation and rotation in place of their
+    matrices."""
+    motions = bool((view.source.structure.get("kinematics") or {}).get("motions"))
+    if not node_of or not (motions or getattr(view.source, "animations", None)):
         return []
+    from cadgen.engine.export.animation import bake
     from cadgen.engine.export.motion import clips, quaternion
 
-    baked = clips(view, list(node_of), _size(held, shown))
-    animated = sorted({index for clip in baked for index in clip.instances})
+    size = _size(held, shown)
+    baked = clips(view, list(node_of), size) if motions else []
+    animations = bake(view, held, shown, node_of, size) if getattr(view.source, "animations", None) else []
+    animated = sorted({index for clip in baked for index in clip.instances}
+                      | {channel.instance for animation in animations for channel in animation.channels})
     rest = {placed.instance: placed.matrix for placed in shown}
     for index in animated:
         node = nodes[node_of[index]]
@@ -250,13 +259,22 @@ def _animations(view: Any, held: dict[int, Any], shown: list[Any], node_of: dict
         node.pop("matrix")
         node["translation"] = [float(value) for value in matrix[:3, 3]]
         node["rotation"] = [float(value) for value in quaternion(matrix)]
+    inputs: dict[bytes, int] = {}
+
+    def times_of(times: np.ndarray) -> int:
+        data = np.ascontiguousarray(times, "<f4")
+        found = inputs.get(data.tobytes())
+        if found is None:
+            found = inputs[data.tobytes()] = add(data, None, "SCALAR", 5126)
+            accessors[found]["min"] = [float(data[0])]
+            accessors[found]["max"] = [float(data[-1])]
+        return found
+
     found = []
     for clip in baked:
         if not clip.instances:
             continue
-        times = add(np.ascontiguousarray(clip.times, "<f4"), None, "SCALAR", 5126)
-        accessors[times]["min"] = [float(np.float32(clip.times[0]))]
-        accessors[times]["max"] = [float(np.float32(clip.times[-1]))]
+        times = times_of(clip.times)
         samplers, channels = [], []
         for index, translations, rotations in zip(clip.instances, clip.translations, clip.rotations):
             for path, rows, kind in (("translation", translations, "VEC3"), ("rotation", rotations, "VEC4")):
@@ -265,6 +283,19 @@ def _animations(view: Any, held: dict[int, Any], shown: list[Any], node_of: dict
                 channels.append({"sampler": len(samplers) - 1, "target": {"node": node_of[index], "path": path}})
         found.append({"name": clip.name, "channels": channels, "samplers": samplers,
                       "extras": {"cadgen": {"duration": clip.duration}}})
+    for animation in animations:
+        if not animation.channels:
+            continue
+        samplers, channels = [], []
+        for channel in animation.channels:
+            rows = channel.values
+            values = add(np.ascontiguousarray(rows.reshape(-1, rows.shape[-1]), "<f4"), None,
+                         "VEC4" if channel.path == "rotation" else "VEC3", 5126)
+            samplers.append({"input": times_of(channel.times), "interpolation": channel.interpolation, "output": values})
+            channels.append({"sampler": len(samplers) - 1, "target": {"node": node_of[channel.instance],
+                                                                      "path": channel.path}})
+        found.append({"name": animation.name, "channels": channels, "samplers": samplers,
+                      "extras": {"cadgen": {"duration": animation.duration}}})
     return found
 
 

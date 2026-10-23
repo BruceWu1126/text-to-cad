@@ -23,7 +23,8 @@ instead of running it. A part's material is a value set on the shape: ``part.mat
 ``connect_to``, as built where the joints place the parts; ``configuration(assembly, name,
 **values)`` names a configuration of it, ``couple(assembly, name, **joints)`` a constraint moving
 several joints by ratio (their only way to move, its range their limits'), and ``motion(assembly,
-name, ...)`` a motion, which a GLB export bakes into a clip. ``read_step(path)`` and ``read_xbf(path)`` copy a file's geometry into
+name, ...)`` a motion, which a GLB export bakes into a clip; ``animation(assembly, name, duration=)``
+a GLB's own choreography, never in the document, baked into the GLBs the model declares. ``read_step(path)`` and ``read_xbf(path)`` copy a file's geometry into
 the model, named, coloured and given its materials as the file has them; ``read_mesh(path)`` reads
 an STL as data -- vertices, triangles, ``bounding_box()`` -- never a shape. ``select(source, ref,
 kind=None)`` is the geometry a ref names -- ``hand/finger.2/f:finger.tip.1``, ``base/face 3`` --
@@ -38,7 +39,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Material", "configuration", "couple", "dxf", "glb", "materials", "memo", "model", "motion", "paint",
+__all__ = ["Material", "animation", "configuration", "couple", "dxf", "glb", "materials", "memo", "model", "motion", "paint",
            "read_mesh", "read_step", "read_xbf", "report", "select", "step", "stl", "threemf", "track", "xbf"]
 
 

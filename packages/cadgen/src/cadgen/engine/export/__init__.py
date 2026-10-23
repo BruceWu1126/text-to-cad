@@ -14,7 +14,9 @@ document of its own: its root at the subtree's frame. Meshes are never sources: 
 no B-rep in them. An xbf is written from a STEP (read into a document
 first), or from an xbf with ``part`` (a sub-assembly extracted); a posed xbf is refused,
 since a pose is a request, never a document. A GLB carries every motion the document defines as a glTF animation of the same
-name, baked by forward kinematics (``export/motion.py``); STEP, STL and 3MF ignore motions. A
+name, baked by forward kinematics (``export/motion.py``), and, from a build's source, every
+``animation()`` its code made (``export/animation.py``): the document holds none, so a GLB
+exported from the xbf alone carries the motions only. STEP, STL and 3MF ignore both. A
 DXF is drawn from a planar document alone (``export/dxf.py``): a 3D one is refused.
 
 Every file is written to a temporary file beside its target and moved over it; a DXF only
@@ -102,13 +104,16 @@ class Source:
 
     def __init__(self, structure: dict[str, Any], shapes: dict[str, Any], *, live: bool, xcaf: Any = None,
                  world: Callable[[tuple[int, ...]], Any] | None = None, mechanism: Any = None,
-                 foreign: bool = False, path: Path | None = None) -> None:
+                 foreign: bool = False, path: Path | None = None, animations: Any = None) -> None:
         self.structure = structure
         self.shapes = shapes
         self.live = live
         self.xcaf = xcaf
         self._world = world
         self.mechanism = mechanism
+        # The animations the build's code made (``animations.harvest``): a built source's alone, never
+        # a file's, since the document holds none. A GLB bakes them (``export/animation.py``).
+        self.animations = animations
         # A document this engine did not write (a foreign STEP): its keys are its reader's,
         # made again from the geometry before an xbf holds them.
         self.foreign = foreign
@@ -151,7 +156,8 @@ class Source:
             shapes.setdefault(part.key, part.shape)
         return cls(structure, shapes, live=True, xcaf=doc,
                    world=lambda occurrence: kinematics._occurrence(tree, occurrence)[0],
-                   mechanism=tree.mechanism, path=None if path is None else Path(path))
+                   mechanism=tree.mechanism, path=None if path is None else Path(path),
+                   animations=getattr(tree, "animations", None))
 
     def world(self, occurrence: tuple[int, ...]) -> Any:
         """An occurrence's placement as built, a 4x4 matrix (numpy), or None."""

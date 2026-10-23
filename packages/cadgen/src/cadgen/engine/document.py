@@ -129,6 +129,8 @@ class Tree:
     parts: list[Part]
     signature: tuple
     mechanism: Any = None
+    # Its animations (``animations.harvest``), by name, or None: the GLB writer's, never the document's.
+    animations: Any = None
     # The model's build closure (``previous.manifest``, as text), written on the main label;
     # None for none.
     closure: str | None = None
@@ -305,7 +307,12 @@ def collect(result: Any, name: str) -> Tree:
     tree = Tree(root, order, parts, (signature, _location_key(location), root_name))
     # The result's joints, harvested: the result is the holder's one component where it has one.
     tree.mechanism = mechanism.harvest(result, tree, (0,) if held else ())
-    tree.signature = (*tree.signature, tree.mechanism.signature() if tree.mechanism else None)
+    # And its animations, which only a GLB holds: a change of one rewrites the GLB, never the document's tree.
+    from cadgen.engine.animations import harvest
+
+    tree.animations = harvest(result, tree, (0,) if held else (), tree.mechanism)
+    tree.signature = (*tree.signature, tree.mechanism.signature() if tree.mechanism else None,
+                      tuple(sorted(tree.animations.items())) if tree.animations else None)
     return tree
 
 

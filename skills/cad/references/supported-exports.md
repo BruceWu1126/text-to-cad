@@ -48,7 +48,9 @@ and a failure as `{"ok": false, "error": ...}` with exit status 1, as every comm
   by its occurrence, a PBR material per look (with the glTF extensions for IOR,
   transmission, clear coat, anisotropy and emission where a material has them), and
   each of the model's motions as an animation of the same name
-  ([motions](kinematics.md#motions)): the one export that carries motion.
+  ([motions](kinematics.md#motions)): the one export that carries motion. A GLB the model
+  declares (`@glb`) also bakes the model's `animation()`s ([animation](animation.md)); one
+  `cadgen export` writes from the `.xbf` carries the motions only.
 - **3MF**: an object per part, a build item per placement, in millimetres, with
   colours and materials through the materials extension.
 - **STL**: binary, every placed triangle, in millimetres.
