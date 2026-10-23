@@ -69,7 +69,7 @@ ADAPTERS: dict[str, frozenset[str]] = {
     # The engine's verbs (cadgen.engine.cli), each a command of its own.
     "build": frozenset({"source", "model", "name", "xbf", "step", "glb", "stl", "threemf", "dxf", "json", "verify", "profile",
                         "no_daemon"}),
-    "export": frozenset({"source", "destinations", "no_inputs", "pose", "part", "no_daemon", "json"}),
+    "export": frozenset({"source", "destinations", "pose", "part", "no_daemon", "json"}),
     "snapshot": SNAPSHOT,
     "serve": frozenset({"document", "port", "three"}),
     "inspect": frozenset({"document", "ref", "query"}),

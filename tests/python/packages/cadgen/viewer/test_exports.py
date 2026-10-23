@@ -93,7 +93,7 @@ class ExportsTest(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
 
     def test_stale_epoch_closed_formats_and_nonfinite_pose_are_refused(self):
-        for change in ({"epoch": "old"}, {"format": "cadz"}, {"format": []}, {"output": "/tmp/unasked"}):
+        for change in ({"epoch": "old"}, {"format": "zip"}, {"format": []}, {"output": "/tmp/unasked"}):
             with self.assertRaises(ExportError):
                 self.jobs.create({**self.request(), **change})
         for pose in ({"joint": float("nan")}, {"joint": True}, {"joint": "45"}):

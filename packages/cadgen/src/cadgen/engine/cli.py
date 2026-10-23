@@ -5,7 +5,7 @@ ordinary Python scripts call decorated models explicitly.
     cadgen build SOURCE | - [--model NAME] [--name N]  source text (stdin with -), an output required
         [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify]
         [--no-daemon]
-    cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] [--no-daemon] [--json]
+    cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-daemon] [--json]
     cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--camera PRESET|az:el|JSON|authored] [--grid]
         [--preview] [--pose NAME|JSON] [--annotation FILE] [--measurements FILE] [--width N] [--height N]
         [--size-profile P] [--json]
@@ -60,9 +60,7 @@ def _export_arguments(export: argparse.ArgumentParser) -> None:
     export.add_argument("source", metavar="SRC", help="a model address (SCRIPT::NAME or code::NAME), an .xbf, or a .step")
     export.add_argument("destinations", nargs="+", metavar="DST",
                         help=".xbf (from a STEP, or with --part), .step, .glb, .stl, .3mf or .dxf (of a planar "
-                             "document); or .cadz (from an xbf: it, its build closure's source files and its inputs, "
-                             "zipped)")
-    export.add_argument("--no-inputs", action="store_true", help="a .cadz without the closure's input files")
+                             "document)")
     export.add_argument("--pose", help="a configuration's name, or joint and coupling values as JSON "
                                        "('{\"elbow\": 45}', '{\"curl\": 0.6}'): the mechanism posed there; as built "
                                        "without it")
@@ -295,7 +293,7 @@ def _export(args: argparse.Namespace, prog: str) -> int:
         raise Failed(f"{args.source} is no document: an export reads an .xbf or a .step", 2)
     try:
         written = api.export(args.source, *args.destinations, pose=_pose(args.pose), part=args.part,
-                             inputs=not args.no_inputs, log=lambda text: print(text, file=sys.stderr),
+                             log=lambda text: print(text, file=sys.stderr),
                              daemon=not args.no_daemon)
     except (ExportRefused, ValueError) as error:
         raise Failed(str(error), 2) from None

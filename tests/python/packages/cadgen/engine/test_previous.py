@@ -441,31 +441,6 @@ class ClosureTest(unittest.TestCase):
         self.assertEqual(record["modules"], [])
         self.assertNotIn(b"bd.Box", out.read_bytes())
 
-    def test_a_cadz_extracted_and_built_is_the_same_bytes(self) -> None:
-        import subprocess
-        import sys
-        import zipfile
-
-        from cadgen.engine import api
-
-        self.plate()
-        original = self.xbf.read_bytes()
-        package = self.folder / "plate.cadz"
-        (written,) = api.export(self.xbf, package, daemon=False)
-        self.assertEqual(written.kind, "cadz")
-        with zipfile.ZipFile(package) as archive:
-            self.assertEqual(sorted(archive.namelist()), ["XBF/plate.xbf", "depth.json", "dims.py", "plate.py"])
-            other = self.folder / "elsewhere"
-            archive.extractall(other)
-        (other / "XBF/plate.xbf").unlink()
-        done = subprocess.run([sys.executable, "-B", "-c", "import plate; plate.plate.build(daemon=False)"], cwd=other,
-                              capture_output=True, text=True)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual((other / "XBF/plate.xbf").read_bytes(), original)
-        api.export(self.xbf, package, inputs=False, daemon=False)
-        with zipfile.ZipFile(package) as archive:
-            self.assertNotIn("depth.json", archive.namelist())
-
     def test_ocp_without_vtk_is_the_ocp_recorded(self) -> None:
         from importlib import metadata
         from unittest import mock
