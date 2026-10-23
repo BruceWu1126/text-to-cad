@@ -173,8 +173,8 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     engine's **Architecture** and **The daemon and its workers**).
 
 20. **One engine serves the installation.** A page never replaces or re-executes it. Page sessions and document reads share its
-    authenticated HTTP listener. `serve` and `viewer` always start or reuse it, with no
-    standalone serving mode. Launchers exit; clients closing never stop it. Kernel
+    authenticated HTTP listener. `cadgen serve` and `cadgen viewer` always start or reuse it,
+    with no standalone serving mode, and no Python function starts, stops or serves it (law 21). Launchers exit; clients closing never stop it. Kernel
     operations run in child processes, never in the engine's request threads. Each
     page session keeps its own start folder; each MCP session owns its views and resource. The
     stdio shim owns only connection metadata. Sidebar sharing stays in memory, and host
@@ -233,10 +233,15 @@ build metadata. File metadata does not imply a live worker. `where` is retired.
 
 ```
 src/cadgen/
-  __init__.py            # the root: the engine's surface (xbf, step, ..., select, report)
-                         #   and its verbs as functions (build, export, snapshot, serve,
-                         #   inspect, status, stop, daemon), every name loaded on first use;
-                         #   the font guard and the kernel-import recorder, installed first
+  __init__.py            # the root, exactly: model, the decorators (xbf, step, glb, stl,
+                         #   threemf, dxf), memo, Material, materials, paint, read_step,
+                         #   read_xbf, read_mesh, and the operations on documents (export,
+                         #   snapshot, inspect), every name loaded on first use; the font
+                         #   guard, the kernel-import recorder and the lazy kernel, first
+  ap242.py               # the mechanism's AP242 names: mechanism_state,
+                         #   configuration_sequence, gear_pair, rack_and_pinion_pair,
+                         #   screw_pair (product and manufacturing information to join them)
+  gltf.py                # what glTF says and the document does not: animation
   engine/                # the engine: models, the daemon and its workers, documents,
                          #   exports, the mesh, references, the OCCT stills (its README)
   cli/                   # the `cadgen` command: a module per command, each a shell over
@@ -273,6 +278,9 @@ src/cadgen/
   check_fonts.py         # `python -m cadgen.check_fonts`: the font that breaks
                          #   `import build123d`
   _internal/             # the launch command, the font guard, the kernel-import recorder,
+                         #   the lazy kernel (lazy_kernel: `import build123d` binds, the
+                         #   kernel loads on first use; cadgen-lazy-kernel.pth, at the root
+                         #   of site-packages, installs it at interpreter start),
                          #   the engine observer and the telemetry sender, the install
                          #   channel, atomic replace, file locks, the CLI derivation
   _runtime/              # BUILT: the CAD Viewer client, the CAD app page and the headless

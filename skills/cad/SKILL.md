@@ -17,12 +17,12 @@ Use the installed local skill files for the current interface.
 | **Organize a CAD project** | The project's existing layout. | [Project layout](references/project-layout.md), [starters](references/project-template.md) |
 | **Export STEP, STL, 3MF or GLB** | A decorator on the model, or `cadgen export` on its `.xbf`. | [Exports](references/supported-exports.md) |
 | **Use a vendor STEP in a model** | `cadgen export vendor.step vendor.xbf` once, then `read_xbf` in the model. | [Inputs](references/model-contract.md#inputs) |
-| **Resolve a reference from a prompt** | `select(document, ref)` in a Python check (below). | [References](references/inspection-and-validation.md#references) |
+| **Resolve a reference from a prompt** | `cadgen inspect <document> '<ref>'` (below). | [References](references/inspection-and-validation.md#references) |
 | **Find the code that made a face or an edge** | `cadgen inspect <document> <ref>`. | [Which code made it](references/inspection-and-validation.md#which-code-made-it) |
-| **Measure or check geometry** | A Python check: `read_xbf`, `select` and `cadgen.geometry`. | [Inspection](references/inspection-and-validation.md) |
+| **Measure or check geometry** | A Python check: `read_xbf` and `cadgen.geometry`. | [Inspection](references/inspection-and-validation.md) |
 | **See a model or a pose** | `cadgen snapshot`. | [Snapshots](references/snapshot-review.md) |
-| **Articulate a model** | build123d joints in the body, then `mechanism_state`, `gear_pair` / `rack_and_pinion_pair` / `screw_pair` and `configuration_sequence`. | [Kinematics](references/kinematics.md) |
-| **Explode, reveal or showcase a model in a GLB** | `animation` in the body, with `@glb` stacked on `@xbf`. | [Animation](references/animation.md) |
+| **Articulate a model** | build123d joints in the body, then `cadgen.ap242`'s `mechanism_state`, `gear_pair` / `rack_and_pinion_pair` / `screw_pair` and `configuration_sequence`. | [Kinematics](references/kinematics.md) |
+| **Explode, reveal or showcase a model in a GLB** | `cadgen.gltf`'s `animation` in the body, with `@glb` stacked on `@xbf`. | [Animation](references/animation.md) |
 | **Open an existing XBF, STEP/STP, STL, 3MF or GLB** | Show it to the user. | [Show the model](#show-the-model) |
 | **Source or commands written for an older cadgen fail** | Their migration. | [Migrations](references/migrations.md) |
 
@@ -49,7 +49,7 @@ build` take `--no-daemon`, and a model builds in your own process from Python,
 in its script's folder: `python -c "import bracket; bracket.bracket.build(daemon=False)"`.
 Such a build is cold every time.
 
-Command-line paths, and the paths `read_xbf`, `read_step` and `select` take, are
+Command-line paths, and the paths `read_xbf` and `read_step` take, are
 relative to the working directory, as are a model's own file reads unless anchored
 on `__file__`. Decorator `out=` paths are **relative to the model script**.
 
@@ -161,23 +161,22 @@ the labels on its way from the root (`hand/finger.2` is the second component
 labelled `finger` in `hand`; a path may start at any level where it names one
 occurrence), then, after a slash, one element by its name (`f:`, `e:` or `v:`) or
 its number (`face 7`). The CAD viewer copies them for an `.xbf` or a STEP. Resolve
-one in a Python check:
+one with `cadgen inspect`:
 
-```python
-from cadgen.engine import read_xbf, select
-
-arm = read_xbf("/work/robot/XBF/arm.xbf")                            # the latest build
-face = select(arm, "/work/robot/XBF/arm.xbf#arm/fore/f:arm.fore.6")[0]
-print(face.label, face.area)                                          # a Face, world coordinates
+```bash
+cadgen inspect /work/robot/XBF/arm.xbf "fore/f:arm.fore.6"
 ```
 
-`select` returns build123d shapes, one per selector, and `kind="face"` every face
-under what a selector names. `cadgen inspect XBF/arm.xbf "fore/f:arm.fore.6"` answers
-the same ref from the command line: an element's measured facts and what made it,
-or a part's or an assembly's volume and mass. A ref is resolved in the document as
-the latest build left it; one that names nothing, or several things where it names
-one, is refused with what it could mean. The
-[inspection reference](references/inspection-and-validation.md) has the grammar.
+It answers in JSON what the ref names, placed where its occurrence stands: an
+element's canonical `ref`, `kind`, `ordinal` and `name`, the kernel's facts (a face's
+`area`, `centroid`, `surface` and exact `box`; an edge's length and endpoints), and
+`made_by`, the function, file and line of the code that made it; a part's or an
+assembly's volume and mass. `cadgen.inspect(document, ref)` returns the same from
+Python. Edit the code `made_by` names, or pick the element in the model's body with
+build123d's selectors (`body.faces().sort_by(bd.Axis.Z)[-1]`), matching those facts.
+A ref is resolved in the document as the latest build left it; one that names
+nothing, or several things where it names one, is refused with what it could mean.
+The [inspection reference](references/inspection-and-validation.md) has the grammar.
 
 A Quick Edit prompt names its document under `File:`, selected entities under
 `References:`, and a snapshot packet as inline JSON or a `.snapshot.json` path.
@@ -195,7 +194,7 @@ draw it again to check the change. See
 for the packet.
 
 A reference into a file that is not a document names what the viewer picked in it,
-in that file's own terms (none is a ref `select` resolves):
+in that file's own terms (none is a ref `cadgen inspect` resolves):
 
 | File | Reference | Means |
 | --- | --- | --- |
@@ -210,12 +209,12 @@ A check is a Python script that reads the document the latest build wrote, so it
 tests what was written:
 
 ```python
-from cadgen.engine import read_xbf, select
+from cadgen.engine import read_xbf
 from cadgen.geometry import closest_points
 
 kit = read_xbf("XBF/assembly.xbf")
-plate = select(kit, "plate")[0]
-post = select(kit, "standoff_left")[0]
+parts = {part.label: part for part in kit.leaves}   # every placed part, world coordinates
+plate, post = parts["plate"], parts["standoff_left"]
 print(plate.bounding_box().size)              # the envelope: not a hole's diameter or a wall's thickness
 print(closest_points(plate, post).distance)   # 0: the standoff sits on the plate
 ```

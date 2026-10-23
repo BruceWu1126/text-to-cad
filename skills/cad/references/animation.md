@@ -12,7 +12,7 @@ Two layers, each true to its format:
   mechanism's: joint values over time, kept in the `.xbf` as STEP AP242's configuration sequence. Every GLB of the model carries it as a clip,
   including one `cadgen export` writes from the `.xbf` later, and the viewer's Position poses
   the same joints. A robot's gait, a door's opening, an engine's running belong here.
-- **An animation** (`animation(...)`) is the GLB's: glTF channels (translation, rotation,
+- **An animation** (`cadgen.gltf`'s `animation(...)`) is the GLB's: glTF channels (translation, rotation,
   scale) on the parts a GLB places, and the mechanism's forward kinematics at given times. It is
   never written into the `.xbf`. It is baked into the GLB the model declares, when that GLB is
   written. An explode, a reveal, a showcase or a hidden cover belongs here.

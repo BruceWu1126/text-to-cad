@@ -76,17 +76,19 @@ measured offsets or joint frames go in the source.
 ## Alignment and measurement checks
 
 There is no generic alignment mode that guesses which points or axes the design
-means: a check names the mating features by their refs and states the relationship
-in Python ([inspection](inspection-and-validation.md)).
+means: a check names the mating features and states the relationship in Python
+([inspection](inspection-and-validation.md)).
 
 For example, for the enclosure's two mating faces:
 
 ```python
-from cadgen.engine import read_xbf, select
+from cadgen.engine import read_xbf
+import build123d as bd
 
 doc = read_xbf("XBF/enclosure.xbf")
-fixed = select(doc, "base/f:enclosure.base.6")[0]     # the base's top
-moving = select(doc, "lid/f:enclosure.lid.5")[0]      # the lid's underside
+parts = {part.label: part for part in doc.leaves}
+fixed = parts["base"].faces().sort_by(bd.Axis.Z)[-1]     # the base's top
+moving = parts["lid"].faces().sort_by(bd.Axis.Z)[0]      # the lid's underside
 n = fixed.normal_at().normalized()
 m = moving.normal_at().normalized()
 signed_gap_mm = (moving.center() - fixed.center()).dot(n)

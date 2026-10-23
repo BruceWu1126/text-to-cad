@@ -1,14 +1,16 @@
 """cadgen: CAD models as Python, built by its engine (``cadgen.engine``) into documents (``.xbf``)
 and the files they declare.
 
-The root exports the engine's surface -- ``model``, the decorators (``xbf``, ``step``, ``glb``,
-``stl``, ``threemf``, ``dxf``), ``memo``, materials (``Material``, ``materials``, ``paint``), the
-readers (``read_step``, ``read_xbf``, ``read_mesh``) -- and its operations on documents as
-functions (``export``, ``snapshot``, ``inspect``); process control (``serve``, ``status``,
-``stop``, ``daemon``) is the ``cadgen`` command's alone. Two namespaces hold the rest: ``cadgen.ap242`` the mechanism's AP242 names
-(``mechanism_state``, ``configuration_sequence``, ``gear_pair``, ``rack_and_pinion_pair``,
-``screw_pair``) and ``cadgen.gltf`` a GLB's own ``animation``. Every name loads on first use:
-``import cadgen`` imports no CAD kernel.
+The root exports exactly the engine's surface -- ``model``, the decorators (``xbf``, ``step``,
+``glb``, ``stl``, ``threemf``, ``dxf``), ``memo``, materials (``Material``, ``materials``,
+``paint``), the readers (``read_step``, ``read_xbf``, ``read_mesh``) -- its operations on
+documents as functions (``export``, ``snapshot``, ``inspect``) and ``__version__``; process
+control (``serve``, ``status``, ``stop``, ``daemon``) is the ``cadgen`` command's alone. Two
+namespaces hold the standards' names: ``cadgen.ap242`` the mechanism's (``mechanism_state``,
+``configuration_sequence``, ``gear_pair``, ``rack_and_pinion_pair``, ``screw_pair``) and
+``cadgen.gltf`` a GLB's own ``animation``. Every name loads on first use: ``import cadgen``
+imports no CAD kernel, and ``import build123d`` binds a module the kernel loads into on its
+first attribute (``_internal/lazy_kernel.py``).
 """
 
 from functools import cache as _cache

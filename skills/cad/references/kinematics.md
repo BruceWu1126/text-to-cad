@@ -11,7 +11,8 @@ An assembly's mechanism is written in its body, and the document keeps it:
   `BallJoint` and `RigidJoint`, connected with `connect_to`. The values they are
   connected at are the **as-built state**, the pose every file of the model shows.
 
-The functions that say more are named after the STEP AP242 entities they write:
+The functions that say more are named after the STEP AP242 entities they write, and
+are `cadgen.ap242`'s (`from cadgen.ap242 import mechanism_state, gear_pair`):
 
 - **Mechanism states** name other poses: `mechanism_state(assembly, name, **values)`.
 - **Couplings** make joints move together by ratio, one function per pair the document
@@ -209,10 +210,11 @@ the parts as built, so a part that clears there can still pass through another
 mid-motion. Measure a pose by exporting it and checking that STEP:
 
 ```python
-from cadgen.engine import read_step, select
+from cadgen.engine import read_step
 from cadgen.geometry import overlap_volume
 
 posed = read_step("STEP/hinge_open.step")
-arm, base = select(posed, "arm")[0], select(posed, "base")[0]
+parts = {part.label: part for part in posed.leaves}
+arm, base = parts["arm"], parts["base"]
 print(overlap_volume(arm.solids()[0], base.solids()[0]))   # 0: the open arm clears the base
 ```

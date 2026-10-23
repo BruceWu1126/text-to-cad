@@ -304,18 +304,14 @@ built the same way: wrap the shape in a decorated function and call it.
 ## Progress and the report
 
 A build says where it is: on a terminal, `python model.py` draws a bar on stderr,
-each finished stage a line. A long body can name its own progress; both calls do
-nothing outside a build:
+each finished stage a line, and the viewer's build card shows the same. Nothing in
+the model says it: while a model's body runs, the bar names each `@memo` call and
+each child model it calls, by its function's name, as it begins, and counts it when
+it ends. A long body split into `@memo` stages (`finger`, `palm_loft`) shows each:
 
-```python
-from cadgen.engine import report, track, xbf
-
-
-@xbf("XBF/hand.xbf")
-def hand():
-    fingers = [finger(name) for name in track(FINGERS)]   # "Building geometry  2/5  middle"
-    report("palm loft")                                    # "Building geometry  palm loft"
-    ...
+```text
+src/hand.py::hand
+    building geometry  finger
 ```
 
 Each model's report says how it built, then each file:

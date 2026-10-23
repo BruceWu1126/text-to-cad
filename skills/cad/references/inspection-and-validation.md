@@ -5,34 +5,29 @@ no inspection command beyond `cadgen inspect`. A check reads the document as the
 latest build wrote it, so it sees a source edit only after the model runs. Paths
 resolve from the working directory and expand `~`.
 
-## Opening and selecting geometry
+## Opening geometry
 
 ```python
-from cadgen.engine import read_xbf, select
+from cadgen.engine import read_xbf
+import build123d as bd
 
 kit = read_xbf("XBF/kit.xbf")                        # the document as a build123d tree
-for part in kit.leaves:                               # every placed part
+for part in kit.leaves:                               # every placed part, world coordinates
     print(part.label, part.volume)
 
-hand = select(kit, "kit/hand")[0]                     # an assembly: a Compound of its components
-tip = select(kit, "hand/finger.2/f:finger.tip.1")[0]  # a Face, world coordinates
-edges = select(kit, "hand/finger.2/f:finger.tip.1", kind="edge")   # that face's edges
-print(tip.label, tip.area, len(edges))
+hand = next(node for node in kit.descendants if node.label == "hand")   # an assembly: a Compound
+fingers = [node for node in hand.children if node.label == "finger"]    # its components, in order
+top = fingers[1].faces().sort_by(bd.Axis.Z)[-1]                         # build123d's own selectors
 ```
 
 - `read_xbf(path)` and `read_step(path)` read a document into a build123d compound
   tree: each assembly a `Compound` of its components, each part named, coloured and
-  given its material as the file has them, each element keeping the file's name for
-  it.
-- `select(source, ref, kind=None)` returns a `ShapeList`, one shape per selector of
-  the ref: an element as a `Face`, `Edge` or `Vertex`, a part as its shape, an
-  assembly as a `Compound` of its components, all in world coordinates. With `kind`
-  (`"face"`, `"edge"` or `"vertex"`) it returns every such element under each
-  selector instead: of every part below an occurrence, or of an element (a face's
-  edges). Outside a build each shape's `label` is its canonical ref.
-- `source` is a document's path, a tree `read_xbf` or `read_step` returned, or a
-  model: outside a build, `select(bracket, ref)` builds the model through the
-  daemon first and reads its `.xbf`.
+  given its material as the file has them, in world coordinates. Walk it by labels
+  (`children`, `descendants`, `leaves`) and select within a part with build123d
+  (`faces()`, `edges()`, `sort_by`, `filter_by`).
+- A ref a person gave names one element exactly: `cadgen inspect` answers it
+  ([below](#which-code-made-it)), and its facts (centroid, box, surface) tell which
+  face of the part it is.
 - `bounding_box()` is the world-aligned envelope; `bounding_box(optimal=False)` is a
   fast conservative one for curved geometry.
 
@@ -73,8 +68,7 @@ plate/face 3                            in a document of one part, its elements 
   resolves where it is; one it deleted fails, naming it; one whose making changed
   fails too, listing what its atom is named now (`plate.body.6 is now
   f:plate.body.6`), never guessing.
-- **The canonical ref**, what `select` labels a shape with and `cadgen inspect`
-  answers, spells an element by its name under its part's label where that label
+- **The canonical ref**, what `cadgen inspect` answers, spells an element by its name under its part's label where that label
   names one occurrence, else under the occurrence's path from the root.
 
 ### Element names
@@ -107,14 +101,19 @@ starts from, and a step for each feature that made it out of another:
 Renaming a variable renames that feature's elements and nothing else; moving code
 renames nothing.
 
-### Selecting in a model's body
+### A picked element in a model's body
 
-A body selects from the live shape it is building, by the names this build gives
-it; the selected element's parent is its part, so build123d operations on it act on
-that part:
+A ref resolves in the engine (`cadgen inspect`, the viewer), never in a model: a
+body selects from the live shape it is building with build123d, by what the element
+is. To change what a person picked, read the ref's answer and either edit the code
+its `made_by` names or pick the same element in the body:
+
+```bash
+cadgen inspect XBF/bracket.xbf "plate/f:plate.body.6;M:plate.relief"   # centroid (0, 0, 6), a plane
+```
 
 ```python
-from cadgen.engine import select, xbf
+from cadgen.engine import xbf
 import build123d as bd
 
 from plate import plate
@@ -123,12 +122,11 @@ from plate import plate
 @xbf("XBF/bracket.xbf")
 def bracket():
     base = plate()
-    top = select(base, "f:plate.body.6;M:plate.relief")[0]   # the face a person picked
+    top = base.faces().sort_by(bd.Axis.Z)[-1]                 # the face the person picked: the top
     return base + bd.Pos(top.center(bd.CenterOf.MASS)) * bd.Cylinder(4, 10)
 ```
 
-A model never selects from a file its own build writes: the name is the same in the
-live shape.
+A model never reads a file its own build writes.
 
 ## Which code made it
 
@@ -185,8 +183,8 @@ volume = overlap_volume(solid_a, solid_b)
 `closest_points` returns the minimum distance and one witness pair; overlap,
 contact and containment all give 0, so it does not measure penetration.
 `overlap_volume` is the exact intersection volume (mm³) of two finite, positively
-oriented solids, 0 for mere contact; pair bodies with
-`select(document, "group")[0].solids()`. Kernel failures raise.
+oriented solids, 0 for mere contact; pair bodies with a group's `solids()`, the
+group found in `read_xbf`'s tree by its label. Kernel failures raise.
 
 Two solids at `overlap_volume` 0 at most touch. A pair meant to overlap (a
 press-fit pin, a bearing in its bore) is named as such, not inferred from where it

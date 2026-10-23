@@ -57,12 +57,13 @@ An assembly's mechanism is build123d's joints: `RevoluteJoint`,
 `LinearJoint`, `CylindricalJoint`, `BallJoint` and `RigidJoint` on its parts, placed with
 `connect_to(..., angle=, position=, angles=)`. The values they are connected at are the
 as-built state, the pose every file of the model shows. The functions that say more are named
-after the AP242 entities they write: `mechanism_state(assembly, name, **values)` names another
+after the AP242 entities they write, and are `cadgen.ap242`'s (the root holds none of them):
+`mechanism_state(assembly, name, **values)` names another
 state (`mechanism_state_representation`), by joint label, and never moves the build;
 `gear_pair`, `rack_and_pinion_pair` and `screw_pair(assembly, name, **joints)` constrain joints to
 move together by ratio (**Kinematics**); `configuration_sequence(assembly, name, ...)` names a
 sequence of states over time (`interpolated_configuration_sequence`, **Configuration
-sequences**), and `animation(assembly, name, duration=)` a GLB's own animation
+sequences**), and `cadgen.gltf`'s `animation(assembly, name, duration=)` a GLB's own animation
 (**Animations**). Connect parts before putting them in the compound that holds
 them; where `connect_to` cannot place them (a nested assembly), give the two joints one label
 where the parts stand.
@@ -279,7 +280,7 @@ is explicitly restarted. Session state is memory only and is recreated after res
 | Module | What it is |
 | --- | --- |
 | `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run, and the models a target's run ran (`BuildContext.children`); `@memo` and its calls; explicit model calls asking the daemon; a script's module and package (`module_of`); `paint`, `mechanism_state`, `configuration_sequence`; `read_step`, `read_xbf` |
-| `api.py` | the verbs as functions, through the daemon: `export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `daemon` (`cadgen.export`, ...), and `build_script`, a script's models built by `Model.build()`; `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
+| `api.py` | the verbs as functions, through the daemon: `export`, `snapshot`, `inspect` (the root's `cadgen.export`, ...), and `serve`, `status`, `stop`, `daemon`, which only the CLI calls (process control is the CLI's alone), and `build_script`, a script's models built by `Model.build()`; `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
 | `colors.py` | a colour as the author gives it (sRGB hex, 0-255 integers, a build123d `Color`) held linear, and the way back (**Materials**) |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`gear_pair`, `rack_and_pinion_pair`, `screw_pair`), mechanism states (`mechanism_state`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and configuration sequences (`configuration_sequence`, a function's samples, `Timeline`: a sequence's pair values over time) |
@@ -287,7 +288,7 @@ is explicitly restarted. Session state is memory only and is recreated after res
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
-| `refs.py` | references to geometry: the ref grammar, occurrence paths, resolution by name in the latest build, `select` (**References**) |
+| `refs.py` | references to geometry: the ref grammar, occurrence paths, resolution by name in the latest build, for `inspect` and the viewer (**References**) |
 | `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a planar document's drawing through build123d's DXF exporter, with the drawing checks (`dxf`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a STEP read in a reader process, held by its bytes; a minimal three.js page |
@@ -296,7 +297,7 @@ is explicitly restarted. Session state is memory only and is recreated after res
 | `formats/` | the files the stills draw that are not documents, each read into a structure and part buffers: STL (numpy), 3MF (zip + XML), GLB (OCCT's glTF reader, textures and all), URDF/SDF/SRDF (XML, the viewer's forward kinematics), DXF (group codes, flattened as the viewer's pane draws it) |
 | `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document and per file (`service.py`); the scene (`occt.py`); a DXF drawn in the 2D look (`drawing.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, at most one per core alive (`Pool`), connect-or-start; a worker's memory cap |
-| `progress.py` | where a build is: the author's `report` and `track`, the engine's stages heard where they begin, the frames, and the terminal's bar |
+| `progress.py` | where a build is: the engine's stages heard where they begin, each body a model's body runs by name, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
 | `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `daemon` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
@@ -499,26 +500,29 @@ its worker is replaced in its slot) or `exited` (it died).
 
 ## Progress
 
-A build says where it is (`progress.py`). The author's half is cadgen's own API, unchanged:
-`report(detail)` and `track(items, label=)`, from `cadgen.engine`, each a no-op outside a build.
+A build says where it is (`progress.py`), and nothing in a model says it: the engine reports what
+it runs, by name. Its stages are said where the build reaches them (`build.py`, through
+`progress.current`): `load` (the script loads), `body` (a model's body runs: "Building
+geometry"), `names` (its result collected and its elements named), `document` (its XCAF document
+made) and `write` (each file written: its name the detail, counted of the model's files). Inside
+`body`, each `@memo` call and each child model the body calls is a body of its own, said where
+it begins and where it ends by its function's name (`BuildContext.memo` and `child`, through
+`Progress.entering` and `leaving`):
 
 ```python
-from cadgen.engine import report, track, xbf
+@memo
+def finger(name): ...                                     # "Building geometry  finger"
 
 @xbf("XBF/hand.xbf")
 def hand():
-    fingers = [finger(name) for name in track(FINGERS)]  # "Building geometry  2/5  middle"
-    report("palm loft")                                   # "Building geometry  palm loft"
+    fingers = [finger(name) for name in FINGERS]
     return bd.Compound(children=[palm(), *fingers], label="hand")
 ```
 
-`track` counts the items done and names the one in flight (`label(item)`, or the item itself
-when it is a string); a sized iterable gives the count its total, and a lazy one is passed
-through lazily, counted without one. `report` names what runs now. A body the memo replays
-runs nothing, and says nothing. The engine's half is its stages, said where the build reaches
-them (`build.py`, through `progress.current`): `load` (the script loads), `body` (a model's body runs: "Building
-geometry"), `names` (its result collected and its elements named), `document` (its XCAF document
-made) and `write` (each file written: its name the detail, counted of the model's files).
+While a body runs the detail is its name, the innermost when they nest; when it ends the detail
+goes back to the body around it and `done` counts it, of no `total` (how many there will be is not
+known). A body the memo replays begins and ends too; a placement of a result this build already
+made says nothing, and a body that raises says no end, so the build's last frame names it.
 
 Each is a frame, the whole of where the build is:
 
@@ -528,10 +532,11 @@ Each is a frame, the whole of where the build is:
 ```
 
 `model` is as the model's report names it, `outputs` the files its build writes, `done` of
-`total` the running `track`'s count (`total` null, `determinate` false, without one) and
-`elapsedMs` counts from the build's start. A phase opens with a frame of its own; the author's
-come at least 100 ms apart, the latest held one sent when the interval is up, so the last
-frame is the build's last state. The worker sends each on its pipe (`{"id", "progress"}`), and
+`total` the files written while they are written, and in `body` the bodies done (`total` null,
+`determinate` false), and `elapsedMs` counts from the build's start. A phase opens with a frame of
+its own; a body's come at least 100 ms apart, the latest held one sent when the interval is up, so
+a build of a thousand small bodies sends a frame an interval and the last frame is the build's last
+state. The worker sends each on its pipe (`{"id", "progress"}`), and
 the daemon:
 
 - passes it to the build's caller as it does the log's lines (`client.request(on_progress=)`):
@@ -836,8 +841,8 @@ make a child's part, placed in its caller's assembly, other bytes than its own b
 The xbf is saved first and the viewer woken with it: the worker waits for the daemon to hold
 the patch (`{"op": "patched"}` on its pipe) before it writes a derived file.
 
-**Functions** (`api`, also `cadgen.export`, `cadgen.snapshot`, `cadgen.serve`,
-`cadgen.inspect`): one per command, each through the daemon. No function builds source text
+**Functions** (`api`, also `cadgen.export`, `cadgen.snapshot` and `cadgen.inspect`; `serve`,
+`status`, `stop` and `daemon` only the CLI calls): one per command, each through the daemon. No function builds source text
 or a shape made elsewhere: a shape is built by wrapping it in a decorated function (law 12).
 `export(source, *destinations, pose=, part=, inputs=)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`; `where(doc)` the build
 closure an xbf holds, `where(doc, ref)` an element's facts. A `Model` builds, exports and draws
@@ -1182,8 +1187,8 @@ its rule: **a build123d `Color`'s channels are sRGB**, as build123d defines them
 and its iteration are `Quantity_TOC_sRGB`; `Color("#e68019")` is `(0.902, 0.502, 0.098)`), so
 the engine reads a shape's colour linear through the `Quantity_Color` it wraps. `shape.color =
 bd.Color("#e68019")`, `shape.color = "#e68019"` (build123d's setter makes the `Color`) and
-`paint(shape, shape.faces(), "#e68019")` store the same colour, within one 8-bit step
-(`test_colors`). Floats are no colour of the author's: `Material(color=(0.5, 0.5, 0.5))` and
+`paint(shape, shape.faces(), "#e68019")` store the same colour, within one 8-bit step.
+Floats are no colour of the author's: `Material(color=(0.5, 0.5, 0.5))` and
 `paint(..., (0.5, 0.5, 0.5))` are refused by what they take, and `bd.Color(0.5, 0.5, 0.5)` is
 sRGB mid grey, `#808080`. A colour read back is the colour written: `Material.color` holds it
 linear, and a shape a reader makes (`read_xbf`, `read_step`) is given the `Color` of it.
@@ -1529,7 +1534,7 @@ below holds it, so a document of one part takes its elements by the document's n
 (`plate/face 3`). A part's elements are numbered by their `TopExp.MapShapes` ordinals, the ones
 its names, `faceNames` and the XBM2 buffer use. `FILE` (everything before the first `#`,
 JSON-quoted where it holds one) must be the document resolved in: the same file, or the last
-segments of its path. A canonical ref -- what `select` labels a shape with and `where` answers --
+segments of its path. A canonical ref -- what `inspect` answers --
 spells the element by its name (its ordinal only where it has none) under its part's label where
 that label names one occurrence, else under the occurrence's path from the root; in a document of
 one part, under the document's name. It is also what the CAD Viewer copies of an `.xbf`'s selection,
@@ -1537,43 +1542,20 @@ the file's path first (`/work/XBF/kit.xbf#kit/hand/finger.2/face 7`): the viewer
 of this grammar (`cadRefs` in the bundled runtime) are held to this module's, case for case, by a
 fixture both suites assert.
 
-`select(source, ref, kind=None)` (`cadgen.engine.select`) is the geometry a ref names, as a
-build123d `ShapeList` in world coordinates, one per selector: an element a `Face`, `Edge` or
-`Vertex`, a part its shape, an assembly a `Compound` of its components (new placements on the
-same geometry). `kind` (`"face"`, `"edge"`, `"vertex"`) is every such element under each instead:
-of every part below an occurrence, or of an element (a face's edges; never an edge's faces).
-`source` is a document's path (`.xbf`, `.step`), a shape -- `read_xbf`'s or `read_step`'s tree,
-whose elements its file names, or a live shape in a model's body, whose elements are named as
-this build names them (`trace`: what its document will hold) -- or a model: in a build its result
-in this run (a child), outside one built warm through the daemon first, then its xbf read.
-
-```python
-kit = read_xbf("XBF/kit.xbf")                                   # a checks script: the latest build
-rim = select(kit, "kit/wheel.2/f:wheel.rim.1")[0]               # a Face, world coordinates, labelled
-edges = select(kit, "kit/base/f:base.body.6", kind="edge")      # its edges, each labelled
-
-@xbf("XBF/bracket.xbf")
-def bracket():
-    base = plate()                                              # the user picked plate/f:plate.body.6;M:plate.relief
-    top = select(base, "f:plate.body.6;M:plate.relief")[0]      # a live shape: this build's names
-    return base + bd.Pos(top.center(bd.CenterOf.MASS)) * bd.Cylinder(4, 10)
-```
-
-Outside a build every shape carries its canonical ref as its `label`. Inside one a label names
-what is made of the shape it is on (**Element names**), so an element comes unlabelled, as
-`faces()` gives it, a part or an assembly with its own label, and an element's `topo_parent` is
-its part where the tree puts it: `bd.fillet(select(base, "f:…", kind="edge"), 1)` fillets `base`,
-and what a selected element makes is named as what `faces()` gives makes. A document `select`
-reads in a body is the model's own read, keyed by the file's bytes as `read_xbf`'s: the file is
-one of the closure's `inputs`, and a changed file runs the body again.
+A ref resolves inside the engine, for `inspect` and the viewer, never in a model:
+`cadgen inspect DOC REF` (`cadgen.inspect(source, ref)`) answers what it names, placed where its
+occurrence stands -- an element's kind, ordinal, name and canonical ref, the kernel's facts of it,
+and `made_by`, the feature and the function, file and line of the call that made it; a part's or
+an assembly's volume and mass. A model that changes what a person picked reads that answer and
+edits the code `made_by` names, or selects the element from the live shape with build123d
+(`base.faces().sort_by(bd.Axis.Z)[-1]`); a check reads the document with `read_xbf` and walks its
+tree by labels.
 
 **A model never reads a file its own build writes**: its own xbf or export, a child's, a
-sibling's (`reader.refuse_written`: `select` asks before it reads, `read_xbf` and `read_step` as
-they read the file). Read,
+sibling's (`reader.refuse_written`: `read_xbf` and `read_step` ask as they read the file). Read,
 the file would be an input the build rewrites -- its key moving on every build, so the model would
 never be taken from its file -- or, kept out of the key, a model depending on its own past. A
-model selects what it makes from the live shape instead, by the same names, which are this
-build's: so its own output never invalidates it.
+model takes what it makes from the live shape instead: so its own output never invalidates it.
 
 ## Body retention
 
