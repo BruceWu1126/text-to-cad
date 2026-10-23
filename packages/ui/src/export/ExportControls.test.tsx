@@ -5,14 +5,16 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ExportControls } from '../../dist/export/ExportControls.js';
 import { useExportView } from '../../dist/export/context.js';
 import { I18nProvider } from '../../dist/i18n/index.js';
+import { ViewerMobileContext } from '../../dist/file-viewer/responsive.js';
 
 Object.assign(globalThis, { React });
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const source = { doc: 'doc', revision: 'v1', file: '/part.xbf', name: 'part.xbf', part: null, pose: null, preview: false };
 function Document() { useExportView(source); return <div>Model</div>; }
-function mount(service: any, downloads: any, locale = 'en') {
-  return render(<I18nProvider locale={locale}><ExportControls service={service} downloads={downloads} file="/part.xbf">{({ navbar, overlay }: any) => <><nav>{navbar}</nav><Document />{overlay}</>}</ExportControls></I18nProvider>);
+function mount(service: any, downloads: any, locale = 'en', phone = false) {
+  // The overlay renders inside the viewer, which says whether its width is a phone's.
+  return render(<I18nProvider locale={locale}><ExportControls service={service} downloads={downloads} file="/part.xbf">{({ navbar, overlay }: any) => <><nav>{navbar}</nav><Document /><ViewerMobileContext.Provider value={phone}>{overlay}</ViewerMobileContext.Provider></>}</ExportControls></I18nProvider>);
 }
 const formats = { epoch: 'epoch', formats: [{ format: 'step', label: 'STEP', extension: '.step', reason: null }] };
 const later = () => Date.now() / 1000 + 3600;
@@ -148,4 +150,25 @@ it('the toast speaks the page language, never the server stage', async () => {
   await user.click(await screen.findByRole('button', { name: 'エクスポートしてダウンロード' }));
   expect(await screen.findByText(/^開始を待っています · /)).toBeTruthy();
   expect(screen.queryByText(/Waiting for worker/)).toBeNull();
+});
+
+it('on a phone the toasts sit at the view\'s bottom with 36px buttons; a desktop keeps them top-right', async () => {
+  for (const phone of [false, true]) {
+    const { service } = server();
+    const { container, unmount } = mount(service, { save: vi.fn() }, 'en', phone);
+    const user = userEvent.setup();
+    await exportOnce(user);
+    const toast = await screen.findByRole('region', { name: 'Export part.step' });
+    const stack = container.querySelector('[data-export-stack]')!;
+    const buttons = within(toast).getAllByRole('button');
+    if (phone) {
+      expect(stack.className).toMatch(/\bbottom-2\b/);
+      expect(stack.className).not.toMatch(/\btop-2\b/);
+      for (const button of buttons) expect(button.className).toMatch(/\b(?:h-9|size-9)\b/);
+    } else {
+      expect(stack.className).toMatch(/\btop-2\b.*\bitems-end\b/);
+      for (const button of buttons) expect(button.className).toMatch(/\b(?:h-6|size-6)\b/);
+    }
+    unmount();
+  }
 });

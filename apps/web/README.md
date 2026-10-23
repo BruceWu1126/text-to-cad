@@ -179,7 +179,7 @@ URL carries no token: the session cookie authenticates it, as it does every requ
 page makes.
 
 Multiple exports queue independently, each with a persistent toast at the top-right
-under the navbar and its own **Cancel**. A queued cancellation is immediate; an
+under the navbar (on a phone, at the view's bottom) and its own **Cancel**. A queued cancellation is immediate; an
 in-flight kernel operation finishes before its output is discarded. **Download again**
 fetches the same artifact while it is kept; once it is gone the button is **Export again**,
 which runs the same export anew. Closing a toast only hides it, and **Export → Show exports**
