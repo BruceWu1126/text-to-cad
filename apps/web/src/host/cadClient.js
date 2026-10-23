@@ -7,7 +7,8 @@ import { createCadClient } from "@text-to-cad/core/client";
  * current when it is shown, and a build's feed reads the catalog itself when the build settles.
  * The CAD app polls nothing; this is the web's alone.
  */
-export function createWebCadClient({ document: page = globalThis.document, location = globalThis.location, ...options } = {}) {
-  const session = location?.pathname.match(/^\/s\/[^/]+/)?.[0] || "";
-  return createCadClient({ origin: session ? `${location.origin}${session}` : "", ...options, shouldPoll: () => page.visibilityState !== "hidden" });
+export function createWebCadClient({ document: page = globalThis.document, ...options } = {}) {
+  // The page is the engine's one page, at its origin: every request goes to the server's root,
+  // whichever document's path (`/<id>`) the page is at.
+  return createCadClient({ origin: "", ...options, shouldPoll: () => page.visibilityState !== "hidden" });
 }

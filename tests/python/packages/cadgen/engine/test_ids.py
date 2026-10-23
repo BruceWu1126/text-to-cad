@@ -80,7 +80,8 @@ class IdsTest(unittest.TestCase):
         for spelling in spellings:
             with self.subTest(spelling=str(spelling)):
                 self.assertEqual(model_id(spelling, "part"), model_id(self.script, "part"))
-                self.assertEqual(document_id(f"{spelling}::part"), model_id(self.script, "part"))
+                # A script's name never names its model: `parts.py::part` is a file name like any other.
+                self.assertNotEqual(document_id(f"{spelling}::part"), model_id(self.script, "part"))
 
     def test_a_symlinked_or_case_variant_file_is_one_file(self) -> None:
         target = self.folder / "Part.xbf"

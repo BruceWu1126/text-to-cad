@@ -109,31 +109,13 @@ function Row({ kind, path, detail = "", name, depth = 0, active = false, expande
  * folder it is in (`source.search`, bounded by the server, which says when it stopped early). A
  * pick is `onOpen`; whoever holds the explorer puts it away.
  *
- * @param {{ source: Pick<import("../types").FileSource, "list" | "search" | "collections">, file: string, onOpen(path: string): void }} props
+ * @param {{ source: Pick<import("../types").FileSource, "list" | "search">, file: string, onOpen(path: string): void }} props
  */
 export function FolderExplorer({ source, file, onOpen }) {
   const { t } = useI18n();
   const [folder, setFolder] = useState(() => parentFolder(file));
   const [listing, setListing] = useState({ folder: "", entries: null, error: null });
   const [query, setQuery] = useState("");
-  const [collections, setCollections] = useState([]);
-  useEffect(() => {
-    if (!source.collections) return;
-    const controller = new AbortController();
-    let timer;
-    const refresh = async () => {
-      try {
-        const next = await source.collections({ signal: controller.signal });
-        if (!controller.signal.aborted) setCollections(next);
-      } catch { /* A disconnected engine has no live documents. */
-        if (!controller.signal.aborted) setCollections([]);
-      } finally {
-        if (!controller.signal.aborted) timer = setTimeout(refresh, 2000);
-      }
-    };
-    void refresh();
-    return () => { controller.abort(); clearTimeout(timer); };
-  }, [source]);
   const [found, setFound] = useState(null);
   // The folders opened inline, by path, and what each holds once it has been read.
   const [open, setOpen] = useState(() => new Set());
@@ -289,15 +271,6 @@ export function FolderExplorer({ source, file, onOpen }) {
     <TreeFilterInput label={t("explorer.filterLabel")} placeholder={t("explorer.filterPlaceholder")} value={query} onChange={setQuery} onKeyDown={event => walk(event, null)} />
     <ScrollArea className="min-h-0 flex-1" viewportClassName="p-1" viewportRef={rows}
       viewportProps={{ onKeyDown: event => walk(event, event.target.closest?.("[data-explorer-row]") ?? null) }}>
-      {collections.map(collection => <section key={collection.id} aria-label={collection.label}>
-        <p className="px-2 py-1 text-xs text-muted-foreground">{collection.label}</p>
-        {collection.entries.filter(entry => !term || `${entry.name} ${entry.path}`.toLowerCase().includes(term.toLowerCase())).map(entry =>
-          <TooltipHint key={entry.path} content={entry.detail || entry.path}><button type="button"
-            className="flex w-full flex-col rounded-sm px-2 py-1 text-left text-xs hover:bg-accent/50"
-            data-explorer-row="" data-kind="file" data-path={entry.path} onClick={() => onOpen(entry.path)}>
-            <span>{entry.name}</span><span className="max-w-full truncate text-muted-foreground">{entry.detail || entry.path}</span>
-          </button></TooltipHint>)}
-      </section>)}
       {body}
     </ScrollArea>
   </div>;

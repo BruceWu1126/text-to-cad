@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from cadgen.viewer.engine_app import SessionApp
+from cadgen.viewer.engine_app import ViewerApp
 from .protocol import INVALID_REQUEST, INVALID_PARAMS, PARSE_ERROR, INTERNAL_ERROR, RequestContext, RpcError
 from .server import Server, _PROTOCOL_VERSIONS
 from .sidebar import SidebarViews
@@ -75,13 +75,13 @@ class Sessions:
         options = options if isinstance(options, dict) else {}
         directory = options.get('appDir')
         page = AppPage(Path(directory)) if isinstance(directory, str) and directory else AppPage()
-        app = SessionApp(self.engine.server, host=self.engine.host, port=self.engine.server.port,
+        app = ViewerApp(self.engine.server, host=self.engine.host, port=self.engine.server.port,
                          start=options.get('cwd') if isinstance(options.get('cwd'), str) else None)
         app.analytics = self.engine.analytics
         app.consent_by = "app"
-        def viewer_url():
+        def viewer_url(model=None):
             from .browser import ViewerUnavailable
-            answer = self.engine.launch({'start': app.start})
+            answer = self.engine.launch({'start': app.start, 'files': [model] if model else []})
             if 'failed' in answer:
                 raise ViewerUnavailable(answer['failed'])
             return answer['url']

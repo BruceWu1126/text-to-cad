@@ -67,6 +67,8 @@ export const ViewerNavbar: ComponentType<{
   history?: import("../types.js").ViewerHistory | null;
   /** The open file, by its absolute path. */
   file?: string | null;
+  /** The document's name where its path does not give it (a model's). */
+  name?: string;
   explorer?: { source: Pick<FileSource, "list" | "search">; onOpen: (path: string) => void } | null;
   fileMenu?: { platform: Platform; capabilities: ReadonlySet<EntryAction>; onAction: (action: EntryAction, path: string) => void } | null;
   trailing?: ReactNode;

@@ -31,8 +31,8 @@ cadgen inspect XBF/arm.xbf                      # its build closure
 
 **PURPOSE** — the engine and its command surface: models built in a warm worker whose memo
 makes an edit cost what it changed, documents and their exports, kinematics and configuration sequences,
-materials, references to geometry, snapshots drawn by OCCT; the CAD Viewer (`cadgen viewer`: a
-launcher for a page on the installation’s engine, serving every CAD file by its absolute path); CAD beside an agent's chat (`cadgen mcp`: a stateless stdio peer of the engine’s
+materials, references to geometry, snapshots drawn by OCCT; the CAD Viewer (`cadgen viewer [FILE]`: a
+launcher for the installation’s engine’s one page, every document at `/<id>`, every file read by its absolute path); CAD beside an agent's chat (`cadgen mcp`: a stateless stdio peer of the engine’s
 HTTP MCP endpoint, with tools and the app page owned by the engine); the URDF, SDF and SRDF validators; and
 engineering drawings (`@eng_drawing`).
 
@@ -91,8 +91,9 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
    inside it by the id of its canonical path (`ids.file_id`); its public name stays its path.
    Bare `@model` keeps its document in the worker's memory. File decorators imply a model
    and write only their named outputs. No implicit XBF, source file, sidecar, registry,
-   cache or thumbnail is written for an in-memory model. Model documents and the viewer's
-   In memory list disappear when their workers retire or the engine restarts.
+   cache or thumbnail is written for an in-memory model. Model documents disappear when
+   their workers retire or the engine restarts; their ids are then refused with the command that
+   builds them again.
 7. **Provenance is served live, never written.** What made an element -- the feature, its
    operation, the function, file and line of its call -- lives in the trace of the worker that
    built the document, and is asked of it while it lives (`made_by`, `cadgen inspect`). A document
@@ -109,7 +110,8 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     build -- the build's target, or a child another model's body calls -- that file is written,
     once per build, from the model's own document; a GLB's animations are baked from the code
     when that GLB is written. A model with no file decorator writes nothing.
-11. **Decoration only declares; a model script is Python.** Importing cadgen or
+11. **Decoration only declares; a model script is Python.** A script runs only when Python
+    runs it; no verb imports or builds a script. Importing cadgen or
     defining a decorated function never builds a model, writes its outputs, starts a
     worker, or exits the caller. An explicit call builds the model and writes its
     declared files, then returns to the caller. Python controls which calls run and
@@ -172,11 +174,13 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     whose document a page watches; it is exceeded instead. The memory cap may retire it (the
     engine's **Architecture** and **The daemon and its workers**).
 
-20. **One engine serves the installation.** A page never replaces or re-executes it. Page sessions and document reads share its
-    authenticated HTTP listener. `serve` and `viewer` always start or reuse it, with no
+20. **One engine serves the installation; tabs select documents at `/<uuid>`.** A tab names
+    a model's id, or a file's id after a launcher registers it; Python scripts are never
+    documents. A page never replaces or re-executes the engine. Its one page and document reads
+    share its authenticated HTTP listener. `serve` and `viewer` always start or reuse it, with no
     standalone serving mode. Launchers exit; clients closing never stop it. Kernel
-    operations run in child processes, never in the engine's request threads. Each
-    page session keeps its own start folder; each MCP session owns its views and resource. The
+    operations run in child processes, never in the engine's request threads. There are no page
+    sessions: the home shows the folder of the most recent launch; each MCP session owns its views and resource. The
     stdio shim owns only connection metadata. Sidebar sharing stays in memory, and host
     quirks stay in the shim and page. MCP's shared `cad_http` exposes only telemetry
     status and opt-out to agents; other viewer routes require the session capability
@@ -192,9 +196,10 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
 
 Every MCP presentation exposes `cad_export`, `cad_snapshot` and `cad_inspect`,
 independently of the viewer. They call the Python operations through the engine's
-workers. No tool builds source text: a model is built by its script (law 12). Export
-names absolute server-host destinations; snapshot names a PNG or a Quick Edit packet.
-Export and snapshot retain the Python API's script-model build behavior.
+workers. No tool builds or imports a script: a model is built by its script, run by Python
+(laws 11, 12). A source is an absolute CAD file path or a document id; a document id is read as
+the engine holds it. Export names absolute server-host destinations; snapshot names a PNG or a
+Quick Edit packet.
 
 Start with a unique `requestId` (16–100 letters, digits, underscores or hyphens).
 The result carries `id`, `epoch`, `state`, `sequence`, stage/progress and, when done,
@@ -218,9 +223,9 @@ expiry, revision checks and download delivery; running cancellation discards tha
 temporary artifact. Browser downloads choose the viewer user's local destination
 before starting. An agent's explicit host path is a different destination contract.
 
-`cadgen inspect`, `cadgen.inspect()` and `cad_inspect` read existing files or live
-models. They never execute source to obtain a missing model or write its declared
-outputs. An unbuilt or expired model requires an explicit build. With no reference,
+`cadgen inspect`, `cadgen.inspect()` and `cad_inspect` read existing files or documents the
+engine holds by id. They never execute source to obtain a missing model or write its declared
+outputs: an id the engine no longer holds is refused with the command that builds it again. With no reference,
 inspection returns the build closure; with a reference it returns geometry facts.
 `query="build"` (`--query build`) returns saved-file metadata and closure or live
 build metadata. File metadata does not imply a live worker. `where` is retired.

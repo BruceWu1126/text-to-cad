@@ -334,3 +334,37 @@ test('the library, Open, Reveal and the person\'s settings are guarded requests 
     ['/__cad/analytics/activity', 'POST', '1', { touched: true }],
   ]);
 });
+
+test('rows join by their document id: a symlinked file asked for by both its paths is one row', async () => {
+  const id = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab';
+  const calls = [];
+  // The server answers either spelling with the one document: its id, and the path it read.
+  const fetch = async (url) => {
+    calls.push(String(url));
+    const params = new URL(String(url)).searchParams;
+    return json({ entries: [{ id, file: params.get('file') || '/real/a.step', hash: 'one' }] });
+  };
+  const client = createCadClient({ origin: 'http://one.test', fetch, pollIntervalMs: 0 });
+  const viaLink = await client.resolveEntry('/link/a.step');
+  const viaTarget = await client.resolveEntry('/real/a.step');
+  const viaId = await client.resolveEntry(id);
+  assert.equal(client.getSnapshot().entries.length, 1, 'one document, one row');
+  assert.deepEqual([viaLink.id, viaTarget.id, viaId.id], [id, id, id]);
+  assert.equal(client.entryOf('/link/a.step')?.id, id);
+  assert.equal(new URL(calls.at(-1)).searchParams.get('id'), null, 'a row the catalog has is not asked for again');
+  client.dispose();
+});
+
+test('an id the engine does not hold is missing, in the engine\'s words', async () => {
+  const id = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab';
+  const calls = [];
+  const client = createCadClient({ origin: 'http://one.test', pollIntervalMs: 0, fetch: async (url) => {
+    calls.push(String(url));
+    return json({ entries: [], missing: `no document ${id} is held: run \`python /m/parts.py\` to build it again` });
+  } });
+  const failure = await client.resolveEntry(id).catch((error) => error);
+  assert.equal(isMissingFileError(failure), true);
+  assert.match(failure.message, /run `python \/m\/parts.py` to build it again/);
+  assert.equal(new URL(calls[0]).searchParams.get('id'), id, 'a document id is asked for by id');
+  client.dispose();
+});

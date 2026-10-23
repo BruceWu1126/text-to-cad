@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exercise the shipped launch command, authenticated session and bundled STEP renderer.
+# Exercise the shipped launch command, its authenticated page at /<id> and the bundled STEP renderer.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,7 +67,7 @@ export VIEWER_RUNTIME_DIR="$RUNTIME"
 "$PYTHON" - "$REPO_ROOT/tests/fixtures/cad/import-smoke.step" <<'PYTHON'
 import json, os, shutil, subprocess, sys, tempfile
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from playwright.sync_api import sync_playwright
 
@@ -84,13 +84,16 @@ with tempfile.TemporaryDirectory(prefix="cv-") as temporary:
     try:
         first = launch()
         again = launch()
-        fresh = launch("--new")
-        assert first["session"] == again["session"] != fresh["session"]
-        assert first["pid"] == again["pid"] == fresh["pid"]
+        assert first["pid"] == again["pid"] and first["port"] == again["port"]
         with urlopen(Request(first["apiUrl"]+"/__cad/server", headers={"Authorization": "Bearer "+first["token"]})) as response:
             assert json.load(response)["pid"] == first["pid"]
         fixture = root / "smoke.step"
         shutil.copyfile(sys.argv[1], fixture)
+        # A launch given a file registers it and lands on its page, /<id>.
+        opened = launch(str(fixture))
+        assert opened["pid"] == first["pid"]
+        page_path = urlsplit(opened["url"]).path
+        assert page_path == "/" + opened["documents"][0]["id"], opened
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True, args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
             try:
@@ -98,12 +101,16 @@ with tempfile.TemporaryDirectory(prefix="cv-") as temporary:
                 errors = []
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 with page.expect_response(lambda response: "/__cad/api/doc/" in response.url and "/part/" in response.url and response.ok, timeout=120000):
-                    page.goto(first["url"]+"&"+urlencode({"file": str(fixture)}))
+                    page.goto(opened["url"])
                 page.locator(".cad-loading-overlay").wait_for(state="hidden", timeout=120000)
                 assert page.locator("canvas").first.is_visible()
                 assert not errors, errors
                 assert "token=" not in page.url
-                print("Bundled viewer rendered a STEP on the engine; session reuse, isolation and authentication passed.")
+                assert urlsplit(page.url).path == page_path, page.url
+                # A page session's old link is the home now.
+                page.goto(opened["apiUrl"] + "/s/old/")
+                assert urlsplit(page.url).path == "/", page.url
+                print("Bundled viewer rendered a STEP on the engine at /<id>; launch reuse and authentication passed.")
             finally:
                 browser.close()
     finally:

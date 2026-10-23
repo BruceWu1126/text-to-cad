@@ -43,6 +43,7 @@ export default {
 
   "file.opening": "正在打开…",
   "file.missing": "文件不存在",
+  "file.notHeld": "此模型已不再保留",
   "file.openFailed": "无法打开该文件",
   "file.displayFailed": "无法显示该文件",
   "file.goHome": "返回主页",
@@ -98,6 +99,7 @@ export default {
   "home.byline": "构建万物。",
   "home.bylineOpenSource": "100% 开源免费。",
   "home.recentFiles": "最近文件",
+  "home.launchFolder": "启动文件夹",
   "home.searchAria": "搜索模型",
   "home.searchPlaceholder": "搜索",
   "home.layout": "布局",

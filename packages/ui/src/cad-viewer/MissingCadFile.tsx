@@ -9,8 +9,10 @@ import { useI18n } from '../i18n/index.js';
  * a document the cadgen engine builds is written whole, and the engine says nothing of a build
  * before it is. `title` is the host's translation of "File does not exist", else the surrounding
  * language's. */
-export function MissingCadFile({ file, entry, reload, action, title }: {
+export function MissingCadFile({ file, entry, reload, action, title, description }: {
   file: string; entry: CadEntry | null; reload?: () => void; action?: ReactNode; title?: string;
+  /** What to say in place of the file's path: why a document named by its id is not held. */
+  description?: string;
 }) {
   const { t } = useI18n();
   const reloaded = useRef('');
@@ -23,5 +25,5 @@ export function MissingCadFile({ file, entry, reload, action, title }: {
       reload();
     }
   }, [file, entry, reload]);
-  return <EmptyState icon={FileX} title={title ?? t("file.missing")} description={file} tone="warn" action={action} />;
+  return <EmptyState icon={FileX} title={title ?? t("file.missing")} description={description ?? file} tone="warn" action={action} />;
 }

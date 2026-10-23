@@ -22,7 +22,7 @@ export interface PreparedXbfDocument extends PreparedWorkspaceEntry {
 /** A cadgen engine document: B-rep parts placed by instances, every face, edge and vertex named. */
 export const XBF_FILE = /\.xbf$/i;
 /** What the cadgen engine reads and serves as a document: its own, and a STEP. */
-export const ENGINE_DOCUMENT_FILE = /(?:\.(?:xbf|step|stp)|::[A-Za-z_][A-Za-z0-9_]*)$/i;
+export const ENGINE_DOCUMENT_FILE = /\.(?:xbf|step|stp)$/i;
 
 /**
  * An `.xbf` or a STEP is drawn from what the cadgen engine serves of it (its structure and one
@@ -33,9 +33,10 @@ export function createXbfRenderer({ client, ...options }: XbfRendererOptions) {
   const services = { ...options, preferences: options.preferences || createCadPreferences() };
   return defineFileRenderer<PreparedXbfDocument>({
     id: 'xbf',
-    // An .xbf and a STEP are this one's, above any renderer that takes whatever the viewer calls CAD.
+    // An .xbf and a STEP are this one's, above any renderer that takes whatever the viewer calls CAD,
+    // and so is a document the engine holds by its id alone (a model's: `cad-document`).
     priority: 110,
-    matches: (file) => ENGINE_DOCUMENT_FILE.test(file.path),
+    matches: (file) => ENGINE_DOCUMENT_FILE.test(file.path) || file.mediaType === 'cad-document',
     async prepare(context) {
       const prepared = await prepareWorkspaceEntry(client, context);
       return { ...prepared, data: { ...prepared.data, services } };

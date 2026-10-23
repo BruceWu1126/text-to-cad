@@ -12,7 +12,6 @@ import { createMeshRenderer } from '../renderers/mesh/index.js';
 import { createRobotRenderer } from '../renderers/robot/index.js';
 import type { CadPreferenceSource } from '../renderers/workspace/index.js';
 import { createXbfRenderer } from '../renderers/xbf/index.js';
-import { createScriptRenderer } from '../renderers/script/index.js';
 import { createCadFileSource } from './catalog.js';
 
 /**
@@ -21,7 +20,6 @@ import { createCadFileSource } from './catalog.js';
  */
 export function cadRenderers(client: CadWorkspaceService, preferences: CadPreferenceSource, live: LiveRegistry['binding']) {
   return [
-    createScriptRenderer(client),
     createDxfRenderer({ client, preferences, live }),
     createGlbRenderer({ client, preferences, live }),
     createMeshRenderer({ client, preferences, live }),

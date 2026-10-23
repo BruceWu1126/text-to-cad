@@ -1,5 +1,6 @@
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { FileText } from "lucide-react";
+import { isDocumentId } from "@text-to-cad/core/lib/cadRefs.js";
 import { Component, useCallback, useMemo, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { Button } from "../primitives/button.jsx";
@@ -89,18 +90,24 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
   const trailing = shownActions.length ? <>
     {shownActions.map(({ id, label, hint, icon: Icon, disabled, active, onInvoke }) => <TooltipHint key={id} content={hint ?? label}><Button type="button" variant="ghost" size="icon-xs" className="size-6 text-muted-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground" aria-label={label} disabled={disabled} aria-pressed={active} onClick={() => { try { void Promise.resolve(onInvoke()).catch(error => onError?.(error)); } catch (error) { onError?.(error instanceof Error ? error : new Error(String(error))); } }}><Icon className="size-3.5" aria-hidden="true" /></Button></TooltipHint>)}
   </> : null;
+  // The on-disk file the view browses from and acts on: the file's own path, or none for a document
+  // with no file of its own (a model's, by its id): it has no Select File and no file menu.
+  const navigationPath = shown ? (shown.file.navigationPath === undefined ? shown.file.path : shown.file.navigationPath)
+    : path && !isDocumentId(path) ? path : null;
   // What the host can do with the file on screen: its ⋯ menu.
   const perform = host.fileActions?.perform;
   const fileMenu = useMemo(() => {
     const capabilities = new Set(Object.keys(perform ?? {}) as EntryAction[]);
-    return capabilities.size ? {
+    return navigationPath && capabilities.size ? {
       platform: host.fileActions?.platform ?? "linux", capabilities,
       onAction: (action: EntryAction, target: string) => { void Promise.resolve(perform?.[action]?.({ path: target, kind: "file" })).catch(error => onError?.(error)); },
     } : null;
-  }, [perform, host.fileActions?.platform, onError]);
-  // The name opens the explorer where the host's files can be browsed and this view shows another:
-  // a pick shows the file here. A view that shows its file alone opens none.
-  const explorer = useMemo(() => source.list && source.search && onOpenFile ? { source, onOpen: onOpenFile } : null, [source, onOpenFile]);
+  }, [navigationPath, perform, host.fileActions?.platform, onError]);
+  // The name opens the explorer -- Select File, rooted at the file's folder -- where the host's files
+  // can be browsed and this view shows another: a pick shows the file here. A view that shows its
+  // file alone opens none, and nor does a document with no file of its own.
+  const explorer = useMemo(() => navigationPath && source.list && source.search && onOpenFile ? { source, onOpen: onOpenFile } : null,
+    [navigationPath, source, onOpenFile]);
   // The logo's app menu: the host's links and the person's settings (Back to files is `onHome`).
   const menu = useMemo(() => host.links || appSettings?.length || colorScheme || language ? { links: host.links, appSettings, colorScheme, language, platform: appearance.platform } : null,
     [host.links, appSettings, colorScheme, language, appearance.platform]);
@@ -112,7 +119,7 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
   const navbar = (Boolean(path) || home) && !appearance.compact;
   return <I18nProvider locale={locale}><ViewerMobileContext.Provider value={mobile}><ViewerHostContext.Provider value={host}><ViewerElementContext.Provider value={viewerElement}><div className="text-to-cad-file-viewer text-ui font-normal flex h-full min-h-0 min-w-0 flex-col overflow-hidden" ref={bindElement} data-viewer-layout={mobile ? "mobile" : "desktop"} tabIndex={-1}>
     {navbar ? (path
-      ? <ViewerNavbar onHome={host.navigation.home} menu={menu} history={history} file={path} explorer={explorer} fileMenu={fileMenu} trailing={trailing} actions={navbarActions} update={update} fullSize={fullSize} controlsRef={setNavbarSlot} />
+      ? <ViewerNavbar onHome={host.navigation.home} menu={menu} history={history} file={navigationPath ?? path} name={shown?.file.name} explorer={explorer} fileMenu={fileMenu} trailing={trailing} actions={navbarActions} update={update} fullSize={fullSize} controlsRef={setNavbarSlot} />
       : <ViewerNavbar menu={menu} history={history} actions={navbarActions} update={update} fullSize={fullSize} />) : null}
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <div className="min-w-0 flex-1 overflow-hidden">{body}</div>

@@ -264,12 +264,14 @@ def rig():
 
 A model is a Python script: decorated functions declare models, explicit calls build
 them, and `python script.py` runs the program. No command builds source text. A bare
-`@model` keeps its document in the engine's memory with no file. A script model is
-addressed by its absolute path and function name, `/path/parts.py::bracket`, so
-functions in different scripts do not clash; `cadgen serve`, `snapshot`, `export`
-and `inspect` accept these addresses. An in-memory model keeps no files or restart
-cache; the viewer's In memory list loses it when its worker retires or the engine
-restarts. Running the script again updates the same address and its open viewers.
+`@model` keeps its document in the engine's memory with no file. Each model's document has an
+id, which the build prints (`id:`, beside `view:`, its page): derived from the script's path
+and the function's name, so functions in different scripts do not clash. `cadgen serve`,
+`snapshot`, `export` and `inspect` take that id (or a CAD file's path) and read the document
+the engine holds, as it is: no verb imports, runs or builds a script, so editing the script
+changes nothing until Python runs it again. An in-memory model keeps no files or restart cache:
+once its worker retires or the engine restarts, its id is refused with the command that builds
+it again. Running the script again updates the same document and its open viewers.
 
 ```python
 # parts/bracket.py
@@ -287,9 +289,10 @@ if __name__ == "__main__":
 ```
 
 ```bash
-python parts/bracket.py
-cadgen snapshot "$PWD/parts/bracket.py::bracket" bracket.png
-cadgen export "$PWD/parts/bracket.py::bracket" bracket.step
+python parts/bracket.py               # prints id: and view: (its page, <engine>/<id>)
+ID=...                                # the id: line it printed
+cadgen snapshot "$ID" bracket.png
+cadgen export "$ID" bracket.step
 ```
 
 A shape already made in Python -- a quick probe, a shape from another library -- is
@@ -353,6 +356,6 @@ hour. It keeps a warm worker per model script, each with its own memo, and build
 - Nothing else is written: no cache folder, and no record of a build beside the
   `.xbf`.
 
-A successful server-backed build reports its model address and localhost viewer URL,
+A successful server-backed build reports its model's id and localhost viewer URL,
 including when it writes files. To build a shape made elsewhere, wrap the shape in a
 decorated function: its document and exports are a model's like any other.

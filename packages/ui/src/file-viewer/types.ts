@@ -7,8 +7,13 @@ export type { LanguageSetting };
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export interface FileEntry { path: string; name: string; kind: "file" | "directory" }
-export interface FileCollection { id: string; label: string; entries: readonly (FileEntry & { detail?: string })[] }
 export interface FileMetadata extends FileEntry {
+  /**
+   * The on-disk file to browse from and act on (Select File, copy path, Reveal); omitted it is
+   * `path`. Null for a document with no file of its own (a model's, by its id): no Select File and no
+   * file menu.
+   */
+  navigationPath?: string | null;
   size: number;
   extension: string;
   mime?: string;
@@ -27,7 +32,6 @@ export interface FileActions {
 export interface FileSource {
   /** Stable identity: what a document's key is named by. */
   id: string;
-  collections?: (options: { signal: AbortSignal }) => Promise<readonly FileCollection[]>;
   stat: (path: string, options: { signal: AbortSignal }) => Promise<FileMetadata>;
   list?: (directory: string, options: { signal: AbortSignal }) => Promise<readonly FileEntry[]>;
   search?: (directory: string, query: string, options: { signal: AbortSignal }) => Promise<{ paths: readonly string[]; truncated: boolean }>;

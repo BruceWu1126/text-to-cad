@@ -485,7 +485,7 @@ export function useRendererShell({
   // The file a prompt's views render: the one shown, by its absolute path.
   const promptFile = useCallback(() => {
     const shown = liveResourceRef.current?.() || resourceRef.current;
-    return shown?.kind === "workspace-file" ? shown.path : null;
+    return shown?.kind === "workspace-file" || shown?.kind === "cad-model" ? shown.path : null;
   }, []);
   // Quick Edit captures the current view and annotation views; the host prepares JSON at the press.
   const replayUnavailable = useRef("");

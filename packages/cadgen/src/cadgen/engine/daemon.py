@@ -47,9 +47,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from cadgen.engine.addresses import document_id
 from cadgen.engine.atomic_replace import replace_atomic
-from cadgen.engine.ids import canonical, file_id
+from cadgen.engine.ids import canonical, file_id, is_id
 
 __all__ = ["IDLE_SECONDS", "Pool", "lock", "lock_path", "main", "socket_path", "state_dir", "worker_cap",
            "worker_idle"]
@@ -708,6 +707,22 @@ class Daemon:
             for paths in held:
                 self.server.release(paths)
 
+    def document(self, ident: str) -> dict[str, Any]:
+        """What the document ``ident`` is while this engine holds it: a model a live worker holds
+        (``{"script", "function", "held": ident}``, read from that worker and never built), or a
+        file it serves (``{"path"}``). ``ValueError`` naming the command that builds it again
+        for any other id: the engine runs nothing (``Models.missing``)."""
+        record = self.models.held(ident)
+        if record is not None:
+            return {"script": record["source"]["script"], "function": record["source"]["name"], "held": ident}
+        server = self.server
+        if server is not None and ident in server.served and not isinstance(server.served[ident].path, str):
+            return {"path": str(server.served[ident].path)}
+        known = server.file_of(ident) if server is not None else None
+        if known is not None:
+            return {"path": known}
+        raise ValueError(self.models.missing(ident))
+
     def _routed(self, request: dict[str, Any]) -> tuple[str, str | None]:
         """The worker a request goes to (its key) and the folder that worker starts in."""
         source = request.get("source") or {}
@@ -729,14 +744,17 @@ class Daemon:
                 worker = None
                 try:
                     environment = request.get("env") or {}
-                    if request.get("expected"):
-                        # Viewer exports borrow the held document's worker, including
-                        # its environment. An empty HTTP environment must not evict it.
+                    if request.get("expected") or (request.get("source") or {}).get("held"):
+                        # Viewer exports and a document named by its id borrow the held document's
+                        # worker, including its environment: another caller's environment must not
+                        # evict it (a different one starts a fresh worker, which holds nothing).
                         with self.pool.lock:
                             held = self.pool.live.get(os.path.normcase(key))
                             environment = held.environment if held else dict(os.environ)
                         if held is None and "script" in request["source"]:
-                            send({"failed": "The viewed model is no longer held. Reopen it before exporting."})
+                            named = request["source"].get("held")
+                            send({"failed": self.models.missing(named) if isinstance(named, str) else
+                                  "The viewed model is no longer held. Reopen it before exporting."})
                             return
                     worker = self.lease(key, environment, cwd)
                     expected = request.get("expected") or {}
@@ -744,7 +762,7 @@ class Daemon:
                         # The lease excludes a rebuild: validate the generation here,
                         # including a rebuild that produced identical geometry.
                         with self.models.lock:
-                            model = self.models.records.get(document_id(expected.get("address") or ""))
+                            model = self.models.records.get(expected.get("id") or "")
                             matches = (model is not None and model["worker"] is worker
                                        and f"{model['version']}-0" == expected["modelRevision"])
                         if not matches:
@@ -789,16 +807,25 @@ class Daemon:
             return
         if op == "model_info":
             self.models.prune()
-            with self.models.lock:
-                record = self.models.records.get(document_id(request["address"]))
-                if record is None:
-                    send({"failed": f"no live model {request['address']}; build it before inspecting"})
-                else:
-                    send({"model": {key: record[key] for key in ("id", "address", "source", "builtAt", "version", "files")}})
+            record = self.models.held(str(request.get("id")))
+            if record is None:
+                send({"failed": self.models.missing(str(request.get("id")))})
+            else:
+                send({"model": {key: record[key] for key in ("id", "source", "program", "builtAt", "version", "files")}})
             return
-        if op == "model_source":
-            send({"ok": True, "source": self.models.resolve(request["address"])})
+        if op == "document":
+            # What an id names while this engine holds it (``document``), asked without building.
+            try:
+                send({"ok": True, "document": self.document(str(request.get("id")))})
+            except ValueError as error:
+                send({"failed": str(error)})
             return
+        if op == "export" and "id" in (request.get("source") or {}):
+            try:
+                request = {**request, "source": self.document(request["source"]["id"])}
+            except ValueError as error:
+                send({"failed": str(error)})
+                return
         if op == "export":
             order = {"id": 1, "op": "export", "source": request["source"], "destinations": request["destinations"],
                      "pose": request.get("pose"), "part": request.get("part"), "cwd": request.get("cwd"),
@@ -839,6 +866,8 @@ class Daemon:
                                 if path.endswith(".xbf"):
                                     self.builders[file_id(path)] = worker
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
+                        # The program that asked: what a document it built names to build it again.
+                        answer["program"] = request.get("program")
                         self._built(worker, answer)
                         send(answer)
                         return
@@ -858,21 +887,22 @@ class Daemon:
                 self.touch()
         elif op == "serve":
             server = self.serve(request)
+            named = str(request["path"])
             try:
-                from cadgen.engine.addresses import parse
-
-                address = parse(request["path"])
-                if address is not None:
-                    server, ident = self.models.serve(str(address), request)
+                if not is_id(named):
+                    ident = server.add(Path(named))
+                elif self.models.held(named) is not None:
+                    server, ident = self.models.serve(named)
                 else:
-                    ident = server.add(Path(request["path"]))
+                    found = self.document(named)  # a file this engine knows by its id, or refused
+                    ident = server.add(Path(found["path"]))
             except Exception as error:  # noqa: BLE001
-                send({"failed": f"cannot serve {request['path']}: {error}"})
+                send({"failed": f"cannot serve {named}: {error}"})
                 return
             app = getattr(server.http, "app", None)
             token = app.token if app is not None else ""
-            send({"ok": True, "url": f"{server.url}/?doc={ident}" + (f"&token={token}" if token else ""),
-                  "doc": ident, "token": token, "port": server.port})
+            send({"ok": True, "url": self.models.url(server, ident), "doc": ident, "token": token,
+                  "port": server.port})
         elif op in ("viewer", "http"):
             server = self.serve(request)
             application = getattr(server.http, "app", None)

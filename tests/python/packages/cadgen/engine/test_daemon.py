@@ -420,17 +420,20 @@ class DaemonTest(unittest.TestCase):
         return self.built("block")
 
     def test_inspection_never_builds_missing_or_stale_script_models(self):
+        from cadgen.engine.ids import model_id
+
         marker = self.folder / "executed.txt"
         main = self.folder / "main.txt"
         self.script.write_text(textwrap.dedent(MODEL.format(size=3)).replace(
             'if __name__ == "__main__":',
             f'from pathlib import Path\nPath({str(marker)!r}).write_text("imported", encoding="utf-8")\n'
             f'if __name__ == "__main__":\n    Path({str(main)!r}).write_text("main", encoding="utf-8")'), encoding="utf-8")
-        address = str(self.script) + "::block"
+        ident = model_id(self.script, "block")
+        # An id nothing holds is refused, naming no build: the engine runs nothing.
         for options in ((), ("face 1",), ("--query", "build")):
-            missing = self.cli("inspect", address, *options)
+            missing = self.cli("inspect", ident, *options)
             self.assertNotEqual(missing.returncode, 0, missing.stdout)
-            self.assertIn("no live model", missing.stderr)
+            self.assertIn(f"no document {ident} is held", missing.stderr)
         self.assertFalse(marker.exists())
         self.assertFalse((self.folder / "XBF/block.xbf").exists())
         self.built("block")
@@ -440,23 +443,25 @@ class DaemonTest(unittest.TestCase):
         marker.unlink()
         self.script.write_text('raise RuntimeError("inspection ran source")\n', encoding="utf-8")
         for options in ((), ("face 1",), ("--query", "build")):
-            inspected = self.cli("inspect", address, *options)
+            inspected = self.cli("inspect", ident, *options)
             self.assertEqual(inspected.returncode, 0, inspected.stderr)
         self.assertEqual((self.folder / "XBF/block.xbf").read_bytes(), saved)
         self.assertFalse(marker.exists())
         self._stop_daemon()
-        missing = self.cli("inspect", address, "face 1")
+        missing = self.cli("inspect", ident, "face 1")
         self.assertNotEqual(missing.returncode, 0)
-        self.assertIn("no live model", missing.stderr)
+        self.assertIn(f"no document {ident} is held", missing.stderr)
         inspected = self.cli("inspect", str(self.folder / "XBF/block.xbf"), "--query", "build")
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
         self.assertIsNone(json.loads(inspected.stdout)["live"])
 
     def _bare(self) -> str:
-        """``bracket.py``: one bare ``@model``, a document of memory alone, and its address."""
+        """``bracket.py``: one bare ``@model``, a document of memory alone, and its id."""
+        from cadgen.engine.ids import model_id
+
         script = self.folder / "bracket.py"
         script.write_text(textwrap.dedent(BARE.format(size=1)), encoding="utf-8")
-        return f"{script}::bracket"
+        return model_id(script, "bracket")
 
     def test_named_memory_model_updates_one_address_and_is_gone_after_restart(self) -> None:
         from urllib.parse import urlparse, parse_qs
@@ -464,10 +469,11 @@ class DaemonTest(unittest.TestCase):
         address = self._bare()
         first = self.built("bracket")
         self.assertEqual(first["files"], {})
-        self.assertEqual(first["address"], address)
+        self.assertEqual(first["id"], address)
+        self.assertNotIn("address", first, "a report names its document by its id alone")
         self.assertEqual(first["meshed"], 0)
         url = urlparse(first["url"])
-        doc = parse_qs(url.query)["doc"][0]
+        doc = url.path.strip("/")
         endpoint = f"{url.scheme}://{url.netloc}/api/doc/{doc}"
         token = parse_qs(url.query)["token"][0]
         before = get_json(endpoint, token)
@@ -484,13 +490,13 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(measured.returncode, 0, measured.stderr)
         self.assertEqual(json.loads(measured.stdout)["kind"], "face")
         models = json.loads(self.cli("status", "--json").stdout)["models"]
-        self.assertEqual([row["address"] for row in models], [address])
+        self.assertEqual([row["id"] for row in models], [address])
         self.assertEqual([path.name for path in self.folder.iterdir()], ["bracket.py"],
                          "no cache, document, or thumbnail on disk")
         self._stop_daemon()
         missing = self.cli("inspect", f"{address}#face 1")
         self.assertNotEqual(missing.returncode, 0)
-        self.assertIn("no live model", missing.stderr)
+        self.assertIn(f"no document {address} is held", missing.stderr)
         self.assertEqual(json.loads(self.cli("status", "--json").stdout)["models"], [])
 
     def test_snapshot_job_draws_a_memory_model_without_an_intermediate_document(self) -> None:
@@ -509,22 +515,49 @@ class DaemonTest(unittest.TestCase):
             self.assertEqual(picture.size, (200, 150))
         self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["bracket.png", "bracket.py"])
 
-    def test_script_address_builds_only_the_selected_declaration(self) -> None:
-        self.script.write_text("""from cadgen import model
-import build123d as bd
-@model
-def unused():
-    raise AssertionError('not called')
-@model
-def block():
-    return bd.Box(1, 2, 3)
-""", encoding="utf-8")
-        served = self.cli("serve", f"{self.script}::block")
-        self.assertEqual(served.returncode, 0, served.stderr)
-        self.assertEqual([path.name for path in self.folder.iterdir()], ["block.py"])
-        exported = self.cli("export", f"{self.script}::block", "block.step")
-        self.assertEqual(exported.returncode, 0, exported.stderr)
-        self.assertTrue((self.folder / 'block.step').is_file())
+    def test_a_script_is_never_a_source_and_an_id_is_read_as_held(self) -> None:
+        """No verb imports, runs or builds a script: ``x.py`` and ``x.py::f`` are refused as any file
+        that is no document is. An id is the document the engine holds: exported after the script
+        changed, it writes the same bytes, and nothing runs."""
+        from cadgen.engine.ids import model_id
+
+        marker = self.folder / "ran.txt"
+        self.script.write_text(textwrap.dedent(MODEL.format(size=3)).replace(
+            "def block():\n", f"def block():\n    open({str(marker)!r}, 'w', encoding='utf-8').write('ran')\n"),
+            encoding="utf-8")
+        for named in (str(self.script), f"{self.script}::block"):
+            for verb, *rest in (("export", "refused.step"), ("serve",), ("inspect",), ("snapshot", "refused.png")):
+                with self.subTest(verb=verb, source=named):
+                    refused = self.cli(verb, named, *rest)
+                    self.assertEqual(refused.returncode, 2, refused.stderr)
+                    self.assertRegex(refused.stderr, "is no document|is neither a document")
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["block.py"], "nothing ran, nothing was written")
+        ident = self.built("block")["id"]
+        self.assertEqual(ident, model_id(self.script, "block"))
+        marker.unlink()
+        first = self.cli("export", ident, "first.step")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.script.write_text(textwrap.dedent(MODEL.format(size=9)), encoding="utf-8")
+        again = self.cli("export", ident, "again.step")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual((self.folder / "again.step").read_bytes(), (self.folder / "first.step").read_bytes(),
+                         "the held document, as it was built")
+        self.assertFalse(marker.exists(), "an id is never built")
+
+    def test_a_program_reports_every_model_its_calls_build_wherever_each_is_defined(self) -> None:
+        from urllib.parse import urlsplit
+
+        from cadgen.engine.ids import model_id
+
+        (self.folder / "parts.py").write_text(textwrap.dedent(BARE.format(size=1)).replace("bracket", "cube"),
+                                              encoding="utf-8")
+        (self.folder / "caller.py").write_text("import parts\nparts.cube()\n", encoding="utf-8")
+        done = self.run_script("caller.py")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        ident = model_id(self.folder / "parts.py", "cube")
+        self.assertIn(f"  id: {ident}", done.stdout)
+        view = next(line for line in done.stdout.splitlines() if line.startswith("  view: "))
+        self.assertEqual(urlsplit(view.removeprefix("  view: ")).path, f"/{ident}")
 
     def test_main_calls_bare_and_file_models_in_order_and_keeps_its_arguments(self) -> None:
         self.script.write_text("""import sys
@@ -625,7 +658,7 @@ if __name__ == '__main__':
         from urllib.parse import urlsplit, parse_qs
         url = urlsplit(served.stdout.strip())
         base, query = f"{url.scheme}://{url.netloc}", parse_qs(url.query)
-        ident, token = query["doc"][0], query["token"][0]
+        ident, token = url.path.strip("/"), query["token"][0]
         api = f"{base}/api/doc/{ident}"
         before = get_json(api, token)
         for prototype in before["prototypes"]:  # the page has every part
@@ -654,7 +687,7 @@ if __name__ == '__main__':
         from urllib.parse import urlsplit, parse_qs
         url = urlsplit(served.stdout.strip())
         base, query = f"{url.scheme}://{url.netloc}", parse_qs(url.query)
-        ident, token = query["doc"][0], query["token"][0]
+        ident, token = url.path.strip("/"), query["token"][0]
         before = get_json(f"{base}/api/doc/{ident}", token)
         self.script.write_text(textwrap.dedent(PAIR.format(size=12)), encoding="utf-8")
         self.assertEqual(self.built("pair")["meshed"], 1, "the changed part alone, not the whole document")
@@ -734,7 +767,7 @@ if __name__ == '__main__':
         self.assertEqual([line.removeprefix("  id: ") for line in done.stdout.splitlines() if line.startswith("  id: ")],
                          expected)
         views = [line for line in done.stdout.splitlines() if line.startswith("  view: ")]
-        self.assertEqual([parse_qs(urlparse(line.removeprefix("  view: ")).query)["doc"][0] for line in views], expected)
+        self.assertEqual([urlparse(line.removeprefix("  view: ")).path.strip("/") for line in views], expected)
         workers = json.loads(self.cli("status", "--json").stdout)["workers"]
         self.assertEqual([(Path(w["script"]).name, w["builds"]) for w in workers], [("block.py", 2)],
                          "the daemon's worker built it, not the script's own process")
@@ -798,7 +831,7 @@ if __name__ == '__main__':
         from urllib.parse import urlsplit, parse_qs
         url = urlsplit(served.stdout.strip())
         base, query = f"{url.scheme}://{url.netloc}", parse_qs(url.query)
-        ident, token = query["doc"][0], query["token"][0]
+        ident, token = url.path.strip("/"), query["token"][0]
         before = get_json(f"{base}/api/doc/{ident}", token)
         stl = self.folder / "pair.stl"
         written = stl.stat().st_mtime_ns
@@ -826,7 +859,7 @@ if __name__ == '__main__':
         done = self.cli("export", "XBF/pair.xbf", "made.stl", "--part", "peg")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.cli("export", "pair.glb", "x.step").returncode, 2, "a mesh is no source")
-        self.assertEqual(self.cli("export", "pair.py::pair", "x.step").returncode, 0, "a model address selects its function")
+        self.assertEqual(self.cli("export", "pair.py::pair", "x.step").returncode, 2, "a script is no source")
         (self.folder / "plug.py").write_text(textwrap.dedent(PLUG), encoding="utf-8")
         built = self.run_script("plug.py")
         self.assertEqual(built.returncode, 0, built.stderr)

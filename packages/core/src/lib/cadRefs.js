@@ -322,12 +322,24 @@ const ENGINE_REF_FILE_RE = /\.xbf$/i;
 const pyStrip = text => text.replace(PY_STRIP_RE, "");
 const isBlank = character => character === " " || character === "\t";
 
+const DOCUMENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /**
- * Whether a file's refs are the engine's grammar: an `.xbf`, the engine's own document. A STEP keeps
- * its own grammar (above), whichever renderer draws it.
+ * Whether `value` is a document's id (`cadgen.engine.ids`): a lower-case canonical UUID, as the
+ * engine prints it -- a model's, or a file's. A ref's FILE may be one.
+ */
+export function isDocumentId(value) {
+  return typeof value === "string" && DOCUMENT_ID_RE.test(value);
+}
+
+/**
+ * Whether a file's refs are the engine's grammar: an `.xbf`, the engine's own document, or a document
+ * the engine holds by its id (a model's). A STEP keeps its own grammar (above), whichever renderer
+ * draws it.
  */
 export function isEngineRefFile(path) {
-  return ENGINE_REF_FILE_RE.test(String(path || "").trim());
+  const text = String(path || "").trim();
+  return isDocumentId(text) || ENGINE_REF_FILE_RE.test(text);
 }
 
 // A JSON string starting at `at` (a quote), read as Python's `raw_decode` reads one: its value and

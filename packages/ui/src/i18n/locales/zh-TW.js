@@ -43,6 +43,7 @@ export default {
 
   "file.opening": "正在開啟…",
   "file.missing": "檔案不存在",
+  "file.notHeld": "此模型已不再保留",
   "file.openFailed": "無法開啟這個檔案",
   "file.displayFailed": "無法顯示這個檔案",
   "file.goHome": "回到首頁",
@@ -98,6 +99,7 @@ export default {
   "home.byline": "打造任何東西。",
   "home.bylineOpenSource": "100% 開放原始碼，完全免費。",
   "home.recentFiles": "最近的檔案",
+  "home.launchFolder": "啟動資料夾",
   "home.searchAria": "搜尋模型",
   "home.searchPlaceholder": "搜尋",
   "home.layout": "版面配置",

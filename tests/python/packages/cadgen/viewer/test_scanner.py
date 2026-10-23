@@ -57,30 +57,14 @@ class ScannerTestCase(unittest.TestCase):
 
 
 class OneRowPerNamedFile(ScannerTestCase):
-    def test_artifacts_and_script_declarations_have_rows(self):
+    def test_artifacts_have_rows_and_a_script_has_none(self):
         self.write("drawing.dxf.py", "print(1)")
-        self.write("model.py", "print(1)")
+        self.write("model.py", "raise AssertionError('catalog must never execute a script')")
         self.write("outline.dxf", "0\nSECTION\n")
-        self.assertEqual(catalog_entry(self.path("drawing.dxf.py"))["models"], [])
-        self.assertEqual(catalog_entry(self.path("model.py"))["models"], [])
+        self.assertIsNone(catalog_entry(self.path("drawing.dxf.py")))
+        self.assertIsNone(catalog_entry(self.path("model.py")))
+        self.assertIsNone(catalog_entry(f"{self.path('model.py')}::bare"))
         self.assertEqual(self.entry("outline.dxf")["file"], self.path("outline.dxf").replace(os.sep, "/"))
-
-    def test_script_listing_reads_declarations_without_running_the_script(self):
-        script = self.write("parts.py", """from cadgen import model as declare, step
-import cadgen.engine as engine
-raise AssertionError('catalog must never execute a script')
-@declare
-def bare(): pass
-@step('part.step')
-def saved(): pass
-@engine.model
-def another(): pass
-""")
-        entry = catalog_entry(script)
-        self.assertEqual(entry["models"], [{"name": name, "address": f"{Path(script).resolve()}::{name}"}
-                                          for name in ("bare", "saved", "another")])
-        self.assertEqual(catalog_entry(f"{script}::bare")["sourceFormat"], "model")
-        self.assertEqual(sorted(os.listdir(self.root)), ["parts.py"])
 
     def test_a_file_under_a_hidden_folder_has_its_row_and_a_hidden_file_none(self):
         # Named, never found: a hidden FOLDER on the way is no reason to refuse it.

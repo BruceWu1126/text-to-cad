@@ -92,8 +92,8 @@ class ViewerExportHttpTest(unittest.TestCase):
             built = api.build_script(script, ['export_http'])
             self.assertEqual(built.files, {})
             url = urlparse(built.models[0]['url'])
-            doc = parse_qs(url.query)['doc'][0]
-            session = request({'op': 'viewer', 'start': str(root), 'api_only': True, 'new': True})
+            doc = url.path.strip('/')
+            session = request({'op': 'viewer', 'start': str(root), 'api_only': True})
             self.assertTrue(session.get('ok'), session)
 
             def http(path, body=None, *, headers=None):

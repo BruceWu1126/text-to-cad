@@ -140,8 +140,10 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
  * (`wantsPicture`) is handed to `picture`, where the viewer draws one out of sight — one card at a
  * time, each once while the page is up — and the list is read again once one is kept.
  */
-export function ModelLibrary<Model extends LibraryModel>({ library, layout = "grid", onLayoutChange, picture, links, onError, sections }: {
+export function ModelLibrary<Model extends LibraryModel>({ library, layout = "grid", onLayoutChange, picture, links, onError, sections, after }: {
   sections?: ReactNode;
+  /** What the host shows under the recent files (the folder of the most recent launch). */
+  after?: ReactNode;
   library: ModelLibrarySource<Model>;
   /** Grid or list; the host keeps the choice (the tab's settings). */
   layout?: LibraryLayout;
@@ -281,6 +283,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
             </li></ul>
             : <p className="cad-library-empty">{t("home.emptyNoPicker")}</p>)
             : models}
+      {after}
     </main>
   </div>;
 }

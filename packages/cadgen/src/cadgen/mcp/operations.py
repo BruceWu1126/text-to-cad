@@ -42,9 +42,9 @@ START = {
     "cad_inspect": obj({"source": STRING, "ref": STRING, "query": {"type": "string", "enum": ["closure", "geometry", "build"]}}, ("source",)),
 }
 DESCRIPTIONS = {
-    "cad_export": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf). Reuses the Python export operation, including building a script model source first. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts.",
-    "cad_snapshot": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. Paths must be absolute on the engine host. A script model source may build first. A failed snapshot or packet leaves existing pictures unchanged.",
-    "cad_inspect": "Read closure, geometry (requires ref), or build metadata of an existing file or live model. Never builds a model or writes its declared outputs; an unbuilt or expired model must be built first by running its script. Defaults to geometry with a ref, otherwise closure.",
+    "cad_export": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf). The source is an absolute CAD file path or a document id (a model's, which running its script prints); a document id is exported as the engine holds it. Reuses the Python export operation. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts.",
+    "cad_snapshot": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. The source is an absolute CAD file path or a document id; paths must be absolute on the engine host. A failed snapshot or packet leaves existing pictures unchanged.",
+    "cad_inspect": "Read closure, geometry (requires ref), or build metadata of an existing CAD file or a document id. Never builds a model or writes its declared outputs; a document the engine no longer holds is refused with the command that builds it again. Defaults to geometry with a ref, otherwise closure.",
 }
 
 
@@ -101,9 +101,12 @@ def absolute(value):
 
 
 def source(value):
-    absolute(value.partition("#")[0].rsplit("::", 1)[0])
-    from cadgen.engine.addresses import split
-    split(value)  # validate model address without executing it
+    """A source: a document id, or an absolute path on the engine host (``FILE#REF`` alike)."""
+    from cadgen.engine.ids import is_id
+
+    named = value.partition("#")[0]
+    if not is_id(named):
+        absolute(named)
 
 
 def packet_paths(value, override=None):
@@ -209,7 +212,7 @@ class Operations(Jobs):
         return {**{k: v for k, v in result.items() if k not in ("result", "progress", "error")},
                 "error": str(result.get("error", ""))[:4096],
                 "result": {"truncated": True, "message": "Report exceeds 2 MiB; use the Python API or CLI for the full report.",
-                           "address": summary.get("address")}}
+                           "id": summary.get("id")}}
 
     def _failure(self, job, error):
         return {"result": {"outputsMayHaveBeenWritten": job["operation"] in ("cad_export", "cad_snapshot")}}
@@ -231,7 +234,9 @@ class Operations(Jobs):
         progress({"label": name.removeprefix("cad_").capitalize() + " in progress"})
         if name == "cad_export":
             destinations = [absolute(path) for path in args.pop("destinations")]
-            if len(set(destinations)) != len(destinations) or ("::" not in args["source"] and absolute(args["source"]) in destinations):
+            from cadgen.engine.ids import is_id
+
+            if len(set(destinations)) != len(destinations) or (not is_id(args["source"]) and absolute(args["source"]) in destinations):
                 raise JobError("Export destinations must be distinct from each other and the source")
             # Keep the one Python operation: all destinations are validated and share a document read.
             src = args.pop("source")

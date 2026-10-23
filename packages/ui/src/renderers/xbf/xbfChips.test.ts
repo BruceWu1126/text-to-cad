@@ -63,6 +63,15 @@ it("an .xbf's selection copies the engine's canonical refs: a label, an occurren
   expect(chips.map((chip: any) => chip.selectors)).toEqual([['kit/hand/finger.2/f:finger.body.1', 'kit/hand/finger.2/face 7']]);
 });
 
+it('a model the engine holds by its id is referenced by that id, in the engine grammar, and its chips copy', () => {
+  const id = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab';
+  const resource = { kind: 'cad-model', path: id };
+  expect(copied(resource, ['i0', 'i2/face/7'])).toEqual([`${id}#palm`, `${id}#kit/hand/finger.2/face 7`]);
+  const { result } = renderHook(() => useXbfSelectionChips({ scene, tree, resource, selectedIds: ['i2/face/7'],
+    facts: new Map(), onRemove: () => {}, onHover: () => {} }));
+  expect(result.current.references).toEqual([{ resource, target: { kind: 'cad-selector', selectors: ['kit/hand/finger.2/face 7'] } }]);
+});
+
 it('a view hides and isolates by the refs Copy Prompt copies, a hidden assembly by its own', () => {
   const resource = at('/work/XBF/kit.xbf');
   const refs = (ids: string[]) => xbfNodeRefs({ scene, tree, resource, ids });

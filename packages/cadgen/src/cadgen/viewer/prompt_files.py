@@ -158,14 +158,11 @@ def _checked(request) -> tuple[str, str, list[dict], dict | None, list | None]:
     if name is not None and type(name) is not str:
         raise ValueError("name is the file's name, a string")
     input_path = request.get("input")
-    from cadgen.engine.addresses import parse as model_address
+    from cadgen.engine.ids import is_id
 
-    address = model_address(input_path) if type(input_path) is str else None
-    if address is not None:
-        input_path = str(address)
-    else:
+    if not is_id(input_path):
         if type(input_path) is not str or not os.path.isabs(input_path):
-            raise ValueError("input is the absolute path of the file the views show")
+            raise ValueError("input is the absolute path of the file the views show, or its document's id")
         if not os.path.isfile(input_path):
             raise ValueError(f"no file at {input_path}")
     views = request.get("views")
@@ -214,7 +211,7 @@ def _drawn_in(annotation: dict, views: list[dict]) -> dict:
 
 def _accepted(packet: dict) -> None:
     """The packet as ``cadgen snapshot`` reads it, checked before anything renders: its input a
-    file the snapshot draws, each job's camera and display, its annotation, the parts it hides and
+    file the snapshot draws (or a document's id), each job's camera and display, its annotation, the parts it hides and
     isolates and its measurements, by the snapshot's own parsers (``cadgen.engine.snapshot``). Their
     refusal is this request's 400.
     """
@@ -228,8 +225,10 @@ def _accepted(packet: dict) -> None:
         parse_measurements,
     )
 
+    from cadgen.engine.ids import is_id
+
     suffix = Path(str(packet["input"])).suffix.lower()
-    if suffix not in SNAPSHOT_SUFFIXES:
+    if not is_id(packet["input"]) and suffix not in SNAPSHOT_SUFFIXES:
         raise ValueError(f"{Path(str(packet['input'])).name} is no file cadgen snapshot draws: "
                          f"one of {', '.join(SNAPSHOT_SUFFIXES)}")
     try:

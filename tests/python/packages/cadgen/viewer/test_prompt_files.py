@@ -179,6 +179,18 @@ class PromptFilesRouteTest(unittest.TestCase):
         self.assertEqual(_view_of(saved, "current view").camera, CAMERA)
         self.assertEqual(parse_measurements(saved["measurements"])[0]["label"], mark["label"])
 
+    def test_a_packets_input_is_a_files_path_or_a_documents_id_and_never_a_script(self) -> None:
+        ident = "6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"
+        status, body, _ = self.call("POST", "/__cad/prompt-files", self.request(input=ident, name="bracket"))
+        self.assertEqual(status, 200, body)
+        packet = json.loads(Path(json.loads(body)["snapshot"]).read_text(encoding="utf-8"))
+        self.assertEqual(packet["input"], ident)
+        script = self.tmp / "parts.py"
+        script.write_text("print(1)\n", encoding="utf-8")
+        for named in (str(script), f"{script}::cube"):
+            status, body, _ = self.call("POST", "/__cad/prompt-files", self.request(input=named))
+            self.assertEqual(status, 400, named)
+
     def test_a_request_snapshot_would_refuse_is_refused_before_anything_renders(self) -> None:
         for request, said in (
             ([], "requested as an object"),

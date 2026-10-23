@@ -5,15 +5,14 @@ opens.
 
 `cadgen snapshot SRC OUT.png` draws SRC as the CAD Viewer draws it, rendered by
 OCCT, into a PNG. SRC is a document (`.xbf`, `.step`), a mesh (`.stl`, `.3mf`,
-`.glb`), a robot (`.urdf`, `.sdf`, `.srdf`), a drawing (`.dxf`), or a script's model
-(`src/bracket.py::bracket`: built first in its worker, which writes the files it
-declares, and drawn from the document that worker holds). Nothing is written but
-OUT.
+`.glb`), a robot (`.urdf`, `.sdf`, `.srdf`), a drawing (`.dxf`), or a model's document id
+(the `id:` its build printed: drawn from the document its worker holds, as it is, and
+nothing is built). A script is never a source. Nothing is written but OUT.
 
 ```bash
 cadgen snapshot XBF/bracket.xbf tmp/review.png
 cadgen snapshot XBF/bracket.xbf tmp/review.png --display hidden-line --grid --camera top
-cadgen snapshot src/bracket.py::bracket tmp/review.png --preview
+cadgen snapshot "$ID" tmp/review.png --preview    # ID: the id: line python src/bracket.py printed
 ```
 
 A face the mesher left without triangles is drawn without it and named in a

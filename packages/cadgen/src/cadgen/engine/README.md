@@ -120,8 +120,9 @@ def hinge():
    inside it by the id of its canonical path (`ids.file_id`); its public name stays its path.
    Bare `@model` keeps its document in the worker's memory. File decorators imply a model
    and write only their named outputs. No implicit XBF, source file, sidecar, registry,
-   cache or thumbnail is written for an in-memory model. Model documents and the viewer's
-   In memory list disappear when their workers retire or the engine restarts.
+   cache or thumbnail is written for an in-memory model. Model documents disappear when
+   their workers retire or the engine restarts; their ids are then refused with the command that
+   builds them again.
 7. **Provenance is served live, never written.** What made an element -- the
    feature, its operation, the function, file and line of its call -- lives in
    the trace of the worker that built the document, and is asked of it while it
@@ -145,7 +146,8 @@ def hinge():
    file is what the code that last ran makes, whichever model ran it (**Exports**); a
    GLB's animations are baked from the code when that GLB is written (**Animations**).
    A model with no file decorator writes nothing.
-11. **Decoration only declares; a model script is Python.** Importing cadgen or
+11. **Decoration only declares; a model script is Python.** A script runs only when Python
+    runs it; no verb imports or builds a script. Importing cadgen or
     defining a decorated function never builds a model, writes its outputs, starts a
     worker, or exits the caller. An explicit call builds the model and writes its
     declared files, then returns to the caller. Python controls which calls run and
@@ -169,12 +171,14 @@ def hinge():
     cap may retire it. Closing a page never stops the engine or its worker; once its last sync
     expires, ordinary idle retirement applies.
 
-15. **One HTTP owner per installation.** The daemon serves page sessions and document
+15. **One HTTP owner per installation.** The daemon serves its one page and document
     reads on one authenticated listener. Both `serve` and `viewer` start or reuse it;
     neither command has a standalone serving mode. A launcher exits after handing its client the
-    engine URL; closing a client never stops the engine. Each page session has its own start
-    folder, which a relative `?file=` resolves against; files are read by absolute path.
-    No page replaces or re-executes the engine; stopping it is an explicit engine operation.
+    engine URL; closing a client never stops the engine. Tabs select documents at `/<uuid>`: a
+    model's id, or a file's id after a launcher registers it; Python scripts are never documents.
+    The home shows the folder of the most recent launch, which each launch replaces; requests read
+    files by absolute path. No page replaces or re-executes the engine; stopping it is an explicit
+    engine operation.
 16. **No kernel in request threads.** Reading XBF/STEP, meshing, topology facts and poses
     run in child processes. The daemon holds structures and buffers, never live kernel objects.
 
@@ -194,11 +198,12 @@ def hinge():
 One server per installation owns the worker pool, served documents and HTTP listener.
 `cadgen serve` and `cadgen viewer` launch or reuse that server and return its URL.
 The background process is implemented in `daemon.py`; warm workers remain separate.
-Every successful build registers a lightweight document address and URL; registration does not mesh it.
+Every successful build registers its document by id and gives it a URL, `/<id>`; registration does not mesh it.
 A model's worker is a separate process, holding its memo and live kernel objects.
 The distribution injects its HTTP application through `daemon.HTTP_FACTORY`; this
 standalone engine imports no application module. The application serves the built
-viewer and per-launch page sessions on that listener. Document routes run in
+viewer's one page on that listener, every document at `/<id>`; an old page session's link
+(`/s/...`) and a document named by query (`/?doc=`, `/?file=`) are answered with the home. Document routes run in
 process, with no network relay. Kernel reads, topology, poses and meshes run in
 reader/mesh subprocesses; even an inline-mesh request stays outside the daemon.
 
@@ -261,16 +266,18 @@ Active HTTP calls keep the daemon alive; quiet MCP sessions expire after an hour
 A card's `cad_sync` renews its served document's warm-worker lease.
 
 The viewer launcher owns no server, reload watcher or process-reuse probe. It
-requests a session from the existing engine. Development client reload remains
-a browser concern; Python changes take effect when that installation's engine
-is explicitly restarted. Session state is memory only and is recreated after restart.
+asks the existing engine for its page: the launch's folder becomes the one the home shows, and
+each file it names is registered by its id (the id of its canonical path) and printed as its
+page, `/<id>`. Development client reload remains a browser concern; Python changes take effect
+when that installation's engine is explicitly restarted. What the page knows by id is memory
+only, and a file's id is derived again from its path after a restart.
 
 
 ## Layout
 
 | Module | What it is |
 | --- | --- |
-| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run, and the models a target's run ran (`BuildContext.children`); `@memo` and its calls; explicit model calls asking the daemon; a script's module and package (`module_of`); `paint`, `mechanism_state`, `configuration_sequence`; `read_step`, `read_xbf` |
+| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); its id (`ids.model_id` of its script and function), and a build's report of every model a program's call builds, wherever the model is defined; a child model called in a body is a sub-assembly built in the same run, and the models a target's run ran (`BuildContext.children`); `@memo` and its calls; explicit model calls asking the daemon; a script's module and package (`module_of`); `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
 | `api.py` | the verbs as functions, through the daemon: `export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `daemon` (`cadgen.export`, ...), and `build_script`, a script's models built by `Model.build()`; `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`gear_pair`, `rack_and_pinion_pair`, `screw_pair`), mechanism states (`mechanism_state`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and configuration sequences (`configuration_sequence`, a function's samples, `Timeline`: a sequence's pair values over time) |
@@ -297,7 +304,7 @@ is explicitly restarted. Session state is memory only and is recreated after res
 ```
 python SCRIPT.py                             the models the script explicitly calls
 cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-daemon] [--json]
-                                             SRC an .xbf or a .step
+                                             SRC an .xbf, a .step, or a document id
 cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
                 [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
                 [--width W --height H | --size-profile P] [--no-daemon] [--json]
@@ -311,6 +318,12 @@ cadgen status [--json] | stop | daemon
 
 `python -m cadgen.engine VERB ...` takes the same verbs, the engine's own entry.
 
+Every `SRC` and `DOC` is an on-disk CAD file's path or a document's id (`ids`): a model's id is
+what `python SCRIPT.py` prints for it (`id:`, beside its page, `view: <engine>/<id>`). A document
+id is read as the engine holds it, never built: one it does not hold is refused with the command
+that builds it again, `python <the program that built it>`. A script is never a source: `x.py`
+and `x.py::fn` are refused as any other file that is no document is.
+
 A verb's `--json` (`export`, `snapshot`, `status`) prints its answer as one JSON object
 on stdout, and a failure as `{"ok": false, "error": ...}` there too, exit status 1, so a caller
 reading stdout always finds an answer (`cli.answered`); without `--json` a failure is its words
@@ -318,8 +331,9 @@ on stderr, exit 2 for a request refused by name before anything ran and 1 for on
 
 `python SCRIPT.py` executes normal Python. Decoration only registers a model;
 imports and definitions build nothing. A call such as `arm()` asks the daemon to
-build that model and the children its body calls, prints its report when called
-from `__main__`, and returns its shape when the caller uses it. A failed build
+build that model and the children its body calls, prints its report -- its `id:` and its
+`view:` -- when the call is the program's (made in `__main__`, wherever the model is defined:
+`python caller.py` calling `parts.cube()` reports cube), and returns its shape when the caller uses it. A failed build
 raises; a successful call resumes the script. Put executable model calls under
 `if __name__ == "__main__":` so other models can import their definitions.
 `Model.build(verify=, profile=, daemon=)` explicitly requests a build and returns its report.
@@ -556,9 +570,9 @@ build's end wake it, and nothing polls.
 The CAD Viewer and its document reads share the daemon's HTTP listener. The page
 reads `/__cad/api/doc/<id>` and waits on its `/version` route; dispatch calls the
 engine directly. XBF/STEP loading and geometry facts run in child processes. A
-launcher creates or reuses a page session, prints its authenticated URL and exits.
-Each session has its own starting directory and catalog. The standalone engine's
-minimal page and snapshot server remain available without the enclosing application.
+launcher starts or reuses the engine's one page, prints its authenticated URL -- a file's page,
+`/<id>`, for each file it names, else the home's -- and exits. The standalone engine's
+minimal page (`/<id>`) and snapshot server remain available without the enclosing application.
 
 **The look.** The regular display modes draw a document as OCCT's PBR raster draws it, one frozen
 record (`render/look.py`) that the OCCT prototype (`render/occt.py`, its finishes and light in
@@ -703,11 +717,11 @@ per file (read again when a file it read changes) or `--no-daemon` in this proce
   Measure's dimensions over it. Every other flag is refused by name; what it does not draw
   (points, hatch patterns, images) is named in a warning.
 
-`SRC` may be a script's model too
-(`SCRIPT.py::MODEL`, `cadgen.snapshot(model, ...)`, `Model.snapshot`): the model is built in its
-worker and drawn from the document that worker holds, served by a server of the worker's over its
-one mesh cache, whether or not the model declares an xbf; the build writes what the model
-declares (law 10), and the snapshot nothing but OUT. A picture is never a declaration: no
+`SRC` may be a document's id too: it is drawn from the document the worker holding it has,
+served by a server of the worker's over its one mesh cache, whether or not the model declares an
+xbf, and nothing is built. From Python, `cadgen.snapshot(model, ...)` and `Model.snapshot` take
+the `Model` itself: the program's own call builds it first, writing what the model declares (law
+10), and the snapshot nothing but OUT. A picture is never a declaration: no
 decorator and no build flag draws one.
 
 ## Exports
@@ -737,8 +751,10 @@ writes every one, whether a decorator declares the file or `cadgen export` asks 
 same document and the same options write the same bytes. Every file is written beside its
 target and moved over it; a DXF only when its bytes change.
 
-- **Sources are documents**: an `.xbf` or a `.step` (read into a document first); from Python,
-  a `Model` (built first, in its worker) too. A mesh is never a
+- **Sources are documents**: an `.xbf` or a `.step` (read into a document first), or a
+  document's id (written from what the worker holding it has, byte for byte what it would write
+  however the script has changed since, and nothing is built); from Python, a `Model` (built
+  first, in its worker: the program's own call) too. A mesh is never a
   source: it has no B-rep. An xbf is written from a STEP, or from an xbf with `--part`; a posed xbf is refused (a
   pose is a request, never a document). Several destinations read the document once; an export
   runs in the worker that built the document while the file is as it left it, else in the
@@ -1481,12 +1497,16 @@ as another sibling's, is JSON-quoted. An element of an assembly resolves from it
 below holds it, so a document of one part takes its elements by the document's name
 (`plate/face 3`). A part's elements are numbered by their `TopExp.MapShapes` ordinals, the ones
 its names, `faceNames` and the XBM2 buffer use. `FILE` (everything before the first `#`,
-JSON-quoted where it holds one) must be the document resolved in: the same file, or the last
-segments of its path. A canonical ref -- what `select` labels a shape with and `where` answers --
+JSON-quoted where it holds one) is an absolute CAD file path, the last segments of the document's
+path, or a document's id (a model's, which `python SCRIPT.py` prints, or a file's), and must be the
+document resolved in: the same file, the same path's last segments, or the same id. A script is
+never a `FILE`: `<uuid>#face 1` names face 1 of the model whose id it is, read as the engine holds
+it. A canonical ref -- what `select` labels a shape with and `where` answers --
 spells the element by its name (its ordinal only where it has none) under its part's label where
 that label names one occurrence, else under the occurrence's path from the root; in a document of
 one part, under the document's name. It is also what the CAD Viewer copies of an `.xbf`'s selection,
-the file's path first (`/work/XBF/kit.xbf#kit/hand/finger.2/face 7`): the viewer's parser and speller
+the file's path first (`/work/XBF/kit.xbf#kit/hand/finger.2/face 7`), or a model's id first for a
+model the engine holds: the viewer's parser and speller
 of this grammar (`cadRefs` in the bundled runtime) are held to this module's, case for case, by a
 fixture both suites assert.
 
@@ -1792,7 +1812,7 @@ process's bodies made, and a document read is never written or patched: the firs
 after a restart runs the model, and writes the cold build's bytes. A taken document has
 no worker that built it: `made_by` is null until a build of it runs.
 
-## In-memory model addresses
+## In-memory models
 
 `@model` declares a model with no files. `@step`, `@xbf` and the other file
 decorators also declare models; stacking `@model` with them is optional. A
@@ -1810,24 +1830,19 @@ if __name__ == "__main__":
     bracket()
 ```
 
-The address is `/absolute/path/parts.py::bracket`, and the document's id is
-`bracket.id`: uuid5 of the script's canonical path and the function's name, the same in every
-process (**Architecture**). Different scripts can use the same function name. Running the
-script again with changed code updates the same document and open viewers; `python parts.py`
-prints each model's `id:` and `view:` lines. No address list is saved.
+The document's id is `bracket.id`: uuid5 of the script's canonical path and the function's name,
+the same in every process (**Architecture**). Different scripts can use the same function name.
+Running the script again with changed code updates the same document and open viewers; `python
+parts.py` prints each model's `id:` and `view:` lines (`<engine>/<id>`). No list of ids is saved.
 
-`cadgen serve ADDRESS`, `cadgen snapshot ADDRESS view.png`,
-`cadgen export ADDRESS part.step`, and `cadgen inspect ADDRESS 'face 1'`
-accept model addresses. `cadgen inspect 'ADDRESS#face 1'` uses the same reference
-syntax. Inspection reads existing files or live models only: an unbuilt or expired
-script address is refused, never imported or built. `--query build` returns saved-file
-metadata/closure or live-build metadata; `--query closure` and `--query geometry`
-select the other queries explicitly. Opening a Python script in the viewer lists its declarations without
-executing it; choosing one builds that function explicitly. The In memory
-section lists the live models, their addresses, build times and states. An
-expired script address is rebuilt by running its script. Exporting a file writes
-the requested destinations. Exporting a script model builds it first, including its
-declared files.
+`cadgen serve ID`, `cadgen snapshot ID view.png`, `cadgen export ID part.step`, and `cadgen
+inspect ID 'face 1'` take the id; `cadgen inspect 'ID#face 1'` uses the same reference syntax.
+Each reads the document the engine holds, as it is: editing the script changes nothing until
+Python runs it again, and no verb imports, runs or builds a script. An id the engine no longer
+holds is refused with the command that builds it again (`python <the program that built it>`).
+`--query build` returns saved-file metadata/closure or live-build metadata; `--query closure` and
+`--query geometry` select the other queries explicitly. In the CAD Viewer a model's page is
+`/<id>`; it has no file of its own, so no Select File and no file menu.
 
-Address parsing and declaration listing live in [addresses.py](addresses.py), ids in
-[ids.py](ids.py); the daemon's transient book of live models, by id, lives in [models.py](models.py).
+Ids live in [ids.py](ids.py), document names (a CAD file's path or an id) in
+[addresses.py](addresses.py); the daemon's transient book of live models, by id, lives in [models.py](models.py).

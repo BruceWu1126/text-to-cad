@@ -58,6 +58,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -569,12 +570,14 @@ class Bench:
         load = loads()
         done, wall = self.run(model, ["-m", "cadgen.cli", "serve", str(model.document)], timeout=600)
         url = (done.stdout.strip().splitlines() or [""])[-1] if done is not None else ""
-        if done is None or done.returncode or "/?doc=" not in url:
+        page = urllib.parse.urlsplit(url)
+        ident = page.path.strip("/")
+        if done is None or done.returncode or not page.netloc or not ident:
             self.step(model, "serve", wall, load, ok=False, error=(done.stderr[-2000:] if done else "no answer"))
         else:
             self.step(model, "serve", wall, load, ok=True)
-            base, _sep, ident = url.partition("/?doc=")
-            api = f"{base}/api/doc/{ident}"
+            # The page is ``<engine>/<id>``: the document's routes are under ``/api/doc/<id>``.
+            api = f"{page.scheme}://{page.netloc}/api/doc/{ident}"
             for step, query in (("mesh-cold", ""), ("mesh-warm", "?drop=1")):
                 load, started = loads(), time.perf_counter()
                 try:

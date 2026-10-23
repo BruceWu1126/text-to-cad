@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createPromptContext, createPromptDeliveryLedger, referencePart, textPart, validatePromptContext, formatPromptContextText, formatPromptMessage, formatPromptReference, parsePromptReference, promptReferenceIds, resolveAttachmentPaths } from './index.js';
+import { createPromptContext, createPromptDeliveryLedger, referencePart, textPart, validatePromptContext, formatPromptContextText, formatPromptMessage, formatPromptReference, parsePromptReference, validatePromptReference, promptReferenceIds, resolveAttachmentPaths } from './index.js';
 
 // A ref is `<occurrence token>/<element name>`, as cadgen and the viewer compose it.
 const FACE = 'o:3f2a9c1d7e5b/f:bracket.extrude1.3';
@@ -102,4 +102,13 @@ test('prompt serialization prefers inline text and preserves references without 
     inlineText: Promise.resolve(null), path: Promise.resolve('/tmp/a.snapshot.json'), label: 'Snapshot' }])),
     'Keep it.\n\nSnapshot: /tmp/a.snapshot.json');
   await assert.rejects(resolvePromptMessage(createPromptContext([{ ...small, inlineText: Promise.reject(new Error('save failed')) }])), /save failed/);
+});
+
+test('a model is referenced by its document id, in the engine grammar, and nothing else names one', () => {
+  const id = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab';
+  const reference = parsePromptReference(`${id}#face 1`);
+  assert.deepEqual(reference, { resource: { kind: 'cad-model', path: id }, target: { kind: 'cad-selector', selectors: ['face 1'] } });
+  assert.equal(formatPromptReference(reference), `${id}#face 1`);
+  assert.throws(() => validatePromptReference({ resource: { kind: 'cad-model', path: '/m/parts.py' }, target: { kind: 'whole-resource' } }), /by its id/);
+  assert.equal(parsePromptReference('/m/parts.py::cube#face 1'), null);
 });

@@ -143,7 +143,7 @@ def _object(properties: dict[str, Any] | None = None, required: list[str] | None
     return schema
 
 
-_PATH = {"type": "string", "description": "A CAD file or script path, or script.py::MODEL."}
+_PATH = {"type": "string", "description": "A CAD file's absolute path, or a document id (a model's, which running its script prints)."}
 _VIEW = {"type": "string", "description": "A view id from cad_view; defaults to the most recently used viewer."}
 # What a view watches: its model's catalog entry.
 _WATCH = _object({"file": {"type": ["string", "null"]}})
@@ -503,7 +503,8 @@ class Server:
         """The launch that shows the home: the models opened before, which come with it so its cards
         draw at once, and Open with the desktop's chooser."""
         try:
-            recents = [entry.public() for entry in self.recents.list()]
+            recents = [entry.public() for entry in self.recents.list()
+                       if os.path.splitext(entry.path)[1].lower() in VIEWER_EXTENSIONS]
         except Exception:  # the home opens whatever the library says
             LOG.exception("could not read recents")
             recents = []
@@ -524,23 +525,26 @@ class Server:
         return launch
 
     def _model_path(self, value: Any) -> str:
-        """An existing CAD file, from the absolute path a caller named."""
+        """An existing CAD file, from the absolute path a caller named; or a document the engine holds,
+        from its id: a model's id stays itself, a file's is its path. Nothing is built."""
         if not isinstance(value, str) or not value.strip():
             raise ToolFailed("Name a CAD file by its absolute path.", "no_path")
-        from cadgen.engine.addresses import parse
+        from cadgen.engine.ids import is_id
 
-        address = parse(value)
-        if address is not None:
-            if not address.script.is_file():
-                raise ToolFailed(f"No script at {address.script}.", "no_file")
-            return str(address)
+        if is_id(value):
+            from cadgen.engine.client import request
+
+            answer = request({"op": "document", "id": value}, start=False)
+            if not answer or "failed" in answer:
+                raise ToolFailed((answer or {}).get("failed") or f"no document {value} is held", "no_file")
+            return answer["document"].get("path") or value
         path = local_path(value)
         if not os.path.isabs(path):
             raise ToolFailed(f"{value} is not an absolute path: name the model by its absolute path.", "relative_path")
         path = os.path.abspath(path)
         if not os.path.isfile(path):
             raise ToolFailed(f"No file at {path}.", "no_file")
-        if os.path.splitext(path)[1].lower() not in (*VIEWER_EXTENSIONS, ".py"):
+        if os.path.splitext(path)[1].lower() not in VIEWER_EXTENSIONS:
             raise ToolFailed(f"CAD opens {', '.join(EXTENSIONS)} files; {os.path.basename(path)} is not one.", "not_cad")
         return path
 
@@ -549,7 +553,9 @@ class Server:
 
     def _tool_cad_tab(self, arguments, context):
         current = next((view.model for view in self.views.live(context.meta.get("threadId")) if view.model), None) or self._model
-        if current is not None and "::" not in current and not os.path.isfile(current):
+        from cadgen.engine.ids import is_id
+
+        if current is not None and not is_id(current) and not os.path.isfile(current):
             current = None
         launch = self._launch(current, surface="tab") if current else self._home(surface="tab")
         return _text("CAD is open.", {"launch": launch})
@@ -629,17 +635,16 @@ class Server:
 
     def _show_in_browser(self, model: str) -> dict[str, Any]:
         """The model's link in the CAD Viewer this machine runs, started if none is."""
-        from .browser import ViewerUnavailable, model_link, viewer_url
+        from .browser import ViewerUnavailable, viewer_url
 
         self._model = model
         try:
-            url = (self._viewer_url or viewer_url)()
+            link = (self._viewer_url or viewer_url)(model)
         except ViewerUnavailable as failure:
             raise ToolFailed(f"This app cannot show CAD views, and the CAD Viewer did not start ({failure}). Run "
-                             f"`cadgen viewer --host 127.0.0.1 --json` and open {model_link('<the url it prints>', model)}.",
+                             f"`cadgen viewer --host 127.0.0.1 --json {model}` and open the url it prints.",
                              "no_viewer") from failure
         self.warm()  # the browser page's first document meshes on a pool already starting
-        link = model_link(url, model)
         # Text alone: an app that shows a result's structured content shows it in place of the text
         # (Claude Code does), and the agent would get neither this guidance nor the update line.
         return self._told(_text(f"This app cannot show CAD views, so {os.path.basename(model)} is in the CAD Viewer: {link}\n"

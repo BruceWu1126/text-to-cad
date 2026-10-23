@@ -281,8 +281,10 @@ def resident_after_build() -> float | None:
 
 
 def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, Any]:
-    """An ``export`` request: the document -- a script's model built first, or a file (the document this worker last built of it while the file is as the
-    build left it, else read) -- written to each destination, and drawn into ``draw``'s
+    """An ``export`` request: the document -- one this worker holds (``held``: a document named
+    by its id, read as it is and never built), a ``Model`` this program built first (its own
+    explicit call), or a file (the document this worker last built of it while the file is as
+    the build left it, else read) -- written to each destination, and drawn into ``draw``'s
     PNG where the request has one (``{"out", option: value}``, the snapshot verb's: a
     model's picture is drawn from the document in this worker's memory). Answers what was
     written."""
@@ -291,10 +293,17 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
 
     source_spec = request["source"]
     built: list[dict[str, Any]] = []
-    if request.get("expected") and "script" in source_spec:
+    if "id" in source_spec:
+        # The daemon names a held document's worker (``Daemon.document``); in this process, none is.
+        raise export.ExportRefused(f"no document {source_spec['id']} is held in this process: a document id is "
+                                   "the engine's, read through its daemon")
+    if (request.get("expected") or source_spec.get("held")) and "script" in source_spec:
         source = engine_build.held(Path(source_spec["script"]), source_spec.get("function"))
         if source is None:
-            raise export.ExportRefused("The viewed model is no longer held. Reopen it before exporting.")
+            raise export.ExportRefused("The viewed model is no longer held. Reopen it before exporting."
+                                       if request.get("expected") else
+                                       f"{source_spec.get('function')} is no longer held: run the program that "
+                                       "builds it again")
     elif "script" in source_spec:
         script = Path(source_spec["script"])
         function = source_spec.get("function")
@@ -302,16 +311,16 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         reports = engine_build.build(script, [function] if function else None, log=log,
                                      cwd=Path(request["cwd"]) if request.get("cwd") else None)
         if len(reports) != 1:
-            raise engine_build.BuildError(f"{script.name} defines {len(reports)} models: name one (SCRIPT::MODEL)")
+            raise engine_build.BuildError(f"{script.name} defines {len(reports)} models: export one of them")
         built = reports
         if not reports[0].get("ok"):
             return {"reports": reports, "files": []}
-        function = reports[0]["model"].rpartition("::")[2]
+        function = reports[0]["source"]["name"]
         source = engine_build.held(script.resolve(), function)
         if source is None:
             xbf = next((path for path, row in reports[0]["files"].items() if row.get("kind") == "xbf"), None)
             if xbf is None:
-                raise engine_build.BuildError(f"{script.name}::{function}: the build left no document")
+                raise engine_build.BuildError(f"{function} of {script.name}: the build left no document")
             source = export.Source.read(xbf)
     else:
         path = Path(source_spec["path"])

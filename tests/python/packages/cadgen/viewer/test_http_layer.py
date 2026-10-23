@@ -258,7 +258,12 @@ class Catalog(HttpLayerTestCase):
         self.assertEqual(set(catalog), {"schemaVersion", "entries", "revision"})
         [entry] = catalog["entries"]
         self.assertEqual(entry["file"], str(part).replace(os.sep, "/"))
-        self.assertEqual(list(entry), ["file", "kind", "url", "hash", "bytes"])
+        # Its document's id: the page names the file by it (``/<id>``), and rows join by it.
+        from cadgen.engine.ids import file_id
+
+        self.assertEqual(list(entry), ["file", "kind", "url", "hash", "bytes", "id"])
+        self.assertEqual(entry["id"], file_id(part))
+        self.assertEqual(self.fixture.request("GET", f"/__cad/catalog?id={entry['id']}")[0], 200)
         # The row's URL is how its bytes are read.
         self.assertEqual(self.fixture.request("GET", entry["url"])[::2], (200, part.read_bytes()))
         part.write_bytes(b"solid moved\nendsolid moved\n")

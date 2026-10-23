@@ -1,4 +1,5 @@
-"""The viewer is a short-lived launcher; one engine owns every page session."""
+"""The viewer is a short-lived launcher; one engine owns its one page, which addresses documents by
+path (``/<id>``) and whose home shows the folder of the most recent launch."""
 from __future__ import annotations
 
 import http.client
@@ -51,25 +52,55 @@ class LauncherTest(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_launches_reuse_one_engine_and_keep_per_session_roots(self):
-        first = self.launch()
-        again = self.launch()
-        fresh = self.launch('--new')
-        other = self.root / 'other'
-        other.mkdir()
-        elsewhere = self.launch(cwd=other)
-        self.assertEqual({r['pid'] for r in (first, again, fresh, elsewhere)}, {first['pid']})
-        self.assertEqual({r['port'] for r in (first, again, fresh, elsewhere)}, {first['port']})
-        self.assertEqual(first['session'], again['session'])
-        self.assertNotEqual(first['session'], fresh['session'])
-        for launch, root in ((first, self.root), (elsewhere, other)):
-            status, _, data = self.get(launch, urlsplit(launch['apiUrl']).path + '/__cad/server')
-            self.assertEqual(status, 200)
-            self.assertEqual(os.path.realpath(json.loads(data)['start']), os.path.realpath(root))
-            self.assertEqual(json.loads(data)['pid'], first['pid'])
-        # Both launchers have exited; the shared server still serves their pages.
-        self.assertEqual(self.get(first, urlsplit(first['apiUrl']).path + '/')[0], 200)
+    def test_launches_reuse_one_engine_and_the_home_shows_the_latest_folder(self):
+        b, c = self.root / 'b', self.root / 'c'
+        b.mkdir()
+        c.mkdir()
+        first = self.launch(cwd=b)
+        again = self.launch(cwd=b)
+        latest = self.launch(cwd=c)
+        self.assertEqual({r['pid'] for r in (first, again, latest)}, {first['pid']})
+        self.assertEqual({r['port'] for r in (first, again, latest)}, {first['port']})
+        self.assertEqual([urlsplit(r['url']).path for r in (first, latest)], ['/', '/'])
+        # One page: the home shows the folder of the most recent launch, c, replacing b.
+        status, _, data = self.get(first, '/__cad/server')
+        self.assertEqual(status, 200)
+        self.assertEqual(os.path.realpath(json.loads(data)['start']), os.path.realpath(c))
+        self.assertEqual(json.loads(data)['pid'], first['pid'])
+        # Both launchers have exited; the shared server still serves the page.
+        self.assertEqual(self.get(first, '/')[0], 200)
         self.assertIn('already serves', self.launch('--port', str(first['port']+1), ok=False))
+
+    def test_a_file_launched_lands_on_its_id_and_old_links_land_home(self):
+        from cadgen.engine.ids import file_id
+
+        part = self.root / 'part.stl'
+        part.write_text('solid x\nendsolid x\n', encoding='utf-8')
+        link = self.root / 'link.stl'
+        link.symlink_to(part)
+        launched = self.launch('part.stl')
+        ident = file_id(part)
+        self.assertEqual(urlsplit(launched['url']).path, f'/{ident}')
+        self.assertEqual([row['id'] for row in launched['documents']], [ident])
+        # A symlink to it is the same document: one id, one catalog row.
+        self.assertEqual(urlsplit(self.launch('link.stl')['url']).path, f'/{ident}')
+        self.assertEqual(self.get(launched, f'/{ident}')[0], 200)
+        status, _, data = self.get(launched, f'/__cad/catalog?id={ident}')
+        self.assertEqual(status, 200)
+        self.assertEqual([(row['id'], os.path.realpath(row['file'])) for row in json.loads(data)['entries']],
+                         [(ident, os.path.realpath(part))])
+        status, _, data = self.get(launched, '/__cad/catalog?file=' + str(link))
+        self.assertEqual([row['id'] for row in json.loads(data)['entries']], [ident])
+        # An id nothing holds is missing, and says so; a script is no CAD file to open.
+        status, _, data = self.get(launched, '/__cad/catalog?id=6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab')
+        self.assertEqual((status, json.loads(data)['entries']), (200, []))
+        self.assertIn('is held', json.loads(data)['missing'])
+        (self.root / 'model.py').write_text('print(1)\n', encoding='utf-8')
+        self.assertIn('no CAD file', self.launch('model.py', ok=False))
+        # A page session's link and a document named by query are forms that are gone: the home.
+        for route in ('/s/abc/', '/s/abc/?file=/m/a.step', '/?doc=' + ident, '/?file=' + str(part)):
+            status, headers, _ = self.get(launched, route)
+            self.assertEqual((status, headers.get('location')), (302, '/'), route)
 
     def test_every_route_requires_token_and_keeps_host_and_post_gates(self):
         launch = self.launch()
@@ -102,7 +133,7 @@ class LauncherTest(unittest.TestCase):
                               env=self.env, cwd=self.root, capture_output=True, text=True, timeout=60)
         self.assertEqual(done.returncode, 0, done.stderr)
         launch = json.loads(done.stdout)
-        self.assertEqual(self.get(launch, urlsplit(launch['apiUrl']).path+'/__cad/server')[0], 200)
+        self.assertEqual(self.get(launch, '/__cad/server')[0], 200)
 
 
 if __name__ == '__main__':

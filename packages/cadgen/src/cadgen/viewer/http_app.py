@@ -28,7 +28,7 @@ import stat
 import sys
 from pathlib import Path
 
-from cadgen.engine.ids import canonical
+from cadgen.engine.ids import canonical, file_id, is_id
 
 from .backend import absolute_path, asset_path
 from .content_types import content_type_for_path, content_type_for_static_asset, extension_of
@@ -190,7 +190,7 @@ def _working_folder() -> str:
 
 
 # Routes one method reaches: the other one answers 405 naming it, never a 404 that reads as no route.
-_GET_ONLY_ROUTES = frozenset({"/__cad/server", "/__cad/catalog", "/__cad/folder", "/__cad/search", "/__cad/models",
+_GET_ONLY_ROUTES = frozenset({"/__cad/server", "/__cad/catalog", "/__cad/folder", "/__cad/search",
                               "/__cad/thumbnail", "/__cad/drawing", "/__cad/robot", "/__cad/xbf", "/__cad/asset",
                               "/__cad/version"})
 _POST_ONLY_ROUTES = frozenset({"/__cad/pick", "/__cad/reveal", "/__cad/clipboard",
@@ -204,9 +204,11 @@ class CadApp:
     serves the client itself, and the dev proxy forwards only the two API
     prefixes, so nothing else can be waiting behind this.
 
-    One app serves every file on this machine, by absolute path (``backend``). ``start`` is the
-    folder it was started in (the working folder by default): the page resolves a developer's
-    relative ``?file=`` against it, and it bounds nothing.
+    One app serves every file on this machine, by absolute path (``backend``). The page names
+    each document it shows by id, ``/<id>`` (``cadgen.engine.ids``): a model's, or a file's once it
+    is registered here (``remember``: by the launcher, or by the catalog's answer for its path).
+    ``start`` is the folder of the most recent launch (the working folder by default): the home
+    shows it, and it bounds nothing.
     """
 
     def __init__(self, *, host: str, port: int, dist_dir: str = "", start: str | None = None, identity: str | None = None, documents=None):
@@ -236,6 +238,8 @@ class CadApp:
         self.identity_token = identity if identity is not None else identity_token(self.dist_dir)
         self._recents = None
         self._picker = None
+        # The files this app knows by id (``remember``); the engine's app keeps them in its server.
+        self._files: dict[str, str] = {}
         # The engine shares one recorder across its page and MCP sessions.
         self.analytics = None
         self.consent_by = "viewer"
@@ -264,25 +268,71 @@ class CadApp:
             "platform": sys.platform if sys.platform in ("darwin", "win32") else "linux",
             # The OS identity of the engine serving this page.
             "user": os_user(),
-            # Where a developer's relative ?file= resolves, in the page. Not a boundary.
+            # The folder of the most recent launch, which the home shows. Not a boundary.
             "start": self.start,
             "pick": self.pick,
             "port": self.port,
             "pid": os.getpid(),
         }
 
-    def read_catalog(self, file=None) -> dict:
-        """The catalog of ``file``, an absolute path: its row, or none when it has none (or no file
-        is named), and its revision -- a digest of the entries, which a client that only watches for
-        change compares instead of reading the catalog again. A file is written whole, by rename,
-        by every writer cadgen has, so a read never meets one half written."""
-        from cadgen.engine.addresses import parse
-        from .model_catalog import entry as model_entry
+    def remember(self, path) -> str:
+        """An on-disk file the page or a launcher opens, known by its id from now on: its id."""
+        found = canonical(path)
+        ident = file_id(found)
+        self._files[ident] = found
+        return ident
 
-        path = str(parse(file)) if file and parse(file) is not None else absolute_path(file) if file else None
-        entry = (model_entry(path) or catalog_entry(path)) if path else None
+    def file_of(self, ident: str) -> str | None:
+        """The canonical path of the on-disk file of id ``ident`` this app knows, else None."""
+        return self._files.get(ident)
+
+    def _file_of(self, ident: str) -> str | None:
+        """A file's path by its id: one registered here, else one in Recents (a page reloaded after
+        the engine restarted)."""
+        found = self.file_of(ident)
+        if found is not None:
+            return found
+        try:
+            for recent in self.recents.list():
+                if file_id(recent.path) == ident:
+                    return self.file_of(self.remember(recent.path))
+        except OSError:
+            pass
+        return None
+
+    def read_catalog(self, file=None, ident=None) -> dict:
+        """The catalog of one document -- ``file``, an absolute path, registered by its id
+        (``remember``), or ``ident``, a document's id: a file's or a model's the engine holds -- its
+        row, with its ``id``, or none when it has none (``missing`` says why for an id), and its
+        revision -- a digest of the entries, which a client that only watches for change compares
+        instead of reading the catalog again. A file is written whole, by rename, by every writer
+        cadgen has, so a read never meets one half written."""
+        from .model_catalog import entry as model_entry, held
+
+        missing = ""
+        entry = None
+        if ident:
+            if not is_id(ident):
+                raise ValueError(f"{ident} is not a document id")
+            path = self._file_of(ident)
+            if path is not None:
+                entry = catalog_entry(path)
+            else:
+                entry = model_entry(ident)
+                if entry is None:
+                    missing = held(ident)[1] if self.engine_documents.server is not None else f"no document {ident} is held"
+        elif file:
+            path = absolute_path(file)
+            entry = catalog_entry(path)
+            if entry is not None:
+                self.remember(path)
+        if entry is not None and "id" not in entry:
+            entry["id"] = file_id(entry["file"])
         entries = [entry] if entry else []
-        return {"schemaVersion": CAD_CATALOG_SCHEMA_VERSION, "entries": entries, "revision": catalog_revision(entries)}
+        answer = {"schemaVersion": CAD_CATALOG_SCHEMA_VERSION, "entries": entries, "revision": catalog_revision(entries)}
+        if missing:
+            answer["missing"] = missing
+        return answer
 
     # --- gates ------------------------------------------------------------
 
@@ -404,13 +454,9 @@ class CadApp:
                 if pathname == "/__cad/server":
                     response.send_json(200, self.server_info())
                 elif pathname == "/__cad/catalog":
-                    response.send_json(200, self.read_catalog(query.get("file")))
+                    response.send_json(200, self.read_catalog(query.get("file"), query.get("id")))
                 elif pathname in ("/__cad/folder", "/__cad/search"):
                     self._handle_folder(response, pathname, query)
-                elif pathname == "/__cad/models":
-                    from .model_catalog import in_memory
-
-                    response.send_json(200, {"models": in_memory()})
                 elif pathname == "/__cad/recents":
                     response.send_json(200, self._recents_payload())
                 elif pathname == "/__cad/thumbnail":
@@ -560,7 +606,8 @@ class CadApp:
         return self._picker
 
     def _recents_payload(self) -> dict:
-        return {"recents": [entry.public() for entry in self.recents.list()]}
+        # A CAD file the viewer opens: a script an earlier release kept here is no document.
+        return {"recents": [entry.public() for entry in self.recents.list() if extension_of(entry.path) in VIEWER_EXTENSIONS]}
 
     def _change_recents(self, payload) -> dict:
         """A change to the library -- ``{action, path, png?}``, the model by its absolute path --
@@ -569,17 +616,15 @@ class CadApp:
 
         if type(payload) is not dict:
             raise ValueError("a recents change is {action, path}")
-        from cadgen.engine.addresses import parse
-
-        # In-memory addresses and their pictures never enter the persistent library.
-        if payload.get("path") and parse(payload["path"]) is not None:
+        # A document known by its id alone (a model's) and its pictures never enter the library.
+        if is_id(payload.get("path")):
             return self._recents_payload()
         action, path = payload.get("action"), absolute_path(payload.get("path"))
         # The library keys a model by its canonical path, the engine's (``ids.canonical``): a
         # symlink, its target and a case variant of one file are one entry.
         key = canonical(path)
         if action == "open":
-            if extension_of(path) not in (*VIEWER_EXTENSIONS, ".py") or not os.path.isfile(path):
+            if extension_of(path) not in VIEWER_EXTENSIONS or not os.path.isfile(path):
                 raise ValueError(f"no CAD file at {path}")
             self.recents.opened(key)
             if self.analytics is not None:

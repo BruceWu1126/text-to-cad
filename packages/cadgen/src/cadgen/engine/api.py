@@ -174,16 +174,11 @@ def _ask(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] | Non
     return answer
 
 
-def _target(target: Any) -> tuple[Path, list[str] | None]:
-    """A snapshot's script source: ``script.py`` or ``script.py::model``."""
-    text = os.fspath(target)
-    script, _sep, function = text.partition("::")
-    path = Path(script).resolve()
-    if path.suffix != ".py":
-        raise EngineError(f"{script} is not a Python script")
-    if not path.is_file():
-        raise EngineError(f"no script {script}")
-    return path, [function] if function else None
+def _program() -> str | None:
+    """The program this process runs, ``__main__``'s file: what a document it builds names as the
+    command that builds it again (``models.Models.missing``); None where it has no file."""
+    found = getattr(sys.modules.get("__main__"), "__file__", None)
+    return os.path.abspath(found) if isinstance(found, str) and os.path.isfile(found) else None
 
 
 _RUN: list[str] = []
@@ -234,7 +229,7 @@ def _built(script: Path, functions: list[str] | None, *, verify: bool = False, p
                 shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")
 
             answer = _ask({"op": "build", "script": str(script), "functions": functions, "cwd": str(cwd),
-                           "verify": verify, "profile": profile, "run": _run()}, relay, frames)
+                           "verify": verify, "profile": profile, "run": _run(), "program": _program()}, relay, frames)
             reports, fresh = answer["done"], answer.get("worker", {}).get("fresh")
     finally:
         if bar is not None:
@@ -254,31 +249,26 @@ def build_script(script: Path, functions: list[str] | None = None, *, verify: bo
     return Report(reports, round(wall, 4), fresh)
 
 
-def _source(source: Any, *, scripts: bool = False) -> dict[str, Any]:
-    """What an export or a snapshot reads: a ``Model`` (or the ``Built`` handle of one), a
-    document's path -- or, for a snapshot (``scripts``), a script's model by its path,
-    ``script.py::model``."""
+def _source(source: Any) -> dict[str, Any]:
+    """What an export or a snapshot reads: a ``Model`` this Python program names (or the
+    ``Built`` handle of one), a document's id (``{"id"}``: the document the engine holds, read
+    as it is and never built), or an on-disk document's path."""
     from cadgen.engine.export import MESHES, SOURCES, ExportRefused
+    from cadgen.engine.ids import is_id
     from cadgen.engine.model import Model
 
     if isinstance(source, Model):
         return {"script": str(source.script), "function": source.name}
     if isinstance(source, Built):
         return {"function": source.name, "script": str(source.script)}
-    from cadgen.engine.addresses import parse
-
     text = os.fspath(source)
-    address = parse(text)
-    if address is not None:
-        return {"script": str(address.script), "function": address.name}
-    if scripts and ("::" in text or text.endswith(".py")):
-        script, functions = _target(text)
-        return {"script": str(script), "function": functions[0] if functions else None}
+    if is_id(text):
+        return {"id": text}
     path = Path(text).resolve()
     if path.suffix.lower() in MESHES:
         raise ExportRefused(f"{path.name} is a mesh: it has no B-rep, and no export is made from one")
     if path.suffix.lower() not in SOURCES:
-        raise ExportRefused(f"{path.name} is no document: an export reads an .xbf or a .step")
+        raise ExportRefused(f"{path.name} is no document: an export reads an .xbf, a .step or a document id")
     if not path.is_file():
         raise ExportRefused(f"no document {path}")
     return {"path": str(path)}
@@ -289,7 +279,8 @@ def export(source: Any, *destinations: Any, pose: Any = None, part: str | None =
            progress: Callable[[dict], None] | None = None) -> list[Written]:
     """Write a document to each destination, its kind from its suffix (``.xbf``, ``.step``,
     ``.glb``, ``.stl``, ``.3mf``, and ``.dxf`` of a planar document): the document of an
-    ``.xbf``, of a ``.step`` read into one, or of a ``Model`` (built first). Several destinations read the document once. ``part`` is one part or assembly as
+    ``.xbf``, of a ``.step`` read into one, of a document id (the one the engine holds, never
+    built), or of a ``Model`` (built first: this program's own call). Several destinations read the document once. ``part`` is one part or assembly as
     a ref's owner names it (``refs``). ``daemon=False`` does it in this process, cold. A GLB
     carries every configuration sequence the document defines, as a clip."""
     from cadgen.engine.export import ExportRefused, kind_of
@@ -332,9 +323,10 @@ def snapshot(source: Any, out: Any, *, display: Any = None, camera: Any = None, 
              preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
              size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
              measurements: Any = None) -> Drawn:
-    """Draw a document (``.xbf``, ``.step``) or a mesh file (``.glb``, ``.stl``, ``.3mf``) into
-    ``out`` (a ``.png``) as the viewer draws it. A ``Model`` (or ``script.py::model``) is built
-    first: the document drawn is the one its worker holds in memory, whether or not an xbf of it is on disk. ``annotation`` (the viewer's
+    """Draw a document (``.xbf``, ``.step``, or a document id: the one the engine holds) or a mesh
+    file (``.glb``, ``.stl``, ``.3mf``) into ``out`` (a ``.png``) as the viewer draws it. A
+    ``Model`` is built first: the document drawn is the one its worker holds in memory, whether or
+    not an xbf of it is on disk. ``annotation`` (the viewer's
     annotation: its file's path, its object, or the Quick Edit packet that carries it) and
     ``measurements`` are drawn over the model; ``camera="authored"`` draws it from the view the
     annotation's ink was drawn in, which the packet holds. ``out`` a folder (a path ending in a
@@ -353,13 +345,13 @@ def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, 
               width: int | None, height: int | None, size_profile: str | None, daemon: bool, annotation: Any,
               measurements: Any) -> Drawn:
     from cadgen.engine import snapshot as drawing
+    from cadgen.engine.ids import is_id
     from cadgen.engine.model import Model
 
-    if isinstance(source, (Model, Built)) or (not isinstance(source, Path) and (
-            "::" in os.fspath(source) or os.fspath(source).endswith(".py"))):
+    if isinstance(source, (Model, Built)) or is_id(os.fspath(source)):
         if out.suffix.lower() != ".png":
             raise drawing.SnapshotRefused(f"a snapshot is a .png; {out.name} is not one")
-        spec = _source(source, scripts=True)
+        spec = _source(source)
         drawing.options(display, camera, grid, width, height, size_profile)  # refused here, before any build
         drawing.parse_annotation(annotation)  # refused here, before any build
         if isinstance(annotation, (str, Path)) and not str(annotation).lstrip().startswith("{"):
@@ -402,13 +394,27 @@ def snapshot_job(job: Any, source: Any = None, *, display: Any = None, camera: A
             for found in drawing.draw_pictures(pictures, daemon=daemon)]
 
 
-def serve(source: Any, port: int = 0, three: str | None = None) -> Served:
-    """Serve a document (``.xbf``, ``.step``) from the daemon; its page's URL."""
+def _document(source: Any, verb: str, named: str | None = None) -> Path | str:
+    """The document ``serve`` or ``inspect`` reads: a document id as it is, or an on-disk
+    ``.xbf`` or STEP by its canonical path; anything else is no document, refused by name
+    (``ValueError``)."""
     from cadgen.engine.addresses import key
 
     path = key(os.fspath(source))
-    if isinstance(path, Path) and not path.is_file():
-        raise EngineError(f"no document {source}")
+    if isinstance(path, Path):
+        if path.suffix.lower() not in (".xbf", ".step", ".stp"):
+            raise ValueError(f"{named or os.fspath(source)} is no document: {verb} reads an .xbf, a .step or a document id")
+        if not path.is_file():
+            raise ValueError(f"no document {named or source}")
+    return path
+
+
+def serve(source: Any, port: int = 0, three: str | None = None) -> Served:
+    """Serve a document (``.xbf``, ``.step``, or a document id the engine holds) from the daemon;
+    its page's URL, ``/<id>``."""
+    from cadgen.engine.addresses import key
+
+    path = _document(source, "serve")
     if three is None:
         from cadgen.engine.serve import find_three
 
@@ -438,6 +444,7 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
 
     from cadgen.engine.addresses import key, split
 
+    named = os.fspath(source).partition("#")[0]
     source, embedded_ref = split(source)
     if ref is not None and embedded_ref is not None and ref != embedded_ref:
         raise EngineError("source reference and ref disagree")
@@ -447,12 +454,13 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
         raise EngineError("query is closure, geometry or build")
     if (query == "geometry") != (ref is not None):
         raise EngineError("only a geometry query requires a reference")
-    path = key(source)
-    if isinstance(path, Path) and not path.is_file():
-        raise EngineError(f"no document {source}")
+    path = _document(source, "inspect", named)
     if query == "build":
         if not isinstance(path, Path):
-            return {"file": None, "live": _ask({"op": "model_info", "address": str(path)})["model"]}
+            found = _ask({"op": "document", "id": path})["document"]
+            if "path" not in found:
+                return {"file": None, "live": _ask({"op": "model_info", "id": path})["model"]}
+            path = Path(found["path"])
         from cadgen.engine import previous
 
         stat = path.stat()
@@ -469,8 +477,8 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
         return json.loads(found)
     if ref is not None:
         refs.parse(ref)  # refuse invalid refs before serving
-    answer = _ask({"op": "serve", "path": str(path), "build": False})
-    base = answer["url"].split("/?", 1)[0]
+    answer = _ask({"op": "serve", "path": str(path)})
+    base = answer["url"].rsplit("/", 1)[0]
     ident = answer["doc"]
 
     def get(route: str) -> Any:
@@ -658,9 +666,11 @@ def _kind(source: Any) -> str:
 
     if isinstance(source, (Model, Built)):
         return "model"
+    from cadgen.engine.ids import is_id
+
     text = os.fspath(source)
-    if "::" in text or text.endswith(".py"):
-        return "model"
+    if is_id(text):
+        return "model"  # a document by its id
     return _SUFFIXES.get(Path(text).suffix.lower(), "other")
 
 

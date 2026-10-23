@@ -2,15 +2,16 @@
 
 A local-filesystem CAD review app. This directory is the React CLIENT; the
 backend is the installation's engine, hosting the `cadgen.viewer` HTTP app.
-The built client ships inside the same wheel. `cadgen viewer` opens a page session
-on that engine and exits. Each session has its own starting folder; `?file=` names
-an absolute file or resolves a relative path against that folder. There is no
-hosted deployment.
+The built client ships inside the same wheel. `cadgen viewer [FILE ...]` opens the
+engine's one page and exits. The page addresses every document by path, `/<uuid>`: a
+model's id, or a file's id once a launcher (or the page itself) registers it, derived from
+the file's canonical path. `/` is the home: Recents, Open, and the folder of the most recent
+launch. Python scripts are never documents. There is no hosted deployment.
 
 This app is the browser host of `@text-to-cad/ui/file-viewer`, not the owner of
 the shared CAD interface.
 
-**Owns:** URL selection, browser history, document title/appearance, browser
+**Owns:** URL selection (`/<id>`: `src/client/workbench/fileParam.js`), browser history, document title/appearance, browser
 persistence, the file menu's reveal route, and this app's release check.
 `src/App.tsx` composes an explicit `ViewerHost` and hands it to the shared
 `CadViewer` (`@text-to-cad/ui/cad-viewer`), which registers one renderer per file
@@ -66,28 +67,28 @@ and assets, so the app does not scan another package's source.
 ## Launching
 
 Dev serves the client from source with HMR. Build the shared packages from the
-repository root first, then invoke npm from the folder a relative `?file=`
-should resolve against (outside `apps/web`):
+repository root first, then invoke npm from the folder the home should show (outside
+`apps/web`):
 
 ```bash
 cd <a folder of models>
 VIEWER_PYTHON=<checkout>/.venv/bin/python \
   npm --prefix <checkout>/apps/web run dev -- --host 127.0.0.1
-# open http://127.0.0.1:5173/?file=<an absolute path, or one relative to that folder>
+# open http://127.0.0.1:5173/: the home shows that folder; a file opened there is /<its id>
 ```
 
 For the spawned backend, `scripts/directoryRoot.mjs` uses `INIT_CWD`, then the
 process working directory, accepting either only outside `apps/web`. If neither
 qualifies, Vite defaults to the app's parent, `<checkout>/apps`. npm sets
 `INIT_CWD` to the directory where you invoked it, so `--prefix` selects the app
-without changing that folder. It is only where relative links resolve
-(`serverInfo.start`): the backend opens any file by its absolute path.
+without changing that folder. It is only the folder the home shows
+(`serverInfo.start`, the most recent launch's): the backend opens any file by its absolute path.
 
-Dev obtains an API session from the same engine with
-`python -m cadgen.viewer --new --api-only --json`, then proxies `/__cad` with the
-engine token. Vite owns the client and closing it leaves the engine running.
-`VIEWER_PYTHON` names the interpreter with cadgen installed (default `python3`).
-`VIEWER_BACKEND_URL` and `VIEWER_ENGINE_TOKEN` attach to an existing session
+Dev announces itself to the same engine with
+`python -m cadgen.viewer --api-only --json` (a launch: its folder becomes the home's), then
+proxies `/__cad` with the engine token. Vite owns the client and closing it leaves the engine
+running. `VIEWER_PYTHON` names the interpreter with cadgen installed (default `python3`).
+`VIEWER_BACKEND_URL` and `VIEWER_ENGINE_TOKEN` attach to an existing engine
 using its `apiUrl` and `token`. Build shared packages first; Vite needs no web
 production build.
 
@@ -98,11 +99,12 @@ checkout's web build, start from the repository root:
 ```bash
 npm run build:web
 export CADGEN_VIEWER_DIST="$PWD/apps/web/dist"
-cadgen viewer --host 127.0.0.1 --json
+cadgen viewer --host 127.0.0.1 --json [FILE ...]
 ```
 
-The launcher ensures this installation's engine, creates or reuses a page session,
-prints its URL, opens it in the browser, and exits. `--json` prints the launch
+The launcher ensures this installation's engine and its one page, registers each FILE (an
+on-disk CAD file, or a document id the engine holds) by its id, prints its page's URL
+(`/<id>`, a line each; the home's, `/`, with none), opens the first in the browser, and exits. `--json` prints the launch
 record without opening a browser; `--no-open` prints only the URL. There is no
 foreground viewer server and no `--detach` or `viewer stop`. `cadgen stop` stops
 the installation's engine and all its clients; never stop an engine you did not start.
@@ -113,14 +115,14 @@ exits. It has no `--foreground` or standalone server mode.
 The engine binds loopback on an OS-assigned port. `--port N` pins its HTTP port
 and `--host ADDRESS` pins its bind address. If the running engine has a different
 port or address, the launch fails with that conflict; it never replaces a server
-or starts a second engine. A taken port fails. `--new` creates a fresh page session
-on the same engine and port. Otherwise a launch reuses a session with the same
-starting directory and client build. Each session's home and relative links start
-from its own directory; changing one session's navigation does not change another.
-`--dist DIR` (or `CADGEN_VIEWER_DIST`) selects a built client.
+or starts a second engine. A taken port fails. There are no page sessions: every launch
+reuses the one page, and its folder replaces the last launch's as the one the home shows.
+An old page session's link (`/s/...`) and a document named by query (`/?doc=`, `/?file=`)
+are answered with the home. `--dist DIR` (or `CADGEN_VIEWER_DIST`) selects a built client.
 
-The JSON record includes `url`, `apiUrl`, `token`, `port`, `pid`, `session` and
-`action` (`started` or `reused`, referring to the page session). The URL is usable
+The JSON record includes `url`, `apiUrl`, `token`, `port`, `pid`, `start` (the folder the home
+shows), `documents` (`{id, file, url}` for each FILE) and `action` (`started` or `reused`,
+referring to the page). The URL is usable
 as soon as it is printed. Its token is exchanged for an HttpOnly, SameSite cookie
 and removed from the address bar. Programmatic clients send the token as a Bearer
 header. Every route, including documents, requires it. The loopback Host check,
@@ -330,8 +332,18 @@ the menu the navbar's C logo opens leads back to it. The home has the same navba
 menu (without Back to files) at the left and the update button at the right while a newer
 text-to-cad is out; under its wordmark are GitHub, Discord and X. The home is a step of
 the browser's history, as a file is: the browser's Back and Forward walk between them (the
-navbar draws no arrows of its own here). A `?file=` that names nothing there shows "File does not exist",
-with Go home.
+navbar draws no arrows of its own here). Under Recents the home lists the folder of the most
+recent launch (`serverInfo.start`, read again each time the home is shown): its subfolders and CAD
+files, a file opening by its id. A `/<id>` the server knows no file for, and no model the engine
+holds, shows "This model is no longer held" with the engine's words -- the command that builds it
+again, `python <the program that built it>` -- and Go home; a file that is not there shows "File
+does not exist".
+
+A file is opened by its path (Select File, the home) and shown by its id: the page asks the
+catalog for the file (`GET /__cad/catalog?file=<abs>`), whose row carries the document's `id`,
+and moves to `/<id>`. Rows join by that id (`client.entryOf`), so a symlinked or case-variant
+spelling of one file is one row. A model (a document with no file of its own) has no Select File
+and no file menu; a file's Select File lists that file's folder.
 
 The home reads the library over `GET /__cad/recents`, pins, unpins and removes over
 `POST /__cad/recents`, and draws each card's picture from `GET /__cad/thumbnail`. The
@@ -414,10 +426,11 @@ this is not the remote phone's clipboard when accessing a shared server. Failure
 use the viewer's error presentation; successful actions are silent. A host with a
 composer has no camera action: its note to the agent is Quick Edit.
 
-## Live model addresses
+## Live models
 
-The catalog and open/show actions accept `script.py::name` as well as file paths. Python scripts open to a declaration list read without
-execution; selecting a model explicitly builds it. The shared viewer's In memory
-collection reads the installation engine's live metadata. It never enters saved
-recents or thumbnail storage, and disappears on worker retirement or engine restart.
-Rebuilding a named model updates the same view through the document version stream.
+A model's page is `/<id>`, its document's id, which `python SCRIPT.py` prints (`view:`). The
+page reads the document the engine holds, by id (`GET /__cad/catalog?id=`); it never builds or
+imports a script, and no folder lists one. A model has no file of its own: no Select File, no
+file menu, and it never enters saved recents or thumbnail storage. Once its worker retires or
+the engine restarts, its page says it is no longer held and names the command that builds it
+again. Rebuilding the model updates the same view through the document version stream.
