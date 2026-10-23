@@ -611,6 +611,13 @@ class CodeTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 cli.main(["build", "--stl"])
         self.assertEqual(list(json.loads(out.getvalue().splitlines()[0])["files"]), [str(self.folder / "plug.stl")])
+        # A --no-daemon build is held by no engine: no address or view to open is printed.
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(["build", self.CODE.format(height=5), "--name", "plug", "--stl", "--no-daemon"]), 0)
+        self.assertIn("plug.stl", out.getvalue())
+        self.assertNotIn("model: code::plug", out.getvalue())
+        self.assertNotIn("view:", out.getvalue())
         self.assertIn("assigns no `result`", err.getvalue())
         self.assertIn("the following arguments are required: SOURCE", err.getvalue())
 

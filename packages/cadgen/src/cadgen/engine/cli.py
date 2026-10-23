@@ -252,10 +252,11 @@ def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as
                 from cadgen.engine.profiling import describe
 
                 print(describe(report["profile"]))
-            if report.get("address"):
+            if report.get("address") and report.get("url"):
+                # Only a build the engine holds has an address to open: a --no-daemon
+                # build's document went with its process.
                 print(f"  model: {report['address']}")
-                if report.get("url"):
-                    print(f"  view: {report['url']}")
+                print(f"  view: {report['url']}")
         if not report.get("ok"):
             failed = True
             print(report.get("error", ""), file=sys.stderr)
