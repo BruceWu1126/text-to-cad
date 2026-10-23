@@ -495,6 +495,30 @@ def motion(assembly: Any, name: str, waypoints_or_fn: Any = None, *, sweep: Any 
     return mechanism.motion(assembly, name, waypoints_or_fn, sweep=sweep, duration=duration, ease=ease, **removed)
 
 
+def animation(assembly: Any, name: str, *, duration: Any) -> Any:
+    """Name an animation of an assembly: a GLB's own choreography, ``duration`` seconds long,
+    returned as a builder of glTF channels; its calls chain::
+
+        show = animation(car, "showcase", duration=6)
+        show.channel("lid", path="translation", keys=[(0, (0, 0, 0)), (1, (0, 0, 40))])
+        show.rotation("wheel*", axis=(0, 1, 0), turns=3, start=1, interpolation="LINEAR")
+        show.translation("door", by=(0, 300, 0), start=2, end=4)
+        show.explode("body/*", radial=True, distance=40, end=2)       # helpers, compiled to channels
+        show.hide("roof", at=3)                                       # a STEP scale channel to 0
+        show.pose(at={0: "shut", 5: {"doors": 1}})                    # the mechanism, by its FK
+
+    ``.channel(parts, path=, keys=, interpolation=)`` is glTF's channel (``path``
+    ``translation``, ``rotation`` or ``scale``; ``interpolation`` ``CUBICSPLINE``, ``LINEAR`` or
+    ``STEP``); ``.translation``, ``.rotation`` and ``.scale`` are channels from a start to an end.
+    Parts are named as a ref's owner names them (a label, ``hand/finger.2``), or by a glob
+    (``wheel*``). A motion is the mechanism's and the document keeps it; an animation is the GLB's:
+    never written into the xbf, baked into every GLB the model declares when that GLB is written.
+    Returns the builder."""
+    from cadgen.engine.animations import animation as build
+
+    return build(assembly, name, duration=duration)
+
+
 def _read_step(path: Any) -> Any:
     from cadgen.engine.document import read_step_shape
 
