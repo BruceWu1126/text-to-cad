@@ -49,6 +49,23 @@ class RootExports(unittest.TestCase):
             with self.subTest(verb=verb):
                 self.assertIs(getattr(cadgen, verb), getattr(api, verb))
 
+    def test_snapshot_is_one_verb_of_two_input_shapes(self):
+        """One picture (``source``, ``out``) or every picture a job names (``job``, ``source`` in place of its
+        input); no ``snapshot_job``, and any other call refused as Python refuses one."""
+        import inspect
+
+        from cadgen.engine import api
+
+        parameters = inspect.signature(cadgen.snapshot).parameters
+        self.assertEqual(list(parameters)[:3], ["source", "out", "job"])
+        self.assertEqual(parameters["job"].kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertFalse(hasattr(api, "snapshot_job"))
+        self.assertNotIn("snapshot_job", api.__all__)
+        for call in (lambda: cadgen.snapshot(), lambda: cadgen.snapshot("a.xbf"),
+                     lambda: cadgen.snapshot("a.xbf", "a.png", job={"jobs": []})):
+            with self.subTest(call=call), self.assertRaises(TypeError):
+                call()
+
     def test_each_namespace_is_exactly_its_declared_names(self):
         import importlib
 

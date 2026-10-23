@@ -246,7 +246,7 @@ class Operations(Jobs):
                 if output is not None:
                     raise JobError("A packet declares its outputs; omit output")
                 packet = packet_paths(packet, args.get("source"))
-                result = {"pictures": serial(api.snapshot_job(packet, **args))}
+                result = {"pictures": serial(api.snapshot(job=packet, **args))}
             else:
                 if output is None or "source" not in args:
                     raise JobError("Snapshot requires source and output, or a packet")

@@ -629,7 +629,7 @@ separator -- and the picture is then `<SRC's stem>_<UTC time>.png` in it (a mode
 
 **A job.** `--job PACKET` replays a whole Quick Edit packet -- or a job file in its words: a job, a list
 of jobs, or `{"input", "jobs": [...], "annotation", "measurements"}` -- in one call
-(`snapshot.job_pictures`, `api.snapshot_job`), on the machinery above: each job is a view, drawn with
+(`snapshot.job_pictures`, `api.snapshot(job=)`), on the machinery above: each job is a view, drawn with
 its own `camera` (an output's own `camera` over it), its `display` (its `hidden` and `isolated` parts
 among it; the packet's top-level copies are `--annotation`'s), its pose (`jointValues`, as `--pose`
 takes it), `preview`, and -- a robot's -- the visuals its `selection.hide` names by the viewer's ids
@@ -849,7 +849,7 @@ the patch (`{"op": "patched"}` on its pipe) before it writes a derived file.
 **Functions** (`api`, also `cadgen.export`, `cadgen.snapshot` and `cadgen.inspect`; `serve`,
 `status`, `stop` and `daemon` only the CLI calls): one per command, each through the daemon. No function builds source text
 or a shape made elsewhere: a shape is built by wrapping it in a decorated function (law 12).
-`export(source, *destinations, pose=, part=, inputs=)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`; `where(doc)` the build
+`export(source, *destinations, pose=, part=, inputs=)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`, and `snapshot(job=PACKET, ...)` (with `source` in place of the packet's input, as `--job PACKET SRC`) a list of them, one verb with two input shapes, anything else refused as Python refuses a call; `where(doc)` the build
 closure an xbf holds, `where(doc, ref)` an element's facts. A `Model` builds, exports and draws
 itself the same way (`.build(verify=, profile=, daemon=)`, a `Report`: it and its children, as declared;
 `.export()`, `.snapshot()`), and `.document` is its xbf as last built, read-only

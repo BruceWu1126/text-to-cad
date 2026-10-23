@@ -3,7 +3,7 @@
     export(source, *destinations, pose=None, part=None) -> list[Written]
     snapshot(source, out, *, display=None, camera=None, grid=False, preview=False, pose=None,
              width=None, height=None, annotation=None, measurements=None) -> Drawn
-    snapshot_job(job, source=None, *, the snapshot's flags) -> list[Drawn]
+    snapshot(source=None, *, job, the same flags) -> list[Drawn]
     serve(source, port=0) -> Served
     inspect(source, ref=None) -> Facts (the build closure without a ref)
     status() / stop() / daemon()
@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, TypeVar, cast
 
 __all__ = ["Built", "Drawn", "EngineError", "Facts", "Report", "Served", "Written", "daemon", "export",
-           "observers", "serve", "snapshot", "snapshot_job", "status", "stop", "inspect"]
+           "observers", "serve", "snapshot", "status", "stop", "inspect"]
 
 class EngineError(RuntimeError):
     """A request the engine refused or could not run: its words."""
@@ -316,19 +316,35 @@ def _exported(order: dict[str, Any], spec: dict[str, Any], shown: Callable[[str]
     return done
 
 
-def snapshot(source: Any, out: Any, *, display: Any = None, camera: Any = None, grid: bool = False,
-             preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
-             size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
-             measurements: Any = None) -> Drawn:
+def snapshot(source: Any = None, out: Any = None, *, job: Any = None, display: Any = None, camera: Any = None,
+             grid: bool = False, preview: bool = False, pose: Any = None, width: int | None = None,
+             height: int | None = None, size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
+             measurements: Any = None) -> Drawn | list[Drawn]:
     """Draw a document (``.xbf``, ``.step``) or a mesh file (``.glb``, ``.stl``, ``.3mf``) into
-    ``out`` (a ``.png``) as the viewer draws it. A ``Model`` (or ``script.py::model``) is built
+    ``out`` (a ``.png``) as the viewer draws it: one picture, a ``Drawn``. A ``Model`` (or ``script.py::model``) is built
     first: the document drawn is the one its worker holds in memory, whether or not an xbf of it is on disk. ``annotation`` (the viewer's
     annotation: its file's path, its object, or the Quick Edit packet that carries it) and
     ``measurements`` are drawn over the model; ``camera="authored"`` draws it from the view the
     annotation's ink was drawn in, which the packet holds. ``out`` a folder (a path ending in a
     separator, or one that is there) is given a name inside it, the source's stem and the time
     (``snapshot.picture_path``). A snapshot refused or failed leaves the file at ``out`` as it
-    was (``snapshot.write_png``)."""
+    was (``snapshot.write_png``).
+
+    ``job`` in place of ``out`` is every picture a job names (``cadgen snapshot --job``), a list of
+    ``Drawn``: a Quick Edit packet (the ``.snapshot.json`` the viewer writes, its path or its
+    object), a job or a list of jobs, each job a view drawn as it was -- its camera, display, hidden
+    and isolated parts, pose, the packet's ink and dimensions -- at its output settings, into each
+    of its outputs (``snapshot.job_pictures``). ``source`` is then drawn in place of every job's
+    input; a flag given overrides every job. Every request is checked before anything renders, and
+    a picture that fails writes none of the job's, leaving every output as it was."""
+    if job is not None:
+        if out is not None:
+            raise TypeError("snapshot() takes out or job, not both: a job's outputs name its pictures")
+        return _job(job, source, display=display, camera=camera, grid=grid, preview=preview, pose=pose, width=width,
+                    height=height, size_profile=size_profile, daemon=daemon, annotation=annotation,
+                    measurements=measurements)
+    if source is None or out is None:
+        raise TypeError(f"snapshot() missing required argument: {'source' if source is None else 'out'!r}")
     from cadgen.engine import snapshot as drawing
 
     out = drawing.picture_path(out, source)
@@ -369,17 +385,10 @@ def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, 
     return Drawn(out, found["width"], found["height"], found)
 
 
-def snapshot_job(job: Any, source: Any = None, *, display: Any = None, camera: Any = None, grid: bool = False,
-                 preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
-                 size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
-                 measurements: Any = None) -> list[Drawn]:
-    """Every picture a job names (``cadgen snapshot --job``): a Quick Edit packet (the
-    ``.snapshot.json`` the viewer writes, its path or its object), a job or a list of jobs, each
-    job a view drawn as it was -- its camera, display, hidden and isolated parts, pose, the
-    packet's ink and dimensions -- at its output settings, into each of its outputs
-    (``snapshot.job_pictures``). ``source`` is drawn in place of every job's input; a flag given
-    overrides every job. Every request is checked before anything renders, and a picture that
-    fails writes none of the job's, leaving every output as it was."""
+def _job(job: Any, source: Any, *, display: Any, camera: Any, grid: bool, preview: bool, pose: Any,
+         width: int | None, height: int | None, size_profile: str | None, daemon: bool, annotation: Any,
+         measurements: Any) -> list[Drawn]:
+    """``snapshot(job=...)``: every picture the job names (see ``snapshot``)."""
     from cadgen.engine import snapshot as drawing
 
     _heard("source", os.fspath(source) if source is not None else drawing.job_input(job))
@@ -626,7 +635,7 @@ def _facts(verb: str, args: tuple, kwargs: dict[str, Any], heard: dict[str, Any]
         "models": [_model(report) for report in reports], "worker": worker,
         "error": _error(error, reports, worker)}
     if verb in ("export", "snapshot"):
-        # A job's is the file it draws, which it says as it starts (``snapshot_job``).
+        # A job's is the file it draws, which it says as it starts (``snapshot(job=)``).
         source = heard.get("source") or (args[0] if args else kwargs.get("source"))
         found["source"] = _kind(source)
         found["pose"] = kwargs.get("pose") is not None
@@ -711,4 +720,3 @@ def _read(text: str) -> dict[str, Any]:
 build_script = _observed("build", build_script)
 export = _observed("export", export)
 snapshot = _observed("snapshot", snapshot)
-snapshot_job = _observed("snapshot", snapshot_job)

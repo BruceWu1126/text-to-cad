@@ -231,6 +231,7 @@ same names but the three verbs. Everything else an 0.8 preview had there moved o
 | `from cadgen import animation` (or `cadgen.engine`) | `from cadgen.gltf import animation` |
 | `select(source, ref, kind=None)` | none in a model or a check. `cadgen inspect DOC REF` (`cadgen.inspect(DOC, REF)`) answers what a ref names and which code made it; a check walks `read_xbf`'s tree by labels; a body picks an element with build123d's selectors ([a picked element](inspection-and-validation.md#a-picked-element-in-a-models-body)) |
 | `report(detail)`, `track(items, label=)` | none: delete the calls. While a body runs the bar and the viewer's build card name each `@memo` call and child model it calls, as it begins, and count it when it ends |
+| `cadgen.engine.api.snapshot_job(packet, source)` | `cadgen.snapshot(source, job=packet)`: one verb, a picture from `source` and `out` or every picture a job names |
 | `cadgen.serve(doc)`, `cadgen.status()`, `cadgen.stop()`, `cadgen.daemon()` | the commands `cadgen serve DOC`, `cadgen status`, `cadgen stop`, `cadgen daemon`: process control is the CLI's alone |
 | `cadgen.srgb("#2E3742")`, `srgb("#38414D", 0.42)`, `srgb_to_linear`, `linear_to_srgb`, `cadgen.color` | the hex itself: `"#2E3742"`, `"#38414D6B"` (alpha as a byte), or 0-255 integers; `shape.color`, `paint` and `Material` take it and the engine stores it linear |
 | `Material(color=(0.2, 0.3, 0.9))`, `transmission_color=`, `emissive=`: linear floats | a hex string or 0-255 integers, sRGB; floats are refused |

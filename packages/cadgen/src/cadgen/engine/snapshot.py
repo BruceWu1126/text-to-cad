@@ -1122,7 +1122,7 @@ def _run_model(args: argparse.Namespace, prog: str) -> int:
 
 
 def _run_job(args: argparse.Namespace, prog: str) -> int:
-    """``cadgen snapshot --job PACKET [SRC]``: every picture the job names (``api.snapshot_job``),
+    """``cadgen snapshot --job PACKET [SRC]``: every picture the job names (``api.snapshot(job=)``),
     a line each; with ``--json``, ``{"ok": true, "pictures": [what each drew]}``."""
     from cadgen.engine import api
     from cadgen.engine.cli import Failed, _shown
@@ -1131,7 +1131,7 @@ def _run_job(args: argparse.Namespace, prog: str) -> int:
         raise Failed(f"--job writes the pictures its outputs name, so it takes no OUT ({args.out})", 2)
     started = time.perf_counter()
     try:
-        drawn = api.snapshot_job(args.job, args.document, display=args.display, camera=args.camera, grid=args.grid,
+        drawn = api.snapshot(args.document, job=args.job, display=args.display, camera=args.camera, grid=args.grid,
                                  preview=args.preview, pose=args.pose, width=args.width, height=args.height,
                                  size_profile=args.size_profile, annotation=args.annotation,
                                  measurements=args.measurements)
