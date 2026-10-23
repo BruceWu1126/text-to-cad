@@ -143,7 +143,7 @@ def _object(properties: dict[str, Any] | None = None, required: list[str] | None
     return schema
 
 
-_PATH = {"type": "string", "description": "A CAD file or script path, script.py::MODEL, or code::NAME."}
+_PATH = {"type": "string", "description": "A CAD file or script path, or script.py::MODEL."}
 _VIEW = {"type": "string", "description": "A view id from cad_view; defaults to the most recently used viewer."}
 # What a view watches: its model's catalog entry.
 _WATCH = _object({"file": {"type": ["string", "null"]}})
@@ -529,7 +529,7 @@ class Server:
 
         address = parse(value)
         if address is not None:
-            if address.script is not None and not address.script.is_file():
+            if not address.script.is_file():
                 raise ToolFailed(f"No script at {address.script}.", "no_file")
             return str(address)
         path = local_path(value)
