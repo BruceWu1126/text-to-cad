@@ -53,7 +53,7 @@ PLATFORM = context.platform()  # a row a platform draws apart has a golden of it
 # plate's back edge, to pose.
 BENCH = """
 import build123d as bd
-from cadgen.engine import Material, configuration, materials, paint, xbf
+from cadgen.engine import Material, materials, mechanism_state, paint, xbf
 
 LACQUER = Material("Red lacquer", 1200, family="other", color=(0.6, 0.02, 0.02), roughness=0.4, coat=1.0,
                    coat_roughness=0.05)
@@ -78,7 +78,7 @@ def bench():
     bd.RigidJoint("foot", pane, joint_location=bd.Location((0, 0, 0), (0, 90, 0)))
     plate.joints["hinge"].connect_to(pane.joints["foot"], angle=0)
     root = bd.Compound(children=[block, plate, print_, pane, left, right], label="bench")
-    return configuration(root, "open", hinge=60)
+    return mechanism_state(root, "open", hinge=60)
 """
 
 # Ink on the plate (instance 1, in its own frame: its top face is z 2) and a dimension along its front.

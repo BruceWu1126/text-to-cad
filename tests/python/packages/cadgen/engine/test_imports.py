@@ -22,7 +22,7 @@ from cadgen.engine import document
 
 KIT = """
 import build123d as bd
-from cadgen.engine import configuration, materials, paint, step, xbf
+from cadgen.engine import materials, mechanism_state, paint, step, xbf
 
 
 @xbf("XBF/kit.xbf")
@@ -45,7 +45,7 @@ def hinge():
     bd.RevoluteJoint("elbow", base, axis=bd.Axis((40, 0, 20), (0, 1, 0)), angular_range=(-10, 120))
     bd.RigidJoint("mount", arm)
     base.joints["elbow"].connect_to(arm.joints["mount"], angle=30)
-    return configuration(bd.Compound(children=[base, arm], label="hinge"), "raised", elbow=90)
+    return mechanism_state(bd.Compound(children=[base, arm], label="hinge"), "raised", elbow=90)
 """
 
 USE = """

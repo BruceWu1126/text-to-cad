@@ -34,7 +34,7 @@ OCCURRENCE ORDER IS FROZEN — top to bottom below.
 
 from __future__ import annotations
 
-from cadgen.engine import configuration, motion, xbf
+from cadgen.engine import configuration_sequence, mechanism_state, xbf
 
 import build123d as bd
 
@@ -198,11 +198,11 @@ def motorbike():
     # The old typed mates' poses, by the joints that carry them now (steering is
     # head_tube_axis, engine_swing engine_pivot, center_stand_pivot stand_bracket;
     # same axes, same senses). "ride" set nothing: it is the bike as built.
-    configuration(bike, "stand_down", stand_bracket=-76.2)
-    configuration(bike, "turned_left", head_tube_axis=32.0)
-    configuration(bike, "bump", engine_pivot=12.0)
+    mechanism_state(bike, "stand_down", stand_bracket=-76.2)
+    mechanism_state(bike, "turned_left", head_tube_axis=32.0)
+    mechanism_state(bike, "bump", engine_pivot=12.0)
     # The bars swung from 20 degrees right to 20 left and back, 2 s each way.
-    return motion(bike, "steer", [(0, {"head_tube_axis": -20}), (2, {"head_tube_axis": 20}),
+    return configuration_sequence(bike, "steer", [(0, {"head_tube_axis": -20}), (2, {"head_tube_axis": 20}),
                                   (4, {"head_tube_axis": -20})])
 
 

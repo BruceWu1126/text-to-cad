@@ -31,7 +31,7 @@ from tests.python.support import opengl
 
 HINGE = """
 import build123d as bd
-from cadgen.engine import configuration, step, xbf
+from cadgen.engine import mechanism_state, step, xbf
 
 
 @xbf("XBF/hinge.xbf")
@@ -46,15 +46,15 @@ def hinge():
     {connect}
     root = bd.Compound(children=[base, arm], label="hinge")
     {after}
-    configuration(root, "raised", elbow=90)
-    configuration(root, "flat", {flat})
+    mechanism_state(root, "raised", elbow=90)
+    mechanism_state(root, "flat", {flat})
     return root
 """
 CONNECT = 'base.joints["elbow"].connect_to(arm.joints["mount"], angle=30)'
 
 CHAIN = """
 import build123d as bd
-from cadgen.engine import configuration, xbf
+from cadgen.engine import mechanism_state, xbf
 
 
 @xbf("XBF/lift.xbf")
@@ -77,7 +77,7 @@ def lift():
     bd.RigidJoint("hub", arm, bd.Location())
     clamp.joints["wrist"].connect_to(arm.joints["hub"], angle=0)
     root = bd.Compound(children=[base, carriage, clamp, arm], label="lift")
-    configuration(root, "top", lift=90, wrist=45)
+    mechanism_state(root, "top", lift=90, wrist=45)
     return root
 """
 
@@ -594,13 +594,13 @@ class ChainTest(_Folder):
         np.testing.assert_allclose(top[1][:3, 3], [0, 0, 95], atol=1e-9)  # at lift 90 on the axis through z = 5
 
 
-# Every kind of pair, coupler and motion segment on one plate: a pinion geared to a wheel and
-# driving a rack, a lead screw whose turn drives its own travel and a slide, a free ball.
+# Every kind of pair, coupler and sequence segment on one plate: a pinion geared to a wheel, a
+# crank driving a rack and a slide, a lead screw whose turn drives its own travel, a free ball.
 BENCH = """
 import math
 
 import build123d as bd
-from cadgen.engine import configuration, couple, motion, xbf
+from cadgen.engine import configuration_sequence, gear_pair, mechanism_state, rack_and_pinion_pair, screw_pair, xbf
 
 
 @xbf("XBF/bench.xbf")
@@ -614,7 +614,8 @@ def bench():
         joint.connect_to(part.joints[joint.label], **connect)
         parts.append(part)
 
-    for name, at, limits in (("pinion", (0, 0, 0), (-360, 360)), ("wheel", (60, 0, 0), (-720, 720))):
+    for name, at, limits in (("pinion", (0, 0, 0), (-360, 360)), ("wheel", (60, 0, 0), (-720, 720)),
+                             ("crank", (120, 40, 0), (-360, 360))):
         wheel = bd.Pos(*at) * bd.Cylinder(20, 8, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
         wheel.label = name
         mount(bd.RevoluteJoint(name, plate, axis=bd.Axis(at, (0, 0, 1)), angular_range=limits), wheel, at, (0, 0, 1),
@@ -632,12 +633,13 @@ def bench():
     mount(bd.BallJoint("ball", plate, bd.Location((0, -60, 10)), angular_range=((-30, 30), (-30, 30), (-30, 30))),
           ball, (0, -60, 10), (0, 0, 1), angles=(0, 0, 0))
     bench = bd.Compound(children=parts, label="bench")
-    couple(bench, "drive", pinion=1, wheel=-0.5, rack=0.1)
-    couple(bench, "feed", screw=(36, 1), slide=2)
-    configuration(bench, "home", drive=10, ball=(5, 0, 0))
-    motion(bench, "run", [(0, "home"), (1, {"drive": 100}), (2, {"drive": -100, "feed": 5})], ease="linear")
-    motion(bench, "ease", sweep={"feed": (0, 10)}, duration=1)
-    return motion(bench, "wobble", lambda t: {"ball": (20 * math.sin(math.pi * t), 0, 0)}, duration=2)
+    gear_pair(bench, "drive", pinion=1, wheel=-0.5)
+    rack_and_pinion_pair(bench, "traverse", crank=1, rack=0.1, slide=0.2)
+    screw_pair(bench, "feed", screw=10)
+    mechanism_state(bench, "home", drive=10, ball=(5, 0, 0))
+    configuration_sequence(bench, "run", [(0, "home"), (1, {"drive": 100}), (2, {"drive": -100, "feed": 180})], ease="linear")
+    configuration_sequence(bench, "ease", sweep={"feed": (0, 360)}, duration=1)
+    return configuration_sequence(bench, "wobble", lambda t: {"ball": (20 * math.sin(math.pi * t), 0, 0)}, duration=2)
 """
 # AP242's names, as Part 21 writes them (edition 4's domain model's where Part 21 has none):
 # the entities the subtree may hold, each attribute it may set, and the enumerations' values.
@@ -671,7 +673,7 @@ class ConformanceTest(_Folder):
         self.assertNotIn("kinematics", report, "no warning")
         loaded = document.Loaded(self.folder / "XBF/bench.xbf")
         found = loaded.mechanism
-        self.assertEqual(sorted(found.couplings), ["drive", "feed"])
+        self.assertEqual(sorted(found.couplings), ["drive", "feed", "traverse"])
         self.assertEqual(sorted(found.motions), ["ease", "run", "wobble"])
         root = next(label for label in mechanism._children_of(loaded.doc.Main())
                     if label.IsAttribute(Standard_GUID(mechanism.GUID)))
@@ -723,9 +725,87 @@ class ConformanceTest(_Folder):
         self.assertLessEqual({"REVOLUTE_PAIR_WITH_RANGE", "PRISMATIC_PAIR_WITH_RANGE", "CYLINDRICAL_PAIR_WITH_RANGE",
                               "SPHERICAL_PAIR_WITH_RANGE", "SCREW_PAIR", "KinematicPairWithMotionCoupling",
                               "INTERPOLATED_CONFIGURATION_SEGMENT"}, entities)
-        self.assertEqual(kinds - {None}, {"gear_pair", "rack_and_pinion_pair", "two_joint_coupler"})
+        self.assertEqual(kinds - {None}, {"gear_pair", "rack_and_pinion_pair"})
         self.assertEqual(interpolations - {None}, {"discontinuous_interpolation_type",
                                                    "synchronous_interpolation_type", "linear_interpolation_type"})
+
+
+# Every authoring name the mechanism has, on boxes only (no curved face, so no tessellation a
+# platform's maths could move): a gear pair, a rack and pinion, a screw, a mechanism state and two
+# configuration sequences (waypoints naming the state, and a sweep).
+NAMED = """
+import build123d as bd
+from cadgen.engine import configuration_sequence, gear_pair, mechanism_state, rack_and_pinion_pair, screw_pair, xbf
+
+PARTS = (("wheel_a", 20, "revolute"), ("wheel_b", 60, "revolute"), ("pinion", 100, "revolute"),
+         ("rack", 140, "linear"), ("nut", 180, "cylindrical"))
+
+
+@xbf("XBF/mechanism.xbf")
+def mechanism():
+    base = bd.Box(200, 40, 10, align=(bd.Align.MIN, bd.Align.MIN, bd.Align.MAX))
+    base.label = "base"
+    parts = []
+    for name, x, kind in PARTS:
+        part = bd.Pos(x, 20, 0) * bd.Box(16, 16, 8, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+        part.label = name
+        axis = bd.Axis((x, 20, 0), (1, 0, 0) if kind == "linear" else (0, 0, 1))
+        if kind == "revolute":
+            bd.RevoluteJoint(name, base, axis=axis, angular_range=(-360, 360))
+        elif kind == "linear":
+            bd.LinearJoint(name, base, axis=axis, linear_range=(-40, 40))
+        else:
+            bd.CylindricalJoint(name, base, axis=axis, angular_range=(-720, 720), linear_range=(-20, 20))
+        bd.RigidJoint(name, part, bd.Plane(origin=axis.position, z_dir=axis.direction).location)
+        at = {"angle": 0} if kind == "revolute" else {"position": 0} if kind == "linear" else {"angle": 0, "position": 0}
+        base.joints[name].connect_to(part.joints[name], **at)
+        parts.append(part)
+    assembly = bd.Compound(children=[base, *parts], label="mechanism")
+    gear_pair(assembly, "mesh", wheel_a=1.0, wheel_b=-2.0)
+    rack_and_pinion_pair(assembly, "slide", pinion=1.0, rack=0.25)
+    screw_pair(assembly, "lead", nut=22.5)
+    mechanism_state(assembly, "quarter", mesh=90, slide=40, lead=180)
+    configuration_sequence(assembly, "cycle", [(0, "quarter"), (1, {"mesh": 0, "slide": -40}), (2, "quarter")])
+    return configuration_sequence(assembly, "spin", sweep={"lead": (0, 300)}, duration=2, ease="linear")
+"""
+# NAMED's document as cadgen 0.8.0 wrote it when its functions were ``couple``, ``configuration``
+# and ``motion`` (the same source with those three names), before the AP242 names replaced them.
+NAMED_GOLDEN = Path(__file__).resolve().parent / "kinematics_golden" / "mechanism.xbf"
+_RECORD = b'{"schema":"cadgen.engine closure/1",'
+
+
+def _cut_record(data: bytes) -> tuple[bytes, int, bytes]:
+    """An xbf as the bytes before its provenance record (the closure: the engine's and the
+    source's digests and symbol names, which any edit to either changes), the record's length,
+    and the bytes after it and its padding."""
+    at = data.index(_RECORD)
+    end = data.index(b"\x00", at)
+    length = json.JSONDecoder().raw_decode(data[at:end].decode("ascii"))[1]
+    return data[:at], length, data[at + length:].lstrip(b"\x00")
+
+
+class AuthoringNamesTest(_Folder):
+    def test_the_document_is_the_one_the_old_names_wrote_but_for_its_provenance(self) -> None:
+        # The functions' names are no part of the document: renamed, every byte but the
+        # provenance record's (and the length and the two section offsets its size moves) is
+        # what the old names wrote.
+        self.build("mechanism", NAMED)
+        new_head, new_length, new_body = _cut_record((self.folder / "XBF/mechanism.xbf").read_bytes())
+        old_head, old_length, old_body = _cut_record(NAMED_GOLDEN.read_bytes())
+        self.assertEqual(new_body, old_body)
+        self.assertEqual(len(new_head), len(old_head))
+        # The header's words end where the record starts (its length is the last of them).
+        moved = sorted({len(new_head) - 4 * -(-(len(new_head) - at) // 4)
+                        for at, (a, b) in enumerate(zip(old_head, new_head)) if a != b})
+        self.assertEqual(moved[-1], len(new_head) - 4)  # the record's padded length, just before it
+
+        def word(head: bytes, at: int) -> int:
+            return int.from_bytes(head[at:at + 4], "little")
+
+        delta = word(new_head, len(new_head) - 4) - word(old_head, len(old_head) - 4)
+        self.assertNotEqual(new_length, old_length)  # the names are in the record, so it moved
+        for at in moved[:-1]:  # a section's offset, past the record
+            self.assertEqual(word(new_head, at) - word(old_head, at), delta, f"the header's word at {at}")
 
 
 if __name__ == "__main__":

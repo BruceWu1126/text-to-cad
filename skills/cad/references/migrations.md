@@ -86,8 +86,8 @@ The document is what the viewer follows build by build, what refs and
 | `CADGEN_CACHE_DIR`, `CADGEN_STORE_MAX`, `CADGEN_DAEMON_STATE_DIR` | none; `CADGEN_ENGINE_DIR` moves the engine daemon's socket |
 | `read_scene(path).resolve(ref).shape()` | `select(path, ref)[0]` |
 | `cadgen.revolute`, `slider`, `cylindrical`, `fastened`, `MateTarget`, `AssemblyHelper` | build123d joints in the body |
-| `cadgen.couple(name, {dof: ratio}, limits=...)` | `couple(assembly, name, **ratios)`, two or more joints, ranged by their limits |
-| `cadgen.clip(update, duration=...)` | `motion(assembly, name, ...)` |
+| `cadgen.couple(name, {dof: ratio}, limits=...)` | `gear_pair`, `rack_and_pinion_pair` or `screw_pair(assembly, name, **ratios)`, by the joints' kinds, ranged by their limits |
+| `cadgen.clip(update, duration=...)` | `configuration_sequence(assembly, name, ...)` |
 | `from cadgen import report, track` | `from cadgen.engine import report, track` |
 | `<name>.step.json` sidecars, `.params.js` | none: the document carries the mechanism; delete them |
 | `cadgen build SOURCE` (`--model`, `--name`, file flags), `cad_build`, an 0.8 preview's | none: no command or tool builds source text. Write the code as a decorated function in a `.py` file and run it (`python parts/x.py`); a bare `@model` keeps its document in memory, a file decorator writes its file |
@@ -133,7 +133,7 @@ def arm():
     bd.RigidJoint("elbow", forearm, bd.Plane(origin=ELBOW.position, z_dir=ELBOW.direction).location)
     upper_arm.joints["elbow"].connect_to(forearm.joints["elbow"], angle=0)
     assembly = bd.Compound(children=[upper_arm, forearm], label="arm")
-    return configuration(assembly, "bent", elbow=60)
+    return mechanism_state(assembly, "bent", elbow=60)
 ```
 
 - `revolute` is a `RevoluteJoint` on the parent's part with its rigid partner on the
@@ -141,13 +141,15 @@ def arm():
   `CylindricalJoint` (`(angle, distance)` where `.turn` and `.travel` were two DOFs),
   and `fastened` two connected `RigidJoint`s. Targets were labels (`"#forearm"`); a
   joint is attached to the part itself.
-- A rest value of 0 was the artifact as written; now the as-built configuration is the
+- A rest value of 0 was the artifact as written; now the as-built state is the
   value each joint is connected at, so connecting at 0, with both frames on the axis,
   keeps the parts where they were built.
-- `poses` become `configuration(assembly, name, **values)`, and a pose is drawn or
+- `poses` become `mechanism_state(assembly, name, **values)`, and a pose is drawn or
   written with `--pose` ([kinematics](kinematics.md)).
 - A coupling is a constraint among two or more joints, its range their limits
-  (`limits=` is gone: give the joints the limits instead). A coupling of one joint is
+  (`limits=` is gone: give the joints the limits instead), made by the function named after
+  the pair its joints make: `gear_pair` (revolute joints), `rack_and_pinion_pair` (a
+  revolute joint and prismatic ones) or `screw_pair` (one cylindrical joint's pitch). A coupling of one joint is
   that joint, so `curl` above is dropped and `elbow` poses alone.
 - A mate's `axis` given as a ref becomes an `Axis` computed in the body, from the
   live shape (`select(part, ref)[0]`).
@@ -169,10 +171,10 @@ A definition becomes a `Material` (or a catalogue entry, [materials](build123d-m
 is the colour's alpha. An assignment to a group is the material set on that assembly,
 the default of every part below it that has none.
 
-## Clips become motions
+## Clips become configuration sequences
 
-A clip moved occurrences directly through `m.get("#part").rotate(...)`. A motion
-drives the mechanism's joints, so model what moves with joints first, then:
+A clip moved occurrences directly through `m.get("#part").rotate(...)`. A configuration
+sequence drives the mechanism's joints, so model what moves with joints first, then:
 
 ```python
 # Before
@@ -182,13 +184,27 @@ def demo(t, m):
 ANIMATION = {"demo": cadgen.clip(demo, duration=4)}
 
 # After, in the body, with a RevoluteJoint "platter" on the base
-motion(turntable, "demo", sweep={"platter": (0, 360)}, duration=4, ease="linear")
+configuration_sequence(turntable, "demo", sweep={"platter": (0, 360)}, duration=4, ease="linear")
 ```
 
 Waypoints, a sweep or a function of time over joint values replace `update(t, m)`
-([motions](kinematics.md#motions)). A motion is a finite clip, and a player repeats
-it. Opacity, visibility and tube deformation have no motion form. A motion plays in a
-GLB export, not in the document's views.
+([configuration sequences](kinematics.md#configuration-sequences)). A sequence is a finite
+clip, and a player repeats it. Opacity, visibility and tube deformation have no sequence form.
+A sequence plays in a GLB export, not in the document's views.
+
+## The mechanism's functions take AP242's names
+
+An 0.8 preview's mechanism functions are renamed after the STEP AP242 entities they write.
+The document is unchanged: a model renamed builds the same `.xbf`.
+
+| Before | Now |
+| --- | --- |
+| `configuration(assembly, name, **values)` | `mechanism_state(assembly, name, **values)` |
+| `motion(assembly, name, ...)` | `configuration_sequence(assembly, name, ...)`, the same arguments |
+| `couple(assembly, name, **joints)` of revolute joints | `gear_pair(assembly, name, **joints)` |
+| `couple(...)` of a revolute joint and prismatic ones, the first-named on one side | `rack_and_pinion_pair(assembly, name, **joints)` |
+| `couple(assembly, name, joint=(turn, travel))` of one cylindrical joint | `screw_pair(assembly, name, joint=360 * travel / turn)`: its pitch; the value is now the turn in degrees, `turn` times the old value |
+| `couple(...)` of any other mix (two slides, cylindrical joints with others, a gear train that also drives a rack) | one pair per relation above, or a configuration sequence; no single function |
 
 ## Refs name occurrences by path
 

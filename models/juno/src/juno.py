@@ -42,7 +42,7 @@ and every other call is a new placement of its result.
 
 from __future__ import annotations
 
-from cadgen.engine import configuration, memo, motion, threemf, xbf
+from cadgen.engine import configuration_sequence, mechanism_state, memo, threemf, xbf
 
 import build123d as bd
 
@@ -197,9 +197,9 @@ def juno():
     bd.LinearJoint(PELVIS_LIFT, robot, axis=bd.Axis((0, 0, 0), Z), linear_range=PELVIS_LIFT_RANGE_MM)
     bd.RigidJoint(PELVIS_LIFT, link["pelvis"], bd.Location((0, 0, 0)))
     for name, pose in chain.named_poses_deg().items():
-        configuration(robot, name, **pose)
+        mechanism_state(robot, name, **pose)
     for name, (gait, duration) in gaits.CLIPS.items():
-        motion(robot, name, _over_time(name, gait, duration), duration=duration)
+        configuration_sequence(robot, name, _over_time(name, gait, duration), duration=duration)
     return robot
 
 

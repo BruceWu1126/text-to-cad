@@ -23,7 +23,7 @@ are, is exported on demand (`cadgen export XBF/w16.xbf w16.glb`).
 
 from __future__ import annotations
 
-from cadgen.engine import motion, track, xbf
+from cadgen.engine import configuration_sequence, track, xbf
 
 import build123d as bd
 
@@ -74,12 +74,12 @@ def w16():
     # order, the cams at half speed, 64 valves and their followers, the sprockets, the oil
     # pump, the turbo rotors and every accessory pulley. It ends where it starts, so a
     # player repeats it exactly (a motion has no loop of its own).
-    motion(engine, "crank", kinematics.crank_cycle(turbo_tags), duration=kinematics.CRANK_SECONDS)
+    configuration_sequence(engine, "crank", kinematics.crank_cycle(turbo_tags), duration=kinematics.CRANK_SECONDS)
     # The staged explode, 12 s with the engine running throughout, and the running
     # cutaway, 24 s: the bodywork off, held and back on while the engine runs, ending where
     # it starts (`lib/explode.py`).
-    motion(engine, "explode", explode.explode_clip(turbo_tags), duration=explode.EXPLODE_SECONDS)
-    return motion(engine, "running_reveal", explode.running_reveal_clip(turbo_tags),
+    configuration_sequence(engine, "explode", explode.explode_clip(turbo_tags), duration=explode.EXPLODE_SECONDS)
+    return configuration_sequence(engine, "running_reveal", explode.running_reveal_clip(turbo_tags),
                   duration=explode.REVEAL_SECONDS)
 
 

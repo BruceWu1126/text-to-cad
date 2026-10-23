@@ -28,7 +28,7 @@ from cadgen.engine.export import ExportRefused, Source, translate
 
 BOARD = """
 import build123d as bd
-from cadgen.engine import configuration, glb, materials, paint, step, stl, threemf, xbf
+from cadgen.engine import glb, materials, mechanism_state, paint, step, stl, threemf, xbf
 
 
 @xbf("XBF/peg.xbf")
@@ -62,7 +62,7 @@ def board():
     bd.RigidJoint("mount", lid, bd.Location())
     base.joints["flap"].connect_to(lid.joints["mount"], angle=0)
     hinge = bd.Compound(children=[base, lid], label="hinge")
-    configuration(hinge, "open", flap=60)
+    mechanism_state(hinge, "open", flap=60)
     return bd.Compound(children=[plate, rack, hinge], label="board")
 """
 
@@ -109,7 +109,7 @@ translate(Path(sys.argv[1]), None, Path(sys.argv[2]), pose=sys.argv[3])
 # sub-assembly repeated, posed three ways.
 HINGES = """
 import build123d as bd
-from cadgen.engine import configuration, xbf
+from cadgen.engine import mechanism_state, xbf
 
 PLATE = bd.Box(10, 10, 2)
 PLATE.color = bd.Color(0.2, 0.3, 0.9)
@@ -131,7 +131,7 @@ def hinge(index):
 @xbf("XBF/hinges.xbf")
 def hinges():
     row = bd.Compound(children=[hinge(0), hinge(1), hinge(2)], label="hinges")
-    configuration(row, "open", flap0=30, flap1=60, flap2=90)
+    mechanism_state(row, "open", flap0=30, flap1=60, flap2=90)
     return row
 """
 # Two axles labelled alike, a wheel on each: two occurrences at the path kit2/axle/wheel.

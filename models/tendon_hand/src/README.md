@@ -83,7 +83,7 @@ abduction, MCP flexion and IP. A joint's two drive pulleys ride its child. The s
 has no palm, so the MCP and thumb-CMC abduction carriers (each joint's abduction
 pulleys) stand as the ground and those abductions are not modelled.
 
-Each finger's curl is one control, `couple(hand, "<finger>_curl", ...)`: 0 straight, 1
+Each finger's curl is one control, `gear_pair(hand, "<finger>_curl", ...)`: 0 straight, 1
 each flexion at its limit (MCP 90, PIP 110, DIP 80 degrees); `thumb_curl` drives the
 thumb's MCP flexion (70) and IP (85). Two configurations: `fist` (every curl 1) and
 `point` (all but the index).

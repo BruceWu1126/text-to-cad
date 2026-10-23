@@ -279,7 +279,7 @@ def export(source: Any, *destinations: Any, pose: Any = None, part: str | None =
     ``.glb``, ``.stl``, ``.3mf``, and ``.dxf`` of a planar document): the document of an
     ``.xbf``, of a ``.step`` read into one, or of a ``Model`` (built first). Several destinations read the document once. ``part`` is one part or assembly as
     a ref's owner names it (``refs``). ``daemon=False`` does it in this process, cold. A GLB
-    carries every motion the document defines, as a clip."""
+    carries every configuration sequence the document defines, as a clip."""
     from cadgen.engine.export import ExportRefused, kind_of
 
     if not destinations:

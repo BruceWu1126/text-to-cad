@@ -55,7 +55,7 @@ mount they open slides:
   82 mm, the old clips' `FLOOR_LIFT` rebase, exactly.
 
 The `drive` coupling is the gear train: one control in input revolutions,
-`couple(actuator, "drive", rotor_spin=360, output=80, ...)`, and a constraint,
+`gear_pair(actuator, "drive", rotor_spin=360, output=80, ...)`, and a constraint,
 so the rotor, cages, carrier and planets turn only through it. Its range is
 the joints' limits over their rates, 0..4.5. The old `quarter_output` and
 `full_output` poses are configurations naming it (`rest` is as built):

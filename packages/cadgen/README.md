@@ -30,7 +30,7 @@ cadgen inspect XBF/arm.xbf                      # its build closure
 ```
 
 **PURPOSE** — the engine and its command surface: models built in a warm worker whose memo
-makes an edit cost what it changed, documents and their exports, kinematics and motions,
+makes an edit cost what it changed, documents and their exports, kinematics and configuration sequences,
 materials, references to geometry, snapshots drawn by OCCT; the CAD Viewer (`cadgen viewer`: a
 launcher for a page on the installation’s engine, serving every CAD file by its absolute path); CAD beside an agent's chat (`cadgen mcp`: a stateless stdio peer of the engine’s
 HTTP MCP endpoint, with tools and the app page owned by the engine); the URDF, SDF and SRDF validators; and
@@ -50,7 +50,7 @@ the two disagree, the engine's README is right.
 
 | Document | What it is for | Go there when |
 |---|---|---|
-| [`src/cadgen/engine/README.md`](src/cadgen/engine/README.md) | The engine: models and decorators, the daemon and its workers, progress, the viewer and the snapshot, exports, kinematics, couplings and motions, materials, imports, placements, the mesh and its wire format, element names, references, body retention, memo functions and the build closure | changing anything a build, an export, a snapshot or a served document does |
+| [`src/cadgen/engine/README.md`](src/cadgen/engine/README.md) | The engine: models and decorators, the daemon and its workers, progress, the viewer and the snapshot, exports, kinematics, couplings and configuration sequences, materials, imports, placements, the mesh and its wire format, element names, references, body retention, memo functions and the build closure | changing anything a build, an export, a snapshot or a served document does |
 
 ## The design laws
 
@@ -98,9 +98,9 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
    built the document, and is asked of it while it lives (`made_by`, `cadgen inspect`). A document
    opened with no such worker has none to give, and says so (`made_by: null`).
 8. **Poses and motion definitions, never frames.** The document carries kinematics -- the
-   mechanism, its configurations and its motions -- as poses and definitions, never baked frames
-   or clips. A GLB export is the one place a motion is baked, into a clip of the GLB; the engine
-   plays nothing.
+   mechanism, its mechanism states and its configuration sequences -- as poses and definitions,
+   never baked frames or clips. A GLB export is the one place a sequence is baked, into a clip of
+   the GLB; the engine plays nothing.
 9. **Names are the durable tie to code.** An element's name is spelled from the function that
    made its feature and the author's name for that feature, never from a line or a file: moving
    code renames nothing, and the file holds no line to go stale.
@@ -123,7 +123,11 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     10303-105's as Part 21 writes it (edition 4's domain model's where Part 21 has none);
     only the root says the schema and the units. What the standard cannot say is not
     patched with an attribute of cadgen's own: it is dropped, or refused by name at document
-    time (the engine's **Kinematics**; a conformance test walks the subtree and holds it).
+    time (the engine's **Kinematics**; a conformance test walks the subtree and holds it). The
+    authoring functions are named after the entities they write: `mechanism_state`
+    (`mechanism_state_representation`), `configuration_sequence`
+    (`interpolated_configuration_sequence`), and `gear_pair`, `rack_and_pinion_pair` and
+    `screw_pair`, each refusing a joint its pair does not relate.
 14. **The package ships alone.** The installed distribution is the whole world: the Python, the
     bundled `_runtime/`, and this document. It works with the repository it was built from gone
     -- and its markdown must read that way, referring to nothing outside the package.

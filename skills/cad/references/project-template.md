@@ -94,7 +94,7 @@ datums and joint relationships, see [positioning](positioning.md).
 | Shared factory or hole pattern | A plain helper under `src/lib/`, with `src/lib/__init__.py`. |
 | Left/right geometry | Mirror inline, or separate models for independent files and reuse. |
 | Subassembly | A model that calls its child models. |
-| Motion | build123d joints in the assembly's body, then `configuration`, `couple` and `motion`. See [kinematics](kinematics.md). |
+| Motion | build123d joints in the assembly's body, then `mechanism_state`, `gear_pair` / `rack_and_pinion_pair` / `screw_pair` and `configuration_sequence`. See [kinematics](kinematics.md). |
 | Materials | `part.material = materials.aluminium_6061`. See [colour and materials](build123d-modeling.md#colour-and-materials). |
 | 2D drawing | A separate drawing model using `$dxf`. |
 | Vendor CAD | The vendor STEP under `vendor/`, converted once with `cadgen export vendor/motor.step vendor/motor.xbf` and read with `read_xbf` (an anchored path). |

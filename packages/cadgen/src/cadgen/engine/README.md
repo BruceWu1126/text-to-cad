@@ -49,16 +49,19 @@ material the first one's description.
 An assembly's mechanism is build123d's joints: `RevoluteJoint`,
 `LinearJoint`, `CylindricalJoint`, `BallJoint` and `RigidJoint` on its parts, placed with
 `connect_to(..., angle=, position=, angles=)`. The values they are connected at are the
-as-built configuration, the pose every file of the model shows; `configuration(assembly, name,
-**values)` names another, by joint label, and never moves the build; `couple(assembly, name,
-**joints)` constrains several joints to move together by ratio (**Kinematics**); `motion(assembly, name, ...)`
-names a motion (**Motions**), and `animation(assembly, name, duration=)` a GLB's own animation
+as-built state, the pose every file of the model shows. The functions that say more are named
+after the AP242 entities they write: `mechanism_state(assembly, name, **values)` names another
+state (`mechanism_state_representation`), by joint label, and never moves the build;
+`gear_pair`, `rack_and_pinion_pair` and `screw_pair(assembly, name, **joints)` constrain joints to
+move together by ratio (**Kinematics**); `configuration_sequence(assembly, name, ...)` names a
+sequence of states over time (`interpolated_configuration_sequence`, **Configuration
+sequences**), and `animation(assembly, name, duration=)` a GLB's own animation
 (**Animations**). Connect parts before putting them in the compound that holds
 them; where `connect_to` cannot place them (a nested assembly), give the two joints one label
 where the parts stand.
 
 ```python
-from cadgen.engine import configuration, xbf
+from cadgen.engine import mechanism_state, xbf
 
 @xbf("XBF/hinge.xbf")
 def hinge():
@@ -67,7 +70,7 @@ def hinge():
     bd.RevoluteJoint("elbow", base, axis=bd.Axis((40, 0, 20), (0, 1, 0)), angular_range=(-10, 120))
     bd.RigidJoint("mount", arm)
     base.joints["elbow"].connect_to(arm.joints["mount"], angle=30)   # as built: elbow 30
-    return configuration(bd.Compound(children=[base, arm], label="hinge"), "raised", elbow=90)
+    return mechanism_state(bd.Compound(children=[base, arm], label="hinge"), "raised", elbow=90)
 ```
 
 ## Laws
@@ -125,11 +128,11 @@ def hinge():
    lives (`made_by` on the facts endpoints, `cadgen inspect`). A document
    opened with no such worker has none to give, and says so (`made_by: null`).
 8. **Poses and motion definitions, never frames.** The document carries
-   kinematics -- the mechanism, its configurations (each a pose: where its parts
-   stand) and its motions (each a definition: waypoints and an ease) -- and
-   the document holds poses and motion definitions, never baked frames or clips.
-   A GLB export is the one place a motion is baked, into a clip of the GLB; the
-   engine plays nothing.
+   kinematics -- the mechanism, its mechanism states (each a pose: where its parts
+   stand) and its configuration sequences (each a definition: waypoints and an
+   ease) -- and the document holds poses and motion definitions, never baked
+   frames or clips. A GLB export is the one place a sequence is baked, into a clip
+   of the GLB; the engine plays nothing.
 9. **Names are the durable tie to code.** An element's name is spelled from the
    function that made its feature and the author's name for that feature (the
    target its result is assigned to, or a label), never from a line or a file:
@@ -267,10 +270,10 @@ is explicitly restarted. Session state is memory only and is recreated after res
 
 | Module | What it is |
 | --- | --- |
-| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run, and the models a target's run ran (`BuildContext.children`); `@memo` and its calls; explicit model calls asking the daemon; a script's module and package (`module_of`); `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
+| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run, and the models a target's run ran (`BuildContext.children`); `@memo` and its calls; explicit model calls asking the daemon; a script's module and package (`module_of`); `paint`, `mechanism_state`, `configuration_sequence`; `read_step`, `read_xbf` |
 | `api.py` | the verbs as functions, through the daemon: `export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `daemon` (`cadgen.export`, ...), and `build_script`, a script's models built by `Model.build()`; `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
-| `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`couple`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
+| `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`gear_pair`, `rack_and_pinion_pair`, `screw_pair`), mechanism states (`mechanism_state`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and configuration sequences (`configuration_sequence`, a function's samples, `Timeline`: a sequence's pair values over time) |
 | `build.py` | one build: load the script afresh (as Python imports it: a package's module by its dotted name), one memo run, document, element names, files: every model's that ran |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
@@ -780,7 +783,7 @@ target and moved over it; a DXF only when its bytes change.
 - `--pose` (on `export` and `snapshot`) and `--part` (on `export`) are the verbs' alone: ad hoc, never cached, never
   declared.
 
-**Motions in a GLB.** Each motion (**Motions**) is baked into a glTF animation of its name:
+**Motions in a GLB.** Each motion (**Configuration sequences**) is baked into a glTF animation of its name:
 CUBICSPLINE translation and rotation channels for each placement it moves, over one key time
 accessor (`export/motion.py`). The keys start at the motion's waypoints and the halfway point
 between each two; at a key every moving placement is where forward kinematics through the
@@ -860,10 +863,14 @@ a mechanism in ISO 10303-105's terms (STEP AP242's kinematics):
   `link_1 · item_1 · M(v) · item_2⁻¹`, `M` a turn about Z, a slide along Z, both
   (cylindrical: angle, then distance) or build123d's intrinsic X-Y-Z rotation (spherical).
   Degrees and millimetres.
-- **Configurations**: the as-built values and each named configuration, as pair values.
-- **Couplings**: each `couple(...)`, a constraint among pairs, as AP242's couplers (below).
-- **Motions**: each named motion, as AP242's `INTERPOLATED_CONFIGURATION_SEQUENCE`: its
-  segments' times (`t_parameter`), interpolation and states (a configuration it names, or pair
+- **Mechanism states**: the as-built values and each named state (`mechanism_state`), as
+  `MECHANISM_STATE_REPRESENTATION`s of pair values (the structure's and the viewer's
+  `configurations`).
+- **Couplings**: each `gear_pair`, `rack_and_pinion_pair` or `screw_pair`, a constraint among
+  pairs, as the AP242 couplers it is named after (below).
+- **Configuration sequences**: each `configuration_sequence`, as AP242's
+  `INTERPOLATED_CONFIGURATION_SEQUENCE` (the structure's and the viewer's `motions`): its
+  segments' times (`t_parameter`), interpolation and states (a mechanism state it names, or pair
   values).
 
 **What AP242 cannot hold is refused or left out, never patched** (law 13). A pair the built
@@ -871,41 +878,46 @@ tree contradicts fails the build by name: one whose part stands where it cannot 
 after `connect_to`, connected after its compound was made, a rigid joint off the joint's axis)
 or that joins two parts rigid joints make one body has no value the standard can hold. A moving
 joint matching two rigid joints alike, a linear joint connected to a revolute one (a pin in a
-slot, which no AP242 lower pair is) and a configuration value a pair cannot take are left out
-and warned; pairs that close a loop are kept and not posed. The warnings are the build's report
-(`kinematics.warnings`), never the document's. The harvest's errors are a configuration, a
-motion or a coupling naming a joint its assembly does not hold, a coupling named as a joint is,
-a coupling no coupler can hold (below), and a joint two couplings drive.
+slot, which no AP242 lower pair is) and a mechanism state's value a pair cannot take are left
+out and warned; pairs that close a loop are kept and not posed. The warnings are the build's
+report (`kinematics.warnings`), never the document's. The harvest's errors are a mechanism state,
+a configuration sequence or a coupling naming a joint its assembly does not hold, a coupling
+named as a joint is, a coupling driving a joint its pair does not relate or no coupler can hold
+(below), and a joint two couplings drive.
 
-**Couplings.** `couple(assembly, name, **joints)` is a constraint: its joints move together,
-each by its ratio, and only through it. Each joint is named by its label (a pair of several
-values takes a ratio per value, as `configuration` takes a value per value). At value `c` each
-joint stands at its as-built value plus its ratio times `c`: `c = 0` is as built, so a coupling
-never moves the build. Its range is derived, never given: the tightest interval of `c` in which
-every joint stays within its own limits (a joint with no limits bounds nothing; a side nothing
-bounds is open). Its name poses wherever a joint's does -- `configuration(..., curl=0.5)`, a
-motion's waypoints and sweeps, `--pose '{"curl": 0.6}'` -- and configurations and motions
-resolve it to pair values at document time, so their AP242 states and a GLB's bake are as ever;
-a pose, a configuration or a motion setting one of its joints alone is refused (a
-configuration's or a motion's value left out, and warned). `range=` and `lock=` are refused by
-name: a coupling's range is its joints' limits, and it is always its joints' only control.
+**Couplings.** A coupling is a constraint, made by the function named after the AP242 pair it
+is written as:
 
-In the document a coupling is the standard's couplers, chained from its first-named value: AP242
-edition 4's `KinematicPairWithMotionCoupling` between two pairs' values, of `Kind` `gear_pair`
-(two revolute rotations, `CouplingRatios`), `rack_and_pinion_pair` (a revolute rotation and a
-prismatic translation, `CouplingRatios`) or `two_joint_coupler` (any other two values, `Scales`),
-with `CouplingTypes` saying which value of each pair; and Part 105's `SCREW_PAIR` (`pitch`,
-travel per 360 degrees of turn) for one cylindrical pair's turn and travel. Each holds
-`s1 · d1 + s2 · d2 = 0` over the two values' displacements from as built, so the ratios read
-back as written. A coupling of more than two values is chained as two-value couplers from its
-first-named value, never one `three_joint_coupler`. A coupling of one value alone, one driving
-a spherical pair (no coupler relates a ball's three angles) and one whose joints' limits leave
-it no range around as built fail the build by name. A function coupling, a cam or a loop is no
-part of the mechanism: a motion says it.
+| Function | Its joints | AP242 |
+| --- | --- | --- |
+| `gear_pair(assembly, name, **joints)` | revolute joints, a ratio each (degrees per unit of its value) | `KinematicPairWithMotionCoupling`, `Kind` `gear_pair`, from the first-named joint to each other one |
+| `rack_and_pinion_pair(assembly, name, **joints)` | the first-named a revolute joint (the pinion) or a prismatic one (the rack), every other of the other kind, a ratio each | `Kind` `rack_and_pinion_pair`, from the first-named joint to each other one |
+| `screw_pair(assembly, name, joint=pitch)` | one cylindrical joint and its pitch, the millimetres it travels per 360 degrees of turn; the coupling's value is its turn | Part 105's `SCREW_PAIR` (`pitch`) |
+
+Its joints move together, each by its ratio, and only through it, each named by its label. At
+value `c` each joint stands at its as-built value plus its ratio times `c`: `c = 0` is as built,
+so a coupling never moves the build. Its range is derived, never given: the tightest interval of
+`c` in which every joint stays within its own limits (a joint with no limits bounds nothing; a
+side nothing bounds is open). Its name poses wherever a joint's does --
+`mechanism_state(..., curl=0.5)`, a configuration sequence's waypoints and sweeps, `--pose
+'{"curl": 0.6}'` -- and mechanism states and configuration sequences resolve it to pair values
+at document time, so their AP242 states and a GLB's bake are as ever; a pose, a mechanism state
+or a configuration sequence setting one of its joints alone is refused (a state's or a
+sequence's value left out, and warned).
+
+In the document each coupler holds `s1 · d1 + s2 · d2 = 0` over the two values' displacements
+from as built (`CouplingRatios`, with `CouplingTypes` saying which value of each pair), so the
+ratios read back as written; a coupling of more than two joints is chained as two-joint couplers
+from its first-named joint, never one `three_joint_coupler`. A joint its function does not
+relate -- a gear pair's prismatic joint, a rack and pinion's two pinions, a screw's revolute
+joint, any coupling's ball joint (no coupler relates a ball's three angles) -- fails the build
+by name, as does a coupling of one value alone and one whose joints' limits leave it no range
+around as built. A function coupling, a cam or a loop is no part of the mechanism: a
+configuration sequence says it.
 
 ```python
 import build123d as bd
-from cadgen.engine import configuration, couple, motion, xbf
+from cadgen.engine import configuration_sequence, gear_pair, mechanism_state, screw_pair, xbf
 
 CURL = {"index_mcp_flexion": 90, "index_pip": 100, "index_dip": 70}  # degrees at a full curl
 BONES = {"base": 30, "proximal": 40, "middle": 25, "distal": 20}     # lengths along +X
@@ -923,8 +935,9 @@ def index_finger():
         bd.RigidJoint(joint, child, bd.Plane(origin=knuckle.position, z_dir=knuckle.direction).location)
         parent.joints[joint].connect_to(child.joints[joint], angle=0)  # as built: straight
     finger = bd.Compound(children=bones, label="index_finger")
-    couple(finger, "index_curl", **CURL)                              # one control: 0 straight, 1 a fist
-    return motion(finger, "grip", [(0, {"index_curl": 0}), (1.5, {"index_curl": 1}), (3, {"index_curl": 0})])
+    gear_pair(finger, "index_curl", **CURL)                           # one control: 0 straight, 1 a fist
+    return configuration_sequence(finger, "grip", [(0, {"index_curl": 0}), (1.5, {"index_curl": 1}),
+                                                   (3, {"index_curl": 0})])
 
 SWEEP, TRAVEL = {"left": -70, "right": 70}, 40                       # a door's turn and travel when open
 
@@ -943,18 +956,19 @@ def hypercar():
         chassis.joints[f"door_{side}"].connect_to(door.joints[f"door_{side}"], angle=0, position=0)  # shut
         doors.append(door)
     car = bd.Compound(children=[chassis, *doors], label="hypercar")
-    couple(car, "doors", door_left=(SWEEP["left"], TRAVEL), door_right=(SWEEP["right"], TRAVEL))
-    return configuration(car, "open", doors=1)                        # shut is as built
+    for side in SWEEP:                                                # each door's pitch: travel per turn
+        screw_pair(car, side, **{f"door_{side}": 360 * TRAVEL / SWEEP[side]})
+    return mechanism_state(car, "open", **SWEEP)                      # shut is as built
 ```
 
 `cadgen snapshot XBF/index_finger.xbf c.png --pose '{"index_curl": 0.6}'` draws the
 knuckles at 54, 60 and 42 degrees: the picture of the same finger with no coupling at
 `--pose '{"index_mcp_flexion": 54, "index_pip": 60, "index_dip": 42}'`; its range, `[0, 1]`, is
 where every knuckle stays within its own. `cadgen export XBF/hypercar.xbf half.step --pose
-'{"doors": 0.5}'` writes the doors a half turn and a half travel open. A gear train is a
-coupling: `couple(actuator, "drive", rotor_spin=360, output=80, ...)`, a quasi-direct-drive
-actuator's, ranged by its joints' limits. A coupling joint in no pair, or given as many ratios as
-its pair has no values, is left out of it and warned. A label names the joint in each placement of a
+'{"left": -35, "right": 35}'` writes the doors a half turn and a half travel open. A gear train
+is a gear pair: `gear_pair(actuator, "drive", rotor_spin=360, output=80, ...)`, a
+quasi-direct-drive actuator's, ranged by its joints' limits. A coupling's joint in no pair is
+left out of it and warned. A label names the joint in each placement of a
 sub-assembly placed several times, and a name two couplings share takes the path of the assembly
 holding each (`hand/index:curl`), as a label two pairs share does.
 
@@ -972,7 +986,7 @@ range null where nothing bounds it. **STEP carries none of it**: OCCT reads AP24
 kinematics but cannot write them, so every STEP, posed or not, is placements only.
 
 `--pose` on `cadgen snapshot` and `cadgen export` poses the mechanism at a
-configuration (its name) or at joint and coupling values (`'{"elbow": 45}'`, `'{"curl": 0.6}'`,
+mechanism state (its name, among the structure's `configurations`) or at joint and coupling values (`'{"elbow": 45}'`, `'{"curl": 0.6}'`,
 the rest as built): the engine places each link by composing its pairs from the ground down,
 exact forward kinematics, and draws or writes that (a posed STEP is written from the document's
 tree with every placement its own). No flag is as built. An unknown configuration, joint or
@@ -983,32 +997,33 @@ refused by name before anything renders or is written.
 **The viewer's Position** shows a slider per coupling under the Pose row (0 as built, its range
 the coupling's, an open side spanning one turn or 100 mm of its first value): dragging it poses
 every joint it drives through the page's forward kinematics (`xbfKinematics.js`), and choosing a
-configuration puts it where that configuration stands on it (0 where it is off its line). A
+mechanism state puts it where that state stands on it (0 where it is off its line). A
 coupling's joints have no slider of their own.
 
-## Motions
+## Configuration sequences
 
-A motion is a definition in the model's code, beside its configurations:
+A configuration sequence -- AP242's `interpolated_configuration_sequence`, a **motion** in the
+structure and the viewer -- is a definition in the model's code, beside its mechanism states:
 
 ```python
-from cadgen.engine import configuration, motion
+from cadgen.engine import configuration_sequence, mechanism_state
 
-configuration(arm, "folded", shoulder=0, elbow=0)
-configuration(arm, "reach", shoulder=45, elbow=90)
-motion(arm, "cycle", [(0, "folded"), (2, "reach"), (5, "folded")])          # waypoints, eased
-motion(arm, "wave", [(0, {"wrist": -30}), (1, {"wrist": 30}), (2, {"wrist": -30})], ease="linear")
-motion(arm, "nod", lambda t: {"elbow": 45 + 20 * math.sin(t)}, duration=6)  # a function of time
+mechanism_state(arm, "folded", shoulder=0, elbow=0)
+mechanism_state(arm, "reach", shoulder=45, elbow=90)
+configuration_sequence(arm, "cycle", [(0, "folded"), (2, "reach"), (5, "folded")])  # waypoints, eased
+configuration_sequence(arm, "wave", [(0, {"wrist": -30}), (1, {"wrist": 30}), (2, {"wrist": -30})], ease="linear")
+configuration_sequence(arm, "nod", lambda t: {"elbow": 45 + 20 * math.sin(t)}, duration=6)  # a function of time
 ```
 
-`motion(assembly, name, waypoints_or_fn=None, *, sweep=None, duration=None, ease="cubic")`
-takes one of: waypoints `[(t, pose), ...]` (seconds from 0, increasing; `pose` a configuration's
-name or `{joint: value}`, the rest as built; the last time is the duration), a sweep
+`configuration_sequence(assembly, name, waypoints_or_fn=None, *, sweep=None, duration=None,
+ease="cubic")` takes one of: waypoints `[(t, pose), ...]` (seconds from 0, increasing; `pose` a
+mechanism state's name or `{joint: value}`, the rest as built; the last time is the duration), a sweep
 `{joint: (from, to)}` with `duration` (two waypoints), or a callable `t -> {joint: value}` with
 `duration`. `ease` is `cubic` (each step eased in and out, every pair arriving together at every
 waypoint: AP242's `synchronous_interpolation_type`) or `linear` (constant speed:
-`linear_interpolation_type`). A motion is a finite clip, and a player repeats it: one that comes
-back says its way back as waypoints. `loop=` and the `spline` ease are refused by name. A motion
-never moves the build. The viewer plays an `.xbf`'s motions from its Motion section, each frame the
+`linear_interpolation_type`). A sequence is a finite clip, and a player repeats it: one that
+comes back says its way back as waypoints. `loop=` and the `spline` ease are refused by name. A
+sequence never moves the build. The viewer plays an `.xbf`'s sequences from its Motion section, each frame the
 values the GLB baker keys at that time, posed by the page's forward kinematics.
 
 The document keeps the definition (**Kinematics**), never frames. A callable is stored as its
@@ -1020,10 +1035,10 @@ strays most: a kink, where two straight runs meet, is the error's peak between t
 the samples close in on it, and the half tolerance at the checks keeps the line within the whole
 one between them (a zigzag with kinks off the grid is held within 0.55 of it, `sin` within 0.44,
 where the quarter checks and middle splits let a kink stray to 1.06). The same code
-samples at the same times, so the file is a function of the code. A motion naming a
-configuration or a joint its assembly lacks fails the build by name; one setting a value its
+samples at the same times, so the file is a function of the code. A sequence naming a
+mechanism state or a joint its assembly lacks fails the build by name; one setting a value its
 pair cannot take, or moving a pair that closes a loop, is left out and warned.
-A warm build that changes only a motion rewrites the mechanism's subtree and converts no
+A warm build that changes only a sequence rewrites the mechanism's subtree and converts no
 prototype; the file is the cold build's bytes.
 
 **A function's samples are kept in the worker's memory** (`kernel/memo.py`, `sampled`), as a
@@ -1040,7 +1055,7 @@ samples are made of changed:
   two tolerances and the 4,097 bound;
 - the engine's code.
 
-Configurations, a pair's frames, the parts' geometry beyond the size and the document's
+Mechanism states, a pair's frames, the parts' geometry beyond the size and the document's
 colours and materials are no input: a colour edit samples nothing, and the samples it keeps
 are a fresh sampling's, so the file is the cold build's bytes (the w16's three motions, 911
 samples). As a body, the function must be a function of its key: one reading the clock, the
@@ -1060,28 +1075,28 @@ what the last four builds used.
 
 ## Animations
 
-A **motion** is the mechanism's and an **animation** is the GLB's. A motion moves pair values
-over time, AP242's interpolated configuration sequence (**Motions**): the document keeps it, every
+A **configuration sequence** (a motion) is the mechanism's and an **animation** is the GLB's. A
+sequence moves pair values over time (**Configuration sequences**): the document keeps it, every
 GLB of the document bakes it, and STEP, STL and 3MF carry nothing of it. An animation moves the
 nodes a GLB places, in glTF's own terms -- translation, rotation and scale channels, and the
 mechanism's forward kinematics at given times -- for what a mechanism does not say: an explode, a
 reveal, a showcase, a part hidden. It is never written into the document (law 13 stands: the xbf
 holds standard data alone). It is baked into every GLB the model declares, when that GLB is
 written (law 10), from the build's tree in memory. A GLB exported later from the xbf alone
-(`cadgen export model.xbf model.glb`) carries the document's motions only. For now a model with
+(`cadgen export model.xbf model.glb`) carries the document's sequences only. For now a model with
 an animation declares its GLB beside its xbf, the two decorators stacked on one function: the xbf
 ignores the animation, the GLB bakes it.
 
 ```python
 import build123d as bd
-from cadgen import animation, configuration, glb, motion, xbf
+from cadgen import animation, configuration_sequence, glb, mechanism_state, xbf
 
 @xbf("XBF/box.xbf")
 @glb("XBF/box.glb")
 def box():
     ...                                                              # a hinged lid, a latch, feet
-    configuration(box, "open", hinge=100)
-    motion(box, "open_close", [(0, {"hinge": 0}), (1.5, "open"), (3, {"hinge": 0})])  # every GLB's
+    mechanism_state(box, "open", hinge=100)
+    configuration_sequence(box, "open_close", [(0, {"hinge": 0}), (1.5, "open"), (3, {"hinge": 0})])  # every GLB's
     show = animation(box, "showcase", duration=4)                    # this GLB's alone
     show.pose(at={0: {}, 1.5: "open", 3.5: {}})                     # the mechanism, by its FK
     show.stagger("feet/*", by=(0, 0, -20), step=0.5, start=0.5)
@@ -1102,7 +1117,7 @@ factor, each part about its own origin, as glTF scales a node); `interpolation` 
 channels: `.explode(parts, direction=|radial=, distance=)` a translation per reference (along a
 direction by its rank, or away from a point), `.stagger(parts, by=, step=)` one per reference in
 turn, `.hide(parts, at=)` a `STEP` scale to 0 (glTF has no visibility channel), and
-`.pose(at={t: configuration or values})` translations and rotations of every part the mechanism
+`.pose(at={t: mechanism state or values})` translations and rotations of every part the mechanism
 moves, its joint values eased between the keys. The duration is the animation's length, in its
 `extras.cadgen.duration` as a motion's is (glTF has no field for it).
 
@@ -1749,7 +1764,7 @@ to its bytes (**Body retention**), each file of its import closure by its bytes.
 blank line changes no digest; a module the model loads and does not reach holds the empty one.
 `inputs` lists every file a body read -- through the engine (`file`: `read_step`, `read_xbf`,
 `read_mesh`, build123d's importers), itself (`read`, a `null` digest for one it found missing;
-a motion's function's reads too, **Motions**), or a text's font (`font`) -- by its digest; a file read past the engine's readers leaves the key
+a motion's function's reads too, **Configuration sequences**), or a text's font (`font`) -- by its digest; a file read past the engine's readers leaves the key
 null (**Body retention**). `cadgen inspect DOC` prints the closure, `cadgen.inspect(doc)` and
 `document.Loaded.closure` read it.
 
@@ -1762,8 +1777,8 @@ closure's fields, or what the key covers -- and then every xbf builds once, clea
 document of another format is "written by" another engine (`cache.reason`). The bumps so far:
 `xbf/2`, the key left the release, the engine digest and numpy, and the closure its commit;
 `xbf/3`, the mechanism subtree took AP242's form (**Kinematics**); `xbf/4`, a function
-motion's samples are made for linear interpolation (**Motions**); `xbf/5`, files read by motion
-functions join the closure (**Motions**).
+motion's samples are made for linear interpolation (**Configuration sequences**); `xbf/5`, files read by motion
+functions join the closure (**Configuration sequences**).
 
 Before a body runs or is replayed, the build makes the closure again -- the script loaded,
 its modules digested, each input hashed again -- and compares its key with the xbf's. The

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cadgen.engine import configuration, couple, motion, xbf
+from cadgen.engine import configuration_sequence, gear_pair, mechanism_state, xbf
 
 import math
 from collections.abc import Sequence
@@ -1465,13 +1465,13 @@ def mars_rover_concept():
     _clip_joints(by_label)
     rover = group("mars_rover_concept", children)
     for name, ratios in _COUPLINGS.items():
-        couple(rover, name, **ratios)
+        gear_pair(rover, name, **ratios)
     for name, values in _POSES.items():
-        configuration(rover, name, **values)
-    motion(rover, "driveAround", _drive_around, duration=18)
-    motion(rover, "armCycle", _arm_cycle, duration=12)
-    motion(rover, "deploySequence", _deploy_sequence, duration=20)
-    motion(rover, "explodedAssembly", _exploded_assembly, duration=12)
+        mechanism_state(rover, name, **values)
+    configuration_sequence(rover, "driveAround", _drive_around, duration=18)
+    configuration_sequence(rover, "armCycle", _arm_cycle, duration=12)
+    configuration_sequence(rover, "deploySequence", _deploy_sequence, duration=20)
+    configuration_sequence(rover, "explodedAssembly", _exploded_assembly, duration=12)
     return rover
 
 

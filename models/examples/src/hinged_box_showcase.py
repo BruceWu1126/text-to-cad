@@ -10,7 +10,7 @@ box.glb` writes a GLB with the motion alone.
 
 import build123d as bd
 
-from cadgen import animation, configuration, glb, motion, xbf
+from cadgen import animation, configuration_sequence, glb, mechanism_state, xbf
 
 HINGE = bd.Axis((-40, 0, 30), (0, -1, 0))  # +angle lifts the lid
 
@@ -31,9 +31,9 @@ def hinged_box_showcase():
     body.joints["hinge"].connect_to(lid.joints["hinge"], angle=0)  # as built: shut
     box = bd.Compound(children=[body, lid, latch, bd.Compound(children=feet, label="feet")],
                       label="hinged_box_showcase")
-    configuration(box, "shut", hinge=0)
-    configuration(box, "open", hinge=100)
-    motion(box, "open_close", [(0, "shut"), (1.5, "open"), (3, "shut")])
+    mechanism_state(box, "shut", hinge=0)
+    mechanism_state(box, "open", hinge=100)
+    configuration_sequence(box, "open_close", [(0, "shut"), (1.5, "open"), (3, "shut")])
 
     show = animation(box, "showcase", duration=4)
     show.pose(at={0: "shut", 1.5: "open", 3.5: "shut"})

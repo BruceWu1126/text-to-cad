@@ -20,10 +20,11 @@ A function worth replaying on a later build -- an assembly's part, a derivation'
 is marked ``@memo``: it writes no file, and a build whose edit does not reach it replays it
 instead of running it. A part's material is a value set on the shape: ``part.material = materials.aluminium``
 (``Material`` for any other). An assembly's mechanism is build123d's joints, placed with
-``connect_to``, as built where the joints place the parts; ``configuration(assembly, name,
-**values)`` names a configuration of it, ``couple(assembly, name, **joints)`` a constraint moving
-several joints by ratio (their only way to move, its range their limits'), and ``motion(assembly,
-name, ...)`` a motion, which a GLB export bakes into a clip; ``animation(assembly, name, duration=)``
+``connect_to``, as built where the joints place the parts; ``mechanism_state(assembly, name,
+**values)`` names a state of it, ``gear_pair``, ``rack_and_pinion_pair`` and ``screw_pair(assembly,
+name, **joints)`` a constraint moving joints by ratio (their only way to move, its range their
+limits'), and ``configuration_sequence(assembly, name, ...)`` a sequence of states over time, which a
+GLB export bakes into a clip; ``animation(assembly, name, duration=)``
 a GLB's own choreography, never in the document, baked into the GLBs the model declares. ``read_step(path)`` and ``read_xbf(path)`` copy a file's geometry into
 the model, named, coloured and given its materials as the file has them; ``read_mesh(path)`` reads
 an STL as data -- vertices, triangles, ``bounding_box()`` -- never a shape. ``select(source, ref,
@@ -39,8 +40,9 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Material", "animation", "configuration", "couple", "dxf", "glb", "materials", "memo", "model", "motion", "paint",
-           "read_mesh", "read_step", "read_xbf", "report", "select", "step", "stl", "threemf", "track", "xbf"]
+__all__ = ["Material", "animation", "configuration_sequence", "dxf", "gear_pair", "glb", "materials", "mechanism_state",
+           "memo", "model", "paint", "rack_and_pinion_pair", "read_mesh", "read_step", "read_xbf", "report", "screw_pair",
+           "select", "step", "stl", "threemf", "track", "xbf"]
 
 
 def _main_in_a_package() -> None:
@@ -80,10 +82,10 @@ def __getattr__(name: str) -> Any:
         from cadgen.engine.refs import select
 
         return select
-    if name == "couple":
-        from cadgen.engine.mechanism import couple
+    if name in ("gear_pair", "rack_and_pinion_pair", "screw_pair"):
+        from cadgen.engine import mechanism
 
-        return couple
+        return getattr(mechanism, name)
     if name == "read_mesh":
         from cadgen.engine.reader import read_mesh
 

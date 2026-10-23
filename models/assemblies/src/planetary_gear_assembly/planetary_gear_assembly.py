@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import configuration, couple, glb, motion, xbf
+from cadgen.engine import configuration_sequence, gear_pair, glb, mechanism_state, xbf
 from math import cos, pi, sin, tau
 
 import build123d as bd
@@ -339,11 +339,11 @@ def planetary_gear_assembly():
         label="simplified_planetary_gear_assembly",
     )
     planets = {f"planet{index + 1}": _PLANET_RATIO for index in range(PLANET_COUNT)}
-    couple(assembly, "drive", sun=1.0, carrier=_CARRIER_RATIO, **planets)
-    configuration(assembly, "quarter_cycle", drive=_FULL_MESH_CYCLE_DEG / 4)
-    configuration(assembly, "half_cycle", drive=_FULL_MESH_CYCLE_DEG / 2)
-    motion(assembly, "meshCycle", sweep={"drive": (0, _FULL_MESH_CYCLE_DEG)}, duration=6, ease="linear")
-    return motion(assembly, "inspectExplode", _inspect_explode, duration=5)
+    gear_pair(assembly, "drive", sun=1.0, carrier=_CARRIER_RATIO, **planets)
+    mechanism_state(assembly, "quarter_cycle", drive=_FULL_MESH_CYCLE_DEG / 4)
+    mechanism_state(assembly, "half_cycle", drive=_FULL_MESH_CYCLE_DEG / 2)
+    configuration_sequence(assembly, "meshCycle", sweep={"drive": (0, _FULL_MESH_CYCLE_DEG)}, duration=6, ease="linear")
+    return configuration_sequence(assembly, "inspectExplode", _inspect_explode, duration=5)
 
 
 if __name__ == "__main__":

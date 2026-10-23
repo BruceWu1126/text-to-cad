@@ -27,7 +27,7 @@ from cadgen.engine import build as engine_build
 ARM = """
 import math
 import build123d as bd
-from cadgen.engine import configuration, motion, xbf
+from cadgen.engine import configuration_sequence, mechanism_state, xbf
 
 
 @xbf("XBF/arm.xbf")
@@ -45,10 +45,10 @@ def arm():
     link.joints["slide"].connect_to(tip.joints["carriage"], position=0)
     base.joints["elbow"].connect_to(link.joints["mount"], angle=0)
     arm = bd.Compound(children=[base, link, tip], label="arm")
-    configuration(arm, "raised", elbow=90)
-    {m}motion(arm, "lift", [(0, {{"elbow": 0}}), (1.5, "raised"), (3, {{"elbow": 0, "slide": 60}})])
-    {m}motion(arm, "wave", sweep={{"elbow": (-10, {reach})}}, duration=2, ease="linear")
-    {m}{nod}motion(arm, "nod", lambda t: {{"elbow": 45 + 20 * math.sin(t), "slide": 40 + 30 * math.sin(2 * t)}}, duration=6)
+    mechanism_state(arm, "raised", elbow=90)
+    {m}configuration_sequence(arm, "lift", [(0, {{"elbow": 0}}), (1.5, "raised"), (3, {{"elbow": 0, "slide": 60}})])
+    {m}configuration_sequence(arm, "wave", sweep={{"elbow": (-10, {reach})}}, duration=2, ease="linear")
+    {m}{nod}configuration_sequence(arm, "nod", lambda t: {{"elbow": 45 + 20 * math.sin(t), "slide": 40 + 30 * math.sin(2 * t)}}, duration=6)
     {more}
     return arm
 """
@@ -90,31 +90,33 @@ class AuthoringTest(unittest.TestCase):
     def test_a_motion_is_one_of_waypoints_a_sweep_or_a_function_and_says_what_is_wrong(self) -> None:
         import build123d as bd
 
-        from cadgen.engine import motion
+        from cadgen.engine import configuration_sequence
 
         box = bd.Box(1, 1, 1)
         for call, error in (
-                (lambda: motion(box, "m"), "waypoints, a function of time, or sweep=: one of them"),
-                (lambda: motion(box, "m", [(0, "a")], sweep={"j": (0, 1)}, duration=1), "one of them"),
-                (lambda: motion(box, "m", [(0, "a")]), "at least two waypoints"),
-                (lambda: motion(box, "m", [(1, "a"), (2, "b")]), "the first waypoint is at 0 s"),
-                (lambda: motion(box, "m", [(0, "a"), (0, "b")]), "is not after the one before it"),
-                (lambda: motion(box, "m", [(0, "a"), (1, "b")], duration=3), "waypoints give their own times"),
-                (lambda: motion(box, "m", [(0, "a"), (1, {"j": "x"})]), "joint 'j' takes a number"),
-                (lambda: motion(box, "m", sweep={"j": (0, 1)}), "sweep= takes duration="),
-                (lambda: motion(box, "m", sweep={"j": 5}, duration=1), "takes \\(from, to\\)"),
-                (lambda: motion(box, "m", lambda t: {}, duration=0), "duration is a number of seconds above 0"),
-                (lambda: motion(box, "m", lambda t: {}), "a function of time takes duration="),
-                (lambda: motion(box, "m", sweep={"j": (0, 1)}, duration=1, ease="bounce"), "ease is one of"),
-                (lambda: motion(box, "m", sweep={"j": (0, 1)}, duration=1, loop="loop"),
-                 "motion 'm': loop= is gone: a motion is a finite clip, and a player repeats it"),
-                (lambda: motion(box, "m", sweep={"j": (0, 1)}, duration=1, ease="spline"),
-                 "motion 'm': ease 'spline' is gone: AP242 interpolates a motion linearly or synchronously"),
-                (lambda: motion(box, "m", sweep={"j": (0, 1)}, duration=1, speed=2), "motion\\(\\) takes no speed"),
-                (lambda: motion("arm", "m", sweep={"j": (0, 1)}, duration=1), "takes the assembly")):
+                (lambda: configuration_sequence(box, "m"), "waypoints, a function of time, or sweep=: one of them"),
+                (lambda: configuration_sequence(box, "m", [(0, "a")], sweep={"j": (0, 1)}, duration=1), "one of them"),
+                (lambda: configuration_sequence(box, "m", [(0, "a")]), "at least two waypoints"),
+                (lambda: configuration_sequence(box, "m", [(1, "a"), (2, "b")]), "the first waypoint is at 0 s"),
+                (lambda: configuration_sequence(box, "m", [(0, "a"), (0, "b")]), "is not after the one before it"),
+                (lambda: configuration_sequence(box, "m", [(0, "a"), (1, "b")], duration=3), "waypoints give their own times"),
+                (lambda: configuration_sequence(box, "m", [(0, "a"), (1, {"j": "x"})]), "joint 'j' takes a number"),
+                (lambda: configuration_sequence(box, "m", sweep={"j": (0, 1)}), "sweep= takes duration="),
+                (lambda: configuration_sequence(box, "m", sweep={"j": 5}, duration=1), "takes \\(from, to\\)"),
+                (lambda: configuration_sequence(box, "m", lambda t: {}, duration=0), "duration is a number of seconds above 0"),
+                (lambda: configuration_sequence(box, "m", lambda t: {}), "a function of time takes duration="),
+                (lambda: configuration_sequence(box, "m", sweep={"j": (0, 1)}, duration=1, ease="bounce"), "ease is one of"),
+                (lambda: configuration_sequence(box, "m", sweep={"j": (0, 1)}, duration=1, loop="loop"),
+                 "configuration sequence 'm': loop= is gone: a configuration sequence is a finite clip, and a player "
+                 "repeats it"),
+                (lambda: configuration_sequence(box, "m", sweep={"j": (0, 1)}, duration=1, ease="spline"),
+                 "configuration sequence 'm': ease 'spline' is gone: AP242 interpolates a configuration sequence linearly "
+                 "or synchronously"),
+                (lambda: configuration_sequence(box, "m", sweep={"j": (0, 1)}, duration=1, speed=2), "configuration_sequence\\(\\) takes no speed"),
+                (lambda: configuration_sequence("arm", "m", sweep={"j": (0, 1)}, duration=1), "takes the assembly")):
             with self.assertRaisesRegex((TypeError, ValueError), error):
                 call()
-        self.assertIs(motion(box, "m", sweep={"j": (0, 1)}, duration=1), box)
+        self.assertIs(configuration_sequence(box, "m", sweep={"j": (0, 1)}, duration=1), box)
 
 
 class SampledKeysTest(unittest.TestCase):
@@ -195,7 +197,7 @@ class DocumentTest(_Folder):
         # A zigzag: straight runs meeting at kinks every 0.685 s, none on the sampler's grid. Its
         # error is largest at a kink, between any two check points.
         zigzag = lambda t: 40 + 60 * 2 * abs(t / 1.37 - math.floor(t / 1.37 + 0.5))  # noqa: E731
-        self.arm(more='motion(arm, "zigzag", lambda t: {"elbow": 40 + 60 * 2 * abs(t / 1.37 - math.floor(t / 1.37 + '
+        self.arm(more='configuration_sequence(arm, "zigzag", lambda t: {"elbow": 40 + 60 * 2 * abs(t / 1.37 - math.floor(t / 1.37 + '
                       '0.5))}, duration=6)')
         keys = document.Loaded(self.xbf).mechanism.motions["zigzag"].keys
         times = np.array([t for t, _name, _values in keys])
@@ -221,12 +223,12 @@ class DocumentTest(_Folder):
         self.assertEqual(self.cold(reach=90, nod=False), warm)
 
     def test_what_a_motion_names_wrong_fails_or_warns_by_name(self) -> None:
-        report = self.arm(ok=False, more='motion(arm, "bad", [(0, "raised"), (1, "lowered")])')
-        self.assertIn("names no configuration 'lowered'", report["error"])
-        report = self.arm(ok=False, more='motion(arm, "bad", sweep={"knee": (0, 1)}, duration=1)')
-        self.assertIn("motion 'bad' of arm names no joint 'knee'", report["error"])
-        report = self.arm(more='motion(arm, "far", sweep={"elbow": (0, 200)}, duration=1)')
-        self.assertTrue(any("motion 'far'" in text and "outside its range" in text and "left out" in text
+        report = self.arm(ok=False, more='configuration_sequence(arm, "bad", [(0, "raised"), (1, "lowered")])')
+        self.assertIn("names no mechanism state 'lowered'", report["error"])
+        report = self.arm(ok=False, more='configuration_sequence(arm, "bad", sweep={"knee": (0, 1)}, duration=1)')
+        self.assertIn("configuration sequence 'bad' of arm names no joint 'knee'", report["error"])
+        report = self.arm(more='configuration_sequence(arm, "far", sweep={"elbow": (0, 200)}, duration=1)')
+        self.assertTrue(any("configuration sequence 'far'" in text and "outside its range" in text and "left out" in text
                             for text in report["kinematics"]["warnings"]), report.get("kinematics"))
         self.assertNotIn("far", document.Loaded(self.xbf).mechanism.motions)
 
@@ -270,7 +272,7 @@ HINGE = """
 import math
 
 import build123d as bd
-from cadgen.engine import couple, motion, xbf
+from cadgen.engine import configuration_sequence, rack_and_pinion_pair, xbf
 import moves
 
 
@@ -290,9 +292,9 @@ def hinge():
     link.joints["slide"].connect_to(tip.joints["carriage"], position=0)
     base.joints["elbow"].connect_to(link.joints["mount"], angle=0)
     hinge = bd.Compound(children=[base, link, tip], label="hinge")
-    couple(hinge, "drive", elbow={ratio}, slide=10)
-    motion(hinge, "nod", moves.nod({scale}), duration={duration})
-    motion(hinge, "table", moves.table, duration=2)
+    rack_and_pinion_pair(hinge, "drive", elbow={ratio}, slide=10)
+    configuration_sequence(hinge, "nod", moves.nod({scale}), duration={duration})
+    configuration_sequence(hinge, "table", moves.table, duration=2)
     {more}
     return hinge
 """
@@ -381,7 +383,7 @@ class MotionMemoTest(unittest.TestCase):
                                (0.45 - 0) * 25, msg="the samples are the file's new values")
 
     def test_a_verifying_build_samples_again_and_marks_a_motion_it_samples_otherwise(self) -> None:
-        self.hinge(more='motion(hinge, "offset", moves.offset, duration=2)')
+        self.hinge(more='configuration_sequence(hinge, "offset", moves.offset, duration=2)')
         report = self.hinge(verify=True)
         self.assertEqual(report["verify"]["motions"], {"hinge:nod": "same", "hinge:offset": "same",
                                                        "hinge:table": "same"})
@@ -398,7 +400,7 @@ class MotionMemoTest(unittest.TestCase):
                         report["motions"])
 
     def test_a_function_holding_what_has_no_canonical_form_is_sampled_on_every_build(self) -> None:
-        held = ('motion(hinge, "held", (lambda part: lambda t: {"drive": 0.5 + 0.1 * math.sin(t) + 0 * part.volume})'
+        held = ('configuration_sequence(hinge, "held", (lambda part: lambda t: {"drive": 0.5 + 0.1 * math.sin(t) + 0 * part.volume})'
                 '(base), duration=2)')
         self.hinge(more=held)
         report = self.hinge(colour="0.1, 0.2, 0.3")

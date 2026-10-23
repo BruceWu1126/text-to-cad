@@ -36,7 +36,7 @@ is a new placement of its result.
 
 from __future__ import annotations
 
-from cadgen.engine import configuration, memo, motion, threemf, xbf
+from cadgen.engine import configuration_sequence, mechanism_state, memo, threemf, xbf
 
 import math
 
@@ -262,11 +262,11 @@ def lyra():
 
     hand = bd.Compound(children=[link[name] for name in chain.all_links()], label="lyra")
     for name, pose in _NAMED_POSES.items():
-        configuration(hand, name, **pose)
+        mechanism_state(hand, name, **pose)
     # Each clip ends on the pose it starts from, so a player repeats it as the old looping
     # clips ran (a motion has no loop of its own).
     for name, (pose_at, duration) in MOTIONS.items():
-        motion(hand, name, _over_time(pose_at, duration), duration=duration)
+        configuration_sequence(hand, name, _over_time(pose_at, duration), duration=duration)
     return hand
 
 

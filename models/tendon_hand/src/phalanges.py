@@ -10,7 +10,7 @@ place `continuous_supports()`, the one `@memo` stage (about 20 s of kernel work)
 
 import copy
 
-from cadgen.engine import configuration, couple, memo, xbf
+from cadgen.engine import gear_pair, mechanism_state, memo, xbf
 
 import build123d as bd
 
@@ -137,11 +137,11 @@ def anatomy_layout():
     curls = []
     for finger in FINGERS:
         flexions = (f"{finger.name}_mcp_flexion", f"{finger.name}_pip", f"{finger.name}_dip")
-        couple(hand, f"{finger.name}_curl", **{name: JOINT_BY_NAME[name].limits[1] for name in flexions})
+        gear_pair(hand, f"{finger.name}_curl", **{name: JOINT_BY_NAME[name].limits[1] for name in flexions})
         curls.append(f"{finger.name}_curl")
-    couple(hand, "thumb_curl", **{name: JOINT_BY_NAME[name].limits[1] for name in ("thumb_mcp_flexion", "thumb_ip")})
-    configuration(hand, "fist", thumb_curl=1, **{curl: 1 for curl in curls})
-    configuration(hand, "point", thumb_curl=1, **{curl: 1 for curl in curls if curl != "index_curl"})
+    gear_pair(hand, "thumb_curl", **{name: JOINT_BY_NAME[name].limits[1] for name in ("thumb_mcp_flexion", "thumb_ip")})
+    mechanism_state(hand, "fist", thumb_curl=1, **{curl: 1 for curl in curls})
+    mechanism_state(hand, "point", thumb_curl=1, **{curl: 1 for curl in curls if curl != "index_curl"})
     return hand
 
 
