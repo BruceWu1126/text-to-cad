@@ -567,6 +567,8 @@ class CodeTest(unittest.TestCase):
         self.assertIn("swing", loaded.mechanism.motions)
         self.assertTrue(loaded.prototypes[0].face_colors)
         self.assertEqual(loaded.prototypes[0].material.name, materials.aluminium.name)
+        # No feature history: no element names and no closure, as the engine README says.
+        self.assertEqual((loaded.prototypes[0].face_names, loaded.prototypes[0].edge_names, loaded.closure), ({}, {}, None))
         self.assertEqual({p.name for p in self.folder.iterdir()}, {"part.step", "part.xbf"})
         revised = build(bd.Box(2, 3, 4), model="shape_part")
         self.assertTrue(revised.ok, revised.report)

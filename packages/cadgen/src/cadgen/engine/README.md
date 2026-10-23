@@ -1697,7 +1697,13 @@ outputs are written. Reusing `model="bracket"` updates `code::bracket`, just as 
 code build does. The shape's creation already happened in the calling Python
 process: only document conversion and export run in the worker. Use a decorated
 model or source text for warm replay of geometry operations and feature provenance;
-`verify=True` is refused for a supplied shape. The CLI continues to take code only.
+`verify=True` is refused for a supplied shape. With no feature history, its faces,
+edges and vertices carry no element names (a ref addresses them by ordinal,
+`part/face 3`), and its xbf holds no build closure, so it is never taken from its
+file after a restart. Each part travels as its binary BRep, base64 in the request's
+JSON line through the daemon to the worker: memory on the way is a few times the
+shape's BRep size. `name` follows the code rule, an ASCII Python identifier. The CLI
+continues to take code only.
 
 ## In-memory model addresses
 

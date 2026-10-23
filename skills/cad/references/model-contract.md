@@ -354,4 +354,6 @@ A successful server-backed build reports its model address and localhost viewer 
 including when it writes files. In Python, `cadgen.build(shape, model="part", step="part.step")`
 accepts an already-built build123d shape; its document and exports use the same worker
 writer. The operations that created that supplied shape ran in the caller and have
-no worker memo or feature provenance. Use a decorated function for warm geometry replay.
+no worker memo or feature provenance, and its faces and edges carry no element names
+(refs address them by ordinal, `part/face 3`). Use a decorated function for warm
+geometry replay and named elements.
