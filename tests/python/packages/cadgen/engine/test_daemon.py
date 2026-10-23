@@ -151,6 +151,21 @@ class ConnectTest(unittest.TestCase):
         self.assertEqual([w for w in caught if issubclass(w.category, ResourceWarning)], [])
 
 
+class InstallationTest(unittest.TestCase):
+    def test_every_name_of_the_installation_s_interpreter_reaches_one_engine(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine import daemon
+
+        folder = os.path.dirname(sys.executable)
+        names = [os.path.join(folder, name) for name in ("python", "python3", f"python3.{sys.version_info[1]}")]
+        tags = set()
+        for name in names:
+            with mock.patch.object(sys, "executable", name):
+                tags.add(daemon.socket_path())
+        self.assertEqual(len(tags), 1, "`python3 model.py` and `cadgen viewer` share one engine")
+
+
 class ListenTest(unittest.TestCase):
     def test_a_taken_port_is_refused_by_name_and_leaves_no_pool_or_recorder_behind(self) -> None:
         import socket

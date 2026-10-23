@@ -89,8 +89,11 @@ def state_dir() -> Path:
 
 
 def _tag() -> str:
-    """One daemon per installation: the interpreter and the engine it runs."""
-    material = f"{sys.executable}|{Path(__file__).resolve().parent}|{PROTOCOL}"
+    """One daemon per installation: its environment, its interpreter's version and the engine it
+    runs -- never the name the interpreter was started by (``python``, ``python3``, ``python3.12``
+    of one environment are one installation)."""
+    prefix = os.path.normcase(os.path.realpath(sys.prefix))
+    material = f"{prefix}|{sys.implementation.cache_tag}|{Path(__file__).resolve().parent}|{PROTOCOL}"
     return hashlib.sha256(material.encode()).hexdigest()[:12]
 
 
