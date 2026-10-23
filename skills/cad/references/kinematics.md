@@ -150,7 +150,8 @@ ease="cubic")` takes one of:
 every waypoint) or `linear` (constant speed). A motion is a finite clip, and a player
 repeats it: one that comes back writes its way back as waypoints. A coupling's name
 poses in waypoints and sweeps like a joint's. A motion naming a configuration or joint
-the assembly lacks fails the build.
+the assembly lacks fails the build. The CAD Viewer plays an `.xbf`'s motions from its Motion
+section (play, pause, scrub, loop, speed), so `cadgen viewer` is where to review one.
 
 Every `@glb` and `cadgen export ... model.glb` carries each motion as a glTF
 animation of its name, keyed so it stays within 1e-3 of the model's size of the true

@@ -613,6 +613,19 @@ pairs (`xbfKinematics.js`), a geared pair written through its gear, and its knob
 a STEP's are (`xbfJointHandles.js`). A pair the engine could not keep a value for is said in the
 section, under the rows.
 
+A document with motions has a **Motion** section after them: the shell's routine transport
+(`kit/tools/playbar/AnimationSection.jsx`, named by its runtime's `noun`) over `useXbfMotion.js` —
+the motions by name, each with its duration, then Play or Pause, the scrubber and Playback settings
+(Speed, Loop, Autoplay), Reset in its heading — and Preview's playbar plays Preview's own. Each frame
+is the motion's pair values at the clock's time, interpolated as AP242 says (`xbfMotion.js` in core:
+linear; synchronous, each step eased in and out with every pair arriving together; a function
+motion's stored samples, linear between them; the clip finite, repeated while Loop is on), the same
+values the engine's GLB baker keys (`xbfMotion.test.js` holds them to its bake), posed through
+Position's forward kinematics. While a motion owns the pose (from a play, a scrub or a choice of
+motion until Reset) Position shows its frame read-only and Select draws no knobs; Reset gives the
+pose back to Position, whose own pose was left untouched. Explode, Clip, Measure, the annotations,
+the selection and what is hidden or isolated stay as they are throughout.
+
 What an `.xbf`'s selection copies -- a chip, Copy Reference, Copy Prompt -- is the
 engine's canonical ref of each thing, the file's path first, the ref `cadgen inspect` answers and
 `select` labels its shapes with (`cadgen.engine.refs`): a part or subassembly by its label where that
@@ -665,7 +678,8 @@ a STEP's, is measured the first time Explode is used).
 
 Explode, a routine, Position and Clip are one motion at a time
 (`kit/tools/model-effects/motionExclusion.js`): the one SET off its default — by value, never
-by a tool taken up — puts the others back. An engine document has Explode, Position and Clip;
+by a tool taken up — puts the others back. An engine document has Explode and Position (its
+motions set neither aside: a motion owns the pose while it plays and gives Position's back);
 a GLB Explode, its routine and Clip; a robot Position and Clip; an STL or a 3MF only Clip.
 
 ## Host integration

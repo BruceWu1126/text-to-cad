@@ -40,14 +40,16 @@ import { XBF_DECLINED_LIVE_COMMANDS, XBF_TOOL, XBF_TOOL_MODES } from "./tools.js
 import { xbfLookSubject } from "./xbfLookAt.js";
 import { readXbfView, xbfViewSignatures, xbfViewSlices } from "./xbfViewSlices.js";
 import { useXbfScene } from "./useXbfScene.js";
+import { useXbfMotion } from "./useXbfMotion.js";
 
 // An engine document in the viewer, exactly as a STEP is: the same tools in the same order
 // (Select with its filter, Pencil, Shapes, Measure, Explode, Clip), the same selection (Parts, Faces and
 // Edges as the filter ticks them, a collapsed assembly picked as a unit, a part's faces and edges
 // once it is open, Group faces and Group edges), the same file sidebar (Model tree, Position), the
-// same menus, the same Quick Edit chips. What differs is underneath: the document is read from
-// the engine that serves it, and every face and edge is to hand from the start, so nothing waits
-// on topology.
+// same menus, the same Quick Edit chips; and, for a document with motions, the file sidebar's
+// Motion section, the shell's routine transport playing them (`useXbfMotion.js`). What differs is
+// underneath: the document is read from the engine that serves it, and every face and edge is to
+// hand from the start, so nothing waits on topology.
 
 const NO_REFERENCES = Object.freeze([]);
 const EMPTY = Object.freeze([]);
@@ -162,8 +164,28 @@ function XbfSurface({ view, data }) {
   const pose = useXbfPose(kinematics);
   const { values: poseValues, applied: poseApplied, preset: posePreset, couplings: poseCouplings,
     setValues: setPoseValues, choosePreset, reset: resetPose } = pose;
+  // ---- Motion: the document's motions played (`useXbfMotion.js`) ------------------------------
+  // While a motion owns the pose (playing, or paused off its start, until Reset lets go of it) its
+  // frames pose the scene and Position shows them, read-only; Position's own pose is untouched
+  // underneath and posed again as the motion lets go. Every other tool's state stays as it is.
+  const sceneRef = useRef(scene);
+  sceneRef.current = scene;
+  const positionRef = useRef(null);
+  positionRef.current = { values: poseValues, applied: poseApplied };
+  const poseFrame = useCallback((values) => {
+    const now = sceneRef.current;
+    if (!now) return;
+    const position = positionRef.current;
+    now.setPose(values || (position.applied ? position.values : null));
+    if (!values) shellRef.current?.syncSceneBounds?.();
+    shellRef.current?.requestRender?.();
+  }, []);
+  const motion = useXbfMotion(kinematics, poseFrame);
+  const motionOwns = Boolean(motion?.enabled);
+  const motionRef = useRef(motion);
+  motionRef.current = motion;
   useEffect(() => {
-    if (!scene || !poseValues) return;
+    if (!scene || !poseValues || motionRef.current?.enabled) return;
     scene.setPose(poseApplied ? poseValues : null);
     shellRef.current?.syncSceneBounds?.();
     requestRender();
@@ -172,12 +194,21 @@ function XbfSurface({ view, data }) {
   // built, as `cadgen snapshot --pose` takes it (`jointValues`), and the parts hidden and isolated as
   // its `--display` takes them (`hidden`, `isolated`), each node as Copy Prompt copies it and the
   // hidden parts by the fewest nodes that name them -- so the view ink was drawn in is drawn as it was.
-  const poseGiven = useMemo(() => (poseApplied && kinematics && poseValues ? xbfPoseGiven(kinematics, poseValues, poseCouplings) : null),
+  // While a motion owns the pose, the pose on screen is its frame.
+  const positionGiven = useMemo(() => (poseApplied && kinematics && poseValues ? xbfPoseGiven(kinematics, poseValues, poseCouplings) : null),
     [poseApplied, kinematics, poseValues, poseCouplings]);
+  const motionGiven = useCallback((at) => {
+    const values = motionRef.current?.valuesAt(at);
+    return values && kinematics ? xbfPoseGiven(kinematics, values) : null;
+  }, [kinematics]);
+  const poseGiven = useMemo(() => (motionOwns ? motionGiven(motion.elapsedSec) : positionGiven),
+    [motionOwns, motion?.elapsedSec, motion?.activeClipId, motionGiven, positionGiven]);
   const viewState = useCallback(() => {
     const refs = ids => xbfNodeRefs({ scene, tree, resource: shellRef.current?.frame.resource, ids });
-    return { jointValues: poseGiven, hidden: refs(xbfCoveringIds(tree, hiddenIds)), isolated: refs(isolatedIds) };
-  }, [poseGiven, scene, tree, hiddenIds, isolatedIds]);
+    const playing = motionRef.current?.enabled && motionRef.current.playing;
+    return { jointValues: playing ? motionGiven(motionRef.current.clock.getAnimationClock()) : poseGiven,
+      hidden: refs(xbfCoveringIds(tree, hiddenIds)), isolated: refs(isolatedIds) };
+  }, [poseGiven, motionGiven, scene, tree, hiddenIds, isolatedIds]);
 
   // ---- this document's own slices of the file's view: the tree and the pose --------------------
   // As a STEP's were (`xbfViewSlices.js`): what is open, hidden and isolated in the Model tree, and
@@ -234,7 +265,7 @@ function XbfSurface({ view, data }) {
   const [edgesDrawn, setEdgesDrawn] = useState(true);
   const shell = useRendererShell({
     view, services: document.services, resource: document.resource, modelKey: document.modelKey, revisionKey: loaded.revision,
-    features, toolModes: XBF_TOOL_MODES, tool, previewable: true, preview, scene, sceneEffects: true,
+    features, toolModes: XBF_TOOL_MODES, tool, previewable: true, preview, scene, sceneEffects: true, animation: motion,
     // A build writing the file is the model on screen updating, its stage the progress
     // (`progress.py`'s frame), until it lands or fails.
     load: { busy: loaded.busy && !scene, updating: loaded.busy && Boolean(scene), editPending: Boolean(loaded.building),
@@ -267,12 +298,13 @@ function XbfSurface({ view, data }) {
   useDeclinedSelectReference(document);
   const ensureSelect = useCallback(() => { if (shellRef.current?.toolMode !== XBF_TOOL.SELECT) shellRef.current?.selectTool(XBF_TOOL.SELECT); }, []);
 
-  // ---- one motion at a time: Explode and the pose ------------------------------------------
+  // ---- one motion at a time: Explode and the pose (a motion playing sets neither aside) -------
   const { view: viewSettings, store } = shell.viewSettings;
   const explodeApplied = Boolean(viewSettings.exploded?.enabled && viewSettings.exploded.amount > 0);
   useMotionExclusion(document.modelKey, {
     explode: { applied: explodeApplied, reset: () => store.patch(EXPLODE_OFF) },
-    position: { applied: poseApplied, reset: resetPose }
+    // Explode set while a motion owns the pose leaves Position's pose for the motion to give back.
+    position: { applied: poseApplied, reset: () => { if (!motionRef.current?.enabled) resetPose(); } }
   });
 
   // The edges the display mode draws, as the view resolved them; Preview's scene draws none.
@@ -293,7 +325,15 @@ function XbfSurface({ view, data }) {
   useEffect(() => { scene?.setLineRegistry(viewportRef.current?.runtimeRef.current || null); });
   const previewScene = usePreviewScene(scene, previewing);
   useEffect(() => { previewScene?.setEdgeLook({ enabled: false }); }, [previewScene]);
-  const previewView = useMemo(() => ({ scene: previewScene }), [previewScene]);
+  // Preview's own motion, on its own scene: at rest as Preview opens, let go as it closes.
+  const previewSceneRef = useRef(previewScene);
+  previewSceneRef.current = previewScene;
+  const previewFrame = useCallback((values) => {
+    previewSceneRef.current?.setPose(values);
+    shellRef.current?.frame.previewViewRef.current?.requestRender?.();
+  }, []);
+  const previewMotion = useXbfMotion(previewScene?.kinematics || null, previewFrame);
+  const previewView = useMemo(() => ({ scene: previewScene, animation: previewMotion }), [previewScene, previewMotion]);
 
   // ---- the tree's actions --------------------------------------------------------------------
   const toggleExpanded = useCallback(id => setExpandedIds(now => (now.includes(id) ? now.filter(item => item !== id) : [...now, id])), []);
@@ -607,8 +647,8 @@ function XbfSurface({ view, data }) {
   const runtimeOf = () => viewportRef.current?.runtimeRef.current;
   const measureSelect = measureSelectHandlers(measure, runtimeOf, clearSelection, { picks: selects(selectFilter, "measurement") });
 
-  // Position's knobs: Select's, while its filter ticks Position, with nothing exploded.
-  const knobsShown = selectActive && posable && selects(selectFilter, "position") && !explodeApplied;
+  // Position's knobs: Select's, while its filter ticks Position, with nothing exploded and no motion owning the pose.
+  const knobsShown = selectActive && posable && selects(selectFilter, "position") && !explodeApplied && !motionOwns;
   const handles = useMemo(() => (knobsShown && poseValues ? xbfJointHandles({ kinematics, rows: positionRows, values: poseValues, scene,
     onChange: (row, value) => { const written = writeXbfPosition(poseValues, row, value); if (written) setPoseValues(written); } }) : null),
   [knobsShown, kinematics, positionRows, poseValues, scene, setPoseValues]);
@@ -627,7 +667,7 @@ function XbfSurface({ view, data }) {
   const sidebar = scene && (assembly || kinematics) ? <>
     {assembly ? <XbfModelTree key={document.modelKey} tree={tree} active={!previewing} disabled={shell.idle} mode={shape}
       selectedIds={selected} onClearSelection={clearSelection} partControls={partControls} /> : null}
-    {kinematics ? <XbfPositionSection kinematics={kinematics} values={poseValues || {}} couplings={poseCouplings} preset={posePreset}
+    {kinematics ? <XbfPositionSection kinematics={kinematics} motion={motionOwns ? motion : null} values={poseValues || {}} couplings={poseCouplings} preset={posePreset}
       changed={poseApplied} onValues={setPoseValues} onPreset={choosePreset} onReset={resetPose} /> : null}
   </> : null;
 
