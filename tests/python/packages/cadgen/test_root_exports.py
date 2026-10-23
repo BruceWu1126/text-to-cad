@@ -21,7 +21,7 @@ HEAVY = ("OCP", "build123d")
 ENGINE = ("model", "xbf", "step", "glb", "stl", "threemf", "dxf", "memo", "Material", "materials", "paint",
           "read_step", "read_xbf", "read_mesh")
 VERBS = ("export", "snapshot", "inspect")
-ROOT = (*ENGINE, *VERBS, "__version__", "build123d")
+ROOT = (*ENGINE, *VERBS, "__version__")
 # The names that are the standards' rather than the engine's.
 NAMESPACES = {
     "cadgen.ap242": ("mechanism_state", "configuration_sequence", "gear_pair", "rack_and_pinion_pair", "screw_pair"),
@@ -69,7 +69,7 @@ class RootExports(unittest.TestCase):
         # ``build`` among them: a model builds by a decorated function's call, never cadgen.build (law 12).
         for name in ("build", "read_scene", "AssemblyHelper", "label_shape", "revolute", "compound_from_instances",
                      "mechanism_state", "animation", "select", "report", "track", "serve", "status", "stop",
-                     "daemon", "srgb", "srgb_to_linear", "linear_to_srgb"):
+                     "daemon", "srgb", "srgb_to_linear", "linear_to_srgb", "build123d"):
             with self.subTest(name=name), self.assertRaises(AttributeError) as caught:
                 getattr(cadgen, name)
             self.assertEqual(str(caught.exception), f"module 'cadgen' has no attribute {name!r}")
@@ -87,12 +87,14 @@ class RootExports(unittest.TestCase):
 
     def test_model_body_helpers_do_not_import_the_cad_stack(self):
         """`from cadgen import flatten` sits in a model's MODULE BODY, so the module behind it
-        must defer the kernel the way `cadgen.build123d` does -- or every such model pays the
-        ~2.5s import in the process that only asks the daemon to build it."""
+        must defer the kernel -- its `import build123d` bound lazily (`_internal/lazy_kernel.py`)
+        -- or every such model pays the ~2.5s import in the process that only asks the daemon to
+        build it."""
         code = (
             "import sys, cadgen.flatten;"
             "from cadgen import flatten;"
-            f"print('HEAVY:' + ','.join(m for m in {HEAVY!r} if m in sys.modules))"
+            "from cadgen._internal.lazy_kernel import loaded;"
+            f"print('HEAVY:' + ','.join(m for m in {HEAVY!r} if loaded(m)))"
         )
         proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stderr)

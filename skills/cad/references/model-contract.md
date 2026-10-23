@@ -44,6 +44,12 @@ python src/bracket.py
   its relative imports (`from ..lib.dims import WIDTH`) work under
   `python proj/parts/block.py` and `python -m proj.parts.block` alike. An edit to any
   module the script imports is read on the next build.
+- **`import build123d as bd` costs nothing until it is used.** cadgen makes the import
+  of `build123d` (and `OCP`) lazy in the environment it is installed in: the module binds
+  at once and the kernel loads on the first attribute anything reads from it, in the
+  worker that builds the model. `from build123d import Box` reads the name, so it loads
+  the kernel at that line; so does a kernel value made at module level (a `bd.Color`
+  palette, a `bd.Align.CENTER` default). Write build123d attribute-style.
 - **A model takes no parameters and returns a build123d shape**: a part, or a
   `Compound` of labelled children (an assembly). A drawing returns 2D geometry
   (`$dxf`). A variant is a second model function; values shared between models live

@@ -99,11 +99,12 @@ class SignatureTest(unittest.TestCase):
         self.assertEqual(found["frames"][-1], {"file": "cadgen/_internal/generation.py", "function": "broke", "line": 9})
 
     def test_what_a_model_asks_wrongly_of_cadgens_helpers_is_its_own_mistake(self) -> None:
-        # cadgen's frame is the innermost, but only to name what the model asked for: a name build123d does
-        # not have (still with Python's suggestion), a colour that is none.
+        # A name build123d does not have, asked of the module cadgen's finder bound lazily (still with Python's
+        # suggestion), and a colour that is none: the person's mistakes, never cadgen's crash.
         import traceback
 
-        from cadgen import build123d as bd
+        import build123d as bd
+
         from cadgen.engine import Material
 
         missing = _caught(_user_calls(lambda: bd.Boxx))

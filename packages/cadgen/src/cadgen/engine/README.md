@@ -20,6 +20,13 @@ if __name__ == "__main__":
     arm()
 ```
 
+`import build123d as bd` binds at once: cadgen makes the import of `build123d` and `OCP` lazy
+(its `cadgen-lazy-kernel.pth`, run at interpreter start in the environment cadgen is installed
+in, and `import cadgen` in a checkout), so the kernel loads on the first attribute anything
+reads from it -- in the worker, for a build the daemon runs, and never in a run of the script
+the engine finds current. `from build123d import Box` reads the name, and loads the kernel at
+that line.
+
 A function worth skipping on a later build is marked `@memo` (**Memo functions**): an
 assembly's parts, a stage of a long derivation. It writes no file; the model that calls
 it does.

@@ -118,6 +118,18 @@ if "site-packages" not in where.parts:
 print(f"   {cadgen.__version__} at {where.parent}")
 PY
 
+step "import build123d is lazy from interpreter start: the wheel's .pth is in site-packages"
+scratch_sp="$("$VENV/bin/python" -c 'import site; print(site.getsitepackages()[0])')"
+[ -f "$scratch_sp/cadgen-lazy-kernel.pth" ] || fail "cadgen-lazy-kernel.pth is not in $scratch_sp"
+[ "$(cat "$scratch_sp/cadgen-lazy-kernel.pth")" = "import cadgen._internal.lazy_kernel" ] \
+  || fail "cadgen-lazy-kernel.pth does not import the finder"
+# Bound, not loaded: the kernel is untouched until an attribute is read from it.
+lazy="$(cd "$EMPTY" && "$VENV/bin/python" -c "import build123d as bd; import sys; print('OCP' in sys.modules)")"
+[ "$lazy" = "False" ] || fail "import build123d loaded the kernel ($lazy)"
+loaded="$(cd "$EMPTY" && "$VENV/bin/python" -c "import build123d as bd, sys; bd.Box(1, 1, 1); print('OCP' in sys.modules)")"
+[ "$loaded" = "True" ] || fail "the first attribute of build123d did not load the kernel ($loaded)"
+echo "   $scratch_sp/cadgen-lazy-kernel.pth"
+
 step "Assets resolve to the packaged runtime"
 "$VENV/bin/python" - <<'PY' || exit 1
 import sys

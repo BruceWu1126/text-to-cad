@@ -29,10 +29,17 @@ from typing import TYPE_CHECKING
 # opts out.
 from cadgen._internal.font_scan import install_font_guard as _install_font_guard
 from cadgen._internal.kernel_import_site import install as _install_kernel_import_site
+from cadgen._internal.lazy_kernel import install as _install_lazy_kernel
 from cadgen._internal.engine_telemetry import install as _install_engine_telemetry
 
 _install_kernel_import_site()
 del _install_kernel_import_site
+
+# ``import build123d as bd`` binds a module the kernel loads into on its first attribute
+# (``_internal/lazy_kernel.py``). The wheel's cadgen-lazy-kernel.pth installs it at interpreter
+# start; this covers an editable install, where that file is not placed. Idempotent.
+_install_lazy_kernel()
+del _install_lazy_kernel
 
 _install_font_guard()
 del _install_font_guard
@@ -60,7 +67,6 @@ __all__ = [
     "__version__",
     *_ENGINE,
     *_VERBS,
-    "build123d",
 ]
 
 
@@ -73,13 +79,6 @@ def __getattr__(name: str):
         from cadgen.engine import api
 
         return getattr(api, name)
-    if name == "build123d":
-        # `from cadgen import build123d as bd` -- the lazy transparent re-export.
-        # Importing the submodule is cheap; the real build123d import happens on
-        # first attribute touch inside cadgen.build123d.
-        import cadgen.build123d as _bd
-
-        return _bd
     if name == "__version__":
         return _resolve_version()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -89,7 +88,6 @@ if TYPE_CHECKING:
     # Mirrors the lazy __getattr__ above so type checkers and editors see the root exports
     # without importing OCP. Every name here must have a branch there, and comes from the
     # module that defines it.
-    from cadgen import build123d
     from cadgen.engine import materials
     from cadgen.engine.api import export, inspect, snapshot
     from cadgen.engine.materials import Material

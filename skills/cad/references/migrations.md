@@ -89,6 +89,7 @@ The document is what the viewer follows build by build, what refs and
 | `cadgen.couple(name, {dof: ratio}, limits=...)` | `gear_pair`, `rack_and_pinion_pair` or `screw_pair(assembly, name, **ratios)`, by the joints' kinds, ranged by their limits |
 | `cadgen.clip(update, duration=...)` | `configuration_sequence(assembly, name, ...)` |
 | `from cadgen import report, track` | `from cadgen.engine import report, track` |
+| `from cadgen import build123d as bd`, `cadgen.build123d` | `import build123d as bd`: cadgen makes the import lazy, the kernel loading on the first attribute; `from build123d import X` loads it at that line |
 | `<name>.step.json` sidecars, `.params.js` | none: the document carries the mechanism; delete them |
 | `cadgen build SOURCE` (`--model`, `--name`, file flags), `cad_build`, an 0.8 preview's | none: no command or tool builds source text. Write the code as a decorated function in a `.py` file and run it (`python parts/x.py`); a bare `@model` keeps its document in memory, a file decorator writes its file |
 | `cadgen.build(code_or_shape, model=..., step=...)`, an 0.8 preview's | none: wrap the shape in a decorated function and call it; its document and exports are a model's like any other |

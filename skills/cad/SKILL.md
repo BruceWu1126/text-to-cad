@@ -95,6 +95,11 @@ built src/bracket.py::bracket cold in 2.33s: bodies 1 run; 6 misses, 0 hits; bod
   explicit model calls build their models and write their declared outputs; Python
   controls which calls run. Keep calls under `if __name__ == "__main__":`.
   cadgen consumes no script arguments, and never exits the caller at import time.
+- **`import build123d as bd`, and use it attribute-style** (`bd.Box`). cadgen makes the
+  import lazy: it binds at once and the kernel (~2.5 s) loads on the first attribute read,
+  in the worker that builds the model, so a run the engine finds current never loads it.
+  `from build123d import Box` reads the name at once and loads the kernel there, as does a
+  module-level kernel value (a `bd.Align.CENTER` default, a `bd.Color` constant).
 - `@model` declares a document without a file. Every file decorator implies a model.
 - `@step`, `@glb`, `@stl`, `@threemf` and `@dxf` declare translations of the
   document; `@xbf` explicitly saves that document. Every file decorator requires `out=` (or a positional output path) and takes nothing else:
