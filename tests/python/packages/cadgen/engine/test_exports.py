@@ -400,17 +400,17 @@ class ExportTest(unittest.TestCase):
                 status = cli.main(list(argv))
             return status, out.getvalue(), err.getvalue()
 
-        status, out, err = run("export", str(self.xbf), str(self.folder / "json.stl"), "--json", "--no-daemon")
+        status, out, err = run("export", str(self.xbf), str(self.folder / "json.stl"), "--json")
         self.assertEqual(status, 0, err)
         found = json.loads(out)
         self.assertEqual((found["ok"], found["source"], [(row["path"], row["kind"]) for row in found["files"]]),
                          (True, str(self.xbf), [(str(self.folder / "json.stl"), "stl")]))
         self.assertEqual(found["files"][0]["bytes"], (self.folder / "json.stl").stat().st_size)
         # Refused: under --json, its envelope on stdout and exit 1; else its words on stderr, exit 2.
-        status, out, err = run("export", str(self.xbf), str(self.folder / "board.obj"), "--json", "--no-daemon")
+        status, out, err = run("export", str(self.xbf), str(self.folder / "board.obj"), "--json")
         self.assertEqual((status, json.loads(out)["ok"], err), (1, False, ""))
         self.assertIn("an export is one of", json.loads(out)["error"])
-        status, out, err = run("export", str(self.xbf), str(self.folder / "board.obj"), "--no-daemon")
+        status, out, err = run("export", str(self.xbf), str(self.folder / "board.obj"))
         self.assertEqual((status, out), (2, ""))
         self.assertIn("an export is one of", err)
 

@@ -306,11 +306,11 @@ is explicitly restarted. Session state is memory only and is recreated after res
 
 ```
 python SCRIPT.py                             the models the script explicitly calls
-cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-daemon] [--json]
+cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--json]
                                              SRC an .xbf or a .step
 cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
                 [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
-                [--width W --height H | --size-profile P] [--no-daemon] [--json]
+                [--width W --height H | --size-profile P] [--json]
 cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
                                              every picture a Quick Edit packet (or a job file) names
 cadgen serve DOC [--port N] [--three DIR]
@@ -320,6 +320,11 @@ cadgen status [--json] | stop | daemon
 ```
 
 `python -m cadgen.engine VERB ...` takes the same verbs, the engine's own entry.
+
+Every build and every verb goes through the engine: no command runs one in its own process.
+`daemon=False` on the Python functions (`Model.build`, `export`, `snapshot`) is a seam for tests
+and debugging only: it runs in this process, cold, and no document is served, so there is no id,
+no page and nothing for `inspect` to read.
 
 A verb's `--json` (`export`, `snapshot`, `status`) prints its answer as one JSON object
 on stdout, and a failure as `{"ok": false, "error": ...}` there too, exit status 1, so a caller
@@ -594,7 +599,7 @@ document's scene brings them as its own lighting and surface rule (the bundled
 up in place of the theme's. Preview is drawn as any file's is.
 
 `cadgen snapshot` draws a document as the viewer does. The engine serves and meshes it (the
-daemon's meshes, or `--no-daemon` a server of this process), and OCCT draws it from those meshes
+daemon's meshes, or with `daemon=False` a server of this process), and OCCT draws it from those meshes
 (`render/`, below), in the look the viewer resolves for the same display settings. `--display` takes
 a mode (`solid`, `shaded`, `parts`, `xray`, `hidden-line`, `wireframe`), `exploded=A` (the parts
 moved apart as the viewer's Explode moves them, by an amount from 0 to 1; with a mode,
@@ -650,7 +655,7 @@ output; an OUT is refused. Every job is checked before anything renders (an unkn
 out of range, two outputs at one path, a file that is not there: refused by name, every file left as
 it was), and a picture that fails writes none of the job's: every picture is staged beside its
 output and moved into place only when all are drawn, and a failed snapshot leaves every existing picture as it was. Through the daemon each picture is a frame
-of the file's warm render process; `--no-daemon` serves each file once for all its pictures.
+of the file's warm render process; `daemon=False` serves each file once for all its pictures.
 `--json` prints `{"ok": true, "pictures": [what each drew]}`.
 
 **The OCCT stills.** A document is drawn by OCCT's own OpenGL renderer from the engine's meshes
@@ -666,14 +671,14 @@ the served document is patched -- a build of it, or its file rewritten -- the pr
 new version at once with the buffers of the parts it lacks: the parts it shares with the last keep
 their shapes, the new ones are made, and its scene is made again before any picture asks. It goes
 with the daemon, and after a picture that leaves it over the workers' memory cap it says so
-(`retired`) and exits. `--no-daemon`, and a model's own document in its worker, draw in that
+(`retired`) and exits. `daemon=False`, and a model's own document in its worker, draw in that
 process. The context is a hidden window: Cocoa on macOS, an X server's (Xvfb on a machine with no
 screen) or OCCT's EGL on Linux, a hidden window on Windows; where none can be made the snapshot
 fails saying so. Nothing is written but OUT.
 
 `SRC` may also be a file the viewer opens that is no document, each read by its reader
 (`formats/`) and drawn by OCCT in the same look, through the daemon by a render process of its own
-per file (read again when a file it read changes) or `--no-daemon` in this process:
+per file (read again when a file it read changes) or with `daemon=False` in this process:
 
 - **A mesh file** (`.stl`, `.3mf`, `.glb`) becomes a structure and part buffers as a document's are,
   so the modes, the camera fit, the grid, clip, Explode, Preview and the annotation are a

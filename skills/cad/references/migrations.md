@@ -68,7 +68,8 @@ The document is what the viewer follows build by build, what refs and
 | `@stl(mesh_tolerance=..., mesh_angular_tolerance=...)`, `--mesh-tolerance` | none: every mesh is made at FreeCAD's default tolerance |
 | `python model.py --force`, `--json`, `--verbose` | `python model.py` takes no options. `CADGEN_ENGINE_MEMO=0` builds without memo hits; `Model.build()` returns the report as data; `Model.build(verify=True)` checks every replay |
 | `python model.py --profile` | `Model.build(profile=True)`. Measures actual worker execution with normal cache hits; skipped work has no timings |
-| `python model.py --no-daemon` | `Model.build(daemon=False)` from Python |
+| `python model.py --no-daemon` | none: every build goes through the engine (`Model.build(daemon=False)` is a seam for tests and debugging: cold, no document served) |
+| `cadgen export ... --no-daemon`, `cadgen snapshot ... --no-daemon` | the same command without the flag: every verb goes through the engine. `export(..., daemon=False)` and `snapshot(..., daemon=False)` from Python are a seam for tests and debugging only: in this process, cold, with no id, page or `inspect` |
 | `cadgen step build IN.step OUT.step` | `cadgen export IN.step OUT.step`, or `OUT.xbf` to read it in models |
 | `cadgen step compile` | none: the viewer and snapshots read a STEP as it is |
 | `cadgen stl build`, `cadgen 3mf build`, `cadgen glb build` | `cadgen export XBF/model.xbf OUT.stl` (`.3mf`, `.glb`), or from a STEP |

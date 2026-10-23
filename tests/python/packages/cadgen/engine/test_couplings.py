@@ -202,6 +202,20 @@ def _run(*argv: str) -> tuple[int, str]:
     return code, err.getvalue()
 
 
+def _refused(source, out, pose: str) -> str:
+    """The words a pose named wrong is refused with, by the export itself, before anything is written:
+    through the seam (``daemon=False``), where the refusal keeps its type (the daemon passes its words)."""
+    from cadgen.engine import api
+    from cadgen.engine.cli import _pose
+    from cadgen.engine.export import ExportRefused
+
+    try:
+        api.export(source, out, pose=_pose(pose), daemon=False)
+    except (ExportRefused, ValueError) as error:
+        return str(error)
+    raise AssertionError(f"{pose} was not refused")
+
+
 class _Folder(unittest.TestCase):
     def setUp(self) -> None:
         from cadgen.engine.kernel import memo
@@ -330,7 +344,7 @@ class FingerTest(_Folder):
             if name == "by_hand":
                 self.build("index_finger", BARE)
             out = self.folder / f"{name}.step"
-            code, err = _run("export", str(path), str(out), "--no-daemon", "--pose", pose)
+            code, err = _run("export", str(path), str(out), "--pose", pose)
             self.assertEqual(code, 0, err)
             posed[name] = _vertices(document.Loaded(out), "distal")
         np.testing.assert_allclose(posed["coupled"], posed["by_hand"], atol=1e-6)
@@ -347,8 +361,7 @@ class FingerTest(_Folder):
                              ["joint 'index_pip' moves only with its coupling 'index_curl'"]),
                             ('{"index_curl": [0.5, 1]}', ["coupling 'index_curl' takes a number"]),
                             ('{"crul": 1}', ["names no joint 'crul'", "its couplings: index_curl"])):
-            code, err = _run("export", path, str(out), "--no-daemon", "--pose", pose)
-            self.assertEqual(code, 2, pose)
+            err = _refused(path, out, pose)
             for word in words:
                 self.assertIn(word, err, pose)
             self.assertFalse(out.exists(), pose)
@@ -438,17 +451,16 @@ class DoorTest(_Folder):
         np.testing.assert_allclose(values["door_left"], (-35.0, 20.0), atol=1e-9)
         np.testing.assert_allclose(values["door_right"], (35.0, 20.0), atol=1e-9)
         half = self.folder / "half.step"
-        code, err = _run("export", str(self.folder / "XBF/hypercar.xbf"), str(half), "--no-daemon", "--pose",
+        code, err = _run("export", str(self.folder / "XBF/hypercar.xbf"), str(half), "--pose",
                          '{"left": -35, "right": 35}')
         self.assertEqual(code, 0, err)
         # Its joint is posed through it alone; the car with no coupling poses them by hand.
         by_hand = self.folder / "by_hand.step"
         pose = '{"door_left": [-35, 20], "door_right": [35, 20]}'
-        code, err = _run("export", str(self.folder / "XBF/hypercar.xbf"), str(by_hand), "--no-daemon", "--pose", pose)
-        self.assertEqual(code, 2)
+        err = _refused(str(self.folder / "XBF/hypercar.xbf"), by_hand, pose)
         self.assertIn("joint 'door_left' moves only with its coupling 'left'", err)
         self.build("hypercar", HYPERCAR.split("    screw_pair(car")[0] + "    return car\n")
-        self.assertEqual(_run("export", str(self.folder / "XBF/hypercar.xbf"), str(by_hand), "--no-daemon", "--pose",
+        self.assertEqual(_run("export", str(self.folder / "XBF/hypercar.xbf"), str(by_hand), "--pose",
                               pose)[0], 0)
         for door in ("door_left", "door_right"):
             np.testing.assert_allclose(_vertices(document.Loaded(half), door),

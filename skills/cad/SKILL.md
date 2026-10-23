@@ -43,11 +43,8 @@ running. Each command's `--help` lists its flags.
 
 Every build runs in the engine's daemon, which the first build starts: one warm
 worker per model script, kept between runs. `cadgen status` shows the workers and
-what each is building; `cadgen stop` stops the daemon. Where no daemon can run (a
-sandbox without local sockets), `cadgen export`, `cadgen snapshot` and `cadgen
-build` take `--no-daemon`, and a model builds in your own process from Python,
-in its script's folder: `python -c "import bracket; bracket.bracket.build(daemon=False)"`.
-Such a build is cold every time.
+what each is building; `cadgen stop` stops the daemon. Every build and every verb
+goes through the engine.
 
 Command-line paths, and the paths `read_xbf` and `read_step` take, are
 relative to the working directory, as are a model's own file reads unless anchored

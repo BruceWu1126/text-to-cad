@@ -123,6 +123,20 @@ def _run(*argv: str) -> tuple[int, str, str]:
     return code, out.getvalue(), err.getvalue()
 
 
+def _refused(source, out, pose: str) -> str:
+    """The words a pose named wrong is refused with, by the export itself, before anything is written:
+    through the seam (``daemon=False``), where the refusal keeps its type (the daemon passes its words)."""
+    from cadgen.engine import api
+    from cadgen.engine.cli import _pose
+    from cadgen.engine.export import ExportRefused
+
+    try:
+        api.export(source, out, pose=_pose(pose), daemon=False)
+    except (ExportRefused, ValueError) as error:
+        return str(error)
+    raise AssertionError(f"{pose} was not refused")
+
+
 class _Folder(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-kinematics-")).resolve()
@@ -190,7 +204,7 @@ class HingeTest(_Folder):
         path = str(self.folder / "XBF/hinge.xbf")
         for pose, q in (("raised", 90.0), ('{"elbow": 45}', 45.0), ("flat", 0.0)):
             out = self.folder / f"posed-{q:g}.step"
-            code, _out, err = _run("export", path, str(out), "--no-daemon", "--pose", pose)
+            code, _out, err = _run("export", path, str(out), "--pose", pose)
             self.assertEqual(code, 0, err)
             posed = document.Loaded(out)
             self.assertTrue(_has_point(_vertices(posed, "arm"), _arm_tip(q)), pose)
@@ -205,7 +219,7 @@ class HingeTest(_Folder):
         self.assertNotIn("MECHANISM", (self.folder / "hinge.step").read_text(encoding="utf-8", errors="replace"))
         # A mesh export at a pose: the arm's node placed as the pair places it.
         glb = self.folder / "posed.glb"
-        self.assertEqual(_run("export", path, str(glb), "--no-daemon", "--pose", "raised")[0], 0)
+        self.assertEqual(_run("export", path, str(glb), "--pose", "raised")[0], 0)
         data = glb.read_bytes()
         length = int.from_bytes(data[12:16], "little")
         nodes = json.loads(data[20:20 + length])["nodes"]
@@ -218,8 +232,7 @@ class HingeTest(_Folder):
         out = self.folder / "refused.step"
         for pose, words in (('{"elbw": 10}', ["'elbw'", "elbow"]), ('{"elbow": 150}', ["'elbow'", "150", "[-10, 120]"]),
                             ("folded", ["'folded'", "flat, raised"]), ('{"elbow": [1, 2]}', ["'elbow'", "a number"])):
-            code, _out, err = _run("export", path, str(out), "--no-daemon", "--pose", pose)
-            self.assertEqual(code, 2, pose)
+            err = _refused(path, out, pose)
             for word in words:
                 self.assertIn(word, err, pose)
             self.assertFalse(out.exists(), pose)
@@ -435,7 +448,7 @@ class NestedTest(_Folder):
                          document.tree_structure(document.saved(path), path)["kinematics"])
         for pose, q in (('{"elbow": 90}', 90.0), ('{"elbow": -10}', -10.0)):
             out = self.folder / "posed.step"
-            code, _out, err = _run("export", str(path), str(out), "--no-daemon", "--pose", pose)
+            code, _out, err = _run("export", str(path), str(out), "--pose", pose)
             self.assertEqual(code, 0, err)
             self.assertTrue(_has_point(_vertices(document.Loaded(out), "arm"), _arm_tip(q)), pose)
 
@@ -449,7 +462,7 @@ class NestedTest(_Folder):
         self.assertEqual(links, {"base": [(0,)], "sub": [(1,), (1, 0)], "wheel": [(1, 1)]})
         self.assertEqual({pair.label: pair.links for pair in found.pairs}, {"mount": (0, 1), "spin": (1, 2)})
         out = self.folder / "posed.step"
-        code, _out, err = _run("export", str(path), str(out), "--no-daemon", "--pose", '{"mount": 90}')
+        code, _out, err = _run("export", str(path), str(out), "--pose", '{"mount": 90}')
         self.assertEqual(code, 0, err)
         plate = _vertices(document.Loaded(out), "plate")
         # A quarter turn about +X through z 10: the plate's corner (15, 15, 11) stands at (15, -1, 25).
