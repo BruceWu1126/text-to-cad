@@ -13,7 +13,7 @@ import math
 import re
 from pathlib import Path
 
-from cadgen.jobs import Jobs, JobError
+from cadgen.jobs import TERMINAL, Jobs, JobError
 
 
 def obj(properties, required=()):
@@ -56,7 +56,7 @@ DESCRIPTIONS = {
 
 def catalog():
     return [{"name": name, "title": name.removeprefix("cad_").capitalize() + " CAD",
-             "description": description + " Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status lasts up to 24 hours in this MCP session; restart loses it. Running file writes cannot be cancelled.",
+             "description": description + " Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
              "inputSchema": {**obj({**COMMON, **START[name]["properties"]}), "anyOf": [
                  obj({"action": {"type": "string", "enum": ["start"]}, "requestId": COMMON["requestId"],
                       **START[name]["properties"]}, ("requestId", *START[name]["required"])),
@@ -150,7 +150,32 @@ def serial(value):
     return value
 
 
+# What a session keeps of finished operations: the most recent, at most this many and this many
+# bytes of reports, so a session never refuses new work for history it holds (each report is
+# already cut to REPORT_BYTES), and the request IDs that named them, for ``request_conflict``.
+HISTORY_JOBS = 64
+HISTORY_BYTES = 32 * 1024 * 1024
+HISTORY_REQUESTS = 2048
+REPORT_BYTES = 2 * 1024 * 1024
+
+
 class Operations(Jobs):
+    def _prune(self):
+        super()._prune()
+        finished = [job for job in self.jobs.values() if job["state"] in TERMINAL]
+        kept = sum(job.get("kept", 0) for job in finished)
+        for job in sorted(finished, key=lambda job: job["finishedAt"]):
+            if len(finished) < HISTORY_JOBS and kept <= HISTORY_BYTES:
+                break
+            self.jobs.pop(job["id"], None)
+            finished.remove(job)
+            kept -= job.get("kept", 0)
+        # A request ID whose operation is gone still answers "expired" until it is the oldest.
+        for request_id in [r for r, ident in self.requests.items() if ident not in self.jobs]:
+            if len(self.requests) < HISTORY_REQUESTS:
+                break
+            del self.requests[request_id]
+
     def call(self, name, arguments):
         try:
             checked(arguments, obj({**COMMON, **START[name]["properties"]}))
@@ -185,7 +210,7 @@ class Operations(Jobs):
 
     def public(self, job):
         result = super().public(job)
-        if len(json.dumps(result).encode()) <= 2 * 1024 * 1024:
+        if len(json.dumps(result).encode()) <= REPORT_BYTES:
             return result
         # MCP transports have bounded messages. Never silently omit a long report.
         summary = result.get("result") or {}
@@ -199,6 +224,12 @@ class Operations(Jobs):
 
     def _finished(self, job):
         job.pop("arguments", None)
+        # Keep only what status can send: a long report is held as its summary, never in full.
+        public = self.public(job)
+        job.update({k: public[k] for k in ("result", "error") if k in public})
+        if "progress" not in public:
+            job.pop("progress", None)
+        job["kept"] = len(json.dumps(public).encode())
 
     def _perform(self, job, progress):
         from cadgen.engine import api
