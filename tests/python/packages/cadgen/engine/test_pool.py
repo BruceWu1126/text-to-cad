@@ -241,9 +241,9 @@ class ConnectedPoolTest(unittest.TestCase):
         for name in ("one", "two"):
             worker = daemon.pool.lease(f"{name}.py", {})
             daemon.pool.release(worker)
-            server.put(f"code::{name}", {"version": "one", "prototypes": []}, {})
-            daemon.builders[os.path.normcase(f"code::{name}")] = worker
-            server.sync(f"code::{name}")
+            server.put(_address(name), {"version": "one", "prototypes": []}, {})
+            daemon.builders[os.path.normcase(_address(name))] = worker
+            server.sync(_address(name))
             watched.append(worker)
         third = daemon.pool.lease("third.py", {})
         self.assertEqual(len(daemon.pool.workers()), 3, "the cap is exceeded, not met by an eviction")
