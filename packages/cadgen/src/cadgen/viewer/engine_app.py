@@ -174,12 +174,11 @@ class EngineApp:
                 ('referrer-policy', 'no-referrer')])
         if request.path == '/mcp' and self.session_factory is not None:
             return self.mcp().handle(request, response)
-        if request.path == '/' and (request.query.get('doc') in self.server.served
-                                    or request.query.get('doc') in self.server.model_loaders):
+        if request.path == '/' and self.server.holds(request.query.get('doc')):
             from cadgen.engine.addresses import parse
 
             # The landing link selects an address without meshing it on the HTTP thread.
-            path = next(path for path, ident in self.server.idents.items() if ident == request.query.get('doc'))
+            path = self.server.path_of(request.query.get('doc'))
             address = parse(path)
             start = str(address.script.parent) if address and address.script else os.getcwd() if address else str(path.parent)
             launch = self.launch({'start': start})

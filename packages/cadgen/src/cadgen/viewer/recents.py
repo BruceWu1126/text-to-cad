@@ -15,6 +15,10 @@ one line under an exclusive lock, readers skip lines they cannot parse and event
 they do not know, and compaction writes a new file and renames it into place
 under the same lock. Nothing is ever migrated in place.
 
+A model is named by its canonical path (``cadgen.engine.ids.canonical``), the engine's: the
+viewer's library route, the one writer, keys every path so, so a symlink and its target, or two
+spellings of one file, are one entry.
+
 A model's picture is a ``picture`` event: the model framed whole from the default
 direction at a card's size, on transparency, taken once its view has settled; its
 time is when it was taken (``pictured``), so a file changed since has an old one.
