@@ -267,6 +267,26 @@ class ServedStepTest(unittest.TestCase):
         self.assertNotIn(ident, self.server.rereading, "and nothing reads the file again until it changes")
 
 
+class ServerUrlTest(unittest.TestCase):
+    def test_a_wildcard_bind_reports_a_loopback_url_and_keeps_its_bind(self) -> None:
+        # `cadgen viewer --host 0.0.0.0` printed and opened http://0.0.0.0:<port>, which Chrome
+        # refuses. A stand-in listener answers the bind: binding 0.0.0.0 in a test would expose a port.
+        from types import SimpleNamespace
+
+        binds = []
+
+        def listener(server, host, port):
+            binds.append(host)
+            return SimpleNamespace(server_address=(host, 4242))
+
+        for host, url in (("0.0.0.0", "http://127.0.0.1:4242"), ("127.0.0.1", "http://127.0.0.1:4242"),
+                          ("::", "http://[::1]:4242"), ("::1", "http://[::1]:4242")):
+            server = Server(host=host, mesh_mode="inline", http_factory=listener)
+            self.addCleanup(server.mesher.stop)
+            self.assertEqual(server.url, url, host)
+        self.assertEqual(binds, ["0.0.0.0", "127.0.0.1", "::", "::1"], "the bind is the address asked for")
+
+
 class MeshCacheTest(unittest.TestCase):
     def test_the_least_recently_used_buffer_goes_past_the_cap(self) -> None:
         from cadgen.engine.serve import MeshCache

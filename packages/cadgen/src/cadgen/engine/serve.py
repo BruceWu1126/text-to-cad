@@ -401,6 +401,18 @@ def _stat(path: Path | str) -> tuple | None:
 # --- the server --------------------------------------------------------------------------
 
 
+def reachable_host(host: str) -> str:
+    """Where a client on this machine reaches a listener bound on ``host``, as a URL spells it.
+
+    A wildcard bind (every interface: ``0.0.0.0``, ``""``, ``::``) is reached at loopback: a
+    browser refuses to open ``http://0.0.0.0:...``. The bind itself is unchanged."""
+    if host in ("", "0.0.0.0"):
+        return "127.0.0.1"
+    if host == "::":
+        return "[::1]"
+    return f"[{host}]" if ":" in host else host
+
+
 class Server:
     def __init__(self, port: int = 0, three: str | None = None, touch: Callable[[], None] = lambda: None,
                  host: str = "127.0.0.1", mesh_mode: str | None = None,
@@ -470,7 +482,7 @@ class Server:
             raise
         self.http.daemon_threads = True
         self.port = self.http.server_address[1]
-        self.url = f"http://{host}:{self.port}"
+        self.url = f"http://{reachable_host(host)}:{self.port}"
         self.thread: threading.Thread | None = None
 
     def start(self) -> None:
