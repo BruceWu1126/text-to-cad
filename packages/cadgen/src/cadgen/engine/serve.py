@@ -197,6 +197,23 @@ def _timed(shape: Any, parallel: bool) -> tuple[bytes, dict[int, str], float]:
     return found.to_bytes(), found.unmeshed, time.perf_counter() - started
 
 
+def exit_with_parent() -> None:
+    """A pool process's start (meshing, reading): it exits once the process that started it is
+    gone, however that one ended -- ``cadgen stop``, a signal, a crash -- so no pool process
+    outlives its engine (or its worker) holding the kernel's memory."""
+    import multiprocessing
+
+    parent = multiprocessing.parent_process()
+    if parent is None:
+        return
+
+    def watch() -> None:
+        parent.join()
+        os._exit(0)
+
+    threading.Thread(target=watch, name="cadgen-parent-watch", daemon=True).start()
+
+
 def _ready() -> bool:
     """A pool process's first job: import the kernel, so the first part waits on nothing."""
     import cadgen.engine.mesh  # noqa: F401
@@ -226,7 +243,7 @@ class Mesher:
                 import multiprocessing
 
                 self._processes = concurrent.futures.ProcessPoolExecutor(
-                    self.workers, mp_context=multiprocessing.get_context("spawn"))
+                    self.workers, mp_context=multiprocessing.get_context("spawn"), initializer=exit_with_parent)
                 for _ in range(self.workers):
                     self._processes.submit(_ready)
             return self._processes
@@ -302,6 +319,7 @@ def _pose_structure(structure: dict, pose: Any) -> dict:
 
 def _reader_ready() -> None:
     """A reader process's start: the kernel and the reader imported, so its read waits on nothing."""
+    exit_with_parent()
     import cadgen.engine.document  # noqa: F401
     import cadgen.engine.mesh  # noqa: F401
 

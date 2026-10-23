@@ -1012,6 +1012,12 @@ def main(argv: list[str] | None = None) -> int:
         temporary.write_text(f"{port} {daemon.token}\n", encoding="utf-8")
         replace_atomic(temporary, port_path())
     server.settimeout(0.5)
+    if not WINDOWS:
+        import signal
+
+        # A terminate (a logout, ``kill``) stops the daemon as ``cadgen stop`` does: its workers,
+        # pools, socket and listener go with it.
+        signal.signal(signal.SIGTERM, lambda _signum, _frame: daemon.stopping.set())
     threading.Thread(target=daemon.watch, daemon=True).start()
     try:
         while not daemon.stopping.is_set():

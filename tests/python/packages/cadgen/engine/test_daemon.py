@@ -166,6 +166,19 @@ class InstallationTest(unittest.TestCase):
         self.assertEqual(len(tags), 1, "`python3 model.py` and `cadgen viewer` share one engine")
 
 
+class PoolExitTest(unittest.TestCase):
+    def test_a_pool_process_exits_when_its_engine_dies_without_cleaning_up(self) -> None:
+        probe = ("import os; from cadgen.engine.serve import Mesher; mesher = Mesher('processes', workers=1); "
+                 "print(mesher.processes().submit(os.getpid).result(), flush=True); os._exit(0)")
+        done = engine_daemon.run([sys.executable, "-c", probe], env={**os.environ, "PYTHONPATH": str(SRC)})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        orphan = int(done.stdout.split()[-1])
+        deadline = time.monotonic() + 30
+        while engine_daemon._alive(orphan):
+            self.assertLess(time.monotonic(), deadline, "the pool process outlived the process that started it")
+            time.sleep(0.05)
+
+
 class ListenTest(unittest.TestCase):
     def test_a_taken_port_is_refused_by_name_and_leaves_no_pool_or_recorder_behind(self) -> None:
         import socket
@@ -627,6 +640,21 @@ if __name__ == '__main__':
         self.assertEqual((first, again), ({"ok": True}, {"ok": True}))
         self.assertTrue(status["serving"]["url"].startswith("http://127.0.0.1:"))
         self.assertEqual(status["serving"]["documents"], [])
+
+    @unittest.skipIf(os.name == "nt", "a terminate signal is POSIX's")
+    def test_a_terminated_daemon_stops_as_stop_does(self) -> None:
+        import signal
+
+        probe = ("import json; from cadgen.engine.client import request; request({'op': 'warm'}); "
+                 "print(request({'op': 'status'})['pid'])")
+        done = engine_daemon.run([sys.executable, "-c", probe], cwd=self.folder, env=self.env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        pid = int(done.stdout.split()[-1])
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.monotonic() + 30
+        while engine_daemon._alive(pid) or any(self.state.glob("*.sock")):
+            self.assertLess(time.monotonic(), deadline, "the daemon shut down and removed its socket")
+            time.sleep(0.05)
 
     def test_an_idle_daemon_exits(self) -> None:
         env = {**self.env, "CADGEN_ENGINE_IDLE": "0.5"}
