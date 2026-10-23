@@ -188,6 +188,18 @@ class InstallationTest(unittest.TestCase):
                 tags.add(daemon.socket_path())
         self.assertEqual(len(tags), 1, "`python3 model.py` and `cadgen viewer` share one engine")
 
+    def test_a_relative_and_an_absolute_launch_reach_one_engine(self) -> None:
+        # `../../.venv/bin/python model.py` from a model folder, and the absolute path.
+        probe = "from cadgen.engine import daemon; print(daemon.socket_path())"
+        env = {**os.environ, "PYTHONPATH": str(SRC)}
+        with tempfile.TemporaryDirectory() as folder:
+            folder = os.path.realpath(folder)
+            relative = os.path.relpath(sys.executable, folder) if os.path.splitdrive(sys.executable)[0].lower() \
+                == os.path.splitdrive(folder)[0].lower() else sys.executable
+            found = {subprocess.run([command, "-c", probe], cwd=folder, env=env, capture_output=True, text=True,
+                                    timeout=60).stdout.strip() for command in (relative, sys.executable)}
+        self.assertEqual(len(found), 1, found)
+
 
 class PoolExitTest(unittest.TestCase):
     def test_a_pool_process_exits_when_its_engine_dies_without_cleaning_up(self) -> None:
