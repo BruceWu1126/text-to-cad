@@ -125,7 +125,7 @@ def _run(*argv: str) -> tuple[int, str, str]:
 
 def _refused(source, out, pose: str) -> str:
     """The words a pose named wrong is refused with, by the export itself, before anything is written:
-    through the seam (``daemon=False``), where the refusal keeps its type (the daemon passes its words)."""
+    through the seam (``daemon=False``); through the daemon it keeps its type as well (``api._failed``)."""
     from cadgen.engine import api
     from cadgen.engine.cli import _pose
     from cadgen.engine.export import ExportRefused
@@ -236,6 +236,11 @@ class HingeTest(_Folder):
             for word in words:
                 self.assertIn(word, err, pose)
             self.assertFalse(out.exists(), pose)
+        # Through the daemon the refusal keeps its type too: the command exits 2, as it does here.
+        code, _out, err = _run("export", path, str(out), "--pose", "folded")
+        self.assertEqual(code, 2, err)
+        self.assertIn("no configuration 'folded'", err)
+        self.assertFalse(out.exists())
 
     def test_a_configuration_naming_no_joint_fails_the_build_and_one_out_of_range_warns(self) -> None:
         # The one harvest error: a configuration naming a joint its assembly does not hold.

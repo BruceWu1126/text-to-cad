@@ -343,6 +343,9 @@ A verb's `--json` (`export`, `snapshot`, `status`) prints its answer as one JSON
 on stdout, and a failure as `{"ok": false, "error": ...}` there too, exit status 1, so a caller
 reading stdout always finds an answer (`cli.answered`); without `--json` a failure is its words
 on stderr, exit 2 for a request refused by name before anything ran and 1 for one that failed.
+A refusal keeps its type across the daemon: the worker answers its kind beside its words
+(`worker.refusal`) and the caller raises it as that type (`api._failed`), so a pose a document
+lacks is refused the same, exit 2, whether a worker or the caller's own process refused it.
 
 `python SCRIPT.py` executes normal Python. Decoration only registers a model;
 imports and definitions build nothing. A call such as `arm()` asks the daemon to

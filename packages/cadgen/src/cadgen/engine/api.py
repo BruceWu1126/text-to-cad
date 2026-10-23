@@ -170,8 +170,33 @@ def _ask(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] | Non
         raise EngineError("no engine daemon")
     _heard("worker", answer.get("worker"))
     if "failed" in answer:
-        raise EngineError(str(answer["failed"]))
+        raise _failed(answer)
     return answer
+
+
+def _failed(answer: dict[str, Any]) -> Exception:
+    """What a request that failed in the engine raises here: a refusal as the type it was raised
+    as there (``worker.refusal``: an ``ExportRefused``, a ``SnapshotRefused``, a ``KinematicsError``,
+    any ``ValueError`` of the engine's), so a caller tells it from a failure as it does with
+    ``daemon=False`` and the CLI exits 2 for it; anything else an ``EngineError``, its words."""
+    import importlib
+
+    text = str(answer["failed"])
+    module, _, name = str(answer.get("kind") or "").partition(":")
+    kind: Any = None
+    if module == "builtins" or module == "cadgen.engine" or module.startswith("cadgen.engine."):
+        try:
+            kind = getattr(importlib.import_module(module), name, None)
+        except ImportError:
+            kind = None
+    if not (isinstance(kind, type) and issubclass(kind, ValueError)):
+        return EngineError(text) if not module else ValueError(text)
+    try:
+        error = kind(text)
+    except TypeError:  # a refusal whose type takes more than its words
+        error = ValueError(text)
+    error._engine_refusal = True  # type: ignore[attr-defined]  # the worker's, not this process's (``_error``)
+    return error
 
 
 def _program() -> str | None:
@@ -710,6 +735,10 @@ def _error(error: BaseException | None, reports: list[dict[str, Any]], worker: d
         if _TRACEBACK in text:
             return {**_read(text), **told}
         return {"type": None, "frames": [], **told, "refused": text != "no engine daemon"}
+    if getattr(error, "_engine_refusal", False):  # the worker's refusal, raised here as its type (``_failed``)
+        kind = type(error)
+        return {"type": kind.__qualname__ if kind.__module__ == "builtins" else f"{kind.__module__}.{kind.__qualname__}",
+                "frames": [], **told, "refused": True}
     refusals = tuple(kind for kind in (getattr(sys.modules.get(module), name, None) for module, name in _REFUSALS)
                      if isinstance(kind, type))
     frames = [{"file": frame.f_code.co_filename, "line": int(line or 0), "function": frame.f_code.co_name}

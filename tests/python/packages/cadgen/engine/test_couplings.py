@@ -204,7 +204,7 @@ def _run(*argv: str) -> tuple[int, str]:
 
 def _refused(source, out, pose: str) -> str:
     """The words a pose named wrong is refused with, by the export itself, before anything is written:
-    through the seam (``daemon=False``), where the refusal keeps its type (the daemon passes its words)."""
+    through the seam (``daemon=False``); through the daemon it keeps its type as well (``api._failed``)."""
     from cadgen.engine import api
     from cadgen.engine.cli import _pose
     from cadgen.engine.export import ExportRefused

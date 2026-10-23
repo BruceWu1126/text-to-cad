@@ -11,7 +11,8 @@ line and, when it has ``bytes``, exactly that many bytes after it. A build is an
 (``progress.py``: each stage, and each body a build runs), a ``{"id", "patch", "bytes"}`` frame (below) for
 each served xbf the moment the build has put it in place -- before the build goes on to
 its exports -- one ``{"id", "done", "rssMb"}`` (the build's reports, and the worker's resident
-memory after it, in MiB) or ``{"id", "failed"}``, and last ``{"id", "settled"}``. What the
+memory after it, in MiB) or ``{"id", "failed"}`` (with ``kind`` where it is a refusal: ``refusal``),
+and last ``{"id", "settled"}``. What the
 model prints goes to the worker's stderr, which the daemon passes on. The worker exits when
 its stdin closes: the daemon's pool closes it to retire the worker (``daemon.Pool``).
 
@@ -388,6 +389,18 @@ def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
         b"".join(data)
 
 
+
+def refusal(error: BaseException) -> dict[str, str]:
+    """A refusal's type, carried beside its words: a ``ValueError`` (an ``ExportRefused``, a
+    ``SnapshotRefused``, a ``KinematicsError``, ...) answered as ``kind``, ``module:name``, so the
+    caller raises it as that type (``api._failed``) and a refused export or snapshot is refused the
+    same through the daemon as in the caller's own process (``daemon=False``). Anything else is
+    no refusal: its words alone."""
+    if not isinstance(error, ValueError):
+        return {}
+    kind = type(error)
+    return {"kind": f"{kind.__module__}:{kind.__qualname__}"}
+
 def main() -> int:
     sys.dont_write_bytecode = True
     os.environ["CADGEN_ENGINE_WORKER"] = "1"
@@ -500,7 +513,7 @@ def main() -> int:
                     answer, payload = _result(request)
                     send({"id": ident, "done": answer}, payload)
             except (BuildError, ValueError, OSError) as error:
-                send({"id": ident, "failed": str(error)})
+                send({"id": ident, "failed": str(error), **refusal(error)})
             except BaseException as error:  # noqa: BLE001 - the worker answers every request
                 send({"id": ident, "failed": "".join(traceback.format_exception(type(error), error,
                                                                                 error.__traceback__))})
