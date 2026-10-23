@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { Slider } from "@text-to-cad/ui/primitives/slider";
 import {
   xbfCoupledPairs, xbfCouplingControls, xbfCouplingValues, xbfCouplingWrite, xbfCouplings, xbfPoseControls,
@@ -21,6 +21,18 @@ import { DEFAULT_POSE_VALUE, KinematicsPoseRow, NO_PRESET_VALUE } from "../kit/i
 // `xbfKinematics.js`).
 
 const NO_COUPLINGS = Object.freeze({});
+const NO_CLOCK = Object.freeze({ subscribe: () => () => {}, getAnimationClock: () => 0 });
+
+/**
+ * The pose a motion that owns it shows (`useXbfMotion.js`): its values at the clock's time while it
+ * plays, at its paused time otherwise; null while no motion owns the pose.
+ */
+function useMotionFrame(kinematics, motion) {
+  const clock = motion?.clock || NO_CLOCK;
+  const live = useSyncExternalStore(clock.subscribe, clock.getAnimationClock, clock.getAnimationClock);
+  if (!motion || !kinematics) return null;
+  return motion.valuesAt(motion.playing ? live : motion.elapsedSec);
+}
 
 // A value as its compact field shows it, as a STEP's row does.
 function formatControlNumber(value) {
@@ -140,9 +152,19 @@ export function useXbfPose(kinematics) {
  *   `values`: every pair's values now. `couplings`: each coupling's slider (where `values` stand on
  *   it when not given). `preset`: the configuration chosen, `DEFAULT_POSE_VALUE` as built,
  *   `NO_PRESET_VALUE` set by hand. `onValues` takes every pair's values, and every coupling's when a
- *   coupling's slider moved.
+ *   coupling's slider moved. `motion`: the motion that owns the pose while it does (`useXbfMotion.js`):
+ *   the section shows its frame, read-only, each coupling where the frame stands on it, and takes no
+ *   edit; Position's own pose is untouched underneath and comes back when the motion is let go.
  */
-export default function XbfPositionSection({ kinematics, values, couplings = null, preset, changed, onValues, onPreset, onReset }) {
+export default function XbfPositionSection({ kinematics, motion = null, ...own }) {
+  const frame = useMotionFrame(kinematics, motion);
+  if (!frame) return <PositionBody kinematics={kinematics} {...own} />;
+  const atRest = xbfSamePose(frame, xbfPoseValues(kinematics));
+  return <PositionBody kinematics={kinematics} values={frame} couplings={xbfCouplingValues(kinematics, frame)}
+    preset={atRest ? DEFAULT_POSE_VALUE : NO_PRESET_VALUE} changed={!atRest} readOnly onValues={own.onValues} onPreset={own.onPreset} onReset={own.onReset} />;
+}
+
+function PositionBody({ kinematics, values, couplings = null, preset, changed, onValues, onPreset, onReset, readOnly = false }) {
   const controls = xbfPositionRows(kinematics);
   const coupled = xbfCouplingControls(kinematics);
   const shown = couplings || xbfCouplingValues(kinematics, values);
@@ -150,24 +172,26 @@ export default function XbfPositionSection({ kinematics, values, couplings = nul
   const unposable = xbfUnposable(kinematics);
   const others = xbfOtherWarnings(kinematics);
   const change = (control, next) => {
+    if (readOnly) return;
     const written = writeXbfPosition(values, control, next);
     if (written) onValues(written);
   };
   const couple = (control, next) => {
+    if (readOnly) return;
     const written = xbfCouplingWrite(kinematics, values, shown, control.coupling, next);
     if (written) onValues(written.values, written.couplings);
   };
   const slider = (control, currentValue, write, title) => <FileSheetSliderField key={control.id} label={control.label}
     labelTitle={title} value={`${formatControlNumber(currentValue)}${unitSuffix(control.unit)}`}
     onValueCommit={text => write(control, parseFileSheetNumberInput(text, { fallback: currentValue, min: control.min, max: control.max }))}
-    valueInputProps={{ ariaLabel: `${control.label} slider value` }}>
-    <Slider className={FILE_SHEET_PRECISION_SLIDER_CLASSES} value={[Number(currentValue) || 0]} min={control.min} max={control.max}
+    valueInputProps={{ ariaLabel: `${control.label} slider value`, disabled: readOnly }}>
+    <Slider className={FILE_SHEET_PRECISION_SLIDER_CLASSES} disabled={readOnly} value={[Number(currentValue) || 0]} min={control.min} max={control.max}
       step={controlStep(control)} onValueChange={next => write(control, next?.[0] ?? currentValue)} thumbProps={{ "aria-label": control.label }} />
   </FileSheetSliderField>;
   return <ToolPanel id="position" title="Position" label="Position controls" fit="details" changed={changed}>
     <div className="space-y-1.5 pb-1.5 pt-0.5">
       {poseNames.length || controls.length || coupled.length ? <KinematicsPoseRow poses={poseNames.map(name => ({ value: name, label: name }))}
-        activeValue={preset} onSelect={onPreset} onReset={onReset} /> : null}
+        activeValue={preset} onSelect={onPreset} onReset={onReset} disabled={readOnly} /> : null}
       {coupled.map(control => slider(control, Number(shown[control.coupling]) || 0, couple,
         `${control.label} · couples ${control.pairs.join(", ")}`))}
       {controls.map((control) => {
