@@ -59,7 +59,7 @@ viewer_pidfile="$project/viewer.pid"
 export CADGEN_STATE_DIR="$project/state"
 # The engine that builds the fixtures and serves the STEP and .xbf ones to the page: this
 # test's own daemon, one part meshed at a time, stopped on the way out.
-export CADGEN_ENGINE_DIR="$project/engine" CADGEN_ENGINE_MESH=inline CADGEN_ENGINE_IDLE=120
+export CADGEN_ENGINE_DIR="$project/engine" CADGEN_ENGINE_MESH=inline CADGEN_ENGINE_IDLE=120 CADGEN_CACHE_DIR="$project/no-0.7-store"
 export CADGEN_VIEWER_DIST="$RUNTIME"
 cleanup() {
   "$PYTHON" -m cadgen.engine stop >/dev/null 2>&1 || true

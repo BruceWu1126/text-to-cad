@@ -20,7 +20,9 @@ when a run is slow.
 Each FILE runs in its own interpreter, ``--jobs`` at a time (default one), with an engine
 directory of its own (``CADGEN_ENGINE_DIR``): a build it asks for without naming one runs on
 an engine daemon of that file's alone, never on a developer's own, and a daemon the file left
-running there is stopped once it ends (``stop_engine``). The per-module output is printed as
+running there is stopped once it ends (``stop_engine``). Its ``CADGEN_CACHE_DIR`` is a folder
+of its own that does not exist, so the sweep of cadgen 0.7's store each daemon start runs never
+reaches a developer's store. The per-module output is printed as
 each finishes and the final ``Ran N tests`` / ``OK`` / ``FAILED`` summary aggregates every
 module. The loaded test set is identical to `python -m unittest <files>` run from --top. A
 file still running ``FILE_HANG_SECONDS`` after it started is hung: its interpreter prints
@@ -214,6 +216,7 @@ def run_files(files: list[str], top: str, jobs: int, verbose: bool, print_weight
             futures = []
             for index, path in enumerate(files):
                 env = {**os.environ, "CADGEN_ENGINE_DIR": os.path.join(engines, f"e{index}"),
+                       "CADGEN_CACHE_DIR": os.path.join(engines, f"c{index}"),
                        "CADGEN_ENGINE_IDLE": str(ENGINE_IDLE_SECONDS)}
                 futures.append(pool.submit(_run_one_file, path, top, verbose, env))
             for future in concurrent.futures.as_completed(futures):
