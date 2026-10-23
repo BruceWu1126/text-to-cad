@@ -13,7 +13,7 @@ export function exportPause(ms, signal) {
     signal.addEventListener('abort', abort, { once: true });
   });
 }
-/** Job transport only. Local files and browser download gestures belong to the host.
+/** Job transport only. Handing a finished file to the browser's downloads belongs to the host.
  * @param {{ origin?: string, fetch?: typeof globalThis.fetch }} [options]
  * @returns {import('./types.js').ExportService}
  */
@@ -44,6 +44,7 @@ export function createExportService({ origin = '', fetch: fetchImpl = globalThis
     status: (id, sequence, signal) => json('/' + encodeURIComponent(id) + (sequence === undefined ? '' : `?after=${sequence}&wait=25`), undefined, signal),
     cancel: id => json('/' + encodeURIComponent(id) + '/cancel', {}),
     release: id => json('/' + encodeURIComponent(id) + '/release', {}),
-    download: (id, signal) => response('/' + encodeURIComponent(id) + '/file', undefined, signal),
+    // A plain same-origin URL: the page's session cookie authenticates it, so no token rides in it.
+    fileUrl: id => url('/' + encodeURIComponent(id) + '/file'),
   };
 }

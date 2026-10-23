@@ -131,6 +131,22 @@ class ExportsTest(unittest.TestCase):
         self.assertIn("attachment;", dict(args[3])["content-disposition"])
         self.jobs.release(ident)
 
+    def test_plain_download_names_the_file_for_every_browser_and_serves_it_repeatedly(self):
+        self.finish.set()
+        self.jobs._source = lambda spec: ({}, {}, "ブラケット v2")
+        ident = self.jobs.create(self.request())["id"]
+        self.settled(ident)
+        for _ in range(2):  # a toast's Download again, or the browser's own retry
+            response = Mock()
+            self.jobs.handle(SimpleNamespace(path=f"/__cad/exports/{ident}/file", method="GET", query={}), response)
+            disposition = dict(response.stream_file.call_args.args[3])["content-disposition"]
+            self.assertEqual(disposition, "attachment; filename=\"_____ v2.step\"; filename*=UTF-8''%E3%83%96%E3%83%A9%E3%82%B1%E3%83%83%E3%83%88%20v2.step")
+        self.assertEqual(self.jobs.get(ident)["state"], "ready")
+        self.jobs.release(ident)
+        part = self.jobs.create({**self.request("two"), "source": {"doc": "d", "revision": "v", "part": "hinge/lid"}})
+        self.assertEqual(self.settled(part["id"])["filename"], "ブラケット v2-part.step")
+        self.jobs.release(part["id"])
+
 
 if __name__ == "__main__":
     unittest.main()

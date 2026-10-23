@@ -193,7 +193,8 @@ class ExportJobs(Jobs):
 
     def _perform(self, job, progress):
         _source, _expected, name = self._source(job["spec"])
-        filename = (re.sub(r"[^\w .-]", "_", name)[:100].strip(" .") or "export") + FORMATS[job["spec"]["format"]]
+        stem = (re.sub(r"[^\w .-]", "_", name)[:100].strip(" .") or "export") + ("-part" if job["spec"]["part"] else "")
+        filename = stem + FORMATS[job["spec"]["format"]]
         directory = Path(tempfile.mkdtemp(prefix="cadgen-download-", dir=self.root))
         with self.changed:
             job["directory"] = directory
@@ -285,8 +286,11 @@ class ExportJobs(Jobs):
                 if len(tail) == 2 and tail[1] == "file":
                     with self.artifact(tail[0]) as path:
                         from urllib.parse import quote
+                        # A plain browser download: every browser names it, the ASCII form for any
+                        # that ignores RFC 5987 (the page's link names it too, with `download`).
+                        plain = re.sub(r"[^ -~]", "_", path.name).replace('"', "_").replace("\\", "_")
                         return response.stream_file(path, path.stat(), "application/octet-stream", [
-                            ("content-disposition", "attachment; filename*=UTF-8''" + quote(path.name)),
+                            ("content-disposition", f'attachment; filename="{plain}"; filename*=UTF-8\'\'{quote(path.name)}'),
                             ("x-content-type-options", "nosniff")])
             raise ExportError("Export route not found.", 404)
         except (ValueError, OSError) as error:

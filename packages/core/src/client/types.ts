@@ -240,5 +240,6 @@ export interface ExportService {
   status(id: string, sequence?: number, signal?: AbortSignal): Promise<ExportJob>;
   cancel(id: string): Promise<ExportJob>;
   release(id: string): Promise<ExportJob>;
-  download(id: string, signal: AbortSignal): Promise<Response>;
+  /** Where the browser downloads a ready job's file: the session's own origin, never a token. */
+  fileUrl(id: string): string;
 }

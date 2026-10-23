@@ -42,7 +42,7 @@ not page state. Each tool starts work with a request ID and polls or cancels its
 own operation; there is no `cad_job` tool. See the
 [operation contract](../../packages/cadgen/README.md#agent-operations) for progress,
 retry, cancellation and explicit server-host destinations. Inspection never builds
-source. Viewer export destinations are chosen on the browser user's filesystem.
+source. The web viewer's Export is a browser download; this page has no Export, having no HTTP origin to download from.
 
 ## The rules
 

@@ -11,45 +11,32 @@ const output = join(directory, 'downloads.mjs');
 await build({ entryPoints: [fileURLToPath(new URL('./downloads.ts', import.meta.url))], bundle: true, platform: 'node', format: 'esm', outfile: output });
 const { createBrowserDownloads } = await import(pathToFileURL(output));
 const storage = { getItem: () => null, setItem() {}, removeItem() {} };
-const options = { secure: true, storage, key: 'test' };
 
-test('picker runs synchronously; bytes stream and close before success', async () => {
-  const events = [];
-  const port = createBrowserDownloads({ ...options, picker: async () => {
-    events.push('picker');
-    return { name: 'local.step', createWritable: async () => new WritableStream({ write(chunk) { events.push([...chunk]); }, close() { events.push('closed'); } }) };
-  } });
-  const pending = port.choose('server.step', '.step');
-  assert.deepEqual(events, ['picker']);
-  const destination = await pending;
-  assert.equal(destination.name, 'local.step');
-  await destination.write(new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-length': '3' } }), { signal: new AbortController().signal, progress: bytes => events.push(bytes) });
-  assert.deepEqual(events, ['picker', 3, [1, 2, 3], 'closed']);
+function page() {
+  const clicked = [], body = new Set();
+  return { clicked, body, document: {
+    body: { append: link => body.add(link) },
+    createElement: () => { const link = { click() { clicked.push({ href: link.href, download: link.download, rel: link.rel, attached: body.has(link) }); }, remove() { body.delete(link); } }; return link; },
+  } };
+}
+
+test('a ready file is one plain same-origin download link, clicked once and removed', () => {
+  const { clicked, body, document } = page();
+  const port = createBrowserDownloads({ document, storage, key: 'test' });
+  port.save('http://127.0.0.1:4178/s/session/__cad/exports/job/file', 'bracket.step');
+  assert.deepEqual(clicked, [{ href: 'http://127.0.0.1:4178/s/session/__cad/exports/job/file', download: 'bracket.step', rel: 'noopener', attached: true }]);
+  assert.equal(body.size, 0);
+  assert.doesNotMatch(clicked[0].href, /token/);
 });
 
-test('cancelled picker makes no destination; insecure origin has no silent fallback', async () => {
-  let calls = 0;
-  const picker = async () => { calls++; throw new DOMException('Cancelled', 'AbortError'); };
-  const port = createBrowserDownloads({ ...options, picker });
-  assert.equal(await port.choose('part.stl', '.stl'), null);
-  const insecure = createBrowserDownloads({ ...options, picker, secure: false });
-  await assert.rejects(insecure.choose('part.stl', '.stl'), /HTTPS/);
-  assert.equal(calls, 1);
-});
-
-test('truncated transfer aborts the writable instead of committing a partial file', async () => {
-  let closed = false, aborted = false;
-  const port = createBrowserDownloads({ ...options, picker: async () => ({ name: 'x.stl', createWritable: async () => new WritableStream({ close() { closed = true; }, abort() { aborted = true; } }) }) });
-  const destination = await port.choose('x.stl', '.stl');
-  await assert.rejects(destination.write(new Response('short', { headers: { 'content-length': '100' } }), { signal: new AbortController().signal, progress() {} }), /incomplete/);
-  assert.equal(closed, false);
-  assert.equal(aborted, true);
-});
-
-test('restoration stores job requests only, never filesystem handles', () => {
+test('restoration keeps requests, names and whether each was delivered; never a file', () => {
   let held;
-  const port = createBrowserDownloads({ ...options, picker: async () => {}, storage: { ...storage, getItem: () => held, setItem: (_key, value) => held = value } });
-  const value = [{ filename: 'x.stl', request: { requestId: 'a', epoch: 'e', source: { doc: 'd' }, format: 'stl' } }];
+  const port = createBrowserDownloads({ document: page().document, key: 'test', storage: { ...storage, getItem: () => held, setItem: (_key, value) => held = value, removeItem: () => held = undefined } });
+  const value = [{ filename: 'x.stl', delivered: true, request: { requestId: 'a', epoch: 'e', source: { doc: 'd' }, format: 'stl' } }];
   port.remember(value);
   assert.deepEqual(port.restore(), value);
+  held = JSON.stringify([{ filename: 'y.stl', request: { requestId: 'b', epoch: 'e', source: { doc: 'd' }, format: 'stl' } }, { filename: 3 }]);
+  assert.deepEqual(port.restore().map(row => [row.filename, row.delivered]), [['y.stl', false]]);
+  port.remember([]);
+  assert.equal(held, undefined);
 });
