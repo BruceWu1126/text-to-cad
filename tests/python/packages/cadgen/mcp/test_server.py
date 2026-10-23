@@ -220,6 +220,12 @@ class TabServerTest(_Session):
         self.assertIn("No file at", missing["content"][0]["text"])
         (self.workspace / "notes.txt").write_text("x", encoding="utf-8")
         self.assertIn("is not one", self.call("cad_open", {"path": str(self.workspace / "notes.txt")})["content"][0]["text"])
+        # A script is no document: refused as any file CAD does not open is, by cad_open and cad_show.
+        script = self.workspace / "parts.py"
+        script.write_text("print(1)\n", encoding="utf-8")
+        for tool in ("cad_open", "cad_show"):
+            self.assertIn("is not one", self.call(tool, {"path": str(script)})["content"][0]["text"], tool)
+            self.assertIn("No file at", self.call(tool, {"path": f"{script}::cube"})["content"][0]["text"], tool)
 
     def test_cad_show_reaches_the_polling_view_without_opening_one(self) -> None:
         self.assertEqual(self.call("cad_show", {"path": self.bracket})["structuredContent"], {"delivered": 0})
@@ -578,7 +584,8 @@ class TextServerTest(_Session):
     """A client that renders no MCP Apps: cad_show answers with the model's link in the CAD Viewer."""
 
     client = {"name": "some-cli", "version": "1"}
-    viewer_url = staticmethod(lambda: "http://127.0.0.1:3245/")
+    # The engine's launch registers the model and answers its page, `/<id>`.
+    viewer_url = staticmethod(lambda model=None: "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab")
 
     def test_a_client_with_no_page_has_no_app_capability(self) -> None:
         self.assertNotIn("_meta", self.call("cad_show", {"path": self.bracket}))
@@ -593,7 +600,7 @@ class TextServerTest(_Session):
         shown = self.call("cad_show", {"path": self.bracket})
         # Text alone: Claude Code shows a result's structured content in place of its text.
         self.assertNotIn("structuredContent", shown)
-        self.assertIn(f"http://127.0.0.1:3245/?file={quote(self.bracket.replace(os.sep, '/'), safe='/:')}", shown["content"][0]["text"])
+        self.assertIn("http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab", shown["content"][0]["text"])
         self.assertNotIn("Showing", shown["content"][0]["text"])
         # The Viewer adds the model to the library once it shows it; a link alone adds nothing.
         self.assertEqual(self.server.recents.list(), [])
@@ -614,13 +621,13 @@ class TextServerTest(_Session):
     def test_a_viewer_that_will_not_start_leaves_the_command_to_run(self) -> None:
         from cadgen.mcp.browser import ViewerUnavailable
 
-        def refuse() -> str:
+        def refuse(_model=None) -> str:
             raise ViewerUnavailable("no port")
 
         self.server._viewer_url = refuse
         failed = self.call("cad_show", {"path": self.bracket})
         self.assertTrue(failed["isError"])
-        self.assertIn("`cadgen viewer --host 127.0.0.1 --json`", failed["content"][0]["text"])
+        self.assertIn(f"`cadgen viewer --host 127.0.0.1 --json {self.bracket}`", failed["content"][0]["text"])
 
     def test_an_app_that_renders_without_advertising_it_can_be_told(self) -> None:
         from unittest import mock
