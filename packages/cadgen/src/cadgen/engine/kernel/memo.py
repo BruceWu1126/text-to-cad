@@ -115,6 +115,13 @@ leave, so the names of what a caller makes of it compose as if it had run, and a
 body makes no call, so its caller's ordinals are what they would be. A body that ran a call
 plain, or whose entries are gone, runs.
 
+**Motions.** A function motion's samples are kept per model and motion (``sampled``), keyed
+by the function as a body's code is keyed, worked out after the body ran (``build._motion_key``),
+the files it opens (heard as a body's are, while it is sampled), what the sampler reads of the
+mechanism and its settings, and the engine's code: a warm build that leaves those alone samples
+nothing, and hands the motion the samples its last sampling made. The files are the model's
+inputs too (``Sampling.checks``).
+
 **History.** While a call from the model's code runs, the OCCT makers it runs record
 what they were given and what they made (``history``), and right after it the call's
 history is composed from them. The feature carries it, and so does the entry: a hit
@@ -155,7 +162,8 @@ from OCP.TopTools import TopTools_IndexedMapOfShape
 from cadgen.engine.kernel import history as kernel_history
 from cadgen.engine.kernel.trace import Trace
 
-__all__ = ["CAPACITY", "RUNS_KEPT", "clear", "enabled", "install", "run", "stats", "uninstall", "wrap_function"]
+__all__ = ["CAPACITY", "RUNS_KEPT", "always_sampled", "clear", "enabled", "install", "run", "sampled", "sampling", "stats",
+           "uninstall", "wrap_function"]
 
 # What a build keeps: every entry and key the last RUNS_KEPT outermost runs used, so an
 # edit, its revert and a second edit in between all find the first run's steps. The
@@ -427,8 +435,10 @@ def _audited(event: str, args: tuple) -> None:
     heard."""
     if event != "open":
         return
+    # A motion's function being sampled (``sampled``) reads for its samples, whatever runs.
+    log = getattr(_LOCAL, "sampling", None)
     state = getattr(_LOCAL, "run", None)
-    if state is None or state.depth or not state.bodies:
+    if log is None and (state is None or state.depth or not state.bodies):
         return
     try:
         path, mode = args[0], args[1]
@@ -448,7 +458,8 @@ def _audited(event: str, args: tuple) -> None:
     import stat as stat_module
 
     path = os.path.abspath(name)
-    log = state.bodies[-1]
+    if log is None:
+        log = state.bodies[-1]
     if path in log.reads:
         return
     try:
@@ -508,8 +519,10 @@ def _read_digest(path: str) -> str:
 def _hold_reads(log: "_BodyLog", state: "_Run") -> None:
     """When a body returns: each regular file it read held to its bytes (``_ReadInput``),
     one of its checks. A file whose stat moved while the body ran may have been read in two
-    states: the body is not retained. The engine's own reads here are not the body's."""
-    state.depth += 1
+    states: the body is not retained. The engine's own reads here are not the body's (a
+    sampling's ``state`` is None: its log is no longer listening)."""
+    if state is not None:
+        state.depth += 1
     try:
         for path, opened in log.reads.items():
             if opened is None:
@@ -533,7 +546,8 @@ def _hold_reads(log: "_BodyLog", state: "_Run") -> None:
                     continue
             log.checks.append((held, held.digest))
     finally:
-        state.depth -= 1
+        if state is not None:
+            state.depth -= 1
 
 
 def _library_file(name: str) -> bool:
@@ -599,6 +613,11 @@ def _reader(call: str, original: Any, static: bool) -> Any:
     reader's, and is not marked."""
     @functools.wraps(original)
     def hooked(*args: Any, **kwargs: Any) -> Any:
+        sampling = getattr(_LOCAL, "sampling", None)
+        if sampling is not None:
+            # A motion's function reads past the engine's readers: its samples are not kept.
+            sampling.bypassed.append((call, _path_argument(args if static else args[1:], kwargs)))
+            return original(*args, **kwargs)
         state = getattr(_LOCAL, "run", None)
         if state is not None and not state.depth and state.bodies:
             path = _path_argument(args if static else args[1:], kwargs)
@@ -1084,6 +1103,8 @@ def _sweep() -> None:
                 _drop(entry)
         for name in [name for name, body in _BODIES.items() if body.generation < oldest]:
             del _BODIES[name]
+        for name in [name for name, held in _SAMPLES.items() if held.generation < oldest]:
+            del _SAMPLES[name]
         stop_key = ("run", -oldest)
         while _KEY_IDS:
             key = next(iter(_KEY_IDS))
@@ -1112,6 +1133,8 @@ def clear() -> None:
         _BOXES.clear()
         _STATE.clear()
         _SUBS.clear()
+        _SAMPLES.clear()
+        _ALWAYS_SAMPLED.clear()
 
 
 # --- bodies -------------------------------------------------------------------------------
@@ -1294,6 +1317,181 @@ def direct(name: str) -> None:
 def always() -> dict[str, str]:
     """The functions a verification found impure, each with why: they run on every call."""
     return dict(_ALWAYS)
+
+
+# --- a motion's samples ----------------------------------------------------------------------
+
+
+class _Samples:
+    """A function motion's samples as its last sampling in this process made them
+    (``sampled``): what they were made of, part by part -- the function (its code and what it
+    reaches), the mechanism it was converted against, the sampling's settings and the engine --
+    the files the function opened, held to their bytes, the samples, the model whose document
+    holds them, and the last outermost run that used them."""
+
+    __slots__ = ("parts", "checks", "keys", "owner", "generation")
+
+    def __init__(self, parts: dict[str, str], checks: list, keys: list, owner: str, generation: int) -> None:
+        self.parts, self.checks, self.keys, self.owner, self.generation = parts, checks, keys, owner, generation
+
+
+# Per motion, by its model and its name in the mechanism: its last sampling, kept while one of
+# the last ``RUNS_KEPT`` outermost runs used it (``_sweep``, ``keep``), as a body is.
+_SAMPLES: dict[str, _Samples] = {}
+# Per motion a verifying build sampled otherwise than its kept samples: sampled on every build
+# for the worker's life, with why.
+_ALWAYS_SAMPLED: dict[str, str] = {}
+
+_PARTS_SAID = {"function": "its function changed", "mechanism": "the joints it moves changed",
+               "sampling": "its duration or a tolerance changed", "engine": "the engine changed"}
+
+
+class Sampling:
+    """The function motions one model's document samples (``sampling``): ``owner`` the model,
+    ``function_key(function)`` a digest of what a motion's function is made of, or None and
+    why it cannot be keyed, ``engine`` the engine's code; per motion how it went (``statuses``:
+    ``reused``, or ``sampled: <why>``), and, verifying, how each the memo would have reused
+    compares with its fresh sampling (``verified``: ``same``, ``differs: <where>``)."""
+
+    def __init__(self, owner: str, function_key: Callable[[Any], tuple[str | None, str | None]], engine: str,
+                 verify: bool) -> None:
+        self.owner, self.function_key, self.engine, self.verify = owner, function_key, engine, verify
+        self.statuses: dict[str, str] = {}
+        self.verified: dict[str, str] = {}
+        # The files the motions' functions opened, each held to its bytes (a body's checks), and
+        # whether they say all the functions read: inputs of the model's closure, as a body's are.
+        self.checks: list[tuple[Callable[[], Any], Any]] = []
+        self.keyed = True
+
+
+@contextlib.contextmanager
+def sampling(owner: str, function_key: Callable[[Any], tuple[str | None, str | None]], engine: str, *,
+             verify: bool = False) -> Iterator[Sampling]:
+    """Inside it, the function motions this thread's harvest samples (``sampled``) are model
+    ``owner``'s, kept and reused by what they are made of."""
+    found = Sampling(owner, function_key, engine, verify)
+    previous = getattr(_LOCAL, "motions", None)
+    _LOCAL.motions = found
+    try:
+        yield found
+    finally:
+        _LOCAL.motions = previous
+
+
+def sampled(name: str, function: Callable, inputs: dict[str, Any], sample: Callable[[], list]) -> list:
+    """A function motion's samples (``mechanism._sampled``, ``sample()``), or its last sampling's
+    in this process where what they are made of is what it was: the function as the model's
+    code reaches it (``Sampling.function_key``: its code, the values it holds and reaches, a
+    module's bytes where a reference cannot be followed), each file it opened, by its bytes,
+    ``inputs`` -- what the sampler reads of the mechanism and its settings, each part by its
+    ``repr`` -- and the engine's code. As a body's, the function must be a function of those:
+    one reading the clock, the environment or randomness is not seen to change. A function
+    holding what has no canonical form, reading what is no regular file or reading past the
+    engine's readers is sampled on every build, and says why. Outside a ``sampling``, or with
+    retention off, it is sampled. A verifying build samples a motion it would reuse and
+    compares the samples: one that differs is sampled on every build for the worker's life.
+    The files a function opened, reused or sampled, are the model's inputs (``Sampling.checks``)."""
+    held_by = getattr(_LOCAL, "motions", None)
+    if held_by is None or not enabled() or os.environ.get("CADGEN_ENGINE_BODIES", "1").strip() == "0":
+        return sample()
+    identity = f"{held_by.owner}#{name}"
+    digest, why = None, _ALWAYS_SAMPLED.get(identity)
+    if why is None:
+        try:
+            digest, why = held_by.function_key(function)
+        except Exception as error:  # noqa: BLE001 - a function that cannot be keyed is sampled
+            digest, why = None, f"its function cannot be keyed ({type(error).__name__}: {error})"
+    record = parts = None
+    if digest is not None:
+        parts = {"function": digest, **{part: hashlib.sha256(repr(value).encode()).hexdigest()
+                                        for part, value in inputs.items()}, "engine": held_by.engine}
+        record = _SAMPLES.get(identity)
+        why = _stale(record, parts)
+    generation = _MARKS[-1] if _MARKS else 0
+    if why is None:
+        if not held_by.verify:
+            record.generation = generation
+            held_by.statuses[name] = "reused"
+            held_by.checks.extend(record.checks)
+            return _copied(record.keys)
+        why = "verifying"
+    held_by.statuses[name] = f"sampled: {why}"
+    log = _BodyLog()
+    previous = getattr(_LOCAL, "sampling", None)
+    _LOCAL.sampling = log
+    try:
+        keys = sample()
+    finally:
+        _LOCAL.sampling = previous
+    if log.reads:
+        _hold_reads(log, None)
+    held_by.checks.extend(log.checks)
+    kept = None
+    if log.unread:
+        kept = f"it reads {log.unread[0]}, not a regular file"
+    elif log.bypassed:
+        call, path = log.bypassed[0]
+        kept = f"it reads {path or 'a file'} through {call}"
+    elif not log.retainable:
+        kept = "a file it read changed while it was sampled"
+    if kept is not None:
+        held_by.keyed = False
+        held_by.statuses[name] += f"; not kept: {kept}"
+    if record is not None and why == "verifying":
+        differs = _samples_differ(record.keys, keys)
+        held_by.verified[name] = "same" if differs is None else f"differs: {differs}"
+        if differs is not None:
+            _ALWAYS_SAMPLED[identity] = f"a verification sampled it otherwise ({differs})"
+            kept = kept or "it differs"
+    with _LOCK:
+        if kept is None and parts is not None:
+            _SAMPLES[identity] = _Samples(parts, list(log.checks), _copied(keys), held_by.owner, generation)
+        else:
+            _SAMPLES.pop(identity, None)
+    return keys
+
+
+def _stale(record: _Samples | None, parts: dict[str, str]) -> str | None:
+    """Why a motion's kept samples are not what it would sample now, or None."""
+    if record is None:
+        return "first sampled in this worker"
+    for part, said in _PARTS_SAID.items():
+        if record.parts.get(part) != parts.get(part):
+            return said
+    if record.parts.keys() != parts.keys():
+        return "the sampler's inputs changed"
+    for check, expected in record.checks:
+        try:
+            if check() != expected:
+                return f"{getattr(check, 'path', 'a file it read')} changed"
+        except _Unkeyable as error:
+            return str(error)
+    return None
+
+
+def _copied(keys: list) -> list:
+    """Samples, their pose dicts new: what a motion holds is never what the memo keeps."""
+    return [(t, configuration, dict(values)) for t, configuration, values in keys]
+
+
+def _samples_differ(logged: list, fresh: list) -> str | None:
+    """Where two samplings of a motion part, or None for the same samples, value for value."""
+    if len(logged) != len(fresh):
+        return f"{len(fresh)} samples, not {len(logged)}"
+    for (t, _c, values), (t_now, _c_now, now) in zip(logged, fresh):
+        if t != t_now:
+            return f"a sample at {t_now:g} s, not {t:g} s"
+        if values != now:
+            joint = next((label for label in sorted(set(values) | set(now)) if values.get(label) != now.get(label)),
+                         "a joint")
+            return f"joint {joint!r} at {t:g} s"
+    return None
+
+
+def always_sampled() -> dict[str, str]:
+    """The motions a verification sampled otherwise, by ``owner#name``, each with why: they are
+    sampled on every build."""
+    return dict(_ALWAYS_SAMPLED)
 
 
 # --- a ``@memo`` call's arguments ------------------------------------------------------------
@@ -1608,6 +1806,10 @@ def keep(name: str) -> None:
                 _KEY_IDS.move_to_end(key)
             if _BODIES.get(current.name) is current:
                 current.generation = generation
+        # And the motions their documents' mechanisms sampled (``sampled``).
+        for held in _SAMPLES.values():
+            if held.owner in seen:
+                held.generation = generation
 
 
 def _replay(record: _Body, state: _Run) -> Any:

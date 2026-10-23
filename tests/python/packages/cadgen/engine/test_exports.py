@@ -340,7 +340,7 @@ class ExportTest(unittest.TestCase):
         self.assertEqual(len(loaded.prototypes), 1)
         self.assertEqual(loaded.prototypes[0].face_names, next(p for p in self.loaded.prototypes
                                                                if p.name == "peg0").face_names)
-        self.assertRegex(loaded.writer or "", r"^cadgen\.engine xbf/4")
+        self.assertRegex(loaded.writer or "", r"^cadgen\.engine xbf/5")
         step = self.folder / "rack.step"
         translate(self.xbf, None, step, part="board/rack")
         self.assertEqual([i.path for i in document.Loaded(step).instances], [i.path for i in loaded.instances])
