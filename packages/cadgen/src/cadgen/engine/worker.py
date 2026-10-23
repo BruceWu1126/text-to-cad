@@ -41,10 +41,14 @@ by default a quarter of the machine's memory) is retired: its reports say so (``
 and it exits once it has answered. The daemon starts a fresh one for the next build, a
 restart: a model whose xbf holds its closure unchanged is taken in seconds.
 
-A build runs with the cyclic collector off, and the worker collects once after it has
-answered: the memo keeps every live result of the last builds, millions of objects, and a
-full collection walks all of them -- a second on a large model, paid inside whichever call
-allocates when it falls due. Off the build's path it is paid while the worker is idle.
+A build runs with the cyclic collector off, and the worker collects once it is idle: the memo
+keeps every live result of the last builds, millions of objects, and a full collection walks
+all of them -- a second on a large model, paid inside whichever call allocates when it falls
+due. It is paid after the worker has answered and no request has come for ``COLLECT_IDLE``
+seconds, so a script calling its models one after another (each call a request) never waits
+on the collection its last call left; the worker says it collected (``{"collected": seconds}``).
+Only a worker over its memory cap after a build collects first, inside the build's answer, and
+measures again: the cap judges what the worker holds, not the cycles it has yet to collect.
 """
 
 from __future__ import annotations
@@ -66,6 +70,8 @@ from cadgen.engine.ids import canonical, file_id
 # How long a build waits for the daemon to say it holds a patch before it writes its
 # derived files: the viewer is woken first, unless the daemon is too slow to say so.
 PATCH_WAIT = 30.0
+# How long the worker waits for a next request, once it has answered, before it collects.
+COLLECT_IDLE = 0.5
 # The daemon's word that it holds the patch of a path (``{"op": "patched", "path"}``).
 _PATCHED: dict[str, threading.Event] = {}
 
@@ -262,6 +268,18 @@ def retirement(reports: list[dict[str, Any]], resident: float | None = None) -> 
     return True
 
 
+def resident_after_build() -> float | None:
+    """This worker's resident memory after a build (``resident_mb``), measured again after a
+    collection where it is over the cap: the cycles the build and the uncollected ones before it
+    left are not what the worker holds. Under the cap nothing is collected here: that is paid
+    once the worker is idle (the module docstring)."""
+    resident, cap = resident_mb(), rss_cap_mb()
+    if resident is not None and cap is not None and resident > cap:
+        gc.collect()
+        resident = resident_mb()
+    return resident
+
+
 def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, Any]:
     """An ``export`` request: the document -- a script's model built first, or a file (the document this worker last built of it while the file is as the
     build left it, else read) -- written to each destination, and drawn into ``draw``'s
@@ -437,8 +455,19 @@ def main() -> int:
     send({"ready": os.getpid()})
     gc.disable()
     threading.Thread(target=read, daemon=True).start()
+    owed = False  # a collection, since the last request answered
     while True:
-        request = requests.get()
+        if owed:
+            try:
+                request = requests.get(timeout=COLLECT_IDLE)
+            except queue.Empty:
+                clock = time.perf_counter()
+                gc.collect()  # idle: the cycles the last builds left
+                owed = False
+                send({"collected": round(time.perf_counter() - clock, 4)})
+                continue
+        else:
+            request = requests.get()
         if request is None:
             break
         ident = request.get("id")
@@ -455,7 +484,7 @@ def main() -> int:
                     with building(said):
                         done = _export(request, lambda text: send({"id": ident, "log": text}))
                     said.attach(done.get("reports") or [])
-                    resident = resident_mb()
+                    resident = resident_after_build()
                     retire = retirement(done.get("reports") or [], resident) if done.get("reports") else False
                     send({"id": ident, "done": done, "rssMb": None if resident is None else round(resident)})
                 else:
@@ -473,7 +502,7 @@ def main() -> int:
                 send({"id": ident, "settled": True, "op": op})
             if retire:
                 return 0
-            gc.collect()
+            owed = True
             continue
         if op != "build":
             send({"id": ident, "failed": f"unknown request {op!r}"})
@@ -496,7 +525,7 @@ def main() -> int:
                                 verify=bool(request.get("verify")), profile=bool(request.get("profile")))
             said.attach(reports)
             patcher.finish(reports)
-            resident = resident_mb()
+            resident = resident_after_build()
             retire = retirement(reports, resident)
             # Its memory now, which the daemon's status shows (``rssMb``).
             send({"id": ident, "done": reports, "rssMb": None if resident is None else round(resident)})
@@ -512,7 +541,7 @@ def main() -> int:
             send({"id": ident, "settled": True})
         if retire:
             return 0  # over its memory cap: gone, with all it held
-        gc.collect()  # answered: the cycles the build left, collected while idle
+        owed = True  # answered: the cycles the build left, collected once idle
     return 0
 
 

@@ -288,6 +288,8 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
                 elif "settled" in message:
                     if message.get("op", "build") == "build":
                         self.on_settled(self)
+                elif "collected" in message:
+                    pass  # the worker collected while idle (``worker.py``): nothing waits on it
                 elif "where" in message:
                     waiting = self.asked.pop(str(message.get("id")), None)
                     if waiting is not None:

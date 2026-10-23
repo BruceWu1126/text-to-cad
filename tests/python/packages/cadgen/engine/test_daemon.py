@@ -157,6 +157,99 @@ class PatcherTest(unittest.TestCase):
         self.assertEqual(len(sent[0]["patch"]["meshes"]), 1, "the changed part alone")
 
 
+LOADS = """
+import build123d as bd
+from cadgen.engine import xbf
+
+with open("loads.txt", "a", encoding="utf-8") as handle:  # one line per load of the script
+    handle.write("load\\n")
+
+
+@xbf("XBF/block.xbf")
+def block():
+    return bd.Box(3, 2, 1)
+
+
+@xbf("XBF/peg.xbf")
+def peg():
+    return bd.Cylinder(1, 3)
+"""
+
+
+class WorkerLoopTest(unittest.TestCase):
+    """A worker's request loop, driven as the daemon drives it: its collection waits until it is
+    idle."""
+
+    def setUp(self) -> None:
+        import queue
+        import threading
+
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-worker-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.script = self.folder / "pair.py"
+        self.script.write_text(textwrap.dedent(LOADS), encoding="utf-8")
+        env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_WORKER": "1"}
+        self.worker = subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.worker"], stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, cwd=self.folder)
+        self.addCleanup(self._stop)
+        self.frames: "queue.Queue[dict | None]" = queue.Queue()
+
+        def read() -> None:
+            stream = self.worker.stdout
+            for line in iter(stream.readline, b""):
+                frame = json.loads(line)
+                if frame.get("bytes"):
+                    stream.read(frame["bytes"])
+                self.frames.put(frame)
+            self.frames.put(None)
+
+        threading.Thread(target=read, daemon=True).start()
+        self.assertIn("ready", self.next())
+
+    def _stop(self) -> None:
+        self.worker.stdin.close()
+        self.worker.wait(timeout=60)
+        self.worker.stdout.close()
+
+    def next(self) -> dict:
+        frame = self.frames.get(timeout=300)
+        self.assertIsNotNone(frame, "the worker exited")
+        return frame
+
+    def ask(self, ident: int, functions: list | None = None, run: str | None = None) -> None:
+        request = {"id": ident, "op": "build", "script": str(self.script), "functions": functions,
+                   "cwd": str(self.folder), "run": run}
+        self.worker.stdin.write((json.dumps(request) + "\n").encode())
+        self.worker.stdin.flush()
+
+    def until_settled(self, ident: int, seen: list | None = None) -> list:
+        """The frames up to request ``ident``'s ``settled``; its reports."""
+        reports = []
+        while True:
+            frame = self.next()
+            if seen is not None:
+                seen.append(frame)
+            if frame.get("id") == ident and "done" in frame:
+                reports = frame["done"]
+            if frame.get("id") == ident and "failed" in frame:
+                self.fail(frame["failed"])
+            if frame.get("id") == ident and frame.get("settled"):
+                return reports
+
+    def loads(self) -> int:
+        return (self.folder / "loads.txt").read_text(encoding="utf-8").count("load")
+
+    def test_a_queued_request_is_answered_before_the_worker_collects(self) -> None:
+        # Two calls back to back: the second is queued while the first builds.
+        self.ask(1, ["block"])
+        self.ask(2, ["peg"])
+        seen: list = []
+        self.until_settled(1, seen)
+        self.until_settled(2, seen)
+        self.assertFalse(any("collected" in frame for frame in seen), "no collection between the two answers")
+        self.assertIsInstance(self.next().get("collected"), float, "it collected once idle")
+
+
 class ConnectTest(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "a stale socket file is a Unix daemon's")
     def test_a_connect_to_a_stale_socket_fails_and_leaves_no_socket_open(self) -> None:
