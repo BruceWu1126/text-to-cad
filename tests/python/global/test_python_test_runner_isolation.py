@@ -53,7 +53,7 @@ class PythonTestRunnerIsolation(unittest.TestCase):
         self.assertNotEqual(engines[0], engines[1])
         self.assertEqual(Path(engines[0]).parent, Path(engines[1]).parent)
         self.assertFalse(Path(engines[0]).parent.exists(), "the run's folder goes with it")
-        caches = [env["CADGEN_CACHE_DIR"] for _argv, env in calls]  # 0.7's store: never the developer's swept
+        caches = [env["CADGEN_CACHE_DIR"] for _argv, env in calls]  # never the developer's 0.7 store
         self.assertEqual([Path(cache).parent for cache in caches], [Path(engine).parent for engine in engines])
         self.assertNotEqual(caches[0], caches[1])
 

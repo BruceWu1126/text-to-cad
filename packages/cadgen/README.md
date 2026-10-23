@@ -280,8 +280,7 @@ src/cadgen/
                          #   `import build123d`
   _internal/             # the launch command, the font guard, the kernel-import recorder,
                          #   the engine observer and the telemetry sender, the install
-                         #   channel, atomic replace, file locks, the CLI derivation,
-                         #   the sweep of cadgen 0.7's store (legacy_store)
+                         #   channel, atomic replace, file locks, the CLI derivation
   _runtime/              # BUILT: the CAD Viewer client, the CAD app page and the headless
                          #   browser bundle -- produced when the wheel is packaged, never
                          #   committed, never edited
@@ -293,16 +292,6 @@ snapshot for those files alone; `cadgen urdf|sdf|srdf validate` the validators; 
 doctor` the installation and a skill's pin; `cadgen viewer` the engine page launcher;
 `cadgen mcp` the stateless proxy an agent host starts; and `cadgen telemetry` the person's answer. A
 model builds by running its script: `python model.py`.
-
-cadgen 0.7's store goes with the first 0.8 engine. Each time the daemon starts, once it holds
-its lock, a thread of its own (`_internal/legacy_store.py`, through `daemon.ON_START`) looks in
-0.7's store root -- `CADGEN_CACHE_DIR`, else `$XDG_CACHE_HOME/cadgen` or
-`%LOCALAPPDATA%\cadgen`, else `~/.cache/cadgen` -- and removes its `objects` and `index`
-folders, only when each is a real folder shaped as 0.7 left it: renamed aside to
-`<name>.removing-<pid>` first, then deleted without following a link, one line on the daemon's
-stderr saying how much. Nothing else under the root is touched, nor the state directory (settings,
-the telemetry answer and installation id, recents); what Windows holds open is left for the next
-start. With no store there, the look is one directory read.
 
 The viewer exposes `POST /__cad/clipboard` for explicit viewport PNG copies. It
 uses the same host and custom-header POST gates as other mutation routes, limits

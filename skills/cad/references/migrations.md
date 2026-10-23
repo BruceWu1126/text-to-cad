@@ -91,13 +91,9 @@ The document is what the viewer follows build by build, what refs and
 | `from cadgen import report, track` | `from cadgen.engine import report, track` |
 | `<name>.step.json` sidecars, `.params.js` | none: the document carries the mechanism; delete them |
 
-An older cadgen's cache is no longer read, and the engine removes it: each time the
-engine daemon starts, it looks in 0.7's cache folder (`CADGEN_CACHE_DIR`, else
-`~/.cache/cadgen` on macOS and Linux, `$XDG_CACHE_HOME/cadgen` when that is set,
-`%LOCALAPPDATA%\cadgen` on Windows) and deletes the `objects` and `index` folders there,
-in the background, so no build waits for it. Nothing else is touched: other files in
-that folder, your settings, your telemetry choice and installation id, and your recent
-files all stay. A file Windows holds open is left for the next start to delete.
+An older cadgen's cache is no longer read: `CADGEN_CACHE_DIR`, else
+`~/.cache/cadgen` (`$XDG_CACHE_HOME/cadgen`, `%LOCALAPPDATA%\cadgen` on Windows).
+Delete it to reclaim its space.
 
 ## Mates become build123d joints
 
