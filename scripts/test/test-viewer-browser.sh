@@ -203,7 +203,7 @@ cat > "$project/smoke.urdf" <<'URDF'
 </robot>
 URDF
 
-(cd "$project" && "$PYTHON" -m cadgen.viewer --json --new) >"$log"
+(cd "$project" && "$PYTHON" -m cadgen.viewer --json) >"$log"
 url="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["apiUrl"])' "$log")"
 export VIEWER_TEST_TOKEN="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["token"])' "$log")"
 e2e_args=(--dir "$project" --url "$url")

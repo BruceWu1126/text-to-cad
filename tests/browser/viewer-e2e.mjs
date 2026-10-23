@@ -98,8 +98,8 @@ async function newPage() {
       return;
     }
     const parsed = new URL(url);
-    // A file is named by its absolute path in every request: the page resolves a relative
-    // `?file=` (as this suite opens them) against where the viewer started before it asks.
+    // A file is named by its absolute path in every request: the page addresses documents by id
+    // (`/<id>`) and asks for a file by the path its row gives.
     if (["/__cad/catalog", "/__cad/artifact", "/__cad/preview"].includes(parsed.pathname)) {
       const file = parsed.searchParams.get("file") || "";
       if (file && !/^(?:\/|[a-z]:\/)/i.test(file)) {
@@ -191,7 +191,13 @@ async function newPage() {
 }
 
 async function openFile(page, file) {
-  await page.goto(`${args.url.replace(/\/$/, "")}/?file=${encodeURIComponent(file)}`, {
+  // A page names its document by id, `/<id>`: the file's, which the server derives from its canonical
+  // path and registers when the catalog is asked for it (as Select File and the home do).
+  const base = args.url.replace(/\/$/, "");
+  const catalog = await page.request.get(`${base}/__cad/catalog?file=${encodeURIComponent(path.join(root, file))}`);
+  const id = (await catalog.json()).entries?.[0]?.id;
+  if (!id) fail(`the catalog gave ${file} no document id`);
+  await page.goto(`${base}/${id}`, {
     waitUntil: "domcontentloaded",
     timeout: 60_000,
   });
