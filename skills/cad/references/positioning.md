@@ -56,6 +56,10 @@ def enclosure():
     bd.RigidJoint("lid_seat", lid, bd.Location((0, 0, -LID_THICKNESS / 2)))
     base.joints["lid_seat"].connect_to(lid.joints["lid_seat"])
     return bd.Compound(children=[base, lid], label="enclosure")
+
+
+if __name__ == "__main__":
+    enclosure()
 ```
 
 The joint kinds are `RigidJoint` for fixed placement, `RevoluteJoint` for rotation,

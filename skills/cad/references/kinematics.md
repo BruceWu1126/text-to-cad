@@ -108,7 +108,10 @@ leaves out as built, and returns the assembly. A cylindrical joint takes
 a snapshot's `--pose` names.
 
 A file of the mechanism in another pose is a model of its own: `posed(assembly, state)`
-returns the assembly with its parts placed at that state.
+returns a copy of the assembly with every part where the named state, or a mapping of
+joint label to value, puts it. The copy keeps its joints, couplings, states and
+sequences, with the asked values as its as-built state, so its page's Position and
+motions still work. An unknown state or joint is refused by name.
 
 ```python
 # src/hinge_poses.py
@@ -121,6 +124,10 @@ from hinge import hinge
 @model
 def hinge_open():
     return posed(hinge(), "open")
+
+
+if __name__ == "__main__":
+    hinge_open()
 ```
 
 ## Couplings
@@ -168,6 +175,10 @@ def index_finger():
     gear_pair(finger, "index_curl", **CURL)                             # 0 straight, 1 a fist
     return configuration_sequence(finger, "grip", [(0, {"index_curl": 0}), (1.5, {"index_curl": 1}),
                                                    (3, {"index_curl": 0})])
+
+
+if __name__ == "__main__":
+    index_finger()
 ```
 
 `--pose '{"index_curl": 0.6}'` poses the knuckles at 54, 60 and 42 degrees; its range,

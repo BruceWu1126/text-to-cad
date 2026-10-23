@@ -36,7 +36,7 @@ Use the corresponding robot-description skill for URDF, SRDF or SDF.
 ## Setup and paths
 
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
-one installation, and its engine, with the CAD app's server:
+one installation, and its engine server, with the CAD app's:
 
 - `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen`
 - `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 python`
@@ -93,12 +93,12 @@ python src/bracket.py
 ```
 
 ```text
-built src/bracket.py::bracket cold in 2.64s: bodies 2 run; 6 misses, 0 hits; body 0.01s, ...
-  id: 1c02ada0-b915-5723-b40c-4c8ad25f71c0
-  view: http://127.0.0.1:61135/1c02ada0-b915-5723-b40c-4c8ad25f71c0?token=...
-built src/bracket.py::bracket_wide warm in 0.02s: ...
-  id: dee8cf0b-c871-53ba-b51e-df2b05b30d1a
-  view: http://127.0.0.1:61135/dee8cf0b-c871-53ba-b51e-df2b05b30d1a?token=...
+built src/bracket.py::bracket cold in 2.61s: bodies 1 run; 6 misses, 0 hits; body 0.01s, names 0.00s, document 0.00s
+  id: 0dc50a92-a21f-5895-a245-ebdeb5352f3b
+  view: http://127.0.0.1:54360/0dc50a92-a21f-5895-a245-ebdeb5352f3b?token=...
+built src/bracket.py::bracket_wide warm in 0.01s: bodies 1 run; 6 misses, 0 hits; body 0.01s, names 0.00s, document 0.00s
+  id: 966d03a5-7b43-5bed-b75c-eb67d56c72d2
+  view: http://127.0.0.1:54360/966d03a5-7b43-5bed-b75c-eb67d56c72d2?token=...
 ```
 
 Each call the script's `__main__` makes prints its document's `id:` and its page,
@@ -118,9 +118,10 @@ so it is the same run after run, and the open page follows every run.
   alone, such as a whole sub-assembly stage; never a part, never a helper called many
   times ([`@memo`](references/model-contract.md#memo-marks-stages)).
 - **An assembly calls its parts.** Its body calls each part model (`plate()`), places and
-  labels what they return, and returns a `Compound`. Each child builds in the same run and
-  keeps its own document. Running a child's script alone leaves the assemblies that use
-  it as they were: run the assembly.
+  labels what they return, and returns a `Compound`. Each child builds in the same run.
+  Running a child's script alone leaves the assemblies that use it as they were: run the
+  assembly. To show, export or inspect a part on its own, run its own script and use the
+  id that run prints.
 - **`import build123d as bd`, and use it attribute-style** (`bd.Box`). The import is lazy:
   the kernel loads on first use, in the worker. `from build123d import Box`, or a
   module-level `bd.Color(...)` or `bd.Align` default, loads it at that line instead.
@@ -179,7 +180,7 @@ pose and size. It shows arrangement and appearance, not dimensions
 
 ## Prompt references and inspection
 
-A reference such as `1c02ada0-b915-5723-b40c-4c8ad25f71c0#bracket/face 7` names geometry
+A reference such as `0dc50a92-a21f-5895-a245-ebdeb5352f3b#bracket/face 7` names geometry
 in a document by the engine's own names: the document (a model's id, or a file's
 absolute path), `#`, a part or an assembly by the labels on its way from the root
 (`hand/finger.2` is the second component labelled `finger` in `hand`), then, after a
@@ -253,8 +254,8 @@ print(closest_points(plate, post).distance)   # 0: the standoff sits on the plat
 - A check that fails or cannot decide has shown nothing about the design.
 - A retry that leaves out or shrinks a specified feature (a fillet skipped, a radius
   reduced) builds a different design from the one asked for.
-- Every run says where its time went and why it built (`rebuilt: src/lib/arm_parts.py
-  changed`). A body that runs on every run is named, with why, in the report
+- Every run says where its time went and how each body went (`run` or `replayed`). A
+  body that runs on every run is named, with why, in the report
   `bracket.build().models[0]["retention"]` returns
   ([what a run runs](references/model-contract.md#what-a-run-runs)).
 

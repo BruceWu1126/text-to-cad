@@ -165,8 +165,9 @@ if __name__ == "__main__":
 ```
 
 - **A child builds in the same run**, in the caller's worker, and returns what its body
-  returned, before the caller placed or labelled it. It keeps its own document and id. A
-  child called twice is one model, built once.
+  returned, before the caller placed or labelled it. A child called twice is one model,
+  built once. Its own id and page come from a run of its own script: running the
+  assembly prints the assembly's.
 - **Running a child's script alone builds the child** and leaves the assemblies that use
   it as they were: run the assembly to update them.
 - **A placement shares its shape.** `Pos(...) * part`, `part.moved(...)` and
@@ -203,8 +204,7 @@ body: the clock, environment variables, randomness, a file only tested for
 module for another. A body must be a function of its inputs.
 
 A run after the engine restarted, or after the script's worker retired, starts a fresh
-worker and builds cold. Every run says why it built what it built:
-`rebuilt: src/lib/arm_parts.py changed`.
+worker and builds cold. Every run says how each body went: `bodies 2 run, 1 replayed`.
 
 `bracket.build(verify=True)` runs every body the engine would replay and compares each
 fresh result with the logged one (`.models[0]["verify"]`); a body whose result differs
@@ -268,6 +268,10 @@ CAD app's tools, take the id and read the document as the engine holds it. No co
 imports, runs or builds a script: editing the script changes nothing until Python runs
 it again.
 
+- **Documents outlive their workers.** A document stays held after its script's worker
+  retires (`cadgen status`: `live` with its worker, `held` without one, where `made_by`
+  is null), under one memory budget (`CADGEN_ENGINE_MEMORY_MB`, default a quarter of the
+  machine's) that never drops a document a page watches.
 - **The engine never reruns code.** A document it no longer holds (the engine restarted,
   or it dropped the document under its memory budget) is refused with the command that
   brings it back, `python <the program that built it>`, by the page, `cadgen inspect`
@@ -301,17 +305,20 @@ src/hand.py::hand
 Each model's report says how it built, then its children:
 
 ```text
-built src/assembly.py::assembly warm in 0.17s: bodies 3 run; 11 misses, 0 hits; body 0.01s, ...
-  rebuilt: src/plate.py changed
+built src/assembly.py::assembly warm in 0.03s: bodies 2 run, 1 replayed; 3 misses, 2 hits; body 0.00s, ...
   src/plate.py::plate, a child
-  id: b48e875e-f53d-5535-ada3-a2a300690f6f
-  view: http://127.0.0.1:61135/b48e875e-f53d-5535-ada3-a2a300690f6f?token=...
+  src/standoff.py::standoff_m3, a child
+  id: 7a9724e8-f676-5676-acaa-160d7c6cc5fa
+  view: http://127.0.0.1:54360/7a9724e8-f676-5676-acaa-160d7c6cc5fa?token=...
 ```
+
+That run followed an edit of the plate's depth: the plate's body and the assembly's ran,
+the standoff's replayed, and of the kernel's five operations two were hits.
 
 `cold` is a fresh worker, `warm` one that built the script before; `bodies` counts
 those run or replayed, and `misses` and `hits` the kernel's memo. `assembly.build()`
 returns the same report as data, a dict per model in `.models`: `id`, `memo`, `bodies`
-(each `run` or `replayed`), `cache` (`reason`, `changed`), `retention` (each body's
+(each `run` or `replayed`), `retention` (each body's
 `fallbacks`, the reasons it runs on every run, and the files it `reads`), `timings` and
 `child_models`:
 

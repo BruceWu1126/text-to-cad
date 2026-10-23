@@ -126,8 +126,8 @@ geometry, names, colours and materials. Keep the xbf beside the STEP, and read t
   the model's configuration sequences as an animation of its name
   ([kinematics](kinematics.md#configuration-sequences)), and each of its `animation()`s
   ([animation](animation.md)). The animations come from the model's code, so a GLB
-  exported from the model's id (or by `exports.py`) carries them; one exported from a
-  saved `.xbf` carries the sequences alone.
+  exported by `export(model, path)`, or from the id of a `live` model, carries them; one
+  exported from a `held` document or a saved `.xbf` carries the sequences alone.
 - **3MF**: an object per part, a build item per placement, in millimetres, with colours
   and materials through the materials extension.
 - **STL**: binary, every placed triangle, in millimetres.

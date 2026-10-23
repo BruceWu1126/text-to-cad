@@ -61,7 +61,7 @@ ELEMENT  = NAME | face N | edge N | vertex N    NAME: f:..., e:..., v:...
 kit/hand/finger.2                       the second component labelled finger in hand
 finger.2/face 7                         face 7 of it: the path may start at any level that names one occurrence
 palm/f:palm.body.3;M:palm.relief        a face of palm by its name
-b48e875e-f53d-5535-ada3-a2a300690f6f#palm,finger.1   two selectors, with the model's id first
+7a9724e8-f676-5676-acaa-160d7c6cc5fa#palm,finger.1   two selectors, with the model's id first
 /work/STEP/kit.step#palm                a file's document, by its absolute path
 "m3/screw"/f:kit.screw.1                a label holding '/', ',' or a quote is JSON-quoted
 plate/face 3                            in a document of one part, its elements by the document's name
@@ -156,20 +156,24 @@ def bracket():
 $ cadgen inspect "$ID" "bracket/face 7"
 {
   "ref": "bracket/f:bracket_body.hole.1;M:bracket_body.body_dedanl",
+  "path": "bracket/bracket",
+  "part": "bracket",
   "kind": "face",
   "ordinal": 7,
-  "area": 150.796...,
+  "name": "f:bracket_body.hole.1;M:bracket_body.body_dedanl",
+  "area": 150.79644737231007,
   "surface": "cylinder",
   "radius": 4.0,
-  "made_by": {"feature": "bracket_body.body_dedanl", "operation": "cut", "function": "bracket_body",
-              "file": "/work/src/bracket.py", "line": 9},
+  "made_by": {"name": "f:bracket_body.hole.1;M:bracket_body.body_dedanl", "feature": "bracket_body.body_dedanl",
+              "operation": "cut", "function": "bracket_body", "file": "/work/src/bracket.py", "line": 8},
   ...
 }
 ```
 
 The bore's wall is face 1 of the cylinder `hole`, modified by the cut whose result
 `body` took. `made_by` comes from the worker that built the document, while it lives:
-it is `null` for a file no worker built. A ref of several selectors answers a list; one
+it is `null` once that worker has retired (run the script again for it) and for a file
+no worker built. A ref of several selectors answers a list; one
 that names nothing is refused (exit 2). Without a REF, `cadgen inspect DOC` prints what
 the document was built from: its script and function, the modules it reaches and the
 files it read, each by its digest.

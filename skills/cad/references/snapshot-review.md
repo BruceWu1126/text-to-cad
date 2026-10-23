@@ -203,8 +203,8 @@ still on it.
 
 OUT is written exactly as given, relative to the working directory, and must end in
 `.png`; a folder instead (one that is there, or a path ending in `/`) gets a
-generated name inside it, `<SRC's stem>_<UTC time>.png` (a model's name for a model:
-`tmp/stills/bracket_20261022T174512Z.png`),
+generated name inside it, `<SRC's stem>_<UTC time>.png` (an id for a model:
+`tmp/stills/0dc50a92-a21f-5895-a245-ebdeb5352f3b_20261023T233930Z.png`),
 which the command prints. Check the command's exit status before reading it: a refused request
 (an unknown key or value, a pose out of range, a flag the input cannot take) and a
 failed render write nothing, and leave a file an earlier run wrote where it

@@ -259,7 +259,7 @@ Code written against an 0.8 preview may use names the release renamed or removed
 | `from cadgen import mechanism_state, configuration_sequence, gear_pair, ...` | `from cadgen.ap242 import ...` |
 | `from cadgen import animation` | `from cadgen.gltf import animation` |
 | `cadgen build SOURCE`, `cadgen.build(code_or_shape, ...)`, `cad_build` | none: write a decorated function in a `.py` file and run it; a shape made elsewhere is wrapped in a `@model` function |
-| `@xbf` + `@glb` stacked so a GLB bakes its animations | `@model`; `cadgen export <id> model.glb` bakes them |
+| `@xbf` + `@glb` stacked so a GLB bakes its animations | `@model`; `export(model, "model.glb")`, or `cadgen export <id> model.glb` while the model is live, bakes them |
 | `cadgen export DOC OUT --pose NAME`, `export(..., pose=)` | a model returning `posed(assembly, NAME)`, exported |
 | `cadgen export DOC OUT --part OWNER`, `export(..., part=)` | the part's own `@model`, exported |
 | `cadgen export ... --no-daemon`, `cadgen snapshot ... --no-daemon` | the same command without the flag |
