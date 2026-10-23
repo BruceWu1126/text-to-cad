@@ -129,6 +129,25 @@ class HttpSessionsTest(unittest.TestCase):
         self.assertEqual(client.call('DELETE', '/mcp', headers=headers)[0], 200)
         self.assertEqual(post({'jsonrpc': '2.0', 'id': 2, 'method': 'ping'}, **headers)[0], 404)
 
+    def test_shim_opens_a_new_session_when_the_engine_session_ends(self):
+        # A host initializes once: an expired session or a restarted engine must not leave the
+        # server answering every later call with an error until the host reconnects it.
+        proxy = self.proxy()
+        proxy.notify('notifications/initialized', {})
+        first = proxy.session
+        self.assertEqual(EngineClient().call('DELETE', '/mcp', headers={'Mcp-Session-Id': first})[0], 200)
+        status = self.tool(proxy, 'cad_http', {'method': 'GET', 'url': '/__cad/analytics'})
+        self.assertEqual(status['structuredContent']['status'], 200)
+        second = proxy.session
+        self.assertNotEqual(second, first)
+        from cadgen.engine.api import stop
+        pid = request({'op': 'status'})['pid']
+        self.assertTrue(stop())
+        self.assertEqual(self.call(proxy, 'ping'), {})
+        self.assertNotEqual(proxy.session, second)
+        self.assertNotEqual(request({'op': 'status'})['pid'], pid)
+        self.assertIn('cad_open', [tool['name'] for tool in self.call(proxy, 'tools/list')['tools']])
+
     def test_stdio_shim_serves_resource_and_exits_without_stopping_engine(self):
         process = subprocess.Popen([sys.executable, '-m', 'cadgen.cli', 'mcp'],
                     env={**self.env, 'CADGEN_MCP_APP_DIR': str(self.page)},

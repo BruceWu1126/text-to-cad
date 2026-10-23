@@ -22,6 +22,11 @@ class EngineClient:
                 self.endpoint = answer
             return self.endpoint
 
+    def forget(self):
+        """Ask the engine where it listens again on the next call."""
+        with self.lock:
+            self.endpoint = None
+
     def call(self, method, path, body=b'', headers=None):
         endpoint = self.connect()
         parsed = urlsplit(endpoint['url'])

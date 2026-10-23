@@ -287,7 +287,10 @@ socket supplies the endpoint and token; the shim sends Bearer authentication.
 Initialize creates an opaque `Mcp-Session-Id`, which accompanies subsequent POSTs
 and DELETE. Requests negotiate a supported MCP protocol revision. JSON replies need
 no SSE stream, so GET returns 405. Missing sessions return 400; expired sessions 404.
-A restart requires reconnecting the host’s MCP server; mutations are never replayed.
+When the engine restarts or a session's idle hour passes, the shim opens a new session
+with the host's own initialize and sends again only the request the engine refused
+unseen (404, or a refused connection); the host never reconnects. Views, operations
+and the app capability start over with the new session, and mutations are never replayed.
 Host-specific capability corrections live in `mcp/shim.py`. Version polls use `wait=0`
 in the page’s tunnel so they never occupy a host call slot. The engine has no such
 host-specific timing rule. The manifests continue to launch `cadgen mcp`.

@@ -218,7 +218,8 @@ installation identity and therefore a different engine.
 The injected application also serves `/mcp`, the Streamable HTTP MCP transport
 (2025-11-25 and the previously supported protocol revisions). Initialization returns
 an opaque `Mcp-Session-Id`. Every subsequent request identifies that session;
-DELETE releases it, and a missing/expired session must initialize again. JSON replies
+DELETE releases it, and a missing/expired session must initialize again (the stdio shim
+does so for its host). JSON replies
 are used; GET returns 405 because this server has no unsolicited SSE events.
 Each session owns its tool server, view registry and immutable UI resource. `cad_http`
 dispatches into the same application in process. It is listed for every host, even
