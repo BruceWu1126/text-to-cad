@@ -57,6 +57,8 @@ export interface CadCatalogSnapshot {
   hydrated: boolean;
   refreshing: boolean;
   error: string;
+  /** The last read failed because the engine is gone (`isEngineGone`); cleared by the next that answers. */
+  engineGone: boolean;
   /** The server's digest of the last catalog applied ('' before one is): what a change watcher compares. */
   catalogRevision: string;
 }
@@ -244,6 +246,8 @@ export interface ExportJob {
   state: 'queued' | 'running' | 'cancelling' | 'cancelled' | 'failed' | 'ready' | 'expired';
   stage: string; sequence: number; createdAt: number; finishedAt: number; expiresAt: number;
   bytes?: number; error?: string;
+  /** Expired because the browser fetched the whole file (it is deleted then), not by its window. */
+  fetched?: boolean;
 }
 export interface ExportService {
   options(source: ExportSource, signal: AbortSignal): Promise<{ epoch: string; formats: ExportOption[] }>;

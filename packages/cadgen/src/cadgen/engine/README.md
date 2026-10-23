@@ -287,7 +287,7 @@ only, and a file's id is derived again from its path after a restart.
 | Module | What it is |
 | --- | --- |
 | `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); its id (`ids.model_id` of its script and function), and a build's report of every model a program's call builds, wherever the model is defined; a child model called in a body is a sub-assembly built in the same run, and the models a target's run ran (`BuildContext.children`); `@memo` and its calls; explicit model calls asking the daemon; a script's module and package (`module_of`); `paint`, `mechanism_state`, `configuration_sequence`; `read_step`, `read_xbf` |
-| `api.py` | the verbs as functions, through the daemon: `export`, `snapshot`, `inspect` (the root's `cadgen.export`, ...), and `serve`, `status`, `stop`, `daemon`, which only the CLI calls (process control is the CLI's alone), and `build_script`, a script's models built by `Model.build()`; `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
+| `api.py` | the verbs as functions, through the daemon: `export`, `snapshot`, `inspect` (the root's `cadgen.export`, ...), and `serve`, `status`, `stop`, `server`, which only the CLI calls (process control is the CLI's alone), and `build_script`, a script's models built by `Model.build()`; `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
 | `colors.py` | a colour as the author gives it (sRGB hex, 0-255 integers, a build123d `Color`) held linear, and the way back (**Materials**) |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`gear_pair`, `rack_and_pinion_pair`, `screw_pair`), mechanism states (`mechanism_state`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and configuration sequences (`configuration_sequence`, a function's samples, `Timeline`: a sequence's pair values over time) |
@@ -306,7 +306,7 @@ only, and a file's id is derived again from its path after a restart.
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, at most one per core alive (`Pool`), connect-or-start; a worker's memory cap |
 | `progress.py` | where a build is: the engine's stages heard where they begin, each body a model's body runs by name, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
-| `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `daemon` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
+| `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `server` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
 
 ## CLI
@@ -323,7 +323,7 @@ cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
 cadgen serve DOC [--port N] [--three DIR]
 cadgen inspect DOC [REF]                       the build closure; with REF (**References**): an element's facts and
                                              what made it, or a part's or an assembly's volume and mass
-cadgen status [--json] | stop | daemon
+cadgen status [--json] | stop | server
 ```
 
 `python -m cadgen.engine VERB ...` takes the same verbs, the engine's own entry.
@@ -388,7 +388,7 @@ header is always `01/01/2000` (`document.WRITTEN_DATE`, put over the driver's in
 place), so two cold builds of the same code are the same bytes on any day.
 If a body raises, the error is reported with the model's frames and the
 previous files stay. Builds run in the daemon's warm workers, at most one per core alive
-(**The daemon and its workers**). `CADGEN_ENGINE_DIR` moves its socket and lock.
+(**The engine server and its workers**). `CADGEN_ENGINE_DIR` moves its socket and lock.
 `CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_VIEWER_WARM=0` keeps `cadgen viewer`
 from warming the engine at its launch (**The viewer and the snapshot**). `CADGEN_ENGINE_MESH=processes|inline`
 picks how parts are meshed. The default, `processes`, uses a warm pool of
@@ -451,9 +451,10 @@ reused by a later build. Failed model reports include the work observed before f
 `builtins=False`: native OCCT time belongs to the Python function that called it,
 which also avoids pybind11's unmatched profile events on Python 3.12 and later.
 
-## The daemon and its workers
+## The engine server and its workers
 
-One daemon per installation (`daemon.py`), started on demand by the first command that needs
+One engine server per installation (`daemon.py`: a daemon, which `cadgen server` runs in the
+foreground), started on demand by the first command that needs
 it and gone after an idle hour (`CADGEN_ENGINE_IDLE` seconds; a page waiting on a served
 document keeps it). It holds a pool of warm workers, one per model script (and one for the documents no
 worker built), each a process whose memo lives as long as
@@ -510,10 +511,10 @@ between requests: an idle worker holds no project folder (on Windows, one a proc
 cannot be renamed or deleted). A meshing or reading pool's processes exit with the process that
 started them, however it ends.
 
-`cadgen status` says what the daemon holds (`--json`: the same as data, `api.status()`):
+`cadgen status` says what the server holds (`--json`: the same as data, `api.status()`):
 
 ```
-engine daemon 98307, up 2h10m · workers 2/10 · idle timeout 1h · RSS cap 16.0 GB
+engine server 98307, up 2h10m · workers 2/10 · idle timeout 1h · RSS cap 16.0 GB
   busy  tom.py         98310   12 builds   3.7 GB  building tom.py::tom · Building geometry · 3/7 stages · 41s
   idle  motorbike.py   98410    3 builds   0.6 GB  4m
   waiting  2 builds, first come first served
@@ -526,6 +527,12 @@ last progress frame says (**Progress**); the time is how long it has been busy, 
 retirement's reason is `LRU` (room at the cap), `idle`, `RSS` (over its memory cap),
 `environment` (a build asked for the script with another `PYTHONPATH`, `PATH` or `VIRTUAL_ENV`:
 its worker is replaced in its slot) or `exited` (it died).
+
+`cadgen stop` stops every server of the installation, whatever protocol it speaks: the socket and
+lock names carry the protocol (`daemon._tag`), and `daemon.endpoints()` lists this one's and each
+older one's, so a cadgen that bumps `PROTOCOL` still stops the server an earlier one started. Both
+`stop` and `status` remove the socket and lock of a dead server (nothing answers and nobody holds
+its lock) and say so on stderr; `status` names an older protocol's live server, which `stop` stops.
 
 ## Progress
 
@@ -572,7 +579,7 @@ the daemon:
   `python model.py` draws a bar on stderr when it is a terminal -- each
   phase finished a line with its time, the one in flight repainted in place -- and nothing when
   it is not (`progress.Bar`; `api.build_script(progress=)` takes the frames instead, `False` none);
-- keeps a busy worker's last, which `cadgen status` shows (**The daemon and its workers**);
+- keeps a busy worker's last, which `cadgen status` shows (**The engine server and its workers**);
 - wakes the pages waiting on a served document among the frame's `outputs` (below).
 
 Each model's report holds its last frame (`progress`), so a failed build
@@ -873,7 +880,7 @@ The xbf is saved first and the viewer woken with it: the worker waits for the da
 the patch (`{"op": "patched"}` on its pipe) before it writes a derived file.
 
 **Functions** (`api`, also `cadgen.export`, `cadgen.snapshot` and `cadgen.inspect`; `serve`,
-`status`, `stop` and `daemon` only the CLI calls): one per command, each through the daemon. No function builds source text
+`status`, `stop` and `server` only the CLI calls): one per command, each through the daemon. No function builds source text
 or a shape made elsewhere: a shape is built by wrapping it in a decorated function (law 12).
 `export(source, *destinations, pose=, part=, inputs=)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`, and `snapshot(job=PACKET, ...)` (with `source` in place of the packet's input, as `--job PACKET SRC`) a list of them, one verb with two input shapes, anything else refused as Python refuses a call; `where(doc)` the build
 closure an xbf holds, `where(doc, ref)` an element's facts. A `Model` builds, exports and draws

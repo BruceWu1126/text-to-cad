@@ -50,7 +50,7 @@ the two disagree, the engine's README is right.
 
 | Document | What it is for | Go there when |
 |---|---|---|
-| [`src/cadgen/engine/README.md`](src/cadgen/engine/README.md) | The engine: models and decorators, the daemon and its workers, progress, the viewer and the snapshot, exports, kinematics, couplings and configuration sequences, materials, imports, placements, the mesh and its wire format, element names, references, body retention, memo functions and the build closure | changing anything a build, an export, a snapshot or a served document does |
+| [`src/cadgen/engine/README.md`](src/cadgen/engine/README.md) | The engine: models and decorators, the engine server and its workers, progress, the viewer and the snapshot, exports, kinematics, couplings and configuration sequences, materials, imports, placements, the mesh and its wire format, element names, references, body retention, memo functions and the build closure | changing anything a build, an export, a snapshot or a served document does |
 
 ## The design laws
 
@@ -148,7 +148,7 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     is an error naming the supported set, never silently ignored.
 17. **Loud failure or correct output, nothing between.** The cardinal sin is plausible-wrong
     output at exit 0. No silent fallbacks, no globs, no guessing; a failed write or render leaves
-    NO file at the requested path.
+    no file this run wrote; an earlier file stays byte for byte.
 18. **Nothing waits on the network.** Once installed, cadgen works offline: every command,
     build, snapshot, server and page. Its own requests are two: telemetry (`analytics.py`, usage
     counts under a random id, sent by default once a `cadgen` command has said so, and never
@@ -172,7 +172,7 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     sync protects the worker that built it from idle retirement. The engine outlives its
     clients; a page closing never stops a worker. The worker-count cap never retires a worker
     whose document a page watches; it is exceeded instead. The memory cap may retire it (the
-    engine's **Architecture** and **The daemon and its workers**).
+    engine's **Architecture** and **The engine server and its workers**).
 
 20. **One engine serves the installation; tabs select documents at `/<uuid>`.** A tab names
     a model's id, or a file's id after a launcher registers it; Python scripts are never
@@ -191,7 +191,7 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
 21. **Operations on documents are Python functions the CLI exposes; process control is the
     CLI's alone.** `export`, `snapshot` and `inspect` are functions of the root
     (`cadgen.export`, ...) and commands that call them; serving, the engine's status, stopping it
-    and running it (`cadgen serve`, `status`, `stop`, `daemon`) are commands only, with no
+    and running it (`cadgen serve`, `status`, `stop`, `server`) are commands only, with no
     function of the root. Every successful server-backed build reports its id and localhost
     viewer URL, including a build with file outputs. A cold `daemon=False` build has no served
     URL.
@@ -248,7 +248,7 @@ src/cadgen/
                          #   configuration_sequence, gear_pair, rack_and_pinion_pair,
                          #   screw_pair (product and manufacturing information to join them)
   gltf.py                # what glTF says and the document does not: animation
-  engine/                # the engine: models, the daemon and its workers, documents,
+  engine/                # the engine: models, the server and its workers, documents,
                          #   exports, the mesh, references, the OCCT stills (its README)
   cli/                   # the `cadgen` command: a module per command, each a shell over
                          #   the function or parser that does the work
@@ -295,7 +295,7 @@ src/cadgen/
 ```
 
 Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and
-`daemon` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
+`server` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
 snapshot for those files alone; `cadgen urdf|sdf|srdf validate` the validators; `cadgen
 doctor` the installation and a skill's pin; `cadgen viewer` the engine page launcher;
 `cadgen mcp` the stateless proxy an agent host starts; and `cadgen telemetry` the person's answer. A

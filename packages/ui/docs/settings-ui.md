@@ -997,7 +997,8 @@ when a closing menu hands focus back.
 Copy, snapshot and prompt actions complete silently, the Copy and Quick Edit
 buttons showing a tick for a moment. Explicit export jobs are the one exception: each
 has a persistent toast at the top-right below the navbar, with its state, elapsed time,
-Cancel, Download again and Remove, in the menu's one size (`text-tiny`). Multiple jobs
+Cancel, Download again (Export again once the file is gone) and Remove, in the menu's one size (`text-tiny`); on a phone
+the stack sits at the view's bottom, the view's width less 8px each side, and its buttons are 36px. Multiple jobs
 stack and scroll within the viewport; dismissing one only hides it, and Export's Show
 exports restores the stack. No other action earns a toast. Export is an icon button at
 the navbar's right end, named on hover as the view controls are, never in the tool strip.

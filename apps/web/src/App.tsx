@@ -13,6 +13,7 @@ import { createBrowserDownloads } from './host/downloads';
 import { browserClipboard, browserClipboardSupportsImages } from './host/clipboard';
 import { createWebPromptContext } from './host/promptContext';
 import { useViewerLinks } from './host/viewerLinks.js';
+import { EngineStopped } from './EngineStopped';
 import { readDefaultFileParam, readDocumentId, writeDocumentId } from './client/workbench/fileParam.js';
 import { applyColorSchemeToDocument, resolveColorSchemeMode } from './client/ui/colorScheme.js';
 
@@ -151,7 +152,9 @@ export default function App({ client, server, tabStore, notice = null, language:
     usage: { used: feature => { if (feature === 'quickEdit') client.reportActivity({ quickEdit: true }); } },
     environment: { colorScheme: appearance.colorScheme, locale, platform: keyboardPlatform() },
   }), [downloads, client, source, fileActions, promptContext, promptFiles, links, appearance.colorScheme, locale]);
-  return <div className="flex h-svh flex-col overflow-hidden"><div className="min-h-0 flex-1">
+  // The engine gone under the page: said over it, which stays as it was for the engine's return.
+  const engineGone = useSyncExternalStore(client.subscribe, () => client.getSnapshot().engineGone, () => false);
+  return <div className="relative flex h-svh flex-col overflow-hidden">{engineGone ? <EngineStopped locale={locale} /> : null}<div className="min-h-0 flex-1">
     <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={next => { void show(next); }} onShown={shown} start={start}
       library={library} onThumbnail={client.keepThumbnail} appSettings={appSettings}
       update={updateNotice ? <UpdateButton notice={updateNotice} copy={prompt => browserClipboard.writeText(prompt)} onLink={openTab} /> : null}

@@ -13,7 +13,7 @@ repository link is only for provenance and release review.
 ## Setup
 
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
-one installation, and its engine daemon, with the CAD app's server:
+one installation, and its engine server, with the CAD app's:
 
 - `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen`
 - `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 python`
@@ -21,7 +21,7 @@ one installation, and its engine daemon, with the CAD app's server:
 The first run downloads that installation; later runs reuse it.
 
 `cadgen doctor <skill-dir>` reports the installation in use and checks that it is
-the one this skill pins, that the CAD kernel loads, and whether the engine daemon
+the one this skill pins, that the CAD kernel loads, and whether the engine server
 every build runs in is running; use it for installation or kernel load errors.
 
 Drawings are build123d geometry, so a drawing builds in the engine's warm worker

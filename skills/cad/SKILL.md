@@ -32,16 +32,16 @@ Use the corresponding robot-description skill for URDF, SRDF or SDF.
 ## Setup and paths
 
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
-one installation, and its engine daemon, with the CAD app's server:
+one installation, and its engine server, with the CAD app's:
 
 - `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen`
 - `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 python`
 
 `cadgen doctor <skill-dir>` reports the installation in use, whether it is the one
-this skill pins, whether the CAD kernel loads, and whether the engine daemon is
+this skill pins, whether the CAD kernel loads, and whether the engine server is
 running. Each command's `--help` lists its flags.
 
-Every build runs in the engine's daemon, which the first build starts: one warm
+Every build runs in the engine server, which the first build starts: one warm
 worker per model script, kept between runs. `cadgen status` shows the workers and
 what each is building; `cadgen stop` stops the daemon. Every build and every verb
 goes through the engine.

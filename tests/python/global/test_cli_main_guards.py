@@ -58,7 +58,7 @@ class RegisteredCommandsAnswerHelpTest(unittest.TestCase):
     """``cadgen <command> --help`` prints help on stdout and exits 0. Every one.
 
     This is the contract scripts/test/test-installed.sh walks the registry to
-    check, and `cadgen daemon --help` broke it: the daemon refuses arguments so
+    check, and `cadgen server --help` broke it: the server refuses arguments so
     a stray one cannot leave a resident server behind, and --help was swept up
     with the typos -- usage on STDERR, exit 2. Nothing in the suite noticed,
     because the only check ran at the end of the installed-mode pipeline.

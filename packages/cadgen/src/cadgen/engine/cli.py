@@ -7,7 +7,7 @@ ordinary Python scripts call decorated models explicitly.
         [--preview] [--pose NAME|JSON] [--annotation FILE] [--measurements FILE] [--width N] [--height N]
         [--size-profile P] [--json]
     cadgen serve DOC [--port N] [--three DIR]
-    cadgen status [--json] | stop | daemon
+    cadgen status [--json] | stop | server
     cadgen inspect DOC [REF]                           a document's build closure, or what a ref names (``refs``)
 
 SRC and DOC are an on-disk CAD file's path or a document's id (``ids``): a model's id is what
@@ -55,7 +55,7 @@ def _serve_arguments(serve: argparse.ArgumentParser) -> None:
 
 
 def _status_arguments(status: argparse.ArgumentParser) -> None:
-    status.add_argument("--json", action="store_true", help="the daemon's answer as JSON")
+    status.add_argument("--json", action="store_true", help="the server's answer as JSON")
 
 
 def _no_arguments(_parser: argparse.ArgumentParser) -> None:
@@ -330,18 +330,20 @@ def _inspect(args: argparse.Namespace, prog: str) -> int:
     return 0
 
 
-def _daemon(_args: argparse.Namespace, _prog: str) -> int:
+def _server(_args: argparse.Namespace, _prog: str) -> int:
     from cadgen.engine.daemon import main as daemon
 
     return daemon([])
 
 
 def _status(args: argparse.Namespace, _prog: str) -> int:
-    from cadgen.engine.client import request
+    from cadgen.engine.client import request, sweep
 
+    swept = sweep(stop=False)
+    _told_swept(swept)
     answer = request({"op": "status"}, start=False)
     if answer is None:
-        print("null" if args.json else "no engine daemon is running")
+        print("null" if args.json else "no engine server is running")
         return 0
     if args.json:
         print(json.dumps(answer, indent=2))
@@ -350,17 +352,33 @@ def _status(args: argparse.Namespace, _prog: str) -> int:
     return 0
 
 
-def _stop(_args: argparse.Namespace, prog: str) -> int:
-    from cadgen.engine.client import request, wait_gone
+def _told_swept(swept: dict[str, list[str]]) -> None:
+    """What a sweep found besides this protocol's server, on stderr (stdout is the answer's): the
+    stale files it removed, and a server of an older protocol, which ``stop`` stops."""
+    for path in swept["removed"]:
+        print(f"removed stale engine file {path}", file=sys.stderr)
+    from cadgen.engine.daemon import socket_path, port_path, WINDOWS
 
-    answer = request({"op": "stop"}, start=False)
-    if answer is None:
-        print("no engine daemon is running")
+    current = str(port_path() if WINDOWS else socket_path())
+    for address in swept["running"]:
+        if address != current:
+            print(f"an engine server of an older cadgen runs at {address}; cadgen stop stops it", file=sys.stderr)
+
+
+def _stop(_args: argparse.Namespace, prog: str) -> int:
+    from cadgen.engine.client import sweep
+
+    # Every server of this installation, whatever protocol it speaks; stopped means gone: the next
+    # command starts a fresh one, never reaches these.
+    try:
+        swept = sweep(stop=True)
+    except ConnectionError as error:
+        raise Failed(str(error)) from None
+    _told_swept(swept)
+    if not swept["stopped"]:
+        print("no engine server is running")
         return 0
-    # Stopped means gone: the next command starts a fresh daemon, never reaches this one.
-    if not wait_gone():
-        raise Failed("the engine daemon did not exit")
-    print(json.dumps(answer, indent=2))
+    print(json.dumps({"ok": True, "stopped": swept["stopped"]}, indent=2))
     return 0
 
 
@@ -386,7 +404,7 @@ def _gb(megabytes: Any) -> str:
 
 
 def status_text(answer: dict[str, Any]) -> str:
-    """``cadgen status``: the daemon and its pool's rules, a line per worker -- busy or idle,
+    """``cadgen status``: the server and its pool's rules, a line per worker -- busy or idle,
     its script, process, builds and memory after its last build, where a busy one's build is
     (its last progress frame), how long it has been busy or idle -- the builds waiting for a
     worker, the last retirements, and what it serves."""
@@ -394,7 +412,7 @@ def status_text(answer: dict[str, Any]) -> str:
 
     workers = answer.get("workers") or []
     cap = answer.get("rssCapMb")
-    lines = [" · ".join([f"engine daemon {answer.get('pid')}, up {_span(answer.get('up'))}",
+    lines = [" · ".join([f"engine server {answer.get('pid')}, up {_span(answer.get('up'))}",
                          f"workers {len(workers)}/{answer.get('cap')}",
                          f"idle timeout {_span(answer.get('idleTimeout'))}",
                          f"RSS cap {_gb(cap)}" if cap else "no RSS cap"])]
@@ -437,10 +455,10 @@ VERBS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[
     "serve": ("serve a document over HTTP and print its URL", _serve_arguments, _serve),
     "inspect": ("a document's build closure (its source, modules, inputs and key), or what one thing a ref names is "
               "and what made it", _inspect_arguments, _inspect),
-    "status": ("the engine daemon's workers, what each is building, and its served documents", _status_arguments,
+    "status": ("the engine server's workers, what each is building, and its served documents", _status_arguments,
                _status),
-    "stop": ("stop the engine daemon", _no_arguments, _stop),
-    "daemon": ("run the engine daemon in this process", _no_arguments, _daemon),
+    "stop": ("stop the engine server", _no_arguments, _stop),
+    "server": ("run the engine server in this process", _no_arguments, _server),
 }
 
 

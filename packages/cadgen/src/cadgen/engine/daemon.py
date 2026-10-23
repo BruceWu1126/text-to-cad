@@ -50,8 +50,8 @@ from typing import Any, Callable
 from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.ids import canonical, file_id, is_id
 
-__all__ = ["IDLE_SECONDS", "Pool", "lock", "lock_path", "main", "socket_path", "state_dir", "worker_cap",
-           "worker_idle"]
+__all__ = ["IDLE_SECONDS", "Endpoint", "Pool", "endpoints", "lock", "lock_path", "main", "socket_path", "state_dir",
+           "worker_cap", "worker_idle"]
 
 HTTP_FACTORY = None  # optional application supplied by the enclosing distribution
 
@@ -90,12 +90,14 @@ def state_dir() -> Path:
     return Path(override) if override else Path(tempfile.gettempdir()) / "cadgen-engine"
 
 
-def _tag() -> str:
+def _tag(protocol: int | None = None) -> str:
     """One daemon per installation: its environment, its interpreter's version and the engine it
     runs -- never the name the interpreter was started by (``python``, ``python3``, ``python3.12``
-    of one environment are one installation)."""
+    of one environment are one installation) -- and the protocol it speaks (``PROTOCOL``, else
+    ``protocol``: an older one's daemon, which ``stop`` still finds)."""
     prefix = os.path.normcase(os.path.realpath(sys.prefix))
-    material = f"{prefix}|{sys.implementation.cache_tag}|{Path(__file__).resolve().parent}|{PROTOCOL}"
+    material = (f"{prefix}|{sys.implementation.cache_tag}|{Path(__file__).resolve().parent}|"
+                f"{PROTOCOL if protocol is None else protocol}")
     return hashlib.sha256(material.encode()).hexdigest()[:12]
 
 
@@ -103,12 +105,12 @@ def _tag() -> str:
 SOCKET_PATH_LIMIT = 100
 
 
-def socket_path() -> Path:
+def socket_path(protocol: int | None = None) -> Path:
     """The daemon's socket: beside its lock, or -- when that path is past ``SOCKET_PATH_LIMIT``
     (a long temporary folder or ``CADGEN_ENGINE_DIR``) -- named by its digest in the user's own
     ``/tmp/cadgen-<uid>`` (``private_folder``). Nothing binds or connects by changing folder: the
     daemon's threads share one working folder with every request they serve."""
-    path = state_dir() / f"{_tag()}.sock"
+    path = state_dir() / f"{_tag(protocol)}.sock"
     if WINDOWS or len(os.fsencode(path)) < SOCKET_PATH_LIMIT:
         return path
     return Path("/tmp") / f"cadgen-{os.getuid()}" / f"{hashlib.sha256(os.fsencode(path)).hexdigest()[:16]}.sock"
@@ -133,12 +135,30 @@ def private_folder(folder: Path) -> bool:
     return stat.S_ISDIR(found.st_mode) and found.st_uid == os.getuid() and not found.st_mode & 0o077
 
 
-def lock_path() -> Path:
-    return state_dir() / f"{_tag()}.lock"
+def lock_path(protocol: int | None = None) -> Path:
+    return state_dir() / f"{_tag(protocol)}.lock"
 
 
-def port_path() -> Path:
-    return state_dir() / f"{_tag()}.port"
+def port_path(protocol: int | None = None) -> Path:
+    return state_dir() / f"{_tag(protocol)}.port"
+
+
+@dataclass(frozen=True)
+class Endpoint:
+    """Where one protocol's daemon of this installation listens and locks: its socket (on Windows,
+    its port file) and its lock."""
+
+    protocol: int
+    address: Path
+    lock: Path
+
+
+def endpoints() -> list[Endpoint]:
+    """Every daemon this installation may have running, this protocol's first and then each older
+    one's (``_tag``): the files ``stop`` looks at, in the engine folder and, for a socket past the
+    path limit, in ``/tmp/cadgen-<uid>``. A protocol bump never strands the daemon that runs."""
+    return [Endpoint(protocol, port_path(protocol) if WINDOWS else socket_path(protocol), lock_path(protocol))
+            for protocol in range(PROTOCOL, 0, -1)]
 
 
 def engine_root() -> str:
@@ -1038,10 +1058,11 @@ def _bind() -> socket.socket:
     return server
 
 
-def lock() -> Any:
-    """The daemon's lock, held for its life; None when another daemon holds it."""
+def lock(path: Path | None = None) -> Any:
+    """The daemon's lock (or another protocol's, at ``path``), held for its life; None when
+    another daemon holds it."""
     state_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
-    handle = open(lock_path(), "a+")
+    handle = open(path or lock_path(), "a+")
     try:
         if WINDOWS:
             import msvcrt

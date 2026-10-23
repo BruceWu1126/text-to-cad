@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { TooltipHint } from '../primitives/tooltip.jsx';
 import { NAVBAR_CONTROL_CLASS } from '../lib/navbarRow.js';
 import { useI18n } from '../i18n/index.js';
+import { useViewerMobile } from '../file-viewer/responsive.js';
 import { ExportContext, type ExportView } from './context.js';
 
 const active = (job: ExportJob | null) => !job || ['queued', 'running', 'cancelling'].includes(job.state);
@@ -21,11 +22,14 @@ const STATE_TEXT: Record<ExportJob['state'], string> = {
 };
 
 /** Each toast owns one job subscription and hands its file to the browser once; siblings never cancel each other. */
-function ExportToast({ attempt, service, downloads, reveal, onDelivered, onRemove, onActivity }: {
+function ExportToast({ attempt, service, downloads, reveal, onDelivered, onRemove, onActivity, onExportAgain }: {
   attempt: ExportRecord; service: ExportService; downloads: DownloadPort; reveal: number;
-  onDelivered(): void; onRemove(): void; onActivity(id: string, busy: boolean): void;
+  onDelivered(): void; onRemove(): void; onActivity(id: string, busy: boolean): void; onExportAgain(): void;
 }) {
   const { t } = useI18n();
+  // A phone's buttons are its 36px touch tiles (`docs/settings-ui.md`, Mobile); a desktop's the menu's.
+  const mobile = useViewerMobile();
+  const button = mobile ? { size: 'default' as const, className: 'px-3 text-tiny' } : { size: 'xs' as const, className: 'text-tiny' };
   const [job, setJob] = useState<ExportJob | null>(null);
   const [error, setError] = useState('');
   const [fatal, setFatal] = useState(false);
@@ -73,8 +77,10 @@ function ExportToast({ attempt, service, downloads, reveal, onDelivered, onRemov
             setJob(found);
           }
           if (!active(found)) {
-            if (found.state === 'ready' && !delivered.current && !cancelWanted.current) deliver(found);
-            return;
+            if (found.state !== 'ready') return;
+            if (!delivered.current && !cancelWanted.current) deliver(found);
+            // Ready, its status waits for the file to go: fetched whole by the browser, or past its
+            // window (`cadgen/viewer/exports.py`). Then Download again becomes Export again.
           }
         } catch (failure) {
           if (signal.aborted) return;
@@ -109,7 +115,8 @@ function ExportToast({ attempt, service, downloads, reveal, onDelivered, onRemov
   useEffect(() => { onActivity(attempt.request.requestId, busy); }, [onActivity, attempt.request.requestId, busy]);
   if (hidden) return null;
   const failure = error || job?.error;
-  const title = !job ? (failure ? t('export.failed') : t('export.submitting')) : t(expired ? 'export.expired' : STATE_TEXT[job.state]);
+  const title = !job ? (failure ? t('export.failed') : t('export.submitting'))
+    : t(job.fetched ? 'export.fetched' : expired ? 'export.expired' : STATE_TEXT[job.state]);
   const seconds = Math.max(0, Math.floor(((job?.finishedAt || now / 1000) - (job?.createdAt || now / 1000))));
   const ready = job?.state === 'ready' && !expired;
   return <section className="rounded-lg border border-border bg-popover p-3 text-tiny text-popover-foreground shadow-lg" aria-label={t('export.toast', { name: job?.filename || attempt.filename })} data-export-toast="">
@@ -117,17 +124,29 @@ function ExportToast({ attempt, service, downloads, reveal, onDelivered, onRemov
       {failure ? <CircleAlert className="mt-0.5 size-4 shrink-0 text-destructive" /> : busy ? <Spinner className="mt-0.5 size-4 shrink-0" />
         : ready ? <Check className="mt-0.5 size-4 shrink-0" /> : <ArrowDownToLine className="mt-0.5 size-4 shrink-0 text-muted-foreground" />}
       <div className="min-w-0 flex-1"><p className="truncate">{job?.filename || attempt.filename}</p><p className="mt-1 text-muted-foreground" role="status" aria-live="polite">{title}{busy ? ` · ${seconds}s` : ''}</p></div>
-      <Button variant="ghost" size="icon-xs" aria-label={t('export.dismiss')} onClick={() => setHidden(true)}><X /></Button>
+      <Button variant="ghost" size={mobile ? 'icon' : 'icon-xs'} aria-label={t('export.dismiss')} onClick={() => setHidden(true)}><X /></Button>
     </div>
     {connection ? <p className="mt-2">{connection}</p> : null}
     {failure ? <p className="mt-2 break-words text-destructive" role="alert">{failure}</p> : null}
     {ready ? <p className="mt-2 text-muted-foreground">{t('export.until', { time: new Date(job.expiresAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}</p> : null}
     <div className="mt-2 flex justify-end gap-2">
-      {busy ? <Button size="xs" variant="outline" className="text-tiny" disabled={job?.state === 'cancelling'} onClick={() => { void cancel(); }}>{t('export.cancel')}</Button> : null}
-      {ready ? <Button size="xs" className="text-tiny" onClick={again}>{t('export.again')}</Button> : null}
-      {!busy ? <Button size="xs" variant="ghost" className="text-tiny" onClick={() => { void remove(); }}>{t('export.remove')}</Button> : null}
+      {busy ? <Button {...button} variant="outline" disabled={job?.state === 'cancelling'} onClick={() => { void cancel(); }}>{t('export.cancel')}</Button> : null}
+      {ready ? <Button {...button} onClick={again}>{t('export.again')}</Button> : null}
+      {expired ? <Button {...button} onClick={onExportAgain}>{t('export.exportAgain')}</Button> : null}
+      {!busy ? <Button {...button} variant="ghost" onClick={() => { void remove(); }}>{t('export.remove')}</Button> : null}
     </div>
   </section>;
+}
+
+/** Where the toasts stand: under the navbar at the view's top-right on a desktop; at a phone's
+ * bottom, the view's width less its margins, where a thumb reaches them. Rendered inside the
+ * viewer, so it reads the viewer's own width (`useViewerMobile`). */
+function ToastStack({ label, children }: { label: string; children: ReactNode }) {
+  const mobile = useViewerMobile();
+  return <div className={`pointer-events-none absolute inset-x-2 z-40 flex max-h-[calc(100%-1rem)] flex-col overflow-y-auto ${mobile ? 'bottom-2 items-stretch' : 'top-2 items-end'}`}
+    aria-label={label} data-export-stack={mobile ? 'bottom' : 'top'}>
+    <div className={`pointer-events-auto flex max-w-full flex-col gap-2 ${mobile ? 'w-full' : 'w-80'}`}>{children}</div>
+  </div>;
 }
 
 export function ExportControls({ service, downloads, file, children }: {
@@ -198,10 +217,13 @@ export function ExportControls({ service, downloads, file, children }: {
       {attempts.length ? <Button size="xs" variant="outline" className="text-tiny" onClick={() => { setReveal(n => n + 1); setOpen(false); }}>{t('export.show', { count: attempts.length })}</Button> : null}
     </PopoverContent>
   </Popover> : null;
-  const overlay = enabled && attempts.length ? <div className="pointer-events-none absolute inset-x-2 top-2 z-40 flex max-h-[calc(100%-1rem)] flex-col items-end overflow-y-auto" aria-label={t('export.jobs')}><div className="pointer-events-auto flex w-80 max-w-full flex-col gap-2">
+  const overlay = enabled && attempts.length ? <ToastStack label={t('export.jobs')}>
     {attempts.map(attempt => <ExportToast key={attempt.request.requestId} attempt={attempt} service={service!} downloads={downloads!} reveal={reveal} onActivity={reportActivity}
       onDelivered={() => setAttempts(old => old.map(row => row.request.requestId === attempt.request.requestId ? { ...row, delivered: true } : row))}
-      onRemove={() => setAttempts(old => old.filter(row => row.request.requestId !== attempt.request.requestId))} />)}
-  </div></div> : null;
+      onRemove={() => setAttempts(old => old.filter(row => row.request.requestId !== attempt.request.requestId))}
+      // The file is gone (downloaded, or past its window): the same export run again, in its place.
+      onExportAgain={() => setAttempts(old => old.map(row => row.request.requestId === attempt.request.requestId
+        ? { request: { ...row.request, requestId: crypto.randomUUID() }, filename: row.filename, delivered: false } : row))} />)}
+  </ToastStack> : null;
   return <ExportContext.Provider value={enabled ? setSource : null}>{children({ navbar, overlay })}</ExportContext.Provider>;
 }

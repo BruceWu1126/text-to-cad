@@ -2,14 +2,14 @@
 
 The one check a skill teaches: run it with the skill's launch command, pointed at the skill
 (its directory or SKILL.md), and it says which installation is running -- its folder, and the
-engine daemon it shares -- and whether that is the cadgen the skill's docs were written
+engine server it shares -- and whether that is the cadgen the skill's docs were written
 against: the version its launch command pins (``uvx ... --from cadgen==<version>``).
 
 It also proves the CAD kernel loads. ``OCP`` is imported in a fresh interpreter
 (never in this one, so the report itself stays stdlib-only and fast to reach),
 and a refused load is named for what it is: on Windows 11 that is Smart App
 Control blocking the unsigned ``.pyd``, which the bare ``ImportError`` never
-says (``cadgen._internal.kernel_load_hint``). And it says where the engine's daemon,
+says (``cadgen._internal.kernel_load_hint``). And it says where the engine's server,
 where every build runs, keeps its socket and whether one is running, without starting one.
 
 Exit codes: 0 = installed cadgen matches the pin (or nothing claims a pin);
@@ -48,8 +48,8 @@ def _resolve_skill(target: str | None) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def _daemon() -> str:
-    """The engine daemon this installation shares (``cadgen.engine.daemon``): where its socket is,
+def _server() -> str:
+    """The engine server this installation shares (``cadgen.engine.daemon``): where its socket is,
     and whether one is running -- asked, never started."""
     try:
         from cadgen.engine import daemon as engine_daemon
@@ -156,7 +156,7 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     sys.stdout.write(f"  python   {sys.version.split()[0]} ({sys.executable})\n")
     sys.stdout.write(f"  install  {location}\n")
     # One per installation: the same socket means the same warm daemon.
-    sys.stdout.write(f"  daemon   {_daemon()}\n")
+    sys.stdout.write(f"  server   {_server()}\n")
     sharing = _sharing()
     if sharing:
         # Whether CAD's apps send usage stats, as `cadgen telemetry` says it.

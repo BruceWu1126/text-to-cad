@@ -38,8 +38,12 @@ export default {
   "export.failed": "导出失败",
   "export.expired": "已过期",
   "export.downloaded": "已开始下载",
+  "export.fetched": "已下载",
+  "export.exportAgain": "重新导出",
 
   "app.start.notAnswering": "CAD 查看器没有响应",
+  "app.engine.notRunning": "引擎没有运行。",
+  "app.engine.runAgain": "请再次运行 cadgen viewer。",
 
   "file.opening": "正在打开…",
   "file.missing": "文件不存在",

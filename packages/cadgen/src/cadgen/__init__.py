@@ -5,7 +5,7 @@ The root exports exactly the engine's surface -- ``model``, the decorators (``xb
 ``glb``, ``stl``, ``threemf``, ``dxf``), ``memo``, materials (``Material``, ``materials``,
 ``paint``), the readers (``read_step``, ``read_xbf``, ``read_mesh``) -- its operations on
 documents as functions (``export``, ``snapshot``, ``inspect``) and ``__version__``; process
-control (``serve``, ``status``, ``stop``, ``daemon``) is the ``cadgen`` command's alone. Two
+control (``cadgen serve``, ``status``, ``stop``, ``server``) is the ``cadgen`` command's alone. Two
 namespaces hold the standards' names: ``cadgen.ap242`` the mechanism's (``mechanism_state``,
 ``configuration_sequence``, ``gear_pair``, ``rack_and_pinion_pair``, ``screw_pair``) and
 ``cadgen.gltf`` a GLB's own ``animation``. Every name loads on first use: ``import cadgen``

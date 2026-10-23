@@ -38,8 +38,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, TypeVar, cast
 
-__all__ = ["Built", "Drawn", "EngineError", "Facts", "Report", "Served", "Written", "daemon", "export",
-           "observers", "serve", "snapshot", "status", "stop", "inspect"]
+__all__ = ["Built", "Drawn", "EngineError", "Facts", "Report", "Served", "Written", "export",
+           "observers", "serve", "server", "snapshot", "status", "stop", "inspect"]
 
 class EngineError(RuntimeError):
     """A request the engine refused or could not run: its words."""
@@ -571,8 +571,8 @@ def stop() -> bool:
     return True
 
 
-def daemon() -> int:
-    """Run the daemon in this process."""
+def server() -> int:
+    """Run the engine server in this process (`cadgen server`)."""
     from cadgen.engine.daemon import main
 
     return main([])

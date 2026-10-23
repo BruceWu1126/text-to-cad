@@ -208,3 +208,50 @@ test('an old link -- a page session, a document named by query -- is the home, a
     dom.window.close();
   }
 });
+
+test('a page whose engine is gone says so in its language, over the page, until the engine answers', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { url: `http://cad.local/${ONE}` });
+  const { window } = dom;
+  const matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  for (const [key, value] of Object.entries({ window, document: window.document, navigator: window.navigator, localStorage: window.localStorage, sessionStorage: window.sessionStorage, matchMedia, IS_REACT_ACT_ENVIRONMENT: true })) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  window.matchMedia = matchMedia;
+  const fetchBefore = globalThis.fetch;
+  // The catalog's answer: nothing listening (a stopped engine), an engine that does not know this
+  // page's token (one started since), or the engine back.
+  let catalog = 'back';
+  globalThis.fetch = async (url) => {
+    if (url.startsWith('/__cad/catalog') && catalog === 'stopped') throw new TypeError('Failed to fetch');
+    if (url.startsWith('/__cad/catalog') && catalog === 'restarted') {
+      return new Response(JSON.stringify({ error: 'engine token required' }), { status: 403, headers: { 'content-type': 'application/json' } });
+    }
+    const reply = url.startsWith('/__cad/catalog') ? catalogOf(url) : url === '/__cad/recents' ? { recents: [] }
+      : url === '/__cad/language' ? { locale: 'ja' } : url === '/__cad/analytics' ? { sharing: false, reason: 'untold', policy: 'p' } : { ok: true };
+    return new Response(JSON.stringify(reply), { headers: { 'content-type': 'application/json' } });
+  };
+  const client = { ...createWebCadClient({ document: window.document }), serverInfo: async () => ({ start: '/m' }) };
+  const root = createRoot(window.document.getElementById('root'));
+  const alert = () => window.document.querySelector('[role="alert"]');
+  try {
+    await act(() => root.render(createElement(App, { client, server: { start: '/m' }, tabStore: createTabStore(sessionTabRecord(window.sessionStorage)), language: 'ja' })));
+    await act(() => client.refresh({ file: ONE }));
+    assert.equal(alert() === null, true, 'nothing is said while the engine answers');
+    catalog = 'stopped';
+    await act(() => client.refresh({ file: ONE }).catch(() => {}));
+    assert.match(alert()?.textContent ?? '', /エンジンが動いていません。/);
+    assert.match(alert()?.textContent ?? '', /cadgen viewer をもう一度実行してください。/);
+    assert.doesNotMatch(alert()?.textContent ?? '', /Failed to fetch|\{/, 'never the failure itself');
+    assert.equal(snapshot() !== undefined, true, 'the page stays under it');
+    catalog = 'restarted';
+    await act(() => client.refresh({ file: ONE }).catch(() => {}));
+    assert.match(alert()?.textContent ?? '', /エンジンが動いていません。/);
+    assert.doesNotMatch(alert()?.textContent ?? '', /engine token required/);
+    catalog = 'back';
+    await act(() => client.refresh({ file: ONE }));
+    assert.equal(alert() === null, true, 'gone with the first read that answers');
+  } finally {
+    globalThis.fetch = fetchBefore;
+    await act(() => root.unmount());
+    client.dispose();
+    dom.window.close();
+  }
+});

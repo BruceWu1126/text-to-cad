@@ -37,8 +37,12 @@ export default {
   "export.failed": "エクスポートに失敗しました",
   "export.expired": "期限切れです",
   "export.downloaded": "ダウンロードを開始しました",
+  "export.fetched": "ダウンロードしました",
+  "export.exportAgain": "もう一度エクスポート",
 
   "app.start.notAnswering": "CAD ビューアーが応答しません",
+  "app.engine.notRunning": "エンジンが動いていません。",
+  "app.engine.runAgain": "cadgen viewer をもう一度実行してください。",
 
   "file.opening": "開いています…",
   "file.missing": "ファイルが存在しません",

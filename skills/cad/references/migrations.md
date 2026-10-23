@@ -83,8 +83,9 @@ The document is what the viewer follows build by build, what refs and
 | `cadgen where`, `cadgen.where()` | `cadgen inspect`, `cadgen.inspect()`; existing files or live models only, never an implicit build |
 | `cadgen store why`, `store where`, `store forget`, `store gc`, `store info` | none: no store. `cadgen inspect DOC` prints a document's build closure, `cadgen inspect DOC REF` what made an element |
 | `cadgen daemon status` | `cadgen status` (and `cadgen stop`) |
+| `cadgen daemon` | `cadgen server` |
 | `cadgen serve DOC --foreground` | `cadgen serve DOC`: start or reuse the installation's server, print its URL, and exit |
-| `CADGEN_CACHE_DIR`, `CADGEN_STORE_MAX`, `CADGEN_DAEMON_STATE_DIR` | none; `CADGEN_ENGINE_DIR` moves the engine daemon's socket |
+| `CADGEN_CACHE_DIR`, `CADGEN_STORE_MAX`, `CADGEN_DAEMON_STATE_DIR` | none; `CADGEN_ENGINE_DIR` moves the engine server's socket |
 | `read_scene(path).resolve(ref).shape()` | `cadgen inspect PATH REF` for what a ref names; `read_xbf(path)`'s tree, walked by labels, for its shapes |
 | `cadgen.revolute`, `slider`, `cylindrical`, `fastened`, `MateTarget`, `AssemblyHelper` | build123d joints in the body |
 | `cadgen.couple(name, {dof: ratio}, limits=...)` | `cadgen.ap242`'s `gear_pair`, `rack_and_pinion_pair` or `screw_pair(assembly, name, **ratios)`, by the joints' kinds, ranged by their limits |
@@ -232,7 +233,7 @@ same names but the three verbs. Everything else an 0.8 preview had there moved o
 | `select(source, ref, kind=None)` | none in a model or a check. `cadgen inspect DOC REF` (`cadgen.inspect(DOC, REF)`) answers what a ref names and which code made it; a check walks `read_xbf`'s tree by labels; a body picks an element with build123d's selectors ([a picked element](inspection-and-validation.md#a-picked-element-in-a-models-body)) |
 | `report(detail)`, `track(items, label=)` | none: delete the calls. While a body runs the bar and the viewer's build card name each `@memo` call and child model it calls, as it begins, and count it when it ends |
 | `cadgen.engine.api.snapshot_job(packet, source)` | `cadgen.snapshot(source, job=packet)`: one verb, a picture from `source` and `out` or every picture a job names |
-| `cadgen.serve(doc)`, `cadgen.status()`, `cadgen.stop()`, `cadgen.daemon()` | the commands `cadgen serve DOC`, `cadgen status`, `cadgen stop`, `cadgen daemon`: process control is the CLI's alone |
+| `cadgen.serve(doc)`, `cadgen.status()`, `cadgen.stop()`, `cadgen.daemon()` | the commands `cadgen serve DOC`, `cadgen status`, `cadgen stop`, `cadgen server`: process control is the CLI's alone |
 | `cadgen.srgb("#2E3742")`, `srgb("#38414D", 0.42)`, `srgb_to_linear`, `linear_to_srgb`, `cadgen.color` | the hex itself: `"#2E3742"`, `"#38414D6B"` (alpha as a byte), or 0-255 integers; `shape.color`, `paint` and `Material` take it and the engine stores it linear |
 | `Material(color=(0.2, 0.3, 0.9))`, `transmission_color=`, `emissive=`: linear floats | a hex string or 0-255 integers, sRGB; floats are refused |
 | `paint(shape, faces, (1, 0, 0))`, `paint(..., "orange")` | `paint(shape, faces, "#ff0000")`: a hex string, 0-255 integers or a build123d `Color` |

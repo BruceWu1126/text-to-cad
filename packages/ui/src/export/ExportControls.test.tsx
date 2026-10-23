@@ -5,14 +5,16 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ExportControls } from '../../dist/export/ExportControls.js';
 import { useExportView } from '../../dist/export/context.js';
 import { I18nProvider } from '../../dist/i18n/index.js';
+import { ViewerMobileContext } from '../../dist/file-viewer/responsive.js';
 
 Object.assign(globalThis, { React });
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const source = { doc: 'doc', revision: 'v1', file: '/part.xbf', name: 'part.xbf', part: null, pose: null, preview: false };
 function Document() { useExportView(source); return <div>Model</div>; }
-function mount(service: any, downloads: any, locale = 'en') {
-  return render(<I18nProvider locale={locale}><ExportControls service={service} downloads={downloads} file="/part.xbf">{({ navbar, overlay }: any) => <><nav>{navbar}</nav><Document />{overlay}</>}</ExportControls></I18nProvider>);
+function mount(service: any, downloads: any, locale = 'en', phone = false) {
+  // The overlay renders inside the viewer, which says whether its width is a phone's.
+  return render(<I18nProvider locale={locale}><ExportControls service={service} downloads={downloads} file="/part.xbf">{({ navbar, overlay }: any) => <><nav>{navbar}</nav><Document /><ViewerMobileContext.Provider value={phone}>{overlay}</ViewerMobileContext.Provider></>}</ExportControls></I18nProvider>);
 }
 const formats = { epoch: 'epoch', formats: [{ format: 'step', label: 'STEP', extension: '.step', reason: null }] };
 const later = () => Date.now() / 1000 + 3600;
@@ -100,18 +102,44 @@ it('a restored request reconnects by identity and downloads only what it never h
   expect(screen.getAllByRole('button', { name: 'Download again' })).toHaveLength(2);
 });
 
-it('an expired artifact offers no download; Remove releases it', async () => {
+it('an expired artifact offers no download but Export again; Remove releases it', async () => {
   const { service } = server();
   service.create.mockImplementation(async value => ({ ...value, id: value.requestId, filename: 'old.step', state: 'ready', stage: 'Ready to save', sequence: 1, createdAt: 1, finishedAt: 2, expiresAt: Date.now() / 1000 - 1, bytes: 5 }));
   const downloads = { save: vi.fn(), restore: () => [{ request: { requestId: 'old', epoch: 'epoch', source: { doc: 'doc', revision: 'v1', part: null, pose: null }, format: 'step' }, filename: 'old.step', delivered: true }] };
   mount(service, downloads);
   expect(await screen.findByText('Expired')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Download again' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Export again' })).toBeTruthy();
   const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: 'Remove' }));
   expect(service.release).toHaveBeenCalledWith('old');
   await waitFor(() => expect(screen.queryByRole('region', { name: 'Export old.step' })).toBeNull());
   expect(downloads.save).not.toHaveBeenCalled();
+});
+
+it('once the browser has fetched the file it is gone: Download again becomes Export again, which runs it again', async () => {
+  const { service, jobs, waiting, finish } = server();
+  const downloads = { save: vi.fn(), remember: vi.fn() };
+  mount(service, downloads);
+  const user = userEvent.setup();
+  await exportOnce(user);
+  await waitFor(() => expect(jobs.size).toBe(1));
+  const [id] = [...jobs.keys()];
+  await finish(id);
+  expect(await screen.findByRole('button', { name: 'Download again' })).toBeTruthy();
+  // The ready job's status is asked again; it answers when the server deletes the fetched file.
+  await waitFor(() => expect(service.status).toHaveBeenCalledTimes(2));
+  await act(async () => waiting.get(id)!({ ...jobs.get(id), state: 'expired', stage: 'Export downloaded', fetched: true, sequence: 2,
+    finishedAt: Date.now() / 1000, expiresAt: later() }));
+  expect(await screen.findByText('Downloaded')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Download again' })).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Export again' }));
+  await waitFor(() => expect(service.create).toHaveBeenCalledTimes(2));
+  const [first, again] = service.create.mock.calls.map(call => call[0]);
+  expect(again).toEqual({ ...first, requestId: expect.any(String) });
+  expect(again.requestId).not.toBe(first.requestId);
+  expect(screen.getAllByRole('region', { name: 'Export part.step' })).toHaveLength(1);
+  expect(downloads.save).toHaveBeenCalledTimes(1);
 });
 
 it('the toast speaks the page language, never the server stage', async () => {
@@ -122,4 +150,25 @@ it('the toast speaks the page language, never the server stage', async () => {
   await user.click(await screen.findByRole('button', { name: 'エクスポートしてダウンロード' }));
   expect(await screen.findByText(/^開始を待っています · /)).toBeTruthy();
   expect(screen.queryByText(/Waiting for worker/)).toBeNull();
+});
+
+it('on a phone the toasts sit at the view\'s bottom with 36px buttons; a desktop keeps them top-right', async () => {
+  for (const phone of [false, true]) {
+    const { service } = server();
+    const { container, unmount } = mount(service, { save: vi.fn() }, 'en', phone);
+    const user = userEvent.setup();
+    await exportOnce(user);
+    const toast = await screen.findByRole('region', { name: 'Export part.step' });
+    const stack = container.querySelector('[data-export-stack]')!;
+    const buttons = within(toast).getAllByRole('button');
+    if (phone) {
+      expect(stack.className).toMatch(/\bbottom-2\b/);
+      expect(stack.className).not.toMatch(/\btop-2\b/);
+      for (const button of buttons) expect(button.className).toMatch(/\b(?:h-9|size-9)\b/);
+    } else {
+      expect(stack.className).toMatch(/\btop-2\b.*\bitems-end\b/);
+      for (const button of buttons) expect(button.className).toMatch(/\b(?:h-6|size-6)\b/);
+    }
+    unmount();
+  }
 });

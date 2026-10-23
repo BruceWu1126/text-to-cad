@@ -25,7 +25,7 @@ patterns, which are toolpaths, not documents; the two are different jobs.
 ## Setup
 
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
-one installation, and its engine daemon, with the CAD app's server:
+one installation, and its engine server, with the CAD app's:
 
 - `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen`
 - `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 python`
@@ -119,7 +119,8 @@ The script raises rather than writing a wrong or missing document:
   `angle()` legs that are collinear or zero-length, a non-finite `at=` or
   `offset=`.
 - A missing renderer. The PDF is the drawing, so no matplotlib is a failure,
-  not a skipped half. A failed render leaves no file behind.
+  not a skipped half. A failed render leaves no file
+  it wrote; an earlier PDF stays byte for byte.
 - `out=` missing or not naming a `.pdf`, at import time.
 
 ## Limits to state in the handoff

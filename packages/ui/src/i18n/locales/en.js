@@ -40,9 +40,13 @@ export default {
   "export.failed": "Export failed",
   "export.expired": "Expired",
   "export.downloaded": "Download started",
+  "export.fetched": "Downloaded",
+  "export.exportAgain": "Export again",
 
   // The page before the viewer answers (`apps/web`'s starting view).
   "app.start.notAnswering": "The CAD Viewer is not answering",
+  "app.engine.notRunning": "The engine is not running.",
+  "app.engine.runAgain": "Run cadgen viewer again.",
 
   // The file view: opening, and the states where it stops.
   "file.opening": "Opening…",

@@ -86,7 +86,7 @@ class RootExports(unittest.TestCase):
         # ``build`` among them: a model builds by a decorated function's call, never cadgen.build (law 12).
         for name in ("build", "read_scene", "AssemblyHelper", "label_shape", "revolute", "compound_from_instances",
                      "mechanism_state", "animation", "select", "report", "track", "serve", "status", "stop",
-                     "daemon", "srgb", "srgb_to_linear", "linear_to_srgb", "build123d"):
+                     "daemon", "server", "srgb", "srgb_to_linear", "linear_to_srgb", "build123d"):
             with self.subTest(name=name), self.assertRaises(AttributeError) as caught:
                 getattr(cadgen, name)
             self.assertEqual(str(caught.exception), f"module 'cadgen' has no attribute {name!r}")

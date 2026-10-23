@@ -2,6 +2,12 @@
 
 No native save dialog: the destination is chosen on the browser's computer. Kernel
 work goes through the engine worker. Disconnecting a request never cancels a job.
+
+An artifact is deleted as soon as the browser has fetched it whole (the server saw its GET
+end), and one nobody fetches within ``ARTIFACT_SECONDS`` (ten minutes) is deleted then; either
+way its job is ``expired`` (``fetched`` says which), and the page offers to export it again. A
+job's record lives as long as the engine that ran it -- the page session -- bounded by the
+history, never by a day.
 """
 from __future__ import annotations
 
@@ -19,7 +25,7 @@ from pathlib import Path
 FORMATS = {"step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "dxf": ".dxf", "xbf": ".xbf", "original": ".xbf"}
 from cadgen.jobs import Jobs, JobError as ExportError, STATUS_SECONDS, MAX_JOBS, TERMINAL
 
-ARTIFACT_SECONDS = 3600
+ARTIFACT_SECONDS = 600
 MAX_RETAINED_BYTES = 4 * 1024**3
 def specification(payload):
     if not isinstance(payload, dict) or set(payload) - {"doc", "revision", "part", "pose"}:
@@ -91,12 +97,9 @@ class ExportJobs(Jobs):
     def _prune(self):
         now = self.clock()
         for ident, job in list(self.jobs.items()):
-            if job["state"] == "ready" and now >= job["expiresAt"] and not job["readers"]:
+            if job["state"] == "ready" and (job.get("fetched") or now >= job["expiresAt"]) and not job["readers"]:
                 self._remove(job)
-                self._change(job, state="expired", stage="Export expired")
-            if job["state"] in TERMINAL and now - job["finishedAt"] >= STATUS_SECONDS and not job["readers"]:
-                self._remove(job)
-                self.jobs.pop(ident)
+                self._change(job, state="expired", stage="Export downloaded" if job.get("fetched") else "Export expired")
         for key, row in list(self.inspections.items()):
             if row["done"] and now - row["at"] > 30:
                 self.inspections.pop(key)
@@ -238,7 +241,8 @@ class ExportJobs(Jobs):
             job["directory"] = None
 
     def public(self, job):
-        fields = ("id", "requestId", "filename", "state", "stage", "sequence", "createdAt", "finishedAt", "expiresAt", "bytes", "error")
+        fields = ("id", "requestId", "filename", "state", "stage", "sequence", "createdAt", "finishedAt", "expiresAt", "bytes",
+                  "error", "fetched")
         return {**{k: job[k] for k in fields if k in job}, "epoch": self.epoch}
 
     def release(self, ident):
@@ -250,6 +254,24 @@ class ExportJobs(Jobs):
             job["expiresAt"] = 0
             self._prune()
             return self.public(job)
+
+    def get(self, ident, after=None, wait=0):
+        """A job's state; asked ``after`` its sequence, a ready job's answer waits too, for its file
+        to go (fetched, or past its window): what turns the page's Download again into Export again."""
+        with self.changed:
+            self._prune()
+            job = self.jobs.get(ident)
+            if job is not None and after is not None and job["sequence"] == after and job["state"] == "ready":
+                self.changed.wait_for(lambda: job["sequence"] != after, timeout=min(25, max(0, wait)))
+            return super().get(ident)
+
+    def fetched(self, ident):
+        """The browser has the whole file: it is deleted now, its job expired as ``fetched``."""
+        with self.changed:
+            job = self.jobs.get(ident)
+            if job is not None and job["state"] == "ready":
+                job["fetched"] = True
+                self._prune()
 
     @contextlib.contextmanager
     def artifact(self, ident):
@@ -291,9 +313,15 @@ class ExportJobs(Jobs):
                         # A plain browser download: every browser names it, the ASCII form for any
                         # that ignores RFC 5987 (the page's link names it too, with `download`).
                         plain = re.sub(r"[^ -~]", "_", path.name).replace('"', "_").replace("\\", "_")
-                        return response.stream_file(path, path.stat(), "application/octet-stream", [
+                        response.stream_file(path, path.stat(), "application/octet-stream", [
                             ("content-disposition", f'attachment; filename="{plain}"; filename*=UTF-8\'\'{quote(path.name)}'),
                             ("x-content-type-options", "nosniff")])
+                    # The whole file reached the browser -- no range, and the page did not hang up
+                    # part way -- so it is deleted at once; a broken transfer keeps it for a retry.
+                    whole = not (request.header("range") if hasattr(request, "header") else "")
+                    if whole and getattr(response, "gone", False) is not True and request.method == "GET":
+                        self.fetched(tail[0])
+                    return None
             raise ExportError("Export route not found.", 404)
         except (ValueError, OSError) as error:
             response.send_json(getattr(error, "status", 400), {"error": str(error)})

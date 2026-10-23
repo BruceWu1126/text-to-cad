@@ -1,4 +1,4 @@
-"""``cadgen status``: the engine daemon's workers, what each builds, and what it serves
+"""``cadgen status``: the engine server's workers, what each builds, and what it serves
 (``cadgen.engine.cli``).
 
 The parser and the run are the engine's (``cadgen.engine.cli.parser_for``, ``run``), the same

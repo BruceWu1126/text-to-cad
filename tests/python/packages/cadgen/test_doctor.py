@@ -77,12 +77,12 @@ class DoctorTests(unittest.TestCase):
                 mock.patch.dict("os.environ", {"CADGEN_ENGINE_DIR": engine}):
             code, out, _ = _run([tmp])
             self.assertEqual(code, 0)
-            self.assertRegex(out, r"daemon   not running \(.+\); the first build starts it\n")
+            self.assertRegex(out, r"server   not running \(.+\); the first build starts it\n")
             self.assertEqual([path for path in Path(engine).iterdir()], [], "nothing started")
         answer = {"pid": 4242, "workers": [{"script": "a.py"}, {"script": "b.py"}]}
         with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request", return_value=answer):
             _, out, _ = _run([tmp])
-        self.assertRegex(out, r"daemon   running, pid 4242, 2 workers \(.+\)\n")
+        self.assertRegex(out, r"server   running, pid 4242, 2 workers \(.+\)\n")
 
     def test_the_report_names_the_kernel_it_loaded(self) -> None:
         with TemporaryDirectory() as tmp:
