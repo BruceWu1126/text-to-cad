@@ -444,8 +444,12 @@ class Server:
                 server.touch()
                 server.route(self, "POST")
 
-        self.http = (http_factory(self, host, port) if http_factory is not None
-                     else ThreadingHTTPServer((host, port), Handler))
+        try:
+            self.http = (http_factory(self, host, port) if http_factory is not None
+                         else ThreadingHTTPServer((host, port), Handler))
+        except BaseException:
+            self.mesher.stop()  # a listener that could not bind leaves no meshing pool behind
+            raise
         self.http.daemon_threads = True
         self.port = self.http.server_address[1]
         self.url = f"http://{host}:{self.port}"

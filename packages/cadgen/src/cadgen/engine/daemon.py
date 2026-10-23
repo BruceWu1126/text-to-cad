@@ -643,9 +643,14 @@ class Daemon:
 
         with self.serving:
             if self.server is None:
-                self.server = Server(port=int(request.get("port") or 0), three=request.get("three"), touch=self.touch,
-                                     provenance=self.provenance, cache=MESHES, isolated=True,
-                                     host=request.get("host") or "127.0.0.1", http_factory=HTTP_FACTORY)
+                port, host = int(request.get("port") or 0), request.get("host") or "127.0.0.1"
+                try:
+                    self.server = Server(port=port, three=request.get("three"), touch=self.touch,
+                                         provenance=self.provenance, cache=MESHES, isolated=True,
+                                         host=host, http_factory=HTTP_FACTORY)
+                except OSError as error:
+                    raise ValueError(f"cannot listen on {host}:{port}: {error.strerror or error}"
+                                     + ("; pass another --port" if port else "")) from None
                 self.server.start()
             elif ((request.get("port") and int(request["port"]) != self.server.port)
                   or (request.get("host") and request["host"] != self.server.http.server_address[0])):

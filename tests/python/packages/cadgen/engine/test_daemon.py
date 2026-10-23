@@ -151,6 +151,30 @@ class ConnectTest(unittest.TestCase):
         self.assertEqual([w for w in caught if issubclass(w.category, ResourceWarning)], [])
 
 
+class ListenTest(unittest.TestCase):
+    def test_a_taken_port_is_refused_by_name_and_leaves_no_pool_or_recorder_behind(self) -> None:
+        import socket
+        from unittest import mock
+
+        from cadgen._internal import engine_host
+        from cadgen.engine import daemon
+
+        taken = socket.socket()
+        self.addCleanup(taken.close)
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        port = taken.getsockname()[1]
+        engine = daemon.Daemon(60)
+        with mock.patch("cadgen.engine.serve.Mesher") as mesher, mock.patch.object(daemon, "HTTP_FACTORY", None):
+            with self.assertRaisesRegex(ValueError, f"127.0.0.1:{port}: .*; pass another --port"):
+                engine.serve({"port": port})
+        mesher.return_value.stop.assert_called_once_with()
+        self.assertIsNone(engine.server, "the next request may still choose its port")
+        with mock.patch("cadgen.viewer.engine_app.EngineApp") as app, self.assertRaises(OSError):
+            engine_host.http_factory(mock.Mock(), "127.0.0.1", port)
+        app.return_value.close.assert_called_once_with()
+
+
 class DaemonTest(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-daemon-")).resolve()
