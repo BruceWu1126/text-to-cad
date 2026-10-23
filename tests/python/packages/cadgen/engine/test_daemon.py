@@ -402,6 +402,25 @@ if __name__ == '__main__':
         self.assertTrue((self.folder / 'XBF/document.xbf').is_file())
         self.assertFalse((self.folder / 'XBF/bare.xbf').exists())
 
+    def test_an_idle_worker_holds_no_project_folder_and_a_build_reads_relative_to_its_script(self) -> None:
+        (self.folder / "size.txt").write_text("7", encoding="utf-8")
+        self.script.write_text(textwrap.dedent(MODEL.format(size='float(open("size.txt").read())')), encoding="utf-8")
+        done = self.run_script("block.py")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        worker = json.loads(self.cli("status", "--json").stdout)["workers"][0]["pid"]
+        if os.name == "nt":  # a folder a process stands in cannot be renamed
+            moved = self.folder.with_name(self.folder.name + "-moved")
+            os.rename(self.folder, moved)
+            os.rename(moved, self.folder)
+            return
+        if sys.platform.startswith("linux"):
+            where = os.readlink(f"/proc/{worker}/cwd")
+        else:
+            listed = subprocess.run(["lsof", "-a", "-p", str(worker), "-d", "cwd", "-Fn"], capture_output=True,
+                                    text=True, timeout=60).stdout
+            where = next(line[1:] for line in listed.splitlines() if line.startswith("n"))
+        self.assertNotEqual(os.path.realpath(where), os.path.realpath(self.folder), "the idle worker left the folder")
+
     def test_a_warm_worker_keeps_its_memo_between_builds(self) -> None:
         cold = self.build(10)
         self.assertGreater(cold["memo"]["misses"], 0)

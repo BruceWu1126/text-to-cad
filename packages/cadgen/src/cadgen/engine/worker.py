@@ -54,6 +54,7 @@ import json
 import os
 import queue
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -421,6 +422,19 @@ def main() -> int:
         finally:
             requests.put(None)
 
+    # A request runs in its folder (its ``cwd``, else the one this worker started in: its script's),
+    # so a model's relative reads resolve as before; between requests the worker stands in the
+    # temporary folder, so an idle worker holds no project folder open (on Windows, a folder a
+    # process stands in cannot be renamed or deleted).
+    home, neutral = os.getcwd(), tempfile.gettempdir()
+    os.chdir(neutral)
+
+    def leave() -> None:
+        try:
+            os.chdir(neutral)
+        except OSError:
+            pass
+
     send({"ready": os.getpid()})
     gc.disable()
     threading.Thread(target=read, daemon=True).start()
@@ -434,8 +448,7 @@ def main() -> int:
             retire = False
             try:
                 cwd = request.get("cwd")
-                if cwd:
-                    os.chdir(cwd)
+                os.chdir(cwd or home)
                 if op == "export":
                     source = request["source"]
                     said = progress(ident, script=source.get("script"), cwd=cwd, code="code" in source)
@@ -457,6 +470,7 @@ def main() -> int:
                 if isinstance(error, (KeyboardInterrupt, SystemExit)):
                     return 1
             finally:
+                leave()
                 send({"id": ident, "settled": True, "op": op})
             if retire:
                 return 0
@@ -472,8 +486,7 @@ def main() -> int:
         retire = False
         try:
             cwd = request.get("cwd")
-            if cwd:
-                os.chdir(cwd)
+            os.chdir(cwd or home)
             script = Path(request["script"])
             # Where the build is, frame by frame; each report holds its model's last.
             said = progress(ident, script=script, cwd=cwd, code=request.get("code") is not None)
@@ -497,6 +510,7 @@ def main() -> int:
             if isinstance(error, (KeyboardInterrupt, SystemExit)):
                 return 1
         finally:
+            leave()
             document.SAVED_LISTENERS.remove(patcher.saved)
             send({"id": ident, "settled": True})
         if retire:

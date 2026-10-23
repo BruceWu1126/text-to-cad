@@ -446,6 +446,12 @@ a process group of its own too (`daemon.detached`), never no console at all: a c
 started with none gets a new console, with a window (#597). What they start in turn (the
 meshing and reading pools) shares their windowless console.
 
+A worker runs each request in that request's folder (its script's, or the caller's), so a model's
+relative reads resolve as they would under `python SCRIPT`, and stands in the temporary folder
+between requests: an idle worker holds no project folder (on Windows, one a process stands in
+cannot be renamed or deleted). A meshing or reading pool's processes exit with the process that
+started them, however it ends.
+
 `cadgen status` says what the daemon holds (`--json`: the same as data, `api.status()`):
 
 ```
