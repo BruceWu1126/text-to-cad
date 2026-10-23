@@ -696,7 +696,7 @@ class Daemon:
 
     def serve(self, request: dict[str, Any]) -> Any:
         """The daemon's server, started on the first request that needs one."""
-        from cadgen.engine.serve import MESHES, Server
+        from cadgen.engine.serve import MESHES, Server, memory_budget
 
         with self.serving:
             if self.server is None:
@@ -704,10 +704,11 @@ class Daemon:
                 try:
                     self.server = Server(port=port, three=request.get("three"), touch=self.touch,
                                          provenance=self.provenance, cache=MESHES, isolated=True,
-                                         host=host, http_factory=HTTP_FACTORY)
+                                         host=host, http_factory=HTTP_FACTORY, budget=memory_budget())
                 except OSError as error:
                     raise ValueError(f"cannot listen on {host}:{port}: {error.strerror or error}"
                                      + ("; pass another --port" if port else "")) from None
+                self.server.lost = self.models.rebuild
                 self.server.start()
             elif ((request.get("port") and int(request["port"]) != self.server.port)
                   or (request.get("host") and request["host"] != self.server.http.server_address[0])):
