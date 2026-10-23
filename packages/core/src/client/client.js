@@ -295,7 +295,7 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     async engineDocument(file, { signal } = {}) {
       // A document the cadgen ENGINE reads -- an `.xbf`, or a STEP -- is served by the engine: the
       // viewer asks it to serve the file (`cadgen.viewer.xbf`) and answers where the page reads it,
-      // through this server (`/__cad/xbf/api/doc/<id>`), so the reads travel as every request does
+      // through this server (`/__cad/api/doc/<id>`), so the reads travel as every request does
       // (over the CAD app's tunnel too). Answered with the fetch they are made with. The engine's
       // first read of a large STEP takes a while: the server answers 202 { state: 'reading',
       // retryMs } until the engine holds it, and the client asks again after `retryMs`; each

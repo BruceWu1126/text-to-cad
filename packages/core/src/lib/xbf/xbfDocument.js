@@ -4,7 +4,7 @@
 // with world matrices; the tree; the version) and one XBM2 buffer per prototype, read as views
 // over the fetched bytes (`xbm.js`). The viewer's xbf renderer and the snapshot's headless stage
 // both load through here, so they draw the same bytes. The viewer's page reads the engine through
-// its own server (`/__cad/xbf/api/...`, `cadgen/viewer/xbf.py`), with the fetch its client
+// its own server (`/__cad/api/...`, `cadgen/viewer/documents.py`), with the fetch its client
 // sends every request with (the CAD app's goes over its tunnel); the snapshot's stage reads the
 // engine's own port. Either is a document URL here, and every read is made beside it.
 //
@@ -26,7 +26,7 @@ export const XBF_VERSION_WAIT_SECONDS = 25;
 
 /**
  * Where a served document is read: its API URL -- the engine's own,
- * `http://127.0.0.1:<port>/api/doc/<id>`, or the viewer's relay of it, `/__cad/xbf/api/doc/<id>`
+ * `http://127.0.0.1:<port>/api/doc/<id>`, or the viewer's relay of it, `/__cad/api/doc/<id>`
  * (resolved against the page) -- and the base every other read of that engine is made under
  * (`base`: the URL before `/api/doc/<id>`, its look at `<base>/api/look`).
  * @param {string | { url: string }} value

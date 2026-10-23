@@ -210,7 +210,7 @@ cannot overwrite a newer file revision. `folder(path)` lists one folder and
 `CadWorkspaceService` exposes a scoped `resources` provider and, where its host serves
 the cadgen engine, where the page reads a document the engine serves
 (`engineDocument`: an `.xbf`, or a STEP, read through the viewer at
-`/__cad/xbf/api/doc/<id>` with the client's own fetch). Its HTTP adapter owns the protocol; renderers
+`/__cad/api/doc/<id>` with the client's own fetch). Its HTTP adapter owns the protocol; renderers
 consume domain results and resource tickets. See [workspace services and resource
 transport](docs/workspace-resources.md) for worker transfer, nested dependencies,
 cache generations and the standalone static-HTTP default. No client reads model

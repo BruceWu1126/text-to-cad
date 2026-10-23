@@ -107,7 +107,7 @@ async function newPage() {
       }
     }
     // The page reads its own origin alone: a document the cadgen engine serves is read through
-    // the viewer (`/__cad/xbf/api/...`), never from the engine's own port.
+    // the viewer (`/__cad/api/...`), never from the engine's own port.
     if (["http:", "https:"].includes(parsed.protocol) && parsed.origin !== viewerOrigin) {
       errors.push(`a request to another origin: ${request.method()} ${url} (${request.resourceType()})`);
       await route.abort("blockedbyclient");

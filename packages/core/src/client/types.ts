@@ -94,7 +94,7 @@ export interface CadDrawingPayload {
  */
 /**
  * Where a page reads a document the cadgen engine serves (an `.xbf`, a STEP): its id, its API URL
- * through the viewer (`/__cad/xbf/api/doc/<id>`, on the client's origin), and the fetch every read
+ * through the viewer (`/__cad/api/doc/<id>`, on the client's origin), and the fetch every read
  * of it is made with (the client's own: the CAD app's travels over its tunnel).
  */
 export interface CadEngineDocument {
