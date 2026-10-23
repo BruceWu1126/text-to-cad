@@ -52,7 +52,8 @@ An assembly's mechanism is build123d's joints: `RevoluteJoint`,
 as-built configuration, the pose every file of the model shows; `configuration(assembly, name,
 **values)` names another, by joint label, and never moves the build; `couple(assembly, name,
 **joints)` constrains several joints to move together by ratio (**Kinematics**); `motion(assembly, name, ...)`
-names a motion (**Motions**). Connect parts before putting them in the compound that holds
+names a motion (**Motions**), and `animation(assembly, name, duration=)` a GLB's own animation
+(**Animations**). Connect parts before putting them in the compound that holds
 them; where `connect_to` cannot place them (a nested assembly), give the two joints one label
 where the parts stand.
 
@@ -136,7 +137,8 @@ def hinge():
    argument; omitted paths and `None` are refused. Whenever the model it decorates
    runs in a build -- the build's target, or a child another model's body calls --
    that file is written, once per build, from the model's own document: a declared
-   file is what the code that last ran makes, whichever model ran it (**Exports**).
+   file is what the code that last ran makes, whichever model ran it (**Exports**); a
+   GLB's animations are baked from the code when that GLB is written (**Animations**).
    A model with no file decorator writes nothing.
 11. **Decoration only declares; a model script is Python.** Importing cadgen or
     defining a decorated function never builds a model, writes its outputs, starts a
@@ -745,8 +747,9 @@ target and moved over it; a DXF only when its bytes change.
 - **GLB**: one mesh per prototype, a node per placement named by its path, a PBR material per
   look (a paint is a primitive of its own) with an extension for each part of the look past
   metallic-roughness (`KHR_materials_ior`, `_transmission`, `_volume`, `_clearcoat`,
-  `_anisotropy`, `_emissive_strength`; **Materials**), and every motion of the document an
-  animation of the same name (below); **3MF**: an object per prototype, a build item per
+  `_anisotropy`, `_emissive_strength`; **Materials**), every motion of the document an
+  animation of the same name (below), and, from a build, every `animation()` of its code
+  (**Animations**); **3MF**: an object per prototype, a build item per
   placement, looks through the materials extension (base materials, `pbmetallic` display
   properties, painted triangles naming their own); **STL**: binary, every placed triangle.
   Their meshes are the process's one mesh cache's (`serve.MESHES`), the viewer's: a part the
@@ -798,7 +801,7 @@ forward kinematics at eight points inside every step.
 and `@dxf("arm.dxf")` declare translations. Relative paths are relative to the script.
 There is no default decorator path. No file decorator takes
 anything else: a model's material, colours, joints, the pose its joints connect its parts at, its
-configurations and its motions are written in its body. Every declared file shows the model as
+configurations, its motions and its animations are written in its body. Every declared file shows the model as
 built: where its joints' `connect_to` placed the parts. A model that wants a second pose on
 every build is a second model function with other joint values. A model with no `@xbf` writes
 its derived files and nothing else.
@@ -1069,6 +1072,76 @@ every motion it would reuse and compares the samples, value for value: `verify.m
 `same` or `differs: <where>`, and a motion that differs is sampled on every build for the
 worker's life, and its model not taken from its file. Kept samples follow the memo's retention:
 what the last four builds used.
+
+## Animations
+
+A **motion** is the mechanism's and an **animation** is the GLB's. A motion moves pair values
+over time, AP242's interpolated configuration sequence (**Motions**): the document keeps it, every
+GLB of the document bakes it, and STEP, STL and 3MF carry nothing of it. An animation moves the
+nodes a GLB places, in glTF's own terms -- translation, rotation and scale channels, and the
+mechanism's forward kinematics at given times -- for what a mechanism does not say: an explode, a
+reveal, a showcase, a part hidden. It is never written into the document (law 13 stands: the xbf
+holds standard data alone). It is baked into every GLB the model declares, when that GLB is
+written (law 10), from the build's tree in memory. A GLB exported later from the xbf alone
+(`cadgen export model.xbf model.glb`) carries the document's motions only. For now a model with
+an animation declares its GLB beside its xbf, the two decorators stacked on one function: the xbf
+ignores the animation, the GLB bakes it.
+
+```python
+import build123d as bd
+from cadgen import animation, configuration, glb, motion, xbf
+
+@xbf("XBF/box.xbf")
+@glb("XBF/box.glb")
+def box():
+    ...                                                              # a hinged lid, a latch, feet
+    configuration(box, "open", hinge=100)
+    motion(box, "open_close", [(0, {"hinge": 0}), (1.5, "open"), (3, {"hinge": 0})])  # every GLB's
+    show = animation(box, "showcase", duration=4)                    # this GLB's alone
+    show.pose(at={0: {}, 1.5: "open", 3.5: {}})                     # the mechanism, by its FK
+    show.stagger("feet/*", by=(0, 0, -20), step=0.5, start=0.5)
+    show.rotation("latch", axis=(0, 0, 1), turns=2, start=1, end=3, interpolation="LINEAR")
+    show.channel("latch", path="translation", keys=[(1, (0, 0, 0)), (3, (30, 0, 0))])
+    show.hide("latch", at=3)
+    return box
+```
+
+`animation(assembly, name, duration=)` returns a builder whose calls chain (`animations.py`). Its
+primitive is glTF's channel, `.channel(parts, path=, keys=[(t, value), ...], interpolation=)`:
+`path` is `translation` (a key an offset from as built, mm), `rotation` (a unit quaternion
+`(x, y, z, w)`, the turn about `about=`, default the reference's centre) or `scale` (a uniform
+factor, each part about its own origin, as glTF scales a node); `interpolation` is `CUBICSPLINE`
+(the default, eased in and out at every key), `LINEAR` or `STEP`, as a sampler spells them.
+`.translation(parts, by=|to=)`, `.rotation(parts, axis=, turns=|by=|to=, about=)` and
+`.scale(parts, to=)` are channels from `start` (0) to `end` (the duration). The helpers compile to
+channels: `.explode(parts, direction=|radial=, distance=)` a translation per reference (along a
+direction by its rank, or away from a point), `.stagger(parts, by=, step=)` one per reference in
+turn, `.hide(parts, at=)` a `STEP` scale to 0 (glTF has no visibility channel), and
+`.pose(at={t: configuration or values})` translations and rotations of every part the mechanism
+moves, its joint values eased between the keys. The duration is the animation's length, in its
+`extras.cadgen.duration` as a motion's is (glTF has no field for it).
+
+Parts are named as a ref's owner names them (**References**: a label, `feet/foot_1`, a path from
+the assembly the animation is on) or by a glob (`feet/*`, `wheel?`), its outermost matches each a
+reference of its own; a reference's parts move as one body. A reference's translations add, after
+its rotations; a part's place is every reference holding it, the largest outermost (a scene
+graph's order), after the pose. The build fails by name on a part no occurrence is, a
+configuration or joint the mechanism lacks, two channels of one path on one reference overlapping
+in time, two poses overlapping, a part one glTF channel would interpolate by `STEP` and by
+another interpolation, a time outside the duration, and an animation named as a motion is.
+
+**The bake** (`export/animation.py`). A GLB holds the document's motions, then each animation,
+one glTF animation per name, its samplers keyed from 0 to the duration. Each part a channel moves
+gets a channel per path it changes, its true place at `t` composed as above; a path's
+interpolation is its channels': `STEP` keys at each jump, `LINEAR` and `CUBICSPLINE` keys from the
+channels' own key times, each step halved while glTF's interpolation strays from the true place by
+more than a motion's tolerance (1e-3 of the model's size in an origin, 1e-3 radian, 1e-3 in a
+scale), and two keys never more than 120 degrees apart. A CUBICSPLINE key's tangents are the
+true curve's one-sided derivatives there, as a motion's are and as the 0.7 clip baker's central
+differences were in the limit. Against that baker, on a hinge eased through 100 degrees, a slide
+eased 60 mm and a constant spin (a 127 mm model), the two curves agree within 0.1 mm at every
+corner of each part, each within its own tolerance of the motion, the new one in 5 to 7 keys a
+path where the old one wrote 6 to 11.
 
 ## Materials
 

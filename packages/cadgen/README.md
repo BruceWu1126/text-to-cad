@@ -105,7 +105,8 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
 10. **A file decorator requires an explicit output path.** `out` is its only argument;
     omitted paths and `None` are refused. Whenever the model it decorates runs in a
     build -- the build's target, or a child another model's body calls -- that file is written,
-    once per build, from the model's own document. A model with no file decorator writes nothing.
+    once per build, from the model's own document; a GLB's animations are baked from the code
+    when that GLB is written. A model with no file decorator writes nothing.
 11. **Decoration only declares; a model script is Python.** Importing cadgen or
     defining a decorated function never builds a model, writes its outputs, starts a
     worker, or exits the caller. An explicit call builds the model and writes its
