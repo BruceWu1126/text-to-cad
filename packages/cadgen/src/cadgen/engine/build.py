@@ -593,28 +593,16 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     clock = time.perf_counter()
     from cadgen.engine.kernel import memo
 
-    # The mechanism's function motions are sampled again only where what they are made of
-    # changed (``memo.sampled``): a warm edit that leaves them alone samples nothing.
-    with memo.sampling(f"{model.script}::{model.name}", _motion_key(context), _engine_version(),
-                       verify=bool(getattr(run, "verify", False))) as sampling:
+    # The files the motions' functions open while they are sampled (``memo.listened``) are the
+    # model's inputs, as its bodies' are: its closure holds them, so an edit of one is a change
+    # the document's key sees.
+    with memo.motion_reads() as reads:
         tree = document.collect(result, model.name)
-    if sampling.checks or not sampling.keyed:
-        # The files the motions' functions opened are the model's inputs, as its bodies' are:
-        # its closure holds them, so an edit of one is a change the document's key sees.
+    if reads.checks or not reads.keyed:
         found = run.keys.get(f"{model.script}::{model.name}")
         if found is not None:
-            run.keys[f"{model.script}::{model.name}"] = (found[0], [*found[1], *sampling.checks],
-                                                         found[2] and sampling.keyed, found[3])
-    if sampling.statuses:
-        counts = report.setdefault("memo", {})
-        counts["motions_sampled"] = sum(1 for found in sampling.statuses.values() if found != "reused")
-        counts["motions_reused"] = sum(1 for found in sampling.statuses.values() if found == "reused")
-        report["motions"] = dict(sampling.statuses)
-    if sampling.verified and isinstance(report.get("verify"), dict):
-        report["verify"]["motions"] = dict(sampling.verified)
-        report["verify"]["mismatches"] = sorted([*report["verify"]["mismatches"],
-                                                 *(f"motion {name}" for name, found in sampling.verified.items()
-                                                   if found.startswith("differs"))])
+            run.keys[f"{model.script}::{model.name}"] = (found[0], [*found[1], *reads.checks],
+                                                         found[2] and reads.keyed, found[3])
     xbf = next((path for kind, path in targets if kind == "xbf"), None)
     if context is not None:
         from cadgen.engine import previous
@@ -780,43 +768,6 @@ def _statuses(run: Any, name: str) -> dict[str, str]:
     return {_identity(body): run.statuses.get(body, "run") for body in previous.closure(run.keys, name)}
 
 
-def _engine_version() -> str:
-    from cadgen.engine.model import _engine_version as version
-
-    return version()
-
-
-def _motion_key(context: Any) -> Callable[[Any], tuple[str | None, str | None]]:
-    """A motion's function as ``memo.sampled`` keys it: a digest of what it reaches
-    (``sources.Symbols``, as a body's code is keyed), worked out after the body ran, against the
-    namespaces the function samples in; or None and why it cannot be keyed: what it or a
-    function it reaches holds -- a closure cell, a default -- with no canonical form (a shape,
-    an open file: a value a run made, which no module's bytes say, as a ``@memo`` call's
-    arguments must be values), or a reach nothing can key."""
-    held: list[Any] = []
-
-    def key(function: Any) -> tuple[str | None, str | None]:
-        from cadgen.engine.sources import Symbols
-
-        if not held:
-            held.append(Symbols(getattr(context, "resolved", None), getattr(context, "loaded", None),
-                                getattr(context, "base", None)))
-        symbols = held[0]
-        # The function as a closure cell holds it: a lambda, a factory's closure, a partial, a
-        # bound method or a callable object, each by its canonical form.
-        holder = (lambda found: (lambda: found))(function)
-        digest, reasons = symbols.key(holder)
-        loose = symbols.loose(holder)
-        if loose:
-            return None, f"its function holds what has no canonical form ({loose[0]})"
-        unkeyable = [reason for reason in reasons if reason.startswith("always runs:")]
-        if unkeyable:
-            return None, f"its function cannot be keyed ({unkeyable[0][len('always runs: '):]})"
-        return digest, None
-
-    return key
-
-
 def _verified(run: Any, name: str) -> dict[str, Any]:
     """A verifying build's finding for one model: each body of it the memo would have
     replayed, ``same``, ``differs: why``, or ``follows`` the bodies it called that differ;
@@ -866,9 +817,6 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
     impure = sorted(_identity(family) for family in _FAMILIES.get(name, ()) if family in always)
     if impure:
         return {"used": False, "reason": f"it calls {', '.join(impure)}, which a verification found impure"}, None
-    resampled = sorted(identity[len(name) + 1:] for identity in memo.always_sampled() if identity.startswith(name + "#"))
-    if resampled:
-        return {"used": False, "reason": f"a verification sampled its motion {', '.join(resampled)} otherwise"}, None
     stats = {str(path): _stat(path) for _kind, path in targets}
     remembered = _WRITTEN.get(name)
     if memo.replayable(name, source) and not _as_built(name, remembered, stats):
