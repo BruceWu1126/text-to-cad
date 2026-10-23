@@ -870,7 +870,7 @@ class PictureTest(FixtureTest):
             with self.subTest(camera=camera), self.assertRaisesRegex(SnapshotRefused, "its camera is a plan view"):
                 job_pictures({**packet, "jobs": [{**packet["jobs"][0], "camera": camera}]})
 
-    def test_what_a_kind_does_not_offer_is_refused_by_name_and_leaves_no_picture(self) -> None:
+    def test_what_a_kind_does_not_offer_is_refused_by_name_and_keeps_the_earlier_picture(self) -> None:
         out = self.folder / "stale.png"
         for path, options, why in (
                 (self.folder / "part.stl", {"pose": {"a": 1}}, "is a mesh and has none"),
@@ -881,7 +881,7 @@ class PictureTest(FixtureTest):
             out.write_bytes(b"before")
             with self.subTest(path=path.name, options=options), self.assertRaisesRegex(SnapshotRefused, why):
                 snapshot(path, out, size=SIZE, daemon=False, **options)
-            self.assertFalse(out.exists(), f"{path.name}: a refused snapshot leaves no picture at OUT")
+            self.assertEqual(out.read_bytes(), b"before", f"{path.name}: a refused snapshot keeps the picture at OUT")
 
 
 class DaemonFileTest(unittest.TestCase):

@@ -291,6 +291,12 @@ def build(code: Any, *, model: str | None = None, name: str | None = None, xbf: 
     if not isinstance(code, str):
         if verify:
             raise EngineError("verify requires source code: a supplied shape has already been built")
+        from cadgen.engine.build import _CODE_NAME
+
+        # Source text is refused by this rule in its worker (``build.code_source``); a shape
+        # has no source, so its name is checked here, before it names a worker or a path.
+        if not _CODE_NAME.fullmatch(name):
+            raise EngineError(f"name {name!r} is no Python identifier")
         from cadgen.engine.shape_input import pack
 
         shape = pack(code, name)
@@ -405,15 +411,14 @@ def snapshot(source: Any, out: Any, *, display: Any = None, camera: Any = None, 
     ``measurements`` are drawn over the model; ``camera="authored"`` draws it from the view the
     annotation's ink was drawn in, which the packet holds. ``out`` a folder (a path ending in a
     separator, or one that is there) is given a name inside it, the source's stem and the time
-    (``snapshot.picture_path``). A snapshot refused or failed leaves no picture at ``out``
-    (``snapshot.nothing_left``)."""
+    (``snapshot.picture_path``). A snapshot refused or failed leaves the file at ``out`` as it
+    was (``snapshot.write_png``)."""
     from cadgen.engine import snapshot as drawing
 
     out = drawing.picture_path(out, source)
-    with drawing.nothing_left(out):
-        return _snapshot(source, out, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
-                         width=width, height=height, size_profile=size_profile, daemon=daemon, annotation=annotation,
-                         measurements=measurements)
+    return _snapshot(source, out, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
+                     width=width, height=height, size_profile=size_profile, daemon=daemon, annotation=annotation,
+                     measurements=measurements)
 
 
 def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, preview: bool, pose: Any,
@@ -458,7 +463,7 @@ def snapshot_job(job: Any, source: Any = None, *, display: Any = None, camera: A
     packet's ink and dimensions -- at its output settings, into each of its outputs
     (``snapshot.job_pictures``). ``source`` is drawn in place of every job's input; a flag given
     overrides every job. Every request is checked before anything renders, and a picture that
-    fails leaves none of the job's."""
+    fails writes none of the job's, leaving every output as it was."""
     from cadgen.engine import snapshot as drawing
 
     _heard("source", os.fspath(source) if source is not None else drawing.job_input(job))

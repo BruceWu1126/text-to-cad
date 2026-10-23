@@ -567,6 +567,8 @@ class CodeTest(unittest.TestCase):
         self.assertIn("swing", loaded.mechanism.motions)
         self.assertTrue(loaded.prototypes[0].face_colors)
         self.assertEqual(loaded.prototypes[0].material.name, materials.aluminium.name)
+        # No feature history: no element names and no closure, as the engine README says.
+        self.assertEqual((loaded.prototypes[0].face_names, loaded.prototypes[0].edge_names, loaded.closure), ({}, {}, None))
         self.assertEqual({p.name for p in self.folder.iterdir()}, {"part.step", "part.xbf"})
         revised = build(bd.Box(2, 3, 4), model="shape_part")
         self.assertTrue(revised.ok, revised.report)
@@ -579,6 +581,23 @@ class CodeTest(unittest.TestCase):
             build(123, model="invalid_shape")
         with self.assertRaisesRegex(api.EngineError, "requires source code"):
             build(base, model="invalid_shape", verify=True)
+        # An author's names are data, never the transfer's structure: a joint and a
+        # configuration called "tuple" arrive as they were made.
+        named = bd.Box(4, 5, 2)
+        named.label = "named"
+        loose = bd.Box(3, 2, 1)
+        loose.label = "loose"
+        bd.RevoluteJoint("tuple", named, axis=bd.Axis.Z, angular_range=(0, 90))
+        bd.RigidJoint("mount", loose, bd.Location())
+        named.joints["tuple"].connect_to(loose.joints["mount"], angle=30)
+        kit = configuration(bd.Compound(children=[named, loose], label="kit"), "tuple", tuple=60)
+        self.assertTrue(build(kit, model="shape_names", xbf="names.xbf").ok)
+        mechanism = document.Loaded(self.folder / "names.xbf").mechanism
+        self.assertEqual((mechanism.as_built, mechanism.configurations), ({"tuple": (30.0,)}, {"tuple": {"tuple": (60.0,)}}))
+        # The name of a shape names its default files: a path in it is refused, nothing written.
+        with self.assertRaisesRegex(api.EngineError, "no Python identifier"):
+            build(base, name="../escaped", xbf=True, step=True)
+        self.assertFalse((self.folder.parent / "escaped.step").exists())
 
     def test_code_assigns_result_and_its_flags_are_its_files(self) -> None:
         with self.assertRaisesRegex(engine_build.BuildError, "assigns no `result`"):
@@ -607,6 +626,13 @@ class CodeTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 cli.main(["build", "--stl"])
         self.assertEqual(list(json.loads(out.getvalue().splitlines()[0])["files"]), [str(self.folder / "plug.stl")])
+        # A --no-daemon build is held by no engine: no address or view to open is printed.
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(["build", self.CODE.format(height=5), "--name", "plug", "--stl", "--no-daemon"]), 0)
+        self.assertIn("plug.stl", out.getvalue())
+        self.assertNotIn("model: code::plug", out.getvalue())
+        self.assertNotIn("view:", out.getvalue())
         self.assertIn("assigns no `result`", err.getvalue())
         self.assertIn("the following arguments are required: SOURCE", err.getvalue())
 

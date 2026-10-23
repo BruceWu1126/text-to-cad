@@ -605,7 +605,8 @@ size. SRC, given, is drawn in place of every job's input, and a flag given overr
 display, the grid, the camera, Preview, the pose, the ink, the dimensions, the size of every
 output; an OUT is refused. Every job is checked before anything renders (an unknown key, a setting
 out of range, two outputs at one path, a file that is not there: refused by name, every file left as
-it was), and a picture that fails leaves none of the job's. Through the daemon each picture is a frame
+it was), and a picture that fails writes none of the job's: every picture is staged beside its
+output and moved into place only when all are drawn, and a failed snapshot leaves every existing picture as it was. Through the daemon each picture is a frame
 of the file's warm render process; `--no-daemon` serves each file once for all its pictures.
 `--json` prints `{"ok": true, "pictures": [what each drew]}`.
 
@@ -1692,7 +1693,13 @@ outputs are written. Reusing `model="bracket"` updates `code::bracket`, just as 
 code build does. The shape's creation already happened in the calling Python
 process: only document conversion and export run in the worker. Use a decorated
 model or source text for warm replay of geometry operations and feature provenance;
-`verify=True` is refused for a supplied shape. The CLI continues to take code only.
+`verify=True` is refused for a supplied shape. With no feature history, its faces,
+edges and vertices carry no element names (a ref addresses them by ordinal,
+`part/face 3`), and its xbf holds no build closure, so it is never taken from its
+file after a restart. Each part travels as its binary BRep, base64 in the request's
+JSON line through the daemon to the worker: memory on the way is a few times the
+shape's BRep size. `name` follows the code rule, an ASCII Python identifier. The CLI
+continues to take code only.
 
 ## In-memory model addresses
 
