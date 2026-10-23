@@ -374,8 +374,8 @@ class Pool:
     at most ``cap`` of them (see the module): ``lease`` a key's worker for one request, and
     ``release`` it after. Requests are granted first come first served: one whose key has a live
     worker takes it when it is free; one that needs a worker of its own takes a slot under the cap,
-    else the slot of the least recently used idle worker -- one no request waits for, if there is
-    one -- which is retired; with every worker busy it waits, and so does every request that needs
+    else the slot of the least recently used idle worker -- one no page watches, then one no
+    request waits for, if there is one -- which is retired; with every worker busy it waits, and so does every request that needs
     a slot after it. A worker idle ``idle`` seconds is retired (``retire_idle``), as is one that is
     gone or over its memory cap when let go. ``start(key, environment, cwd)`` starts a worker."""
 
@@ -512,7 +512,10 @@ class Pool:
             if not idle:
                 blocked = True
                 continue
-            victim = min(idle, key=lambda held: (held.key in wanted, held.used))
+            # Connected means warm: a worker whose document a page watches makes room only after
+            # every unwatched one; at a cap of watched idle workers alone the least recently used
+            # of them still goes, so a build never waits on an open page.
+            victim = min(idle, key=lambda held: (self.connected(held), held.key in wanted, held.used))
             del self.live[victim.key]
             self._note(victim, "LRU")
             self._slot(ticket, victim)

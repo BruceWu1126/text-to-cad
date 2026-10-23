@@ -206,8 +206,10 @@ reader/mesh subprocesses; even an inline-mesh request stays outside the daemon.
 The daemon maps each built document to its worker. HTTP watcher accounting has its
 own lock, independent of document reads and pool admission. Outstanding version
 waits and recent syncs preserve that worker from idle retirement and keep the daemon
-alive. The worker-count cap still uses LRU eviction to admit a new script, and the
-per-worker memory cap remains enforced after each build.
+alive. To admit a new script at the worker-count cap, the least recently used
+unwatched idle worker is retired; a watched one goes only when every idle worker is
+watched, so a build never waits on an open page. The per-worker memory cap remains
+enforced after each build.
 
 The installation's private socket supplies its HTTP token. Page URLs exchange it
 for a same-site cookie; programmatic clients use Bearer authentication. All routes
@@ -419,8 +421,8 @@ guess, no refusal; the operating system does the rest.
   cores). A build for a script whose worker is alive goes to it, waiting while it builds
   something else: one build at a time per worker, builds of different scripts at once.
 - **First come, first served.** A build for a script with no worker starts one under the cap.
-  At the cap, the least recently used idle worker is retired first -- its stdin closed, so it
-  exits -- and its slot is the new one's. With every worker busy, the build waits for the first
+  At the cap, the least recently used idle worker is retired first -- one no page watches
+  before a watched one; its stdin closed, so it exits -- and its slot is the new one's. With every worker busy, the build waits for the first
   to come free, and every build that needs a slot after it waits behind it. A build that waits
   for its own script's busy worker takes no slot.
 - **Unwatched idle workers go.** A worker idle `CADGEN_ENGINE_WORKER_IDLE` seconds (default:

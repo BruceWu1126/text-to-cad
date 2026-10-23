@@ -204,6 +204,33 @@ class ConnectedPoolTest(unittest.TestCase):
             with mock.patch("time.monotonic", return_value=synced + LIVE + 1):
                 self.assertEqual(daemon.pool.retire_idle(), [builder], "no watcher: idle retirement")
 
+    def test_the_worker_count_cap_retires_an_unwatched_worker_before_a_watched_one(self) -> None:
+        from cadgen.engine.serve import Server
+
+        daemon = Daemon(3600, cap=2)
+        daemon.pool.start = Fake
+        server = daemon.server = Server(mesh_mode="inline")
+        self.addCleanup(daemon.shutdown)
+        watched = daemon.pool.lease("watched.py", {})
+        daemon.pool.release(watched)  # used least recently
+        unwatched = daemon.pool.lease("unwatched.py", {})
+        daemon.pool.release(unwatched)
+        server.put("code::watched", {"version": "one", "prototypes": []}, {})
+        daemon.builders[os.path.normcase("code::watched")] = watched
+        server.sync("code::watched")
+        third = daemon.pool.lease("third.py", {})
+        self.assertTrue(unwatched.stopped, "the unwatched worker made room")
+        self.assertFalse(watched.stopped, "a watched worker is not the count cap's victim")
+        daemon.pool.release(third)
+        # Only watched idle workers left: the least recently used of them still goes, so a
+        # build never waits on an open page.
+        server.put("code::third", {"version": "one", "prototypes": []}, {})
+        daemon.builders[os.path.normcase("code::third")] = third
+        server.sync("code::third")
+        daemon.pool.lease("fourth.py", {})
+        self.assertTrue(watched.stopped and not third.stopped)
+        self.assertEqual([row["reason"] for row in daemon.pool.retired], ["LRU", "LRU"])
+
     def test_memory_model_sync_keeps_its_worker_warm(self) -> None:
         from cadgen.engine.serve import LIVE, Server
 
