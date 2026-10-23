@@ -80,6 +80,14 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(status, 302)
         self.assertIn('HttpOnly', headers['set-cookie'])
         self.assertNotIn(launch['token'], headers['location'])
+        # A cookie from an engine that held this port before (restarted with --port) never
+        # outranks the launch URL's token, and a token that is not ASCII is refused, not a crash.
+        stale = {'Cookie': f"cadgen-engine-{launch['port']}=stale"}
+        status, headers, _ = self.get(launch, urlsplit(launch['url']).path+'?token='+launch['token'],
+                                      token=False, headers=stale)
+        self.assertEqual(status, 302)
+        self.assertIn(launch['token'], headers['set-cookie'])
+        self.assertEqual(self.get(launch, '/__cad/server?token=%C3%A9', token=False)[0], 403)
         conn = http.client.HTTPConnection('127.0.0.1', launch['port'], timeout=10)
         try:
             conn.request('POST', '/__cad/recents', body=b'{}', headers={'Authorization': 'Bearer '+launch['token']})
