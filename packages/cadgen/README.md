@@ -85,14 +85,16 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
    makes everything downstream of it miss. So an edit costs what it changed, and an element
    keeps the name its feature history gave it across edits. Across a restart, a model's only
    cache is its own xbf, taken whole or not at all.
-6. **One document per model, with one id; only declared files.** Every called model makes
-   one document, with an id derived from its script and function (`ids.model_id`): the same
-   in every process, worked out without asking the engine. A file the engine serves is known
-   inside it by the id of its canonical path (`ids.file_id`); its public name stays its path.
-   Bare `@model` keeps its document in the worker's memory. File decorators imply a model
-   and write only their named outputs. No implicit XBF, source file, sidecar, registry,
-   cache or thumbnail is written for an in-memory model. Model documents and the viewer's
-   In memory list disappear when their workers retire or the engine restarts.
+6. **One document per model, with one id.** Every called model makes one document, with an
+   id derived from its script and function (`ids.model_id`): the same in every process, worked
+   out without asking the engine. A file the engine serves is known inside it by the id of its
+   canonical path (`ids.file_id`); its public name stays its path. Its store is `pointer` (a
+   model in a saved file, the default) or `memory` (asked for with `store="memory"`). File
+   decorators imply a model and write only their named outputs. No xbf, mesh, memo,
+   provenance or derived file is written for a document beyond what it declares. A document
+   lives until the engine exits or memory evicts it; its worker retiring does not end it,
+   except a `memory` document's. A document that is not held names the command that builds it
+   again; the engine never runs it (the engine's **Document lifetime**).
 7. **Provenance is served live, never written.** What made an element -- the feature, its
    operation, the function, file and line of its call -- lives in the trace of the worker that
    built the document, and is asked of it while it lives (`made_by`, `cadgen inspect`). A document
@@ -170,7 +172,8 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     sync protects the worker that built it from idle retirement. The engine outlives its
     clients; a page closing never stops a worker. The worker-count cap never retires a worker
     whose document a page watches; it is exceeded instead. The memory cap may retire it (the
-    engine's **Architecture** and **The daemon and its workers**).
+    engine's **Architecture** and **The daemon and its workers**). Memory may evict a worker's
+    document only when nothing watches it (the engine's **Document lifetime**).
 
 20. **One engine serves the installation.** A page never replaces or re-executes it. Page sessions and document reads share its
     authenticated HTTP listener. `serve` and `viewer` always start or reuse it, with no
@@ -218,9 +221,10 @@ expiry, revision checks and download delivery; running cancellation discards tha
 temporary artifact. Browser downloads choose the viewer user's local destination
 before starting. An agent's explicit host path is a different destination contract.
 
-`cadgen inspect`, `cadgen.inspect()` and `cad_inspect` read existing files or live
-models. They never execute source to obtain a missing model or write its declared
-outputs. An unbuilt or expired model requires an explicit build. With no reference,
+`cadgen inspect`, `cadgen.inspect()` and `cad_inspect` read existing files or the
+documents the engine holds. They never execute source to obtain a missing model or write
+its declared outputs. An unbuilt, evicted or expired model requires an explicit build: one
+the engine built before names the command (`python` and the program that built it). With no reference,
 inspection returns the build closure; with a reference it returns geometry facts.
 `query="build"` (`--query build`) returns saved-file metadata and closure or live
 build metadata. File metadata does not imply a live worker. `where` is retired.

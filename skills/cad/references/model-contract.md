@@ -345,7 +345,14 @@ hour. It keeps a warm worker per model script, each with its own memo, and build
   the cap the least recently used idle one is retired. A worker idle for
   `CADGEN_ENGINE_WORKER_IDLE` seconds, or over `CADGEN_ENGINE_WORKER_RSS_MB` of
   memory after a build (default: a quarter of the machine's, at least 2 GiB; `0` for
-  no cap), is retired, and its script's next build starts cold.
+  no cap), is retired, and its script's next build starts cold. Its documents stay
+  served: the daemon takes them first, and holds them under one memory budget
+  (`CADGEN_ENGINE_MEMORY_MB`, default a quarter of the machine's) that never evicts one a
+  page watches. `@model(store="memory")` (or `store="memory"` on a file decorator) keeps a
+  document in its worker alone: it expires with the worker.
+- A document no longer held (`cadgen status`: `evicted`, `expired`) is never rebuilt for
+  you: `cadgen status`, `cadgen inspect` and its page print the command that builds it
+  again, `python` and the program that built it. Run it.
 - `CADGEN_ENGINE_IDLE` sets the daemon's idle time in seconds, and
   `CADGEN_ENGINE_DIR` where it keeps its socket and lock (one daemon per folder). A
   build asked with another `PYTHONPATH`, `PATH` or `VIRTUAL_ENV` replaces its
