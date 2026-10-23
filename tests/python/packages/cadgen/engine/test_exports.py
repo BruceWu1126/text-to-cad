@@ -579,6 +579,19 @@ class CodeTest(unittest.TestCase):
             build(123, model="invalid_shape")
         with self.assertRaisesRegex(api.EngineError, "requires source code"):
             build(base, model="invalid_shape", verify=True)
+        # An author's names are data, never the transfer's structure: a joint and a
+        # configuration called "tuple" arrive as they were made.
+        named = bd.Box(4, 5, 2)
+        named.label = "named"
+        loose = bd.Box(3, 2, 1)
+        loose.label = "loose"
+        bd.RevoluteJoint("tuple", named, axis=bd.Axis.Z, angular_range=(0, 90))
+        bd.RigidJoint("mount", loose, bd.Location())
+        named.joints["tuple"].connect_to(loose.joints["mount"], angle=30)
+        kit = configuration(bd.Compound(children=[named, loose], label="kit"), "tuple", tuple=60)
+        self.assertTrue(build(kit, model="shape_names", xbf="names.xbf").ok)
+        mechanism = document.Loaded(self.folder / "names.xbf").mechanism
+        self.assertEqual((mechanism.as_built, mechanism.configurations), ({"tuple": (30.0,)}, {"tuple": {"tuple": (60.0,)}}))
         # The name of a shape names its default files: a path in it is refused, nothing written.
         with self.assertRaisesRegex(api.EngineError, "no Python identifier"):
             build(base, name="../escaped", xbf=True, step=True)

@@ -19,14 +19,17 @@ from typing import Any
 
 
 def _value(value: Any) -> Any:
+    """The mechanism as JSON. Every tuple, dict and dataclass is a one-key wrapper (``t``,
+    ``d``, ``c``), so an author's name -- a joint, a configuration or a motion called
+    ``tuple`` -- is never read back as structure."""
     if is_dataclass(value):
-        return {"type": type(value).__name__, "fields": {f.name: _value(getattr(value, f.name)) for f in fields(value)}}
+        return {"c": [type(value).__name__, [[f.name, _value(getattr(value, f.name))] for f in fields(value)]]}
     if isinstance(value, tuple):
-        return {"tuple": [_value(item) for item in value]}
+        return {"t": [_value(item) for item in value]}
     if isinstance(value, list):
         return [_value(item) for item in value]
     if isinstance(value, dict):
-        return {key: _value(item) for key, item in value.items()}
+        return {"d": [[_value(key), _value(item)] for key, item in value.items()]}
     return value
 
 
@@ -37,11 +40,13 @@ def _restore(value: Any) -> Any:
     if isinstance(value, list):
         return [_restore(item) for item in value]
     if isinstance(value, dict):
-        if set(value) == {"tuple"}:
-            return tuple(_restore(item) for item in value["tuple"])
-        if set(value) == {"type", "fields"}:
-            return kinds[value["type"]](**{key: _restore(item) for key, item in value["fields"].items()})
-        return {key: _restore(item) for key, item in value.items()}
+        [(tag, held)] = value.items()
+        if tag == "t":
+            return tuple(_restore(item) for item in held)
+        if tag == "d":
+            return {_restore(key): _restore(item) for key, item in held}
+        kind, given = held
+        return kinds[kind](**{key: _restore(item) for key, item in given})
     return value
 
 
