@@ -163,9 +163,10 @@ def hinge():
 14. **Connected means warm.** A worker is not retired for idleness while any served
     document it built has a version wait outstanding or completed a sync within `serve.LIVE`
     seconds. Heartbeats use the canonical document address, including `code::NAME`
-    and `script.py::NAME`; they never turn a model address into a file path. The memory cap still applies; the
-    worker-count cap takes a watched worker only when every idle worker is watched. Closing a page never stops the engine or its
-    worker; once its last sync expires, ordinary idle retirement applies.
+    and `script.py::NAME`; they never turn a model address into a file path. The worker-count
+    cap never retires a worker whose document a page watches; it is exceeded instead. The memory
+    cap may retire it. Closing a page never stops the engine or its worker; once its last sync
+    expires, ordinary idle retirement applies.
 
 15. **One HTTP owner per installation.** The daemon serves page sessions and document
     reads on one authenticated listener. Both `serve` and `viewer` start or reuse it;
@@ -211,9 +212,10 @@ The daemon maps each built document to its worker. HTTP watcher accounting has i
 own lock, independent of document reads and pool admission. Outstanding version
 waits and recent syncs preserve that worker from idle retirement and keep the daemon
 alive. To admit a new script at the worker-count cap, the least recently used
-unwatched idle worker is retired; a watched one goes only when every idle worker is
-watched, so a build never waits on an open page. The per-worker memory cap remains
-enforced after each build.
+unwatched idle worker is retired. When every idle worker is watched, the new worker
+starts past the cap instead: a build never waits on an open page, and never costs one
+its warm worker. The per-worker memory cap remains enforced after each build, watched
+or not.
 
 The installation's private socket supplies its HTTP token. Page URLs exchange it
 for a same-site cookie; programmatic clients use Bearer authentication. All routes
@@ -350,7 +352,7 @@ previous files stay. Builds run in the daemon's warm workers, at most one per co
 `CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_VIEWER_WARM=0` keeps `cadgen viewer`
 from warming the engine at its launch (**The viewer and the snapshot**). `CADGEN_ENGINE_MESH=processes|inline`
 picks how parts are meshed. The default, `processes`, uses a warm pool of
-processes started with the server, each handed one part's shape as bytes,
+processes started with the first page or view, each handed one part's shape as bytes,
 largest first, a large part meshed with the kernel's face parallelism too.
 `inline` meshes one part at a time over the kernel's own threads. Python
 threads add nothing, because the kernel's mesher holds the interpreter's lock.
@@ -426,16 +428,27 @@ guess, no refusal; the operating system does the rest.
   cores). A build for a script whose worker is alive goes to it, waiting while it builds
   something else: one build at a time per worker, builds of different scripts at once.
 - **First come, first served.** A build for a script with no worker starts one under the cap.
-  At the cap, the least recently used idle worker is retired first -- one no page watches
-  before a watched one; its stdin closed, so it exits -- and its slot is the new one's. With every worker busy, the build waits for the first
-  to come free, and every build that needs a slot after it waits behind it. A build that waits
-  for its own script's busy worker takes no slot.
+  At the cap, the least recently used idle worker no page watches is retired first (its stdin
+  closed, so it exits), and its slot is the new one's. With every worker busy, the build waits
+  for the first to come free, and every build that needs a slot after it waits behind it. A
+  build that waits for its own script's busy worker takes no slot.
+- **The cap never retires a watched worker.** When every idle worker has a document a page
+  watches, the new worker starts past the cap. The memory cap may still retire a watched one.
 - **Unwatched idle workers go.** A worker idle `CADGEN_ENGINE_WORKER_IDLE` seconds (default:
   the daemon's idle time, an hour) is retired only when none of its served documents has
   an outstanding version wait or a sync within `serve.LIVE` (90 seconds).
 - **A memory cap.** A worker whose resident memory is over `CADGEN_ENGINE_WORKER_RSS_MB` after
   a build (default: a quarter of the machine's memory, at least 2 GiB; `0` for no cap) is
   retired: the report says so (`retired`), and the worker exits once it has answered.
+
+The meshing pool starts with the first page or view, never with a build. A build serves its
+document, so the daemon's server starts with the first `python model.py`; its meshing pool
+waits. It starts on the first mesh, topology or pose a page asks, or on `Server.warm`: sent
+by `cadgen viewer` at launch (`CADGEN_VIEWER_WARM=0` skips it), called when an app launches a
+view and when a build's `view:` link lands. With no page, the daemon's only child is the
+worker. Measured on a 24-part model (5 shapes) on a 10-core machine: 1 child and 0.5 GB with
+no page, against 12 and 3.2 GB when the pool started with the server. The pool's start costs
+a first page about 0.8 s, less the time the page takes to load after the warm.
 
 A retired script's next build is a fresh worker's: a restart, which takes the xbf whole when
 its closure is unchanged (**Build closure**), and else builds the model cold. A render
