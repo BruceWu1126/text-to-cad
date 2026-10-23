@@ -9,8 +9,7 @@ When a build writes a model's xbf, the document's main label carries its closure
   digest of the engine's own code;
 - ``libs``: the versions of build123d and OCP, which decide the geometry;
 - ``source``: ``{"kind": "script", "path", "function"}`` -- the script relative to the
-  document's folder and the model's function -- or, for code built from text, ``{"kind":
-  "code", "name", "digest"}``, the code never written;
+  document's folder and the model's function;
 - ``modules``: ``[path, digest]`` per first-party module the script's load imported or the
   model reaches, each a digest of what the model reaches in it (its functions' code objects
   with no line tables, its classes, the values its bindings hold: ``sources.Symbols.modules``);
@@ -159,11 +158,6 @@ def absolute(path: str | None, folder: Path) -> str | None:
 
 
 def _source(model: Any, folder: Path) -> dict[str, Any]:
-    from cadgen.engine import sources
-
-    held = sources.MEMORY.get(str(model.script))
-    if held is not None:
-        return {"kind": "code", "name": model.name, "digest": hashlib.sha256(held).hexdigest()[:32]}
     return {"kind": "script", "path": _relative(str(model.script), folder), "function": model.name}
 
 
@@ -258,8 +252,7 @@ def again(record: dict[str, Any], model: Any, folder: Path, modules: dict[str, s
             changes.append(f"{name} {record['libs'].get(name)} became {now['libs'].get(name)}")
     if now["source"] != record["source"]:
         source = now["source"]
-        changes.append("the code changed" if source["kind"] == "code"
-                       else f"the model is now {source['path']}::{source['function']}")
+        changes.append(f"the model is now {source['path']}::{source['function']}")
     held, current = dict(map(tuple, record["modules"])), dict(map(tuple, now["modules"]))
     named = _named(symbols or {}, folder)
     for path in sorted(set(held) | set(current)):

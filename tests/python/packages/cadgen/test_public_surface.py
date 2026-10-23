@@ -67,8 +67,6 @@ ADAPTERS: dict[str, frozenset[str]] = {
     # The person's telemetry choice: status, on or off.
     "telemetry": frozenset({"action"}),
     # The engine's verbs (cadgen.engine.cli), each a command of its own.
-    "build": frozenset({"source", "model", "name", "xbf", "step", "glb", "stl", "threemf", "dxf", "json", "verify", "profile",
-                        "no_daemon"}),
     "export": frozenset({"source", "destinations", "pose", "part", "no_daemon", "json"}),
     "snapshot": SNAPSHOT,
     "serve": frozenset({"document", "port", "three"}),
@@ -135,10 +133,10 @@ class Manifest(unittest.TestCase):
     def test_the_retired_commands_are_gone(self):
         # No backwards compatibility: a retired command has no entry and no module, so it gets the
         # same answer as any unknown command.
-        for command in ("step build", "step compile", "step snapshot", "stl build", "stl snapshot", "3mf build",
+        for command in ("build", "step build", "step compile", "step snapshot", "stl build", "stl snapshot", "3mf build",
                         "3mf snapshot", "glb build", "glb snapshot", "store", "daemon status", "xbf", "where"):
             self.assertNotIn(command, cli._COMMANDS)
-        for module in ("cadgen.cli.step_build", "cadgen.cli.step_snapshot", "cadgen.cli.stl_build",
+        for module in ("cadgen.cli.build", "cadgen.engine.shape_input", "cadgen.cli.step_build", "cadgen.cli.step_snapshot", "cadgen.cli.stl_build",
                        "cadgen.cli.where", "cadgen.cli.store", "cadgen.cli.daemon_status", "cadgen.step", "cadgen.store", "cadgen.daemon"):
             with self.subTest(module=module), self.assertRaises(ModuleNotFoundError):
                 importlib.import_module(module)
@@ -175,10 +173,10 @@ class Manifest(unittest.TestCase):
         self.assertNotIn("sdf validate", out)
 
     def test_an_unknown_noun_lists_every_command(self):
-        code, out, err = self._dispatch("frobnicate", "build")
+        code, out, err = self._dispatch("frobnicate", "export")
         self.assertEqual(2, code)
         self.assertIn("unknown command 'frobnicate'", err)
-        for command in ("build", "export", "snapshot", "dxf snapshot", "urdf validate", "viewer", "inspect"):
+        for command in ("export", "snapshot", "dxf snapshot", "urdf validate", "viewer", "inspect"):
             self.assertIn(command, err)
 
     def test_a_name_that_is_not_a_verb_raises_the_plain_attribute_error(self):
@@ -191,13 +189,17 @@ class Manifest(unittest.TestCase):
 
     def test_the_engines_verbs_are_commands_of_their_own(self):
         # One parser per verb, the engine's (cadgen.engine.cli), named by the command that runs it.
-        for verb in ("build", "export", "snapshot", "serve", "inspect", "status", "stop", "daemon"):
+        for verb in ("export", "snapshot", "serve", "inspect", "status", "stop", "daemon"):
             with self.subTest(verb=verb):
                 module = importlib.import_module(cli._COMMANDS[verb][0])
                 self.assertEqual(module.build_parser().prog, f"cadgen {verb}")
+
+    def test_no_command_builds_source_text(self):
+        # A model is a script, built by running it (law 12): `build` is an unknown command like any
+        # other, said by the dispatcher's ordinary words and nothing about what it once was.
         code, out, err = self._dispatch("build", "raise AssertionError('must not run')")
         self.assertEqual((code, out), (2, ""))
-        self.assertIn("cadgen build: build requires an output: --model NAME", err)
+        self.assertTrue(err.startswith("cadgen: unknown command 'build'\n"), err)
 
     def test_a_format_snapshot_draws_its_own_files_alone(self):
         # `cadgen dxf snapshot` is the engine's snapshot for a .dxf: any other file is refused by

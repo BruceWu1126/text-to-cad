@@ -281,9 +281,8 @@ class MemoTest(MemoCase):
     def test_verify_reaches_the_build_through_the_api(self) -> None:
         import contextlib
         import io
-        import json
 
-        from cadgen.engine import api, cli
+        from cadgen.engine import api
         from cadgen.engine.model import xbf
 
         self.build()
@@ -293,25 +292,26 @@ class MemoTest(MemoCase):
         here = Path.cwd()
         os.chdir(self.folder)
         self.addCleanup(os.chdir, here)
-        # Code calling the model: a verifying build of it runs the model's bodies again too.
-        printed = io.StringIO()
-        with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(io.StringIO()):
-            status = cli.main(["build", "from root import root\nresult = root()", "--no-daemon", "--xbf", "--verify", "--json"])
-        self.assertEqual(status, 0)
-        found = json.loads(printed.getvalue().splitlines()[-1])["verify"]
+        # A model calling the model: a verifying build of it runs the called model's bodies again too.
+        self.write("caller.py", "from cadgen.engine import xbf\nfrom root import root\n\n\n"
+                                "@xbf(\"XBF/caller.xbf\")\ndef caller():\n    return root()\n")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            report = api.build_script(self.folder / "caller.py", ["caller"], verify=True, daemon=False)
+        self.assertTrue(report.ok, report.models)
+        found = report.models[0]["verify"]
         self.assertEqual(found["mismatches"], ["parts.py::jitter"], found)
 
         @xbf("XBF/probe.xbf")
         def probe():
             return None
 
-        # Through the daemon, the request carries it to the worker's build: code's and a model's.
+        # Through the daemon, the request carries it to the worker's build.
         asked = []
         answer = {"done": [{"ok": True, "model": "probe"}], "worker": {}}
         with mock.patch.object(api, "_ask", side_effect=lambda message, *_relays: asked.append(message) or answer), \
                 contextlib.redirect_stdout(io.StringIO()):
-            cli.main(["build", "result = 1", "--model", "probe", "--verify"])
-            cli.main(["build", "result = 1", "--model", "probe"])
+            probe.build(verify=True)
+            probe.build()
             probe.build(verify=True)
         self.assertEqual([message["verify"] for message in asked], [True, False, True])
 

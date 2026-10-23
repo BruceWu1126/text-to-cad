@@ -241,8 +241,7 @@ class SnapshotTest(unittest.TestCase):
 
         out = str(self.folder / "enveloped.png")
         for argv, said, status in ((["snapshot", str(self.folder / "missing.xbf"), out], "no document", 2),
-                                   (["snapshot", str(self.document), out, "--display", "sideways"], "sideways", 2),
-                                   (["build", "result = 1", "--xbf", "a.txt"], "must end in .xbf", 1)):
+                                   (["snapshot", str(self.document), out, "--display", "sideways"], "sideways", 2)):
             with self.subTest(argv=argv):
                 code, printed, err = run(lambda: cli.main([*argv, "--json"]))
                 found = json.loads(printed)

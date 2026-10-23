@@ -1,6 +1,5 @@
 """The engine's verbs as functions, one per command; ``cli`` is a thin argparse over them.
 
-    build(code, *, model=None, name=None, xbf=None, step=None, glb=None, stl=None, threemf=None, dxf=None) -> Built
     export(source, *destinations, pose=None, part=None) -> list[Written]
     snapshot(source, out, *, display=None, camera=None, grid=False, preview=False, pose=None,
              width=None, height=None, annotation=None, measurements=None) -> Drawn
@@ -9,16 +8,14 @@
     inspect(source, ref=None) -> Facts (the build closure without a ref)
     status() / stop() / daemon()
 
-Every one goes through the daemon (``client``), so the warm worker of the script, of the code
-(by its ``name``) or of the document does the work and keeps what it made in memory for the
-next call. ``build`` takes source text or a build123d shape (the CLI takes code only) and requires an explicit destination:
-``model=NAME`` holds it in memory; file flags (``xbf=``, ``step=``, ...) write to the default
-path with ``True`` or to a supplied path. A script's models build when called by the script
-(``python model.py``), or from Python
-by ``Model.build()`` (``build_script``), a ``Report``. A build writes the model as its joints place
-it; a pose, a part and a picture are the ``export`` and ``snapshot`` verbs', never cached.
+Every one goes through the daemon (``client``), so the warm worker of the script or of the
+document does the work and keeps what it made in memory for the next call. No verb builds
+source text: a script's models build when called by the script (``python model.py``), or from
+Python by ``Model.build()`` (``build_script``), a ``Report``. A build writes the model as its
+joints place it; a pose, a part and a picture are the ``export`` and ``snapshot`` verbs', never
+cached.
 
-The engine counts nothing. After each ``build``, ``export`` and ``snapshot`` it calls every
+The engine counts nothing. After each build, ``export`` and ``snapshot`` it calls every
 function in ``observers``, in the verb's thread, with one plain dict of what the verb did
 (``_facts``): kinds, counts, times, the warm worker's part, and an error's type and frames --
 never a name, a path or a message of the person's but the frames' files as Python has them. An
@@ -41,11 +38,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, TypeVar, cast
 
-__all__ = ["Built", "Drawn", "EngineError", "Facts", "Report", "Served", "Written", "build", "daemon", "export",
+__all__ = ["Built", "Drawn", "EngineError", "Facts", "Report", "Served", "Written", "daemon", "export",
            "observers", "serve", "snapshot", "snapshot_job", "status", "stop", "inspect"]
-
-KINDS = ("xbf", "step", "glb", "stl", "threemf", "dxf")
-
 
 class EngineError(RuntimeError):
     """A request the engine refused or could not run: its words."""
@@ -116,14 +110,14 @@ Facts = dict
 
 @dataclass
 class Built:
-    """Code built from source text (``build(code=...)``): its report, its files, and -- asked
-    of the worker that built it, which holds them -- its document and its shape."""
+    """A script's model a worker built (``Model.shape``, ``Model.document``): its report, its
+    files, and -- asked of the worker that built it, which holds them -- its document and its
+    shape."""
 
     name: str
     script: Path
     report: dict[str, Any]
     cwd: Path
-    source_kind: str = "code"
     _document: Any = field(default=None, repr=False)
 
     @property
@@ -132,7 +126,7 @@ class Built:
 
     @property
     def files(self) -> dict[str, dict[str, Any]]:
-        """Every file the build wrote or kept: the code's, then each child model's."""
+        """Every file the build wrote or kept: the model's, then each child model's."""
         return _files(self.report)
 
     @property
@@ -143,8 +137,7 @@ class Built:
         if self._document is None:
             from cadgen.engine.export import Source
 
-            answer = _ask({"op": "result", "script": str(self.script), "name": self.name, "cwd": str(self.cwd),
-                           "source_kind": self.source_kind})
+            answer = _ask({"op": "result", "script": str(self.script), "name": self.name, "cwd": str(self.cwd)})
             payload = base64.b64decode(answer.get("payload") or "")
             done = answer["done"]
             shapes, at = {}, 0
@@ -193,25 +186,10 @@ def _target(target: Any) -> tuple[Path, list[str] | None]:
     return path, [function] if function else None
 
 
-def _outputs(flags: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
-    found: dict[str, dict[str, Any]] = {}
-    for kind in KINDS:
-        value = flags.get(kind)
-        if value is None or value is False:
-            continue
-        if value is True:
-            found[kind] = {}
-        else:
-            found[kind] = {"out": os.fspath(value)}
-    return found or None
-
-
-def _built(script: Path, functions: list[str] | None, *, code: str | None = None, name: str | None = None,
-           outputs: dict[str, dict[str, Any]] | None = None, verify: bool = False, profile: bool = False,
+def _built(script: Path, functions: list[str] | None, *, verify: bool = False, profile: bool = False,
            log: Callable[[str], None] | None = None, daemon: bool = True,
-           progress: Any = None, shape: dict | None = None, cwd: Path | None = None) -> tuple[list[dict[str, Any]], Any, float]:
-    """One build -- of code, or of a script's models -- in the warm worker that holds it, or in
-    this process: its reports, whether the worker was started for it, and its wall time. Where
+           progress: Any = None) -> tuple[list[dict[str, Any]], Any, float]:
+    """One build of a script's models in the warm worker that holds it, or in this process: its reports, whether the worker was started for it, and its wall time. Where
     the build is goes, frame by frame, to ``progress`` (``progress.py``): by default a bar on
     stderr when it is a terminal and nowhere when it is not; ``False`` nowhere; a callable takes
     each frame. Each model's report holds its last (``progress``)."""
@@ -223,19 +201,18 @@ def _built(script: Path, functions: list[str] | None, *, code: str | None = None
     shown = log or (lambda _text: None)
     if bar is not None:
         shown = bar.around(shown)  # a line of the log goes above the bar
-    cwd = cwd or Path.cwd()
+    cwd = Path.cwd()
     started = time.perf_counter()
     try:
         if not daemon:
             from cadgen.engine import build as engine_build
 
-            said = progressing.Progress(frames or (lambda _frame: None), script=script, cwd=cwd,
-                                        code=code is not None)
+            said = progressing.Progress(frames or (lambda _frame: None), script=script, cwd=cwd)
             try:
                 with progressing.building(said):
                     said.load()
-                    reports = engine_build.build(script, functions, log=shown, cwd=cwd, outputs=outputs, code=code,
-                                                 verify=verify, profile=profile, shape=shape)
+                    reports = engine_build.build(script, functions, log=shown, cwd=cwd, verify=verify,
+                                                 profile=profile)
             except BuildError as error:
                 raise EngineError(str(error)) from None
             said.attach(reports)
@@ -245,70 +222,12 @@ def _built(script: Path, functions: list[str] | None, *, code: str | None = None
                 shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")
 
             answer = _ask({"op": "build", "script": str(script), "functions": functions, "cwd": str(cwd),
-                           "outputs": outputs, "code": code, "shape": shape, "name": name, "verify": verify, "profile": profile}, relay, frames)
+                           "verify": verify, "profile": profile}, relay, frames)
             reports, fresh = answer["done"], answer.get("worker", {}).get("fresh")
     finally:
         if bar is not None:
             bar.close()
     return reports, fresh, time.perf_counter() - started
-
-
-def build(code: Any, *, model: str | None = None, name: str | None = None, xbf: Any = None, step: Any = None, glb: Any = None,
-          stl: Any = None, threemf: Any = None, dxf: Any = None, verify: bool = False, profile: bool = False,
-          log: Callable[[str], None] | None = None, daemon: bool = True, progress: Any = None,
-          cwd: Any = None) -> Built:
-    """Build source text or a build123d shape. Source text assigns its final shape to
-    ``result``, and is built as ``name`` (``model`` by default) in the warm worker of that name.
-    An output is required: ``model=NAME`` holds ``code::NAME`` in memory and updates it on
-    subsequent builds. File flags are additive declarations:
-    ``True`` writes the kind at the CLI default in the working folder
-    (``XBF/<name>.xbf``, ``<name>.step``, ...), a path writes it there. A child
-    model the code calls writes the files it declares (law 10). ``verify`` runs every body the
-    memo would replay and compares it with the logged one (``build.build``); ``daemon=False``
-    builds in this process; ``progress`` as ``_built`` has it. Returns once every file is on
-    disk. For a supplied shape, its geometry already exists in the caller; metadata
-    and geometry travel in memory to the worker's normal document writer. Its prior
-    operations cannot be replayed or verified. ``profile=True`` reports the actual worker
-    build call, preserving cache hits; for a supplied shape only the remaining worker
-    processing is measured. ``cwd`` sets the build working directory without changing
-    the caller's process directory. A script's decorated models use ``Model.build()``."""
-    from cadgen.engine.build import code_script
-
-    outputs = _outputs({"xbf": xbf, "step": step, "glb": glb, "stl": stl, "threemf": threemf, "dxf": dxf})
-    if model is None and not outputs:
-        raise EngineError("build requires an output: model=NAME or xbf/step/glb/stl/threemf/dxf")
-    if model is not None:
-        if not isinstance(model, str) or not model.isidentifier() or not model.isascii() or __import__("keyword").iskeyword(model):
-            raise EngineError("model must be a nonempty Python identifier")
-        if name is not None and name != model:
-            raise EngineError("model and name must name the same model")
-    name = model or name or "model"
-    cwd = Path(cwd).resolve() if cwd is not None else Path.cwd()
-    if not cwd.is_dir():
-        raise EngineError(f"no working directory {cwd}")
-    script = code_script(name, cwd)
-    shape = None
-    if not isinstance(code, str):
-        if verify:
-            raise EngineError("verify requires source code: a supplied shape has already been built")
-        from cadgen.engine.build import _CODE_NAME
-
-        # Source text is refused by this rule in its worker (``build.code_source``); a shape
-        # has no source, so its name is checked here, before it names a worker or a path.
-        if not _CODE_NAME.fullmatch(name):
-            raise EngineError(f"name {name!r} is no Python identifier")
-        from cadgen.engine.shape_input import pack
-
-        shape = pack(code, name)
-        code = ""  # the same named worker/address as a source-code build
-    reports, _fresh, wall = _built(script, [name], code=code, name=name, outputs=outputs, verify=verify, log=log,
-                                   daemon=daemon, progress=progress, profile=profile, shape=shape, cwd=cwd)
-    result = Built(name, script, {**reports[0], "wall": round(wall, 4)}, cwd)
-    if not daemon and result.ok:
-        from cadgen.engine.build import held
-
-        result._document = held(script, name)
-    return result
 
 
 def build_script(script: Path, functions: list[str] | None = None, *, verify: bool = False, profile: bool = False,
@@ -324,23 +243,22 @@ def build_script(script: Path, functions: list[str] | None = None, *, verify: bo
 
 
 def _source(source: Any, *, scripts: bool = False) -> dict[str, Any]:
-    """What an export or a snapshot reads: a ``Model``, built code (a ``Built``), a document's path
-    -- or, for a snapshot (``scripts``), a script's model by its path, ``script.py::model``."""
+    """What an export or a snapshot reads: a ``Model`` (or the ``Built`` handle of one), a
+    document's path -- or, for a snapshot (``scripts``), a script's model by its path,
+    ``script.py::model``."""
     from cadgen.engine.export import MESHES, SOURCES, ExportRefused
     from cadgen.engine.model import Model
 
     if isinstance(source, Model):
         return {"script": str(source.script), "function": source.name}
     if isinstance(source, Built):
-        return {"code" if source.source_kind == "code" else "function": source.name, "script": str(source.script)}
+        return {"function": source.name, "script": str(source.script)}
     from cadgen.engine.addresses import parse
 
     text = os.fspath(source)
     address = parse(text)
     if address is not None:
-        if address.script is not None:
-            return {"script": str(address.script), "function": address.name}
-        return _ask({"op": "model_source", "address": str(address)})["source"]
+        return {"script": str(address.script), "function": address.name}
     if scripts and ("::" in text or text.endswith(".py")):
         script, functions = _target(text)
         return {"script": str(script), "function": functions[0] if functions else None}
@@ -359,8 +277,7 @@ def export(source: Any, *destinations: Any, pose: Any = None, part: str | None =
            progress: Callable[[dict], None] | None = None) -> list[Written]:
     """Write a document to each destination, its kind from its suffix (``.xbf``, ``.step``,
     ``.glb``, ``.stl``, ``.3mf``, and ``.dxf`` of a planar document): the document of an
-    ``.xbf``, of a ``.step`` read into one, of a ``Model`` (built first) or of built code (a
-    ``Built``). Several destinations read the document once. ``part`` is one part or assembly as
+    ``.xbf``, of a ``.step`` read into one, or of a ``Model`` (built first). Several destinations read the document once. ``part`` is one part or assembly as
     a ref's owner names it (``refs``). ``daemon=False`` does it in this process, cold. A GLB
     carries every motion the document defines, as a clip."""
     from cadgen.engine.export import ExportRefused, kind_of
@@ -383,7 +300,7 @@ def _exported(order: dict[str, Any], spec: dict[str, Any], shown: Callable[[str]
               progress: Callable[[dict], None] | None = None) -> dict:
     """An ``export`` request answered by the worker that holds the document (``worker._export``)."""
     if daemon:
-        done = _ask({**order, "code": spec.get("code")}, lambda message: shown(message["log"]), progress)["done"]
+        done = _ask(order, lambda message: shown(message["log"]), progress)["done"]
     else:
         from cadgen.engine.build import BuildError
         from cadgen.engine.worker import _export
@@ -405,8 +322,7 @@ def snapshot(source: Any, out: Any, *, display: Any = None, camera: Any = None, 
              measurements: Any = None) -> Drawn:
     """Draw a document (``.xbf``, ``.step``) or a mesh file (``.glb``, ``.stl``, ``.3mf``) into
     ``out`` (a ``.png``) as the viewer draws it. A ``Model`` (or ``script.py::model``) is built
-    first and built code (a ``Built``) is drawn as built: the document drawn is the one its
-    worker holds in memory, whether or not an xbf of it is on disk. ``annotation`` (the viewer's
+    first: the document drawn is the one its worker holds in memory, whether or not an xbf of it is on disk. ``annotation`` (the viewer's
     annotation: its file's path, its object, or the Quick Edit packet that carries it) and
     ``measurements`` are drawn over the model; ``camera="authored"`` draws it from the view the
     annotation's ink was drawn in, which the packet holds. ``out`` a folder (a path ending in a
@@ -626,7 +542,7 @@ def daemon() -> int:
 #               the engine's own code, or its worker's), refused (the engine refused the request by name),
 #               here (raised in this process, as against told by the daemon or a report)}
 #     source    export, snapshot: what it read -- "xbf", "step", "glb", "stl", "threemf", "dxf", "urdf",
-#               "sdf", "srdf", "model" (a script's model or built code) or "other"
+#               "sdf", "srdf", "model" (a script's model) or "other"
 #     found     snapshot: the source file is there (a model's always is)
 #     outputs   export: each destination, {kind, seconds (None for one not written)}
 #     pose      export, snapshot: a pose was asked for
@@ -699,8 +615,7 @@ def _facts(verb: str, args: tuple, kwargs: dict[str, Any], heard: dict[str, Any]
     from cadgen.engine import model
 
     if verb == "build":
-        reports = (result.models if isinstance(result, Report) else [result.report] if isinstance(result, Built)
-                   else [])
+        reports = result.models if isinstance(result, Report) else []
     else:
         reports = list(heard.get("reports") or [])
     worker = {"fresh": (heard.get("worker") or {}).get("fresh"),
@@ -792,7 +707,6 @@ def _read(text: str) -> dict[str, Any]:
     return {"type": kind, "frames": frames}
 
 
-build = _observed("build", build)
 # A script's models build here (law 11: ``python model.py``, ``Model.build()``): a build too.
 build_script = _observed("build", build_script)
 export = _observed("export", export)

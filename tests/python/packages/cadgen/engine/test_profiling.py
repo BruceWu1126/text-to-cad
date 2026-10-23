@@ -1,8 +1,7 @@
-"""Actual function profiles across Python, CLI, workers, cache hits and supplied shapes."""
+"""Actual function profiles across Python, workers, cold builds and cache hits."""
 from __future__ import annotations
 
 import contextlib
-import io
 import json
 import os
 import subprocess
@@ -13,8 +12,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from cadgen import build, stop
-from cadgen.engine import cli
+from cadgen import stop
+from cadgen.engine.api import build_script
 from cadgen.engine.profiling import describe
 
 
@@ -83,43 +82,33 @@ class ProfilingTest(unittest.TestCase):
         self.assertNotIn("profile", ordinary)
         self.assertEqual({p.name for p in self.folder.iterdir()}, {"model.py", "part.xbf"})
 
-    def test_code_api_and_cli_json_and_human_output_use_actual_profiles(self) -> None:
-        code = "import build123d as bd\ndef make_pin():\n    return bd.Cylinder(2, 5)\nresult = make_pin()"
-        first = build(code, model="pin", profile=True, progress=False)
-        profile = self.assert_profile(first.report)
+    def test_a_cold_build_and_a_failing_body_are_profiled_and_described(self) -> None:
+        script = self.folder / "pin.py"
+        script.write_text(textwrap.dedent('''
+            import build123d as bd
+            from cadgen import model
+
+            def make_pin():
+                return bd.Cylinder(2, 5)
+
+            @model
+            def pin():
+                return make_pin()
+
+            @model
+            def broken():
+                raise ValueError("broken")
+        '''), encoding="utf-8")
+        built = build_script(script, ["pin"], profile=True, daemon=False, progress=False).models[0]
+        profile = self.assert_profile(built, worker=False)
         functions = {row["function"] for row in profile["project_cumulative"]}
         self.assertTrue({"pin", "make_pin"} <= functions, functions)
-        self.assertFalse(profile["supplied_shape"])
-        stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
-            self.assertEqual(cli.main(["build", code, "--model", "pin", "--profile", "--json"]), 0)
-        warm = json.loads(stdout.getvalue())
-        self.assert_profile(warm)
-        self.assertNotIn("make_pin", {row["function"] for row in warm["profile"]["project_cumulative"]})
-        stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
-            self.assertEqual(cli.main(["build", code, "--model", "pin", "--profile"]), 0)
-        self.assertIn("project functions by cumulative time", stdout.getvalue())
-        self.assertIn("cache hits preserved", stdout.getvalue())
-        self.assertEqual(list(self.folder.iterdir()), [])
-
-    def test_supplied_shape_cold_processing_and_failed_code(self) -> None:
-        import build123d as bd
-
-        def earlier_construction():
-            return bd.Box(2, 3, 4)
-
-        shape = earlier_construction()
-        built = build(shape, model="given", profile=True, daemon=False, progress=False)
-        profile = self.assert_profile(built.report, worker=False)
-        self.assertTrue(profile["supplied_shape"])
-        self.assertNotIn("earlier_construction", {row["function"] for row in profile["top_self"]})
-        self.assertIn("earlier construction was not profiled", describe(profile))
-        self.assertAlmostEqual(built.shape.volume, 24)
-        failed = build("raise ValueError('broken')\nresult = None", model="broken", profile=True,
-                       daemon=False, progress=False)
-        self.assertFalse(failed.ok)
-        self.assertIn("broken", {row["function"] for row in failed.report["profile"]["project_cumulative"]})
-        ordinary = build(shape, model="given", daemon=False, progress=False)
-        self.assertNotIn("profile", ordinary.report)
-        self.assertEqual(list(self.folder.iterdir()), [])
+        described = describe(profile)
+        self.assertIn("project functions by cumulative time", described)
+        self.assertIn("cache hits preserved", described)
+        failed = build_script(script, ["broken"], profile=True, daemon=False, progress=False).models[0]
+        self.assertFalse(failed["ok"])
+        self.assertIn("broken", {row["function"] for row in failed["profile"]["project_cumulative"]})
+        ordinary = build_script(script, ["pin"], daemon=False, progress=False).models[0]
+        self.assertNotIn("profile", ordinary)
+        self.assertEqual([path.name for path in self.folder.iterdir()], ["pin.py"])

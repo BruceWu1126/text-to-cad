@@ -19,9 +19,8 @@ class Profile:
     cProfile never pushed (Python 3.12+). Native time belongs to its Python caller.
     """
 
-    def __init__(self, *, project: Path, supplied_shape: bool) -> None:
+    def __init__(self, *, project: Path) -> None:
         self.project = project.resolve()
-        self.supplied_shape = supplied_shape
         self.profiler = cProfile.Profile(builtins=False)
         self.started = 0.0
         self.seconds = 0.0
@@ -52,7 +51,7 @@ class Profile:
             return sorted(items, key=lambda row: (-row[key], row["file"], row["line"], row["function"]))[:LIMIT]
 
         return {"scope": "build_request", "mode": "actual_execution", "process": os.getpid(),
-                "supplied_shape": self.supplied_shape, "builtins": False, "seconds": self.seconds,
+                "builtins": False, "seconds": self.seconds,
                 "self_seconds": sum(row["self_seconds"] for row in rows), "function_count": len(rows),
                 "limit": LIMIT, "project_cumulative": ranked(project_rows, "cumulative_seconds"),
                 "top_self": ranked(rows, "self_seconds")}
@@ -62,8 +61,6 @@ def describe(profile: dict[str, Any]) -> str:
     """Human mirror of the report's two bounded tables, with scope and cache semantics."""
     lines = [f"  profile: actual build request, {profile['seconds']:.3f}s; cache hits preserved",
              "    cProfile adds overhead; native time is included in the calling Python function."]
-    if profile["supplied_shape"]:
-        lines.append("    Supplied shape: remaining worker processing only; earlier construction was not profiled.")
     lines.append("    Replayed bodies and memo hits contain no timings for the work they skipped.")
     for title, field, seconds in (("project functions by cumulative time", "project_cumulative", "cumulative_seconds"),
                                   ("all functions by self time", "top_self", "self_seconds")):

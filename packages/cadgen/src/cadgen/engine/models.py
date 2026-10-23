@@ -61,17 +61,14 @@ class Models:
     def resolve(self, address: str) -> dict[str, Any]:
         found = parse(address)
         if found is None:
-            raise ValueError("expected script.py::NAME or code::NAME")
+            raise ValueError("expected script.py::NAME")
         address = str(found)
         with self.lock:
             record = self.records.get(address)
             if record is not None and self.daemon.pool.holds(record["worker"]):
                 source = record["source"]
-                return ({"script": source["script"], "code": source["name"]}
-                        if source["kind"] == "code" else {"script": source["script"], "function": source["name"]})
-        if found.script is not None:
-            return {"script": str(found.script), "function": found.name}
-        raise ValueError(f"no live model {address}; build it with --model {found.name}")
+                return {"script": source["script"], "function": source["name"]}
+        return {"script": str(found.script), "function": found.name}
 
     def serve(self, address: str, request: dict) -> tuple[Any, str]:
         address = str(parse(address))
@@ -102,7 +99,7 @@ class Models:
             raise ValueError(f"model {address} retired; open its address again to rebuild")
         replies = []
         self.daemon.handle({"op": "result", "script": source["script"], "name": source["name"],
-                            "source_kind": source["kind"], "env": worker.environment}, replies.append)
+                            "env": worker.environment}, replies.append)
         answer = next((row for row in reversed(replies) if "done" in row or "failed" in row), {})
         if "failed" in answer:
             raise ValueError(answer["failed"])
@@ -127,7 +124,7 @@ class Models:
     def listing(self) -> list[dict[str, Any]]:
         self.prune()
         with self.lock:
-            return [{"address": address, "script": row["source"]["script"] if row["source"]["kind"] == "script" else "code",
+            return [{"address": address, "script": row["source"]["script"],
                      "name": row["source"]["name"], "builtAt": row["builtAt"], "version": row["version"],
                      "state": self.state(address, row)}
                     for address, row in self.records.items() if not row["files"]]

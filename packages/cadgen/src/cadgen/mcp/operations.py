@@ -8,7 +8,6 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
-import keyword
 import math
 import re
 from pathlib import Path
@@ -23,7 +22,6 @@ def obj(properties, required=()):
 STRING = {"type": "string", "minLength": 1}
 BOOL = {"type": "boolean"}
 JSON_VALUE = {"type": ["object", "array", "string"]}
-FORMATS = ("xbf", "step", "glb", "stl", "threemf", "dxf")
 COMMON = {
     "action": {"type": "string", "enum": ["start", "status", "cancel"], "default": "start"},
     "requestId": {**STRING, "description": "Unique 16–100 character request ID. Reuse only for an identical start in this session."},
@@ -38,19 +36,15 @@ SNAPSHOT = {"source": STRING, "output": STRING, "packet": JSON_VALUE,
             "height": {"type": "integer", "minimum": 1}, "size_profile": STRING,
             "annotation": JSON_VALUE, "measurements": JSON_VALUE}
 START = {
-    "cad_build": obj({"code": {**STRING, "maxLength": 1000000}, "name": STRING, "cwd": STRING,
-                      "outputs": obj({"model": {"type": "boolean", "enum": [True]}, **{k: STRING for k in FORMATS}}),
-                      "verify": BOOL, "profile": BOOL}, ("code", "name", "cwd", "outputs")),
     "cad_export": obj({"source": STRING, "destinations": {"type": "array", "minItems": 1, "maxItems": 32, "items": STRING},
                        "pose": {"type": ["object", "string"]}, "part": STRING}, ("source", "destinations")),
     "cad_snapshot": obj(SNAPSHOT),
     "cad_inspect": obj({"source": STRING, "ref": STRING, "query": {"type": "string", "enum": ["closure", "geometry", "build"]}}, ("source",)),
 }
 DESCRIPTIONS = {
-    "cad_build": "Build Python source assigning result, in the named working directory. Declare a live model and/or absolute file outputs. Does not select a script or execute its __main__; imported code and called decorated models may write their declared outputs.",
     "cad_export": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf). Reuses the Python export operation, including building a script model source first. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts.",
     "cad_snapshot": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. Paths must be absolute on the engine host. A script model source may build first. A failed snapshot or packet leaves existing pictures unchanged.",
-    "cad_inspect": "Read closure, geometry (requires ref), or build metadata of an existing file or live model. Never builds source or writes declared model outputs; an unbuilt or expired model must be explicitly built first. Defaults to geometry with a ref, otherwise closure.",
+    "cad_inspect": "Read closure, geometry (requires ref), or build metadata of an existing file or live model. Never builds a model or writes its declared outputs; an unbuilt or expired model must be built first by running its script. Defaults to geometry with a ref, otherwise closure.",
 }
 
 
@@ -107,9 +101,7 @@ def absolute(value):
 
 
 def source(value):
-    path = value.partition("#")[0].rsplit("::", 1)[0]
-    if path != "code" or "::" not in value:
-        absolute(path)
+    absolute(value.partition("#")[0].rsplit("::", 1)[0])
     from cadgen.engine.addresses import split
     split(value)  # validate model address without executing it
 
@@ -220,7 +212,7 @@ class Operations(Jobs):
                            "address": summary.get("address")}}
 
     def _failure(self, job, error):
-        return {"result": {"outputsMayHaveBeenWritten": job["operation"] in ("cad_build", "cad_export", "cad_snapshot")}}
+        return {"result": {"outputsMayHaveBeenWritten": job["operation"] in ("cad_export", "cad_snapshot")}}
 
     def _finished(self, job):
         job.pop("arguments", None)
@@ -237,21 +229,6 @@ class Operations(Jobs):
         if "source" in args:
             source(args["source"])
         progress({"label": name.removeprefix("cad_").capitalize() + " in progress"})
-        if name == "cad_build":
-            cwd = absolute(args.pop("cwd"))
-            model_name = args.pop("name")
-            if not model_name.isascii() or not model_name.isidentifier() or keyword.iskeyword(model_name):
-                raise JobError("name must be a Python identifier")
-            outputs = dict(args.pop("outputs"))
-            live = outputs.pop("model", False)
-            if not live and not outputs:
-                raise JobError("Declare a live model or at least one file output")
-            outputs = {kind: absolute(path) for kind, path in outputs.items()}
-            built = api.build(**args, **outputs, cwd=cwd, name=model_name, model=model_name if live else None, progress=progress)
-            result = {"address": f"code::{model_name}", "report": serial(built.report), "files": serial(built.files),
-                      **({"outputsMayHaveBeenWritten": True} if not built.ok else {})}
-            return {"state": "succeeded" if built.ok else "failed", "stage": "Build complete" if built.ok else "Build failed",
-                    "result": result, **({"error": built.report.get("error") or "Build failed"} if not built.ok else {})}
         if name == "cad_export":
             destinations = [absolute(path) for path in args.pop("destinations")]
             if len(set(destinations)) != len(destinations) or ("::" not in args["source"] and absolute(args["source"]) in destinations):

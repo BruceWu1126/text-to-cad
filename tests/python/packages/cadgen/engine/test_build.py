@@ -392,13 +392,6 @@ class ChildFilesTest(EngineCase):
         engine_build.build(self.folder / "bracket.py", None, cwd=self.folder)
         self.assertEqual((self.folder / "XBF/bracket.xbf").read_bytes(), written)
 
-    def test_code_s_flags_are_its_own_files_and_its_children_write_their_declarations(self) -> None:
-        code = "from bracket import bracket\nresult = bracket()\n"
-        [plug] = engine_build.build(engine_build.code_script("plug", self.folder), ["plug"], cwd=self.folder,
-                                    outputs={"step": {"out": "plug.step"}}, code=code)
-        self.assertEqual((plug["ok"], list(plug["child_models"])), (True, ["bracket.py::bracket"]))
-        self.assertEqual(_files(self.folder), {"bracket.py", "rig.py", "plug.step", "XBF/bracket.xbf", "bracket.stl"})
-
 
 KIT = """
 import build123d as bd

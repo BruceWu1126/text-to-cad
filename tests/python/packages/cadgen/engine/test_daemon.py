@@ -34,6 +34,35 @@ if __name__ == "__main__":
 """
 
 
+# A bare model: no file, its document the worker's memory alone.
+BARE = """
+import build123d as bd
+from cadgen.engine import model
+
+
+@model
+def bracket():
+    return bd.Box({size}, 2, 3)
+
+if __name__ == "__main__":
+    bracket()
+"""
+
+
+PLUG = """
+import build123d as bd
+from cadgen.engine import stl
+
+
+@stl("plug.stl")
+def plug():
+    return bd.Box(2, 2, 2) - bd.Cylinder(0.5, 3)
+
+if __name__ == "__main__":
+    plug()
+"""
+
+
 PAIR = """
 import build123d as bd
 from cadgen.engine import xbf
@@ -309,35 +338,39 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
         self.assertIsNone(json.loads(inspected.stdout)["live"])
 
+    def _bare(self) -> str:
+        """``bracket.py``: one bare ``@model``, a document of memory alone, and its address."""
+        script = self.folder / "bracket.py"
+        script.write_text(textwrap.dedent(BARE.format(size=1)), encoding="utf-8")
+        return f"{script}::bracket"
+
     def test_named_memory_model_updates_one_address_and_is_gone_after_restart(self) -> None:
         from urllib.parse import urlparse, parse_qs
 
-        def build(size):
-            done = self.cli("build", f"import build123d as bd; result = bd.Box({size}, 2, 3)", "--model", "bracket", "--json")
-            self.assertEqual(done.returncode, 0, done.stderr)
-            return json.loads(done.stdout.splitlines()[-1])
-
-        first = build(1)
+        address = self._bare()
+        first = self.built("bracket")
         self.assertEqual(first["files"], {})
-        self.assertEqual(first["address"], "code::bracket")
+        self.assertEqual(first["address"], address)
         self.assertEqual(first["meshed"], 0)
         url = urlparse(first["url"])
         doc = parse_qs(url.query)["doc"][0]
         endpoint = f"{url.scheme}://{url.netloc}/api/doc/{doc}"
         token = parse_qs(url.query)["token"][0]
         before = get_json(endpoint, token)
-        second = build(2)
+        (self.folder / "bracket.py").write_text(textwrap.dedent(BARE.format(size=2)), encoding="utf-8")
+        second = self.built("bracket")
         self.assertEqual(second["url"], first["url"])
         after = get_json(endpoint, token)
         self.assertNotEqual(before["version"], after["version"])
-        measured = self.cli("inspect", "code::bracket#face 1")
+        measured = self.cli("inspect", f"{address}#face 1")
         self.assertEqual(measured.returncode, 0, measured.stderr)
         self.assertEqual(json.loads(measured.stdout)["kind"], "face")
         models = json.loads(self.cli("status", "--json").stdout)["models"]
-        self.assertEqual([row["address"] for row in models], ["code::bracket"])
-        self.assertEqual(list(self.folder.iterdir()), [], "no source, cache, document, or thumbnail on disk")
+        self.assertEqual([row["address"] for row in models], [address])
+        self.assertEqual([path.name for path in self.folder.iterdir()], ["bracket.py"],
+                         "no cache, document, or thumbnail on disk")
         self._stop_daemon()
-        missing = self.cli("serve", "code::bracket")
+        missing = self.cli("inspect", f"{address}#face 1")
         self.assertNotEqual(missing.returncode, 0)
         self.assertIn("no live model", missing.stderr)
         self.assertEqual(json.loads(self.cli("status", "--json").stdout)["models"], [])
@@ -346,9 +379,9 @@ class DaemonTest(unittest.TestCase):
         from tests.python.packages.cadgen.engine.test_snapshot import gl
 
         gl()
-        built = self.cli("build", "import build123d as bd; result = bd.Box(1, 2, 3)", "--model", "bracket")
-        self.assertEqual(built.returncode, 0, built.stderr)
-        packet = {"input": "code::bracket", "jobs": [{"outputs": [
+        address = self._bare()
+        self.built("bracket")
+        packet = {"input": address, "jobs": [{"outputs": [
             {"path": str(self.folder / "bracket.png"), "width": 200, "height": 150}]}]}
         drawn = self.cli("snapshot", "--job", json.dumps(packet))
         self.assertEqual(drawn.returncode, 0, drawn.stderr)
@@ -356,7 +389,7 @@ class DaemonTest(unittest.TestCase):
 
         with Image.open(self.folder / "bracket.png") as picture:
             self.assertEqual(picture.size, (200, 150))
-        self.assertEqual([path.name for path in self.folder.iterdir()], ["bracket.png"])
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["bracket.png", "bracket.py"])
 
     def test_script_address_builds_only_the_selected_declaration(self) -> None:
         self.script.write_text("""from cadgen import model
@@ -650,7 +683,7 @@ if __name__ == '__main__':
         self.assertEqual(building.wait(timeout=300), 0)
         self.assertNotEqual(stl.stat().st_mtime_ns, written)
 
-    def test_exports_and_code_through_the_daemon(self) -> None:
+    def test_exports_and_a_model_s_document_through_the_daemon(self) -> None:
         self.script = self.folder / "pair.py"
         self.script.write_text(textwrap.dedent(PAIR.format(size=10)), encoding="utf-8")
         self.assertEqual(self.run_script("pair.py").returncode, 0)
@@ -665,23 +698,22 @@ if __name__ == '__main__':
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.cli("export", "pair.glb", "x.step").returncode, 2, "a mesh is no source")
         self.assertEqual(self.cli("export", "pair.py::pair", "x.step").returncode, 0, "a model address selects its function")
-        code = "import build123d as bd\nresult = bd.Box(2, 2, 2) - bd.Cylinder(0.5, 3)\n"
-        built = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "build", "-", "--name", "plug", "--stl",
-                                   "plug.stl", "--json"], input=code, cwd=self.folder, env=self.env)
+        (self.folder / "plug.py").write_text(textwrap.dedent(PLUG), encoding="utf-8")
+        built = self.run_script("plug.py")
         self.assertEqual(built.returncode, 0, built.stderr)
         self.assertTrue((self.folder / "plug.stl").is_file())
-        # From Python: the code's document and shape, asked of the worker that holds them.
-        probe = textwrap.dedent(f"""
-            import json, cadgen
-            built = cadgen.build({code!r}, name="plug", stl="plug.stl")
-            shape = built.shape
-            print(json.dumps({{"bodies": built.report["bodies"], "name": built.document.name,
-                               "volume": round(shape.volume, 3)}}))
+        # From Python: the model's document and shape, asked of the worker that holds them.
+        probe = textwrap.dedent("""
+            import json, plug
+            report = plug.plug.build().models[0]
+            shape = plug.plug()
+            print(json.dumps({"bodies": report["bodies"], "name": plug.plug.document.name,
+                              "volume": round(shape.volume, 3)}))
         """)
         done = engine_daemon.run([sys.executable, "-c", probe], cwd=self.folder, env=self.env)
         self.assertEqual(done.returncode, 0, done.stderr)
         found = json.loads(done.stdout.strip().splitlines()[-1])
-        self.assertEqual(found["bodies"], {"plug.py::plug": "replayed"}, "the code's warm worker")
+        self.assertEqual(found["bodies"], {"plug.py::plug": "replayed"}, "the script's warm worker")
         self.assertEqual(found["name"], "plug")
         self.assertAlmostEqual(found["volume"], 8 - 3.14159265 * 0.25 * 2, places=2)
 

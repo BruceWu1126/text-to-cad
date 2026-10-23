@@ -32,16 +32,17 @@ class RootExports(unittest.TestCase):
         for name in cadgen.engine.__all__:
             with self.subTest(name=name):
                 self.assertIs(getattr(cadgen, name), getattr(cadgen.engine, name))
-        for verb in ("build", "export", "snapshot", "serve", "inspect", "status", "stop", "daemon"):
+        for verb in ("export", "snapshot", "serve", "inspect", "status", "stop", "daemon"):
             with self.subTest(verb=verb):
                 self.assertIs(getattr(cadgen, verb), getattr(api, verb))
         self.assertEqual(set(cadgen.__all__) - set(cadgen.engine.__all__),
-                         {"__version__", "build", "export", "snapshot", "serve", "inspect", "status", "stop", "daemon",
+                         {"__version__", "export", "snapshot", "serve", "inspect", "status", "stop", "daemon",
                           "build123d", "srgb"})
 
     def test_a_name_the_root_never_had_is_pythons_own_error(self):
         # No backwards compatibility: a retired name is no name, and says nothing about history.
-        for name in ("read_scene", "AssemblyHelper", "label_shape", "revolute", "compound_from_instances"):
+        # ``build`` among them: a model builds by a decorated function's call, never cadgen.build (law 12).
+        for name in ("build", "read_scene", "AssemblyHelper", "label_shape", "revolute", "compound_from_instances"):
             with self.subTest(name=name), self.assertRaises(AttributeError) as caught:
                 getattr(cadgen, name)
             self.assertEqual(str(caught.exception), f"module 'cadgen' has no attribute {name!r}")

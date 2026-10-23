@@ -28,6 +28,13 @@ from cadgen.engine.daemon import Daemon, Pool  # noqa: E402
 _PIDS = itertools.count(1)
 
 
+def _address(name: str) -> str:
+    """A script model's address, as the server keys it (the script needs not exist)."""
+    from cadgen.engine.addresses import key
+
+    return str(key(f"{name}.py::{name}"))
+
+
 class Fake:
     """A worker as the pool sees one."""
 
@@ -215,9 +222,9 @@ class ConnectedPoolTest(unittest.TestCase):
         daemon.pool.release(watched)  # used least recently
         unwatched = daemon.pool.lease("unwatched.py", {})
         daemon.pool.release(unwatched)
-        server.put("code::watched", {"version": "one", "prototypes": []}, {})
-        daemon.builders[os.path.normcase("code::watched")] = watched
-        server.sync("code::watched")
+        server.put(_address("watched"), {"version": "one", "prototypes": []}, {})
+        daemon.builders[os.path.normcase(_address("watched"))] = watched
+        server.sync(_address("watched"))
         third = daemon.pool.lease("third.py", {})
         self.assertTrue(unwatched.stopped, "the unwatched worker made room")
         self.assertFalse(watched.stopped, "a watched worker is not the count cap's victim")
@@ -256,7 +263,7 @@ class ConnectedPoolTest(unittest.TestCase):
         daemon.pool.start = Fake
         server = daemon.server = Server(mesh_mode="inline")
         self.addCleanup(daemon.shutdown)
-        address = "code::part"
+        address = _address("part")
         server.put(address, {"version": "one", "prototypes": []}, {})
         worker = daemon.pool.lease("part.py", {})
         daemon.builders[os.path.normcase(address)] = worker

@@ -2,9 +2,6 @@
 ordinary Python scripts call decorated models explicitly.
 
     python SCRIPT.py                                 the models the script explicitly calls
-    cadgen build SOURCE | - [--model NAME] [--name N]  source text (stdin with -), an output required
-        [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify]
-        [--no-daemon]
     cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-daemon] [--json]
     cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--camera PRESET|az:el|JSON|authored] [--grid]
         [--preview] [--pose NAME|JSON] [--annotation FILE] [--measurements FILE] [--width N] [--height N]
@@ -32,32 +29,9 @@ from typing import Any, Callable
 __all__ = ["VERBS", "Failed", "answered", "build_parser", "main", "parser_for", "run", "weighed",
            "inspect_main", "inspect_parser"]
 
-FILE_FLAGS = ("xbf", "step", "glb", "stl", "threemf", "dxf")
-_SUFFIX = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "dxf": ".dxf"}
-# Where a file flag with no path writes, in the working folder.
-_DEFAULT = {"xbf": "XBF/<name>.xbf", "step": "<name>.step", "glb": "<name>.glb", "stl": "<name>.stl",
-            "threemf": "<name>.3mf", "dxf": "<name>.dxf"}
-
-
-def _build_arguments(build: argparse.ArgumentParser) -> None:
-    build.usage = ("%(prog)s SOURCE [--model NAME] [--name N] [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] "
-                   "[--dxf [F]] [--json] [--verify] [--profile] [--no-daemon]")
-    build.add_argument("source", metavar="SOURCE", help="the code (- reads it from stdin)")
-    build.add_argument("--model", metavar="NAME", help="build or update the named document in memory")
-    build.add_argument("--name", metavar="N",
-                       help="the code's name: its model, its files' default names and its warm worker (default: model)")
-    for kind in FILE_FLAGS:
-        build.add_argument(f"--{kind}", nargs="?", const=True, metavar="F",
-                           help=f"write the {kind} at F (default: {_DEFAULT[kind]} in the working folder)")
-    build.add_argument("--profile", action="store_true", help="profile actual worker execution, preserving cache hits")
-    build.add_argument("--json", action="store_true", help="print the report as JSON")
-    build.add_argument("--verify", action="store_true",
-                       help="run every function the engine would replay and compare its result with the logged one")
-    build.add_argument("--no-daemon", action="store_true", help="build in this process (cold, no worker kept)")
-
 
 def _export_arguments(export: argparse.ArgumentParser) -> None:
-    export.add_argument("source", metavar="SRC", help="a model address (SCRIPT::NAME or code::NAME), an .xbf, or a .step")
+    export.add_argument("source", metavar="SRC", help="a model address (SCRIPT::NAME), an .xbf, or a .step")
     export.add_argument("destinations", nargs="+", metavar="DST",
                         help=".xbf (from a STEP, or with --part), .step, .glb, .stl, .3mf or .dxf (of a planar "
                              "document)")
@@ -72,7 +46,7 @@ def _export_arguments(export: argparse.ArgumentParser) -> None:
 
 
 def _serve_arguments(serve: argparse.ArgumentParser) -> None:
-    serve.add_argument("document", help="a model address (SCRIPT::NAME or code::NAME), an .xbf, or a STEP")
+    serve.add_argument("document", help="a model address (SCRIPT::NAME), an .xbf, or a STEP")
     serve.add_argument("--port", type=int, default=0)
     serve.add_argument("--three", help="the three.js package folder (default: the nearest node_modules/three)")
 
@@ -88,7 +62,7 @@ def _no_arguments(_parser: argparse.ArgumentParser) -> None:
 def _inspect_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--query", choices=("closure", "geometry", "build"),
                         help="inspect closure, geometry (requires REF), or build metadata; never builds a model")
-    parser.add_argument("document", help="a model address (SCRIPT::NAME or code::NAME), or an .xbf")
+    parser.add_argument("document", help="a model address (SCRIPT::NAME), or an .xbf")
     parser.add_argument("ref", nargs="?", help="[FILE#][OWNER/]ELEMENT or [FILE#]OWNER (cadgen.engine.refs): OWNER a "
                                                "part's or an assembly's label, or its occurrence path (hand/finger.2); "
                                                "ELEMENT an element name (f:..., e:..., v:...) or face N (edge, vertex). "
@@ -111,7 +85,7 @@ def _snapshot(args: argparse.Namespace, prog: str) -> int:
 
 def build_parser(prog: str = "python -m cadgen.engine") -> argparse.ArgumentParser:
     """The engine's own command: its verbs as subcommands, each with its options."""
-    parser = argparse.ArgumentParser(prog=prog, description="Build, export, draw and serve cadgen engine documents.")
+    parser = argparse.ArgumentParser(prog=prog, description="Export, draw and serve cadgen engine documents.")
     verbs = parser.add_subparsers(dest="verb", required=True)
     for verb, (help_text, arguments, _runner) in VERBS.items():
         arguments(verbs.add_parser(verb, help=help_text, description=help_text))
@@ -119,7 +93,7 @@ def build_parser(prog: str = "python -m cadgen.engine") -> argparse.ArgumentPars
 
 
 def parser_for(verb: str, prog: str | None = None) -> argparse.ArgumentParser:
-    """One verb's parser, as a command of its own (``cadgen build``, ``cadgen export``, ...)."""
+    """One verb's parser, as a command of its own (``cadgen export``, ``cadgen snapshot``, ...)."""
     help_text, arguments, _runner = VERBS[verb]
     parser = argparse.ArgumentParser(prog=prog or f"cadgen {verb}", description=help_text)
     arguments(parser)
@@ -226,18 +200,6 @@ def _verified(found: dict[str, Any] | None) -> str:
     return "".join(lines)
 
 
-def _file_flags(args: argparse.Namespace) -> dict[str, Any]:
-    """The file flags, each True (its default path) or a path ending in its kind's suffix."""
-    flags = {}
-    for kind in FILE_FLAGS:
-        value = getattr(args, kind)
-        if isinstance(value, str) and Path(value).suffix.lower() != _SUFFIX[kind] and not (
-                kind == "step" and Path(value).suffix.lower() == ".stp"):
-            raise Failed(f"--{kind} {value}: the file must end in {_SUFFIX[kind]}")
-        flags[kind] = value
-    return flags
-
-
 def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as_json: bool) -> int:
     """Each report on stdout, described or as JSON, a failed one's error on stderr; 1 if any failed."""
     failed = False
@@ -263,23 +225,6 @@ def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as
 
 def _log(text: str) -> None:
     print(text, file=sys.stderr)
-
-
-def _build(args: argparse.Namespace, prog: str) -> int:
-    """``cadgen build SOURCE``: code, its flags its declarations (law 12)."""
-    from cadgen.engine import api
-
-    flags = _file_flags(args)
-    if not args.model and not any(flags.values()):
-        raise Failed("build requires an output: --model NAME or --xbf/--step/--glb/--stl/--threemf/--dxf", 2)
-    if args.model and args.no_daemon:
-        raise Failed("--model needs the engine to hold its document; omit --no-daemon", 2)
-    code = sys.stdin.read() if args.source == "-" else args.source
-    try:
-        built = api.build(code, model=args.model, name=args.name, **flags, verify=args.verify, profile=args.profile, log=_log, daemon=not args.no_daemon)
-    except api.EngineError as error:
-        raise Failed(str(error)) from None
-    return _reported([built.report], built.report.get("wall", 0.0), None, args.json)
 
 
 def _export(args: argparse.Namespace, prog: str) -> int:
@@ -484,8 +429,6 @@ def status_text(answer: dict[str, Any]) -> str:
 
 # Each verb: its help, the function adding its arguments to a parser, and the function running it.
 VERBS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[[argparse.Namespace, str], int]]] = {
-    "build": ("build source text into the files its flags name (a script builds by running it)", _build_arguments,
-              _build),
     "export": ("write an .xbf or a .step to STEP, GLB, STL, 3MF, DXF or xbf files, by suffix; a GLB carries the "
                "document's motions as clips, a DXF draws a planar one", _export_arguments, _export),
     "snapshot": ("draw a document or a file the viewer opens as the CAD Viewer does, into a PNG", _snapshot_arguments,

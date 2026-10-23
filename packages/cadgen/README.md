@@ -85,12 +85,11 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
    makes everything downstream of it miss. So an edit costs what it changed, and an element
    keeps the name its feature history gave it across edits. Across a restart, a model's only
    cache is its own xbf, taken whole or not at all.
-6. **One document per model, only declared files.** Bare `@model` and code built
-   with `--model NAME` keep their document in the worker's memory. File decorators
-   imply a model and write only their named outputs. No implicit XBF, source file,
-   sidecar, registry, cache or thumbnail is written for an in-memory model.
-   Model addresses and the viewer's In memory list disappear when their workers
-   retire or the engine restarts. Reusing a code model's name updates that address.
+6. **One document per model, only declared files.** Bare `@model` keeps its document
+   in the worker's memory. File decorators imply a model and write only their named
+   outputs. No implicit XBF, source file, sidecar, registry, cache or thumbnail is
+   written for an in-memory model. Model addresses and the viewer's In memory list
+   disappear when their workers retire or the engine restarts.
 7. **Provenance is served live, never written.** What made an element -- the feature, its
    operation, the function, file and line of its call -- lives in the trace of the worker that
    built the document, and is asked of it while it lives (`made_by`, `cadgen inspect`). A document
@@ -113,18 +112,8 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     in what order, including its `__main__` block and conditions; watchers never
     change that control flow. cadgen consumes no script arguments. Engine switches
     are environment variables.
-12. **`cadgen build` takes code and requires an output declaration.** Its one
-    positional argument is source text assigning `result`. At least one of
-    `--model NAME`, `--xbf`, `--step`, `--glb`, `--stl`, `--threemf`, or `--dxf` is
-    required before code can run. `--model NAME` declares a named document in
-    memory; the file flags declare files, additive among themselves. `--name`
-    alone declares no output. The Python `cadgen.build()` function also accepts an already-built
-    build123d shape, with the same output declarations. A script may call that function
-    or its decorated models (law 11). `cad_build` exposes the code form with explicit
-    `name`, `cwd` and outputs; it has no script-selection mode. Calling `Model.build()`
-    selects decorated models without running the script's `__main__`; importing that
-    script still runs its top-level Python. Running `python script.py` runs its
-    ordinary program, including `__main__`. Neither meaning is substituted for the other.
+12. **A model is a Python script.** Decorated functions declare models; explicit calls
+    build them; `python script.py` runs the program. No command builds source text.
 13. **The document's kinematics are AP242's, and cadgen stores no kinematic fact the
     standard cannot name.** Every entity and attribute of the mechanism subtree is ISO
     10303-105's as Part 21 writes it (edition 4's domain model's where Part 21 has none);
@@ -186,22 +175,17 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     delivered in UI-only launch metadata. Only the person can opt in through a page
     or the telemetry CLI. See the engine's **Architecture**.
 
-21. **Python functions own operations; decorators and CLIs expose them.** Code and
-    supplied-shape builds use the same document/output writer as decorated models.
-    `cadgen.build(shape, model="part", step="part.step")` transfers the shape and its
-    metadata in memory to a worker; the server never decodes native geometry. The
-    caller's already-executed operations have no worker memo or feature provenance.
-    Every successful server-backed build reports its address and localhost viewer URL,
+21. **Python functions own operations; decorators and CLIs expose them.** Every
+    successful server-backed build reports its address and localhost viewer URL,
     including a build with file outputs. A cold `daemon=False` build has no served URL.
 
 
 ## Agent operations
 
-Every MCP presentation exposes `cad_build`, `cad_export`, `cad_snapshot` and
-`cad_inspect`, independently of the viewer. They call the Python operations through
-the engine's workers. `cad_build` takes source text assigning `result`, a name,
-an absolute working directory and explicit live-model/file outputs. Export names
-absolute server-host destinations; snapshot names a PNG or a Quick Edit packet.
+Every MCP presentation exposes `cad_export`, `cad_snapshot` and `cad_inspect`,
+independently of the viewer. They call the Python operations through the engine's
+workers. No tool builds source text: a model is built by its script (law 12). Export
+names absolute server-host destinations; snapshot names a PNG or a Quick Edit packet.
 Export and snapshot retain the Python API's script-model build behavior.
 
 Start with a unique `requestId` (16–100 letters, digits, underscores or hyphens).
@@ -286,7 +270,7 @@ src/cadgen/
                          #   committed, never edited
 ```
 
-Commands: `cadgen build`, `export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and
+Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and
 `daemon` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
 snapshot for those files alone; `cadgen urdf|sdf|srdf validate` the validators; `cadgen
 doctor` the installation and a skill's pin; `cadgen viewer` the engine page launcher;

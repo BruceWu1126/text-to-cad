@@ -181,7 +181,7 @@ class Model:
             raise api.EngineError(next(row.get("error", "model failed") for row in built.models if not row.get("ok")))
         if _caller_discards_model_result():
             return None
-        return api.Built(self.name, self.script, built.models[0], Path.cwd(), source_kind="script").shape
+        return api.Built(self.name, self.script, built.models[0], Path.cwd()).shape
 
     def _path(self, kind: str, out: Any) -> Path:
         if out is None:
@@ -237,7 +237,7 @@ class Model:
         if found is None:
             from cadgen.engine.api import Built
 
-            return Built(self.name, self.script, {}, Path.cwd(), source_kind="script").document
+            return Built(self.name, self.script, {}, Path.cwd()).document
         if not found.is_file():
             raise FileNotFoundError(f"model {self.identity} is not built yet: {found} is missing (.build() it)")
         return document.load(found)
@@ -387,7 +387,7 @@ def memo(function: Any = None, /, **options: Any) -> Any:
     """Mark a function worth replaying: ``@memo``, bare. Its arguments are keyed by value
     (plain values, build123d's value types, materials, shapes the engine made); it returns
     geometry (a shape, or a tuple, list or dict of shapes); it writes nothing outside
-    itself. A verifying build (``Model.build(verify=True)``, ``cadgen build SOURCE --verify``)
+    itself. A verifying build (``Model.build(verify=True)``)
     runs every call the engine would replay and compares what it makes with what was logged."""
     if options or function is None:
         raise TypeError("@memo takes no arguments: write @memo")
@@ -630,7 +630,7 @@ class BuildContext:
         # The first-party modules the script's load imported (``build`` sets it), the
         # build's symbol resolution, the time keys took and each body's fallbacks.
         self.loaded: set[str] | None = None
-        # The build's folder: the script's, or the working folder of code (``build`` sets it).
+        # The build's folder: the script's (``build`` sets it).
         self.base: Path | None = None
         self.symbols: Any = None
         self.key_seconds = 0.0

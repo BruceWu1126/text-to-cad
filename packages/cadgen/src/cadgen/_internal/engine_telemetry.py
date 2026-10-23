@@ -7,7 +7,8 @@ the moment the engine's verbs are imported, never sooner, so a process that does
 imports none of it. It counts these events (``analytics.EVENTS``):
 
 - a ``build`` of kind ``xbf``, by who asked (``via``): ``python model.py``, or a Python caller's
-  ``cadgen.build()``, is ``script``; a ``cadgen`` command ``command``. How it ended (``crashed``: its
+  ``Model.build()``, is ``script`` (no command builds one now; ``command`` is still a value
+  ``analytics.VIAS`` reads, which releases before 0.8 sent). How it ended (``crashed``: its
   worker died under it; ``cancelled``: interrupted), whether its documents were their xbfs taken whole
   (``cached``: every model's ``cache.used``), how long it took, and why it failed (``build_failure``,
   ``analytics.told_failure``);

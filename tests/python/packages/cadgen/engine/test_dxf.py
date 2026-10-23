@@ -257,13 +257,6 @@ class DrawingEditTest(unittest.TestCase):
                                 if path.is_file()), ["XBF/bracket.xbf", "bracket.py", "flat.dxf", "flat.py"])
         self.assertEqual(_entities(self.folder / "flat.dxf"), Counter({("LINE", "CUT"): 4, ("CIRCLE", "CUT"): 1}))
 
-    def test_code_declares_a_drawing_with_its_flag(self) -> None:
-        script = engine_build.code_script("tab", self.folder)
-        [report] = engine_build.build(script, ["tab"], cwd=self.folder, outputs={"dxf": {}},
-                                      code="import build123d as bd\nresult = bd.Rectangle(10, 5).face()\n")
-        self.assertTrue(report["ok"], report)
-        self.assertEqual([path.name for path in self.folder.iterdir()], ["tab.dxf"])
-
 
 class RefusedTest(unittest.TestCase):
     @classmethod

@@ -110,12 +110,11 @@ def hinge():
    gave it across edits. Tessellations live in the serving process's memory,
    keyed by a part's geometry, under a size cap. Across a restart, a model's only
    cache is its own xbf, taken whole or not at all (**Build closure**).
-6. **One document per model, only declared files.** Bare `@model` and code built
-   with `--model NAME` keep their document in the worker's memory. File decorators
-   imply a model and write only their named outputs. No implicit XBF, source file,
-   sidecar, registry, cache or thumbnail is written for an in-memory model.
-   Model addresses and the viewer's In memory list disappear when their workers
-   retire or the engine restarts. Reusing a code model's name updates that address.
+6. **One document per model, only declared files.** Bare `@model` keeps its document
+   in the worker's memory. File decorators imply a model and write only their named
+   outputs. No implicit XBF, source file, sidecar, registry, cache or thumbnail is
+   written for an in-memory model. Model addresses and the viewer's In memory list
+   disappear when their workers retire or the engine restarts.
 7. **Provenance is served live, never written.** What made an element -- the
    feature, its operation, the function, file and line of its call -- lives in
    the trace of the worker that built the document, and is asked of it while it
@@ -145,14 +144,8 @@ def hinge():
     in what order, including its `__main__` block and conditions; watchers never
     change that control flow. cadgen consumes no script arguments. Engine switches
     are environment variables.
-12. **`cadgen build` takes code and requires an output declaration.** Its one
-    positional argument is source text assigning `result`. At least one of
-    `--model NAME`, `--xbf`, `--step`, `--glb`, `--stl`, `--threemf`, or `--dxf` is
-    required before code can run. `--model NAME` declares a named document in
-    memory; the file flags declare files, additive among themselves. `--name`
-    alone declares no output. The Python `cadgen.build()` function also accepts an already-built
-    build123d shape, with the same output declarations. A script may call that function
-    or its decorated models (law 11).
+12. **A model is a Python script.** Decorated functions declare models; explicit calls
+    build them; `python script.py` runs the program. No command builds source text.
 13. **The document's kinematics are AP242's, and cadgen stores no kinematic fact the
    standard cannot name.** Every entity and attribute of the mechanism subtree is ISO
    10303-105's as Part 21 writes it (edition 4's domain model's where Part 21 has none);
@@ -162,8 +155,8 @@ def hinge():
 
 14. **Connected means warm.** A worker is not retired for idleness while any served
     document it built has a version wait outstanding or completed a sync within `serve.LIVE`
-    seconds. Heartbeats use the canonical document address, including `code::NAME`
-    and `script.py::NAME`; they never turn a model address into a file path. The worker-count
+    seconds. Heartbeats use the canonical document address, a file's path or
+    `script.py::NAME`; they never turn a model address into a file path. The worker-count
     cap never retires a worker whose document a page watches; it is exceeded instead. The memory
     cap may retire it. Closing a page never stops the engine or its worker; once its last sync
     expires, ordinary idle retirement applies.
@@ -184,12 +177,8 @@ def hinge():
     the app page keeps version reads short enough for the host's tool-call slots. Engine
     request handlers act on declared capabilities, never on a host's identity.
 
-21. **Python functions own operations; decorators and CLIs expose them.** Code and
-    supplied-shape builds use the same document/output writer as decorated models.
-    `cadgen.build(shape, model="part", step="part.step")` transfers the shape and its
-    metadata in memory to a worker; the server never decodes native geometry. The
-    caller's already-executed operations have no worker memo or feature provenance.
-    Every successful server-backed build reports its address and localhost viewer URL,
+21. **Python functions own operations; decorators and CLIs expose them.** Every
+    successful server-backed build reports its address and localhost viewer URL,
     including a build with file outputs. A cold `daemon=False` build has no served URL.
 
 ## Architecture
@@ -197,8 +186,6 @@ def hinge():
 One server per installation owns the worker pool, served documents and HTTP listener.
 `cadgen serve` and `cadgen viewer` launch or reuse that server and return its URL.
 The background process is implemented in `daemon.py`; warm workers remain separate.
-A Python shape build sends plain metadata and binary geometry encoded as JSON (`shape_input.py`);
-only the worker reconstructs it, then calls the same writer as a source build.
 Every successful build registers a lightweight document address and URL; registration does not mesh it.
 A model's worker is a separate process, holding its memo and live kernel objects.
 The distribution injects its HTTP application through `daemon.HTTP_FACTORY`; this
@@ -260,10 +247,10 @@ is explicitly restarted. Session state is memory only and is recreated after res
 | Module | What it is |
 | --- | --- |
 | `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run, and the models a target's run ran (`BuildContext.children`); `@memo` and its calls; explicit model calls asking the daemon; a script's module and package (`module_of`); `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
-| `api.py` | the verbs as functions, through the daemon: `build`, `export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `daemon` (`cadgen.build`, ...); `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
+| `api.py` | the verbs as functions, through the daemon: `export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `daemon` (`cadgen.export`, ...), and `build_script`, a script's models built by `Model.build()`; `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`couple`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
-| `build.py` | one build: load the script (as Python imports it: a package's module by its dotted name) or code afresh, one memo run, document, element names, files: every model's that ran |
+| `build.py` | one build: load the script afresh (as Python imports it: a package's module by its dotted name), one memo run, document, element names, files: every model's that ran |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
@@ -278,15 +265,13 @@ is explicitly restarted. Session state is memory only and is recreated after res
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, at most one per core alive (`Pool`), connect-or-start; a worker's memory cap |
 | `progress.py` | where a build is: the author's `report` and `track`, the engine's stages heard where they begin, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
-| `cli.py` | the verbs as commands: `cadgen build`, `export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `daemon` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
+| `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `daemon` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
 
 ## CLI
 
 ```
 python SCRIPT.py                             the models the script explicitly calls
-cadgen build SOURCE | - [--name N]           one model from source text (stdin with -), its files
-    [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify] [--profile] [--no-daemon]
 cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-daemon] [--json]
                                              SRC an .xbf or a .step
 cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
@@ -302,7 +287,7 @@ cadgen status [--json] | stop | daemon
 
 `python -m cadgen.engine VERB ...` takes the same verbs, the engine's own entry.
 
-A verb's `--json` (`build`, `export`, `snapshot`, `status`) prints its answer as one JSON object
+A verb's `--json` (`export`, `snapshot`, `status`) prints its answer as one JSON object
 on stdout, and a failure as `{"ok": false, "error": ...}` there too, exit status 1, so a caller
 reading stdout always finds an answer (`cli.answered`); without `--json` a failure is its words
 on stderr, exit 2 for a request refused by name before anything ran and 1 for one that failed.
@@ -379,10 +364,8 @@ in. Its structure says how long the parse took and which process made it
 
 ## Profiling
 
-Request function timings with `arm.build(profile=True)` or
-`cadgen.build(code, model="part", profile=True)`. The script remains plain Python,
-run as `python model.py`; it takes no engine flags. The CLI mirror is
-`cadgen build CODE --model part --profile`, with `--json` for the same structured report.
+Request function timings with `arm.build(profile=True)`. The script remains plain Python,
+run as `python model.py`; it takes no engine flags, and no command profiles a build.
 
 Profiling measures **actual execution**, preserving normal memo, body and XBF hits.
 It does not force a rebuild: a replayed body has no function timings for its earlier
@@ -390,23 +373,21 @@ execution, and a kernel memo hit measures lookup/replay, not the skipped operati
 Read the existing `cache`, `memo` and `bodies` fields alongside the timings. `verify=True`
 retains its usual verification behavior when combined with profiling; it is not a cold run.
 
-The `profile` field in `Built.report` or each top-level `Report.models` entry covers
+The `profile` field in each top-level `Report.models` entry covers
 one entire build request, including script loading, all requested and child models,
 document processing and declared exports. For multiple targets those entries carry
 the **same request-wide profile**, not separate per-model measurements to add together.
 It runs in the worker (or the caller with `daemon=False`), excludes client/daemon startup
 and queuing, and includes waits during that worker call. Work in other processes is
-not function-profiled. An already-created shape can also request `profile=True`, but
-only its remaining worker processing is measured: construction and packing in the
-caller happened before this scope. `supplied_shape: true` makes that distinction explicit.
+not function-profiled.
 
 The JSON profile identifies `scope: "build_request"`, `mode: "actual_execution"`, the
 process id, elapsed `seconds`, total `self_seconds`, and `function_count`. Its two
 lists hold at most 20 rows each: `project_cumulative` (functions under the script's
-folder, or the code build's working folder, excluding installed dependencies) and
+folder, excluding installed dependencies) and
 `top_self` (all functions by self time). A row names `file`, `line`, `function`, total
 `calls`, `primitive_calls` (non-recursive calls), `self_seconds` and
-`cumulative_seconds`. CLI human output prints those tables; Python callers receive
+`cumulative_seconds`. `profiling.describe` prints those tables; Python callers receive
 these fields without printing or writing a profile file. No profile is saved or
 reused by a later build. Failed model reports include the work observed before failure.
 
@@ -418,8 +399,8 @@ which also avoids pybind11's unmatched profile events on Python 3.12 and later.
 
 One daemon per installation (`daemon.py`), started on demand by the first command that needs
 it and gone after an idle hour (`CADGEN_ENGINE_IDLE` seconds; a page waiting on a served
-document keeps it). It holds a pool of warm workers, one per model script (and one per code
-name, and one for the documents no worker built), each a process whose memo lives as long as
+document keeps it). It holds a pool of warm workers, one per model script (and one for the documents no
+worker built), each a process whose memo lives as long as
 it does. Its rules are a standard pool's, and nothing else: no memory budget, no admission
 guess, no refusal; the operating system does the rest.
 
@@ -521,13 +502,13 @@ frame is the build's last state. The worker sends each on its pipe (`{"id", "pro
 the daemon:
 
 - passes it to the build's caller as it does the log's lines (`client.request(on_progress=)`):
-  `python model.py` and `cadgen build` draw a bar on stderr when it is a terminal -- each
+  `python model.py` draws a bar on stderr when it is a terminal -- each
   phase finished a line with its time, the one in flight repainted in place -- and nothing when
-  it is not (`progress.Bar`; `api.build(progress=)` takes the frames instead, `False` none);
+  it is not (`progress.Bar`; `api.build_script(progress=)` takes the frames instead, `False` none);
 - keeps a busy worker's last, which `cadgen status` shows (**The daemon and its workers**);
 - wakes the pages waiting on a served document among the frame's `outputs` (below).
 
-Each model's report holds its last frame (`progress`, which `--json` prints), so a failed build
+Each model's report holds its last frame (`progress`), so a failed build
 says where it was; a worker that dies during a build fails it with where it was in the words.
 
 **The page's route.** `GET /api/doc/<id>/version?after=V&progress=N&wait=S` answers
@@ -726,7 +707,7 @@ same document and the same options write the same bytes. Every file is written b
 target and moved over it; a DXF only when its bytes change.
 
 - **Sources are documents**: an `.xbf` or a `.step` (read into a document first); from Python,
-  a `Model` (built first, in its worker) or built code (a `Built`) too. A mesh is never a
+  a `Model` (built first, in its worker) too. A mesh is never a
   source: it has no B-rep. An xbf is written from a STEP, or from an xbf with `--part`; a posed xbf is refused (a
   pose is a request, never a document). Several destinations read the document once; an export
   runs in the worker that built the document while the file is as it left it, else in the
@@ -811,10 +792,9 @@ script imports). So its xbf is the one its own build writes, byte for byte; a la
 takes that file (**Build closure**), and a file whose bytes are unchanged is kept. A child called
 twice is one model, written once; a child that is also a target of the build writes as the
 target; a child run inside a replayed body writes as one its caller ran; one that ran before its
-caller raised writes all the same. A child writes what its decorators declare, never what
-code's flags name: those are the code's own (law 12). A model taken from its file ran nothing,
+caller raised writes all the same. A child writes what its decorators declare. A model taken from its file ran nothing,
 and nor did its children. The target's report holds each child's under its identity
-(`child_models`: its files, parts and timings; `--json` prints it with the target's), and a
+(`child_models`: its files, parts and timings), and a
 child whose file cannot be written fails the build. A part is written free
 (`document.unchecked`): OCCT marks a shape put in a compound as no longer free, which would
 make a child's part, placed in its caller's assembly, other bytes than its own build's.
@@ -822,25 +802,10 @@ make a child's part, placed in its caller's assembly, other bytes than its own b
 The xbf is saved first and the viewer woken with it: the worker waits for the daemon to hold
 the patch (`{"op": "patched"}` on its pipe) before it writes a derived file.
 
-**Code** (`cadgen build SOURCE`, `-` reading it from stdin; `--name N`, default `model`) is
-one model with no decorators (law 12): the code assigns its final shape to `result` (refused by
-name otherwise), it runs in the warm worker of its name, and its elements are named from its
-assignment targets with `N` as the function (`f:N.body.3`). It declares nothing, so its file flags
-are its declarations, additive among themselves: each writes its kind at `F`, or with no `F`
-at the CLI default in the working folder (`--xbf` is `XBF/N.xbf`, `--step`
-`N.step`). `--model N` declares the document in memory without a file.
-With neither `--model` nor a file flag, the command fails before running code. A child model it calls writes what that model declares (law 10).
-Its source is held in memory only (`sources.MEMORY`), under the path `(code)/N.py` of the working
-folder, which no file holds, so its provenance is live only. `--xbf` gives it the cold cache as
-any model has. `--json` prints the report, including `address` and `url`; the text report prints both too.
-`--verify` verifies its bodies (**Memo functions**),
-`--no-daemon` builds in this process.
-
-**Functions** (`api`, also `cadgen.build`, `cadgen.export`, `cadgen.snapshot`, `cadgen.serve`,
-`cadgen.inspect`): one per command, each through the daemon. `build(code_or_shape, model=, name=, xbf=, ...)` takes
-source text or an already-built build123d shape, and returns a `Built` (`.files`, `.report`, `.document` and `.shape`
-asked of the worker that holds them, `.export(...)`); `export(source, *destinations, pose=, part=,
-inputs=)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`; `where(doc)` the build
+**Functions** (`api`, also `cadgen.export`, `cadgen.snapshot`, `cadgen.serve`,
+`cadgen.inspect`): one per command, each through the daemon. No function builds source text
+or a shape made elsewhere: a shape is built by wrapping it in a decorated function (law 12).
+`export(source, *destinations, pose=, part=, inputs=)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`; `where(doc)` the build
 closure an xbf holds, `where(doc, ref)` an element's facts. A `Model` builds, exports and draws
 itself the same way (`.build(verify=, profile=, daemon=)`, a `Report`: it and its children, as declared;
 `.export()`, `.snapshot()`), and `.document` is its xbf as last built, read-only
@@ -1620,7 +1585,7 @@ candidates (tom's six stages, movement's three layers: 1.3–3 s each, and twice
 edit), while per-part markers measured under 0.1 s. Nested `@xbf` is never needed for caching:
 the operation-level memo handles every kernel call in any model, markers or not.
 
-A verifying build (`Model.build(verify=True)`, `cadgen build SOURCE --verify`) runs every
+A verifying build (`Model.build(verify=True)`) runs every
 body the memo would replay -- a model's and every `@memo` call's -- and compares each fresh
 result with the logged one: per shape its class, label, colour, paints, material and
 placement, and each leaf's geometry: the same TShape, else the same binary BRep digest, else the
@@ -1676,7 +1641,6 @@ engine   {"release": "cadgen 0.8.0", "format": "xbf/5", "digest": ...}   the for
                                                                     the engine's code digest (information only)
 libs     {"build123d": ..., "OCP": ...}                             what decides the geometry
 source   {"kind": "script", "path": "../src/tom.py", "function": "tom"}
-         | {"kind": "code", "name": "bracket", "digest": ...}             code's text is never written
 modules  [["../src/lib/arm_parts.py", "9f3c..."], ...]
 inputs   [["file", "../STEP/gripper.step", "c0de..."], ["read", "../src/lib/ids.json", "77ab..."], ...]
 bodies   how many bodies the model is
@@ -1739,31 +1703,6 @@ process's bodies made, and a document read is never written or patched: the firs
 after a restart runs the model, and writes the cold build's bytes. A taken document has
 no worker that built it: `made_by` is null until a build of it runs.
 
-## Building an existing Python shape
-
-```python
-import build123d as bd
-import cadgen
-
-part = bd.Box(10, 20, 3)
-built = cadgen.build(part, model="bracket", step="bracket.step")
-print(built.report["url"])
-```
-
-This uses the normal worker and document writer, preserving assembly structure,
-placements, materials, face colours, configurations and motions. Only declared
-outputs are written. Reusing `model="bracket"` updates `code::bracket`, just as a
-code build does. The shape's creation already happened in the calling Python
-process: only document conversion and export run in the worker. Use a decorated
-model or source text for warm replay of geometry operations and feature provenance;
-`verify=True` is refused for a supplied shape. With no feature history, its faces,
-edges and vertices carry no element names (a ref addresses them by ordinal,
-`part/face 3`), and its xbf holds no build closure, so it is never taken from its
-file after a restart. Each part travels as its binary BRep, base64 in the request's
-JSON line through the daemon to the worker: memory on the way is a few times the
-shape's BRep size. `name` follows the code rule, an ASCII Python identifier. The CLI
-continues to take code only.
-
 ## In-memory model addresses
 
 `@model` declares a model with no files. `@step`, `@xbf` and the other file
@@ -1783,11 +1722,8 @@ if __name__ == "__main__":
 ```
 
 The address is `/absolute/path/parts.py::bracket`. Different scripts can use the
-same function name. `cadgen build 'import build123d as bd; result = bd.Box(10, 20, 3)' --model bracket`
-builds `code::bracket` in the installation's engine. That name is explicit and
-unique within that engine; the same command with changed code updates the same
-address and open viewers. Neither code nor an address list is saved. Names are
-ASCII Python identifiers; no generated address or update flag is needed.
+same function name. Running the script again with changed code updates the same
+address and open viewers. No address list is saved.
 
 `cadgen serve ADDRESS`, `cadgen snapshot ADDRESS view.png`,
 `cadgen export ADDRESS part.step`, and `cadgen inspect ADDRESS 'face 1'`
@@ -1798,10 +1734,9 @@ metadata/closure or live-build metadata; `--query closure` and `--query geometry
 select the other queries explicitly. Opening a Python script in the viewer lists its declarations without
 executing it; choosing one builds that function explicitly. The In memory
 section lists the live models, their addresses, build times and states. An
-expired code address needs another `build --model`; a script address can be
-rebuilt from its source. `--model` needs the warm engine and cannot be combined
-with CLI `--no-daemon`. Exporting a file or held code writes the requested
-destinations. Exporting a script model builds it first, including its declared files.
+expired script address is rebuilt by running its script. Exporting a file writes
+the requested destinations. Exporting a script model builds it first, including its
+declared files.
 
 Address parsing and declaration listing live in [addresses.py](addresses.py);
 the daemon's transient address book lives in [models.py](models.py).

@@ -416,8 +416,7 @@ composer has no camera action: its note to the agent is Quick Edit.
 
 ## Live model addresses
 
-The catalog and open/show actions accept `script.py::name` and `code::name` as
-well as file paths. Python scripts open to a declaration list read without
+The catalog and open/show actions accept `script.py::name` as well as file paths. Python scripts open to a declaration list read without
 execution; selecting a model explicitly builds it. The shared viewer's In memory
 collection reads the installation engine's live metadata. It never enters saved
 recents or thumbnail storage, and disappears on worker retirement or engine restart.

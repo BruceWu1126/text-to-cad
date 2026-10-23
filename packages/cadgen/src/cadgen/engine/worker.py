@@ -259,8 +259,7 @@ def retirement(reports: list[dict[str, Any]], resident: float | None = None) -> 
 
 
 def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, Any]:
-    """An ``export`` request: the document -- a script's model built first, code this worker
-    built, or a file (the document this worker last built of it while the file is as the
+    """An ``export`` request: the document -- a script's model built first, or a file (the document this worker last built of it while the file is as the
     build left it, else read) -- written to each destination, and drawn into ``draw``'s
     PNG where the request has one (``{"out", option: value}``, the snapshot verb's: a
     model's picture is drawn from the document in this worker's memory). Answers what was
@@ -271,10 +270,10 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
     source_spec = request["source"]
     built: list[dict[str, Any]] = []
     if request.get("expected") and "script" in source_spec:
-        source = engine_build.held(Path(source_spec["script"]), source_spec.get("code") or source_spec.get("function"))
+        source = engine_build.held(Path(source_spec["script"]), source_spec.get("function"))
         if source is None:
             raise export.ExportRefused("The viewed model is no longer held. Reopen it before exporting.")
-    elif "script" in source_spec and "code" not in source_spec:
+    elif "script" in source_spec:
         script = Path(source_spec["script"])
         function = source_spec.get("function")
         # Built as it declares, its children as theirs (law 10); the exports are this request's.
@@ -292,10 +291,6 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
             if xbf is None:
                 raise engine_build.BuildError(f"{script.name}::{function}: the build left no document")
             source = export.Source.read(xbf)
-    elif "code" in source_spec:
-        source = engine_build.held(Path(source_spec["script"]), source_spec["code"])
-        if source is None:
-            raise engine_build.BuildError(f"no code named {source_spec['code']!r} is built in this worker")
     else:
         path = Path(source_spec["path"])
         source = engine_build.held(path=path)
@@ -345,13 +340,13 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
 
 
 def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
-    """A ``result`` request: the document code this worker built, as its structure and each
+    """A ``result`` request: the document of a model this worker built, as its structure and each
     part's shape bytes (``[key, size]`` in ``shapes``, the bytes after the line in order)."""
     from cadgen.engine import build as engine_build
 
-    source = engine_build.held(Path(request["script"]), request["code"])
+    source = engine_build.held(Path(request["script"]), request["name"])
     if source is None:
-        raise engine_build.BuildError(f"no code named {request['code']!r} is built in this worker")
+        raise engine_build.BuildError(f"no model named {request['name']!r} is built in this worker")
     keys = [prototype["key"] for prototype in source.structure["prototypes"]]
     data = [source.shape_data(key) for key in keys]
     from cadgen.engine import previous
@@ -451,7 +446,7 @@ def main() -> int:
                 os.chdir(cwd or home)
                 if op == "export":
                     source = request["source"]
-                    said = progress(ident, script=source.get("script"), cwd=cwd, code="code" in source)
+                    said = progress(ident, script=source.get("script"), cwd=cwd)
                     said.model = said.name(source.get("script") or source.get("path"))
                     with building(said):
                         done = _export(request, lambda text: send({"id": ident, "log": text}))
@@ -489,14 +484,12 @@ def main() -> int:
             os.chdir(cwd or home)
             script = Path(request["script"])
             # Where the build is, frame by frame; each report holds its model's last.
-            said = progress(ident, script=script, cwd=cwd, code=request.get("code") is not None)
+            said = progress(ident, script=script, cwd=cwd)
             with building(said):
                 said.load()
                 reports = build(script, request.get("functions") or None,
                                 log=lambda text: send({"id": ident, "log": text}), cwd=Path(cwd) if cwd else None,
-                                outputs=request.get("outputs"), code=request.get("code"),
-                                verify=bool(request.get("verify")), profile=bool(request.get("profile")),
-                                shape=request.get("shape"))
+                                verify=bool(request.get("verify")), profile=bool(request.get("profile")))
             said.attach(reports)
             patcher.finish(reports)
             resident = resident_mb()

@@ -1,8 +1,7 @@
-"""Document addresses: file paths, script.py::name, and code::name.
+"""Document addresses: file paths and script.py::name.
 
 Names select documents; #owner/element selects geometry inside the document.
-Code names belong to this engine installation. Scripts use their absolute path.
-Nothing here reads, builds, or persists a model.
+Scripts use their absolute path. Nothing here reads, builds, or persists a model.
 """
 from __future__ import annotations
 
@@ -16,11 +15,11 @@ _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 @dataclass(frozen=True)
 class ModelAddress:
-    script: Path | None
+    script: Path
     name: str
 
     def __str__(self) -> str:
-        return f"{self.script if self.script is not None else 'code'}::{self.name}"
+        return f"{self.script}::{self.name}"
 
 
 def parse(value: str | os.PathLike) -> ModelAddress | None:
@@ -30,11 +29,9 @@ def parse(value: str | os.PathLike) -> ModelAddress | None:
     source, name = text.rsplit("::", 1)
     if not _NAME.fullmatch(name):
         raise ValueError("a model address ends in ::NAME, with NAME a Python identifier")
-    if source == "code":
-        return ModelAddress(None, name)
     script = Path(source).expanduser()
     if script.suffix.lower() != ".py":
-        raise ValueError("a model address is script.py::NAME or code::NAME")
+        raise ValueError("a model address is script.py::NAME")
     return ModelAddress(script.resolve(), name)
 
 

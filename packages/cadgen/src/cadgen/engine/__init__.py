@@ -14,7 +14,7 @@ kernel memo makes an edit cost what it changed; the document is written to
 ``XBF/arm.xbf`` beside the script, and the derived files it declares after it, each a
 translation of that document (``cadgen export``). ``cadgen serve XBF/arm.xbf``
 shows it. Nothing but those files is written: every cache lives in a process's memory.
-The verbs as functions are ``cadgen.engine.api`` (``cadgen.build``, ``cadgen.export``, ...).
+The verbs as functions are ``cadgen.engine.api`` (``cadgen.export``, ``cadgen.snapshot``, ...).
 
 A function worth replaying on a later build -- an assembly's part, a derivation's stage --
 is marked ``@memo``: it writes no file, and a build whose edit does not reach it replays it

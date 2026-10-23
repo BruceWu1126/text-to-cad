@@ -21,7 +21,7 @@ def engine_document_path(file_ref):
 
     address = parse(file_ref)
     if address is not None:
-        if address.script is not None and not address.script.is_file():
+        if not address.script.is_file():
             raise ValueError(f"no script {address.script}")
         return str(address)
     path = absolute_path(file_ref)
