@@ -81,6 +81,11 @@ export interface CadViewerProps<Model extends LibraryModel = LibraryModel> {
    */
   fullSize?: ReactNode;
   /**
+   * The host's way to open what is shown in a page of its own outside the host (the CAD app's Open
+   * in browser), where it has one: last in the navbar, over every file and on the home.
+   */
+  openInBrowser?: ReactNode;
+  /**
    * The view's own history, where the host keeps one rather than a browser (the CAD app's views):
    * Back and Forward in the navbar after its logo, over every file and on the home.
    */
@@ -101,7 +106,7 @@ const reportError = (error: Error) => console.error(error);
  * navigates: showing a file, or the home, is the host's `onShow`.
  */
 export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, host, tabStore, live, file, onShow, onShown, start,
-  library, onThumbnail, colorScheme, language, appSettings, notice, update, fullSize, history, onError = reportError }: CadViewerProps<Model>) {
+  library, onThumbnail, colorScheme, language, appSettings, notice, update, fullSize, openInBrowser, history, onError = reportError }: CadViewerProps<Model>) {
   // The language the host names: the pages drawn here (the home, a file that will not open) read in it.
   const locale = host.environment.locale;
   const t = translator(locale);
@@ -206,7 +211,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   }), [library, layout, changeLayout, path, picture, host.links, host.files, openFile, entry, onError, goHome, t, start]);
   return <I18nProvider locale={locale}>
     <ExportControls service={client.exports} downloads={host.downloads} file={shown ?? path}>{({ navbar, overlay }) => <FileViewer navbarActions={navbar} overlay={overlay} file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
-      colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} fullSize={fullSize} history={history} notice={notice} onError={onError} presentation={presentation} />}</ExportControls>
+      colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} fullSize={fullSize} openInBrowser={openInBrowser} history={history} notice={notice} onError={onError} presentation={presentation} />}</ExportControls>
     {drawing && !path ? <OffscreenPicture key={drawing.source.file} source={drawing.source} host={host} preferences={preferences} onDone={drawn} /> : null}
   </I18nProvider>;
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
-import { Maximize } from 'lucide-react';
+import { ExternalLink, Maximize } from 'lucide-react';
 import { useAnalyticsConsent } from '@text-to-cad/ui/consent';
-import { useLanguage } from '@text-to-cad/ui/i18n';
+import { useI18n, useLanguage } from '@text-to-cad/ui/i18n';
 import { UpdateButton, useUpdateNotice } from '@text-to-cad/ui/update';
 import { viewerLinks } from '@text-to-cad/ui/links';
 import { Button } from '@text-to-cad/ui/primitives/button';
@@ -17,7 +17,7 @@ import { watchSupersession, type Presentation } from './host/presentation';
 import { chatReach } from './host/prompt';
 import type { Launch, Server } from './host/server';
 import { createViewSync } from './host/sync';
-import { createTunnelClient, createTunnelFetch } from './host/tunnel';
+import { createTunnelClient, createTunnelFetch, TUNNEL_ORIGIN } from './host/tunnel';
 import ModelView, { type ViewReporter } from './ModelView';
 import { Banner } from './Notice';
 
@@ -80,7 +80,7 @@ function Frame({ bridge, context, insets, inline = false, floatingComposer = fal
 }
 
 /**
- * Inline, the card's way to full size: the last of the navbar's own controls (the view's follow it), and the home's.
+ * Inline, the card's way to full size: in the navbar, before the view's own controls and Open in browser, over a file and on the home.
  * Corner brackets, the host's own way to full size.
  */
 function FullSizeButton({ bridge }: { bridge: Bridge }) {
@@ -88,6 +88,45 @@ function FullSizeButton({ bridge }: { bridge: Bridge }) {
   return <TooltipHint content="Full size">
     <Button variant="ghost" size="icon-xs" className="size-6 text-muted-foreground hover:text-foreground" aria-label="Full size" onClick={expand}>
       <Maximize className="size-3.5" aria-hidden="true" />
+    </Button>
+  </TooltipHint>;
+}
+
+/**
+ * The web viewer's page of what the view shows, the one a text-only host's `cad_show` links: asked
+ * of the server (`GET /__cad/browser`, the app's alone: `cadgen/mcp/server.py`) whenever what is
+ * shown changes, the home's with nothing shown. `available` is the last answer's, so the button is
+ * drawn once the engine gives a page and never where it gives none (`ViewerUnavailable`); `page()`
+ * is the answer for what is shown now.
+ */
+function useBrowserPage(tunnel: typeof fetch, model: string | null) {
+  const [available, setAvailable] = useState(false);
+  const asked = useRef<Promise<string | null>>(Promise.resolve(null));
+  useEffect(() => {
+    let active = true;
+    const page = tunnel(`${TUNNEL_ORIGIN}/__cad/browser${model ? `?${new URLSearchParams({ model })}` : ''}`)
+      .then(async response => {
+        const body = response.ok ? await response.json() as { url?: unknown } : null;
+        return typeof body?.url === 'string' ? body.url : null;
+      })
+      .catch(() => null);
+    asked.current = page;
+    void page.then(url => { if (active) setAvailable(url !== null); });
+    return () => { active = false; };
+  }, [tunnel, model]);
+  return useMemo(() => ({ available, page: () => asked.current }), [available]);
+}
+
+/**
+ * The view's page in the person's browser, opened through the host as every link is: the last of
+ * the navbar's controls, over every file and on the home.
+ */
+function OpenInBrowserButton({ open }: { open: () => void }) {
+  const { t } = useI18n();
+  const label = t('navbar.openInBrowser');
+  return <TooltipHint content={label}>
+    <Button variant="ghost" size="icon-xs" className="size-6 text-muted-foreground hover:text-foreground" aria-label={label} onClick={open}>
+      <ExternalLink className="size-3.5" aria-hidden="true" />
     </Button>
   </TooltipHint>;
 }
@@ -140,6 +179,8 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   // The server stopped answering (its process has gone): the view keeps its model, and says so.
   const [lost, setLost] = useState(false);
   const shown = useRef<string | null>(null);
+  // What the view shows, for its page in the browser: the launch's until the view says.
+  const [showingModel, setShowingModel] = useState<string | null>(() => initial.model ? normalizePath(initial.model) : null);
   // The model the agent last showed here, until the view shows it (or anything after it): a capture
   // asked with the show, or right after it, is of that model, not of the one it is leaving.
   const asked = useRef<string | null>(null);
@@ -159,6 +200,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
     showing(model) {
       shown.current = model;
       asked.current = null;
+      setShowingModel(model);
       sync.focus();
     },
   }), [sync]);
@@ -220,6 +262,8 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   // host (a frame cannot open one itself).
   const links = useMemo(() => viewerLinks({ version, build: BUILD, open: url => bridge.request('ui/open-link', { url }).then(() => {}) }),
     [bridge]);
+  const browser = useBrowserPage(tunnel, showingModel);
+  const openInBrowser = () => void browser.page().then(url => { if (url) openLink(url); });
   const { launch } = showing;
   if (superseded) {
     return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer}><Superseded still={still} /></Frame>;
@@ -231,6 +275,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
       update={updateNotice ? <UpdateButton notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)}
         onLink={openLink} /> : null}
       fullSize={inline && context.availableDisplayModes?.includes('fullscreen') !== false ? <FullSizeButton bridge={bridge} /> : null}
+      openInBrowser={browser.available ? <OpenInBrowserButton open={openInBrowser} /> : null}
       colorScheme={colorScheme} theme={theme} locale={locale} language={language} platform={initial.platform || 'darwin'} reporter={reporter} sync={sync} chat={chat} />
   </Frame>;
 }

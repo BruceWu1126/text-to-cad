@@ -53,6 +53,7 @@ export default {
   "navbar.back": "上一頁",
   "navbar.forward": "下一頁",
   "navbar.fileActions": "檔案動作",
+  "navbar.openInBrowser": "在瀏覽器中開啟",
 
   "file.copyPath": "複製路徑",
   "file.revealFinder": "在 Finder 中顯示",

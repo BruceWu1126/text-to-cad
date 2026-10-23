@@ -63,8 +63,9 @@ none.
   menu's.
 
   *Design note: the strip is for tools; the view's controls are the navbar's.* What a host or
-  the file adds (the update, an alert's icon, Full size) is the navbar's right end, and last
-  after them the view's own controls, **Display** and **Preview** (`navbarSlot`): they act on
+  the file adds (the update, an alert's icon, Full size) is the navbar's right end, after
+  them the view's own controls, **Display** and **Preview** (`navbarSlot`), and last the
+  host's **Open in browser**, where it has one (the CAD app's). The view's controls act on
   the whole view, whatever tool is in hand, so they are no tools. In Preview the same place
   holds its own controls, **Preview settings** and **Exit preview**. A host with no navbar has
   them over the view instead: Display and Preview ending the strip after a thin rule, the

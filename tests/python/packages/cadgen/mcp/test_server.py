@@ -489,6 +489,36 @@ class InlineServerTest(_Session):
         self.assertEqual(page, '<!doctype html><meta name="cad-presentation" content="inline"><title>CAD</title>')
         self.assertNotEqual(uri, AppPage(self.tmp / "app").uri)
 
+    def test_the_cards_open_in_browser_asks_the_page_a_text_client_is_linked_to_and_only_the_card_may(self) -> None:
+        from cadgen.mcp.browser import ViewerUnavailable
+
+        asked = []
+
+        def page(model=None) -> str:
+            asked.append(model)
+            return "http://127.0.0.1:3245/" + ("6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab" if model else "") + "?token=t"
+
+        self.server._viewer_url = page
+        # The document the card shows, as its client names it, and the home with none.
+        route = "http://cad.invalid/__cad/browser"
+        self.assertEqual(self.http("GET", f"{route}?model={quote(self.bracket, safe='')}"),
+                         (200, {"url": "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab?token=t"}))
+        self.assertEqual(self.http("GET", route), (200, {"url": "http://127.0.0.1:3245/?token=t"}))
+        self.assertEqual(asked, [self.bracket, None])
+        # The one source of the link: what a text client's cad_show hands over for the same model.
+        self.assertIn("http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab?token=t",
+                      self.server._show_in_browser(self.bracket)["content"][0]["text"])
+        # An agent never reaches it; nor does a write.
+        agent = self.call("cad_http", {"method": "GET", "url": route})["structuredContent"]
+        self.assertEqual((agent["status"], len(asked)), (403, 3))
+        self.assertEqual(self.http("POST", route)[0], 405)
+
+        def refuse(_model=None) -> str:
+            raise ViewerUnavailable("CAD Viewer client is not built")
+
+        self.server._viewer_url = refuse
+        self.assertEqual(self.http("GET", route), (503, {"error": "CAD Viewer client is not built"}))
+
     def test_a_mounted_view_warms_the_engine_s_meshing_pool(self) -> None:
         # The engine starts its pool with the first view, never with a build (law 19).
         warmed = []

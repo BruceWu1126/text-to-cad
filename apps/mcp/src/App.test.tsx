@@ -1,4 +1,4 @@
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { CadViewerProps } from '@text-to-cad/ui/cad-viewer';
 import { version } from '../package.json';
@@ -17,7 +17,7 @@ vi.mock('@text-to-cad/ui/cad-viewer', async original => {
   return {
     ...await original<object>(),
     // The host's notice, if it had one, drawn as the real viewer would once a model is on screen.
-    CadViewer: (props: CadViewerProps) => { viewer.props = props; useEffect(() => { viewer.mounts += 1; }, []); return <>{props.update ?? null}{props.fullSize ?? null}{props.notice ?? null}</>; },
+    CadViewer: (props: CadViewerProps) => { viewer.props = props; useEffect(() => { viewer.mounts += 1; }, []); return <>{props.update ?? null}{props.fullSize ?? null}{props.openInBrowser ?? null}{props.notice ?? null}</>; },
   };
 });
 
@@ -25,7 +25,9 @@ beforeEach(() => vi.stubGlobal('IntersectionObserver', class { observe() {} unob
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); viewer.props = null; viewer.mounts = 0; });
 
 const POLICY = 'https://www.texttocad.dev/privacy-policy';
-type Answer = (body: any) => unknown;
+type Answer = (body: any, url: URL) => unknown;
+/** An answer with a status of its own (a route answers 200 otherwise). */
+class Status { constructor(readonly status: number, readonly body: unknown) {} }
 
 /**
  * A host frame and CAD's server, as the page reaches them: its sync, and the viewer's routes over
@@ -53,11 +55,13 @@ function host(initial: HostContext, hostCapabilities: Record<string, unknown> = 
   const server = {
     sync: () => new Promise(() => {}), reply: vi.fn(async () => ({})),
     http: vi.fn(async ({ url, body }: { url: string; body: string }) => {
-      const path = new URL(url).pathname;
+      const target = new URL(url);
+      const path = target.pathname;
       const sent = body ? JSON.parse(atob(body)) : null;
       requests.push({ path, body: sent });
       if (!answers[path]) return new Promise(() => {});
-      const value = await answers[path](sent);
+      const value = await answers[path](sent, target);
+      if (value instanceof Status) return { status: value.status, headers: { 'content-type': 'application/json' }, body: btoa(JSON.stringify(value.body)) };
       return value === null ? { status: 204, headers: {}, body: '' }
         : { status: 200, headers: { 'content-type': 'application/json' }, body: btoa(JSON.stringify(value)) };
     }),
@@ -253,6 +257,37 @@ it("a view keeps its own history of files, as a browser's tab does: the agent's 
   // A file handler shows its file alone, with no home to go to: no Back or Forward.
   render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 7, page: 'viewer', model: '/work/a.step', surface: 'file' }} />);
   expect(viewer.props!.history).toBeUndefined();
+});
+
+it("Open in browser, the navbar's last control, opens the web viewer's page of what the view shows now through the host, and is absent where the engine gives none", async () => {
+  const { bridge, server } = host({ displayMode: 'fullscreen' });
+  const replies: ((reply: { events: unknown[] }) => void)[] = [];
+  server.sync = vi.fn(() => new Promise(resolve => { replies.push(resolve); }));
+  const agentShows = (model: string, seq: number) => act(async () => {
+    replies.shift()!({ events: [{ seq, type: 'show', launch: { protocol: 8, page: 'viewer', model } }] });
+  });
+  // The engine's page of each document (`/<id>`, its viewer token in the URL) and its home; none for one it cannot give.
+  const ids: Record<string, string> = { '/work/a b.step': 'id-a', '/work/b.step': 'id-b' };
+  server.answers['/__cad/browser'] = (_body, url) => {
+    const model = url.searchParams.get('model');
+    if (model && !ids[model]) return new Status(503, { error: 'CAD Viewer client is not built' });
+    return { url: `http://127.0.0.1:3245/${model ? ids[model] : ''}?token=t` };
+  };
+  const opened = async (url: string) => {
+    act(() => screen.getByRole('button', { name: 'Open in browser' }).click());
+    await waitFor(() => expect(bridge.request).toHaveBeenCalledWith('ui/open-link', { url }));
+  };
+  render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 8, page: 'viewer', model: '/work/a b.step' }} />);
+  await screen.findByRole('button', { name: 'Open in browser' });
+  await opened('http://127.0.0.1:3245/id-a?token=t');
+  // The home the person goes to, and the model the agent shows next: each its own page.
+  act(() => viewer.props!.onShow(''));
+  await opened('http://127.0.0.1:3245/?token=t');
+  await agentShows('/work/b.step', 1);
+  await opened('http://127.0.0.1:3245/id-b?token=t');
+  await agentShows('/work/gone.step', 2);
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Open in browser' })).toBeNull());
+  expect(viewer.props!.openInBrowser).toBeNull();
 });
 
 it('an inline host that cannot show a view full size gets no Full size, and still the whole viewer', () => {

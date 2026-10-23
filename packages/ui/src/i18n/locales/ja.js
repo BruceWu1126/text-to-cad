@@ -52,6 +52,7 @@ export default {
   "navbar.back": "戻る",
   "navbar.forward": "進む",
   "navbar.fileActions": "ファイルの操作",
+  "navbar.openInBrowser": "ブラウザで開く",
 
   "file.copyPath": "パスをコピー",
   "file.revealFinder": "Finder で表示",

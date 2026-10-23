@@ -442,8 +442,8 @@ keyboard `platform` (`environment.platform`) for its undo and redo keys.
 
 FileViewer draws ONE navbar, the same in every app, over every file and over a host's home.
 Over the home it has only the logo and its menu (no Back to files), Back and Forward where
-the host hands a `history`, and the host's update and Full size, each where it stands over
-a file; the home's search, layout switch and Open stay
+the host hands a `history`, and the host's update, Full size and Open in browser, each where
+it stands over a file; the home's search, layout switch and Open stay
 in its Recent Files row, and its links under its title. Left: the text-to-cad "C" logo,
 which opens the app menu (`AppMenu`, `file-viewer/navigation/AppMenu.jsx`), then Back and
 Forward where the host hands a `history`, then the open file's name and its ⋯ menu. The
@@ -456,8 +456,11 @@ manager, each where `fileActions` can do it, and is absent where it can do none 
 right-click on the name). Right, only what a host or a file adds: the host's update button
 first (`update`, while its install is behind), the renderer's navigation actions, the
 host's Full size where it shows the view small
-(`fullSize`, the inline card's way to full size, over the home too), and last the box the
-renderer draws its own controls into (over a file only). The navbar holds no settings.
+(`fullSize`, the inline card's way to full size, over the home too), the box the
+renderer draws its own controls into (over a file only), and last the host's way to open
+what is shown in a page of its own outside the host (`openInBrowser`, `CadViewerProps.openInBrowser`:
+the CAD app's Open in browser, the web viewer's page of the document on screen or of the
+home, over the home too; the web app, itself that page, hands none). The navbar holds no settings.
 
 The app menu is FileViewer's, built from the host's `navigation.home`, `links` and
 `environment.platform` and the person's `FileViewerProps.appSettings` (which `CadViewer`
