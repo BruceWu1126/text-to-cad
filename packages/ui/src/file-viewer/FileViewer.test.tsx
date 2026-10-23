@@ -28,7 +28,7 @@ const navbar = () => document.querySelector('[data-viewer-navbar]');
 const fileName = () => document.querySelector<HTMLElement>('[data-file-name]')!;
 const labels = (selector = '[data-viewer-navbar]') => [...document.querySelectorAll(`${selector} a, ${selector} button`)].map(node => node.getAttribute('aria-label'));
 
-it('draws the navbar over every file, named by its name, and over the home with only its menu, update and Full size; never over a view shown small', async () => {
+it('draws the navbar over every file, named by its name, and over the home with only its menu, update, Full size and the host\'s last control; never over a view shown small', async () => {
   open({});
   await screen.findByText('shown');
   // The name, as words where nothing can be browsed; no logo with no home, no ⋯ where the host can do nothing.
@@ -40,15 +40,16 @@ it('draws the navbar over every file, named by its name, and over the home with 
   expect(navbar()).toBeNull();
   cleanup();
   // The home has the same navbar: the logo's menu, Back and Forward where the host keeps the view's
-  // history, and the host's update and Full size, as over a file; no file, no box for view controls.
+  // history, and the host's update, Full size and Open in browser, as over a file; no file, no box for view controls.
   const back = vi.fn();
   open({ host: { ...host, links: viewerLinks({ version: '0.7.4' }), navigation: { openFile() {}, home() {} } }, file: null,
     history: { canGoBack: true, canGoForward: false, back, forward() {} },
     update: <button type="button" aria-label="Update to 0.7.5" />, fullSize: <button type="button" aria-label="Full size" />,
+    openInBrowser: <button type="button" aria-label="Open in browser" />,
     presentation: { home: <p>home</p> } } as any);
   await screen.findByText('home');
   expect([labels(), document.querySelector('[data-file-name]'), document.querySelector('[data-view-controls]')])
-    .toEqual([['Menu', 'Back', 'Forward', 'Update to 0.7.5', 'Full size'], null, null]);
+    .toEqual([['Menu', 'Back', 'Forward', 'Update to 0.7.5', 'Full size', 'Open in browser'], null, null]);
   expect((screen.getByRole('button', { name: 'Forward' }) as HTMLButtonElement).disabled).toBe(true);
   await userEvent.setup().click(screen.getByRole('button', { name: 'Back' }));
   expect(back).toHaveBeenCalledOnce();
@@ -56,7 +57,7 @@ it('draws the navbar over every file, named by its name, and over the home with 
   expect(screen.queryByRole('menuitem', { name: 'Back to files' })).toBeNull();
 });
 
-it('keeps the right of the navbar for the host\'s update button and Full size, then hands the renderer a box for its own view controls, last; a view shown small has no navbar and no box', async () => {
+it('keeps the right of the navbar for the host\'s update button and Full size, then hands the renderer a box for its own view controls, then the host\'s Open in browser, last; a view shown small has no navbar and no box', async () => {
   // A renderer that draws its view controls into the box it is handed (the CAD viewer's Display
   // and Preview), and over its view where it is handed none.
   const handed: (HTMLElement | null)[] = [];
@@ -70,10 +71,11 @@ it('keeps the right of the navbar for the host\'s update button and Full size, t
     } }),
   });
   const view = (extra: object = {}) => render(<FileViewer file={FILE} host={{ ...host, ...extra } as any} renderers={[slotted]} state={{}} onStateChange={() => {}}
-    update={<button type="button" aria-label="Update to 0.7.5" />} fullSize={<button type="button" aria-label="Full size" />} />);
+    update={<button type="button" aria-label="Update to 0.7.5" />} fullSize={<button type="button" aria-label="Full size" />}
+    openInBrowser={<button type="button" aria-label="Open in browser" />} />);
   view();
   await screen.findByRole('button', { name: 'Preview' });
-  expect([labels(), screen.getByRole('button', { name: 'Preview' }).parentElement!.hasAttribute('data-view-controls')]).toEqual([['Update to 0.7.5', 'Full size', 'Preview'], true]);
+  expect([labels(), screen.getByRole('button', { name: 'Preview' }).parentElement!.hasAttribute('data-view-controls')]).toEqual([['Update to 0.7.5', 'Full size', 'Preview', 'Open in browser'], true]);
   cleanup();
   handed.length = 0;
   view({ environment: { colorScheme: 'light', compact: true } });

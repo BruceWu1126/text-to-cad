@@ -56,6 +56,8 @@ export default {
   "navbar.back": "뒤로",
   "navbar.forward": "앞으로",
   "navbar.fileActions": "파일 작업",
+  "navbar.fullSize": "전체 크기",
+  "navbar.openInBrowser": "브라우저에서 열기",
 
   "file.copyPath": "경로 복사",
   "file.revealFinder": "Finder에서 보기",

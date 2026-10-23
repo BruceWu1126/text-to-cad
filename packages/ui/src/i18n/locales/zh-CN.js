@@ -57,6 +57,8 @@ export default {
   "navbar.back": "后退",
   "navbar.forward": "前进",
   "navbar.fileActions": "文件操作",
+  "navbar.fullSize": "全尺寸",
+  "navbar.openInBrowser": "在浏览器中打开",
 
   "file.copyPath": "复制路径",
   "file.revealFinder": "在 Finder 中显示",

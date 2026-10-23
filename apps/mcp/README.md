@@ -26,7 +26,8 @@ extension):
   mounts a viewer card in the chat, and the host keeps the old cards. A card is
   the whole viewer at card size: its navbar (the logo, which opens the app menu,
   first; the file name that opens the explorer; the ⋯; then, at the right, the
-  update button, and Full size where the host can show a view full size), the tool strip
+  update button, Full size where the host can show a view full size, Display and
+  Preview, and last Open in browser), the tool strip
   ending in Display and Preview, the file sidebar, the view cube, and Quick Edit. A
   newer card retires the older ones.
 
@@ -63,7 +64,7 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   viewer) and Open with the desktop's chooser, where this computer has one
   (`pick`). The sidebar (`cad_home`) and a tab with nothing to show open on it; a
   model opened from it is shown in place. The home has the same navbar (the C menu, Back
-  and Forward, the update button and Full size); under its wordmark are GitHub,
+  and Forward, the update button, Full size and Open in browser); under its wordmark are GitHub,
   Discord and X.
 - **A view browses from its file's folder.** The file name in the navbar opens
   the explorer: one folder at a time, its subfolders and then its CAD files,
@@ -182,7 +183,9 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   and an `.xbf`'s reads too, dispatched directly to the engine's document router
   that serves them (`/__cad/api/...`) -- the
   library and its pictures, Open (`/__cad/pick`), Reveal, the person's analytics
-  answer and language, the update check. Only the clipboard stays the host's: a
+  answer and language, the update check. One route is the server's own, not the
+  viewer's: `/__cad/browser`, the web viewer's page of what the view shows, for Open
+  in browser. Only the clipboard stays the host's: a
   view copies through its frame. `cad_sync` and `cad_capture_reply` remain app-only
   and are absent in text-only hosts. `cad_http` is shared with agents: without
   an app capability, only telemetry status and opt-out are authorized. Every
@@ -275,7 +278,12 @@ another model or the home drops it, as in the web Viewer. A view the
 host creates again (its frame re-created) starts afresh: nothing names a view across its
 frames, so there is nothing to keep its record under. `App.tsx` frames it (full page, or
 an inline card whose height the host is told; its Full size is the last of the navbar's
-controls). In a tab, Codex's composer floats over the page, and the
+own controls before the view's). Last in the navbar, in every presentation, Open in browser
+opens the web viewer's page of what the view shows — the document's, `/<id>` with the
+viewer token, or the home's — through `ui/open-link`: the card asks the server for it
+(`GET /__cad/browser`, a `cad_http` route of the app's alone, answered by the same
+`browser.viewer_url` a text-only host's `cad_show` links) whenever what it shows changes,
+and draws no button where the engine gives no page. In a tab, Codex's composer floats over the page, and the
 home's list scrolls clear of it (`--cad-host-bottom-inset`). The cube sits at bottom-left
 in this tab presentation, across sidebar, thread and file views, so the composer and
 sidebar chat button can occupy bottom-right. `App.tsx` supplies

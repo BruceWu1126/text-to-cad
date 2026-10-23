@@ -152,6 +152,9 @@ _READ_ONLY = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": F
 # Shared with agents, but the viewer routes require the capability delivered only to the UI.
 _APP_TOKEN_META = "dev.texttocad/httpToken"
 _APP_TOKEN_HEADER = "x-cadgen-app"
+# The card's Open in browser: the web viewer's page of what it shows (``_browser_page``), a route of
+# the app's alone -- an agent's or a text client's request never reaches it.
+_BROWSER_ROUTE = "/__cad/browser"
 _HTTP_TOOL = {
     "name": "cad_http", "title": "CAD HTTP request", "icons": [ICON],
     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
@@ -633,13 +636,38 @@ class Server:
         self.views.post([view.id], {"type": "show", "launch": launch})
         return _text(f"Showing {model} in CAD.", {"delivered": 1, "view": view.id})
 
+    def _browser_url(self, model: str | None = None) -> str:
+        """The web viewer's page of ``model`` (an absolute path or a document id), or of the home
+        without one: the engine's own (``browser.viewer_url``), started if none runs. Raises
+        ``ViewerUnavailable`` where the engine can give none."""
+        from .browser import viewer_url
+
+        return (self._viewer_url or viewer_url)(model)
+
+    def _browser_page(self, method: str, url: str) -> dict[str, Any]:
+        """``GET /__cad/browser[?model=<path or id>]``, the card's Open in browser: ``{"url": ...}``,
+        the page a text client's ``cad_show`` links for the document the card shows (the home's
+        with none), or 503 where the engine can give none and the card draws no button."""
+        from cadgen.viewer import url_norm
+        from .browser import ViewerUnavailable
+        from .tunnel import _result
+
+        json_type = {"content-type": "application/json"}
+        if method.upper() != "GET":
+            return _result(405, {"allow": "GET"}, b"")
+        try:
+            link = self._browser_url(url_norm.request_query(url).get("model") or None)
+        except ViewerUnavailable as failure:
+            return _result(503, json_type, json.dumps({"error": str(failure)}).encode("utf-8"))
+        return _result(200, json_type, json.dumps({"url": link}).encode("utf-8"))
+
     def _show_in_browser(self, model: str) -> dict[str, Any]:
         """The model's link in the CAD Viewer this machine runs, started if none is."""
-        from .browser import ViewerUnavailable, viewer_url
+        from .browser import ViewerUnavailable
 
         self._model = model
         try:
-            link = (self._viewer_url or viewer_url)(model)
+            link = self._browser_url(model)
         except ViewerUnavailable as failure:
             raise ToolFailed(f"This app cannot show CAD views, and the CAD Viewer did not start ({failure}). Run "
                              f"`cadgen viewer --host 127.0.0.1 --json {model}` and open the url it prints.",
@@ -813,8 +841,12 @@ class Server:
         if token and not app:
             # A view opened in an earlier session (the engine restarted under its host) holds that one's.
             raise ToolFailed("This CAD view was opened before CAD restarted: close it and open CAD again.", "bad_request")
-        reply = self.tunnel.serve(method=str(arguments.get("method") or "GET"), url=str(arguments.get("url") or ""),
-                                  headers=headers, body=body, agent=not app)
+        method, url = str(arguments.get("method") or "GET"), str(arguments.get("url") or "")
+        from cadgen.viewer import url_norm
+
+        if app and url_norm.request_pathname(url) == _BROWSER_ROUTE:
+            return _data(self._browser_page(method, url))
+        reply = self.tunnel.serve(method=method, url=url, headers=headers, body=body, agent=not app)
         if app:
             return _data(reply)
         return _text(base64.b64decode(reply["body"]).decode("utf-8"), reply, error=reply["status"] >= 400)
