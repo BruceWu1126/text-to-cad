@@ -260,36 +260,40 @@ def rig():
     return bd.Compound(children=[bd.Box(120, 80, 6), bd.Pos(0, 0, 20) * motor], label="rig")
 ```
 
-## Code: `cadgen build`
+## In-memory models and shapes made elsewhere
 
-`cadgen build` builds one model from source text, for a quick shape or a probe. The
-code assigns its final shape to `result`; output flags declare its destination. A
-file flag writes its kind at the path given or its CLI default (`--xbf` is `XBF/<name>.xbf` in the working folder):
+A model is a Python script: decorated functions declare models, explicit calls build
+them, and `python script.py` runs the program. No command builds source text. A bare
+`@model` keeps its document in the engine's memory with no file. A script model is
+addressed by its absolute path and function name, `/path/parts.py::bracket`, so
+functions in different scripts do not clash; `cadgen serve`, `snapshot`, `export`
+and `inspect` accept these addresses. An in-memory model keeps no files or restart
+cache; the viewer's In memory list loses it when its worker retires or the engine
+restarts. Running the script again updates the same address and its open viewers.
 
-```bash
-cadgen build 'import build123d as bd
-result = bd.Box(10, 10, 10) - bd.Cylinder(3, 10)' --name cube --xbf --step out/cube.step
+```python
+# parts/bracket.py
+import build123d as bd
+from cadgen import model
+
+
+@model
+def bracket():
+    return bd.Box(10, 20, 3)
+
+
+if __name__ == "__main__":
+    bracket()
 ```
 
-`--model NAME` explicitly declares an in-memory model. At least one of `--model`
-or a file flag is required; a command with no output declaration fails before
-executing its code. Building the same named model again updates `code::NAME`.
-The name is required with `--model`, and is unique within this installation's
-engine. A script model is addressed by its absolute path and function name,
-`/path/parts.py::bracket`, so functions in different scripts do not clash.
-`cadgen serve`, `snapshot`, `export`, and `where` accept these addresses.
-`--model` keeps no files or restart cache; the viewer's In memory list disappears
-when its workers retire or the engine restarts. `--model` cannot use `--no-daemon`.
-
 ```bash
-cadgen build 'import build123d as bd; result = bd.Box(10, 20, 3)' --model bracket
-cadgen snapshot code::bracket bracket.png
-cadgen export code::bracket bracket.step
+python parts/bracket.py
+cadgen snapshot "$PWD/parts/bracket.py::bracket" bracket.png
+cadgen export "$PWD/parts/bracket.py::bracket" bracket.step
 ```
 
-`-` reads the code from stdin; `--name` (default `model`) names it, its elements and
-its warm worker; `--json` prints the report; `--verify` verifies its bodies. A
-script is never built this way: a script builds by running it.
+A shape already made in Python -- a quick probe, a shape from another library -- is
+built the same way: wrap the shape in a decorated function and call it.
 
 ## Progress and the report
 
@@ -332,8 +336,7 @@ python -c "import bracket; print(bracket.bracket.build().models[0]['retention'])
 ## The daemon
 
 One daemon per installation, started by the first build and gone after an idle
-hour. It keeps a warm worker per model script (and one per `cadgen build` name),
-each with its own memo, and builds of different scripts run at once.
+hour. It keeps a warm worker per model script, each with its own memo, and builds of different scripts run at once.
 
 - `cadgen status` lists the workers: each one's script, builds, memory and what it
   is building now (`--json` as data). `cadgen stop` stops the daemon and its
@@ -351,9 +354,5 @@ each with its own memo, and builds of different scripts run at once.
   `.xbf`.
 
 A successful server-backed build reports its model address and localhost viewer URL,
-including when it writes files. In Python, `cadgen.build(shape, model="part", step="part.step")`
-accepts an already-built build123d shape; its document and exports use the same worker
-writer. The operations that created that supplied shape ran in the caller and have
-no worker memo or feature provenance, and its faces and edges carry no element names
-(refs address them by ordinal, `part/face 3`). Use a decorated function for warm
-geometry replay and named elements.
+including when it writes files. To build a shape made elsewhere, wrap the shape in a
+decorated function: its document and exports are a model's like any other.

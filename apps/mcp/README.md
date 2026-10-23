@@ -36,13 +36,14 @@ with the model's link in this machine's CAD Viewer, started if none runs
 tells the shim that a client renders apps without advertising them, as the
 reference host `basic-host` does.
 
-The agent also has `cad_build`, `cad_export`, `cad_snapshot` and `cad_inspect` in
+The agent also has `cad_export`, `cad_snapshot` and `cad_inspect` in
 all presentations, including text-only hosts. They use the Python operations,
 not page state. Each tool starts work with a request ID and polls or cancels its
 own operation; there is no `cad_job` tool. See the
 [operation contract](../../packages/cadgen/README.md#agent-operations) for progress,
-retry, cancellation and explicit server-host destinations. Inspection never builds
-source. The web viewer's Export is a browser download; this page has no Export, having no HTTP origin to download from.
+retry, cancellation and explicit server-host destinations. No tool builds source
+text: to build a shape, wrap the shape in a decorated function and run its script.
+Inspection never builds. The web viewer's Export is a browser download; this page has no Export, having no HTTP origin to download from.
 
 ## The rules
 
@@ -314,8 +315,7 @@ built by `scripts/bundle/bundle.sh`.
 
 ## Live model addresses
 
-The catalog and open/show actions accept `script.py::name` and `code::name` as
-well as file paths. Python scripts open to a declaration list read without
+The catalog and open/show actions accept `script.py::name` as well as file paths. Python scripts open to a declaration list read without
 execution; selecting a model explicitly builds it. The shared viewer's In memory
 collection reads the installation engine's live metadata. It never enters saved
 recents or thumbnail storage, and disappears on worker retirement or engine restart.
