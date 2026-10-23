@@ -97,7 +97,7 @@ path, the rehearsal, and local/manual fallbacks.
 - `packages/core`: `@text-to-cad/core`, shared CAD/runtime/client code without React.
 - `packages/ui`: `@text-to-cad/ui`, the shared FileViewer, renderers, controls and styles.
 - `packages/cadgen`: the published distribution — the engine (models built into
-  `.xbf` documents and the STEP, GLB, STL, 3MF and DXF they declare), the skill
+  documents it holds, and the XBF, STEP, GLB, STL, 3MF and DXF files written from them), the skill
   CLI parsers, the CAD Viewer backend + client, and the browser runtime it serves.
 - `apps/docs/`: documentation site.
 - `apps/api/`: `api.texttocad.dev`, its own Vercel project: cadgen's version feed (read from PyPI) and the CAD app's consented analytics.
@@ -119,7 +119,7 @@ path, the rehearsal, and local/manual fallbacks.
   - `packages/core/docs/`: `render-pipeline.md`, `resource-ownership.md`,
     `tube-skins.md`.
   - `packages/ui/docs/`: `settings-ui.md` (BINDING for any settings control),
-    `render-types.md`, `render-mode.md`, `loading.md`, `storage.md`, `backend.md`.
+    `render-types.md`, `render-mode.md`, `loading.md`, `viewer-host.md`.
 - Ships-alone law: `packages/cadgen` (the built PyPI wheel) works in isolation
   outside this repo, so its markdown must not refer to anything outside the
   package — enforced by `tests/python/global/test_package_boundaries.py`.
@@ -201,7 +201,7 @@ path, the rehearsal, and local/manual fallbacks.
   ships in the wheel at `cadgen/_runtime/viewer` (built, never committed; a
   checkout serves `apps/web/dist`). The CAD, DXF and robot-description skills document that verb directly.
   Nothing in `cadgen.viewer` imports the CAD kernel at module scope — a STEP or
-  `.xbf` it shows is read and meshed by the engine's daemon (`viewer/xbf.py`),
+  `.xbf` it shows is read and meshed by the engine (`viewer/documents.py`),
   never by a request's thread.
   Keep repo-level tooling in `scripts/`, not under `apps/web/`.
 - `packages/core` stays non-React. Shared FileViewer/renderers belong in
