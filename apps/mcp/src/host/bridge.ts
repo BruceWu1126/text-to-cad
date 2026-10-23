@@ -18,6 +18,7 @@ export interface HostContext {
 }
 
 export interface ToolResult {
+  _meta?: Record<string, unknown>;
   content?: Array<{ type: string; text?: string; [key: string]: unknown }>;
   structuredContent?: Record<string, unknown>;
   isError?: boolean;

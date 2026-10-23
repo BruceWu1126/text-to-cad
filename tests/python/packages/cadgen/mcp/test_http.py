@@ -56,6 +56,14 @@ class HttpSessionsTest(unittest.TestCase):
     def test_two_sessions_share_engine_and_router_but_not_conversation_views(self):
         first, second = self.proxy(), self.proxy()
         self.assertNotEqual(first.session, second.session)
+        # Agent access works over the real transport before any view has opened.
+        status = self.tool(first, 'cad_http', {'method': 'GET', 'url': '/__cad/analytics'})
+        self.assertEqual(status['structuredContent']['status'], 200)
+        self.assertIn('sharing', json.loads(status['content'][0]['text']))
+        refused = self.tool(first, 'cad_http', {'method': 'POST', 'url': '/__cad/analytics',
+                            'body': base64.b64encode(b'{"share":true}').decode()})
+        self.assertTrue(refused['isError'])
+        self.assertEqual(refused['structuredContent']['status'], 403)
         info = request({'op': 'status'})
         sessions = {item['id'] for item in info['sessions'] if item['kind'] == 'mcp'}
         self.assertTrue({first.session, second.session} <= sessions)
@@ -63,7 +71,8 @@ class HttpSessionsTest(unittest.TestCase):
                   'state': {'selection': ['part#f1']}, 'focused': True})
         self.assertEqual(self.tool(first, 'cad_view')['structuredContent']['views'][0]['selection'], ['part#f1'])
         self.assertEqual(self.tool(second, 'cad_view')['structuredContent']['views'], [])
-        reply = self.tool(first, 'cad_http', {'url': '/__cad/server'})['structuredContent']
+        token = self.tool(first, 'cad_tab')['_meta']['dev.texttocad/httpToken']
+        reply = self.tool(first, 'cad_http', {'method': 'GET', 'url': '/__cad/server', 'headers': {'x-cadgen-app': token}})['structuredContent']
         self.assertEqual(reply['status'], 200)
         self.assertEqual(json.loads(base64.b64decode(reply['body']))['pid'], info['pid'])
         first.close()

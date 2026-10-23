@@ -67,7 +67,7 @@ function host(initial: HostContext, hostCapabilities: Record<string, unknown> = 
   return { bridge, server };
 }
 // The home, as the server launches it: the library, with Open on a computer that has a chooser.
-const home: Launch = { protocol: 7, page: 'home', model: null, pick: true };
+const home: Launch = { protocol: 8, page: 'home', model: null, pick: true };
 const sized = (notify: ReturnType<typeof vi.fn>) => notify.mock.calls.filter(([method]) => method === 'ui/notifications/size-changed');
 
 it('a tab host gets the page it always had, down to its bottom: the home, with no card to size and no full-size button', () => {

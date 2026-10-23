@@ -247,9 +247,11 @@ finally:
         copy = self.base / "tunnelled.step"
         shutil.copyfile(self.step, copy)
 
+        token = proxy.handle('tools/call', {'name': 'cad_show', 'arguments': {'path': str(copy)}}, context)['_meta']['dev.texttocad/httpToken']
+
         def get(url: str):
             reply = proxy.handle('tools/call', {'name': 'cad_http', 'arguments':
-                         {'method': 'GET', 'url': f'http://cad.invalid{url}'}}, context)['structuredContent']
+                         {'method': 'GET', 'url': f'http://cad.invalid{url}', 'headers': {'x-cadgen-app': token}}}, context)['structuredContent']
             body = base64.b64decode(reply.get("body") or "")
             return reply["status"], gzip.decompress(body) if reply.get("encoding") == "gzip" else body
 

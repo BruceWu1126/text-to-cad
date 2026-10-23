@@ -8,7 +8,7 @@ import type { Bridge, CallOptions, ToolResult } from './bridge';
  * needs to start on it alone; a view makes one call a second (`cad_sync`) and reaches the viewer's
  * routes through `cad_http`.
  */
-export const PROTOCOL = 7;
+export const PROTOCOL = 8;
 
 /** What an opening tool tells the page to show. The server decides all of it. */
 export interface Launch {
@@ -62,7 +62,7 @@ export function readLaunch(result: ToolResult | undefined): Launch | null {
 }
 
 /** CAD's server, as this page calls it through the host. */
-export function createServer(bridge: Pick<Bridge, 'callTool'>) {
+export function createServer(bridge: Pick<Bridge, 'callTool'>, appToken: string) {
   async function call<T>(name: string, args: Record<string, unknown> = {}, options?: CallOptions): Promise<T> {
     const result = await bridge.callTool(name, args, options);
     if (result.isError) throw new ServerError(toolText(result));
@@ -76,7 +76,7 @@ export function createServer(bridge: Pick<Bridge, 'callTool'>) {
       call('cad_capture_reply', { requestId, ...reply }),
     /** One request to the viewer's routes (`host/tunnel.ts`): everything else the page asks of the server. */
     http: (args: { method: string; url: string; headers: Record<string, string>; body: string }, options?: CallOptions) =>
-      call<HttpReply>('cad_http', args, options),
+      call<HttpReply>('cad_http', { ...args, headers: { ...args.headers, 'x-cadgen-app': appToken } }, options),
   };
 }
 export type Server = ReturnType<typeof createServer>;

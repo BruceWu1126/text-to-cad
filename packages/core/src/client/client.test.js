@@ -311,7 +311,7 @@ test('the library, Open, Reveal and the person\'s settings are guarded requests 
   await client.consent();
   await client.consent(true);
   await client.consent(false);
-  await client.features({ quickEdit: false });
+  assert.equal(client.features, undefined);
   await client.language();
   await client.language('zh-CN');
   await client.language(null);
@@ -328,7 +328,6 @@ test('the library, Open, Reveal and the person\'s settings are guarded requests 
     ['/__cad/reveal', 'POST', '1', { path: '/models/a.step' }], ['/__cad/reveal', 'POST', '1', { path: '/models/gone.step' }],
     ['/__cad/analytics', 'GET', null, null],
     ['/__cad/analytics', 'POST', '1', { share: true }], ['/__cad/analytics', 'POST', '1', { share: false }],
-    ['/__cad/features', 'POST', '1', { quickEdit: false }],
     ['/__cad/language', 'GET', null, null],
     ['/__cad/language', 'POST', '1', { locale: 'zh-CN' }], ['/__cad/language', 'POST', '1', { locale: null }],
     ['/__cad/version', 'GET', null, null],

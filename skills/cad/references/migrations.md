@@ -7,6 +7,19 @@ argument, key or import is gone, and fails the way an unknown one does (an unkno
 command, an unrecognized argument, an unknown key, an `ImportError`) without naming
 what replaced it. The sections below map old forms to current ones.
 
+## CAD app settings and telemetry in 0.8
+
+Quick Edit has no enable/disable preference. The `features` settings API and
+`/__cad/features` route are removed; a stale `features.quickEdit: false` does not
+hide Quick Edit and needs no conversion.
+
+The MCP `cad_telemetry` tool is removed. Use `cad_http` with method `GET`, URL
+`/__cad/analytics` for status, or method `POST` and base64 body
+`eyJzaGFyZSI6ZmFsc2V9` (`{"share":false}`) when the person requests opt-out.
+No open CAD page is needed. Agents cannot opt in or reach other viewer routes.
+The app page moves to protocol 8 and receives its route capability through
+UI-only launch metadata; reopen a restored page after updating.
+
 ## Models build into documents in 0.8
 
 cadgen 0.8 builds models with its engine: a model's result is an `.xbf` document,

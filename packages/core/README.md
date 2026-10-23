@@ -172,7 +172,7 @@ inert; subscriptions start catalog polling, which the host's `shouldPoll` gates
 (the web's pauses while its page is hidden). The client also carries what every
 CAD view asks of its server, so each host reaches it the same way: the model
 library (`recents`, `changeRecents`, `thumbnail`, `keepThumbnail`), Open
-(`pick`), Reveal (`reveal`), the person's analytics answer and feature settings (`consent`, `features`), the
+(`pick`), Reveal (`reveal`), the person's analytics answer and language (`consent`, `language`), the
 update check (`version`) and what the page did for
 telemetry (`reportActivity`: a touch, a Quick Edit that went, or a crash); every
 change is a POST with the viewer's guard header. A host reports its page's crashes

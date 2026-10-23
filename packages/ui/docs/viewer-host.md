@@ -503,6 +503,7 @@ hand's sub-toolbar under it, the file sidebar down the left edge, Quick Edit at 
 top-right, and the view cube at the bottom-right. A host's one notice goes through the shell too: `notice` is drawn at the top-right once the
 file is on screen, never while it loads or after it failed to, with Quick Edit stacked under
 it while it stands; the home never shows it. Neither app has one now.
+Quick Edit has no host preference or persisted enable/disable state.
 What Quick Edit offers follows the subscribed destination capability and
 the ports, never an app name: Copy Prompt always, Queue for a composer
 destination, Send where the prompt port has `send`. Native clipboard effects

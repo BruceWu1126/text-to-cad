@@ -734,6 +734,9 @@ selects nothing: the selection is as its first click found it.
 
 ## Quick Edit
 
+Quick Edit is always available in an interactive CAD view. It has no enable/disable
+control or persisted preference; stale settings cannot suppress it.
+
 Quick Edit is a person's note to their agent about the file on screen, and the
 one way the viewer hands it over: a box at the viewport's top-right, 8px in, on the
 floating surface. It is there only while it has something to carry or a note to keep:

@@ -276,7 +276,8 @@ writes. Clipboard operations, prompt delivery and the reload watcher live
 under `src/host`; shared UI receives their explicit ports. The browser file source
 exposes no general write operations.
 
-The prompt destination is the clipboard, so Quick Edit offers Copy Prompt alone. Its
+Quick Edit has no enable/disable preference; a stale `features.quickEdit: false`
+setting has no effect. The prompt destination is the clipboard, so Quick Edit offers Copy Prompt alone. Its
 text goes through the clipboard port's `writeText`, which takes pending text: a
 `ClipboardItem` holding the promise, so the write starts inside the gesture, or the
 text itself once it arrives where the browser takes no pending item. At the press,

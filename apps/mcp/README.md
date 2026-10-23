@@ -130,8 +130,12 @@ reference host `basic-host` does.
   a `cadgen` command has said so, once, and nothing asks. The app menu's **Share usage
   stats** (`appSettings`, through `/__cad/analytics`) changes the answer, one answer for
   this app and the browser viewer. The channel is reported with the
-  counts; it decides nothing there. The agent's `cad_telemetry` reports the
-  setting and turns it off, never on.
+  counts; it decides nothing there. The agent's `cad_http` reads the setting with
+  `GET /__cad/analytics` and turns it off with `POST /__cad/analytics`, body
+  `{"share":false}` (base64 in the tool call). This works with no open page and
+  in text-only hosts. Opt-out deletes the installation ID and requests deletion
+  of data sent under it. The reply's `saved:false` means persisting the choice
+  failed; agents cannot opt in.
 - **Told how it is presented, before it greets the host.** A host that mounts
   views inline is served the page with `<meta name="cad-presentation"
   content="inline">` in its head: the page offers that host `inline` and
@@ -168,10 +172,16 @@ reference host `basic-host` does.
   and an `.xbf`'s reads too, dispatched directly to the engine's document router
   that serves them (`/__cad/api/...`) -- the
   library and its pictures, Open (`/__cad/pick`), Reveal, the person's analytics
-  answer and features, the update check. Only the clipboard stays the host's: a
-  view copies through its frame. So the page has three tools of its own:
-  `cad_sync`, `cad_capture_reply` and `cad_http`, and a client with no page (a
-  text client) is listed none of them, so nothing there answers for the person.
+  answer and language, the update check. Only the clipboard stays the host's: a
+  view copies through its frame. `cad_sync` and `cad_capture_reply` remain app-only
+  and are absent in text-only hosts. `cad_http` is shared with agents: without
+  an app capability, only telemetry status and opt-out are authorized. Every
+  page launch includes a session capability in result `_meta["dev.texttocad/httpToken"]`,
+  which [MCP Apps hosts deliver to the UI](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx#2-tool-results), outside model context; content and structured content never
+  carry it. The page sends `x-cadgen-app` with HTTP calls. The server validates
+  it before routing or serving cached ranges. An arbitrary guard header, view
+  id, or caller assertion cannot grant app access; another session's capability
+  fails. The local host itself retains installation-level authority.
   The fetch is a distinct function, so workers are handed bytes rather than URLs.
 - **No reply a host cannot read.** A reply is one JSON-RPC message, its body
   base64 (4/3 of its size), and a host that caps one message closes the
@@ -220,6 +230,15 @@ reference host `basic-host` does.
   a show is of the model shown, never of the one the view is leaving. What it
   cannot wait out it says: a card the chat never drew, a model that did not finish
   loading, a view out of sight that did not answer.
+
+## Protocol migration
+
+Protocol 8 replaces protocol 7: reopen restored views so their launch carries the
+app capability. `cad_telemetry` is removed, with no alias; agents use `cad_http`
+with `GET /__cad/analytics` or opt-out `POST` and base64 `eyJzaGFyZSI6ZmFsc2V9`.
+The obsolete `/__cad/features` route and shared client's `features()` are removed.
+Quick Edit has no enable/disable setting in either app; stale `features.quickEdit`
+values have no reader and cannot hide it. Settings files need no conversion.
 
 ## Host adapter (`src/host`)
 

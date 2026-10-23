@@ -173,7 +173,10 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     operations run in child processes, never in the engine's request threads. Each
     page session keeps its own root; each MCP session owns its views and resource. The
     stdio shim owns only connection metadata. Sidebar sharing stays in memory, and host
-    quirks stay in the shim and page. See the engine's **Architecture**.
+    quirks stay in the shim and page. MCP's shared `cad_http` exposes only telemetry
+    status and opt-out to agents; other viewer routes require the session capability
+    delivered in UI-only launch metadata. Only the person can opt in through a page
+    or the telemetry CLI. See the engine's **Architecture**.
 
 21. **Python functions own operations; decorators and CLIs expose them.** Code and
     supplied-shape builds use the same document/output writer as decorated models.
@@ -221,8 +224,7 @@ src/cadgen/
   analytics.py           # telemetry: usage counts and crash reports, on by default once
                          #   a command has said so, never after a no
   settings.py            # the person's settings: settings.json in the state directory
-  features.py,           # the CAD views' features a person can turn off, and the
-  language.py            #   language they speak
+  language.py            # the language the person chose for the CAD views
   updates.py             # the daily version check, for a copy nothing else keeps current
   assets.py              # where the bundled runtime is
   build123d.py           # `from cadgen import build123d as bd`, the lazy re-export

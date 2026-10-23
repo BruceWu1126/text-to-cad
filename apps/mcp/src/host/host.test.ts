@@ -35,10 +35,11 @@ describe('the MCP Apps bridge', () => {
     await bridge.initialize({ name: 'CAD', version: 'test' });
     expect(bridge.hostContext.theme).toBe('dark');
     expect(frame.posted.some(message => message.method === 'ui/notifications/initialized')).toBe(true);
-    frame.deliver({ jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: { structuredContent: { launch: { page: 'home' } } } });
+    frame.deliver({ jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: { structuredContent: { launch: { page: 'home' } }, _meta: { 'dev.texttocad/httpToken': 'session-capability' } } });
     const seen: ToolResult[] = [];
     bridge.onToolResult(result => seen.push(result));
     expect(seen[0].structuredContent).toEqual({ launch: { page: 'home' } });
+    expect(seen[0]._meta?.['dev.texttocad/httpToken']).toBe('session-capability');
     frame.deliver({ jsonrpc: '2.0', method: 'ui/notifications/host-context-changed', params: { theme: 'light' } });
     expect(bridge.hostContext.theme).toBe('light');
   });
@@ -193,11 +194,12 @@ describe('the fetch tunnel', () => {
         calls.push({ name, args });
         return { structuredContent: { status: args.method === 'HEAD' ? 200 : 201, headers: { 'content-type': 'application/json', 'content-length': '11' }, body: encodeBase64(new TextEncoder().encode('{"ok":true}')) } };
       },
-    });
+    }, 'app-capability');
     const tunnel = createTunnelFetch(server);
     const posted = await tunnel(`${TUNNEL_ORIGIN}/__cad/parts?x=1`, { method: 'POST', headers: { 'x-cadgen-viewer': '1' }, body: '{"a":1}' });
     expect(calls[0]).toMatchObject({ name: 'cad_http', args: { method: 'POST', url: `${TUNNEL_ORIGIN}/__cad/parts?x=1` } });
     expect(calls[0].args.headers['x-cadgen-viewer']).toBe('1');
+    expect(calls[0].args.headers['x-cadgen-app']).toBe('app-capability');
     expect(new TextDecoder().decode(decodeBase64(calls[0].args.body))).toBe('{"a":1}');
     expect(posted.status).toBe(201);
     expect(await posted.json()).toEqual({ ok: true });
@@ -210,7 +212,7 @@ describe('the fetch tunnel', () => {
     const server = createServer({ callTool: async (_name, args) => {
       calls.push(args);
       return { structuredContent: { status: 200, headers: {}, body: '' } };
-    } });
+    } }, 'app-capability');
     await createTunnelFetch(server)(`${TUNNEL_ORIGIN}/__cad/api/doc/part/version?after=v&wait=60`);
     expect(new URL(calls[0].url).searchParams.get('wait')).toBe('0');
   });
@@ -222,7 +224,7 @@ describe('the fetch tunnel', () => {
     const server = createServer({
       callTool: async () => ({ structuredContent: { status: 200, encoding, body: encodeBase64(gzipped),
         headers: { 'content-type': 'application/json', 'content-length': String(json.length) } } }),
-    });
+    }, 'app-capability');
     const tunnel = createTunnelFetch(server);
     const reply = await tunnel(`${TUNNEL_ORIGIN}/__cad/catalog`);
     expect([reply.headers.get('content-length'), await reply.text()]).toEqual([String(json.length), json]);
@@ -231,7 +233,7 @@ describe('the fetch tunnel', () => {
   });
 
   it('turns a failed call into the TypeError fetch throws', async () => {
-    const tunnel = createTunnelFetch(createServer({ callTool: async () => ({ isError: true, content: [{ type: 'text', text: 'not this thread' }] }) }));
+    const tunnel = createTunnelFetch(createServer({ callTool: async () => ({ isError: true, content: [{ type: 'text', text: 'not this thread' }] }) }, 'app-capability'));
     await expect(tunnel(`${TUNNEL_ORIGIN}/__cad/catalog`)).rejects.toThrow(TypeError);
   });
 
@@ -295,7 +297,7 @@ function servingInParts(bytes: Uint8Array, {
         'content-range': `bytes ${first}-${last}/${bytes.length}`, etag: etag(first),
       } } };
     },
-  });
+  }, 'app-capability');
   return { server, ranges, continues, sizes };
 }
 

@@ -407,10 +407,6 @@ class CadApp:
                     self._handle_asset(request, response, query)
                 elif pathname == "/__cad/analytics" and self.analytics is not None:
                     response.send_json(200, self._consent())
-                elif pathname == "/__cad/features":
-                    from cadgen import features
-
-                    response.send_json(200, features.read())
                 elif pathname == "/__cad/language":
                     from cadgen import language
 
@@ -444,18 +440,10 @@ class CadApp:
                     if type(payload) is not dict:
                         raise ValueError("an analytics request is an object")
                     if pathname == "/__cad/analytics":
-                        response.send_json(200, self._consent(payload.get("share")))
+                        response.send_json(200, self._consent(payload.get("share"), by=request.consent_by))
                     else:
                         self._report_activity(payload)
                         response.send_empty(204)
-                elif pathname == "/__cad/features":
-                    # The app menu's features: the person's choices, one for every CAD view (``cadgen/features.py``).
-                    from cadgen import features
-
-                    if int(request.headers.get("content-length") or 0) > 4096:
-                        response.send_empty(413, [("connection", "close")])
-                        return
-                    response.send_json(200, features.change(json.loads(request.body() or b"{}")))
                 elif pathname == "/__cad/language":
                     # The app menu's Language: the person's choice, one for every CAD view (``cadgen/language.py``).
                     from cadgen import language
@@ -624,16 +612,16 @@ class CadApp:
 
     # --- usage stats (telemetry) --------------------------------------------
 
-    def _consent(self, share=None) -> dict:
+    def _consent(self, share=None, *, by=None) -> dict:
         """The app menu's Share anonymous usage data toggle: whether sharing is on and why, and, from the person's
         click, their answer, which changes it whenever. Nothing asks: telemetry is on by default once a
         ``cadgen`` command has said so (``cadgen/analytics.py``)."""
         from cadgen.analytics import PRIVACY_URL
 
-        if isinstance(share, bool):
-            self.analytics.choose(share, by=self.consent_by)
+        changed = self.analytics.choose(share, by=by or self.consent_by) if isinstance(share, bool) else None
         found = self.analytics.status()
-        return {"sharing": found["sharing"], "reason": found["reason"], "policy": PRIVACY_URL}
+        return {"sharing": found["sharing"], "reason": found["reason"], "policy": PRIVACY_URL,
+                **({"saved": bool(changed.get("saved"))} if changed is not None else {})}
 
     def _version(self) -> dict:
         """The page's update button (``cadgen/updates.py``): whether a newer text-to-cad is out, from

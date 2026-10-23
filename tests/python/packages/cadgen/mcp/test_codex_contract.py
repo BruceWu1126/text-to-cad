@@ -69,6 +69,8 @@ def converse(tmp: Path) -> dict:
         },
     }
     for result in record["launches"].values():
+        if "dev.texttocad/httpToken" in result.get("_meta", {}):
+            result["_meta"]["dev.texttocad/httpToken"] = "<app-token>"
         launch = (result.get("structuredContent") or {}).get("launch")
         if isinstance(launch, dict):  # this run's install and machine, not the contract
             launch.update({key: f"<{key}>" for key in ("version", "platform", "pick", "notice") if key in launch})

@@ -11,7 +11,7 @@ open, a view makes ONE call each second, ``cad_sync``: it says what it shows (it
 model, its selection, whether a person just touched it) and what it watches (its
 model's catalog entry), and gets back the agent's requests
 and what changed. Everything else -- its model, the library and the home's Open,
-Reveal, the person's analytics answer and features, the update check -- it reaches
+Reveal, the person's analytics answer and language, the update check -- it reaches
 through ``cad_http``, the viewer's own HTTP routes. No call is held open
 (``views.py``). Agents name models by absolute path only.
 
@@ -30,7 +30,7 @@ Hosts present views in one of three ways, told apart at initialize:
   ``cad_show`` returned: one session may serve many chats, and no host says which.
 - *Text* (a client that renders no MCP Apps, so does not advertise the
   ``io.modelcontextprotocol/ui`` extension: Grok, Zed, Gemini CLI, Claude Code in a
-  terminal, ...). ``cad_show`` is the only tool, and it answers with a link to the
+  terminal, ...). ``cad_show`` shows models, and it answers with a link to the
   model in the CAD Viewer (``browser.py``), the one this machine runs, started
   if none is; nothing opens a browser.
 
@@ -45,6 +45,7 @@ import binascii
 import json
 import logging
 import os
+import secrets
 import sys
 import itertools
 import time
@@ -68,7 +69,7 @@ TITLE = "CAD"
 # path (`page: viewer`) or the home (`page: home`, its recents with it), and carries what the page
 # needs to start on it alone (the server's version and platform); a view makes one call a second
 # (`cad_sync`) and reaches the viewer's routes through `cad_http`, by absolute path.
-PROTOCOL = 7
+PROTOCOL = 8
 _PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 _RESOURCE_NOT_FOUND = -32002
 EXTENSIONS = sorted(VIEWER_EXTENSIONS)
@@ -148,16 +149,21 @@ _VIEW = {"type": "string", "description": "A view id from cad_view; defaults to 
 _WATCH = _object({"file": {"type": ["string", "null"]}})
 _SHOWN_VIEW = {"type": "string", "description": "The view that cad_show returned."}
 _READ_ONLY = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}
-# Every client's: the agent reports CAD's telemetry setting, or turns sharing off when the user asks.
-_TELEMETRY_TOOL = {
-    "name": "cad_telemetry", "title": "CAD telemetry", "icons": [ICON],
-    "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
-    "description": ("Report whether cadgen sends usage stats (counts of tool calls, view activity, files shown, builds "
-                    "and snapshots) and crash reports (where cadgen's own code failed, never a message), tagged with a "
-                    "random ID and never file names, paths, contents or prompts, or turn them off. Call with action off "
-                    "only when the user asks."),
-    "inputSchema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["status", "off"]}},
-                    "additionalProperties": False},
+# Shared with agents, but the viewer routes require the capability delivered only to the UI.
+_APP_TOKEN_META = "dev.texttocad/httpToken"
+_APP_TOKEN_HEADER = "x-cadgen-app"
+_HTTP_TOOL = {
+    "name": "cad_http", "title": "CAD HTTP request", "icons": [ICON],
+    "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
+    "description": ("Read CAD telemetry status with method GET and url /__cad/analytics. "
+                    "Only when the user asks to opt out, POST to that URL with base64 body eyJzaGFyZSI6ZmFsc2V9 "
+                    "(JSON {\"share\":false}). Opt-out removes the installation ID and requests deletion of previously "
+                    "sent data; saved:false means the choice could not be persisted. Agents cannot opt in or access "
+                    "other routes. CAD app requests carry a session capability. Replies contain HTTP status, headers "
+                    "and a base64 body; agent replies also include readable JSON text."),
+    "inputSchema": _object({"method": {"type": "string"}, "url": {"type": "string"},
+                            "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+                            "body": {"type": "string", "description": "Base64-encoded request body."}}, ["method", "url"]),
 }
 
 
@@ -236,6 +242,7 @@ class Server:
         self._viewer_url = viewer_url
         self._order = itertools.count(1)
         self._analytics = analytics
+        self._app_token = secrets.token_urlsafe(32)
         self._update_told = False
         # Inline views this server named that have not synced yet, oldest first; when cad_open last opened a tab.
         self._mounting: dict[str, None] = {}
@@ -388,7 +395,7 @@ class Server:
             {"name": "cad_screenshot", "title": "Capture CAD view", "icons": [ICON], "annotations": _READ_ONLY,
              "description": "Capture a PNG of exactly what an open CAD viewer in this thread shows right now.",
              "inputSchema": _object({"view": _VIEW})},
-            _TELEMETRY_TOOL,
+            _HTTP_TOOL,
             *self._page_tools(),
         ]
 
@@ -408,7 +415,7 @@ class Server:
             {"name": "cad_screenshot", "title": "Capture CAD view", "icons": [ICON], "annotations": _READ_ONLY,
              "description": "Capture a PNG of exactly what a CAD viewer in this chat shows right now.",
              "inputSchema": _object({"view": _SHOWN_VIEW}, ["view"])},
-            _TELEMETRY_TOOL,
+            _HTTP_TOOL,
             *self._page_tools(),
         ]
 
@@ -420,11 +427,11 @@ class Server:
                              "Viewer in the user's browser; this app cannot show CAD views itself. The Viewer refreshes "
                              "when the file changes, so share a model's link once, not after every rebuild."),
              "inputSchema": _object({"path": _PATH}, ["path"])},
-            _TELEMETRY_TOOL,
+            _HTTP_TOOL,
         ]
 
     def _page_tools(self) -> list[dict[str, Any]]:
-        """The tools only the page calls: its sync, its answer to a capture, and the viewer's routes."""
+        """The tools only the page calls: its sync and its answer to a capture."""
 
         def app(name: str, title: str, description: str, schema: dict[str, Any]) -> dict[str, Any]:
             return {"name": name, "title": title, "description": description, "inputSchema": schema,
@@ -437,10 +444,6 @@ class Server:
                          "watch": _WATCH}, ["view", "surface"])),
             app("cad_capture_reply", "Answer CAD", "Answer the server's request for a capture.",
                 _object({"requestId": {"type": "string"}, "png": {"type": "string"}, "error": {"type": "string"}}, ["requestId"])),
-            app("cad_http", "CAD viewer request", "One request to the CAD viewer's routes, bodies base64.",
-                _object({"method": {"type": "string"}, "url": {"type": "string"},
-                         "headers": {"type": "object", "additionalProperties": {"type": "string"}},
-                         "body": {"type": "string"}}, ["method", "url"])),
         ]
 
     # -- calls -----------------------------------------------------------------
@@ -450,8 +453,8 @@ class Server:
         arguments = params.get("arguments") or {}
         if not isinstance(arguments, dict):
             raise RpcError(INVALID_PARAMS, "arguments must be an object")
-        # Only a tool this client was listed: a text client has no page, so no one there answers a
-        # card or reaches the viewer's routes for the person.
+        # Only a tool this client was listed: text clients have no page tools.
+        # Shared HTTP calls enforce their own route and consent authorization.
         listed = any(tool["name"] == name for tool in self.tools())
         handler = getattr(self, f"_tool_{name}", None) if listed else None
         if handler is None:
@@ -460,6 +463,9 @@ class Server:
         ok, reason = False, "bug"  # anything a handler raises but ToolFailed is cadgen's own (``handle`` reports it)
         try:
             result = handler(arguments, context)
+            if not self.text and isinstance(result.get("structuredContent", {}).get("launch"), dict):
+                # MCP result metadata is delivered to the app, never put in the model's context.
+                result.setdefault("_meta", {})[_APP_TOKEN_META] = self._app_token
             ok = not (isinstance(result, dict) and result.get("isError"))
             return result
         except ToolFailed as failure:
@@ -553,31 +559,6 @@ class Server:
         launch = self._launch(model, surface="agent")
         self._opened = time.monotonic()
         return _text(f"{model} is open in a new CAD tab. From now on, use cad_show to show models in it.", {"launch": launch})
-
-    def _tool_cad_telemetry(self, arguments, context):
-        # The agent may report the setting or turn sharing off for the person; only the person turns it on.
-        from cadgen.analytics import PRIVACY_URL
-
-        if arguments.get("action") == "off":
-            if not self.analytics.choose(False, by="agent").get("saved"):
-                return _text("CAD telemetry could not be turned off for good: cadgen's state directory could not be "
-                             "written. This CAD app sends nothing more until it restarts; DO_NOT_TRACK=1 in the agent "
-                             "app's environment keeps telemetry off.", {"sharing": False})
-            return _text("CAD telemetry is off. The install id was deleted, and the data sent under it is being deleted.",
-                         {"sharing": False})
-        found = self.analytics.status()
-        why = {"environment": "set by the environment (DO_NOT_TRACK or CADGEN_TELEMETRY)",
-               "choice": "the user's choice",
-               "default": "on by default: a cadgen command told the user once",
-               "untold": "not on: no cadgen command has told the user, and none does in CI or from a development install"}.get(
-                   found["reason"], "off: the setting could not be read")
-        state = "on" if found["sharing"] else "off"
-        return _text(f"cadgen's usage stats and crash reports are {state} ({why}). They count CAD tool calls, view "
-                     "activity, files shown, builds and snapshots, and report where cadgen's own code failed (never a "
-                     "message), tagged with a random ID; never file names, paths, contents or prompts. The user "
-                     "turns them off in the CAD app's menu (the logo at the top left of a view) or with "
-                     f"`cadgen telemetry off`. Policy: {PRIVACY_URL}",
-                     {"sharing": found["sharing"], "reason": found["reason"]})
 
     # the agent's tools ----------------------------------------------------------
 
@@ -808,5 +789,13 @@ class Server:
         except (ValueError, binascii.Error) as error:
             raise ToolFailed(str(error), "bad_request") from error
         headers = arguments.get("headers") if isinstance(arguments.get("headers"), dict) else {}
-        return _data(self.tunnel.serve(method=str(arguments.get("method") or "GET"), url=str(arguments.get("url") or ""),
-                                       headers=headers, body=body))
+        headers = {name.lower(): str(value) for name, value in headers.items()}
+        token = headers.pop(_APP_TOKEN_HEADER, "")
+        app = not self.text and secrets.compare_digest(token.encode("utf-8"), self._app_token.encode("utf-8"))
+        if token and not app:
+            raise ToolFailed("Invalid CAD app capability.", "bad_request")
+        reply = self.tunnel.serve(method=str(arguments.get("method") or "GET"), url=str(arguments.get("url") or ""),
+                                  headers=headers, body=body, agent=not app)
+        if app:
+            return _data(reply)
+        return _text(base64.b64decode(reply["body"]).decode("utf-8"), reply, error=reply["status"] >= 400)

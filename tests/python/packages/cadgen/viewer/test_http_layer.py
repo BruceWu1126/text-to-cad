@@ -687,7 +687,7 @@ class RequestBodies(HttpLayerTestCase):
     def test_a_body_cap_precedes_the_body_read_and_closes_the_connection(self):
         from cadgen.viewer.http_app import _LIBRARY_BODY_LIMIT
 
-        for path, limit in (("/__cad/features", 4096), ("/__cad/language", 4096),
+        for path, limit in (("/__cad/language", 4096),
                             ("/__cad/recents", _LIBRARY_BODY_LIMIT)):
             with self.subTest(path=path):
                 raw = self.fixture.raw(
