@@ -86,6 +86,38 @@ class PythonTestRunnerIsolation(unittest.TestCase):
 
 
 class HangGuard(unittest.TestCase):
+    def test_a_live_caller_can_prepare_its_input_before_starting_a_daemon(self):
+        from tests.python.support import engine_daemon
+
+        process = mock.Mock(stdout=io.BytesIO(b"built\n"), stderr=io.BytesIO(), returncode=0)
+        process.poll.side_effect = [None, 0]
+        readers = []
+
+        def reader(*, target, args, daemon):
+            thread = mock.Mock()
+            thread.start.side_effect = lambda: target(*args)
+            thread.is_alive.return_value = False
+            readers.append(thread)
+            return thread
+
+        # Simulate a cold import taking longer than the retired 30-second startup
+        # heuristic, without delaying the test. The command has not asked for a server.
+        with mock.patch.object(engine_daemon.threading, "Thread", side_effect=reader), \
+                mock.patch.object(engine_daemon.time, "monotonic", side_effect=[0, 35, 60]), \
+                mock.patch.object(engine_daemon.time, "sleep"):
+            self.assertEqual(engine_daemon.communicate(process, {}), ("built\n", ""))
+        process.kill.assert_not_called()
+
+        # The overall command timeout still bounds a caller that never finishes.
+        process = mock.Mock(stdout=io.BytesIO(), stderr=io.BytesIO())
+        process.poll.return_value = None
+        with mock.patch.object(engine_daemon.threading, "Thread", side_effect=reader), \
+                mock.patch.object(engine_daemon.time, "monotonic", side_effect=[0, 301]), \
+                mock.patch.object(engine_daemon, "report", return_value="journal"):
+            with self.assertRaisesRegex(AssertionError, "did not finish in 300 s"):
+                engine_daemon.communicate(process, {})
+        process.kill.assert_called_once()
+
     def test_a_hung_file_fails_by_name_with_its_stack(self):
         # A hung file once held a CI job silent for 42 minutes, until it was cancelled.
         with tempfile.TemporaryDirectory() as scratch:

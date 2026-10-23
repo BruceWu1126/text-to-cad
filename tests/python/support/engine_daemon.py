@@ -7,13 +7,13 @@ there (``engine_journal/sitecustomize.py``). ``run``/``communicate`` stand in fo
 ``subprocess.run``/``Popen.communicate`` with a timeout, and fail early, with the journal,
 the state folder and the command's output in the message, when:
 
-- the command is running, ``GRACE_SECONDS`` have passed, and no daemon is observably coming:
-  no daemon process of the journal is alive and the state folder holds no socket or port;
 - the command has exited but its output stays open ``HELD_SECONDS``: a process it started
   holds the command's stdout or stderr, so a plain ``communicate`` would wait for that one;
 - the timeout passes.
 
-The message counts the daemons started and says whether the first one ever listened."""
+The message counts the daemons started and says whether the first one ever listened.
+A live caller may still be importing the kernel or building its input shape before it
+asks for a daemon; absence of a daemon is not evidence that the command has hung."""
 
 from __future__ import annotations
 
@@ -29,7 +29,6 @@ from typing import Any, Callable, Sequence
 
 SITE = Path(__file__).resolve().parent / "engine_journal"
 JOURNAL = "CADGEN_TEST_JOURNAL"
-GRACE_SECONDS = 30.0
 HELD_SECONDS = 10.0
 TIMEOUT_SECONDS = 300.0
 STACK_LINES = 30  # a thread's innermost frames: where it waits
@@ -89,10 +88,6 @@ def communicate(process: subprocess.Popen, env: dict[str, str],
         elif now - started > timeout:
             why = f"did not finish in {timeout:.0f} s"
             break
-        elif now - started > GRACE_SECONDS and not _coming(env):
-            why = (f"no daemon is coming after {GRACE_SECONDS:.0f} s: no daemon of its journal is alive and the "
-                   "state folder holds no socket or port")
-            break
         time.sleep(0.2)
     process.kill()
     for reader in readers:
@@ -109,13 +104,6 @@ def _text(data: bytes) -> str:
 def _state(env: dict[str, str]) -> Path | None:
     folder = env.get("CADGEN_ENGINE_DIR")
     return Path(folder) if folder else None
-
-
-def _coming(env: dict[str, str]) -> bool:
-    state = _state(env)
-    if state is not None and any(state.glob("*.sock")) | any(state.glob("*.port")):
-        return True
-    return any(_alive(pid) for role, pid in _processes(env) if role == "daemon")
 
 
 def _processes(env: dict[str, str]) -> list[tuple[str, int]]:
