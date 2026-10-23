@@ -246,14 +246,16 @@ class ExportJobs(Jobs):
             return self.public(job)
 
     def get(self, ident, after=None, wait=0):
-        """A job's state; asked ``after`` its sequence, a ready job's answer waits too, for its file
-        to go (fetched, or past its window): what turns the page's Download again into Export again."""
+        """A job's state; asked ``after`` its sequence, the answer waits for the next change, an
+        unfinished job's as a ready one's, whose file going (fetched, or past its window) is what
+        turns the page's Download again into Export again."""
         with self.changed:
             self._prune()
             job = self.jobs.get(ident)
             if job is not None and after is not None and job["sequence"] == after and job["state"] == "ready":
                 self.changed.wait_for(lambda: job["sequence"] != after, timeout=min(25, max(0, wait)))
-            return super().get(ident)
+                return super().get(ident)
+            return super().get(ident, after, wait)
 
     def fetched(self, ident):
         """The browser has the whole file: it is deleted now, its job expired as ``fetched``."""
