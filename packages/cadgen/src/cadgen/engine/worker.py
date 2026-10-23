@@ -306,7 +306,8 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         raise export.ExportRefused(f"no document {source_spec['id']} is held in this process: a document id is "
                                    "the engine's, read through its server")
     if "document" in source_spec:
-        source = _held_source(request.get("payload") or b"", str(source_spec.get("name") or "document"))
+        source = _held_source(request.get("payload") or b"", str(source_spec.get("name") or "document"),
+                              source_spec.get("animations"))
     elif (request.get("expected") or source_spec.get("held")) and "script" in source_spec:
         source = engine_build.held(Path(source_spec["script"]), source_spec.get("function"))
         if source is None:
@@ -381,19 +382,22 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
     return {"reports": built, "files": files, "drawn": drawn}
 
 
-def _held_source(payload: bytes, name: str) -> Any:
+def _held_source(payload: bytes, name: str, animations: Any = None) -> Any:
     """A document the daemon holds and no worker does -- the xbf bytes its worker made of it before
     it retired (``models.Models.drain``) -- as an ``export.Source``, read in memory as an on-disk xbf
     is (``document.read_bytes``): its mechanism and its assemblies' placements with it, named as the
-    document is (``name``). The source has no path: it is no file."""
+    document is (``name``), and the build's animations its worker handed over beside the bytes
+    (``animations.to_json``), which a GLB of it bakes as the build's own would. The source has no
+    path: it is no file."""
     from cadgen.engine import document, export
+    from cadgen.engine.animations import from_json
 
     stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in name).strip(".") or "document"
     loaded = document.Loaded(Path(tempfile.gettempdir()) / f"{stem}.xbf", document.read_bytes(payload))
     structure = {**loaded.structure(), "path": ""}
     return export.Source(structure, {p.key: p.shape for p in loaded.prototypes}, live=False,
                          xcaf=loaded.doc, world=lambda occurrence: loaded.worlds.get(occurrence),
-                         mechanism=loaded.mechanism, foreign=False, path=None)
+                         mechanism=loaded.mechanism, foreign=False, path=None, animations=from_json(animations))
 
 
 def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
@@ -418,6 +422,12 @@ def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
         whole = document.to_bytes(source.xcaf, source.shapes.values())
         answer["xbf"] = len(whole)
         data.append(whole)
+        # And its animations, which the document holds none of: a GLB of the hold bakes them.
+        from cadgen.engine.animations import to_json
+
+        baked = to_json(source.animations)
+        if baked:
+            answer["animations"] = baked
     return answer, b"".join(data)
 
 

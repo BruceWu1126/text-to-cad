@@ -109,8 +109,9 @@ class Source:
         self.xcaf = xcaf
         self._world = world
         self.mechanism = mechanism
-        # The animations the build's code made (``animations.harvest``): a built source's alone, never
-        # a file's, since the document holds none. A GLB bakes them (``export/animation.py``).
+        # The animations the build's code made (``animations.harvest``): a built source's, or a held
+        # one's its worker handed over (``animations.from_json``), never a file's, since the document
+        # holds none. A GLB bakes them (``export/animation.py``).
         self.animations = animations
         # A document this engine did not write (a foreign STEP): its keys are its reader's,
         # made again from the geometry before an xbf holds them.
