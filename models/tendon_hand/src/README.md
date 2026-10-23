@@ -40,8 +40,9 @@ a commit rewrites every xbf, those bytes aside the same.)
 ## The port
 
 - `@step(out="../STEP/x.step")` became `@xbf(out="../XBF/x.xbf")`, the engine imported
-  first; `build123d` is imported directly, `cadgen.srgb` is `lib/color.py`'s, and
-  `cadgen.report` and `read_step` are the engine's. `lib/` holds the 56 factory
+  first; `build123d` is imported directly, `cadgen.srgb("#…")` is the hex itself, which
+  a shape takes as it is, `cadgen.report` is gone (the engine names each body it runs) and
+  `read_step` is the engine's. `lib/` holds the 56 factory
   modules these models reach, unchanged but for those imports, and the JSON data they
   read. `lib/assembly.integration_bodies` and `lib/palm_frame.make_palm_frame_bodies`
   still read frozen STEP snapshots outside Git; no ported model calls them.

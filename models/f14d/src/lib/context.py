@@ -10,7 +10,7 @@ import math
 
 import build123d as bd
 
-from lib.palette import srgb, style  # noqa: F401  (re-export)
+from lib.palette import style  # noqa: F401  (re-export)
 
 
 def group(label, children):

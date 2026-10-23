@@ -27,7 +27,6 @@ from math import cos, sin, tau
 
 import build123d as bd
 
-from lib.color import srgb
 
 from lib.mx_switch_socket import MX_PLATE, mx_socket_cutter
 
@@ -83,7 +82,7 @@ FLAT_BOTTOM_Z = 68.0
 FLAT_TOP_Z = PLATE_TOP_Z - MX_PLATE
 
 
-# (sRGB hex, alpha) pairs: _part() turns them into linear colours with srgb().
+# (sRGB hex, alpha) pairs: a colour build123d takes as it is, which the engine reads as sRGB.
 COLORS = {
     "titanium": ("#3A4750", 1.0),
     "graphite": ("#2E3742", 1.0),
@@ -95,7 +94,7 @@ COLORS = {
 
 def _part(shape, name, *details, color):
     shape.label = ":".join([name, *(str(d) for d in details)])
-    shape.color = srgb(*color)
+    shape.color = color
     return shape
 
 

@@ -217,10 +217,11 @@ def _material(found: dict[str, Any] | None) -> Any:
 def assemble(header: dict[str, Any], shapes: list[Any], locations: list[Any]) -> Any:
     """The build123d tree a description makes (see the module): the free shape's node, or a
     ``Compound`` of the free shapes' nodes when the document has several."""
-    from build123d import Color, Compound, Location
+    from build123d import Compound, Location
     from build123d.importers import topods_lut
     from build123d.topology.shape_core import downcast
 
+    from cadgen.engine.colors import color as as_color
     from cadgen.engine.kernel import imported
     from cadgen.engine.kernel.memo import FACE_COLORS, FACE_MATERIALS
 
@@ -249,7 +250,7 @@ def assemble(header: dict[str, Any], shapes: list[Any], locations: list[Any]) ->
                     node.__dict__[FACE_MATERIALS] = {int(o): _material(given)
                                                      for o, given in found["face_materials"].items()}
             color = entry["color"] or found["color"]
-            node.color = None if color is None else Color(*color)
+            node.color = None if color is None else as_color(color)
             node.label = entry["name"] or found["name"]
             node.move(Location(locations[entry["location"]]))
             made.append(node)

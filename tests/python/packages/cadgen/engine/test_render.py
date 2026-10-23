@@ -56,7 +56,7 @@ import build123d as bd
 from cadgen.ap242 import mechanism_state
 from cadgen.engine import Material, materials, paint, xbf
 
-LACQUER = Material("Red lacquer", 1200, family="other", color=(0.6, 0.02, 0.02), roughness=0.4, coat=1.0,
+LACQUER = Material("Red lacquer", 1200, family="other", color="#cb2727", roughness=0.4, coat=1.0,
                    coat_roughness=0.05)
 
 

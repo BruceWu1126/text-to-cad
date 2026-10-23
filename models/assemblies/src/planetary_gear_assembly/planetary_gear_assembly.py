@@ -31,32 +31,11 @@ EXTERNAL_TOOTH_ROOT_SPAN_FRACTION = 0.42
 EXTERNAL_TOOTH_TIP_SPAN_FRACTION = 0.18
 
 
-def _srgb_channel_to_linear(channel: int) -> float:
-    value = channel / 255.0
-    if value <= 0.04045:
-        return value / 12.92
-    return ((value + 0.055) / 1.055) ** 2.4
-
-
-def _srgb_color(hex_color: str) -> tuple[float, float, float, float]:
-    """Linear RGBA for an ``#rrggbb`` sRGB hex: build123d's ``Shape.color``
-    setter builds the Color on assignment."""
-    value = hex_color.removeprefix("#")
-    if len(value) != 6:
-        raise ValueError(f"Expected #rrggbb color, got {hex_color!r}")
-    return (
-        _srgb_channel_to_linear(int(value[0:2], 16)),
-        _srgb_channel_to_linear(int(value[2:4], 16)),
-        _srgb_channel_to_linear(int(value[4:6], 16)),
-        1.0,
-    )
-
-
 # Match the docs app's dark-mode hero render source colors.
 PLANET_COLORS = (
-    _srgb_color("#61d4f6"),
-    _srgb_color("#a6ea90"),
-    _srgb_color("#ed9ee5"),
+    "#61d4f6",
+    "#a6ea90",
+    "#ed9ee5",
 )
 
 RING_TEETH = 60
@@ -66,10 +45,10 @@ RING_INTERNAL_TIP_DIAMETER = 115.0
 RING_OUTSIDE_DIAMETER = 140.0
 RING_TOOTH_ROOT_SPAN_FRACTION = 0.68
 RING_TOOTH_TIP_SPAN_FRACTION = 0.34
-RING_COLOR = _srgb_color("#c5adef")
-SUN_COLOR = _srgb_color("#fdce76")
-CARRIER_COLOR = _srgb_color("#bfcec8")
-PIN_COLOR = _srgb_color("#818993")
+RING_COLOR = "#c5adef"
+SUN_COLOR = "#fdce76"
+CARRIER_COLOR = "#bfcec8"
+PIN_COLOR = "#818993"
 
 CARRIER_DIAMETER = 105.0
 CARRIER_BOTTOM_Z = -5.0

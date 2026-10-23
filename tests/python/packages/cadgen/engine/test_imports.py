@@ -42,7 +42,7 @@ def kit():
 def hinge():
     base, arm = bd.Box(100, 60, 20), bd.Box(120, 20, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.MIN))
     base.label, arm.label = "base", "arm"
-    paint(base, base.faces().sort_by(bd.Axis.Z)[-1], (0.1, 0.8, 0.1))
+    paint(base, base.faces().sort_by(bd.Axis.Z)[-1], "#1ae61a")
     bd.RevoluteJoint("elbow", base, axis=bd.Axis((40, 0, 20), (0, 1, 0)), angular_range=(-10, 120))
     bd.RigidJoint("mount", arm)
     base.joints["elbow"].connect_to(arm.joints["mount"], angle=30)

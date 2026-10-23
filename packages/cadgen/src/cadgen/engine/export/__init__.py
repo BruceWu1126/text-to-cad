@@ -191,12 +191,13 @@ class Source:
         components, a part a shape of its own on the prototype's geometry, placed where the
         document places it, labelled, coloured and given its material."""
         import numpy as np
-        from build123d import Color, Compound, Location
+        from build123d import Compound, Location
         from build123d.importers import topods_lut
         from build123d.topology.shape_core import downcast
         from OCP.gp import gp_Trsf
         from OCP.TopLoc import TopLoc_Location
 
+        from cadgen.engine.colors import color as as_color
         from cadgen.engine.export.tree import _material
         from cadgen.engine.mesh import read_shape
 
@@ -212,7 +213,7 @@ class Source:
             made = topods_lut[type(topods)](topods)
             made.label = tree["name"]
             rgba = instance.get("color") or prototype.get("color")
-            made.color = Color(*rgba) if rgba else None
+            made.color = as_color(rgba) if rgba else None
             material = _material(prototype.get("material"))
             if material is not None:
                 made.material = material

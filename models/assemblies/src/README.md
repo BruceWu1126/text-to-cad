@@ -137,4 +137,4 @@ python -m cadgen.engine snapshot ../../XBF/planetary_gear_assembly/planetary_gea
 - `miniature_spiral_staircase`: the `_highres` STL, 3MF and GLB at
   `mesh_tolerance=4e-4` are dropped. The engine meshes at one tolerance
   (FreeCAD's), configurable nowhere.
-- `motorcycle_fidgets`: `cadgen.srgb` is the group's own `lib/color.py`.
+- `motorcycle_fidgets`: `cadgen.srgb(hex, alpha)` -> the `(hex, alpha)` pair, which a shape takes as it is.

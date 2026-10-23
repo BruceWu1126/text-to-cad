@@ -274,6 +274,7 @@ is explicitly restarted. Session state is memory only and is recreated after res
 | `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run, and the models a target's run ran (`BuildContext.children`); `@memo` and its calls; explicit model calls asking the daemon; a script's module and package (`module_of`); `paint`, `mechanism_state`, `configuration_sequence`; `read_step`, `read_xbf` |
 | `api.py` | the verbs as functions, through the daemon: `export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `daemon` (`cadgen.export`, ...), and `build_script`, a script's models built by `Model.build()`; `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
+| `colors.py` | a colour as the author gives it (sRGB hex, 0-255 integers, a build123d `Color`) held linear, and the way back (**Materials**) |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`gear_pair`, `rack_and_pinion_pair`, `screw_pair`), mechanism states (`mechanism_state`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and configuration sequences (`configuration_sequence`, a function's samples, `Timeline`: a sequence's pair values over time) |
 | `build.py` | one build: load the script afresh (as Python imports it: a package's module by its dotted name), one memo run, document, element names, files: every model's that ran |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
@@ -1156,13 +1157,29 @@ guess. Its physical half: `name` (what the catalogue looks it up by), `family` (
 `young_modulus` Pa, `poisson_ratio`, `yield_strength` and `ultimate_strength` Pa,
 `thermal_expansion` 1/K, `thermal_conductivity` W/(m·K), `specific_heat` J/(kg·K), and
 `isotropic` (False for a laminate or a ply). Its look is a strict subset of OpenPBR, cut to what
-glTF carries: `color` (linear RGBA, alpha its opacity), `metallic`, `roughness`, `ior` (1.5),
+glTF carries: `color` (RGBA, alpha its opacity), `metallic`, `roughness`, `ior` (1.5),
 `anisotropy` and `anisotropy_rotation` (radians), `transmission`, `transmission_color` and
 `transmission_depth` (metres), `coat` and `coat_roughness`, `emissive` (RGB) and
 `emissive_strength` (1). Each look parameter is one glTF field; the module's docstring is the
 contract that maps OpenPBR, the `Material`, glTF and Blender's Principled BSDF onto one another.
 Every field is checked as it is made, by name (0-1 ranges, positive physical values). `but(**changes)`
 is a copy with changes; `mass(volume_m3)` is kilograms, or None without a density.
+
+**Colours.** Every colour a model gives -- `shape.color`, `paint(shape, faces, color)`,
+`Material(color=, transmission_color=, emissive=)` -- is what the author sees, in sRGB: a hex
+string (`"#e68019"`, `"#e68019cc"` with alpha, `"#e81"`, `"#e81c"`), 0-255 integers (`(230, 128,
+25)`, or four with alpha), or a build123d `Color`. The document holds linear RGB, as OCCT's
+`Quantity_Color` and glTF's factors do, and the engine converts at the door (`colors.py`), each
+channel rounded to six decimals, the precision a colour is read back at. The one assumption, and
+its rule: **a build123d `Color`'s channels are sRGB**, as build123d defines them (its constructor
+and its iteration are `Quantity_TOC_sRGB`; `Color("#e68019")` is `(0.902, 0.502, 0.098)`), so
+the engine reads a shape's colour linear through the `Quantity_Color` it wraps. `shape.color =
+bd.Color("#e68019")`, `shape.color = "#e68019"` (build123d's setter makes the `Color`) and
+`paint(shape, shape.faces(), "#e68019")` store the same colour, within one 8-bit step
+(`test_colors`). Floats are no colour of the author's: `Material(color=(0.5, 0.5, 0.5))` and
+`paint(..., (0.5, 0.5, 0.5))` are refused by what they take, and `bd.Color(0.5, 0.5, 0.5)` is
+sRGB mid grey, `#808080`. A colour read back is the colour written: `Material.color` holds it
+linear, and a shape a reader makes (`read_xbf`, `read_step`) is given the `Color` of it.
 
 The catalogue is one object, the module itself: `materials("6061")` looks an entry up in any
 case by its name, its attribute or an alias (`"6061-T6"`, `"al 6061"`, `"steel"`, `"delrin"`),

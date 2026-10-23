@@ -150,13 +150,14 @@ def _location_key(location: Any) -> tuple:
 
 
 def _rgba(color: Any) -> tuple | None:
+    """A shape's colour as the document holds it, linear RGBA: build123d keeps ``shape.color``
+    as a ``Color``, whose channels are sRGB, and ``colors.linear`` reads it linear, as it reads a
+    hex string ``paint`` is given (the engine README's **Materials**)."""
     if color is None:
         return None
-    try:
-        values = tuple(float(value) for value in color)
-    except TypeError:
-        return None
-    return values if len(values) == 4 else (*values[:3], 1.0)
+    from cadgen.engine.colors import linear
+
+    return tuple(linear(color, "a shape's color"))
 
 
 def _material(value: Any) -> Any:
@@ -516,7 +517,9 @@ def _read_extra(label: Any) -> dict[str, Any]:
         found["isotropic"] = bool(data.GetInteger(text("isotropic")))
     if data.HasArrayOfReals(text("transmission_color")):
         values = data.GetArrayOfReals(text("transmission_color"))
-        found["transmission_color"] = tuple(values.Value(at) for at in range(values.Lower(), values.Upper() + 1))
+        from cadgen.engine.colors import Linear
+
+        found["transmission_color"] = Linear(values.Value(at) for at in range(values.Lower(), values.Upper() + 1))
     return found
 
 
@@ -1575,9 +1578,11 @@ def as_read(material: Any, rgba: tuple) -> Any:
     as read), its PBR factors (metallic, roughness, emissive, IOR) as 32-bit floats, its density
     through the kernel's g/cm^3, no emissive where it is black, no description where it is
     empty; every other field as it is (``_write_extra`` keeps doubles)."""
-    emissive = tuple(_f32(value) for value in (material.emissive or (0.0, 0.0, 0.0)))
+    from cadgen.engine.colors import Linear
+
+    emissive = Linear(_f32(value) for value in (material.emissive or (0.0, 0.0, 0.0)))
     return material.but(density=round(material.density / 1000.0 * 1000.0, 6) if material.density else None,
-                        color=rgba, metallic=_f32(material.metallic), roughness=_f32(material.roughness),
+                        color=Linear(rgba), metallic=_f32(material.metallic), roughness=_f32(material.roughness),
                         ior=_f32(material.ior), emissive=emissive if any(emissive) else None,
                         description=material.description or None)
 
@@ -1615,12 +1620,13 @@ def material_from_json(value: dict[str, Any] | None) -> Any:
     """The ``Material`` of ``material_json``'s answer (a black ``emissive`` is none); None for None."""
     if not value:
         return None
+    from cadgen.engine.colors import Linear
     from cadgen.engine.materials import Material
 
     fields = {field: value[key] for field, key in _JSON_FIELDS if value.get(key) is not None}
     for field in ("color", "transmission_color", "emissive"):
         if field in fields:
-            fields[field] = tuple(fields[field])
+            fields[field] = Linear(fields[field])
     if not any(fields.get("emissive") or ()):
         fields.pop("emissive", None)
     return Material(**fields)
@@ -1634,6 +1640,7 @@ def _label_material(label: Any) -> Any:
     from OCP.TDataStd import TDataStd_TreeNode
     from OCP.XCAFDoc import XCAFDoc, XCAFDoc_Material, XCAFDoc_VisMaterialTool
 
+    from cadgen.engine.colors import Linear
     from cadgen.engine.materials import Material
 
     name = description = ""
@@ -1665,8 +1672,9 @@ def _label_material(label: Any) -> Any:
         rgba, emissive, metallic, roughness = _label_color(label), (0.0, 0.0, 0.0), 0.0, 0.5
     else:
         return None
-    return Material(name or "material", density, color=rgba, metallic=metallic, roughness=roughness, ior=ior,
-                    emissive=emissive if any(emissive) else None, description=description or None, **extra)
+    return Material(name or "material", density, color=None if rgba is None else Linear(rgba), metallic=metallic,
+                    roughness=roughness, ior=ior, emissive=Linear(emissive) if any(emissive) else None,
+                    description=description or None, **extra)
 
 
 def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -> Prototype:

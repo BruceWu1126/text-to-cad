@@ -271,7 +271,6 @@ src/cadgen/
   updates.py             # the daily version check, for a copy nothing else keeps current
   assets.py              # where the bundled runtime is
   build123d.py           # `from cadgen import build123d as bd`, the lazy re-export
-  color.py               # sRGB helpers
   check_fonts.py         # `python -m cadgen.check_fonts`: the font that breaks
                          #   `import build123d`
   _internal/             # the launch command, the font guard, the kernel-import recorder,

@@ -6,7 +6,6 @@ from pathlib import Path
 
 import build123d as bd
 
-from lib.color import srgb
 
 PROFILE_PATH = Path(__file__).resolve().parents[1] / "profiles.json"
 
@@ -31,6 +30,6 @@ def make_logo(text: str, lighter: tuple[int, ...] = ()) -> bd.Compound:
         solid = bd.Solid.extrude(face, (0, 0, thickness)).clean()
         solid = solid.moved(bd.Location((index * advance, 0, 0)))
         solid.label = f"letter_{index + 1:02d}_{character}"
-        solid.color = srgb(profiles["lighterColor" if index in lighter else "color"])
+        solid.color = profiles["lighterColor" if index in lighter else "color"]
         letters.append(solid)
     return bd.Compound(children=letters, label=f"logo_{text.lower()}")

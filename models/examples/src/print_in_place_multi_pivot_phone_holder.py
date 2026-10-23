@@ -34,8 +34,6 @@ from cadgen.engine import materials, xbf
 
 import build123d as bd
 
-from lib.color import srgb
-
 
 # ---- shared joint geometry ----
 PLATE_T = 5.0
@@ -165,7 +163,7 @@ def _make_base():
     base = base - [_bore_tool(Y_J1, *END_KN_X1), _bore_tool(Y_J1, *END_KN_X2)]
     base = base - _notch_tool(-1.0, Y_J1, *CENTER_KN_X)
     base.label = "base_mount_plate"
-    base.color = srgb("#5B6B7A")
+    base.color = "#5B6B7A"
     return base
 
 
@@ -185,7 +183,7 @@ def _make_lower_arm():
         _notch_tool(-1.0, Y_J2, *CENTER_KN_X),
     ]
     arm.label = "lower_arm_link"
-    arm.color = srgb("#C98056")
+    arm.color = "#C98056"
     return arm
 
 
@@ -205,7 +203,7 @@ def _make_upper_arm():
         _notch_tool(-1.0, Y_J3, *CENTER_KN_X),
     ]
     arm.label = "upper_arm_link"
-    arm.color = srgb("#6E8B6E")
+    arm.color = "#6E8B6E"
     return arm
 
 
@@ -235,7 +233,7 @@ def _make_cradle():
         _notch_tool(1.0, Y_J3, *END_KN_X2),
     ]
     cradle.label = "cradle_phone_holder"
-    cradle.color = srgb("#A87E93")
+    cradle.color = "#A87E93"
     return cradle
 
 

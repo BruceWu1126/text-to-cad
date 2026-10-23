@@ -306,8 +306,7 @@ def census(rows):
 
 def apply_palette(bodies):
     """Recolor bodies; the owning @step assigns their named PBR materials."""
-    from lib.color import srgb
     for body in bodies:
         _, color, _material, alpha = finish_for(body.name, body.kind)
-        body.shape.color = srgb(color, alpha)
+        body.shape.color = (color, alpha)
     return census([dict(name=b.name, kind=b.kind) for b in bodies])

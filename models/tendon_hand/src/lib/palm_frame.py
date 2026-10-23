@@ -7,7 +7,6 @@ from cadgen.engine import read_step
 
 import build123d as bd
 
-from lib.color import srgb
 from pathlib import Path
 from .layout import MCP_PALM_SUPPORT_PLANES, CMC_PALM_SUPPORT_PLANES
 
@@ -99,7 +98,7 @@ def _finish(pieces,label,bores,blend_nodes):
     if len(s.solids())!=1:
         raise ValueError(f'{label}: {len(s.solids())} disconnected solids; bounds {[str(b.bounding_box()) for b in s.solids()]}')
     if not s.is_valid or s.volume<=0:raise ValueError(f'{label}: invalid frame')
-    s.label=label;s.color=srgb('#a9b7c1')
+    s.label=label;s.color='#a9b7c1'
     return s
 
 
@@ -122,7 +121,7 @@ def make_little_metacarpal(mcp_support_plane=None,label='fifth_metacarpal_cuppin
     nodes=[(22,y,sign*3.4,2.8) for y in (38.2,71.8) for sign in (1,-1)]
     nodes += [(36,89,z,5.) for z in mp]
     result=_finish(p,label,bores,nodes)
-    result.label=label;result.color=srgb('#a9b7c1')
+    result.label=label;result.color='#a9b7c1'
     return result
 
 
@@ -144,7 +143,7 @@ def make_palm_frame_bodies(mcp_support_plane=None,thumb_support_plane=None):
         raise ValueError('Expected one connected main-palm solid')
     for body in bodies:
         aluminum=body.label=='palm_metacarpal_truss' or 'bearing_node' in body.label or 'clamp' in body.label
-        body.color=srgb('#a9b7c1' if aluminum else '#d0d8df')
+        body.color=('#a9b7c1' if aluminum else '#d0d8df')
     return bodies
 
 

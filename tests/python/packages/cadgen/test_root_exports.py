@@ -21,7 +21,7 @@ HEAVY = ("OCP", "build123d")
 ENGINE = ("model", "xbf", "step", "glb", "stl", "threemf", "dxf", "memo", "Material", "materials", "paint",
           "read_step", "read_xbf", "read_mesh")
 VERBS = ("export", "snapshot", "inspect")
-ROOT = (*ENGINE, *VERBS, "__version__", "build123d", "srgb")
+ROOT = (*ENGINE, *VERBS, "__version__", "build123d")
 # The names that are the standards' rather than the engine's.
 NAMESPACES = {
     "cadgen.ap242": ("mechanism_state", "configuration_sequence", "gear_pair", "rack_and_pinion_pair", "screw_pair"),
@@ -69,7 +69,7 @@ class RootExports(unittest.TestCase):
         # ``build`` among them: a model builds by a decorated function's call, never cadgen.build (law 12).
         for name in ("build", "read_scene", "AssemblyHelper", "label_shape", "revolute", "compound_from_instances",
                      "mechanism_state", "animation", "select", "report", "track", "serve", "status", "stop",
-                     "daemon"):
+                     "daemon", "srgb", "srgb_to_linear", "linear_to_srgb"):
             with self.subTest(name=name), self.assertRaises(AttributeError) as caught:
                 getattr(cadgen, name)
             self.assertEqual(str(caught.exception), f"module 'cadgen' has no attribute {name!r}")

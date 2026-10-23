@@ -47,7 +47,7 @@ def peg():
 def board():
     plate = bd.Pos(0, -20, 0) * bd.Box(30, 10, 2)
     plate.color = bd.Color(0.2, 0.3, 0.9)
-    plate = paint(plate, plate.faces().sort_by(bd.Axis.Z)[-1], (1, 0, 0))
+    plate = paint(plate, plate.faces().sort_by(bd.Axis.Z)[-1], "#ff0000")
     plate = paint(plate, plate.faces().sort_by(bd.Axis.Z)[0], materials.steel)
     plate.material = materials.aluminium
     plate.label = "plate"
@@ -82,7 +82,7 @@ def kit():
     for index, rgb in enumerate(looks):
         part = bd.Pos(index * 20, 0, 0) * bd.Box(10, 10, 4 + index)
         part.color = bd.Color(*rgb)
-        part = paint(part, part.faces().sort_by(bd.Axis.Z)[-1], (rgb[2], rgb[0], rgb[1]))
+        part = paint(part, part.faces().sort_by(bd.Axis.Z)[-1], bd.Color(rgb[2], rgb[0], rgb[1]))
         part.material = (materials.aluminium, materials.steel)[index % 2]
         part.label = f"part{index}"
         parts.append(part)

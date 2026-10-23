@@ -138,5 +138,5 @@ replays from the worker's memory (1 s), and a restarted daemon takes the file wh
   The vendor boards (the camera's PCB, the bus-servo driver HAT's) take the board finish, FR4,
   by the labels their files give them; the other board finishes are defined but assigned to
   nothing, as before.
-- `cadgen.color.srgb` -> `lib/color.py`; `cadgen.flatten` -> a copy in `lib/flatten.py`
+- `cadgen.color.srgb("#…")` -> the hex itself, which a shape takes as it is; `cadgen.flatten` -> a copy in `lib/flatten.py`
   (only `lib/flat_project.py` imports it).

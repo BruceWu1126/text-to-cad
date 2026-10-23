@@ -30,7 +30,6 @@ from math import cos, radians, sin
 
 import build123d as bd
 
-from lib.color import srgb
 
 from lib.mx_switch_socket import mx_socket_cutter
 
@@ -77,7 +76,7 @@ VENT_CENTER = (-15.39, 0.0, 13.08)
 VENT_ROT_DEG = -50.0
 
 
-# (sRGB hex, alpha) pairs: _part() turns them into linear colours with srgb().
+# (sRGB hex, alpha) pairs: a colour build123d takes as it is, which the engine reads as sRGB.
 COLORS = {
     "shell_red": ("#D01317", 1.0),
     "graphite": ("#2E3742", 1.0),
@@ -88,7 +87,7 @@ COLORS = {
 
 def _part(shape, name, *details, color):
     shape.label = ":".join([name, *(str(d) for d in details)])
-    shape.color = srgb(*color)
+    shape.color = color
     return shape
 
 

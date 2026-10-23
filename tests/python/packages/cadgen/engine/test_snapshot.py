@@ -38,7 +38,7 @@ from cadgen.engine import paint, xbf
 @xbf("XBF/stand.xbf")
 def stand():
     plate = bd.Box(40, 20, 4) - bd.Cylinder(4, 10)
-    plate = paint(plate, plate.faces().sort_by(bd.Axis.Z)[-1], "orange")
+    plate = paint(plate, plate.faces().sort_by(bd.Axis.Z)[-1], "#ffa500")
     plate.label = "plate"
     peg = bd.Cylinder(3, 12)
     peg.label = "peg"

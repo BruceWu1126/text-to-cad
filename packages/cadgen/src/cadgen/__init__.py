@@ -61,7 +61,6 @@ __all__ = [
     *_ENGINE,
     *_VERBS,
     "build123d",
-    "srgb",
 ]
 
 
@@ -81,10 +80,6 @@ def __getattr__(name: str):
         import cadgen.build123d as _bd
 
         return _bd
-    if name in {"srgb", "srgb_to_linear", "linear_to_srgb"}:
-        from cadgen import color
-
-        return getattr(color, name)
     if name == "__version__":
         return _resolve_version()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -95,13 +90,6 @@ if TYPE_CHECKING:
     # without importing OCP. Every name here must have a branch there, and comes from the
     # module that defines it.
     from cadgen import build123d
-    from cadgen.color import (
-        srgb,
-        # __getattr__ serves these two without advertising them in __all__;
-        # the alias is how the mirror says "re-export" rather than "unused".
-        linear_to_srgb as linear_to_srgb,
-        srgb_to_linear as srgb_to_linear,
-    )
     from cadgen.engine import materials
     from cadgen.engine.api import export, inspect, snapshot
     from cadgen.engine.materials import Material

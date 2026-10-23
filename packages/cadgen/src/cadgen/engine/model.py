@@ -420,8 +420,10 @@ def models_in(namespace: dict[str, Any], script: Path) -> list[Model]:
 
 def paint(shape: Any, faces: Any, color: Any) -> Any:
     """Colour faces of a part, or give them a material: ``faces`` (a face, or several) of
-    ``shape`` take ``color`` -- anything ``build123d.Color`` takes, or a ``Material`` --
-    in the document, by their ordinal in the part. A face holds one paint: a colour
+    ``shape`` take ``color`` -- an sRGB hex string (``"#e68019"``, ``"#e68019cc"``), 0-255
+    integers (three, or four with alpha), a build123d ``Color``, or a ``Material`` -- in the
+    document, by their ordinal in the part. The colour is the one ``shape.color`` would give
+    the same value (``colors``). A face holds one paint: a colour
     replaces its material, a material its colour. Returns ``shape``, whose paints the
     memo keys like its label.
 
@@ -438,12 +440,12 @@ def paint(shape: Any, faces: Any, color: Any) -> Any:
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
 
+    from cadgen.engine.colors import linear
     from cadgen.engine.kernel.memo import FACE_COLORS, FACE_MATERIALS
     from cadgen.engine.materials import Material
 
     material = color if isinstance(color, Material) else None
-    rgba = None if material is not None else tuple(
-        float(value) for value in (color if isinstance(color, bd.Color) else bd.Color(color)))
+    rgba = None if material is not None else tuple(linear(color, "paint's color"))
     mapped = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(shape.wrapped, TopAbs_FACE, mapped)
     painted = dict(shape.__dict__.get(FACE_COLORS) or {})

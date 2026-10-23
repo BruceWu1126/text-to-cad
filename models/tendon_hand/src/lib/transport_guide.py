@@ -2,7 +2,6 @@
 from math import cos, radians, sin
 import build123d as bd
 
-from lib.color import srgb
 from lib.axis_transport import (point_at, tangent_at, GUIDE_OUTER_RADIUS,
     GUIDE_INNER_RADIUS, TENDON_RADIUS)
 
@@ -29,7 +28,7 @@ def make_tendon(path,label='transport_tendon'):
     profile=bd.Plane(origin=start,z_dir=direction)*bd.Circle(TENDON_RADIUS)
     result=bd.sweep(profile,path=path_wire(path),is_frenet=False)
     result.label=label
-    result.color=srgb('#C99850')
+    result.color='#C99850'
     if len(result.solids())!=1 or not result.is_valid:
         raise ValueError(f'{label}: invalid swept tendon')
     return result
@@ -53,7 +52,7 @@ def make_guide(segment,label='open_transport_guide'):
     profile=bd.Plane(origin=segment['start'],z_dir=tangent_at(segment,0))*bd.Face(bd.Wire(edges))
     result=bd.sweep(profile,path=path_wire([segment]),is_frenet=False)
     result.label=label
-    result.color=srgb('#BAC8CE')
+    result.color='#BAC8CE'
     if len(result.solids())!=1 or not result.is_valid:
         raise ValueError(f'{label}: invalid swept open guide')
     return result

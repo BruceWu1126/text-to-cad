@@ -29,5 +29,5 @@ geometry.
 
 The port: `from cadgen import step` -> `from cadgen.engine import step, xbf`, each
 model declaring its xbf and the STEP it delivers, both in `XBF/`; cadgen's
-build123d proxy -> `import build123d as bd`; `cadgen.srgb` -> `lib/color.py`'s
-`srgb`. The `__main__` calls go: running a script builds its model.
+build123d proxy -> `import build123d as bd`; `cadgen.srgb("#…")` -> the hex itself, which
+a shape takes as it is. The `__main__` calls go: running a script builds its model.
