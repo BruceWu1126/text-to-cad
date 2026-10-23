@@ -19,8 +19,8 @@ the workers' idle time, and held to their memory cap; render processes are not w
 do not count toward the cap.
 
 Its only files are the operating system's coordination: a Unix socket and a lock in
-``tempfile.gettempdir()/cadgen-engine`` (on Windows, a localhost TCP port and a token,
-in a port file there). Requests are one JSON object per line on a connection; answers
+``tempfile.gettempdir()/cadgen-engine`` (a socket path past the Unix limit: in ``/tmp/cadgen-<uid>``,
+``socket_path``; on Windows, a localhost TCP port and a token, in a port file there). Requests are one JSON object per line on a connection; answers
 are JSON lines, the last of which carries ``done``, ``failed`` or ``ok``. Before it, a build
 sends its caller its ``{"log"}`` lines and its ``{"progress"}`` frames as its worker sends them
 (``progress.py``); the daemon keeps each busy worker's last frame for ``status``, and wakes the
@@ -97,8 +97,38 @@ def _tag() -> str:
     return hashlib.sha256(material.encode()).hexdigest()[:12]
 
 
+# A Unix socket's path is at most 104 bytes on macOS and 108 on Linux, its terminator included.
+SOCKET_PATH_LIMIT = 100
+
+
 def socket_path() -> Path:
-    return state_dir() / f"{_tag()}.sock"
+    """The daemon's socket: beside its lock, or -- when that path is past ``SOCKET_PATH_LIMIT``
+    (a long temporary folder or ``CADGEN_ENGINE_DIR``) -- named by its digest in the user's own
+    ``/tmp/cadgen-<uid>`` (``private_folder``). Nothing binds or connects by changing folder: the
+    daemon's threads share one working folder with every request they serve."""
+    path = state_dir() / f"{_tag()}.sock"
+    if WINDOWS or len(os.fsencode(path)) < SOCKET_PATH_LIMIT:
+        return path
+    return Path("/tmp") / f"cadgen-{os.getuid()}" / f"{hashlib.sha256(os.fsencode(path)).hexdigest()[:16]}.sock"
+
+
+def socket_folder_ok(path: Path) -> bool:
+    """Whether a socket at ``path`` may be bound or connected: one beside the lock is; one in the
+    shared ``/tmp`` only in a folder that is this user's alone (``private_folder``)."""
+    return path.parent == state_dir() or private_folder(path.parent)
+
+
+def private_folder(folder: Path) -> bool:
+    """Whether ``folder`` (made when missing) is this user's alone: a real folder, not a link, owned
+    by this user and closed to everyone else -- a socket in it can only be this user's daemon."""
+    try:
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        found = os.lstat(folder)
+    except OSError:
+        return False
+    import stat
+
+    return stat.S_ISDIR(found.st_mode) and found.st_uid == os.getuid() and not found.st_mode & 0o077
 
 
 def lock_path() -> Path:
@@ -963,17 +993,11 @@ def _bind() -> socket.socket:
         server.bind(("127.0.0.1", 0))
         return server
     path = socket_path()
+    if not socket_folder_ok(path):
+        raise OSError(f"the engine's socket folder {path.parent} is not this user's alone")
     path.unlink(missing_ok=True)
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    if len(str(path).encode()) < 100:
-        server.bind(str(path))
-    else:  # a path past the socket name limit: bound by its name, from its folder
-        previous = os.getcwd()
-        os.chdir(path.parent)
-        try:
-            server.bind(path.name)
-        finally:
-            os.chdir(previous)
+    server.bind(str(path))
     os.chmod(path, 0o600)
     return server
 

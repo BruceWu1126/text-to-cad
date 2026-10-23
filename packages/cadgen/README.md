@@ -63,7 +63,8 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
    **Build closure**).
 2. **Only requested files to disk.** The engine writes the files a model declares -- the xbf and the exports
    its decorators name, nothing beside them -- and the operating system's coordination for its
-   warm process: a socket and a lock in `tempfile.gettempdir()/cadgen-engine`. It writes no
+   warm process: a socket and a lock in `tempfile.gettempdir()/cadgen-engine` (a socket path past
+   the Unix limit lives in the user's own `/tmp/cadgen-<uid>` instead). It writes no
    sidecar, record of a build, cache, index, memo, mesh or parsed document, and no derived file
    beside an input. A restart is cold, but for the xbf itself: a model whose xbf holds the
    closure the model has now is not run. Explicit viewer exports write only the requested

@@ -151,6 +151,29 @@ class ConnectTest(unittest.TestCase):
         self.assertEqual([w for w in caught if issubclass(w.category, ResourceWarning)], [])
 
 
+class LongStatePathTest(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "a socket's path limit is a Unix socket's")
+    def test_a_state_folder_past_the_socket_path_limit_works_and_nobody_changes_folder(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine import client
+
+        engine = Path(tempfile.mkdtemp(prefix="eng-")) / ("long-" * 24)
+        self.addCleanup(shutil.rmtree, engine.parent, True)
+        env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(engine)},
+                                    self.addCleanup)
+        self.addCleanup(engine_daemon.run, [sys.executable, "-m", "cadgen.engine", "stop"], env=env)
+        probe = "from cadgen.engine.client import request; print(request({'op': 'status'})['ok'])"
+        started = engine_daemon.run([sys.executable, "-c", probe], env=env)
+        self.assertEqual((started.returncode, started.stdout.split()[-1:]), (0, ["True"]), started.stderr)
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(engine)}), \
+                mock.patch.object(os, "chdir", side_effect=AssertionError("the client changed folder")):
+            path = client._daemon.socket_path()
+            self.assertLess(len(os.fsencode(path)), 100, "the socket's own path fits the limit")
+            self.assertTrue(client.request({"op": "status"}, start=False)["ok"])
+        self.assertEqual(os.stat(path.parent).st_mode & 0o077, 0, "the socket's folder is the user's alone")
+
+
 class InstallationTest(unittest.TestCase):
     def test_every_name_of_the_installation_s_interpreter_reaches_one_engine(self) -> None:
         from unittest import mock
