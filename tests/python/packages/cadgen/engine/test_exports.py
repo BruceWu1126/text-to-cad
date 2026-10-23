@@ -579,6 +579,10 @@ class CodeTest(unittest.TestCase):
             build(123, model="invalid_shape")
         with self.assertRaisesRegex(api.EngineError, "requires source code"):
             build(base, model="invalid_shape", verify=True)
+        # The name of a shape names its default files: a path in it is refused, nothing written.
+        with self.assertRaisesRegex(api.EngineError, "no Python identifier"):
+            build(base, name="../escaped", xbf=True, step=True)
+        self.assertFalse((self.folder.parent / "escaped.step").exists())
 
     def test_code_assigns_result_and_its_flags_are_its_files(self) -> None:
         with self.assertRaisesRegex(engine_build.BuildError, "assigns no `result`"):

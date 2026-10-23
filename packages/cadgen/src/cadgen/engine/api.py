@@ -291,6 +291,12 @@ def build(code: Any, *, model: str | None = None, name: str | None = None, xbf: 
     if not isinstance(code, str):
         if verify:
             raise EngineError("verify requires source code: a supplied shape has already been built")
+        from cadgen.engine.build import _CODE_NAME
+
+        # Source text is refused by this rule in its worker (``build.code_source``); a shape
+        # has no source, so its name is checked here, before it names a worker or a path.
+        if not _CODE_NAME.fullmatch(name):
+            raise EngineError(f"name {name!r} is no Python identifier")
         from cadgen.engine.shape_input import pack
 
         shape = pack(code, name)
