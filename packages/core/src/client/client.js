@@ -4,6 +4,7 @@ import { requestViewerJson, ViewerRequestError } from "./request.js";
 import { retainGlbMeshWorker } from '../lib/render/glbMeshWorkerClient.js';
 import { retainStlMeshWorker } from '../lib/render/stlMeshWorkerClient.js';
 import { applyViewerOriginToEntries, normalizeViewerOrigin, viewerOriginUrl } from './origin.js';
+import { isDocumentId } from '../lib/cadRefs.js';
 import { createHttpCadResourceProvider, scopeCadResources } from './resources.js';
 export * from './origin.js';
 
@@ -41,9 +42,11 @@ function pause(ms, signal) {
   });
 }
 
-// A file is named by its absolute path, `/`-separated on every platform.
+// A file is named by its absolute path, `/`-separated on every platform; a document known by its id
+// alone (a model's) by its id. A catalog row carries its document's id: rows join by it, so one
+// file however its path is spelled (a symlink, a case variant) is one row.
 const normalizedFile = (file) => String(file || '').replace(/\\/g, '/');
-const entryKey = (entry) => normalizedFile(entry.file);
+const entryKey = (entry) => entry.id || normalizedFile(entry.file);
 
 /** Whether `error` says the file a view asked for is not there (`resolveEntry`). */
 export function isMissingFileError(error) {
@@ -73,7 +76,16 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
   // The newest answer applied for each file: an older one that lands later changes nothing.
   const publishedSequences = new Map();
   const activeFiles = new Map();
+  // Each path a view asked for, and the id of the document the server answered it with.
+  const aliases = new Map();
+  // Why the server has no row for an id it was asked for (the engine's words), by that id.
+  const missing = new Map();
   let preferredFile = '';
+  /** The key of the row `file` names: its document's id once the server said it. */
+  const keyOf = (file) => (isDocumentId(file) ? file : aliases.get(normalizedFile(file)) || normalizedFile(file));
+  /** The row of `file` in `entries`: by its document's id, else by the path it carries. */
+  const rowOf = (entries, file) => entries.find((entry) => entryKey(entry) === keyOf(file))
+    || entries.find((entry) => normalizedFile(entry.file) === normalizedFile(file));
   const pendingRefreshes = new Map();
   let server = null;
 
@@ -112,9 +124,15 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     if (sequence < (publishedSequences.get(asked) || 0)) return;
     publishedSequences.set(asked, sequence);
     const incoming = applyViewerOriginToEntries(catalog?.entries, origin);
+    // The document the path asked for is the row the server answered: its id joins every spelling.
+    if (asked && incoming.length === 1 && incoming[0].id && !isDocumentId(asked)) aliases.set(asked, incoming[0].id);
+    if (isDocumentId(asked)) {
+      if (typeof catalog?.missing === 'string' && !incoming.length) missing.set(asked, catalog.missing);
+      else missing.delete(asked);
+    }
     const answered = new Set(incoming.map(entryKey));
     // The catalog is the files on screen: an answer brings one, and keeps the others shown.
-    const shown = new Set([...activeFiles.keys(), preferredFile].map(normalizedFile));
+    const shown = new Set([...activeFiles.keys(), preferredFile].map(keyOf));
     const previous = new Map(snapshot.entries.map((entry) => [entryKey(entry), entry]));
     const entries = [
       ...snapshot.entries.filter((entry) => !answered.has(entryKey(entry)) && shown.has(entryKey(entry))),
@@ -138,7 +156,10 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     if (markRefreshing) publish({ refreshing: true, error: '' });
     const work = (async () => {
       try {
-        const catalog = await request('/__cad/catalog', { file, signal, timeoutMs: 10_000, operation: 'catalog' });
+        // A document named by its id is asked for by id; a file by its path.
+        const catalog = await request('/__cad/catalog', isDocumentId(file)
+          ? { params: { id: file }, signal, timeoutMs: 10_000, operation: 'catalog' }
+          : { file, signal, timeoutMs: 10_000, operation: 'catalog' });
         publishCatalog(catalog, { sequence, file });
         return catalog;
       } catch (error) {
@@ -192,15 +213,21 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     refresh,
     async resolveEntry(path, { signal } = {}) {
       preferredFile = path;
-      const match = (entries) => entries.find((entry) => entryKey(entry) === normalizedFile(path));
-      let entry = match(snapshot.entries);
+      let entry = rowOf(snapshot.entries, path);
       if (!entry) {
         await refresh({ file: path, signal });
-        entry = match(snapshot.entries);
+        entry = rowOf(snapshot.entries, path);
       }
       if (signal?.aborted || disposed) throw abortError();
-      if (!entry) throw Object.assign(new Error(`File does not exist: ${path}`), { code: 'cad-file-missing' });
+      if (!entry) {
+        // An id the engine does not hold says why, and names the command that builds it again.
+        throw Object.assign(new Error(missing.get(path) || `File does not exist: ${path}`), { code: 'cad-file-missing' });
+      }
       return entry;
+    },
+    // The row of the document `path` names (its path, or its id), joined by its document's id.
+    entryOf(path) {
+      return path ? rowOf(snapshot.entries, path) ?? null : null;
     },
     async serverInfo({ signal, fresh = false } = {}) {
       if (!server || fresh) {
@@ -215,10 +242,6 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     },
     // One folder's subfolders and CAD files, and the CAD files nested under a folder whose path
     // below it holds `query` (bounded by the server, which says when it stopped early).
-    async models({ signal } = {}) {
-      const answer = await request('/__cad/models', { signal, timeoutMs: 10_000, operation: 'models' });
-      return answer.models;
-    },
     folder(path, { signal } = {}) {
       return request('/__cad/folder', { params: { path }, signal, timeoutMs: 10_000, operation: 'folder' });
     },

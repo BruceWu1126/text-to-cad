@@ -1,15 +1,24 @@
-"""The installation's HTTP application: document routes and per-launch viewer sessions."""
+"""The installation's HTTP application: document routes and the one viewer page.
+
+One engine serves one page, at its origin. Every document is addressed by path, ``/<id>``
+(``cadgen.engine.ids``): a model's id, or a file's once a launcher or the page registers it. The
+home is ``/``: Recents, and the folder of the most recent launch (``launch``), which each launch
+replaces. There are no page sessions and no per-launch folders: an old ``/s/...`` link, or a ``/``
+naming a document by query (``?doc=``, ``?file=``), is answered with the home.
+"""
 from __future__ import annotations
 
 import io
 import os
 import secrets
 import threading
-import time
 from http.cookies import SimpleCookie
 from urllib.parse import urlencode
 
+from cadgen.engine.ids import is_id
+
 from .documents import EngineDocuments
+from .scanner import to_posix_path
 from .http_app import CadApp, RAW_FILE_HEADERS, host_is_allowed
 
 
@@ -50,14 +59,21 @@ def document_route(server, request, response):
                               and not key.startswith('access-control-')}}.items()))
 
 
-class SessionApp(CadApp):
+class ViewerApp(CadApp):
+    """The viewer's routes over the engine's documents: the page's, and each MCP session's tunnel's.
+    Files are known by id through the engine's server (``Server.remember``)."""
+
     def __init__(self, server, **kwargs):
         super().__init__(documents=EngineDocuments(server=server), **kwargs)
         self.server = server
-        self.touched = time.monotonic()
+
+    def remember(self, path):
+        return self.server.remember(path)
+
+    def file_of(self, ident):
+        return self.server.file_of(ident)
 
     def handle(self, request, response):
-        self.touched = time.monotonic()
         self.server.touch()
         if not host_is_allowed(request.header('host'), self.host):
             return response.send_json(403, {'error': 'Host is not a local name'})
@@ -71,7 +87,6 @@ class EngineApp:
         self.server, self.host = server, host
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
-        self.pages = {}
         self.active_requests = 0
         self._default = None
         self._mcp = None
@@ -82,13 +97,13 @@ class EngineApp:
 
     def active(self):
         with self.lock:
-            apps = [*self.pages.values(), *([self._default] if self._default else [])]
+            apps = [self._default] if self._default else []
             active = self.active_requests > 0 or any(app._exports and app._exports.keeps_alive() for app in apps)
         return active or bool(self._mcp and self._mcp.active())
 
     def close(self):
         with self.lock:
-            apps = [*self.pages.values(), *([self._default] if self._default else [])]
+            apps = [self._default] if self._default else []
         for app in apps:
             if app._exports is not None:
                 app._exports.close()
@@ -100,41 +115,62 @@ class EngineApp:
         return {'ok': True, 'url': self.server.url, 'port': self.server.port, 'token': self.token}
 
     def launch(self, options):
+        """A launch of the one page (``cadgen viewer``, a text-only host's link, the dev client's
+        ``--api-only``): its folder (``start``) becomes the folder the home shows, and each file it
+        names (``files``: on-disk CAD files, or ids the engine holds) is registered and given its
+        page, ``/<id>``. ``url`` is the first file's page, else the home's."""
         from .main import resolve_dist_dir
         start = os.path.abspath(options.get('start') or os.path.expanduser('~'))
         dist = '' if options.get('api_only') else resolve_dist_dir(options.get('dist') or '')
         if not options.get('api_only') and not dist:
             return {'failed': 'CAD Viewer client is not built; build apps/web or install the cadgen wheel'}
+        try:
+            documents = [self.document(name, start) for name in options.get('files') or []]
+        except ValueError as error:
+            return {'failed': str(error)}
         with self.lock:
-            found = None if options.get('new') else next((key for key, app in self.pages.items()
-                      if os.path.normcase(os.path.normpath(app.start)) == os.path.normcase(start)
-                      and os.path.normcase(app.dist_dir) == os.path.normcase(dist)), None)
-            ident = found or secrets.token_urlsafe(18)
-            if found is None:
-                app = SessionApp(self.server, host=self.host, port=self.server.port, dist_dir=dist, start=start)
-                app.analytics = self.analytics
-                self.pages[ident] = app
-            self.pages[ident].touched = time.monotonic()
-        url = f'{self.server.url}/s/{ident}/?token={self.token}'
-        return {'ok': True, 'url': url, 'apiUrl': f'{self.server.url}/s/{ident}', 'token': self.token,
-                'port': self.server.port, 'pid': os.getpid(), 'session': ident,
-                'action': 'reused' if found else 'started'}
+            reused = self._default is not None
+            app = self.default_app(dist or None)
+            app.start = to_posix_path(start)
+        token = f'?token={self.token}'
+        for document in documents:
+            document['url'] = f'{self.server.url}/{document["id"]}{token}'
+        return {'ok': True, 'url': documents[0]['url'] if documents else f'{self.server.url}/{token}',
+                'apiUrl': self.server.url, 'token': self.token, 'port': self.server.port, 'pid': os.getpid(),
+                'start': app.start, 'documents': documents, 'action': 'reused' if reused else 'started'}
+
+    def document(self, name, start):
+        """A file or an id a launch names, as ``{id, file}``: a file registered by its canonical path
+        (its id derived from it), an id taken as the engine holds it. ``ValueError`` for another."""
+        from cadgen.engine.ids import is_id
+
+        from .scanner import VIEWER_EXTENSIONS, extension_of
+
+        if is_id(name):
+            if not (self.server.holds(name) or self.server.file_of(name)):
+                raise ValueError(f'no document {name} is held')
+            return {'id': name, 'file': self.server.file_of(name)}
+        path = os.path.join(start, os.path.expanduser(name))
+        if extension_of(path) not in VIEWER_EXTENSIONS or not os.path.isfile(path):
+            raise ValueError(f'no CAD file at {os.path.abspath(path)}')
+        ident = self.server.remember(path)
+        return {'id': ident, 'file': to_posix_path(self.server.file_of(ident))}
 
     def sessions(self):
-        with self.lock:
-            now = time.monotonic()
-            self.pages = {key: app for key, app in self.pages.items() if now - app.touched < 3600 or (app._exports and app._exports.keeps_alive())}
-            pages = [{'id': key, 'kind': 'viewer', 'root': app.start,
-                      'idle': round(time.monotonic()-app.touched, 1)} for key, app in self.pages.items()]
-        return pages + ([] if self._mcp is None else self._mcp.listing())
+        page = [] if self._default is None else [{'kind': 'viewer', 'start': self._default.start}]
+        return page + ([] if self._mcp is None else self._mcp.listing())
 
-    def default_app(self):
+    def default_app(self, dist=None):
+        """The one page's app, made on its first request or launch; a launch's client build replaces
+        the one it serves."""
         with self.lock:
             if self._default is None:
                 from .main import resolve_dist_dir
-                self._default = SessionApp(self.server, host=self.host, port=self.server.port,
-                                           dist_dir=resolve_dist_dir(''))
+                self._default = ViewerApp(self.server, host=self.host, port=self.server.port,
+                                          dist_dir=dist or resolve_dist_dir(''))
                 self._default.analytics = self.analytics
+            elif dist:
+                self._default.dist_dir = os.path.abspath(dist)
             return self._default
 
     def handle(self, request, response):
@@ -174,28 +210,13 @@ class EngineApp:
                 ('referrer-policy', 'no-referrer')])
         if request.path == '/mcp' and self.session_factory is not None:
             return self.mcp().handle(request, response)
-        if request.path == '/' and self.server.holds(request.query.get('doc')):
-            from cadgen.engine.addresses import parse
-
-            # The landing link selects an address without meshing it on the HTTP thread.
-            path = self.server.path_of(request.query.get('doc'))
-            address = parse(path)
-            start = str(address.script.parent) if address and address.script else os.getcwd() if address else str(path.parent)
-            launch = self.launch({'start': start})
-            if 'failed' in launch:
-                return response.send_json(503, launch)
+        if request.method == 'GET' and (request.path.startswith('/s/') or request.path == '/s'
+                                         or request.path == '/' and ('doc' in request.query or 'file' in request.query)):
+            # A page session's link, or a document named by query: forms that are gone. The home.
+            return response.send_bytes(302, b'', '', [('location', '/'), ('referrer-policy', 'no-referrer')])
+        if request.method == 'GET' and is_id(request.path[1:]) and self.server.holds(request.path[1:]):
             self.server.warm()  # a build's view link opened: its meshing pool starts as the page loads
-            return response.send_bytes(302, b'', '', [('location', launch['apiUrl']+'/?'+urlencode({'file': str(path)}))])
-        if request.path.startswith('/s/'):
-            parts = request.path.split('/', 3)
-            with self.lock:
-                app = self.pages.get(parts[2])
-            if app is None:
-                return response.send_json(404, {'error': 'viewer session expired; run cadgen viewer again'})
-            request.path = '/' + (parts[3] if len(parts) > 3 else '')
-        else:
-            app = self.default_app()
-        return app.handle(request, response)
+        return self.default_app().handle(request, response)
 
     def mcp(self):
         with self.lock:

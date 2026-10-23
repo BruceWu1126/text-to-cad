@@ -220,6 +220,20 @@ it('opens the explorer from the file\'s name where the host\'s files can be brow
   expect(fileName().tagName).toBe('SPAN');
 });
 
+it('has no Select File and no file menu on a document with no file of its own, which its name names', async () => {
+  const id = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab';
+  const list = vi.fn(async () => []);
+  const model = { ...host, fileActions: { platform: 'darwin', perform: { 'copy-path': async () => {} } }, files: { id: 'one', list,
+    search: async () => ({ paths: [], truncated: false }),
+    stat: async (path: string) => ({ path, name: 'bracket', navigationPath: null, kind: 'file' as const, extension: 'xbf', size: 0 }) } };
+  open({ host: model, file: id });
+  await screen.findByText('shown');
+  // Its name is the model's, a name and no button; no file menu; nothing is listed.
+  expect([fileName().tagName, fileName().textContent]).toEqual(['SPAN', 'bracket']);
+  expect(labels()).not.toContain('File actions');
+  expect(list).not.toHaveBeenCalled();
+});
+
 it('says why a file will not open, and that it does not exist when it is missing', async () => {
   const missing = Object.assign(new Error('File does not exist: /models/gone.step'), { code: 'cad-file-missing' });
   expect(isMissingFileError(missing)).toBe(true);

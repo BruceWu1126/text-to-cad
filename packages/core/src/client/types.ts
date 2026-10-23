@@ -1,9 +1,13 @@
 export type CadJson = null | boolean | number | string | CadJson[] | { [key: string]: CadJson };
-export interface CadMemoryModel { address: string; script: string; name: string; builtAt: number; version: number; state: string }
 export interface CadEntry {
-  /** The file's absolute path, `/`-separated. */
+  /** The document's id (`cadgen.engine.ids`): rows join by it, so one file is one row however its path is spelled. */
+  id?: string;
+  /** The file's absolute path, `/`-separated; a document known by its id alone (a model's): its id. */
   file: string;
-  models?: { name: string; address: string }[];
+  /** The document's name where its file does not give it (a model's function). */
+  name?: string;
+  /** The file to browse from; null for a document with no file of its own (a model's). */
+  sourcePath?: string | null;
   kind?: string;
   format?: string;
   sourceFormat?: string;
@@ -16,7 +20,7 @@ export interface CadEntry {
 export interface CadServerInfo {
   autoReload?: boolean;
   identityToken?: string;
-  /** The folder the server was started in, where a developer's relative `?file=` resolves. */
+  /** The folder of the most recent launch (`cadgen viewer`), which the home shows. */
   start?: string;
   /** Whether this computer has a file chooser for the home's Open. */
   pick?: boolean;
@@ -37,7 +41,12 @@ export interface CadRecent {
 export interface CadConsent { sharing: boolean; reason: 'default' | 'untold' | 'choice' | 'environment' | 'unavailable'; policy: string; saved?: boolean }
 /** A newer text-to-cad, as cadgen's version check says it (`/__cad/version`). */
 export interface CadUpdateNotice { latest: string; version: string; text: string; prompt: string; instructions: string }
-export interface CadCatalog { entries: CadEntry[]; [key: string]: unknown }
+export interface CadCatalog {
+  entries: CadEntry[];
+  /** Why an id asked for has no row: the engine holds no such document (its words name the command that builds it again). */
+  missing?: string;
+  [key: string]: unknown;
+}
 /** One folder's subfolders and CAD files (`GET /__cad/folder`). */
 export interface CadFolder { path: string; entries: { name: string; kind: 'directory' | 'file' }[]; truncated: boolean }
 /** The CAD files nested under a folder whose path below it holds the query (`GET /__cad/search`). */
@@ -148,9 +157,11 @@ export interface CadWorkspaceService {
   getSnapshot(): CadCatalogSnapshot;
   subscribe(listener: () => void): () => void;
   refresh(options?: CadRequestOptions & {file?: string;markRefreshing?: boolean}): Promise<CadCatalog>;
+  /** The row of a document, by its absolute path or its id, read when the catalog has none yet. */
   resolveEntry(path: string, options?: CadRequestOptions): Promise<CadEntry>;
+  /** The row the catalog has of a document (its path, or its id), joined by the document's id; null when it has none. */
+  entryOf?(path: string): CadEntry | null;
   serverInfo(options?: CadRequestOptions & { fresh?: boolean }): Promise<CadServerInfo>;
-  models?(options?: CadRequestOptions): Promise<CadMemoryModel[]>;
   folder(path: string, options?: CadRequestOptions): Promise<CadFolder>;
   search(path: string, query: string, options?: CadRequestOptions): Promise<CadSearch>;
   /** The home's library, newest first. */

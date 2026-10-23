@@ -314,11 +314,6 @@ def is_served_cad_asset(file_path) -> bool:
 def catalog_entry(file_path) -> dict | None:
     """The catalog row of the file at absolute ``file_path``, or ``None`` when it has none: not a
     regular CAD file, or one whose own name is hidden (``is_catalog_file``)."""
-    from .model_catalog import entry as model_entry
-
-    model = model_entry(str(file_path))
-    if model is not None:
-        return model
     source_path = os.path.abspath(str(file_path))
     if not is_catalog_file(source_path) or _file_stats(source_path) is None:
         return None

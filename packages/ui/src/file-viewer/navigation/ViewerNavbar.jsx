@@ -92,10 +92,10 @@ function FileMenu({ path, platform, capabilities, onAction }) {
  * name, transparent until the pointer is on it, opening the explorer under it. Where they cannot,
  * it is the name alone, in the same place.
  */
-function FileName({ path, explorer }) {
+function FileName({ path, name: given, explorer }) {
   const [open, setOpen] = useState(false);
   const mobile = useViewerMobile();
-  const name = path.split("/").pop() || path;
+  const name = given || path.split("/").pop() || path;
   if (!explorer) return <span className="min-w-0 truncate px-1" data-file-name="">{name}</span>;
   // Opened, its filter has the keyboard, so typing finds a file at once; a phone keeps its keyboard
   // down, the explorer holding focus itself. Nothing else is focused for the person on opening.
@@ -126,7 +126,8 @@ function FileName({ path, explorer }) {
  * @param {{ links?: import("../../host/types.js").ViewerLinks, appSettings?: readonly import("../types.js").AppSetting[], colorScheme?: import("../types.js").ColorSchemeSetting, platform?: string } | null} [props.menu]
  *   The rest of the app's menu: the host's links and the person's settings.
  * @param {import("../types.js").ViewerHistory | null} [props.history] The view's own history, where the host keeps one: Back and Forward after the logo.
- * @param {string | null} [props.file] The open file, by its absolute path.
+ * @param {string | null} [props.file] The open file, by its absolute path (a document with no file of its own: its id).
+ * @param {string} [props.name] The document's name where its path does not give it (a model's).
  * @param {{ source: Pick<import("../types").FileSource, "list" | "search">, onOpen(path: string): void } | null} [props.explorer]
  *   Where the host's files can be browsed: the explorer the name opens.
  * @param {{ platform: import("./entry-menu.js").Platform, capabilities: ReadonlySet<import("./entry-menu.js").EntryAction>,
@@ -138,7 +139,7 @@ function FileName({ path, explorer }) {
  * @param {(element: HTMLDivElement | null) => void} [props.controlsRef] The box, last in the row, the renderer draws its view controls into.
  * @param {string} [props.className]
  */
-export function ViewerNavbar({ onHome, menu = null, history = null, file = null, explorer = null, fileMenu = null, trailing = null, update = null, fullSize = null, controlsRef, actions = null, className }) {
+export function ViewerNavbar({ onHome, menu = null, history = null, file = null, name, explorer = null, fileMenu = null, trailing = null, update = null, fullSize = null, controlsRef, actions = null, className }) {
   const { t } = useI18n();
   return (
     <header className={cn(NAVBAR_ROW_CLASS, "border-border bg-background text-foreground", className)} data-viewer-navbar="">
@@ -146,7 +147,7 @@ export function ViewerNavbar({ onHome, menu = null, history = null, file = null,
         {onHome || menu ? <LogoMenu onHome={onHome} menu={menu} /> : null}
         {history ? <HistoryButtons viewHistory={history} /> : null}
         {file ? <span className="flex min-w-0 items-center">
-          <FileName path={file} explorer={explorer} />
+          <FileName path={file} name={name} explorer={explorer} />
           {fileMenu ? <FileMenu path={file} {...fileMenu} /> : null}
         </span> : null}
       </nav>

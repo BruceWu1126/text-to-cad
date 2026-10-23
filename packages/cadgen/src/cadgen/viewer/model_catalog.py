@@ -1,27 +1,28 @@
-"""Model addresses and script declarations for the viewer, without kernel imports."""
+"""The documents the engine holds by id (a model's), as catalog rows, without kernel imports."""
 from __future__ import annotations
 
-from pathlib import Path
-from cadgen.engine.addresses import declarations, parse
 from cadgen.engine.client import request
-from cadgen.engine.ids import canonical
+from cadgen.engine.ids import is_id
 
 
-def in_memory() -> list[dict]:
-    answer = request({"op": "models"}, start=False)
-    return (answer or {}).get("models", [])
+def held(ident: str) -> tuple[dict | None, str]:
+    """The model the engine holds of id ``ident``, and why it holds none (``""`` when it does):
+    the engine's own words, naming the command that builds it again. Nothing is built."""
+    answer = request({"op": "model_info", "id": ident}, start=False)
+    if not answer:
+        return None, f"no document {ident} is held: no engine is running"
+    if "failed" in answer:
+        return None, str(answer["failed"])
+    return answer["model"], ""
 
 
 def entry(value: str) -> dict | None:
-    address = parse(value)
-    if address is not None:
-        if not address.script.is_file() or address.name not in declarations(address.script):
-            return None
-        return {"file": str(address), "kind": "xbf", "sourceFormat": "model", "url": "", "hash": "model", "bytes": 0}
-    script = Path(value)
-    if script.suffix.lower() == ".py" and script.is_file():
-        stat, script = script.stat(), Path(canonical(script))
-        return {"file": str(script), "kind": "script", "url": "", "bytes": stat.st_size,
-                "hash": f"{stat.st_mtime_ns}-{stat.st_size}",
-                "models": [{"name": name, "address": f"{script}::{name}"} for name in declarations(script)]}
-    return None
+    """The catalog row of the model document ``value`` (its id) while the engine holds it; None for
+    anything else. The row's ``file`` is the id: a model has no file to browse (``sourcePath``)."""
+    if not is_id(value):
+        return None
+    model, _why = held(value)
+    if model is None:
+        return None
+    return {"id": value, "file": value, "name": model["source"]["name"], "sourcePath": None,
+            "kind": "xbf", "sourceFormat": "model", "url": "", "hash": "model", "bytes": 0}

@@ -50,8 +50,8 @@ function resolveDirectoryRoot() {
   });
 }
 
-// Vite obtains a fresh API session from this installation's engine, then proxies
-// /__cad with its token. Closing Vite leaves the engine and its other clients alive.
+// Vite obtains the API endpoint of this installation's engine (its one page's), then
+// proxies /__cad with its token. Closing Vite leaves the engine and its other clients alive.
 // VIEWER_PYTHON names the editable installation's interpreter. An explicit
 // VIEWER_BACKEND_URL (the launcher's apiUrl) also needs VIEWER_ENGINE_TOKEN.
 async function startDevBackend() {
@@ -63,8 +63,8 @@ async function startDevBackend() {
   }
 
   const python = process.env.VIEWER_PYTHON || "python3";
-  // The backend serves every file by absolute path. Where it starts is only where
-  // a developer's relative ?file= resolves (`serverInfo.start`): where
+  // The backend serves every file by absolute path. Where it starts is the launch
+  // folder the home shows (`serverInfo.start`, replacing the last launch's): where
   // `npm run dev` was run (scripts/directoryRoot.mjs reads INIT_CWD, which npm
   // sets), handed over as the child's cwd.
   const child = spawn(
@@ -74,7 +74,6 @@ async function startDevBackend() {
       "cadgen.viewer",
       "--host",
       "127.0.0.1",
-      "--new",
       "--api-only",
       "--json",
     ],

@@ -109,21 +109,17 @@ class ExportJobs(Jobs):
             if doc is None or doc.version != spec["revision"]:
                 raise ExportError("The source changed. Open Export again to use the displayed revision.", 409)
             path, digest = str(doc.path), doc.structure.get("exportRevision")
-        from cadgen.engine.addresses import parse
-        from cadgen.engine.client import request
+            label = str(doc.structure.get("name") or "")
+        from cadgen.engine.ids import is_id
 
-        address = parse(path)
-        if address:
+        if is_id(path):
+            # A document known by its id alone (a model's) is exported from what the engine holds,
+            # never built again (``Daemon.document``).
             if not digest:
                 raise ExportError("Reopen this model before exporting.", 409)
-            answer = request({"op": "model_source", "address": path})
-            if not answer or "source" not in answer:
-                raise ExportError("The viewed model is no longer held.", 409)
-            source, expected = answer["source"], {"digest": digest, "address": path, "modelRevision": spec["revision"]}
-        else:
-            source, expected = {"path": path}, {"version": spec["revision"]}
-        name = path.rsplit("::", 1)[-1] if address else Path(path).stem
-        return source, expected, name
+            source, expected = {"id": path}, {"digest": digest, "id": path, "modelRevision": spec["revision"]}
+            return source, expected, label or "export"
+        return {"path": path}, {"version": spec["revision"]}, Path(path).stem
 
     def _worker(self, spec, target, progress):
         from cadgen.engine.client import request

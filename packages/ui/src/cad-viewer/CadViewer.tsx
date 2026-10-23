@@ -17,7 +17,8 @@ import type { LibraryLayout } from '../tab-store/tabRecord.js';
 import type { TabStore } from '../tab-store/tabStore.js';
 import { useTabViewerState } from '../tab-store/useTabViewerState.js';
 import { normalizePath } from './catalog.js';
-import { MemoryModels } from './MemoryModels.js';
+import { isDocumentId } from '@text-to-cad/core/lib/cadRefs.js';
+import { LaunchFolder } from './LaunchFolder.js';
 import { MissingCadFile } from './MissingCadFile.js';
 
 // A STEP: read by the cadgen engine, at a length its size decides (the home's pictures ask first).
@@ -38,12 +39,17 @@ export interface CadViewerProps<Model extends LibraryModel = LibraryModel> {
   tabStore: TabStore;
   /** The host's handle on the mounted view: its agent reads it, and the library's pictures come through it. */
   live: LiveRegistry;
-  /** The file on screen, by its absolute path; `''` is none: the home. */
+  /** The file on screen, by its absolute path, or a document the engine holds by its id alone (a model's); `''` is none: the home. */
   file: string;
   /** Show another file (absolute), or the home (`''`). */
   onShow(file: string): void;
-  /** The file on screen once the catalog has it, or null (the home, or a file still resolving or missing). */
-  onShown?(file: string | null): void;
+  /**
+   * The file on screen once the catalog has it, or null (the home, or a file still resolving or
+   * missing), and its document's id: what the host names it by (`/<id>`).
+   */
+  onShown?(file: string | null, id: string | null): void;
+  /** The folder the home shows under the recent files: the most recent launch's. */
+  start?: string;
   /**
    * The home's library: the models opened before, to open again, and Open. A host with one shows it
    * wherever no file is open, and the navbar's logo leads to it from a file. Without one (a host
@@ -94,7 +100,7 @@ const reportError = (error: Error) => console.error(error);
  * time, and only a model whose display is already built — the home never starts a build. It never
  * navigates: showing a file, or the home, is the host's `onShow`.
  */
-export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, host, tabStore, live, file, onShow, onShown,
+export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, host, tabStore, live, file, onShow, onShown, start,
   library, onThumbnail, colorScheme, language, appSettings, notice, update, fullSize, history, onError = reportError }: CadViewerProps<Model>) {
   // The language the host names: the pages drawn here (the home, a file that will not open) read in it.
   const locale = host.environment.locale;
@@ -107,13 +113,18 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   const settings = useSyncExternalStore(preferences.subscribe, preferences.getSnapshot, preferences.getSnapshot);
   const { state, onStateChange } = useTabViewerState(tabStore);
   const path = normalizePath(file);
-  const latest = useRef({ onShow, onShown, onThumbnail, path });
-  latest.current = { onShow, onShown, onThumbnail, path };
+  const latest = useRef({ onShow, onShown, onThumbnail, path, shown: null as string | null });
+  latest.current = { onShow, onShown, onThumbnail, path, shown: latest.current.shown };
 
-  // The file on screen once the catalog has it.
-  const entry = path ? catalog.entries.find(item => normalizePath(item.file) === path) ?? null : null;
-  const shown = entry ? path : null;
-  useEffect(() => { latest.current.onShown?.(shown); }, [shown]);
+  // The file on screen once the catalog has it: its row joined by the document's id, so a symlink and
+  // its target, or two spellings of one path, are one row (`client.entryOf`).
+  const entry = path ? (client.entryOf ? client.entryOf(path) : catalog.entries.find(item => normalizePath(item.file) === path) ?? null) : null;
+  // What is on screen by its own name: the file's path, or the id of a document with no file of its
+  // own (a model's). `file` may name it either way: a host addresses documents by id.
+  const shown = entry ? (entry.sourcePath === null ? path : normalizePath(entry.file)) : null;
+  const shownId = entry ? String(entry.id || '') || null : null;
+  latest.current.shown = shown;
+  useEffect(() => { latest.current.onShown?.(shown, shownId); }, [shown, shownId]);
 
   // Only the file on screen keeps its view in the tab (`tab-store`): leaving a model — for another
   // file, or for the home — drops its camera, Display settings, pose and the rest, while a reload of
@@ -138,14 +149,15 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   }, [client]);
 
   // What is on screen joins the library with a picture, once it has settled.
-  useModelThumbnail(live, shown?.includes("::") || shown?.endsWith(".py") ? null : shown, String(entry?.documentHash || entry?.hash || ''),
+  // A document known by its id alone (a model's) is not in the library: it has no file.
+  useModelThumbnail(live, shown && !isDocumentId(shown) ? shown : null, String(entry?.documentHash || entry?.hash || ''),
     (png, pictured) => latest.current.onThumbnail?.(png, pictured) ?? Promise.resolve());
 
   // A file the viewer asks for — a pick in the explorer, a renderer's link — is shown by the host.
   // A view with no library shows its file and nothing else: it opens no other, and has no home.
   const openFile = useCallback((next: string) => {
     const wanted = normalizePath(next);
-    if (wanted && wanted !== latest.current.path) latest.current.onShow(wanted);
+    if (wanted && wanted !== latest.current.path && wanted !== latest.current.shown) latest.current.onShow(wanted);
   }, []);
   const homed = Boolean(library);
   const home = useCallback(() => latest.current.onShow(''), []);
@@ -158,7 +170,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   const drawable = Boolean(library && onThumbnail);
   const picture = useMemo(() => (drawable ? async (model: Model) => {
     const file = normalizePath(model.path);
-    if (latest.current.path || file.includes("::") || file.endsWith(".py")) return false;
+    if (latest.current.path || isDocumentId(file)) return false;
     if (STEP_FILE.test(file) && !(await client.engineHolds?.(file).catch(() => false))) return false;
     if (latest.current.path) return false;
     const keep = (png: Blob) => latest.current.onThumbnail?.(png, model.path) ?? Promise.resolve();
@@ -182,14 +194,18 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   const goHome = useMemo(() => homed ? <Button size="sm" variant="outline" onClick={home}>{t("file.goHome")}</Button> : null, [homed, home, t]);
   const presentation = useMemo(() => ({
     home: library ? <ModelLibrary library={library} layout={layout} onLayoutChange={changeLayout} picture={picture}
-      links={host.links} onError={onError} sections={<MemoryModels source={host.files} onOpen={openFile} />} /> : undefined,
+      links={host.links} onError={onError}
+      after={start && host.files.list ? <LaunchFolder source={host.files} folder={start} onOpen={openFile} /> : null} /> : undefined,
     loading: <div className="relative h-full"><ViewerLoadingOverlay viewerLoading /></div>,
+    // A document named by its id that the engine does not hold says why, and the command that
+    // builds it again (the engine's words); a file that is not there, its path.
     error: ({ message, missing, reload }: { message: string; missing: boolean; reload?: () => void }) => missing
-      ? <MissingCadFile file={path} entry={entry} reload={reload} action={goHome} title={t("file.missing")} />
+      ? <MissingCadFile file={path} entry={entry} reload={reload} action={goHome}
+        title={isDocumentId(path) ? t("file.notHeld") : t("file.missing")} description={isDocumentId(path) ? message : undefined} />
       : <EmptyState icon={FileWarning} title={t("file.openFailed")} description={message} tone="warn" action={goHome} />,
-  }), [library, layout, changeLayout, path, picture, host.links, host.files, openFile, entry, onError, goHome, t]);
+  }), [library, layout, changeLayout, path, picture, host.links, host.files, openFile, entry, onError, goHome, t, start]);
   return <I18nProvider locale={locale}>
-    <ExportControls service={client.exports} downloads={host.downloads} file={path}>{({ navbar, overlay }) => <FileViewer navbarActions={navbar} overlay={overlay} file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
+    <ExportControls service={client.exports} downloads={host.downloads} file={shown ?? path}>{({ navbar, overlay }) => <FileViewer navbarActions={navbar} overlay={overlay} file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
       colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} fullSize={fullSize} history={history} notice={notice} onError={onError} presentation={presentation} />}</ExportControls>
     {drawing && !path ? <OffscreenPicture key={drawing.source.file} source={drawing.source} host={host} preferences={preferences} onDone={drawn} /> : null}
   </I18nProvider>;

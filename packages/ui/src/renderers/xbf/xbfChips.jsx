@@ -138,10 +138,11 @@ export function xbfNodeRefs({ scene, tree, resource, ids }) {
   return ids.filter(id => tree.nodes.has(id)).map(nodeCopy).filter(Boolean);
 }
 
-// How a node and an element are referenced in `resource`: by the engine's refs in an .xbf, by a
-// STEP's own grammar in a STEP the engine draws. A node's copy is its reference with the file's path.
+// How a node and an element are referenced in `resource`: by the engine's refs in an .xbf and in a
+// document the engine holds by its id (a model's), by a STEP's own grammar in a STEP the engine
+// draws. A node's copy is its reference with the file's path, or the document's id.
 function referencing({ scene, tree, resource }) {
-  const workspace = resource?.kind === "workspace-file";
+  const workspace = resource?.kind === "workspace-file" || resource?.kind === "cad-model";
   const engine = workspace && isEngineRefFile(resource.path);
   const referenceTo = selector => ({ resource: { ...resource }, target: { kind: "cad-selector", selectors: [selector] } });
   const referenceOf = (selector) => {

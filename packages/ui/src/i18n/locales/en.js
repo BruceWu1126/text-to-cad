@@ -47,6 +47,7 @@ export default {
   // The file view: opening, and the states where it stops.
   "file.opening": "Opening…",
   "file.missing": "File does not exist",
+  "file.notHeld": "This model is no longer held",
   "file.openFailed": "Could not open that file",
   "file.displayFailed": "Could not display that file",
   "file.goHome": "Go home",
@@ -110,6 +111,7 @@ export default {
   "home.byline": "Build anything.",
   "home.bylineOpenSource": "100% open source and free.",
   "home.recentFiles": "Recent Files",
+  "home.launchFolder": "Launch folder",
   "home.searchAria": "Search models",
   "home.searchPlaceholder": "Search",
   "home.layout": "Layout",

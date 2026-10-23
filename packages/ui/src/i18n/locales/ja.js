@@ -42,6 +42,7 @@ export default {
 
   "file.opening": "開いています…",
   "file.missing": "ファイルが存在しません",
+  "file.notHeld": "このモデルは保持されていません",
   "file.openFailed": "このファイルを開けませんでした",
   "file.displayFailed": "このファイルを表示できませんでした",
   "file.goHome": "ホームへ戻る",
@@ -97,6 +98,7 @@ export default {
   "home.byline": "何でも作ろう。",
   "home.bylineOpenSource": "100% オープンソースで無料。",
   "home.recentFiles": "最近のファイル",
+  "home.launchFolder": "起動フォルダー",
   "home.searchAria": "モデルを検索",
   "home.searchPlaceholder": "検索",
   "home.layout": "レイアウト",

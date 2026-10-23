@@ -42,6 +42,7 @@ export default {
 
   "file.opening": "여는 중…",
   "file.missing": "파일이 없습니다",
+  "file.notHeld": "이 모델은 더 이상 유지되지 않습니다",
   "file.openFailed": "이 파일을 열 수 없습니다",
   "file.displayFailed": "이 파일을 표시할 수 없습니다",
   "file.goHome": "홈으로",
@@ -97,6 +98,7 @@ export default {
   "home.byline": "무엇이든 만드세요.",
   "home.bylineOpenSource": "100% 오픈 소스, 무료.",
   "home.recentFiles": "최근 파일",
+  "home.launchFolder": "실행 폴더",
   "home.searchAria": "모델 검색",
   "home.searchPlaceholder": "검색",
   "home.layout": "레이아웃",

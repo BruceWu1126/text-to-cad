@@ -29,14 +29,13 @@ test('the web catalog poll asks nothing while the page is hidden, and reads the 
 });
 
 
-test('session asset URLs stay absolute through both catalog and resource reads', async () => {
+test('a document page asks the server at its root, whichever document path it is at', async () => {
   const calls = [];
   const client = createWebCadClient({ document: { visibilityState: 'visible' },
-    location: { origin: 'http://127.0.0.1:1234', pathname: '/s/page/' },
-    fetch: async url => { calls.push(String(url)); return new Response(new Uint8Array([1, 2])); },
+    fetch: async url => { calls.push(String(url)); return new Response(JSON.stringify({ entries: [] })); },
   });
-  assert.equal(client.origin, 'http://127.0.0.1:1234/s/page');
-  await client.resources.readBytes('http://127.0.0.1:1234/s/page/__cad/asset?file=part.stl');
-  assert.deepEqual(calls, ['http://127.0.0.1:1234/s/page/__cad/asset?file=part.stl']);
+  assert.equal(client.origin, '');
+  await client.refresh({ file: '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab' });
+  assert.deepEqual(calls, ['/__cad/catalog?id=6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab']);
   client.dispose();
 });

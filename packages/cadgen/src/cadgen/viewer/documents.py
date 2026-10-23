@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from cadgen.engine.addresses import document_id
+from cadgen.engine.ids import is_id
 
 from .backend import absolute_path
 from .scanner import node_basename
@@ -17,15 +18,12 @@ FINISHED_SECONDS = 30.0
 
 
 def engine_document_path(file_ref):
+    """The engine document a request names: a document's id as it is, or an on-disk ``.xbf`` or
+    STEP's absolute path. A script is no document."""
     if not file_ref:
-        raise ValueError("GET /__cad/xbf needs ?file=<absolute document path>")
-    from cadgen.engine.addresses import parse
-
-    address = parse(file_ref)
-    if address is not None:
-        if not address.script.is_file():
-            raise ValueError(f"no script {address.script}")
-        return str(address)
+        raise ValueError("GET /__cad/xbf needs ?file=<a document id, or an absolute document path>")
+    if is_id(file_ref):
+        return file_ref
     path = absolute_path(file_ref)
     if os.path.splitext(path)[1].lower() not in ENGINE_DOCUMENTS:
         raise ValueError(f"{node_basename(path)} is not a document the cadgen engine reads (.xbf, .step, .stp)")
@@ -122,9 +120,8 @@ class EngineDocuments:
     def serve(self, path: str) -> dict:
         if self.server is None:
             raise ValueError("documents are served by the installation's engine")
-        from cadgen.engine.addresses import parse
-
-        if parse(path) is not None:
+        if is_id(path):
+            # Served as the engine holds it, by its daemon: never built (``Daemon`` ``serve``).
             from cadgen.engine.client import request
 
             answer = request({"op": "serve", "path": path})
