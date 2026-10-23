@@ -49,7 +49,7 @@ START = {
 DESCRIPTIONS = {
     "cad_build": "Build Python source assigning result, in the named working directory. Declare a live model and/or absolute file outputs. Does not select a script or execute its __main__; imported code and called decorated models may write their declared outputs.",
     "cad_export": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf/.cadz). Reuses the Python export operation, including building a script model source first. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts.",
-    "cad_snapshot": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. Paths must be absolute on the engine host. A script model source may build first. A failed packet removes its requested pictures.",
+    "cad_snapshot": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. Paths must be absolute on the engine host. A script model source may build first. A failed snapshot or packet leaves existing pictures unchanged.",
     "cad_inspect": "Read closure, geometry (requires ref), or build metadata of an existing file or live model. Never builds source or writes declared model outputs; an unbuilt or expired model must be explicitly built first. Defaults to geometry with a ref, otherwise closure.",
 }
 

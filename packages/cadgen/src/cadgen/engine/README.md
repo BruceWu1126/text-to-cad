@@ -604,7 +604,8 @@ size. SRC, given, is drawn in place of every job's input, and a flag given overr
 display, the grid, the camera, Preview, the pose, the ink, the dimensions, the size of every
 output; an OUT is refused. Every job is checked before anything renders (an unknown key, a setting
 out of range, two outputs at one path, a file that is not there: refused by name, every file left as
-it was), and a picture that fails leaves none of the job's. Through the daemon each picture is a frame
+it was), and a picture that fails writes none of the job's: every picture is staged beside its
+output and moved into place only when all are drawn, and a failed snapshot leaves every existing picture as it was. Through the daemon each picture is a frame
 of the file's warm render process; `--no-daemon` serves each file once for all its pictures.
 `--json` prints `{"ok": true, "pictures": [what each drew]}`.
 

@@ -167,7 +167,7 @@ with `tightFrame` false, as the viewer writes every view, is drawn exactly),
 `transparent` draws on nothing, `renderScale` (1 to 3) supersamples -- OCCT's edge
 lines stay one pixel of the larger picture, so they read finer -- and `sizeProfile`
 sizes an output that gives no size. Every job is checked before anything renders,
-and a failure leaves none of its pictures. `--json` prints each picture's report.
+and a failure writes none of its pictures, leaving existing ones unchanged. `--json` prints each picture's report.
 
 Inspect supplied annotations before editing. A view without annotations is optional
 context: render it only when useful to the request. After an edit, draw the same

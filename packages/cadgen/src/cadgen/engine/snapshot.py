@@ -43,14 +43,13 @@ robot's, the visuals it hid (``selection.hide``), the packet's ink and dimension
 the output settings the job gives (``output``: ``padding``, ``tightFrame``, ``transparent``,
 ``renderScale``, ``sizeProfile``). A view's own camera with the tight frame off is drawn exactly;
 any other camera is fitted with the job's padding. Every request is checked before anything
-renders, and a failure leaves none of the job's pictures.
+renders, and a failure writes none of the job's pictures, leaving every output as it was.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
-import contextlib
 import json
 import math
 import os
@@ -58,7 +57,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from cadgen.engine.atomic_replace import replace_atomic
 
@@ -596,24 +595,14 @@ def picture_path(out: Any, source: Any, *, at: str | None = None, job: tuple[int
 
 
 def write_png(out: Path, data: bytes) -> None:
-    """The one file a snapshot writes: beside ``out`` first, then moved over it."""
+    """The one file a snapshot writes: beside ``out`` first, then moved over it, so a failure
+    leaves whatever was at ``out`` as it was, and no temporary file beside it."""
     temporary = out.with_name(f".{out.stem}.{os.getpid()}.tmp.png")
-    temporary.write_bytes(data)
-    replace_atomic(temporary, out)
-
-
-@contextlib.contextmanager
-def nothing_left(*outs: Path) -> Iterator[None]:
-    """A snapshot that fails or is refused leaves no picture at an ``out``, not even one an earlier
-    run wrote there: a stale picture at exit 1 reads as this run's (law 16) -- a job's, none of its
-    pictures. Only a ``.png`` is taken away; an OUT of another kind is refused before anything is
-    written, and kept."""
     try:
-        yield
+        temporary.write_bytes(data)
+        replace_atomic(temporary, out)
     except BaseException:
-        for out in outs:
-            if Path(out).suffix.lower() == ".png" and Path(out).is_file():
-                Path(out).unlink(missing_ok=True)
+        temporary.unlink(missing_ok=True)
         raise
 
 
@@ -657,13 +646,12 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
     drawn in, read from the Quick Edit packet ``annotation_source`` is (or is beside: ``authored``),
     and its size and projection unless ``size`` and ``display.camera`` say otherwise. ``size`` None
     is the default size. Raises ``SnapshotRefused`` for a request it will not draw, before
-    rendering, and leaves no picture at ``out`` when it refuses or fails (``nothing_left``)."""
+    rendering; one refused or failed leaves the file at ``out`` as it was (``write_png``)."""
     started = time.perf_counter()
     document, out = Path(document).resolve(), Path(out).resolve()
-    with nothing_left(out):
-        return _snapshot(document, out, display=display, camera=camera, preview=preview, size=size, daemon=daemon,
-                         pose=pose, source=source, annotation=annotation, measurements=measurements,
-                         annotation_source=annotation_source, started=started)
+    return _snapshot(document, out, display=display, camera=camera, preview=preview, size=size, daemon=daemon,
+                     pose=pose, source=source, annotation=annotation, measurements=measurements,
+                     annotation_source=annotation_source, started=started)
 
 
 def _checked(document: Path, out: Path, source: Any = None) -> str:
@@ -956,31 +944,48 @@ def job_pictures(job: Any, source: Any = None, *, display: Any = None, camera: A
 def draw_pictures(pictures: list[tuple[Path, Path, Still]], *, daemon: bool = True) -> list[dict[str, Any]]:
     """A job's pictures drawn (``job_pictures``), each written to its file: through the daemon, a
     render process warm for each file, or in this process, each file served once for all its
-    pictures. A picture that fails leaves none of the job's (``nothing_left``)."""
-    with nothing_left(*(out for _document, out, _still in pictures)):
-        for _document, out, _still in pictures:
+    pictures. All or nothing: every picture is drawn into a staged file beside its output, and
+    the staged files are moved over the outputs only once every one is drawn. A picture that
+    fails leaves every output as it was and removes only the staged files (``_staged``)."""
+    staged = [(document, out, out.with_name(f".{out.stem}.{os.getpid()}.{at}.staged.png"), still)
+              for at, (document, out, still) in enumerate(pictures)]
+    try:
+        for _document, out, _stage, _still in staged:
             out.parent.mkdir(parents=True, exist_ok=True)
-        if daemon or any(_model(str(document)) for document, _out, _still in pictures):
-            return [_occt(document, out, still, daemon, None, time.perf_counter()) for document, out, still in pictures]
-        from cadgen.engine.formats import FormatError
-        from cadgen.engine.render.service import draw_here_each
-
-        drawn: list[dict[str, Any]] = []
-        at = 0
-        while at < len(pictures):
-            document = pictures[at][0]
-            # The pictures of one file in a row, drawn from one serve of it.
-            group = pictures[at:at + next((n for n, picture in enumerate(pictures[at:]) if picture[0] != document),
-                                          len(pictures) - at)]
-            started = time.perf_counter()
-            try:
-                answers = draw_here_each(document, [still for _document, _out, still in group])
-            except FormatError as error:
-                raise SnapshotRefused(str(error)) from None
-            drawn += [_written(document, out, data, report, started)
-                      for (_document, out, _still), (data, report) in zip(group, answers)]
-            at += len(group)
+        drawn = _draw_staged(staged, daemon)
+        for (_document, out, stage, _still), found in zip(staged, drawn):
+            replace_atomic(stage, out)
+            found["output"] = str(out)
         return drawn
+    finally:
+        for _document, _out, stage, _still in staged:
+            stage.unlink(missing_ok=True)
+
+
+def _draw_staged(staged: list[tuple[Path, Path, Path, Still]], daemon: bool) -> list[dict[str, Any]]:
+    """Each picture of a job drawn into its staged file (``draw_pictures``)."""
+    if daemon or any(_model(str(document)) for document, _out, _stage, _still in staged):
+        return [_occt(document, stage, still, daemon, None, time.perf_counter())
+                for document, _out, stage, still in staged]
+    from cadgen.engine.formats import FormatError
+    from cadgen.engine.render.service import draw_here_each
+
+    drawn: list[dict[str, Any]] = []
+    at = 0
+    while at < len(staged):
+        document = staged[at][0]
+        # The pictures of one file in a row, drawn from one serve of it.
+        group = staged[at:at + next((n for n, picture in enumerate(staged[at:]) if picture[0] != document),
+                                    len(staged) - at)]
+        started = time.perf_counter()
+        try:
+            answers = draw_here_each(document, [still for _document, _out, _stage, still in group])
+        except FormatError as error:
+            raise SnapshotRefused(str(error)) from None
+        drawn += [_written(document, stage, data, report, started)
+                  for (_document, _out, stage, _still), (data, report) in zip(group, answers)]
+        at += len(group)
+    return drawn
 
 
 def _warn(unmeshed: dict[str, list[int]]) -> dict[str, list[int]]:

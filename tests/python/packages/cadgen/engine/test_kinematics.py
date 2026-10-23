@@ -255,7 +255,7 @@ class HingeTest(_Folder):
             out.write_bytes(b"before")
             with self.assertRaisesRegex(SnapshotRefused, words):
                 snapshot(path, out, pose=pose, size=(160, 120), daemon=False)
-            self.assertFalse(out.exists(), "a refused snapshot leaves no picture at OUT")
+            self.assertEqual(out.read_bytes(), b"before", "a refused snapshot keeps the picture at OUT")
         opengl.require(context.available(), "the pose is refused; drawing it needs an OpenGL context")
         rest = snapshot(path, self.folder / "rest.png", camera="front", size=(160, 120), daemon=False)
         raised = snapshot(path, self.folder / "raised.png", camera="front", size=(160, 120), daemon=False, pose="raised")

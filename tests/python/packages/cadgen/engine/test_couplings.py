@@ -352,7 +352,7 @@ class FingerTest(_Folder):
         out.write_bytes(b"before")
         with self.assertRaisesRegex(SnapshotRefused, "--pose: .*coupling 'index_curl' at 2 is outside its range"):
             snapshot(path, out, pose={"index_curl": 2}, size=(160, 120), daemon=False)
-        self.assertFalse(out.exists(), "a refused snapshot leaves no picture at OUT")
+        self.assertEqual(out.read_bytes(), b"before", "a refused snapshot keeps the picture at OUT")
         # The posed structure the picture is drawn from: every instance where the joints set by hand put it.
         structure = document.Loaded(path).structure()
         coupled = mechanism.posed_structure(structure, {"index_curl": 0.6})

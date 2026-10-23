@@ -115,9 +115,9 @@ class SnapshotTest(unittest.TestCase):
         self.assertGreater(report["timings"]["totalMs"], 0)
         self.assertEqual(out.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
 
-    def test_what_a_document_does_not_offer_is_refused_by_name_and_leaves_no_picture(self) -> None:
-        # A picture an earlier run wrote at OUT is gone once a run is refused (law 16); an OUT
-        # that is no .png is refused, and kept.
+    def test_what_a_document_does_not_offer_is_refused_by_name_and_keeps_the_earlier_picture(self) -> None:
+        # A refused or failed run leaves the picture an earlier run wrote at OUT byte for byte,
+        # and nothing beside it; an OUT that is no .png is refused, and kept.
         out = self.folder / "stale.png"
 
         def stale() -> Path:
@@ -151,7 +151,7 @@ class SnapshotTest(unittest.TestCase):
                                                                            daemon=False))):
             with self.assertRaisesRegex(SnapshotRefused, said):
                 call()
-            self.assertFalse(out.exists(), said)
+            self.assertEqual(out.read_bytes(), b"before", said)
         env = {**os.environ, "PYTHONPATH": str(SRC)}
         stale()
         done = subprocess.run([sys.executable, "-m", "cadgen.engine", "snapshot", str(self.single), str(out),
@@ -159,7 +159,43 @@ class SnapshotTest(unittest.TestCase):
                               env=env, capture_output=True, text=True, timeout=120)
         self.assertEqual(done.returncode, 2)
         self.assertIn("display.exploded", done.stderr)
-        self.assertFalse(out.exists())
+        self.assertEqual(out.read_bytes(), b"before")
+
+    def test_a_failed_render_keeps_every_earlier_picture_and_a_job_moves_its_pictures_in_together(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine import snapshot as drawing
+        from cadgen.engine.render import service
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-kept-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        first, second = folder / "first.png", folder / "second.png"
+        first.write_bytes(b"first, earlier")
+        second.write_bytes(b"second, earlier")
+        with mock.patch.object(service, "draw_here", side_effect=RuntimeError("the render broke")), \
+                self.assertRaisesRegex(RuntimeError, "the render broke"):
+            snapshot(self.document, first, daemon=False)
+        self.assertEqual(first.read_bytes(), b"first, earlier")
+        still = drawing.Still({}, None, False, False, (8, 8), None, None, None)
+        pictures = [(self.document, first, still), (self.document, second, still)]
+        drawn = {"timings": {}}
+        written = drawing._written
+
+        def second_fails(document, out, data, report, started):
+            if len(list(folder.glob(".*.staged.png"))) == 1:
+                raise OSError("the disk is full")
+            return written(document, out, data, report, started)
+
+        with mock.patch.object(service, "draw_here_each", return_value=[(b"new 1", dict(drawn)), (b"new 2", dict(drawn))]):
+            with mock.patch.object(drawing, "_written", side_effect=second_fails), \
+                    self.assertRaisesRegex(OSError, "disk is full"):
+                drawing.draw_pictures(pictures, daemon=False)
+            self.assertEqual((first.read_bytes(), second.read_bytes()), (b"first, earlier", b"second, earlier"))
+            self.assertEqual(sorted(path.name for path in folder.iterdir()), ["first.png", "second.png"])
+            done = drawing.draw_pictures(pictures, daemon=False)
+        self.assertEqual((first.read_bytes(), second.read_bytes()), (b"new 1", b"new 2"))
+        self.assertEqual([found["output"] for found in done], [str(first), str(second)])
+        self.assertEqual(sorted(path.name for path in folder.iterdir()), ["first.png", "second.png"])
 
     def test_an_out_that_is_a_folder_is_given_the_source_s_stem_and_the_time(self) -> None:
         import re
