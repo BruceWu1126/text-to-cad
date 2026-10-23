@@ -207,6 +207,20 @@ class PreviousTest(unittest.TestCase):
         self.assertEqual(self.xbf.read_bytes(), first)
         self.assertEqual(self.kit()["cache"], {"used": True, "from": "memory"})
 
+    def test_a_warm_build_whose_child_models_file_moved_or_went_is_replayed(self) -> None:
+        self.cold()
+        self.assertEqual(self.kit()["cache"], {"used": True, "from": "memory"}, "every file as the last build left it")
+        peg = self.folder / "XBF/peg.xbf"
+        written = peg.read_bytes()
+        later = peg.stat().st_mtime_ns + 1_000_000_000
+        os.utime(peg, ns=(later, later))
+        self.assertEqual(self.kit()["cache"]["reason"], "replayed from memory", "a child's file moved")
+        peg.unlink()
+        report = self.kit()
+        self.assertEqual(report["cache"]["reason"], "replayed from memory", "a child's file gone")
+        self.assertEqual(peg.read_bytes(), written, "the replay writes the child's file again")
+        self.assertEqual(self.kit()["cache"], {"used": True, "from": "memory"})
+
     def test_a_verifying_warm_build_runs_every_body(self) -> None:
         self.cold()
         (report,) = engine_build.build(self.script, ["kit"], cwd=self.folder, verify=True)
