@@ -9,6 +9,7 @@ import { useViewerAutoReload } from './host/useViewerAutoReload.js';
 import { useAnalyticsConsent } from '@text-to-cad/ui/consent';
 import { useLanguage } from '@text-to-cad/ui/i18n';
 import { UpdateButton, useUpdateNotice, type UpdateNotice } from '@text-to-cad/ui/update';
+import { createBrowserDownloads } from './host/downloads';
 import { browserClipboard, browserClipboardSupportsImages } from './host/clipboard';
 import { createWebPromptContext } from './host/promptContext';
 import { useViewerLinks } from './host/viewerLinks.js';
@@ -41,6 +42,7 @@ export function useTabAppearance(tabStore: TabStore): { preference: Appearance; 
  */
 export default function App({ client, server, tabStore, notice = null, language: chosenLanguage = null }: { client: CadClient; server: CadServerInfo; tabStore: TabStore; notice?: UpdateNotice | null; language?: string | null }) {
   useViewerAutoReload(server, { fetchServerInfo: () => client.serverInfo({ fresh: true }).then(info => ({ ok: true, identityToken: String(info.identityToken || '') }), () => ({ ok: false })) });
+  const downloads = useMemo(() => createBrowserDownloads(), []);
   const source = useMemo(() => createCadFileSource(client), [client]);
   const promptContext = useMemo(() => createWebPromptContext(browserClipboard, browserClipboardSupportsImages()), []);
   // The file menu: the file's path to the clipboard, and Reveal in the file manager of the machine the
@@ -119,11 +121,11 @@ export default function App({ client, server, tabStore, notice = null, language:
     return () => { window.removeEventListener('pointerdown', touched, true); window.removeEventListener('keydown', touched, true); };
   }, [client]);
   const host = useMemo<Omit<ViewerHost, 'navigation'>>(() => ({
-    files: source, fileActions, clipboard: browserClipboard, promptContext, promptFiles, links,
+    downloads, files: source, fileActions, clipboard: browserClipboard, promptContext, promptFiles, links,
     // A Quick Edit copied, counted by this Viewer's server for its telemetry, as a touch is.
     usage: { used: feature => { if (feature === 'quickEdit') client.reportActivity({ quickEdit: true }); } },
     environment: { colorScheme: appearance.colorScheme, locale, platform: keyboardPlatform() },
-  }), [client, source, fileActions, promptContext, promptFiles, links, appearance.colorScheme, locale]);
+  }), [downloads, client, source, fileActions, promptContext, promptFiles, links, appearance.colorScheme, locale]);
   return <div className="flex h-svh flex-col overflow-hidden"><div className="min-h-0 flex-1">
     <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={show} onShown={shown}
       library={library} onThumbnail={client.keepThumbnail} appSettings={appSettings}

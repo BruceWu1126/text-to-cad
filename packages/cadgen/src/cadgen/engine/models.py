@@ -110,7 +110,9 @@ class Models:
         for key, size in done["shapes"]:
             shapes[key] = payload[at:at + size]
             at += size
-        return {**done["structure"], "path": address, "address": address, "closure": done.get("closure"), "version": f"{version}-0"}, shapes
+        from cadgen.engine.export.viewer import fingerprint
+
+        return {**done["structure"], "exportRevision": fingerprint(done["structure"]), "path": address, "address": address, "closure": done.get("closure"), "version": f"{version}-0"}, shapes
 
     def prune(self) -> None:
         with self.lock:

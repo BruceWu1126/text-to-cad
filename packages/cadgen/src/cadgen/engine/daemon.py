@@ -185,6 +185,7 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
         # The running request's last progress frame, and every file its frames named.
         self.progress: dict[str, Any] | None = None
         self.touched: set[str] = set()
+        self.document_read = False
         self.answers: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
         self.started = time.time()
         self.builds = 0
@@ -293,6 +294,7 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
     def build(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         with self.lock:
             self.sink = send
+            self.document_read = bool(request.get("expected"))
             self.progress, self.touched = None, set()
             try:
                 self._write(request)
@@ -314,6 +316,7 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
                 raise WorkerGone(str(error)) from error
             finally:
                 self.sink = None
+                self.document_read = False
 
     def stop(self) -> None:
         try:
@@ -565,7 +568,7 @@ class Daemon:
         """A build's progress frame: the pages waiting on a served document it writes are woken
         with it (``serve.Server.building``)."""
         server = self.server
-        if server is not None:
+        if server is not None and not _worker.document_read:
             outputs = [*(frame.get("outputs") or []), *self.models.paths(_worker, frame.get("model"))]
             if outputs:
                 server.building({**frame, "outputs": outputs})
@@ -678,7 +681,28 @@ class Daemon:
             for attempt in (1, 2):
                 worker = None
                 try:
-                    worker = self.lease(key, request.get("env") or {}, cwd)
+                    environment = request.get("env") or {}
+                    if request.get("expected"):
+                        # Viewer exports borrow the held document's worker, including
+                        # its environment. An empty HTTP environment must not evict it.
+                        with self.pool.lock:
+                            held = self.pool.live.get(os.path.normcase(key))
+                            environment = held.environment if held else dict(os.environ)
+                        if held is None and "script" in request["source"]:
+                            send({"failed": "The viewed model is no longer held. Reopen it before exporting."})
+                            return
+                    worker = self.lease(key, environment, cwd)
+                    expected = request.get("expected") or {}
+                    if "modelRevision" in expected:
+                        # The lease excludes a rebuild: validate the generation here,
+                        # including a rebuild that produced identical geometry.
+                        with self.models.lock:
+                            model = self.models.records.get(expected.get("address"))
+                            matches = (model is not None and model["worker"] is worker
+                                       and f"{model['version']}-0" == expected["modelRevision"])
+                        if not matches:
+                            send({"failed": "The source changed. Open Export again to use the displayed revision."})
+                            return
                     answer = worker.build(order, send)
                     payload = answer.pop("payload", b"")
                     if payload:
@@ -691,13 +715,14 @@ class Daemon:
                         for path in _written(row):
                             if path.endswith(".xbf"):
                                 self.builders[os.path.normcase(path)] = worker
-                    self._built(worker, answer)
+                    if not request.get("expected"):
+                        self._built(worker, answer)
                     send(answer)
                     return
                 except WorkerGone as error:
                     if attempt == 2 or "during the build" in str(error):
                         failed = {"failed": self._where(error, worker)}
-                        if worker is not None:
+                        if worker is not None and not request.get("expected"):
                             self._built(worker, failed)
                         send(failed)
                         return
@@ -721,7 +746,8 @@ class Daemon:
         if op == "export":
             order = {"id": 1, "op": "export", "source": request["source"], "destinations": request["destinations"],
                      "pose": request.get("pose"), "part": request.get("part"), "cwd": request.get("cwd"),
-                     "draw": request.get("draw"), "draw_still": request.get("draw_still")}
+                     "draw": request.get("draw"), "draw_still": request.get("draw_still"),
+                     "expected": request.get("expected"), "inspect": request.get("inspect"), "original": request.get("original")}
             return self._call(request, order, send)
         if op == "result":
             order = {"id": 1, "op": "result", "script": request["script"], "code": request["name"],

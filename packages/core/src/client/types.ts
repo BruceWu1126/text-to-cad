@@ -144,6 +144,7 @@ export interface CadRenderSession {
 }
 /** Domain service consumed by renderers; HTTP metadata stays on its adapter. */
 export interface CadWorkspaceService {
+  exports?: ExportService;
   getSnapshot(): CadCatalogSnapshot;
   subscribe(listener: () => void): () => void;
   refresh(options?: CadRequestOptions & {file?: string;markRefreshing?: boolean}): Promise<CadCatalog>;
@@ -221,4 +222,23 @@ export interface CadActivity {
   touched?: boolean;
   quickEdit?: boolean;
   crash?: CadPageCrash;
+}
+
+export type ExportFormat = 'step' | 'glb' | 'stl' | 'threemf' | 'dxf' | 'xbf' | 'original';
+export interface ExportSource { doc: string; revision: string; part: string | null; pose: Record<string, number> | null }
+export interface ExportOption { format: ExportFormat; label: string; extension: string; reason: string | null }
+export interface ExportRequest { requestId: string; epoch: string; source: ExportSource; format: ExportFormat }
+export interface ExportJob {
+  id: string; requestId: string; epoch: string; filename: string;
+  state: 'queued' | 'running' | 'cancelling' | 'cancelled' | 'failed' | 'ready' | 'expired';
+  stage: string; sequence: number; createdAt: number; finishedAt: number; expiresAt: number;
+  bytes?: number; error?: string;
+}
+export interface ExportService {
+  options(source: ExportSource, signal: AbortSignal): Promise<{ epoch: string; formats: ExportOption[] }>;
+  create(request: ExportRequest, signal?: AbortSignal): Promise<ExportJob>;
+  status(id: string, sequence?: number, signal?: AbortSignal): Promise<ExportJob>;
+  cancel(id: string): Promise<ExportJob>;
+  release(id: string): Promise<ExportJob>;
+  download(id: string, signal: AbortSignal): Promise<Response>;
 }

@@ -992,8 +992,13 @@ buttons (Quick Edit's alone say what they do). A disabled, selected or expanded 
 pending one. A hint appears on focus only for keyboard navigation (a Tab), never
 when a closing menu hands focus back.
 
-The viewer shows no toasts or notifications: copy, snapshot and prompt actions
-complete silently, the Copy and Quick Edit buttons showing a tick for a moment.
+Copy, snapshot and prompt actions complete silently, the Copy and Quick Edit
+buttons showing a tick for a moment. Explicit export jobs are the exception: each
+has a persistent toast at the top-right below the navbar, with its own progress,
+Cancel and save/retry actions. Multiple jobs stack and scroll within the viewport;
+dismissing one only hides it, and Export's Show exports restores the stack. Export
+belongs in the navbar's right-hand controls, never the tool strip. The host supplies
+the local destination picker; no source bundle is an export format.
 Progress stays in the viewport; a failed action is the
 viewport's alert card, whose **Retry** reloads the file and whose **Report Issue**,
 where the host has a tracker, opens a new issue titled "Issue: ", labelled `bug`, filled

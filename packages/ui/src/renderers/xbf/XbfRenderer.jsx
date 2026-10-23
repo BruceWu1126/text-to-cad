@@ -4,6 +4,7 @@ import { sceneFramingBounds } from "@text-to-cad/core/lib/viewer/sceneContract.j
 import { boundsInUnits } from "@text-to-cad/core/lib/viewer/sceneUnits.js";
 import { fetchXbfPartGroups } from "@text-to-cad/core/lib/xbf/xbfDocument.js";
 import { parseXbfElementId } from "@text-to-cad/core/lib/xbf/xbfScene.js";
+import { useExportView } from "../../export/context.js";
 import { useViewerHost } from "../../host/context.js";
 import { readFileView } from "../kit/shell/fileView.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
@@ -242,6 +243,13 @@ function XbfSurface({ view, data }) {
     // A prompt's annotation is in the scene's coordinates: the document's millimetres.
     annotationUnits: scene?.units?.unit || "mm"
   });
+  const exportView = useMemo(() => loaded.document && !host.environment.compact ? {
+    doc: loaded.document.source.doc, revision: loaded.revision, file: view.file.path, name: view.file.name,
+    part: !shell.previewing && selected.length === 1 && selectedNodeIds.length === 1 ? tree.refOf(selectedNodeIds[0]) : null,
+    pose: shell.previewing ? null : poseGiven, preview: shell.previewing
+  } : null, [loaded.document, loaded.revision, host.environment.compact, view.file.path, view.file.name,
+    shell.previewing, selected, selectedNodeIds, tree, poseGiven]);
+  useExportView(exportView);
   // A measurement taken, deleted or cleared is a step of the view's one history, with the ink's.
   measure.history.current = shell.frame.history;
   shellRef.current = shell;

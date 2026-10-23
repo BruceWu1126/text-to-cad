@@ -58,7 +58,19 @@ export interface ViewerLinks {
    */
   open?(url: string): Promise<void>;
 }
+export interface DownloadDestination {
+  name: string;
+  write(response: Response, options: { signal: AbortSignal; progress(bytes: number): void }): Promise<void>;
+}
+/** A host-local destination. No server path or filesystem handle crosses this port. */
+export interface DownloadPort {
+  unavailable?: string;
+  choose(name: string, extension: string): Promise<DownloadDestination | null>;
+  restore?(): Array<{ request: import('@text-to-cad/core/client').ExportRequest; filename: string }>;
+  remember?(value: Array<{ request: import('@text-to-cad/core/client').ExportRequest; filename: string }>): void;
+}
 export interface ViewerHost {
+  downloads?: DownloadPort;
   files: FileSource;
   fileActions?: FileActions;
   clipboard: ClipboardPort;

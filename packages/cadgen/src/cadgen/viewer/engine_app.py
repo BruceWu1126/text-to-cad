@@ -79,7 +79,8 @@ class EngineApp:
 
     def active(self):
         with self.lock:
-            return self.active_requests > 0
+            apps = [*self.pages.values(), *([self._default] if self._default else [])]
+            return self.active_requests > 0 or any(app._exports and app._exports.keeps_alive() for app in apps)
 
     def close(self):
         if self._mcp is not None:
@@ -113,7 +114,7 @@ class EngineApp:
     def sessions(self):
         with self.lock:
             now = time.monotonic()
-            self.pages = {key: app for key, app in self.pages.items() if now - app.touched < 3600}
+            self.pages = {key: app for key, app in self.pages.items() if now - app.touched < 3600 or (app._exports and app._exports.keeps_alive())}
             pages = [{'id': key, 'kind': 'viewer', 'root': app.start,
                       'idle': round(time.monotonic()-app.touched, 1)} for key, app in self.pages.items()]
         return pages + ([] if self._mcp is None else self._mcp.listing())

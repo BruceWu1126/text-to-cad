@@ -1,3 +1,4 @@
+import { createExportService } from './exports.js';
 import { encodeBase64 } from './base64.js';
 import { requestViewerJson, ViewerRequestError } from "./request.js";
 import { retainGlbMeshWorker } from '../lib/render/glbMeshWorkerClient.js';
@@ -175,6 +176,7 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
   }
 
   const client = {
+    exports: createExportService({ origin, fetch: fetchImpl }),
     origin,
     resources,
     getSnapshot: () => snapshot,

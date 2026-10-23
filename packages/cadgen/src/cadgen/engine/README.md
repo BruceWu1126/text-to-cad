@@ -75,14 +75,16 @@ def hinge():
    function, modules, data inputs, versions and the key; never source, never lines on
    elements, never input contents, and nothing of a version control's (the engine calls
    no git); names remain the per-element tie to code (**Build closure**).
-2. **Nothing to disk.** The engine writes the files a model declares -- the xbf
+2. **Only requested files to disk.** The engine writes the files a model declares -- the xbf
    and the exports its decorators name, nothing beside them -- and the operating
    system's coordination for its warm process: a socket and a lock in
    `tempfile.gettempdir()/cadgen-engine`. It writes no sidecar, record of a build,
    cache, index, memo, mesh or parsed document, and no derived file beside an input
    (a STEP converted to an xbf is an export the author asks for). A restart is cold,
    but for the xbf itself: a model whose xbf holds the closure the model has now is
-   not run (**Build closure**).
+   not run (**Build closure**). An explicit viewer export names one output in managed
+   temporary storage for delivery to the browser; it never saves source, a registry,
+   or an intermediate XBF. See **Viewer exports** below.
 3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself:
    OCP, build123d (and ezdxf, build123d's own DXF library, which the DXF export writes
    and checks a drawing with), numpy, Pillow (the renderer's rasteriser) and the standard
@@ -671,6 +673,25 @@ declares (law 10), and the snapshot nothing but OUT. A picture is never a declar
 decorator and no build flag draws one.
 
 ## Exports
+
+### Viewer exports
+
+The browser's Export action translates a displayed STEP, XBF or held model through
+`export/viewer.py` and the same worker writer. It pins the displayed revision and
+checks it in the worker. A live source must still be held: this path never executes
+source or rebuilds a model. Scope is the whole model or one canonical part/assembly
+reference; position is authored or an explicit joint-value map. Clip, visibility and
+explode are not geometry inputs. DXF requires a planar drawing; XBF refuses a pose.
+An existing whole XBF uses a separate original-byte download. There is no source bundle
+or CADZ in this interface.
+
+The enclosing distribution owns the HTTP queue, local save dialog and temporary
+artifact lifetime; the standalone engine owns inspection, revision validation and
+translation only. One explicit job names one temporary output, with no intermediate
+XBF. Cancellation takes effect between worker operations, discarding an in-flight
+result without killing a worker shared with another caller.
+
+### Translation formats
 
 The xbf is the model's result; STEP, GLB, STL, 3MF and DXF are exports of a document, and an
 xbf can be one too. One writer, `export.translate(document, kind, path, pose=, part=)`,

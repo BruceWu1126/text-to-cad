@@ -61,12 +61,14 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
    modules, data inputs, versions and the key; never source, never lines on elements, never
    input contents, nothing of git's; names remain the per-element tie to code (the engine's
    **Build closure**).
-2. **Nothing to disk.** The engine writes the files a model declares -- the xbf and the exports
+2. **Only requested files to disk.** The engine writes the files a model declares -- the xbf and the exports
    its decorators name, nothing beside them -- and the operating system's coordination for its
    warm process: a socket and a lock in `tempfile.gettempdir()/cadgen-engine`. It writes no
    sidecar, record of a build, cache, index, memo, mesh or parsed document, and no derived file
    beside an input. A restart is cold, but for the xbf itself: a model whose xbf holds the
-   closure the model has now is not run.
+   closure the model has now is not run. Explicit viewer exports write only the requested
+   artifact to managed temporary storage for delivery; no source or intermediate XBF
+   is written (the engine's **Viewer exports**).
 3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself: OCP, build123d (and
    ezdxf, build123d's own DXF library), numpy, Pillow and the standard library only. cadgen
    reaches into it, never the other way: its telemetry is an observer the engine calls with

@@ -76,6 +76,23 @@ implementations. [Web storage](../../../apps/web/docs/storage.md) documents
 browser lifetimes. Shared component tests can
 use the [explicit fake host](../src/host/testing/host.ts).
 
+## Export destinations and jobs
+
+`ViewerHost.downloads` is an optional `DownloadPort`: `choose(name, extension)`
+opens a host-owned local picker directly in the initiating gesture, returning a
+`DownloadDestination` or null on cancel. Its `write(response, {signal, progress})`
+streams to that destination and resolves only after commit. `unavailable` explains
+an environmental limitation. Optional `remember`/`restore` persist an array of job
+requests and filenames, never handles or server paths. No shared UI detects a browser
+or writes to the host filesystem.
+
+`CadViewer` combines that port with `CadWorkspaceService.exports` (`ExportService`).
+Both are required to show Export. A host without a local-save capability, including
+the MCP host, omits the port. The XBF renderer publishes only displayed revision,
+selection and joint values. `FileViewer.navbarActions` and `overlay` are named
+composition slots: the first is in the navbar's right group; the second is in the
+relative viewport below it. The generic FileViewer knows nothing about export jobs.
+
 ## A CAD renderer's controls
 
 The controls of a CAD renderer (an engine document's, GLB, mesh, robot) are its own, over the viewport: its

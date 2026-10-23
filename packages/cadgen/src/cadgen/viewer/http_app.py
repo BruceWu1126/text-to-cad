@@ -45,6 +45,10 @@ __all__ = [
     "create_cad_app",
 ]
 
+import threading
+
+_EXPORTS_LOCK = threading.Lock()
+
 POST_GUARD_HEADER = "x-cadgen-viewer"
 # A thumbnail travels as base64 in the change's JSON: 512 KiB of PNG, and room for the rest.
 _LIBRARY_BODY_LIMIT = 768 * 1024
@@ -207,6 +211,7 @@ class CadApp:
         # reads dispatched directly to its document server (``documents.py``).
         self.engine_documents = documents or EngineDocuments(on_crash=lambda error: self._crashed(error, bugs_only=True))
         self.prompt_files = PromptFiles()
+        self._exports = None
         self.start = to_posix_path(os.path.abspath(start if start is not None else _working_folder()))
         # Whether this computer has a file chooser for the home's Open (``POST /__cad/pick``).
         self.pick = available()
@@ -224,6 +229,15 @@ class CadApp:
         # The engine shares one recorder across its page and MCP sessions.
         self.analytics = None
         self.consent_by = "viewer"
+
+    @property
+    def exports(self):
+        # CadApp handles concurrent requests; construct exactly one coordinator per session.
+        from .exports import ExportJobs
+        with _EXPORTS_LOCK:
+            if self._exports is None:
+                self._exports = ExportJobs(self.engine_documents.server)
+            return self._exports
 
     # --- server info ------------------------------------------------------
 
@@ -375,6 +389,8 @@ class CadApp:
                 self._serve_dist(request, response)
                 return
             try:
+                if pathname == "/__cad/exports" or pathname.startswith("/__cad/exports/"):
+                    return self.exports.handle(request, response)
                 if pathname == "/__cad/server":
                     response.send_json(200, self.server_info())
                 elif pathname == "/__cad/catalog":
@@ -431,6 +447,8 @@ class CadApp:
             if self._rejected_as_cross_site_post(request, response):
                 return
             try:
+                if pathname == "/__cad/exports" or pathname.startswith("/__cad/exports/"):
+                    return self.exports.handle(request, response)
                 if pathname in ("/__cad/analytics", "/__cad/analytics/activity") and self.analytics is not None:
                     # A page's crash report carries its frames (``_report_activity``): room for them, and no more.
                     if int(request.headers.get("content-length") or 0) > (16384 if pathname.endswith("/activity") else 4096):

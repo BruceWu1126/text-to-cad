@@ -132,12 +132,13 @@ function FileName({ path, explorer }) {
  * @param {{ platform: import("./entry-menu.js").Platform, capabilities: ReadonlySet<import("./entry-menu.js").EntryAction>,
  *   onAction(action: import("./entry-menu.js").EntryAction, path: string): void } | null} [props.fileMenu]
  * @param {import("react").ReactNode} [props.trailing] The file's actions.
+ * @param {import("react").ReactNode} [props.actions] Host workflow controls at the right end.
  * @param {import("react").ReactNode} [props.update] The host's update button, first among the controls.
  * @param {import("react").ReactNode} [props.fullSize] The host's Full size button, where it shows the view small.
  * @param {(element: HTMLDivElement | null) => void} [props.controlsRef] The box, last in the row, the renderer draws its view controls into.
  * @param {string} [props.className]
  */
-export function ViewerNavbar({ onHome, menu = null, history = null, file = null, explorer = null, fileMenu = null, trailing = null, update = null, fullSize = null, controlsRef, className }) {
+export function ViewerNavbar({ onHome, menu = null, history = null, file = null, explorer = null, fileMenu = null, trailing = null, update = null, fullSize = null, controlsRef, actions = null, className }) {
   const { t } = useI18n();
   return (
     <header className={cn(NAVBAR_ROW_CLASS, "border-border bg-background text-foreground", className)} data-viewer-navbar="">
@@ -154,6 +155,7 @@ export function ViewerNavbar({ onHome, menu = null, history = null, file = null,
         {trailing}
         {fullSize}
         {controlsRef ? <div ref={controlsRef} className="contents" data-view-controls="" /> : null}
+        {actions}
       </div>
     </header>
   );

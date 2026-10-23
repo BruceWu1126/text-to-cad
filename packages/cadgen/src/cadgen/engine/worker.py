@@ -269,7 +269,11 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
 
     source_spec = request["source"]
     built: list[dict[str, Any]] = []
-    if "script" in source_spec and "code" not in source_spec:
+    if request.get("expected") and "script" in source_spec:
+        source = engine_build.held(Path(source_spec["script"]), source_spec.get("code") or source_spec.get("function"))
+        if source is None:
+            raise export.ExportRefused("The viewed model is no longer held. Reopen it before exporting.")
+    elif "script" in source_spec and "code" not in source_spec:
         script = Path(source_spec["script"])
         function = source_spec.get("function")
         # Built as it declares, its children as theirs (law 10); the exports are this request's.
@@ -298,11 +302,24 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
             clock = time.perf_counter()
             source = export.Source.read(path)
             log(f"read {path.name} in {time.perf_counter() - clock:.2f}s")
+    if request.get("expected"):
+        from cadgen.engine.export.viewer import check, options
+        check(source, request["expected"])
+        if request.get("inspect"):
+            return {"reports": [], "files": [], "formats": options(source, pose=request.get("pose"), part=request.get("part"), original_allowed="version" in request["expected"])}
     files = []
     for destination in request["destinations"]:
         clock = time.perf_counter()
         target = Path(destination)
-        size = export.translate(source, None, target, pose=request.get("pose"), part=request.get("part"))
+        from cadgen.engine.progress import current
+        progress = current()
+        if progress is not None:
+            progress.stage("write", detail=target.name)
+        if request.get("original"):
+            from cadgen.engine.export.viewer import original
+            size = original(source, target, request["expected"])
+        else:
+            size = export.translate(source, None, target, pose=request.get("pose"), part=request.get("part"))
         seconds = time.perf_counter() - clock
         files.append({"path": str(target), "kind": export.kind_of(target), "bytes": size,
                       "seconds": round(seconds, 4)})
