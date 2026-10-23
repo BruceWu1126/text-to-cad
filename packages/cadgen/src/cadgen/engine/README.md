@@ -97,7 +97,7 @@ def hinge():
    `TDataStd_NamedData` beside it for the rest; `XCAFDoc_VisMaterial`: PBR), element names
    on face, edge and vertex sub-shape
    labels, and an assembly's mechanism (links, pairs, ground, configurations: see
-   Kinematics); its main label names what wrote it (`cadgen.engine xbf/4 (cadgen
+   Kinematics); its main label names what wrote it (`cadgen.engine xbf/5 (cadgen
    <release>)`, `document.Loaded.writer`) and holds the model's build closure
    (**Build closure**). No code location is on an element. STEP, GLB, STL, 3MF and,
    of a planar document, DXF are translations of it (**Exports**).
@@ -1648,7 +1648,7 @@ closure/1`), pointers and digests only:
 
 ```
 schema   "cadgen.engine closure/1"
-engine   {"release": "cadgen 0.8.0", "format": "xbf/4", "digest": ...}   the format (keyed); the release and
+engine   {"release": "cadgen 0.8.0", "format": "xbf/5", "digest": ...}   the format (keyed); the release and
                                                                     the engine's code digest (information only)
 libs     {"build123d": ..., "OCP": ...}                             what decides the geometry
 source   {"kind": "script", "path": "../src/tom.py", "function": "tom"}
@@ -1675,13 +1675,14 @@ null (**Body retention**). `cadgen inspect DOC` prints the closure, `cadgen.insp
 **When the format moves.** The key takes the engine's `format` alone (`previous.FORMAT`),
 not the release that wrote a document nor a digest of the engine's code: a cadgen release,
 or an engine edit, that leaves the written document alone keeps every xbf current. `FORMAT`
-is bumped by hand (`xbf/3` to `xbf/4`) when what
+is bumped by hand (`xbf/4` to `xbf/5`) when what
 an engine writes changes -- the document's structure, the attributes on its labels, the
 closure's fields, or what the key covers -- and then every xbf builds once, cleanly: a
 document of another format is "written by" another engine (`cache.reason`). The bumps so far:
 `xbf/2`, the key left the release, the engine digest and numpy, and the closure its commit;
 `xbf/3`, the mechanism subtree took AP242's form (**Kinematics**); `xbf/4`, a function
-motion's samples are made for linear interpolation (**Motions**).
+motion's samples are made for linear interpolation (**Motions**); `xbf/5`, files read by motion
+functions join the closure (**Motions**).
 
 Before a body runs or is replayed, the build makes the closure again -- the script loaded,
 its modules digested, each input hashed again -- and compares its key with the xbf's. The

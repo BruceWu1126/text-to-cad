@@ -66,7 +66,8 @@ SCHEMA = "cadgen.engine closure/1"
 # xbf/3: the kinematics are AP242's alone: couplings as its couplers, motions' interpolation, no
 # cadgen-only attribute, no gear pair.
 # xbf/4: a function motion's samples are checked at every eighth of a step and held to half the tolerance there.
-FORMAT = "xbf/4"
+# xbf/5: files read by motion functions join the closure.
+FORMAT = "xbf/5"
 # The libraries a key covers: what decides the geometry.
 KEYED_LIBRARIES = ("build123d", "OCP")
 # The start of a closure's text: the schema first, so a head scan finds it.
