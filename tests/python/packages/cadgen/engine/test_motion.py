@@ -242,6 +242,181 @@ class DocumentTest(_Folder):
         self.assertIsNone(document.Loaded(whole).mechanism, "STEP carries no mechanism and no motion")
 
 
+MOVES = """
+import json
+import math
+import os
+from pathlib import Path
+
+AMPLITUDE = {amplitude}
+
+
+def nod(scale):
+    def at(t):
+        return {{"drive": 0.5 + AMPLITUDE * scale * math.sin(t)}}
+    return at
+
+
+def table(t):
+    rows = json.loads((Path(__file__).parent / "table.json").read_text())
+    return {{"drive": rows["base"] + 0.1 * math.sin(t)}}
+
+
+def offset(t):
+    return {{"drive": 0.5 + 0.1 * math.sin(t) + float(os.environ.get("CADGEN_TEST_MOTION_OFFSET", "0"))}}
+"""
+
+HINGE = """
+import math
+
+import build123d as bd
+from cadgen.engine import couple, motion, xbf
+import moves
+
+
+@xbf("XBF/hinge.xbf")
+def hinge():
+    base = bd.Box(100, 60, 20)
+    link = bd.Pos(40, 0, 25) * bd.Box(120, 20, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.CENTER))
+    tip = bd.Pos(60, 0, 35) * bd.Box(40, 10, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.CENTER))
+    base.label, link.label, tip.label = "base", "link", "tip"
+    base.color = bd.Color({colour})
+    elbow = bd.Axis((40, 0, 20), (0, 1, 0))
+    bd.RevoluteJoint("elbow", base, axis=elbow, angular_range=(-10, {top}))
+    bd.RigidJoint("mount", link, bd.Plane(origin=elbow.position, z_dir=elbow.direction).location)
+    slide = bd.Axis((60, 0, 30), (1, 0, 0))
+    bd.LinearJoint("slide", link, axis=slide, linear_range=(0, 80))
+    bd.RigidJoint("carriage", tip, bd.Plane(origin=slide.position, z_dir=slide.direction).location)
+    link.joints["slide"].connect_to(tip.joints["carriage"], position=0)
+    base.joints["elbow"].connect_to(link.joints["mount"], angle=0)
+    hinge = bd.Compound(children=[base, link, tip], label="hinge")
+    couple(hinge, "drive", elbow={ratio}, slide=10)
+    motion(hinge, "nod", moves.nod({scale}), duration={duration})
+    motion(hinge, "table", moves.table, duration=2)
+    {more}
+    return hinge
+"""
+
+
+class MotionMemoTest(unittest.TestCase):
+    """A function motion's samples are kept in the worker's memory and reused while what they
+    are made of -- the function and what it reaches, the files it opens, the joints it moves,
+    the sampling's settings and the engine -- is what it was (``memo.sampled``)."""
+
+    def setUp(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine.kernel import memo
+
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-motion-memo-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.xbf = self.folder / "XBF/hinge.xbf"
+        memo.install()
+        memo.clear()
+        engine_build._WRITTEN.clear()
+        engine_build._PARTS.clear()
+        self.addCleanup(memo.clear)
+        patch = mock.patch.dict(os.environ)
+        patch.start()
+        self.addCleanup(patch.stop)
+        for name in ("CADGEN_ENGINE_BODIES", "CADGEN_ENGINE_MEMO", "CADGEN_TEST_MOTION_OFFSET"):
+            os.environ.pop(name, None)
+        self.values = {"colour": "0.5, 0.5, 0.5", "top": 120, "ratio": 20, "scale": 1, "duration": 6, "more": "pass",
+                       "amplitude": 0.1}
+        self.write("table.json", json.dumps({"base": 0.4}))
+
+    def write(self, name: str, text: str) -> None:
+        path = self.folder / name
+        path.write_text(textwrap.dedent(text), encoding="utf-8")
+        os.utime(path, ns=(time.time_ns(), time.time_ns()))
+
+    def hinge(self, *, verify: bool = False, **values: Any) -> dict:
+        self.values.update(values)
+        self.write("moves.py", MOVES.format(**self.values))
+        self.write("hinge.py", HINGE.format(**self.values))
+        [report] = engine_build.build(self.folder / "hinge.py", ["hinge"], cwd=self.folder, verify=verify)
+        self.assertTrue(report["ok"], report)
+        self.assertNotIn("kinematics", report, "every motion kept")
+        return report
+
+    def statuses(self, report: dict) -> dict[str, str]:
+        return {name: found.partition(";")[0] for name, found in report.get("motions", {}).items()}
+
+    def test_an_edit_the_motions_do_not_read_samples_nothing_and_writes_the_cold_bytes(self) -> None:
+        first = self.hinge()
+        self.assertEqual(self.statuses(first), {"hinge:nod": "sampled: first sampled in this worker",
+                                                "hinge:table": "sampled: first sampled in this worker"})
+        report = self.hinge(colour="0.8, 0.2, 0.2")
+        self.assertEqual(report["bodies"], {"hinge.py::hinge": "run"}, "the body ran")
+        self.assertEqual(report["motions"], {"hinge:nod": "reused", "hinge:table": "reused"})
+        self.assertEqual((report["memo"]["motions_sampled"], report["memo"]["motions_reused"]), (0, 2))
+        warm = self.xbf.read_bytes()
+        from cadgen.engine.kernel import memo
+
+        memo.clear()
+        engine_build._WRITTEN.clear()
+        engine_build._PARTS.clear()
+        self.xbf.unlink()
+        self.assertEqual(self.hinge()["memo"]["motions_sampled"], 2)
+        self.assertEqual(self.xbf.read_bytes(), warm, "the reused samples are a fresh sampling's, byte for byte")
+
+    def test_an_edit_of_what_a_motion_is_made_of_samples_it_again_and_says_why(self) -> None:
+        self.hinge()
+        for values, nod, table in (
+                ({"scale": 2}, "its function changed", "reused"),                      # a value its closure holds
+                ({"amplitude": 0.05}, "its function changed", "reused"),               # a module global it reads
+                ({"top": 100}, "the joints it moves changed", "the joints it moves changed"),   # a joint's limit
+                ({"ratio": 25}, "the joints it moves changed", "the joints it moves changed"),  # a coupling's ratio
+                ({"duration": 5}, "its duration or a tolerance changed", "reused")):  # the sampling
+            with self.subTest(values):
+                report = self.hinge(**values)
+                self.assertEqual(self.statuses(report), {"hinge:nod": f"sampled: {nod}" if nod != "reused" else nod,
+                                                         "hinge:table": f"sampled: {table}" if table != "reused"
+                                                         else table})
+        self.write("table.json", json.dumps({"base": 0.45}))  # a file the function opens
+        report = self.hinge()
+        self.assertEqual(report["motions"]["hinge:nod"], "reused")
+        self.assertEqual(report["motions"]["hinge:table"], f"sampled: {self.folder / 'table.json'} changed")
+        self.assertAlmostEqual(document.Loaded(self.xbf).mechanism.motions["table"].keys[0][2]["elbow"][0],
+                               (0.45 - 0) * 25, msg="the samples are the file's new values")
+
+    def test_a_verifying_build_samples_again_and_marks_a_motion_it_samples_otherwise(self) -> None:
+        self.hinge(more='motion(hinge, "offset", moves.offset, duration=2)')
+        report = self.hinge(verify=True)
+        self.assertEqual(report["verify"]["motions"], {"hinge:nod": "same", "hinge:offset": "same",
+                                                       "hinge:table": "same"})
+        self.assertEqual(set(self.statuses(report).values()), {"sampled: verifying"})
+        self.assertEqual(report["verify"]["mismatches"], [])
+        # A function reading what its key cannot see (the environment): a verification finds it.
+        os.environ["CADGEN_TEST_MOTION_OFFSET"] = "0.01"
+        report = self.hinge(verify=True)
+        self.assertTrue(report["verify"]["motions"]["hinge:offset"].startswith("differs: "), report["verify"])
+        self.assertEqual(report["verify"]["mismatches"], ["motion hinge:offset"])
+        report = self.hinge()
+        self.assertEqual(report["motions"]["hinge:nod"], "reused")
+        self.assertTrue(report["motions"]["hinge:offset"].startswith("sampled: a verification sampled it otherwise"),
+                        report["motions"])
+
+    def test_a_function_holding_what_has_no_canonical_form_is_sampled_on_every_build(self) -> None:
+        held = ('motion(hinge, "held", (lambda part: lambda t: {"drive": 0.5 + 0.1 * math.sin(t) + 0 * part.volume})'
+                '(base), duration=2)')
+        self.hinge(more=held)
+        report = self.hinge(colour="0.1, 0.2, 0.3")
+        self.assertTrue(report["motions"]["hinge:held"].startswith("sampled: its function holds what has no "
+                                                                   "canonical form"), report["motions"])
+        self.assertIn("closure variable part", report["motions"]["hinge:held"])
+        self.assertEqual(report["motions"]["hinge:nod"], "reused")
+
+    def test_builds_taken_from_memory_keep_the_samples_for_the_next_edit(self) -> None:
+        from cadgen.engine.kernel import memo
+
+        self.hinge()
+        for _ in range(memo.RUNS_KEPT + 1):
+            self.assertEqual(self.hinge()["cache"], {"used": True, "from": "memory"})
+        report = self.hinge(colour="0.3, 0.3, 0.3")
+        self.assertEqual(report["motions"], {"hinge:nod": "reused", "hinge:table": "reused"})
+
+
 def _glb(path: Path) -> tuple[dict, Any]:
     """A GLB's JSON chunk, and a reader of its accessors (as float64 rows)."""
     data = path.read_bytes()

@@ -1014,6 +1014,38 @@ pair cannot take, or moving a pair that closes a loop, is left out and warned.
 A warm build that changes only a motion rewrites the mechanism's subtree and converts no
 prototype; the file is the cold build's bytes.
 
+**A function's samples are kept in the worker's memory** (`kernel/memo.py`, `sampled`), as a
+body's run is, and a warm build whose body ran samples a motion again only where what its
+samples are made of changed:
+
+- its function, keyed as a body's code is (**Body retention**), after the body ran: its code,
+  what it reaches, and the values it and every function it reaches hold -- closure cells,
+  defaults, attributes -- by their canonical forms;
+- every file it opens, by its bytes, heard as a body's reads are;
+- what the sampler reads of the mechanism -- the motion's assembly, each pair's label, kind and
+  limits in order, the as-built values, the couplings' ratios, the joints and couplings under
+  the assembly -- and its settings: the duration, each pair's tolerance (the model's size), the
+  two tolerances and the 4,097 bound;
+- the engine's code.
+
+Configurations, a pair's frames, the parts' geometry beyond the size and the document's
+colours and materials are no input: a colour edit samples nothing, and the samples it keeps
+are a fresh sampling's, so the file is the cold build's bytes (the w16's three motions, 911
+samples). As a body, the function must be a function of its key: one reading the clock, the
+environment or randomness is not seen to change. A function whose reach holds what has no
+canonical form -- a shape in a closure cell, an open file: a value its run made, which no
+module's bytes say, as a `@memo` call's arguments must be values -- or that reads what is no
+regular file, or reads past the engine's readers, is sampled on every build, and says why. The
+files a function opens are the model's inputs too (**Build closure**), so a document is not
+taken from memory or its file once one changed. The report's `memo` counts `motions_sampled`
+and `motions_reused`, and `motions` says of each function motion `reused` or `sampled: <why>`
+(`first sampled in this worker`, `its function changed`, `the joints it moves changed`, `its
+duration or a tolerance changed`, `<file> changed`, `verifying`). A verifying build samples
+every motion it would reuse and compares the samples, value for value: `verify.motions` says
+`same` or `differs: <where>`, and a motion that differs is sampled on every build for the
+worker's life, and its model not taken from its file. Kept samples follow the memo's retention:
+what the last four builds used.
+
 ## Materials
 
 A `Material` (`materials.py`) is frozen and SI, and a field it does not know is `None`, never a
@@ -1635,8 +1667,8 @@ hold (a path value inside the script's folder relative to it), and, for a module
 to its bytes (**Body retention**), each file of its import closure by its bytes. A comment or a
 blank line changes no digest; a module the model loads and does not reach holds the empty one.
 `inputs` lists every file a body read -- through the engine (`file`: `read_step`, `read_xbf`,
-`read_mesh`, build123d's importers), itself (`read`, a `null` digest for one it found missing),
-or a text's font (`font`) -- by its digest; a file read past the engine's readers leaves the key
+`read_mesh`, build123d's importers), itself (`read`, a `null` digest for one it found missing;
+a motion's function's reads too, **Motions**), or a text's font (`font`) -- by its digest; a file read past the engine's readers leaves the key
 null (**Body retention**). `cadgen inspect DOC` prints the closure, `cadgen.inspect(doc)` and
 `document.Loaded.closure` read it.
 

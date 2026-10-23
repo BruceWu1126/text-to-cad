@@ -1166,8 +1166,21 @@ def _motions(motioned: list, mechanism: Mechanism, joint_labels: list, controls:
 
             try:
                 if spec[0] == "function":
+                    from cadgen.engine.kernel import memo
+
                     _kind, function, duration, _ease = spec
-                    keys = _sampled(function, duration, convert, tolerances, where, path, joint_labels, controls)
+                    # What the samples are made of besides the function: all the converter and
+                    # the sampler read (``memo.sampled``), so a warm build that leaves them and
+                    # the function alone samples nothing.
+                    inputs = {"mechanism": (path, [(pair.label, pair.kind, pair.limits) for pair in pairs],
+                                            sorted(mechanism.as_built.items()),
+                                            [coupling.signature() for coupling in mechanism.couplings.values()],
+                                            joint_labels, controls),
+                              "sampling": (duration, sorted(tolerances.items()), ANGULAR_TOLERANCE, LINEAR_TOLERANCE,
+                                           MOST_KEYS)}
+                    keys = memo.sampled(f"{name_of(path)}:{name}", function, inputs,
+                                        lambda: _sampled(function, duration, convert, tolerances, where, path,
+                                                         joint_labels, controls))
                     ease = "linear"
                 else:
                     _kind, rows, ease = spec
