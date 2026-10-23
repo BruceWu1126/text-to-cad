@@ -1021,8 +1021,9 @@ class Daemon:
                 "rssCapMb": rss_cap_mb(), "retired": list(self.pool.retired),
                 "idle": round(now - self.last, 1),
                 "serving": None if self.server is None else {"url": self.server.url,
-                                                             "documents": self.server.listing()},
-                "models": self.models.listing(),
+                                                             "documents": self.server.listing(every=True),
+                                                             "memory": self.server.memory()},
+                "models": self.models.listing(every=True),
                 "renders": [] if self.renders is None else self.renders.status(),
                 "sessions": (self.server.http.app.sessions() if self.server is not None
                              and hasattr(self.server.http, "app") else [])}

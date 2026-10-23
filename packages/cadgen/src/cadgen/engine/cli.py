@@ -389,7 +389,8 @@ def status_text(answer: dict[str, Any]) -> str:
     """``cadgen status``: the daemon and its pool's rules, a line per worker -- busy or idle,
     its script, process, builds and memory after its last build, where a busy one's build is
     (its last progress frame), how long it has been busy or idle -- the builds waiting for a
-    worker, the last retirements, and what it serves."""
+    worker, the last retirements, what it serves and holds under its memory budget, and each
+    model document's state, with the command that builds again one not held."""
     import time
 
     workers = answer.get("workers") or []
@@ -423,8 +424,21 @@ def status_text(answer: dict[str, Any]) -> str:
     if serving:
         documents = len(serving.get("documents") or [])
         renders = len(answer.get("renders") or [])
+        memory = serving.get("memory") or {}
+        held = (memory.get("documents") or 0) + (memory.get("meshes") or 0)
         lines.append(f"serving {serving['url']}: {documents} document{'' if documents == 1 else 's'}"
-                     + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else ""))
+                     + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else "")
+                     + (f" · {_gb(held / 2**20)} of {_gb(memory['budget'] / 2**20)} held" if memory.get("budget") else ""))
+    models = answer.get("models") or []
+    if models:
+        # Each model document, its state, and for one not held the command that builds it again.
+        width = max(len(str(row.get("name"))) for row in models)
+        lines.append("documents:")
+        for row in models:
+            line = f"  {row.get('state', ''):<8}  {str(row.get('name')):<{width}}  {row.get('id')}"
+            if row.get("rebuild"):
+                line += f"  run `{row['rebuild']}`" + (" (kept in memory only)" if row.get("store") == "memory" else "")
+            lines.append(line)
     return "\n".join(lines)
 
 
