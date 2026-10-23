@@ -326,6 +326,12 @@ class SweepTest(unittest.TestCase):
         self.assertIn(f"removed stale engine file {path}", done.stderr)
         self.assertIn(f"removed stale engine file {lock}", done.stderr)
         self.assertEqual(list(self.state.iterdir()), [])
+        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stale.bind(str(path))
+        stale.close()
+        done = self.cli("stop")
+        self.assertEqual((done.returncode, done.stdout), (0, "no engine server is running\n"), done.stderr)
+        self.assertEqual(done.stderr, f"removed stale engine file {path}\n", "a swept file a line on stderr")
 
     def test_a_server_of_an_older_protocol_is_still_stopped(self) -> None:
         from unittest import mock
@@ -348,10 +354,16 @@ class SweepTest(unittest.TestCase):
                 time.sleep(0.05)
             found.close()
             self.assertIsNone(client.request({"op": "status"}, start=False), "this protocol's server is another")
-            swept = client.sweep(stop=True)
-        self.assertEqual(swept["stopped"], [str(address)])
+        # ``cadgen stop`` of this protocol reaches it, and says so in one line, no JSON.
+        done = self.cli("stop")
+        self.assertEqual((done.returncode, done.stdout, done.stderr),
+                         (0, f"stopped the engine server at {address}\n", ""))
         self.assertEqual(server.wait(timeout=60), 0)
         self.assertFalse(address.exists())
+        done = self.cli("stop")
+        self.assertEqual((done.returncode, done.stdout, done.stderr), (0, "no engine server is running\n", ""))
+        done = self.cli("stop", "--json")
+        self.assertEqual((done.returncode, json.loads(done.stdout)), (0, {"ok": True, "stopped": []}))
 
 
 class LongStatePathTest(unittest.TestCase):

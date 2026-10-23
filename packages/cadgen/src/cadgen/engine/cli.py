@@ -7,7 +7,7 @@ ordinary Python scripts call decorated models explicitly.
         [--preview] [--pose NAME|JSON] [--annotation FILE] [--measurements FILE] [--width N] [--height N]
         [--size-profile P] [--json]
     cadgen serve DOC [--port N] [--three DIR]
-    cadgen status [--json] | stop | server
+    cadgen status [--json] | stop [--json] | server
     cadgen inspect DOC [REF]                           a document's build closure, or what a ref names (``refs``)
 
 SRC and DOC are an on-disk CAD file's path or a document's id (``ids``): a model's id is what
@@ -56,6 +56,10 @@ def _serve_arguments(serve: argparse.ArgumentParser) -> None:
 
 def _status_arguments(status: argparse.ArgumentParser) -> None:
     status.add_argument("--json", action="store_true", help="the server's answer as JSON")
+
+
+def _stop_arguments(stop: argparse.ArgumentParser) -> None:
+    stop.add_argument("--json", action="store_true", help="what was stopped as JSON")
 
 
 def _no_arguments(_parser: argparse.ArgumentParser) -> None:
@@ -365,7 +369,7 @@ def _told_swept(swept: dict[str, list[str]]) -> None:
             print(f"an engine server of an older cadgen runs at {address}; cadgen stop stops it", file=sys.stderr)
 
 
-def _stop(_args: argparse.Namespace, prog: str) -> int:
+def _stop(args: argparse.Namespace, prog: str) -> int:
     from cadgen.engine.client import sweep
 
     # Every server of this installation, whatever protocol it speaks; stopped means gone: the next
@@ -375,10 +379,14 @@ def _stop(_args: argparse.Namespace, prog: str) -> int:
     except ConnectionError as error:
         raise Failed(str(error)) from None
     _told_swept(swept)
+    if args.json:
+        print(json.dumps({"ok": True, "stopped": swept["stopped"]}, indent=2))
+        return 0
     if not swept["stopped"]:
         print("no engine server is running")
-        return 0
-    print(json.dumps({"ok": True, "stopped": swept["stopped"]}, indent=2))
+    # A line per server stopped, for a person or an agent; JSON only under ``--json``.
+    for address in swept["stopped"]:
+        print(f"stopped the engine server at {address}")
     return 0
 
 
@@ -471,7 +479,7 @@ VERBS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[
               "and what made it", _inspect_arguments, _inspect),
     "status": ("the engine server's workers, what each is building, and its served documents", _status_arguments,
                _status),
-    "stop": ("stop the engine server", _no_arguments, _stop),
+    "stop": ("stop the engine server", _stop_arguments, _stop),
     "server": ("run the engine server in this process", _no_arguments, _server),
 }
 

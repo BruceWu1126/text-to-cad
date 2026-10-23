@@ -326,7 +326,7 @@ cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
 cadgen serve DOC [--port N] [--three DIR]
 cadgen inspect DOC [REF]                       the build closure; with REF (**References**): an element's facts and
                                              what made it, or a part's or an assembly's volume and mass
-cadgen status [--json] | stop | server
+cadgen status [--json] | stop [--json] | server
 ```
 
 `python -m cadgen.engine VERB ...` takes the same verbs, the engine's own entry.
@@ -342,7 +342,7 @@ Every build and every verb goes through the engine: no command runs one in its o
 and debugging only: it runs in this process, cold, and no document is served: no page, and
 nothing for `inspect` to read by its id.
 
-A verb's `--json` (`export`, `snapshot`, `status`) prints its answer as one JSON object
+A verb's `--json` (`export`, `snapshot`, `status`, `stop`) prints its answer as one JSON object
 on stdout, and a failure as `{"ok": false, "error": ...}` there too, exit status 1, so a caller
 reading stdout always finds an answer (`cli.answered`); without `--json` a failure is its words
 on stderr, exit 2 for a request refused by name before anything ran and 1 for one that failed.
@@ -627,6 +627,8 @@ lock names carry the protocol (`daemon._tag`), and `daemon.endpoints()` lists th
 older one's, so a cadgen that bumps `PROTOCOL` still stops the server an earlier one started. Both
 `stop` and `status` remove the socket and lock of a dead server (nothing answers and nobody holds
 its lock) and say so on stderr; `status` names an older protocol's live server, which `stop` stops.
+`stop` prints a line per server it stopped (`stopped the engine server at SOCKET`), or `no engine
+server is running`; `--json` prints `{"ok": true, "stopped": [SOCKET, ...]}` instead.
 
 ## Progress
 
