@@ -91,9 +91,17 @@ The document is what the viewer follows build by build, what refs and
 | `from cadgen import report, track` | `from cadgen.engine import report, track` |
 | `<name>.step.json` sidecars, `.params.js` | none: the document carries the mechanism; delete them |
 
-An older cadgen's cache is no longer read: `CADGEN_CACHE_DIR`, else
-`~/.cache/cadgen` (`$XDG_CACHE_HOME/cadgen`, `%LOCALAPPDATA%\cadgen` on Windows).
-Delete it to reclaim its space.
+cadgen 0.7.x kept a cache store on disk, and it can hold gigabytes. cadgen 0.8 neither
+reads nor writes it, and never removes it. Once no 0.7 install is left on the machine
+(no 0.7 plugin in any agent app), delete that folder by hand to get the space back:
+
+- macOS and Linux: `~/.cache/cadgen`, or `$XDG_CACHE_HOME/cadgen` when `XDG_CACHE_HOME`
+  is set
+- Windows: `%LOCALAPPDATA%\cadgen`
+- If you set `CADGEN_CACHE_DIR` for 0.7, the folder it named instead
+
+An agent can delete it for you if you ask. Your settings, telemetry choice and recent
+files are kept somewhere else, so deleting this folder doesn't touch them.
 
 ## Mates become build123d joints
 

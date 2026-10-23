@@ -293,6 +293,13 @@ doctor` the installation and a skill's pin; `cadgen viewer` the engine page laun
 `cadgen mcp` the stateless proxy an agent host starts; and `cadgen telemetry` the person's answer. A
 model builds by running its script: `python model.py`.
 
+Coming from 0.7: cadgen 0.7.x kept a cache store, which can hold gigabytes, at
+`~/.cache/cadgen` (macOS and Linux; `$XDG_CACHE_HOME/cadgen` when that is set),
+`%LOCALAPPDATA%\cadgen` (Windows) or the folder `CADGEN_CACHE_DIR` named. 0.8 neither reads
+nor writes it, and never removes it. Once no 0.7 install is left on the machine, delete that
+folder by hand; an agent may do it when asked. Settings, the telemetry answer and recents
+live in the state directory, not there.
+
 The viewer exposes `POST /__cad/clipboard` for explicit viewport PNG copies. It
 uses the same host and custom-header POST gates as other mutation routes, limits
 images to 20 MiB, and delegates native delivery to `viewer/clipboard.py`. It never
