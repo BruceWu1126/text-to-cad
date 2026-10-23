@@ -220,7 +220,11 @@ pose back at rest, and using either puts the routine back at rest; paused, its f
 model as a pose does. Preview's routine is its own and moves nothing of the tools view's.
 Another file has the motions its tools have, under the same rule, decided by value
 (`kit/tools/model-effects/motionExclusion.js`): a GLB's Explode, routine and Clip; a robot's
-Position and Clip.
+Position and Clip. An engine document's motions (its **Motion** section) take the pose and give
+it back instead: while one owns the pose — from a play, a scrub or a choice of motion until Reset
+motion — its frames pose the parts, Position shows them read-only and Select draws no knobs, and
+Reset puts Position's own pose back as it was left; Explode, Clip and every other tool's state
+stay as they are throughout.
 
 A tree is the file sidebar's, on screen under every tool; a pick in it takes Select up
 before it acts.
@@ -403,7 +407,7 @@ assembly's **Model tree** (a part file, whose tree would be its one row, has non
 **Position**, where a joint can be driven; a drawing's **Layers**, where it has four or more
 layers or any block reference (a flat pattern's CUT and BEND has none): each layer's pen, name,
 entity count and eye, its block references under it; and, after them, the shell's own **Animation** for a
-file with routines (`kit/tools/playbar/AnimationSection.jsx`). A file with none of them has no
+file with routines (`kit/tools/playbar/AnimationSection.jsx`), headed **Motion** for an engine document's motions. A file with none of them has no
 sidebar. It is a toolbar of its own at the view's top-left, 8px in, on the strip's line and of
 its surface, padding and 24px tiles (`data-file-sidebar-tools`, "File sidebar"): one tile per
 section, a tree's a tree icon named for it (Model tree, Links), Position's a spline, Animation's a
@@ -894,7 +898,8 @@ Preview alike (`kit/tools/playbar/AnimationSection.jsx`): its heading holds **Re
 which stops the routine and puts the model at rest, disabled while it is; its body is the
 routine in hand, a dropdown of the routines where there are two or more, then **Play** or
 **Pause**, the scrubber (`AnimationTimeControl`) and **Playback settings** (a cog: the routine's
-Speed, a submenu, then Loop and Autoplay). In the tools view a routine is a motion as a pose is
+Speed, a submenu, then Loop and Autoplay). Each routine in the dropdown says its duration at its
+right, muted, in tabular figures. In the tools view a routine is a motion as a pose is
 (see [one motion at a time](#tools-and-lifecycle)): paused, its frame stays on the model. A
 routine opens at rest. Each view's routine is its own: entering Preview sets the
 tools view's untouched and starts its own at rest, playing only under Autoplay (off by default);

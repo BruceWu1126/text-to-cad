@@ -1021,7 +1021,8 @@ name or `{joint: value}`, the rest as built; the last time is the duration), a s
 waypoint: AP242's `synchronous_interpolation_type`) or `linear` (constant speed:
 `linear_interpolation_type`). A motion is a finite clip, and a player repeats it: one that comes
 back says its way back as waypoints. `loop=` and the `spline` ease are refused by name. A motion
-never moves the build.
+never moves the build. The viewer plays an `.xbf`'s motions from its Motion section, each frame the
+values the GLB baker keys at that time, posed by the page's forward kinematics.
 
 The document keeps the definition (**Kinematics**), never frames. A callable is stored as its
 samples, interpolated linearly: eight equal steps over its duration, each step split while the
