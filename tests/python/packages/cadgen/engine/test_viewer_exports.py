@@ -15,7 +15,7 @@ class ViewerExportsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder).resolve()
             script = root / "part.py"
-            script.write_text('from cadgen import xbf\nimport build123d as bd\n@xbf("part.xbf")\ndef part():\n    return bd.Box(2, 3, 4)\n')
+            script.write_text('from cadgen import xbf\nimport build123d as bd\n@xbf("part.xbf")\ndef part():\n    return bd.Box(2, 3, 4)\n', encoding="utf-8")
             reports = building.build(script, ["part"], cwd=root)
             self.assertTrue(reports[0]["ok"], reports)
             source = Source.read(root / "part.xbf")
@@ -33,7 +33,7 @@ class ViewerExportsTest(unittest.TestCase):
             _export({**request, "destinations": [str(original)], "original": True}, lambda _: None)
             self.assertEqual(original.read_bytes(), source.path.read_bytes())
             held = building.held(script, "part")
-            script.write_text('raise RuntimeError("must not execute")')
+            script.write_text('raise RuntimeError("must not execute")', encoding="utf-8")
             with patch.object(building, "build", side_effect=AssertionError("viewer rebuilt source")):
                 _export({**request, "source": {"script": str(script), "function": "part"},
                          "expected": {"digest": fingerprint(held.structure)}}, lambda _: None)
@@ -45,7 +45,7 @@ class ViewerExportsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder).resolve()
             script = root / "plate.py"
-            script.write_text('from cadgen import xbf\nimport build123d as bd\n@xbf("plate.xbf")\ndef plate():\n    return bd.Rectangle(4, 3)\n')
+            script.write_text('from cadgen import xbf\nimport build123d as bd\n@xbf("plate.xbf")\ndef plate():\n    return bd.Rectangle(4, 3)\n', encoding="utf-8")
             reports = building.build(script, ["plate"], cwd=root)
             self.assertTrue(reports[0]["ok"], reports)
             source = Source.read(root / "plate.xbf")
