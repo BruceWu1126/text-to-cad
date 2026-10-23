@@ -28,7 +28,7 @@ import math
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
-from cadgen.engine import configuration, motion
+from cadgen.engine import configuration_sequence, mechanism_state
 
 __all__ = ["CLIPS", "MATES", "add_poses", "add_clips", "beat_table", "clip_pose", "occurrence_ids",
            "check_occurrence_ids"]
@@ -127,7 +127,7 @@ def clip_pose(clip: dict, t: float) -> list[float]:
 def add_poses(arm, kinematics):
     """The mates' presets as configurations of ``arm``, by joint label."""
     for name, pose in kinematics.get("poses", {}).items():
-        configuration(arm, name, **pose)
+        mechanism_state(arm, name, **pose)
     return arm
 
 
@@ -138,7 +138,7 @@ def add_clips(arm, kinematics):
         def at(t, clip=clip):
             return dict(zip(MATES.values(), clip_pose(clip, t)))
 
-        motion(arm, name, at, duration=clip["duration"])
+        configuration_sequence(arm, name, at, duration=clip["duration"])
     return arm
 
 

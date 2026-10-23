@@ -37,7 +37,7 @@ clips are the five motions below.
 
 from __future__ import annotations
 
-from cadgen.engine import configuration, glb, motion, xbf
+from cadgen.engine import configuration_sequence, glb, mechanism_state, xbf
 
 import math
 
@@ -520,19 +520,19 @@ def f1():
     _joints(parts)
     car = bd.Compound(children=[parts[name] for name in CHILDREN], label="f1_concept_car")
     _teardown_joints(parts)
-    configuration(car, "drs_open", **_drs_pose(1.0))
-    configuration(car, "full_lock_left", **_steer_pose(1.0))
-    configuration(car, "full_lock_right", **_steer_pose(-1.0))
+    mechanism_state(car, "drs_open", **_drs_pose(1.0))
+    mechanism_state(car, "full_lock_left", **_steer_pose(1.0))
+    mechanism_state(car, "full_lock_right", **_steer_pose(-1.0))
     # The exploded view and nothing else, one loop-closed timeline: the car opens, then
     # the engine, and both close again, 22.5 s.
-    motion(car, "showcase", lambda t: _showcase_at((t / 22.5) % 1.0), duration=22.5)
+    configuration_sequence(car, "showcase", lambda t: _showcase_at((t / 22.5) % 1.0), duration=22.5)
     # The one mechanism you can show while the car is still whole: open and shut, 4 s.
-    motion(car, "drs", lambda t: _drs_pose(_pingpong(t / 4.0)), duration=4)
+    configuration_sequence(car, "drs", lambda t: _drs_pose(_pingpong(t / 4.0)), duration=4)
     # Left, through centre, to right and back — the car "looking around", 6 s.
-    motion(car, "steering", lambda t: _steer_pose(math.sin(math.tau * t / 6.0)), duration=6)
+    configuration_sequence(car, "steering", lambda t: _steer_pose(math.sin(math.tau * t / 6.0)), duration=6)
     # The car apart and back together, 12 s; the engine apart and back, 8 s.
-    motion(car, "teardown", lambda t: _teardown_pose(explode=_pingpong(t / 12.0)), duration=12)
-    return motion(car, "engine", lambda t: _teardown_pose(engine=_pingpong(t / 8.0)), duration=8)
+    configuration_sequence(car, "teardown", lambda t: _teardown_pose(explode=_pingpong(t / 12.0)), duration=12)
+    return configuration_sequence(car, "engine", lambda t: _teardown_pose(engine=_pingpong(t / 8.0)), duration=8)
 
 
 if __name__ == "__main__":

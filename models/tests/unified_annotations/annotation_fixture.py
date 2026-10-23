@@ -1,4 +1,4 @@
-from cadgen.engine import Material, configuration, materials, motion, xbf
+from cadgen.engine import Material, configuration_sequence, materials, mechanism_state, xbf
 
 import math
 
@@ -40,10 +40,10 @@ def annotation_fixture():
     base.joints["lift"].connect_to(shaft.joints["lift"], position=0)
 
     fixture = bd.Compound(children=[base, shaft, arm, *pins], label="annotation_fixture")
-    configuration(fixture, "open", swing=45)
+    mechanism_state(fixture, "open", swing=45)
     # Up 8 mm, down 8 mm and home in 4 s: it ends where it starts, so a player repeats it
     # as the old looping clip did (a motion has no loop of its own).
-    return motion(fixture, "demo", _lift, duration=4)
+    return configuration_sequence(fixture, "demo", _lift, duration=4)
 
 
 if __name__ == "__main__":

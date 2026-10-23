@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import math
 
-from cadgen.engine import configuration, motion, xbf
+from cadgen.engine import configuration_sequence, mechanism_state, xbf
 
 import build123d as bd
 
@@ -452,12 +452,12 @@ def hypercar():
     _door_joints(car)
     _explode_joints(car)
     # Shut is as built; open is each door through its full synchro-helix.
-    configuration(car, "open", **{f"door_{side}": _open(side) for side in SIDES})
+    mechanism_state(car, "open", **{f"door_{side}": _open(side) for side in SIDES})
     # Both doors open and shut again, 7 s (a player repeats it).
     shut = {f"door_{side}": (0.0, 0.0) for side in SIDES}
-    motion(car, "doors", [(0, shut), (3.5, "open"), (7, shut)], ease="cubic")
-    motion(car, "showcase", _showcase, duration=48)
-    return motion(car, "explode", _explode, duration=10)
+    configuration_sequence(car, "doors", [(0, shut), (3.5, "open"), (7, shut)], ease="cubic")
+    configuration_sequence(car, "showcase", _showcase, duration=48)
+    return configuration_sequence(car, "explode", _explode, duration=10)
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ two configurations, and the old clips as motions -- `drive`, `inspect` and
 
 from __future__ import annotations
 
-from cadgen.engine import Material, configuration, couple, materials, motion, xbf
+from cadgen.engine import Material, configuration_sequence, gear_pair, materials, mechanism_state, xbf
 
 import math
 
@@ -1209,9 +1209,9 @@ def _drive(actuator: bd.Compound) -> None:
     carrier, the cages and the planets at 4.5:1 (the old ``drive`` coupling), a
     constraint, as a gear train is: its joints turn only through it; and the old poses
     as its configurations ("rest" is as built)."""
-    couple(actuator, "drive", **_RATES)
-    configuration(actuator, "quarter_output", drive=_INPUT_TURNS / 4.0)
-    configuration(actuator, "full_output", drive=_INPUT_TURNS)
+    gear_pair(actuator, "drive", **_RATES)
+    mechanism_state(actuator, "quarter_output", drive=_INPUT_TURNS / 4.0)
+    mechanism_state(actuator, "full_output", drive=_INPUT_TURNS)
 
 
 def _clips(actuator: bd.Compound) -> None:
@@ -1219,9 +1219,9 @@ def _clips(actuator: bd.Compound) -> None:
     `drive` (12 s) sweeps the coupling over one closed cycle; `inspect` (12 s) runs the
     same cycle while the stack explodes with sin(pi * phase), the gears meshed at
     GEAR_CLUSTER; `teardown` (10 s) explodes every module to its own station, no drive."""
-    motion(actuator, "drive", sweep={"drive": (0.0, _INPUT_TURNS)}, duration=12, ease="linear")
-    motion(actuator, "inspect", _inspect, duration=12)
-    motion(actuator, "teardown", _teardown, duration=10)
+    configuration_sequence(actuator, "drive", sweep={"drive": (0.0, _INPUT_TURNS)}, duration=12, ease="linear")
+    configuration_sequence(actuator, "inspect", _inspect, duration=12)
+    configuration_sequence(actuator, "teardown", _teardown, duration=10)
 
 
 @xbf(out="../XBF/qdd_actuator.xbf")

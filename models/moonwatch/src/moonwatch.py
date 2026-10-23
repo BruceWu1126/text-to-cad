@@ -15,9 +15,9 @@ half where its moving joint holds it at 0 (`_held`):
   on the dial, the going train, escapement and chronograph in the movement,
   the crown (turn and travel) and the two pushers on the case middle, each
   wheel's pinion and each hand's lume and hub fastened by rigid-joint pairs;
-- its gear trains, the old couplings, as `couple`: `running` (seconds of time)
+- its gear trains, the old couplings, as `gear_pair`s: `running` (seconds of time)
   and `chrono` (seconds of chronograph running), each a constraint its wheels and
-  hands move only through, and its poses as `configuration`s;
+  hands move only through, and its poses as `mechanism_state`s;
 - the joints its exploded clips move: each part or group the old `ANIMATION`
   translated slides on a prismatic joint along its own direction, the
   movement rises on one and flips on a revolute about X, and the movement's
@@ -40,7 +40,7 @@ joints are their own travel, stay in the case.
 import math
 
 import build123d as bd
-from cadgen.engine import configuration, couple, glb, motion, xbf
+from cadgen.engine import configuration_sequence, gear_pair, glb, mechanism_state, xbf
 
 import chrono_works
 import keyless_works
@@ -329,19 +329,19 @@ _ESCAPE_DEG_PER_S = 60.0     # the escape wheel's turn per second of `running`
 
 
 def _couplings_and_poses(watch_root) -> None:
-    couple(watch_root, "running", minute=-0.1, hour=-1.0 / 120.0, sub_seconds=-6.0,
+    gear_pair(watch_root, "running", minute=-0.1, hour=-1.0 / 120.0, sub_seconds=-6.0,
            center=-0.1, third=0.8, fourth=-6.0, escape=_ESCAPE_DEG_PER_S)
-    couple(watch_root, "chrono",
+    gear_pair(watch_root, "chrono",
            chrono_seconds=-6.0, chrono_runner=-6.0, chrono_minutes=-0.2, chrono_hours=-1.0 / 120.0, coupling=6.0)
     # ZERO IS THE ARTIFACT AS WRITTEN: the watch as built reads 10:09:38 with the
     # chronograph reset, so every configuration is a departure from that.
-    configuration(watch_root, "one_minute", running=60.0)
-    configuration(watch_root, "half_hour", running=1800.0)
-    configuration(watch_root, "chrono_at_10min", chrono=600.0)
-    configuration(watch_root, "start_pressed", pusher_start=1.0)
-    configuration(watch_root, "reset_pressed", pusher_reset=1.0)
-    configuration(watch_root, "winding", crown=(1080.0, 0.0))
-    configuration(watch_root, "setting", crown=(180.0, 1.6))
+    mechanism_state(watch_root, "one_minute", running=60.0)
+    mechanism_state(watch_root, "half_hour", running=1800.0)
+    mechanism_state(watch_root, "chrono_at_10min", chrono=600.0)
+    mechanism_state(watch_root, "start_pressed", pusher_start=1.0)
+    mechanism_state(watch_root, "reset_pressed", pusher_reset=1.0)
+    mechanism_state(watch_root, "winding", crown=(1080.0, 0.0))
+    mechanism_state(watch_root, "setting", crown=(180.0, 1.6))
 
 
 # ---------------------------------------------------------------------------
@@ -596,10 +596,10 @@ def moonwatch():
 
     _couplings_and_poses(root)
     # Each clip ends on the pose it starts from; a player repeats it (a motion has no loop).
-    motion(root, "running", _running, duration=6)
-    motion(root, "reveal", _reveal, duration=12)
-    motion(root, "showcase", _showcase, duration=12)
-    motion(root, "grand_tour", _grand_tour, duration=24)
+    configuration_sequence(root, "running", _running, duration=6)
+    configuration_sequence(root, "reveal", _reveal, duration=12)
+    configuration_sequence(root, "showcase", _showcase, duration=12)
+    configuration_sequence(root, "grand_tour", _grand_tour, duration=24)
     return root
 
 

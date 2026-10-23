@@ -71,15 +71,16 @@ The migration a user makes, and nothing more:
 - Mates (`AssemblyHelper` frames, `KINEMATICS` revolute/fastened) -> build123d
   joints (`RigidJoint`, `RevoluteJoint`) placed with `connect_to`, which the
   engine harvests into the document's mechanism. The as-built pose is where the
-  joints connect the parts. The kinematics follow AP242: a coupling,
-  `couple(assembly, name, **ratios)`, is a real mechanical relation and a constraint
+  joints connect the parts. The kinematics follow AP242: a coupling, named after the pair
+  it is written as (`gear_pair(assembly, name, **ratios)`, `rack_and_pinion_pair`,
+  `screw_pair`), is a real mechanical relation and a constraint
   (its joints move only through it; its range is what their limits allow): the gear
   trains (the moonwatch's `running` and `chrono`, the qdd, planetary and radial
   `drive`), the mars rover's differential (`rocker_split`) and the tendon hand's
   curls. The old convenience controls are dropped, each named in its project's
   README (the hypercar's `doors`, six of the rover's seven). Poses are
-  `configuration(...)` in the body: every old typed-mate pose is one.
-- Animation (`animation=`, `cadgen.clip`) -> `motion(...)` in the body: a
+  `mechanism_state(...)` in the body: every old typed-mate pose is one.
+- Animation (`animation=`, `cadgen.clip`) -> `configuration_sequence(...)` in the body: a
   definition the xbf keeps (never frames), which a GLB export bakes into a clip.
   Every old clip is a motion of the same name (a function of time where it was
   procedural, waypoints where it was keyed), restored 2026-10-22 where the first port

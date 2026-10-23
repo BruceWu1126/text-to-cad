@@ -38,7 +38,7 @@ import math
 import re
 
 import build123d as bd
-from cadgen.engine import configuration, couple, motion
+from cadgen.engine import configuration_sequence, gear_pair, mechanism_state
 
 from lib import kin
 from lib import spec as S
@@ -339,15 +339,15 @@ def assemble(systems):
     groups held apart (`lib/explode.py`)."""
     engine = bd.Compound(label="radial", children=systems)
     plan = author(engine)
-    couple(engine, "drive", **DRIVE)
+    gear_pair(engine, "drive", **DRIVE)
 
     def turns(t: float) -> dict:
         return running_values(DEG_PER_S * t)
 
     for name, theta in CONFIGURATIONS.items():
-        configuration(engine, name, **plan.values(running_values(theta), {}))
-    motion(engine, "running", lambda t: plan.values(turns(t), {}), duration=CYCLE_S)
-    motion(engine, "explode", lambda t: plan.values({}, plan.explode_slides(t)), duration=plan.duration)
+        mechanism_state(engine, name, **plan.values(running_values(theta), {}))
+    configuration_sequence(engine, "running", lambda t: plan.values(turns(t), {}), duration=CYCLE_S)
+    configuration_sequence(engine, "explode", lambda t: plan.values({}, plan.explode_slides(t)), duration=plan.duration)
     held = plan.running_slides()
-    motion(engine, "exploded-running", lambda t: plan.values(turns(t), held), duration=CYCLE_S)
+    configuration_sequence(engine, "exploded-running", lambda t: plan.values(turns(t), held), duration=CYCLE_S)
     return engine

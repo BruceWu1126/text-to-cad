@@ -44,7 +44,7 @@ from __future__ import annotations
 import math
 import re
 
-from cadgen.engine import motion, track, xbf
+from cadgen.engine import configuration_sequence, track, xbf
 
 import build123d as bd
 
@@ -225,8 +225,8 @@ def f14d():
     groups = [system() for system in track(SYSTEMS, label=lambda system: system.__name__)]
     aircraft = bd.Compound(children=groups, label="f14d_super_tomcat")
     _teardown_joints(aircraft, groups)
-    motion(aircraft, "teardown", _teardown, duration=60)
-    motion(aircraft, "explodedHold", _exploded_hold, duration=24)
+    configuration_sequence(aircraft, "teardown", _teardown, duration=60)
+    configuration_sequence(aircraft, "explodedHold", _exploded_hold, duration=24)
     return aircraft
 
 
