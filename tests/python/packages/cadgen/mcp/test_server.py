@@ -180,7 +180,7 @@ class TabServerTest(_Session):
         page = {name for name, value in meta.items() if value.get("ui", {}).get("visibility") == ["app"]} - set(entrypoints)
         self.assertEqual(page, {"cad_sync", "cad_capture_reply"})
         # All but one read: cad_http turns the person's telemetry off when they ask.
-        self.assertEqual([name for name, tool in tools.items() if not tool["annotations"]["readOnlyHint"]], ["cad_http", "cad_build", "cad_export", "cad_snapshot"])
+        self.assertEqual([name for name, tool in tools.items() if not tool["annotations"]["readOnlyHint"]], ["cad_http", "cad_export", "cad_snapshot"])
         uri = tools["cad_home"]["_meta"]["ui"]["resourceUri"]
         self.assertRegex(uri, r"^ui://cad/[0-9a-f]{16}/app\.html$")
         self.assertEqual(tools["cad_open"]["_meta"]["ui"]["resourceUri"], uri)
@@ -305,9 +305,9 @@ class TabServerTest(_Session):
         # A heartbeat names the document by its canonical address: a model address is never made a path.
         synced = []
         self.server.sync_document = synced.append
-        for model in ("code::bracket", "C:/parts/plate.py::plate", self.bracket):
+        for model in ("C:/parts/plate.py::plate", self.bracket):
             self.call("cad_sync", {"view": "v1", "surface": "tab", "model": model})
-        self.assertEqual(synced, ["code::bracket", "C:/parts/plate.py::plate", self.bracket])
+        self.assertEqual(synced, ["C:/parts/plate.py::plate", self.bracket])
 
     def test_a_sync_says_when_the_catalog_moved(self) -> None:
         watch = {"file": self.bracket}

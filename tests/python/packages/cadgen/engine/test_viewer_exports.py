@@ -85,9 +85,13 @@ class ViewerExportHttpTest(unittest.TestCase):
 
         with contextlib.chdir(self.root):
             root = self.root
-            built = api.build('import build123d as bd; result = bd.Box(2, 3, 4)', model='export_http')
+            # A bare model: its document is the worker's memory alone.
+            script = root / 'export_http.py'
+            script.write_text('import build123d as bd\nfrom cadgen import model\n\n\n@model\n'
+                              'def export_http():\n    return bd.Box(2, 3, 4)\n', encoding='utf-8')
+            built = api.build_script(script, ['export_http'])
             self.assertEqual(built.files, {})
-            url = urlparse(built.report['url'])
+            url = urlparse(built.models[0]['url'])
             doc = parse_qs(url.query)['doc'][0]
             session = request({'op': 'viewer', 'start': str(root), 'api_only': True, 'new': True})
             self.assertTrue(session.get('ok'), session)
@@ -139,7 +143,7 @@ class ViewerExportHttpTest(unittest.TestCase):
             http(f"/__cad/exports/{job['id']}/release", {})
             self.assertEqual(http(f"/__cad/exports/{job['id']}/file")[0], 410)
             # Even a rebuild with identical geometry is a different displayed generation.
-            api.build('import build123d as bd; result = bd.Box(2, 3, 4)', model='export_http')
+            api.build_script(script, ['export_http'])
             payload['requestId'] = 'http-export-request-0002'
             _, _, data = http('/__cad/exports', payload)
             job = json.loads(data)
@@ -150,7 +154,7 @@ class ViewerExportHttpTest(unittest.TestCase):
             self.assertIn('source changed', job['error'])
             _, _, data = http('/api/doc/' + doc + '/version')
             self.assertIsNone(json.loads(data)['failed'], 'an export failure is not a model build failure')
-            self.assertEqual(list(root.iterdir()), [], 'no implicit source or intermediate artifact')
+            self.assertEqual(list(root.iterdir()), [script], 'no implicit source or intermediate artifact')
 
 
 if __name__ == "__main__":

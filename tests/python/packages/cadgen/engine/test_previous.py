@@ -485,18 +485,6 @@ class ClosureTest(unittest.TestCase):
         other["engine"]["format"] = "xbf/1"
         self.assertNotEqual(previous.key(other), record["key"], "the format is keyed")
 
-    def test_code_names_its_digest_never_its_text(self) -> None:
-        code = "import build123d as bd\nresult = bd.Box(3, 4, 5)\n"
-        out = self.folder / "code.xbf"
-        (report,) = engine_build.build(engine_build.code_script("block", self.folder), ["block"], cwd=self.folder,
-                                       code=code, outputs={"xbf": {"out": str(out)}})
-        self.assertTrue(report["ok"], report)
-        record = previous.of(out)
-        self.assertEqual((record["source"]["kind"], record["source"]["name"]), ("code", "block"))
-        self.assertEqual(len(record["source"]["digest"]), 32)
-        self.assertEqual(record["modules"], [])
-        self.assertNotIn(b"bd.Box", out.read_bytes())
-
     def test_ocp_without_vtk_is_the_ocp_recorded(self) -> None:
         from importlib import metadata
         from unittest import mock

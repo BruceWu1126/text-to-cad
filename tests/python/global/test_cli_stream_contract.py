@@ -115,11 +115,12 @@ def run_script(script: str) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, script], cwd=REPO, capture_output=True, text=True, check=False, env=_env())
 
 
-def run_code_json() -> subprocess.CompletedProcess:
-    # The engine's build of code, as the engine's own entry runs it, answering as JSON.
-    code = "import build123d as bd\nresult = bd.Box(4, 4, 4)\n"
-    return subprocess.run([sys.executable, "-m", "cadgen.engine", "build", code, "--model", "stream_contract", "--json"],
-                          cwd=Path(PART).parent, capture_output=True, text=True, check=False, env=_env())
+def run_export_json() -> subprocess.CompletedProcess:
+    # A command answering as JSON: the part's STEP, which its script writes, exported to a GLB.
+    built = run_script(PART)
+    assert built.returncode == 0, built.stderr
+    step = Path(PART).parent.parent / "STEP" / "part.step"
+    return run("export", str(step), str(step.with_suffix(".glb")), "--json")
 
 
 class StdoutIsTheResultTests(unittest.TestCase):
@@ -133,7 +134,7 @@ class StdoutIsTheResultTests(unittest.TestCase):
         self.assertIn("part.py::part", result.stdout)
 
     def test_a_json_answer_is_one_compact_line(self):
-        result = run_code_json()
+        result = run_export_json()
         self.assertEqual(0, result.returncode, result.stderr)
         lines = [line for line in result.stdout.splitlines() if line.strip()]
         self.assertEqual(1, len(lines), result.stdout)
@@ -161,10 +162,10 @@ class StderrIsEverythingElseTests(unittest.TestCase):
                     self.assertFalse(line.startswith(("[", "Traceback")), f"narration on stdout: {line!r}")
 
     def test_a_result_survives_discarding_stderr(self):
-        result = run_code_json()
+        result = run_export_json()
         payload = json.loads(result.stdout.strip())
         self.assertTrue(payload["ok"])
-        self.assertIn("model", payload)
+        self.assertIn("files", payload)
 
 
 if __name__ == "__main__":
