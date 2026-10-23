@@ -55,7 +55,7 @@ the two disagree, the engine's README is right.
 ## The design laws
 
 These are LAWS, not conventions: a change that violates them is wrong even when it works.
-Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
+Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
 
 1. **An xbf carries its build closure as pointers and digests** -- script and function,
    modules, data inputs, versions and the key; never source, never lines on elements, never
@@ -190,6 +190,14 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     function of the root. Every successful server-backed build reports its id and localhost
     viewer URL, including a build with file outputs. A cold `daemon=False` build has no served
     URL.
+
+22. **A verb's option is about the picture or the path, never the model.** `export` takes a
+    document and destinations: what the file holds, its parts and their placement, colours and
+    motion, is what the code built, so no option selects a part or a state. `snapshot`'s
+    options describe the picture (the camera, the display, the size, the state the mechanism
+    is drawn in); `serve`'s and `status`'s the process. Anything that changes what a document
+    is, is a function in the model's code: a part's own model, or a model returning the
+    assembly in a state (`cadgen.ap242.posed`).
 
 
 ## Agent operations

@@ -197,6 +197,13 @@ def hinge():
 21. **Python functions own operations; decorators and CLIs expose them.** Every
     successful server-backed build reports its id and localhost viewer URL,
     including a build with file outputs. A cold `daemon=False` build has no served URL.
+22. **A verb's option is about the picture or the path, never the model.** `export`
+    takes a document and destinations: what the file holds, its parts and their
+    placement, colours and motion, is what the code built, so no option selects a part
+    or a state. `snapshot`'s options describe the picture (the camera, the display, the
+    size, the state the mechanism is drawn in); `serve`'s and `status`'s the process.
+    Anything that changes what a document is, is a function in the model's code: a
+    part's own model, or a model returning the assembly in a state (`posed`).
 
 ## Architecture
 
