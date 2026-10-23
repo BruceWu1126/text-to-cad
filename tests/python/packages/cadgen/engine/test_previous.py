@@ -28,7 +28,7 @@ HERE = Path(__file__).resolve().parent
 NAMES = {{"peg", "pin", "dowel", "stud", "post", "spigot"}}
 
 
-@xbf
+@xbf("XBF/peg.xbf")
 def peg():
     size = json.loads((HERE / "peg.json").read_text())["size"]
     peg = bd.Box(size, size, {peg})
@@ -36,14 +36,14 @@ def peg():
     return peg
 
 
-@xbf
+@xbf("XBF/cap.xbf")
 def cap():
     cap = read_step(HERE / "inputs" / "cap.step")
     cap.label = "cap"
     return cap
 
 
-@xbf
+@xbf("XBF/kit.xbf")
 def kit():
     left = peg().moved(bd.Location((10, 0, 0)))
     right = peg().moved(bd.Location((-10, 0, 0)))
@@ -288,7 +288,7 @@ import dims
 HERE = Path(__file__).resolve().parent
 
 
-@xbf
+@xbf("XBF/plate.xbf")
 def plate():
     try:
         depth = json.loads((HERE / "depth.json").read_text())["depth"]

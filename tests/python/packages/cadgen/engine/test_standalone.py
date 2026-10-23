@@ -76,9 +76,9 @@ class StandaloneTest(unittest.TestCase):
                 import build123d as bd
                 from cadgen.engine import xbf, step, stl
 
-                @xbf
-                @step
-                @stl
+                @xbf("XBF/part.xbf")
+                @step("part.step")
+                @stl("part.stl")
                 def part():
                     return bd.Box(1, 2, 3) - bd.Cylinder(0.3, 5)
             """), encoding="utf-8")

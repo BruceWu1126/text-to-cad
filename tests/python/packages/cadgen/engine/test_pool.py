@@ -254,7 +254,7 @@ from cadgen.engine import xbf
 GATE = pathlib.Path(__file__).with_suffix(".go")
 
 
-@xbf
+@xbf("XBF/{name}.xbf")
 def {name}():
     while {gated} and not GATE.exists():
         time.sleep(0.01)

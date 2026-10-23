@@ -55,16 +55,12 @@ python src/bracket.py
 
 - `@model` declares a model with no file output. File decorators also declare a model.
 
-- `@xbf` makes the function a model and writes its document, by default
-  `XBF/<function>.xbf` beside the script.
-- `@step`, `@glb`, `@stl`, `@threemf` and `@dxf` declare translations of that
-  document, by default `<function>.step` (`.glb`, `.stl`, `.3mf`, `.dxf`) beside the
-  script. `@dxf` draws a planar document; `$dxf` covers drawings.
-- **`out` is every file decorator's only argument**, a path relative to the script:
-  `@step(out="../STEP/arm.step")`, or `@step("../STEP/arm.step")`. Anything else is
-  refused when the script loads: a model's materials, colours, joints, the pose its
-  joints connect at, its configurations and its motions are written in its body, and
-  every declared file shows the model as built.
+- `@xbf("XBF/part.xbf")` declares the native document. `@step("part.step")`,
+  `@glb("part.glb")`, `@stl("part.stl")`, `@threemf("part.3mf")` and
+  `@dxf("part.dxf")` declare translations; DXF requires planar geometry.
+- **Every file decorator requires `out`**, its only argument, as a positional
+  path or `out="..."`. Relative paths are relative to the script. `None` and omitted
+  paths fail. Materials, colours, joints, configurations and motions belong in the body.
 - **A declared file is written whenever its model runs in a build**, as the build's
   target or as a child another model calls, once per build, from that model's own
   document. The `.xbf` comes first (an open viewer shows it at once), then the files
@@ -176,7 +172,7 @@ def frame(length):
     return bd.Compound(children=rails, label="frame")
 
 
-@xbf
+@xbf("XBF/rig.xbf")
 def rig():
     base = frame(200)
     ...
@@ -230,7 +226,7 @@ re-runs the body that read it:
   HERE = Path(__file__).resolve().parent
 
 
-  @xbf
+  @xbf("XBF/enclosure.xbf")
   def enclosure():
       pcb = read_mesh(HERE / "scans/pcb.stl").bounding_box()   # an input, by the scan's bytes
       return bd.Box(pcb.size.X + 6, pcb.size.Y + 6, pcb.size.Z + 4)
@@ -257,7 +253,7 @@ import build123d as bd
 HERE = Path(__file__).resolve().parent
 
 
-@xbf
+@xbf("XBF/rig.xbf")
 def rig():
     motor = read_xbf(HERE / "../vendor/motor.xbf")
     motor.label = "motor"
@@ -268,8 +264,7 @@ def rig():
 
 `cadgen build` builds one model from source text, for a quick shape or a probe. The
 code assigns its final shape to `result`; output flags declare its destination. A
-file flag writes its kind at the path given or where a decorator with
-no path would put it (`--xbf` is `XBF/<name>.xbf` in the working folder):
+file flag writes its kind at the path given or its CLI default (`--xbf` is `XBF/<name>.xbf` in the working folder):
 
 ```bash
 cadgen build 'import build123d as bd
@@ -306,7 +301,7 @@ nothing outside a build:
 from cadgen.engine import report, track, xbf
 
 
-@xbf
+@xbf("XBF/hand.xbf")
 def hand():
     fingers = [finger(name) for name in track(FINGERS)]   # "Building geometry  2/5  middle"
     report("palm loft")                                    # "Building geometry  palm loft"
@@ -354,3 +349,9 @@ each with its own memo, and builds of different scripts run at once.
   script's worker.
 - Nothing else is written: no cache folder, and no record of a build beside the
   `.xbf`.
+
+A successful server-backed build reports its model address and localhost viewer URL,
+including when it writes files. In Python, `cadgen.build(shape, model="part", step="part.step")`
+accepts an already-built build123d shape; its document and exports use the same worker
+writer. The operations that created that supplied shape ran in the caller and have
+no worker memo or feature provenance. Use a decorated function for warm geometry replay.

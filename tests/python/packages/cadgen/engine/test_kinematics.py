@@ -34,7 +34,7 @@ import build123d as bd
 from cadgen.engine import configuration, step, xbf
 
 
-@xbf
+@xbf("XBF/hinge.xbf")
 @step(out="hinge.step")
 def hinge():
     base = bd.Box(100, 60, 20)
@@ -57,7 +57,7 @@ import build123d as bd
 from cadgen.engine import configuration, xbf
 
 
-@xbf
+@xbf("XBF/lift.xbf")
 def lift():
     base = bd.Box(80, 80, 10)
     base.label = "base"
@@ -304,7 +304,7 @@ class JointMemoTest(_Folder):
             import build123d as bd
             from cadgen.engine import xbf
 
-            @xbf
+            @xbf("XBF/lone.xbf")
             def lone():
                 a = bd.Box(10, 10, 10)
                 bd.RigidJoint("top", a, bd.Location((0, 0, 5)))
@@ -333,14 +333,14 @@ class JointMemoTest(_Folder):
             SEEN = {}
 
 
-            @xbf
+            @xbf("XBF/peg.xbf")
             def peg():
                 peg = bd.Box(2, 2, 6)
                 bd.RigidJoint("base", peg, bd.Location((0, 0, -3)))
                 return peg
 
 
-            @xbf
+            @xbf("XBF/pegs.xbf")
             def pegs():
                 first, second, third = peg(), bd.Pos(10, 0, 0) * peg(), peg()
                 bd.RigidJoint("front", first, bd.Location())
@@ -362,7 +362,7 @@ import build123d as bd
 from cadgen.engine import xbf
 
 
-@xbf
+@xbf("XBF/nested.xbf")
 def nested():
     base = bd.Box(100, 60, 20)
     base.label = "base"
@@ -392,7 +392,7 @@ import build123d as bd
 from cadgen.engine import xbf
 
 
-@xbf
+@xbf("XBF/mounted.xbf")
 def mounted():
     base = bd.Box(60, 60, 4)
     base.label = "base"
@@ -471,7 +471,7 @@ import build123d as bd
 from cadgen.engine import xbf
 
 
-@xbf
+@xbf("XBF/bike.xbf")
 def bike():
     # Two parts placed where they stand, a revolute pair between them by label: no connect_to.
     frame = bd.Box(200, 40, 20)
@@ -501,7 +501,7 @@ import build123d as bd
 from cadgen.engine import xbf
 
 
-@xbf
+@xbf("XBF/bike.xbf")
 def bike():
     # The pivot's part is turned: build123d makes the revolute's frame of the axis in that part's
     # frame, so its X is not the X a plane of the world datum has.
@@ -597,7 +597,7 @@ import build123d as bd
 from cadgen.engine import configuration, couple, motion, xbf
 
 
-@xbf
+@xbf("XBF/bench.xbf")
 def bench():
     plate = bd.Box(300, 200, 10, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX))
     plate.label = "plate"

@@ -11,7 +11,7 @@
 
 Every one goes through the daemon (``client``), so the warm worker of the script, of the code
 (by its ``name``) or of the document does the work and keeps what it made in memory for the
-next call. ``build`` takes code only (law 12) and requires an explicit destination:
+next call. ``build`` takes source text or a build123d shape (the CLI takes code only) and requires an explicit destination:
 ``model=NAME`` holds it in memory; file flags (``xbf=``, ``step=``, ...) write to the default
 path with ``True`` or to a supplied path. A script's models build when called by the script
 (``python model.py``), or from Python
@@ -209,7 +209,7 @@ def _outputs(flags: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
 def _built(script: Path, functions: list[str] | None, *, code: str | None = None, name: str | None = None,
            outputs: dict[str, dict[str, Any]] | None = None, verify: bool = False,
            log: Callable[[str], None] | None = None, daemon: bool = True,
-           progress: Any = None) -> tuple[list[dict[str, Any]], Any, float]:
+           progress: Any = None, shape: dict | None = None) -> tuple[list[dict[str, Any]], Any, float]:
     """One build -- of code, or of a script's models -- in the warm worker that holds it, or in
     this process: its reports, whether the worker was started for it, and its wall time. Where
     the build is goes, frame by frame, to ``progress`` (``progress.py``): by default a bar on
@@ -235,7 +235,7 @@ def _built(script: Path, functions: list[str] | None, *, code: str | None = None
                 with progressing.building(said):
                     said.load()
                     reports = engine_build.build(script, functions, log=shown, cwd=cwd, outputs=outputs, code=code,
-                                                 verify=verify)
+                                                 verify=verify, shape=shape)
             except BuildError as error:
                 raise EngineError(str(error)) from None
             said.attach(reports)
@@ -245,7 +245,7 @@ def _built(script: Path, functions: list[str] | None, *, code: str | None = None
                 shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")
 
             answer = _ask({"op": "build", "script": str(script), "functions": functions, "cwd": str(cwd),
-                           "outputs": outputs, "code": code, "name": name, "verify": verify}, relay, frames)
+                           "outputs": outputs, "code": code, "shape": shape, "name": name, "verify": verify}, relay, frames)
             reports, fresh = answer["done"], answer.get("worker", {}).get("fresh")
     finally:
         if bar is not None:
@@ -253,19 +253,21 @@ def _built(script: Path, functions: list[str] | None, *, code: str | None = None
     return reports, fresh, time.perf_counter() - started
 
 
-def build(code: str, *, model: str | None = None, name: str | None = None, xbf: Any = None, step: Any = None, glb: Any = None,
+def build(code: Any, *, model: str | None = None, name: str | None = None, xbf: Any = None, step: Any = None, glb: Any = None,
           stl: Any = None, threemf: Any = None, dxf: Any = None, verify: bool = False,
           log: Callable[[str], None] | None = None, daemon: bool = True, progress: Any = None) -> Built:
-    """Build source text, ``cadgen build SOURCE`` (law 12): ``code`` assigns its final shape to
+    """Build source text or a build123d shape. Source text assigns its final shape to
     ``result``, and is built as ``name`` (``model`` by default) in the warm worker of that name.
     An output is required: ``model=NAME`` holds ``code::NAME`` in memory and updates it on
     subsequent builds. File flags are additive declarations:
-    ``True`` writes the kind where a decorator with no path puts it, in the working folder
+    ``True`` writes the kind at the CLI default in the working folder
     (``XBF/<name>.xbf``, ``<name>.step``, ...), a path writes it there. A child
     model the code calls writes the files it declares (law 10). ``verify`` runs every body the
     memo would replay and compares it with the logged one (``build.build``); ``daemon=False``
     builds in this process; ``progress`` as ``_built`` has it. Returns once every file is on
-    disk. A script's models build by running the script, or by ``Model.build()``."""
+    disk. For a supplied shape, its geometry already exists in the caller; metadata
+    and geometry travel in memory to the worker's normal document writer. Its prior
+    operations cannot be replayed or verified. A script's decorated models use ``Model.build()``."""
     from cadgen.engine.build import code_script
 
     outputs = _outputs({"xbf": xbf, "step": step, "glb": glb, "stl": stl, "threemf": threemf, "dxf": dxf})
@@ -279,8 +281,16 @@ def build(code: str, *, model: str | None = None, name: str | None = None, xbf: 
     name = model or name or "model"
     cwd = Path.cwd()
     script = code_script(name, cwd)
+    shape = None
+    if not isinstance(code, str):
+        if verify:
+            raise EngineError("verify requires source code: a supplied shape has already been built")
+        from cadgen.engine.shape_input import pack
+
+        shape = pack(code, name)
+        code = ""  # the same named worker/address as a source-code build
     reports, _fresh, wall = _built(script, [name], code=code, name=name, outputs=outputs, verify=verify, log=log,
-                                   daemon=daemon, progress=progress)
+                                   daemon=daemon, progress=progress, shape=shape)
     result = Built(name, script, {**reports[0], "wall": round(wall, 4)}, cwd)
     if not daemon and result.ok:
         from cadgen.engine.build import held

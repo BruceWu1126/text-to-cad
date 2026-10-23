@@ -2,7 +2,7 @@
 
     from cadgen.engine import report, track, xbf
 
-    @xbf
+    @xbf("XBF/hand.xbf")
     def hand():
         fingers = [finger(name) for name in track(FINGERS)]  # "Building geometry  2/5  middle"
         report("palm loft")                                   # "Building geometry  palm loft"

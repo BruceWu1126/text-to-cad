@@ -30,7 +30,7 @@ from cadgen.engine import xbf
 from shared import WIDTH
 
 
-@xbf
+@xbf("XBF/left.xbf")
 def left():
     plate = bd.fillet(bd.Box(WIDTH, 8, 3).edges().filter_by(bd.Axis.Z), 1)
     plate = plate - bd.Cylinder(1.5, 10)
@@ -44,7 +44,7 @@ from cadgen.engine import xbf
 from shared import WIDTH
 
 
-@xbf
+@xbf("XBF/right.xbf")
 def right():
     return bd.Box(WIDTH, 4, 4) - bd.Pos(1, 0, 0) * bd.Box(2, 2, 10)
 """
@@ -56,7 +56,7 @@ import build123d as bd
 from cadgen.engine import xbf, read_step
 
 
-@xbf
+@xbf("XBF/bought.xbf")
 def bought():
     return read_step(Path(__file__).parent / "bought.step")
 """
@@ -71,7 +71,7 @@ from bought import bought
 HOLE = {hole}
 
 
-@xbf
+@xbf("XBF/root.xbf")
 def root():
     before = bd.Box(1, 1, 1)
     one = left()
@@ -242,7 +242,7 @@ from dimensions import WIDTH
 from helpers import holed
 
 
-@xbf
+@xbf("XBF/bracket.xbf")
 def bracket():
     return holed(WIDTH)
 """
@@ -253,7 +253,7 @@ from cadgen.engine import xbf
 import dimensions
 
 
-@xbf
+@xbf("XBF/spacer.xbf")
 def spacer():
     return bd.Box(dimensions.HEIGHT, 2, 2)
 """
@@ -266,7 +266,7 @@ import dimensions
 WHICH = "HEI" + "GHT"
 
 
-@xbf
+@xbf("XBF/probe.xbf")
 def probe():
     return bd.Box(getattr(dimensions, WHICH), 3, 3)
 """
@@ -278,7 +278,7 @@ from bracket import bracket
 from spacer import spacer
 
 
-@xbf
+@xbf("XBF/assembly.xbf")
 def assembly():
     return bd.Compound(children=[bracket(), spacer().moved(bd.Location((30, 0, 0)))], label="assembly")
 """
@@ -377,24 +377,24 @@ def config():
         return {{"width": 2}}
 
 
-@xbf
+@xbf("XBF/reader.xbf")
 def reader():
     return bd.Box(config()["width"], 1, 1)
 
 
-@xbf
+@xbf("XBF/holder.xbf")
 def holder():
     return bd.Compound(children=[reader(), bd.Pos(GAP, 0, 0) * bd.Box(1, 1, 1)])
 
 
-@xbf
+@xbf("XBF/writer.xbf")
 def writer():
     with open(HERE / "note.txt", "w", encoding="utf-8") as handle:
         handle.write("built")
     return bd.Box(1, 1, 1)
 
 
-@xbf
+@xbf("XBF/piped.xbf")
 def piped():
     handle = os.open(HERE / "pipe", os.O_RDONLY | os.O_NONBLOCK)
     try:
@@ -413,7 +413,7 @@ from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
 from cadgen.engine import xbf
 
 
-@xbf
+@xbf("XBF/raw.xbf")
 def raw():
     peg = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 2.0, 5.0).Shape()
     return bd.Compound(children=[bd.Solid(downcast(peg)), bd.Box(3, 3, 3)])

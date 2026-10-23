@@ -30,7 +30,7 @@ import build123d as bd
 from cadgen.engine import configuration, motion, xbf
 
 
-@xbf
+@xbf("XBF/arm.xbf")
 def arm():
     base = bd.Box(100, 60, 20)
     link = bd.Pos(40, 0, 25) * bd.Box(120, 20, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.CENTER))

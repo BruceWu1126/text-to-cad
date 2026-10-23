@@ -29,12 +29,12 @@ from cadgen.engine import xbf
 SIZE = {size}
 
 
-@xbf
+@xbf("XBF/post.xbf")
 def post():
     return bd.fillet((bd.Box(SIZE, 4, 10) - bd.Cylinder(1, 20)).edges().filter_by(bd.Axis.Z), 0.5)
 
 
-@xbf
+@xbf("XBF/rack.xbf")
 def rack():
     left = post()
     right = post().moved(bd.Location((20, 0, 0)))
@@ -117,8 +117,8 @@ from cadgen.engine import paint, step, xbf
 SIZE = {size}
 
 
-@xbf
-@step
+@xbf("XBF/shelf.xbf")
+@step("shelf.step")
 def shelf():
     post = bd.fillet(bd.Box(SIZE, 4, 10).edges().filter_by(bd.Axis.Z), 0.5)
     post.label = "post"

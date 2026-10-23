@@ -740,7 +740,7 @@ class Daemon:
                         fresh = worker.builds == 0
                         order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
                                  "cwd": request.get("cwd"), "outputs": request.get("outputs"),
-                                 "code": request.get("code"), "verify": bool(request.get("verify")),
+                                 "code": request.get("code"), "shape": request.get("shape"), "verify": bool(request.get("verify")),
                                  "acknowledged": True}
                         server = self.server
                         if server is not None:

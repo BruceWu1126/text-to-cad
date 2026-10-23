@@ -235,8 +235,8 @@ class ThroughTheDaemonTest(unittest.TestCase):
             import build123d as bd
             from cadgen.engine import stl, xbf
 
-            @xbf
-            @stl
+            @xbf("XBF/plate.xbf")
+            @stl("plate.stl")
             def plate():
                 base, peg = bd.Box(10, 10, 2), bd.Pos(20, 0, 0) * bd.Cylinder(2, 4)
                 base.label, peg.label = "base", "peg"
@@ -249,7 +249,7 @@ class ThroughTheDaemonTest(unittest.TestCase):
             import os
             from cadgen.engine import xbf
 
-            @xbf
+            @xbf("XBF/dies.xbf")
             def dies():
                 os._exit(3)
 

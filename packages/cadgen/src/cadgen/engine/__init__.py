@@ -4,7 +4,7 @@ A model is a parameterless function returning a build123d shape::
 
     from cadgen.engine import xbf, step
 
-    @xbf
+    @xbf("XBF/arm.xbf")
     @step("arm.step")
     def arm():
         ...

@@ -108,7 +108,7 @@ from cadgen.engine import step
 import build123d as bd
 
 
-@step
+@step("hinge.step")
 def hinge():
     base = bd.Box(20, 20, 4)
     base.label = "base"
@@ -124,11 +124,12 @@ HINGE
 # dot-directory, which the explorer skips, so the model's folder still holds
 # one hinge; the gate copies it over the first to stand in for a rebuild that a
 # source edit saved while the model was open.
-# The model name decides the output name, so the two revisions build side by
+# Each revision declares its output name, so the two revisions build side by
 # side instead of one overwriting the other. Literal substitutions only: GNU and
 # BSD sed do not spell a word boundary the same way.
 sed -e 's/bd.Pos(30, 0, 6) \* bd.Box(56, 4, 4)/bd.Pos(80, 0, 6) * bd.Box(156, 4, 4)/' \
     -e 's/hinge()/hinge_grown()/g' \
+    -e 's/"hinge.step"/"hinge_grown.step"/' \
   "$project/hinge.py" > "$project/hinge_grown.py"
 if ! grep -q 'bd.Box(156, 4, 4)' "$project/hinge_grown.py" \
    || ! grep -q 'def hinge_grown()' "$project/hinge_grown.py"; then

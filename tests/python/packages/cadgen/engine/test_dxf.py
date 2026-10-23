@@ -34,8 +34,8 @@ from cadgen.engine import dxf, xbf
 HOLE = {hole}
 
 
-@xbf
-@dxf
+@xbf("XBF/plate.xbf")
+@dxf("plate.dxf")
 def plate():
     with bd.BuildSketch() as cut:
         bd.RectangleRounded(80, 50, 8)
@@ -49,7 +49,7 @@ def plate():
     return bd.Compound(children=[sheet, crosshair, bend], label="plate")
 
 
-@dxf
+@dxf("gasket.dxf")
 def gasket():
     with bd.BuildSketch() as cut:
         bd.Rectangle(60, 40)
@@ -58,7 +58,7 @@ def gasket():
     return cut.sketch
 
 
-@dxf
+@dxf("forward.dxf")
 def forward():
     a, b = bd.Rectangle(10, 5).face(), bd.Pos(20, 0) * bd.Circle(3).face()
     mark = bd.Pos(0, 20) * bd.Rot(0, 0, 30) * bd.Rectangle(4, 2).face()
@@ -66,7 +66,7 @@ def forward():
     return bd.Compound(children=[cut, mark])
 
 
-@dxf
+@dxf("backward.dxf")
 def backward():
     a, b = bd.Rectangle(10, 5).face(), bd.Pos(20, 0) * bd.Circle(3).face()
     mark = bd.Pos(0, 20) * bd.Rot(0, 0, 30) * bd.Rectangle(4, 2).face()
@@ -79,30 +79,30 @@ import build123d as bd
 from cadgen.engine import dxf, xbf
 
 
-@xbf
-@dxf
+@xbf("XBF/solid.xbf")
+@dxf("solid.dxf")
 def solid():
     return bd.Box(1, 2, 3)
 
 
-@dxf
+@dxf("lifted.dxf")
 def lifted():
     return bd.Pos(0, 0, 5) * bd.Rectangle(10, 5).face()
 
 
-@dxf
+@dxf("open_cut.dxf")
 def open_cut():
     return bd.Compound([bd.Line((0, 0), (10, 0)), bd.Line((10, 0), (10, 5))])
 
 
-@dxf
+@dxf("doubled.dxf")
 def doubled():
     a, b = bd.Rectangle(10, 5).face(), bd.Rectangle(10, 5).face()
     a.label, b.label = "CUT", "CUT"
     return bd.Compound(children=[a, b])
 
 
-@dxf
+@dxf("slashed.dxf")
 def slashed():
     a, b = bd.Rectangle(9, 6).face(), bd.Pos(20, 0) * bd.Circle(3).face()
     a.label, b.label = "CUT/2", "CUT"
@@ -114,7 +114,7 @@ import build123d as bd
 from cadgen.engine import xbf
 
 
-@xbf
+@xbf("XBF/bracket.xbf")
 def bracket():
     return bd.Box(40, 20, 3, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN)) - bd.Cylinder(3, 10)
 """
@@ -126,7 +126,7 @@ from cadgen.engine import dxf
 from bracket import bracket
 
 
-@dxf
+@dxf("flat.dxf")
 def flat():
     return bd.Pos(0, 0, -3) * bracket().faces().sort_by(bd.Axis.Z)[-1]
 """
@@ -215,7 +215,7 @@ class DrawingTest(unittest.TestCase):
         self.assertEqual((written.kind, written.path.read_bytes()), ("dxf", self.bytes))
 
     def test_a_drawing_takes_out_alone_and_a_dxf_path(self) -> None:
-        with self.assertRaisesRegex(TypeError, "takes out alone, not layer"):
+        with self.assertRaisesRegex(TypeError, "unexpected keyword argument.*layer"):
             dxf("a.dxf", layer="CUT")
         with self.assertRaisesRegex(ValueError, r"must end in \.dxf"):
             dxf(out="a.step")

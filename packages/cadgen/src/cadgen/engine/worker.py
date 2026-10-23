@@ -465,7 +465,7 @@ def main() -> int:
                 reports = build(script, request.get("functions") or None,
                                 log=lambda text: send({"id": ident, "log": text}), cwd=Path(cwd) if cwd else None,
                                 outputs=request.get("outputs"), code=request.get("code"),
-                                verify=bool(request.get("verify")))
+                                verify=bool(request.get("verify")), shape=request.get("shape"))
             said.attach(reports)
             patcher.finish(reports)
             resident = resident_mb()

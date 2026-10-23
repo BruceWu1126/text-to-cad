@@ -33,7 +33,7 @@ from .lib import WIDTH              # one level: its own package
 from ..common.dims import HEIGHT    # two levels: its package's parent
 
 
-@xbf
+@xbf("XBF/bracket.xbf")
 def bracket():
     return bd.Box(WIDTH, 10, HEIGHT) - bd.Cylinder(helper.RADIUS, dims.HEIGHT * 2)
 
@@ -97,7 +97,7 @@ class PackageScriptTest(unittest.TestCase):
             from lib import empennage
 
 
-            @xbf
+            @xbf("XBF/f14.xbf")
             def f14():
                 return bd.Box(10, empennage.SPAN, 2)
         """})
@@ -121,7 +121,7 @@ class PackageScriptTest(unittest.TestCase):
             import holes
 
 
-            @xbf
+            @xbf("XBF/plate.xbf")
             def plate():
                 return bd.Box(10, 10, 2) - bd.Cylinder(holes.RADIUS, 4)
         """})
@@ -158,7 +158,7 @@ class PackageScriptTest(unittest.TestCase):
             from cadgen.engine import xbf
 
 
-            @xbf
+            @xbf("XBF/plate.xbf")
             def plate():
                 return bd.Box(10, 10, 2)
         """})

@@ -29,7 +29,7 @@ python src/plate.py
 ```
 
 A second run replays the model and keeps its file. A one-off part can instead use a
-flat folder and `@xbf` with its default output, `XBF/plate.xbf` beside the script.
+flat folder and `@xbf("XBF/plate.xbf")` to put the document beside the script.
 
 ## An assembly
 

@@ -11,7 +11,7 @@ from their JavaScript packages and bundled in at build time (the JS *source* nev
 from cadgen import step, xbf
 import build123d as bd
 
-@xbf                      # XBF/arm.xbf beside the script
+@xbf("XBF/arm.xbf")                      # XBF/arm.xbf beside the script
 @step("arm.step")         # and its STEP, a translation of that document
 def arm():
     return bd.Box(10, 20, 30)
@@ -55,7 +55,7 @@ the two disagree, the engine's README is right.
 ## The design laws
 
 These are LAWS, not conventions: a change that violates them is wrong even when it works.
-Laws 1 to 13 and 19 to 20 are the engine's; 14 to 18 hold for the whole package.
+Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
 
 1. **An xbf carries its build closure as pointers and digests** -- script and function,
    modules, data inputs, versions and the key; never source, never lines on elements, never
@@ -99,9 +99,10 @@ Laws 1 to 13 and 19 to 20 are the engine's; 14 to 18 hold for the whole package.
 9. **Names are the durable tie to code.** An element's name is spelled from the function that
    made its feature and the author's name for that feature, never from a line or a file: moving
    code renames nothing, and the file holds no line to go stale.
-10. **A file decorator defines an output file.** Whenever the model it decorates runs in a
+10. **A file decorator requires an explicit output path.** `out` is its only argument;
+    omitted paths and `None` are refused. Whenever the model it decorates runs in a
     build -- the build's target, or a child another model's body calls -- that file is written,
-    once per build, from the model's own document.
+    once per build, from the model's own document. A model with no file decorator writes nothing.
 11. **Decoration only declares; a model script is Python.** Importing cadgen or
     defining a decorated function never builds a model, writes its outputs, starts a
     worker, or exits the caller. An explicit call builds the model and writes its
@@ -114,7 +115,9 @@ Laws 1 to 13 and 19 to 20 are the engine's; 14 to 18 hold for the whole package.
     `--model NAME`, `--xbf`, `--step`, `--glb`, `--stl`, `--threemf`, or `--dxf` is
     required before code can run. `--model NAME` declares a named document in
     memory; the file flags declare files, additive among themselves. `--name`
-    alone declares no output. A script is built by calling its models (law 11).
+    alone declares no output. The Python `cadgen.build()` function also accepts an already-built
+    build123d shape, with the same output declarations. A script may call that function
+    or its decorated models (law 11).
 13. **The document's kinematics are AP242's, and cadgen stores no kinematic fact the
     standard cannot name.** Every entity and attribute of the mechanism subtree is ISO
     10303-105's as Part 21 writes it (edition 4's domain model's where Part 21 has none);
@@ -170,6 +173,14 @@ Laws 1 to 13 and 19 to 20 are the engine's; 14 to 18 hold for the whole package.
     page session keeps its own root; each MCP session owns its views and resource. The
     stdio shim owns only connection metadata. Sidebar sharing stays in memory, and host
     quirks stay in the shim and page. See the engine's **Architecture**.
+
+21. **Python functions own operations; decorators and CLIs expose them.** Code and
+    supplied-shape builds use the same document/output writer as decorated models.
+    `cadgen.build(shape, model="part", step="part.step")` transfers the shape and its
+    metadata in memory to a worker; the server never decodes native geometry. The
+    caller's already-executed operations have no worker memo or feature provenance.
+    Every successful server-backed build reports its address and localhost viewer URL,
+    including a build with file outputs. A cold `daemon=False` build has no served URL.
 
 ## The shape of the package
 

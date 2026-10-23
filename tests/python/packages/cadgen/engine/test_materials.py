@@ -32,7 +32,7 @@ GLOW = Material("Glow", 1500, color=(0.2, 0.9, 0.3), metallic=0.25, roughness=0.
                 description="a lit plastic")
 
 
-@xbf
+@xbf("XBF/plate.xbf")
 @step(out="plate.step")
 def plate():
     body = bd.Box(20, 10, 4) - bd.Cylinder(2, 10)
@@ -67,7 +67,7 @@ LACQUER = Material("Red lacquer", 1200, family="other", color=(0.6, 0.02, 0.02),
                    coat_roughness=0.05)
 
 
-@xbf
+@xbf("XBF/bench.xbf")
 @glb(out="bench.glb")
 def bench():
     block = bd.Box(30, 30, 30)
@@ -294,7 +294,7 @@ class MaterialDocumentTest(unittest.TestCase):
             import build123d as bd
             from cadgen.engine import materials, xbf
 
-            @xbf
+            @xbf("XBF/pair.xbf")
             def pair():
                 left = bd.Box(4, 4, 4)
                 left.label = "left"

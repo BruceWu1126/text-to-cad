@@ -59,7 +59,7 @@ LACQUER = Material("Red lacquer", 1200, family="other", color=(0.6, 0.02, 0.02),
                    coat_roughness=0.05)
 
 
-@xbf
+@xbf("XBF/bench.xbf")
 def bench():
     block = bd.Box(30, 30, 30)
     block.label, block.material = "block", materials.steel_1018
@@ -587,7 +587,7 @@ from cadgen.engine import xbf
 SIZE = {size}
 
 
-@xbf
+@xbf("XBF/pair.xbf")
 def pair():
     block = bd.Box(SIZE, 4, 2)
     block.label = "block"

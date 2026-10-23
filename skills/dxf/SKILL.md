@@ -71,8 +71,8 @@ def gasket():
   (`profile.label, marks.label = "CUT", "ENGRAVE"`). Children sharing a label share
   a layer, and several shapes make one part of a layer as
   `bd.Compound([a, b], label="ENGRAVE")`.
-- **`out=` is the only argument**, relative to the script; without it the file is
-  `<function>.dxf` beside the script. A drawing may also declare `@xbf` to keep its
+- **`out=` is required and is the only argument**, relative to the script; for example
+  `@dxf(out="panel.dxf")`. A drawing may also declare `@xbf` to keep its
   document, from which `cadgen export` writes the same DXF bytes.
 - **No parameters.** Dimensions are module constants (`HOLE_D = 4.5`) or constants
   imported from the part the drawing derives from; a different drawing is a

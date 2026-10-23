@@ -92,7 +92,7 @@ from parts import faces, jitter, offset, plate, tagged, through
 HOLE = {hole}
 
 
-@xbf
+@xbf("XBF/root.xbf")
 def root():
     a = plate({length})
     a.label = "a"
@@ -131,7 +131,7 @@ def stage_two(base, depth):
     return cut
 
 
-@xbf
+@xbf("XBF/staged.xbf")
 def staged():
     one = stage_one(12)
     two = stage_two(one, 4).moved(bd.Location((20, 0, 0)))
@@ -301,7 +301,7 @@ class MemoTest(MemoCase):
         found = json.loads(printed.getvalue().splitlines()[-1])["verify"]
         self.assertEqual(found["mismatches"], ["parts.py::jitter"], found)
 
-        @xbf
+        @xbf("XBF/probe.xbf")
         def probe():
             return None
 

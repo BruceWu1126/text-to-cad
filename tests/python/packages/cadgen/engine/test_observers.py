@@ -17,8 +17,8 @@ import build123d as bd
 from cadgen.engine import stl, xbf
 
 
-@xbf
-@stl
+@xbf("XBF/secret_plate.xbf")
+@stl("secret_plate.stl")
 def secret_plate():
     plate = bd.Box(10, 10, 2)
     plate.label = "plate"
@@ -27,7 +27,7 @@ def secret_plate():
     return bd.Compound(children=[plate, peg], label="secret_plate")
 
 
-@xbf
+@xbf("XBF/secret_broken.xbf")
 def secret_broken():
     raise ValueError("the secret part did not fit")
 """

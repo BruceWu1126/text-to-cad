@@ -99,7 +99,7 @@ CURL = {"index_mcp": 90, "index_pip": 100, "index_dip": 70}           # degrees 
 BONES = {"base": 30, "proximal": 40, "middle": 25, "distal": 20}     # lengths along +X
 
 
-@xbf
+@xbf("XBF/index_finger.xbf")
 def index_finger():
     bones, x = [], -BONES["base"]
     for name, length in BONES.items():

@@ -131,12 +131,12 @@ class StagesTest(unittest.TestCase):
             import build123d as bd
             from cadgen.engine import step, xbf
 
-            @xbf
+            @xbf("XBF/peg.xbf")
             def peg():
                 return bd.Cylinder(1, 4)
 
-            @xbf
-            @step
+            @xbf("XBF/kit.xbf")
+            @step("kit.step")
             def kit():
                 return bd.Compound(children=[bd.Box(4, 4, 1), bd.Pos(0, 0, 2) * peg()], label="kit")
         """), encoding="utf-8")
@@ -204,7 +204,7 @@ from cadgen.engine import report, track, xbf
 FOLDER = pathlib.Path(__file__).parent
 
 
-@xbf
+@xbf("XBF/slow.xbf")
 def slow():
     parts = []
     for name in track(["one", "two", "three"]):

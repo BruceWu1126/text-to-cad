@@ -17,7 +17,9 @@ extension):
 - **Tabs (Codex, and hosts that declare those entrypoints).** **CAD** in the
   sidebar (the home: the models opened before, and Open), a **CAD** tab beside
   each thread, and *Open with CAD* for a model file. The agent opens a tab once
-  (`cad_open`) and drives it (`cad_show`). A host that declares tabs does what
+  (`cad_open`) and drives it (`cad_show`). These remain separate because the host mounts
+  the UI from static tool metadata: adding that metadata to `cad_show` would mount a new
+  view on updates too. A conditional server result cannot promise host-side tab reuse. A host that declares tabs does what
   Codex does: it starts one `cadgen mcp` shim per thread. Each connects to a separate
   engine session, so an unnamed view belongs to that thread.
 - **Inline (Claude Desktop, and every other MCP Apps host).** Each `cad_show`

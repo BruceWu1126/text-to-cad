@@ -25,7 +25,7 @@ from cadgen.engine import xbf, step, paint
 WIDTH = {width}
 
 
-@xbf
+@xbf("XBF/bracket.xbf")
 def bracket():
     plate = bd.Box(WIDTH, 10, 2)
     plate = bd.fillet(plate.edges().filter_by(bd.Axis.Z), 1)
@@ -68,14 +68,14 @@ class EngineCase(unittest.TestCase):
 
 
 class DecoratorTest(unittest.TestCase):
-    def test_bare_and_with_out_and_stacked_in_source_order(self) -> None:
-        @xbf
+    def test_required_out_and_stacked_in_source_order(self) -> None:
+        @xbf("XBF/one.xbf")
         def one():
             return None
 
         @xbf(out="a/b.xbf")
         @stl(out="b.stl")
-        @step
+        @step("two.step")
         def two():
             return None
 
@@ -87,9 +87,20 @@ class DecoratorTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             xbf(out="x.step")
         with self.assertRaises(TypeError):
-            @xbf
+            @xbf("XBF/takes.xbf")
             def takes(value):
                 return value
+
+    def test_every_file_decorator_requires_an_explicit_path(self) -> None:
+        from cadgen import dxf, glb, threemf
+        for decorator in (xbf, step, glb, stl, threemf, dxf):
+            with self.subTest(kind=decorator.__name__):
+                with self.assertRaises(TypeError):
+                    decorator()
+                with self.assertRaises(TypeError):
+                    decorator(None)
+                with self.assertRaises(TypeError):
+                    decorator(lambda: None)
 
     def test_model_only_declares_and_file_decorators_imply_it(self) -> None:
         from cadgen import model
@@ -251,12 +262,12 @@ class BuildTest(EngineCase):
             BOUGHT = Path(__file__).parent / "bought.step"
 
 
-            @xbf
+            @xbf("XBF/holder.xbf")
             def holder():
                 return read_step(BOUGHT) - bd.Cylinder(1, 20)
 
 
-            @xbf
+            @xbf("XBF/stand.xbf")
             def stand():
                 part = read_step(BOUGHT).moved(bd.Location((10, 0, 0)))
                 return bd.Compound(children=[holder(), part])
@@ -290,8 +301,8 @@ import build123d as bd
 from cadgen.engine import stl, xbf
 
 
-@xbf
-@stl
+@xbf("XBF/bracket.xbf")
+@stl("bracket.stl")
 def bracket():
     return bd.Box(10, 4, 2) - bd.Cylinder(1, 5)
 """
@@ -302,12 +313,12 @@ from cadgen.engine import stl, xbf
 from bracket import bracket
 
 
-@stl
+@stl("peg.stl")
 def peg():
     return bd.Cylinder(1, 6)
 
 
-@xbf
+@xbf("XBF/rig.xbf")
 def rig():
     left = bracket()
     right = bracket().moved(bd.Location((0, 20, 0)))
@@ -400,7 +411,7 @@ TOP = bd.Color({top})
 PINS = {pins}
 
 
-@xbf
+@xbf("XBF/left.xbf")
 def left():
     plate = bd.Box(LEFT, 8, 3) - bd.Cylinder(1.5, 10)
     plate.label = "plate"
@@ -415,7 +426,7 @@ def left():
     return bd.Compound(children=[plate, pin, peg][:PINS + 1], label="left")
 
 
-@xbf
+@xbf("XBF/right.xbf")
 def right():
     block = bd.Box(RIGHT, 4, 4)
     block.label = "block"
@@ -429,7 +440,7 @@ def right():
     return bd.Compound(children=[block, cap], label="right")
 
 
-@xbf
+@xbf("XBF/kit.xbf")
 @step(out="kit.step")
 def kit():
     one = right().moved(bd.Location((30, 0, 0)))
@@ -546,7 +557,7 @@ import build123d as bd
 from cadgen.engine import xbf
 
 
-@xbf
+@xbf("XBF/block.xbf")
 def block():
     return bd.Box(3, 2, 1) - bd.Cylinder(0.5, 2)
 """

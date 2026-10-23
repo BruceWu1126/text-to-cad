@@ -3,11 +3,9 @@
 A model is a parameterless function that returns a build123d shape, decorated with
 ``@xbf`` and any of the derived-file decorators ``@step``, ``@glb``, ``@stl``, ``@threemf``
 and ``@dxf`` (the drawing of a planar result: a sketch, a face, wires or edges). Its
-identity is ``script.py::function``. Every decorator takes ``out`` and
-nothing else: ``@xbf(out=None)`` makes the function a model, its document at ``out``
-(``XBF/<function>.xbf`` beside the script by default); a derived-file decorator declares a
-translation of the built document at ``out`` (``<function><suffix>`` beside the script by
-default). Everything else is the model's code: its material, colours, joints, the pose
+identity is ``script.py::function``. Every file decorator requires its output path:
+``@xbf("XBF/part.xbf")`` or ``@step(out="part.step")``. Relative paths are relative
+to the script. Bare ``@model`` declares a document with no file. Everything else is the model's code: its material, colours, joints, the pose
 its joints are connected at (the pose every file shows), its configurations and its
 motions (``configuration``, ``motion``). A picture is the ``snapshot`` verb's, never a
 declaration. The outputs are kept in the order the decorators are written, top to
@@ -49,7 +47,7 @@ SUFFIXES = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "three
 _ACCEPTED = {"xbf": (".xbf",), "step": (".step", ".stp"), "glb": (".glb",), "stl": (".stl",), "threemf": (".3mf",),
              "dxf": (".dxf",)}
 KINDS = tuple(SUFFIXES)
-# Where a model's xbf is when its decorator names none: this folder beside the script.
+# The default folder for an xbf requested by a build flag without a path.
 XBF_FOLDER = "XBF"
 
 _CONTEXT = threading.local()
@@ -61,7 +59,7 @@ _MODELS: dict[str, "Model"] = {}
 
 @dataclass(frozen=True)
 class Output:
-    """One file a model declares: its kind and the path its decorator gave, if any."""
+    """One file a model declares: its kind and path (None requests the CLI default)."""
 
     kind: str
     out: str | None
@@ -311,43 +309,24 @@ def model(function: Any) -> Model:
 
 
 def _decorator(kind: str) -> Callable[..., Any]:
-    def decorate(function: Any = None, out: Any = None, **options: Any) -> Any:
-        if isinstance(function, (str, os.PathLike)):
-            function, out = None, function  # ``@step("arm.step")``
-        if options:
-            raise TypeError(f"@{kind} takes out alone, not {', '.join(sorted(options))}: a model's material, "
-                            "colours, joints, pose, configurations and motions are written in its body")
+    def decorate(out: Any) -> Any:
+        if out is None:
+            raise TypeError(f"@{kind} requires an output path")
         check_output(kind, out, f"@{kind}(out=...)")
 
         def apply(target: Any) -> Model:
             model = target if isinstance(target, Model) else Model(target)
             if any(output.kind == kind for output in model.outputs):
                 raise TypeError(f"model {model.name!r} declares @{kind} twice")
-            # Decorators apply bottom-up: inserting at the front keeps source order.
-            model.outputs.insert(0, Output(kind, None if out is None else os.fspath(out)))
+            model.outputs.insert(0, Output(kind, os.fspath(out)))
             return model
 
-        if function is None:
-            return apply
-        if callable(function):
-            return apply(function)
-        raise TypeError(f"@{kind} takes a function, or out=")
+        return apply
 
     decorate.__name__ = kind
     decorate.__qualname__ = kind
-    if kind == "xbf":
-        decorate.__doc__ = ("Make a function a model: ``@xbf`` or ``@xbf(out=\"path.xbf\")`` (default "
-                            "``XBF/<function>.xbf`` beside the script). The function takes no parameters and "
-                            "returns a build123d shape.")
-    elif kind == "dxf":
-        decorate.__doc__ = ("Declare a drawing of a model's planar document: ``@dxf`` or ``@dxf(\"path.dxf\")`` "
-                            "(default ``<function>.dxf`` beside the script) -- its only argument. The model "
-                            "returns 2D build123d geometry on z=0: one shape is the layer CUT, a compound's "
-                            "labelled children a layer each.")
-    else:
-        decorate.__doc__ = (f"Declare a file derived from a model's document: ``@{kind}`` or ``@{kind}(\"path"
-                            f"{SUFFIXES[kind]}\")`` -- its only argument; the file shows the model as its "
-                            "joints place it.")
+    decorate.__doc__ = (f"Declare an explicit output: @{kind}(out='path{SUFFIXES[kind]}'). "
+                        "The output path is required; decoration builds nothing.")
     return decorate
 
 

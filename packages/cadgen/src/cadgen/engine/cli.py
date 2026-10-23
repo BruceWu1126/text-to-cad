@@ -246,7 +246,7 @@ def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as
             print(json.dumps({**report, "wall": round(wall, 4)}))
         else:
             print(_describe(report, wall, fresh))
-            if report.get("address") and not report.get("files"):
+            if report.get("address"):
                 print(f"  model: {report['address']}")
                 if report.get("url"):
                     print(f"  view: {report['url']}")

@@ -120,7 +120,7 @@ import build123d as bd
 from plate import plate
 
 
-@xbf
+@xbf("XBF/bracket.xbf")
 def bracket():
     base = plate()
     top = select(base, "f:plate.body.6;M:plate.relief")[0]   # the face a person picked

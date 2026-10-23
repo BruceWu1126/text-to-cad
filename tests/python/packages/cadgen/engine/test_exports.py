@@ -31,18 +31,18 @@ import build123d as bd
 from cadgen.engine import configuration, glb, materials, paint, step, stl, threemf, xbf
 
 
-@xbf
+@xbf("XBF/peg.xbf")
 def peg():
     peg = bd.Cylinder(2, 10)
     peg.color = bd.Color(0.9, 0.2, 0.1)
     return peg
 
 
-@xbf
+@xbf("XBF/board.xbf")
 @step("board.step")
-@glb
-@stl
-@threemf
+@glb("board.glb")
+@stl("board.stl")
+@threemf("board.3mf")
 def board():
     plate = bd.Pos(0, -20, 0) * bd.Box(30, 10, 2)
     plate.color = bd.Color(0.2, 0.3, 0.9)
@@ -74,7 +74,7 @@ import build123d as bd
 from cadgen.engine import materials, paint, xbf
 
 
-@xbf
+@xbf("XBF/kit.xbf")
 def kit():
     looks = [(0.9, 0.2, 0.1), (0.1, 0.8, 0.2), (0.2, 0.3, 0.9), (0.7, 0.7, 0.1), (0.5, 0.1, 0.6), (0.1, 0.5, 0.5)]
     parts = []
@@ -128,7 +128,7 @@ def hinge(index):
     return bd.Compound(children=[base, lid], label="hinge")
 
 
-@xbf
+@xbf("XBF/hinges.xbf")
 def hinges():
     row = bd.Compound(children=[hinge(0), hinge(1), hinge(2)], label="hinges")
     configuration(row, "open", flap0=30, flap1=60, flap2=90)
@@ -146,7 +146,7 @@ def axle(y):
     return bd.Compound(children=[wheel], label="axle")
 
 
-@xbf
+@xbf("XBF/kit2.xbf")
 def kit2():
     return bd.Compound(children=[axle(0), axle(50)], label="kit2")
 """
@@ -467,7 +467,7 @@ class BuildFilesTest(unittest.TestCase):
             from cadgen.engine import step
 
 
-            @step
+            @step("solo.step")
             def solo():
                 return bd.Box(1, 2, 3)
         """)
@@ -480,13 +480,13 @@ class BuildFilesTest(unittest.TestCase):
         from cadgen.engine import model
         from cadgen.engine.model import glb, step, xbf
 
-        with self.assertRaisesRegex(TypeError, "takes out alone, not material"):
+        with self.assertRaisesRegex(TypeError, "unexpected keyword argument.*material"):
             step("a.step", material="steel")
-        with self.assertRaisesRegex(TypeError, "takes out alone, not pose"):
+        with self.assertRaisesRegex(TypeError, "unexpected keyword argument.*pose"):
             step("a.step", pose="open")
-        with self.assertRaisesRegex(TypeError, "takes out alone, not out2"):
+        with self.assertRaisesRegex(TypeError, "unexpected keyword argument.*out2"):
             xbf(out2="a.xbf")
-        with self.assertRaisesRegex(TypeError, "takes out alone, not animate"):
+        with self.assertRaisesRegex(TypeError, "unexpected keyword argument.*animate"):
             glb("a.glb", animate={"flap": (0, 90)})
         self.assertFalse(hasattr(model, "snapshot"), "a picture is the snapshot verb's, never a declaration")
         self.assertNotIn("snapshot", cadgen.engine.__all__)
@@ -535,6 +535,50 @@ class CodeTest(unittest.TestCase):
     def build(self, code: str, outputs: dict | None = None) -> dict:
         [report] = engine_build.build(self.script, ["plug"], cwd=self.folder, outputs=outputs, code=code)
         return report
+
+    def test_shape_build_keeps_metadata_updates_its_address_and_only_writes_declared_files(self) -> None:
+        import build123d as bd
+        from cadgen import build, materials, paint
+
+        here = Path.cwd()
+        os.chdir(self.folder)
+        self.addCleanup(os.chdir, here)
+        base = bd.Box(4, 5, 2)
+        base.label = "base"
+        base.material = materials.aluminium
+        base = paint(base, base.faces().sort_by(bd.Axis.Z)[-1], (1, 0, 0))
+        arm = bd.Box(3, 2, 1)
+        arm.label = "arm"
+        arm.color = bd.Color(0, 0, 1)
+        bd.RevoluteJoint("hinge", base, axis=bd.Axis.Z, angular_range=(0, 90))
+        bd.RigidJoint("mount", arm, bd.Location())
+        base.joints["hinge"].connect_to(arm.joints["mount"], angle=30)
+        assembly = bd.Compound(children=[base, arm], label="kit")
+        from cadgen import configuration, motion
+        configuration(assembly, "open", hinge=60)
+        motion(assembly, "swing", [(0, {"hinge": 0}), (1, "open")])
+        built = build(assembly, model="shape_part", step="part.step", xbf="part.xbf")
+        self.assertTrue(built.ok, built.report)
+        self.assertEqual(built.report["address"], "code::shape_part")
+        self.assertIn("http://127.0.0.1:", built.report["url"])
+        loaded = document.Loaded(self.folder / "part.xbf")
+        self.assertEqual([i.path[-1] for i in loaded.instances], ["base", "arm"])
+        self.assertEqual(loaded.mechanism.configurations["open"], {"hinge": (60.0,)})
+        self.assertIn("swing", loaded.mechanism.motions)
+        self.assertTrue(loaded.prototypes[0].face_colors)
+        self.assertEqual(loaded.prototypes[0].material.name, materials.aluminium.name)
+        self.assertEqual({p.name for p in self.folder.iterdir()}, {"part.step", "part.xbf"})
+        revised = build(bd.Box(2, 3, 4), model="shape_part")
+        self.assertTrue(revised.ok, revised.report)
+        self.assertEqual(revised.report["url"], built.report["url"])
+        self.assertAlmostEqual(revised.shape.volume, 24)
+        self.assertEqual(revised.files, {})
+        written = revised.export(self.folder / "revised.step")
+        self.assertTrue(written[0].path.is_file())
+        with self.assertRaisesRegex(TypeError, "source text or.*Shape"):
+            build(123, model="invalid_shape")
+        with self.assertRaisesRegex(api.EngineError, "requires source code"):
+            build(base, model="invalid_shape", verify=True)
 
     def test_code_assigns_result_and_its_flags_are_its_files(self) -> None:
         with self.assertRaisesRegex(engine_build.BuildError, "assigns no `result`"):

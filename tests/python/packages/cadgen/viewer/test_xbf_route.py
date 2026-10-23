@@ -42,12 +42,12 @@ import build123d as bd
 from cadgen.engine import materials, step, xbf
 
 
-@xbf
+@xbf("XBF/block.xbf")
 def block():
     return bd.Box(10, 6, 4) - bd.Cylinder(1, 10)
 
 
-@xbf
+@xbf("XBF/pair.xbf")
 @step(out="pair.step")
 def pair():
     plate = bd.Box(10, 6, 4) - bd.Cylinder(1, 10)

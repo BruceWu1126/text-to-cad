@@ -25,7 +25,7 @@ from cadgen.engine import xbf
 SIZE = {size}
 
 
-@xbf
+@xbf("XBF/block.xbf")
 def block():
     return bd.fillet(bd.Box(SIZE, 4, 2).edges().filter_by(bd.Axis.Z), 0.5)
 
@@ -41,7 +41,7 @@ from cadgen.engine import xbf
 SIZE = {size}
 
 
-@xbf
+@xbf("XBF/pair.xbf")
 def pair():
     block = bd.Box(SIZE, 4, 2)
     block.label = "block"
@@ -61,7 +61,7 @@ from cadgen.engine import xbf
 SIZE = {size}
 
 
-@xbf
+@xbf("XBF/cut.xbf")
 def cut():
     peg = bd.Cylinder(2, 10)
     plate = bd.Box(10, 10, 4) - bd.Pos(SIZE / 10, 0, 0) * peg
@@ -263,7 +263,7 @@ import build123d as bd
 def bare(): return bd.Box(1, 2, 3)
 @step('saved.step')
 def saved(): return bd.Box(2, 2, 3)
-@xbf
+@xbf("XBF/document.xbf")
 def document(): return bd.Box(3, 2, 3)
 if __name__ == '__main__':
     print('before', sys.argv[1:])
@@ -414,7 +414,7 @@ if __name__ == '__main__':
         self.assertEqual([row["reason"] for row in status["retired"]], ["RSS", "RSS"])
 
     def test_a_failing_body_answers_with_its_error(self) -> None:
-        self.script.write_text("from cadgen.engine import xbf\n\n@xbf\ndef block():\n    raise RuntimeError('no')\nif __name__ == '__main__':\n    block()\n", encoding="utf-8")
+        self.script.write_text("from cadgen.engine import xbf\n\n@xbf('XBF/block.xbf')\ndef block():\n    raise RuntimeError('no')\nif __name__ == '__main__':\n    block()\n", encoding="utf-8")
         done = self.run_script("block.py")
         self.assertEqual(done.returncode, 1)
         self.assertIn("RuntimeError: no", done.stderr)
@@ -422,7 +422,7 @@ if __name__ == '__main__':
     def test_running_a_model_script_asks_the_daemon_to_build_it(self) -> None:
         # A script runs like Python and takes no options (law 11): every model it defines writes
         # what it declares, whatever its argv holds.
-        self.script.write_text(textwrap.dedent(MODEL.format(size=3)) + "\n\n@stl\ndef peg():\n"
+        self.script.write_text(textwrap.dedent(MODEL.format(size=3)) + "\n\n@stl('peg.stl')\ndef peg():\n"
                                "    return bd.Cylinder(1, 3)\nif __name__ == '__main__':\n    peg()\n", encoding="utf-8")
         self.script.write_text(self.script.read_text(encoding="utf-8").replace("import xbf", "import stl, xbf"),
                                encoding="utf-8")
@@ -430,6 +430,8 @@ if __name__ == '__main__':
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual([line.split(" in ")[0] for line in done.stdout.splitlines() if line.startswith("built")],
                          ["built block.py::block cold", "built block.py::peg warm"])
+        self.assertEqual(sum(line.startswith("  view: http://127.0.0.1:") for line in done.stdout.splitlines()), 2,
+                         "each model reports its viewer link, including file-output builds")
         workers = json.loads(self.cli("status", "--json").stdout)["workers"]
         self.assertEqual([(Path(w["script"]).name, w["builds"]) for w in workers], [("block.py", 2)],
                          "the daemon's worker built it, not the script's own process")
@@ -447,7 +449,7 @@ if __name__ == '__main__':
             def unused():
                 raise AssertionError("uncalled model ran")
 
-            @xbf
+            @xbf("XBF/block.xbf")
             def block():
                 import build123d as bd
                 return bd.Box(1, 2, 3)
@@ -484,7 +486,7 @@ if __name__ == '__main__':
                 given = export.KINDS["stl"]
                 export.KINDS["stl"] = Slow(given.name, given.suffixes, given.writer, given.atomic)
                 export.slow = True
-        """) + textwrap.dedent(PAIR).replace("@xbf\n", "@xbf\n@stl\n").replace(
+        """) + textwrap.dedent(PAIR).replace('@xbf("XBF/pair.xbf")', '@xbf("XBF/pair.xbf")\n@stl("pair.stl")').replace(
             "import xbf", "import stl, xbf")
         self.script = self.folder / "pair.py"
         self.script.write_text(slow.format(size=10), encoding="utf-8")

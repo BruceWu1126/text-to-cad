@@ -331,7 +331,7 @@ def _declared(name: str, outputs: dict[str, dict[str, Any]] | None, base: Path) 
 
 def build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
           cwd: Path | None = None, outputs: dict[str, dict[str, Any]] | None = None, code: str | None = None,
-          verify: bool = False) -> list[dict[str, Any]]:
+          verify: bool = False, shape: dict | None = None) -> list[dict[str, Any]]:
     """Build the script's models (``functions``, or every model it defines); one report
     per model, holding those of the child models its run ran, each of which wrote its own
     files (``child_models``). Raises BuildError for a script or function that is not there;
@@ -353,6 +353,13 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
     from cadgen.engine import previous
     from cadgen.engine.kernel import determinism, memo
     from cadgen.engine.model import _MODELS, BuildContext, models_in
+
+    if shape is not None:
+        from cadgen.engine.shape_input import build as build_shape
+
+        if not functions or len(functions) != 1:
+            raise BuildError("a shape build names one model")
+        return build_shape(shape, Path(script), functions[0], outputs, Path(cwd or Path.cwd()), log)
 
     script = Path(script).resolve() if code is None else Path(script)
     if code is None and not script.is_file():

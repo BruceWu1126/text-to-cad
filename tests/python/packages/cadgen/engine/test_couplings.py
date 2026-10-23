@@ -36,7 +36,7 @@ CURL = {{"index_mcp_flexion": 90, "index_pip": 100, "index_dip": 70}}  # degrees
 BONES = {{"base": 30, "proximal": 40, "middle": 25, "distal": 20}}  # lengths along +X
 
 
-@xbf
+@xbf("XBF/index_finger.xbf")
 def index_finger():
     bones, x = [], -BONES["base"]
     for name, length in BONES.items():
@@ -70,7 +70,7 @@ SWEEP = {"left": -70, "right": 70}  # each door's turn when open, degrees
 TRAVEL = 40  # and its travel along the hinge, mm
 
 
-@xbf
+@xbf("XBF/hypercar.xbf")
 def hypercar():
     chassis = bd.Box(4400, 900, 400, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
     chassis.label = "chassis"
@@ -97,7 +97,7 @@ from cadgen.engine import configuration, couple, motion, xbf
 RATIOS = {{"sun": 1.0, "idler": -2.0, "ring": 0.5}}
 
 
-@xbf
+@xbf("XBF/train.xbf")
 def train():
     plate = bd.Box(200, 60, 5, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.MAX))
     plate.label = "plate"
@@ -139,7 +139,7 @@ def finger(name):
     return couple(found, "curl", pip=100, dip=70)
 
 
-@xbf
+@xbf("XBF/hand.xbf")
 def hand():
     palm = bd.Box(10, 60, 12, align=(bd.Align.MAX, bd.Align.CENTER, bd.Align.CENTER))
     palm.label = "palm"

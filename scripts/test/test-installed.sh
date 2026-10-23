@@ -209,9 +209,9 @@ from cadgen.engine import step, stl, xbf
 import build123d as bd
 
 
-@xbf
-@step
-@stl
+@xbf("XBF/probe.xbf")
+@step("probe.step")
+@stl("probe.stl")
 def probe():
     return bd.Box(10, 10, 10)
 

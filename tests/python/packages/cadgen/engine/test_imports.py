@@ -25,7 +25,7 @@ import build123d as bd
 from cadgen.engine import configuration, materials, paint, step, xbf
 
 
-@xbf
+@xbf("XBF/kit.xbf")
 @step("kit.step")
 def kit():
     base = bd.Box(10, 10, 5)
@@ -37,7 +37,7 @@ def kit():
     return bd.Compound(children=[base, peg, other], label="kit")
 
 
-@xbf
+@xbf("XBF/hinge.xbf")
 def hinge():
     base, arm = bd.Box(100, 60, 20), bd.Box(120, 20, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.MIN))
     base.label, arm.label = "base", "arm"
@@ -56,17 +56,17 @@ from cadgen.engine import read_step, read_xbf, xbf
 HERE = Path(__file__).resolve().parent
 
 
-@xbf
+@xbf("XBF/from_step.xbf")
 def from_step():
     return read_step(HERE / "kit.step")
 
 
-@xbf
+@xbf("XBF/from_xbf.xbf")
 def from_xbf():
     return read_xbf(HERE / "XBF/converted.xbf")
 
 
-@xbf
+@xbf("XBF/twice.xbf")
 def twice():
     first = read_step(HERE / "kit.step")
     second = read_step(HERE / "kit.step").moved(__import__("build123d").Location((0, 0, 50)))
@@ -74,7 +74,7 @@ def twice():
     return __import__("build123d").Compound(children=[first, second, third], label="twice")
 
 
-@xbf
+@xbf("XBF/hinge_copy.xbf")
 def hinge_copy():
     return read_xbf(HERE / "XBF/hinge.xbf")
 """
@@ -250,30 +250,30 @@ from cadgen.engine import read_mesh, xbf
 HERE = Path(__file__).resolve().parent
 
 
-@xbf
+@xbf("XBF/enclosure.xbf")
 def enclosure():
     pcb = read_mesh(HERE / "scans" / "pcb.stl").bounding_box()
     return bd.Box(pcb.size.X + 6, pcb.size.Y + 6, pcb.size.Z + 4)
 
 
-@xbf
+@xbf("XBF/by_import_stl.xbf")
 def by_import_stl():
     return bd.Box(*bd.import_stl(HERE / "scans" / "pcb.stl").bounding_box().size)
 
 
-@xbf
+@xbf("XBF/by_import_step.xbf")
 def by_import_step():
     return bd.import_step(HERE / "part.step")
 
 
-@xbf
+@xbf("XBF/by_occt.xbf")
 def by_occt():
     shape = TopoDS_Shape()
     BRepTools.Read_s(shape, str(HERE / "part.brep"), BRep_Builder())
     return bd.Solid(shape)
 
 
-@xbf
+@xbf("XBF/mesh_face.xbf")
 def mesh_face():
     mesh = read_mesh(HERE / "scans" / "pcb.stl")
     triangulation = Poly_Triangulation(len(mesh.vertices), len(mesh.triangles), False)
@@ -300,7 +300,7 @@ from cadgen.engine import xbf
 HERE = Path(__file__).resolve().parent
 
 
-@xbf
+@xbf("XBF/sized.xbf")
 def sized():
     scan = bd.import_stl(HERE / "cube.stl")
     return bd.Box(*scan.bounding_box().size)
