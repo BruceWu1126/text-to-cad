@@ -151,11 +151,67 @@ class PreviousTest(unittest.TestCase):
         self.assertEqual(report["memo"]["bodies_run"], 3)
         self.assertEqual(self.xbf.read_bytes(), self.cold(peg=12, plate=44))
 
-    def test_a_warm_build_the_memo_replays_is_replayed(self) -> None:
+    def test_an_unchanged_warm_build_runs_and_replays_nothing_and_leaves_its_file(self) -> None:
+        first = self.cold()
+        written = self.xbf.stat().st_mtime_ns
+        report = self.kit()
+        self.assertEqual(report["cache"], {"used": True, "from": "memory"})
+        self.assertEqual(report["bodies"], {"kit.py::kit": "loaded"})
+        self.assertEqual((report["memo"]["bodies_run"], report["memo"]["bodies_skipped"],
+                          report["memo"]["bodies_loaded"]), (0, 0, 3))
+        self.assertEqual([row["written"] for row in report["files"].values()], [False])
+        self.assertEqual((self.xbf.read_bytes(), self.xbf.stat().st_mtime_ns), (first, written))
+
+    def test_warm_no_ops_keep_the_memo_an_edit_replays(self) -> None:
+        from cadgen.engine.kernel import memo
+
         self.cold()
+        for _ in range(memo.RUNS_KEPT + 2):
+            self.assertTrue(self.kit()["cache"]["used"])
+        self.source(plate=44)
+        report = self.kit()
+        self.assertEqual(report["cache"]["reason"], "../kit.py: kit changed")
+        self.assertEqual(report["bodies"], {"kit.py::kit": "run", "kit.py::peg": "replayed", "kit.py::cap": "replayed"})
+        self.assertEqual(self.xbf.read_bytes(), self.cold(plate=44))
+
+    def test_a_warm_edit_of_the_source_or_an_input_builds(self) -> None:
+        import build123d as bd
+
+        self.cold()
+        self.source(peg=12)
+        report = self.kit()
+        self.assertEqual((report["cache"]["reason"], report["bodies"]["kit.py::peg"]), ("../kit.py: peg changed", "run"))
+        for change, named in (("json", "../peg.json"), ("root", "../kit.json"), ("step", "../inputs/cap.step")):
+            if change == "json":
+                (self.folder / "peg.json").write_text(json.dumps({"size": 5}), encoding="utf-8")
+            elif change == "root":
+                (self.folder / "kit.json").write_text(json.dumps({"thickness": 3}), encoding="utf-8")
+            else:
+                bd.export_step(bd.Cylinder(3, 5), str(self.folder / "inputs" / "cap.step"))
+            report = self.kit()
+            self.assertEqual(report["cache"]["reason"], f"{named} changed", change)
+            self.assertTrue(report["files"][str(self.xbf)]["written"], change)
+
+    def test_a_warm_build_whose_file_moved_or_went_is_replayed(self) -> None:
+        first = self.cold()
+        later = self.xbf.stat().st_mtime_ns + 1_000_000_000
+        os.utime(self.xbf, ns=(later, later))
         report = self.kit()
         self.assertEqual(report["cache"]["reason"], "replayed from memory")
         self.assertEqual(set(report["bodies"].values()), {"replayed"})
+        self.assertEqual(self.xbf.read_bytes(), first)
+        self.xbf.unlink()
+        report = self.kit()
+        self.assertEqual(report["cache"]["reason"], "replayed from memory")
+        self.assertTrue(report["files"][str(self.xbf)]["written"])
+        self.assertEqual(self.xbf.read_bytes(), first)
+        self.assertEqual(self.kit()["cache"], {"used": True, "from": "memory"})
+
+    def test_a_verifying_warm_build_runs_every_body(self) -> None:
+        self.cold()
+        (report,) = engine_build.build(self.script, ["kit"], cwd=self.folder, verify=True)
+        self.assertEqual((report["cache"]["reason"], report["memo"]["bodies_run"]), ("verifying", 3))
+        self.assertEqual(set(report["verify"]["checked"].values()), {"same"})
 
     def test_a_changed_input_file_builds(self) -> None:
         self.cold()

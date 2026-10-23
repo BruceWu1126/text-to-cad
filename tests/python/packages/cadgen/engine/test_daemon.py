@@ -321,7 +321,9 @@ if __name__ == '__main__':
         self.assertEqual(cold["memo"]["hits"], 0)
         warm = self.build(10)
         self.assertEqual(warm["memo"]["misses"], 0)
-        self.assertEqual((warm["memo"]["bodies_run"], warm["memo"]["bodies_skipped"]), (0, 1))
+        # Unchanged: its document holds the model's key, in the worker's memory, and nothing runs.
+        self.assertEqual((warm["memo"]["bodies_run"], warm["memo"]["bodies_skipped"], warm["cache"]),
+                         (0, 0, {"used": True, "from": "memory"}))
         edited = self.build(12)
         self.assertGreater(edited["memo"]["misses"], 0)
         self.assertTrue(edited["files"][str(self.folder / "XBF/block.xbf")]["written"])

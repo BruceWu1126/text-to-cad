@@ -635,7 +635,7 @@ class CodeTest(unittest.TestCase):
         names = list(loaded.prototypes[0].face_names.values())
         self.assertTrue(names and all(name.startswith(("f:plug.body", "f:plug.result")) for name in names), names)
         warm = self.build(self.CODE.format(height=5), outputs)
-        self.assertEqual(warm["bodies"], {"plug.py::plug": "replayed"})
+        self.assertEqual((warm["bodies"], warm["cache"]), ({"plug.py::plug": "loaded"}, {"used": True, "from": "memory"}))
         self.assertFalse(any(row["written"] for row in warm["files"].values()))
         # A new worker: the xbf holds the code's key, and nothing runs.
         from cadgen.engine.kernel import memo

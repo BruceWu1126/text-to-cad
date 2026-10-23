@@ -176,9 +176,8 @@ class BuildTest(EngineCase):
         reports = self.build()
         frame = reports["frame"]
         self.assertEqual(frame["memo"]["misses"], 0)
-        self.assertEqual((frame["memo"]["bodies_run"], frame["memo"]["bodies_skipped"]), (0, 1),
-                         "an unchanged body is not run: its last run is replayed")
-        self.assertEqual(frame["named"], 0, "an unchanged part is not named again")
+        self.assertEqual((frame["memo"]["bodies_run"], frame["memo"]["bodies_skipped"], frame["cache"]), (0, 0, {
+            "used": True, "from": "memory"}), "an unchanged model is not run nor replayed: its key is its document's")
         self.assertFalse(any(row["written"] for row in frame["files"].values()))
         self.assertEqual([path.stat().st_mtime_ns for path in written], before)
 
@@ -354,7 +353,8 @@ class ChildFilesTest(EngineCase):
         self.assertEqual(_files(self.folder), {"bracket.py", "rig.py", "XBF/rig.xbf", "XBF/bracket.xbf", "bracket.stl",
                                                "peg.stl"})
         self.assertEqual(document.load(self.folder / "XBF/bracket.xbf").name, "bracket", "its own document")
-        # A target the build also runs as a child writes once, as the target.
+        # A target the build also runs as a child writes once, as the target (the rig edited, so it runs).
+        self.write(text=RIG.replace("{last}", "right.label = 'right'"))
         peg, rig = self.rig()
         self.assertEqual((peg["model"], list(rig["child_models"])), ("rig.py::peg", ["bracket.py::bracket"]))
         # A child that ran before its caller failed writes its files all the same.

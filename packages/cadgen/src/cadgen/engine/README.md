@@ -1654,16 +1654,22 @@ document of another format is "written by" another engine (`cache.reason`). The 
 `xbf/3`, the mechanism subtree took AP242's form (**Kinematics**); `xbf/4`, a function
 motion's samples are made for linear interpolation (**Motions**).
 
-Before a body the memo would not replay runs, the build makes the closure again -- the script
-loaded, its modules digested, each input hashed again -- and compares its key with the xbf's.
-The same key, in an xbf written by this engine that reads whole, and the body is not run: the
+Before a body runs or is replayed, the build makes the closure again -- the script loaded,
+its modules digested, each input hashed again -- and compares its key with the xbf's. The
+same key, in an xbf written by this engine that reads whole, and the body is not run: the
 report says `cache: {"used": true, "from": "file"}`, every file `written: false`,
 `memo.bodies_loaded` the bodies the document is, `bodies` the root `loaded`, `timings` the key
 (`key`) and the read (`read`). A later build in the same worker takes it from memory without
-reading it (`"from": "memory"`), as it does a file it wrote itself whose root the memo cannot
-replay. Anything else builds as before, and `cache.reason` says why: no file yet, a declared
-export missing, written by another engine or program, a file that does not read, no key in it,
-replayed from memory, or what changed, by name (`cache.changed`, each change; the CLI prints
+reading it (`"from": "memory"`): one taken, or one this worker built, whether or not the memo
+could replay its root, so an unchanged warm build costs what a restart's second build does,
+the key alone (the w16: 59 s replaying, its motions sampled again, against under a second). Its
+bodies' memo entries count as used by that build, as a replay's do, so an edit after any number
+of them still replays what it leaves alone. The memo replays the root instead only where a
+file the worker's last build of the model wrote -- the model's own, or a child model's -- moved
+or is gone, which the replay writes again (`cache.reason`: replayed from memory). Anything
+else builds as before, and `cache.reason` says why: no file yet, a declared export missing,
+written by another engine or program, a file that does not read, no key in it, replayed from
+memory, or what changed, by name (`cache.changed`, each change; the CLI prints
 `rebuilt: ../src/lib/arm_parts.py changed`): a module changed, is new or is no longer imported,
 an input changed or is missing, the format, a library or the source moved.
 `CADGEN_ENGINE_MEMO=0` and `CADGEN_ENGINE_BODIES=0` turn it off with the rest of retention.

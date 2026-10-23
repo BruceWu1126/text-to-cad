@@ -19,9 +19,11 @@ object) is neither named nor keyed again; a document whose every part, placement
 and colour is what the file already holds is not touched or rewritten; and any other
 document is the kept one patched, only its changed prototypes made again.
 
-Before a model's body runs, unless the memo replays it, its xbf is asked (``previous``):
-an xbf holding the key the model has now is what the body would make, and the body is
-not run, nor any file written.
+Before a model's body runs or is replayed, its xbf is asked (``previous``): an xbf holding
+the key the model has now is what the body would make, and the body is not run, nor any
+file written. A warm worker asks its own record of the document it built and left as it
+stands; a body the memo could replay is replayed only when a file of the model's last
+build here moved or is gone.
 """
 
 from __future__ import annotations
@@ -766,7 +768,10 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
     """The model's previous document asked before its body runs (``previous``): the
     verdict, and the model's report where the document is what the body would make -- the
     key the model has now is the one the document holds -- so the body is not run and the
-    files are left as they are. A body the memo replays is replayed, as ever."""
+    files are left as they are. A warm worker asks its own record of the document it built,
+    as a fresh one asks the file: a body the memo could replay is not replayed when the key
+    is unchanged and every file the model's last build here wrote -- its own and its child
+    models' -- is as that build left it; a file moved or gone, and it is replayed, as ever."""
     from cadgen.engine import document, previous
     from cadgen.engine.kernel import memo
 
@@ -779,14 +784,14 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
     name = f"{model.script}::{model.name}"
     clock = time.perf_counter()
     source = context.source(model)
-    if memo.replayable(name, source):
-        return {"used": False, "reason": "replayed from memory"}, None
     always = memo.always()
     impure = sorted(_identity(family) for family in _FAMILIES.get(name, ()) if family in always)
     if impure:
         return {"used": False, "reason": f"it calls {', '.join(impure)}, which a verification found impure"}, None
     stats = {str(path): _stat(path) for _kind, path in targets}
     remembered = _WRITTEN.get(name)
+    if memo.replayable(name, source) and not _as_built(name, remembered, stats):
+        return {"used": False, "reason": "replayed from memory"}, None
     where = "memory"
     if remembered is not None and remembered.stats == stats:
         # The file this process last wrote or took, as it left it: its record is in memory.
@@ -829,6 +834,10 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
             return {"used": False, "reason": "the file does not hold the closure its head shows"}, None
         timings["read"] = round(time.perf_counter() - keyed, 4)
         _WRITTEN[name] = _Written(("loaded", found["key"]), stats, None, text)
+    else:
+        # What the bodies made stays the memo's, as a replay would keep it: an edit after
+        # any number of these builds replays all it leaves alone.
+        memo.keep(name)
     log(f"took {_shown(xbf, None)}: its key is the model's ({found['bodies']} bodies), nothing ran")
     report = {"ok": True, "model": f"{shown}::{model.name}",
               "memo": {"hits": 0, "misses": 0, "uncached": 0, "bodies_run": 0, "bodies_skipped": 0,
@@ -844,6 +853,19 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
               "files": {str(path): {"kind": kind, "written": False, "seconds": 0.0, "bytes": stats[str(path)][1]}
                         for kind, path in targets}}
     return report["cache"], report
+
+
+def _as_built(name: str, remembered: _Written | None, stats: dict[str, tuple | None]) -> bool:
+    """Whether model ``name``'s last build in this process made the document it holds and
+    left every file as it stands now: the model's own (``stats``) and each child model's
+    its run wrote, which a replay would write again were one moved or gone."""
+    if remembered is None or remembered.kept is None or remembered.record is None or remembered.stats != stats:
+        return False
+    for family in _FAMILIES.get(name, ()):
+        child = _WRITTEN.get(family) if family != name else None
+        if child is not None and any(_stat(Path(path)) != stat for path, stat in child.stats.items()):
+            return False
+    return True
 
 
 def _names(run: Any, part: Any) -> tuple[Any, dict[str, dict[str, Any]], dict[tuple[str, str], str | None]]:
