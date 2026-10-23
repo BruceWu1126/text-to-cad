@@ -1049,26 +1049,54 @@ def _coupled(given: dict[str, Any], couplings: dict[str, Any], as_built: dict[st
 
 def _converted(path: tuple[int, ...], values: dict[str, Any], mechanism: Mechanism, joint_labels: list,
                controls: list, where: str) -> tuple[dict[str, tuple[float, ...]], list[str]]:
-    """``values`` -- joints by label and couplings by name, as the assembly at ``path`` sets them
-    -- as the pair values they put the pairs at, and what could not be taken, each said by name:
+    """``values`` as :func:`_converter`'s pair values, and what could not be taken."""
+    return _converter(path, mechanism, joint_labels, controls)(values, where)
+
+
+def _converter(path: tuple[int, ...], mechanism: Mechanism, joint_labels: list,
+               controls: list) -> Callable[[dict[str, Any], str], tuple[dict[str, tuple[float, ...]], list[str]]]:
+    """For the assembly at ``path``: ``values`` -- joints by label and couplings by name, as it
+    sets them -- as the pair values they put the pairs at, and what could not be taken, each said by name:
     a joint in no pair, a value its pair cannot take, a locked coupling's joint set alone, a
     coupling set with one of its joints, a coupling's value outside its range or putting a joint
     past its limits. What a configuration and a motion name is made pair values here, at
-    document time."""
+    document time. What the mechanism holds is read once, here: a motion's function converts
+    every sample through the one converter, each key a lookup."""
     pairs = mechanism.pairs
     by_label = {pair.label: pair for pair in pairs}
     couplings = {name: _coupling_json(coupling, pairs, mechanism.as_built)
                  for name, coupling in mechanism.couplings.items()}
     locked = _locked(couplings)
+    # The couplings (by kept name) and pairs each key names, in their order, as the scans found them.
+    naming: dict[str, list[str]] = {}
+    for holder, own, kept in controls:
+        if holder[:len(path)] == path:
+            for key in {own, kept}:
+                naming.setdefault(key, []).append(kept)
+    matching: dict[str, list[Pair]] = {}
+    for pair, (raw, holder) in zip(pairs, joint_labels):
+        if holder[:len(path)] == path:
+            for key in {pair.label, raw}:
+                matching.setdefault(key, []).append(pair)
+    as_built = mechanism.as_built
+    checked = lambda label, row, at: _checked(by_label[label], row, at)  # noqa: E731
+    return lambda values, where: _convert(values, where, mechanism, naming, matching, couplings, locked, as_built,
+                                          checked)
+
+
+def _convert(values: dict[str, Any], where: str, mechanism: Mechanism, naming: dict[str, list[str]],
+             matching: dict[str, list[Pair]], couplings: dict[str, Any], locked: dict[str, str],
+             as_built: dict[str, tuple[float, ...]],
+             checked: Callable) -> tuple[dict[str, tuple[float, ...]], list[str]]:
     found: dict[str, tuple[float, ...]] = {}
     problems: list[str] = []
     driving: dict[str, Any] = {}
     for key, value in values.items():
-        named = [kept for holder, own, kept in controls if holder[:len(path)] == path and key in (own, kept)]
+        named = naming.get(key)
         if named:
             driving.update(dict.fromkeys(named, value))
             continue
-        matches = _matching(path, key, pairs, joint_labels)
+        matches = matching.get(key, [])
         if not matches:
             problems.append(f"{where} sets joint {key!r}, which is in no pair")
         for pair in matches:
@@ -1080,8 +1108,6 @@ def _converted(path: tuple[int, ...], values: dict[str, Any], mechanism: Mechani
                 found[pair.label] = _checked(pair, value, where)
             except KinematicsError as error:
                 problems.append(str(error))
-    as_built = mechanism.as_built
-    checked = lambda label, row, at: _checked(by_label[label], row, at)  # noqa: E731
     for name in list(driving):
         clash = [label for label in mechanism.couplings[name].ratios if label in found]
         problem = f"{where} sets coupling {name!r} and its joint {clash[0]!r}: set one of them" if clash else None
@@ -1098,7 +1124,7 @@ def _converted(path: tuple[int, ...], values: dict[str, Any], mechanism: Mechani
             found.update(_coupled(driving, couplings, as_built, checked, where))
         except KinematicsError as error:  # each alone within the limits, together past them
             problems.append(str(error))
-    return {pair.label: found[pair.label] for pair in pairs if pair.label in found}, problems
+    return {pair.label: found[pair.label] for pair in mechanism.pairs if pair.label in found}, problems
 
 
 def _size(result: Any) -> float:
@@ -1130,9 +1156,10 @@ def _motions(motioned: list, mechanism: Mechanism, joint_labels: list, controls:
     for path, _obj, held in sorted(motioned, key=lambda item: -len(item[0])):
         for name, spec in held.items():
             where = f"motion {name!r} of {name_of(path)}"
+            converter = _converter(path, mechanism, joint_labels, controls)
 
             def convert(values: dict[str, Any], at: str) -> dict[str, tuple[float, ...]]:
-                converted, problems = _converted(path, values, mechanism, joint_labels, controls, f"{where}: {at}")
+                converted, problems = converter(values, f"{where}: {at}")
                 if problems:
                     raise _Unfit(problems[0])
                 return converted
@@ -1185,6 +1212,12 @@ def _sampled(function: Callable, duration: float, convert: Callable, tolerances:
     one. A function of the code: the same function samples at the same times."""
     held: dict[float, dict[str, tuple[float, ...]]] = {}
     names = {name for holder, own, kept in controls if holder[:len(path)] == path for name in (own, kept)}
+    # The joints under ``path``, once: a key names one by its raw label, or ends ``:<raw label>``.
+    raws = {raw for raw, holder in joint_labels if holder[:len(path)] == path}
+
+    def known(key: str) -> bool:
+        return key in names or key in raws or any(key[colon + 1:] in raws
+                                                  for colon, char in enumerate(key) if char == ":")
 
     def at(t: float) -> dict[str, tuple[float, ...]]:
         found = held.get(t)
@@ -1196,9 +1229,8 @@ def _sampled(function: Callable, duration: float, convert: Callable, tolerances:
             if not isinstance(given, dict) or not given:
                 raise KinematicsError(f"{where}: the function returns {{joint: value}}, not {given!r} (at {t:g} s)")
             for key in given:
-                if key not in names and not any(key in (raw,) or key.endswith(f":{raw}") for raw, holder in joint_labels
-                                                if holder[:len(path)] == path):
-                    labels = sorted({raw for raw, holder in joint_labels if holder[:len(path)] == path})
+                if not known(key):
+                    labels = sorted(raws)
                     raise KinematicsError(f"{where} names no joint {key!r}; its joints are {', '.join(labels)}"
                                           + (f"; its couplings are {', '.join(sorted(names))}" if names else ""))
             found = held[t] = convert(given, f"the function at {t:g} s")
