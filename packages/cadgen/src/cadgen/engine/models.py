@@ -75,10 +75,12 @@ class Models:
 
     def serve(self, address: str, request: dict) -> tuple[Any, str]:
         address = str(parse(address))
-        source = self.resolve(address)
         with self.lock:
             record = self.records.get(address)
         if record is None or not self.daemon.pool.holds(record["worker"]):
+            if request.get("build") is False:
+                raise ValueError(f"no live model {address}; build it before inspecting")
+            source = self.resolve(address)
             replies = []
             self.daemon.handle({"op": "build", "script": source["script"],
                                 "functions": [source["function"]], "env": request.get("env", {}),

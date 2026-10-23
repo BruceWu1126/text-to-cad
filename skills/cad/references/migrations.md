@@ -59,7 +59,7 @@ if __name__ == "__main__":
 ```
 
 The document is what the viewer follows build by build, what refs and
-`cadgen where` read, and the model's cache across a daemon restart. Keep the
+`cadgen inspect` read, and the model's cache across a daemon restart. Keep the
 `__main__` calls: decoration only declares, and each explicit call builds its model.
 
 | 0.7 | 0.8 |
@@ -79,7 +79,8 @@ The document is what the viewer follows build by build, what refs and
 | snapshot `--animation`, `--time`, `--video` | none: export a GLB and play its clips |
 | snapshot `--mode list` | none: list parts with `read_xbf(path).leaves`, and pick them with `select` |
 | snapshot `--focus`, `--hide` | `--display '{"isolated": ["lid"]}'` and `--display '{"hidden": ["lid"]}'` (part refs); a Quick Edit packet given to `--annotation` or `--job` carries the person's own |
-| `cadgen store why`, `store where`, `store forget`, `store gc`, `store info` | none: no store. `cadgen where DOC` prints a document's build closure, `cadgen where DOC REF` what made an element |
+| `cadgen where`, `cadgen.where()` | `cadgen inspect`, `cadgen.inspect()`; existing files or live models only, never an implicit build |
+| `cadgen store why`, `store where`, `store forget`, `store gc`, `store info` | none: no store. `cadgen inspect DOC` prints a document's build closure, `cadgen inspect DOC REF` what made an element |
 | `cadgen daemon status` | `cadgen status` (and `cadgen stop`) |
 | `cadgen serve DOC --foreground` | `cadgen serve DOC`: start or reuse the installation's server, print its URL, and exit |
 | `CADGEN_CACHE_DIR`, `CADGEN_STORE_MAX`, `CADGEN_DAEMON_STATE_DIR` | none; `CADGEN_ENGINE_DIR` moves the engine daemon's socket |

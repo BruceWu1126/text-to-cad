@@ -54,7 +54,7 @@ class ObserversTest(unittest.TestCase):
         api.export(self.folder / "XBF/secret_plate.xbf", self.folder / "out.step", self.folder / "out.3mf", daemon=False)
         with self.assertRaises(ValueError):  # refused by name
             api.snapshot(self.folder / "missing.xbf", self.folder / "out.png", daemon=False)
-        api.where(self.folder / "XBF/secret_plate.xbf")  # where, serve and status tell nothing
+        api.inspect(self.folder / "XBF/secret_plate.xbf")  # where, serve and status tell nothing
         built, exported, drawn = self.told
         self.assertEqual(len(self.told), 3)
         for facts in self.told:

@@ -5,7 +5,7 @@ import { useXbfSelectionChips, xbfCopyText, xbfNodeRefs } from '../../../dist/re
 import { presentXbfTree, xbfCoveringIds } from '../../../dist/renderers/xbf/xbfTree.js';
 
 // What an engine document's selection copies: the engine's canonical refs, one line each, the file's
-// path first -- what `cadgen where DOC REF` and `select(DOC, REF)` read (cadgen.engine.refs) -- and
+// path first -- what `cadgen inspect DOC REF` and `select(DOC, REF)` read (cadgen.engine.refs) -- and
 // what a paste of one names. A STEP drawn by the same renderer keeps its own grammar's references.
 
 const part = (name: string, prototype: number, instance: number) => ({ name, prototype, instance });

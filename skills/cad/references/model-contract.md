@@ -98,7 +98,7 @@ After the daemon restarts (it exits after an idle hour), a model's cache is its 
 `.xbf`: the document carries its build closure (the script and function, a digest
 of each module the model reaches, each input file's digest, the engine and library
 versions), and a build whose closure is unchanged takes the document whole and runs
-nothing. `cadgen where XBF/bracket.xbf` prints that closure. Anything else builds,
+nothing. `cadgen inspect XBF/bracket.xbf` prints that closure. Anything else builds,
 and the report says why: `rebuilt: ../src/lib/arm_parts.py changed`.
 
 A verifying build runs every body the engine would replay and compares each fresh

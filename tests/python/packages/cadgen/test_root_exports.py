@@ -32,11 +32,11 @@ class RootExports(unittest.TestCase):
         for name in cadgen.engine.__all__:
             with self.subTest(name=name):
                 self.assertIs(getattr(cadgen, name), getattr(cadgen.engine, name))
-        for verb in ("build", "export", "snapshot", "serve", "where", "status", "stop", "daemon"):
+        for verb in ("build", "export", "snapshot", "serve", "inspect", "status", "stop", "daemon"):
             with self.subTest(verb=verb):
                 self.assertIs(getattr(cadgen, verb), getattr(api, verb))
         self.assertEqual(set(cadgen.__all__) - set(cadgen.engine.__all__),
-                         {"__version__", "build", "export", "snapshot", "serve", "where", "status", "stop", "daemon",
+                         {"__version__", "build", "export", "snapshot", "serve", "inspect", "status", "stop", "daemon",
                           "build123d", "srgb"})
 
     def test_a_name_the_root_never_had_is_pythons_own_error(self):

@@ -169,7 +169,7 @@ class FilesByAbsolutePath(SecurityTestCase):
     def test_a_null_byte_is_a_400_with_the_exact_message(self):
         status, _, body = self.fixture.request("GET", "/__cad/asset?file=%2Froot%2Fok.step%00.png")
         self.assertEqual(status, 400)
-        self.assertEqual(body, b'{"error":"File path contains an invalid null byte"}')
+        self.assertEqual(body, b'{"ok":false,"error":"File path contains an invalid null byte"}')
 
     def test_repeated_file_params_take_the_first(self):
         good = quote(self.fixture.path("ok.step"), safe="")

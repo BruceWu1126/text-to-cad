@@ -10,7 +10,6 @@ import json
 import math
 import os
 import re
-import secrets
 import shutil
 import tempfile
 import threading
@@ -18,19 +17,10 @@ import time
 from pathlib import Path
 
 FORMATS = {"step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "dxf": ".dxf", "xbf": ".xbf", "original": ".xbf"}
+from cadgen.jobs import Jobs, JobError as ExportError, STATUS_SECONDS, MAX_JOBS, TERMINAL
+
 ARTIFACT_SECONDS = 3600
-STATUS_SECONDS = 86400
-MAX_JOBS = 16
 MAX_RETAINED_BYTES = 4 * 1024**3
-TERMINAL = {"ready", "failed", "cancelled", "expired"}
-
-
-class ExportError(ValueError):
-    def __init__(self, message, status=400):
-        super().__init__(message)
-        self.status = status
-
-
 def specification(payload):
     if not isinstance(payload, dict) or set(payload) - {"doc", "revision", "part", "pose"}:
         raise ExportError("Export source is {doc, revision, part?, pose?}.")
@@ -46,16 +36,16 @@ def specification(payload):
     return {"doc": payload["doc"], "revision": payload["revision"], "part": part, "pose": pose}
 
 
-class ExportJobs:
+class ExportJobs(Jobs):
+    cancel_running = True
+
     def __init__(self, server, *, run=None, clock=time.time, root=None):
         self.server, self.clock = server, clock
-        self.epoch = secrets.token_urlsafe(18)
-        self.changed = threading.Condition(threading.RLock())
-        self.jobs, self.requests, self.inspections = {}, {}, {}
+        super().__init__(clock=clock)
+        self.inspections = {}
         self.root = Path(root) if root else None
         self.run = run or self._worker
         self.started = False
-        self.executing = False
 
     def _maintenance(self):
         # Crash recovery has no persistent job registry. Reap only this service's private
@@ -192,85 +182,42 @@ class ExportJobs:
         normalized = json.dumps(payload, sort_keys=True)
         with self.changed:
             self._prune()
-            previous = self.requests.get(request_id)
-            if previous:
-                job = self.jobs.get(previous)
-                if job is None:
-                    raise ExportError("This export expired. Open Export to start a new job.", 410)
-                if job["request"] != normalized:
-                    raise ExportError("This request ID already names another export.", 409)
-                return self.public(job)
-            if len(self.jobs) >= 128 or len(self.requests) >= 4096:
-                raise ExportError("Export history is full for this session. Open a new viewer session.", 429)
-            if sum(j["state"] not in TERMINAL for j in self.jobs.values()) >= MAX_JOBS:
-                raise ExportError("The export queue is full. Wait or cancel a queued job.", 429)
+            if request_id in self.requests:
+                return self._submit(request_id, normalized)
             if sum(j.get("bytes", 0) for j in self.jobs.values() if j["state"] == "ready") >= MAX_RETAINED_BYTES:
                 raise ExportError("Export storage is full. Release a previous export first.", 429)
-            # Resolving a held source is done by the background job, never executing code here.
-            ident = secrets.token_urlsafe(18)
-            spec["format"] = kind
-            job = {"id": ident, "requestId": request_id, "request": normalized, "spec": spec,
-                   "state": "queued", "stage": "Waiting for export worker", "sequence": 0,
-                   "createdAt": self.clock(), "finishedAt": 0, "expiresAt": 0, "readers": 0,
-                   "cancel": False, "directory": None, "filename": "export" + FORMATS[kind]}
-            self.jobs[ident], self.requests[request_id] = job, ident
             self._start()
-            threading.Thread(target=self._execute, args=(job,), daemon=True, name="cadgen-export").start()
-            return self.public(job)
+            spec["format"] = kind
+            return self._submit(request_id, normalized, spec=spec, expiresAt=0, readers=0,
+                                directory=None, filename="export" + FORMATS[kind])
 
-    def _change(self, job, **fields):
-        job.update(fields)
-        job["sequence"] += 1
-        self.changed.notify_all()
+    def _perform(self, job, progress):
+        _source, _expected, name = self._source(job["spec"])
+        filename = (re.sub(r"[^\w .-]", "_", name)[:100].strip(" .") or "export") + FORMATS[job["spec"]["format"]]
+        directory = Path(tempfile.mkdtemp(prefix="cadgen-download-", dir=self.root))
+        with self.changed:
+            job["directory"] = directory
+            self._change(job, filename=filename, stage="Preparing export")
+            if job["cancel"]:
+                return {}
+        target = directory / filename
+        self.run(job["spec"], target, progress)
+        with self.changed:
+            if job["cancel"]:
+                return {}
+            size = target.stat().st_size
+            retained = sum(j.get("bytes", 0) for j in self.jobs.values() if j["state"] == "ready")
+            if size + retained > MAX_RETAINED_BYTES:
+                raise ExportError("Export exceeded the temporary storage limit.")
+            return {"state": "ready", "stage": "Ready to save", "bytes": size,
+                    "expiresAt": self.clock() + ARTIFACT_SECONDS}
 
-    def _execute(self, job):
-        admitted = False
-        try:
-            with self.changed:
-                self.changed.wait_for(lambda: job["cancel"] or (not self.executing and next(
-                    (j for j in self.jobs.values() if j["state"] == "queued"), None) is job))
-                if job["cancel"]:
-                    return
-                self.executing = admitted = True
-                self._change(job, state="running", stage="Preparing export")
-            _source, _expected, name = self._source(job["spec"])
-            filename = (re.sub(r"[^\w .-]", "_", name)[:100].strip(" .") or "export") + FORMATS[job["spec"]["format"]]
-            directory = Path(tempfile.mkdtemp(prefix="cadgen-download-", dir=self.root))
-            with self.changed:
-                job["directory"] = directory
-                self._change(job, filename=filename)
-            target = directory / filename
-            def progress(frame):
-                with self.changed:
-                    if not job["cancel"]:
-                        self._change(job, state="running", stage="Writing " + filename)
-            with self.changed:
-                if job["cancel"]:
-                    return
-                self._change(job, state="running", stage="Preparing export")
-            self.run(job["spec"], target, progress)
-            with self.changed:
-                if job["cancel"]:
-                    return
-                size = target.stat().st_size
-                retained = sum(j.get("bytes", 0) for j in self.jobs.values() if j["state"] == "ready")
-                if size + retained > MAX_RETAINED_BYTES:
-                    raise ExportError("Export exceeded the temporary storage limit.")
-                self._change(job, state="ready", stage="Ready to save", bytes=size,
-                             finishedAt=self.clock(), expiresAt=self.clock() + ARTIFACT_SECONDS)
-        except Exception as error:
-            with self.changed:
-                if not job["cancel"]:
-                    self._change(job, state="failed", stage="Export failed", error=str(error), finishedAt=self.clock())
-        finally:
-            with self.changed:
-                if job["cancel"]:
-                    self._change(job, state="cancelled", stage="Export cancelled", finishedAt=self.clock())
-                if job["state"] != "ready":
-                    self._remove(job)
-                if admitted:
-                    self.executing = False
-                self.changed.notify_all()
+    def _progress(self, job, frame):
+        super()._progress(job, {**frame, "label": "Writing " + job["filename"]})
+
+    def _finished(self, job):
+        if job["state"] != "ready":
+            self._remove(job)
 
     def _remove(self, job):
         if job["directory"]:
@@ -280,28 +227,6 @@ class ExportJobs:
     def public(self, job):
         fields = ("id", "requestId", "filename", "state", "stage", "sequence", "createdAt", "finishedAt", "expiresAt", "bytes", "error")
         return {**{k: job[k] for k in fields if k in job}, "epoch": self.epoch}
-
-    def get(self, ident, after=None, wait=0):
-        with self.changed:
-            self._prune()
-            job = self.jobs.get(ident)
-            if job is None:
-                raise ExportError("Export no longer exists; the server may have restarted.", 404)
-            if after is not None and job["sequence"] == after and job["state"] not in TERMINAL:
-                self.changed.wait_for(lambda: job["sequence"] != after, timeout=min(25, max(0, wait)))
-            return self.public(job)
-
-    def cancel(self, ident):
-        with self.changed:
-            self.get(ident)
-            job = self.jobs[ident]
-            if job["state"] not in TERMINAL:
-                job["cancel"] = True
-                if job["state"] == "queued":
-                    self._change(job, state="cancelled", stage="Export cancelled", finishedAt=self.clock())
-                else:
-                    self._change(job, state="cancelling", stage="Cancelling after the current step")
-            return self.public(job)
 
     def release(self, ident):
         with self.changed:

@@ -614,7 +614,7 @@ a STEP's are (`xbfJointHandles.js`). A pair the engine could not keep a value fo
 section, under the rows.
 
 What an `.xbf`'s selection copies -- a chip, Copy Reference, Copy Prompt -- is the
-engine's canonical ref of each thing, the file's path first, the ref `cadgen where` answers and
+engine's canonical ref of each thing, the file's path first, the ref `cadgen inspect` answers and
 `select` labels its shapes with (`cadgen.engine.refs`): a part or subassembly by its label where that
 names it alone in the document, else by its occurrence path, each segment its label numbered among the
 siblings sharing it (`/work/XBF/kit.xbf#kit/hand/finger.2`); an element by its name, else its kind and

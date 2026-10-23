@@ -13,7 +13,7 @@ import { isXbfAssemblyId } from "./xbfTree.js";
 // measures on the exact shape when the element is picked (`fetchXbfElementFacts`).
 //
 // Each selected thing is also a reference into the document. An .xbf's are the engine's canonical
-// refs (`xbfTree.js`: `refOf`, `elementRefOf`), the ones `cadgen where` and `select` read: a part
+// refs (`xbfTree.js`: `refOf`, `elementRefOf`), the ones `cadgen inspect` and `select` read: a part
 // or subassembly by its label, or its occurrence path where the label is shared (`hand/finger.2`),
 // an element by its name, else its kind and number, under it (`hand/finger.2/face 7`). A STEP's are
 // its own grammar's (`cadRefs.js`: a part's label, `label/f:…`), where the names spell one.

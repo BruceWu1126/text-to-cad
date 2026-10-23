@@ -51,9 +51,14 @@ class Sessions:
 
     def _expire(self):
         for ident, session in list(self.sessions.items()):
-            if not session.active and time.monotonic() - session.touched > IDLE:
+            if (not session.active and not session.server.operations.keeps_alive()
+                    and time.monotonic() - session.touched > IDLE and session.server.operations.idle_seconds() > IDLE):
                 del self.sessions[ident]
                 session.close()
+
+    def active(self):
+        with self.lock:
+            return any(s.server.operations.keeps_alive() for s in self.sessions.values())
 
     def listing(self):
         with self.lock:
@@ -109,6 +114,8 @@ class Sessions:
             if request.raw_method == 'DELETE':
                 if not session:
                     return response.send_json(400, {'error': 'Mcp-Session-Id required'})
+                if session.server.operations.keeps_alive():
+                    return response.send_json(409, {'error': 'Wait for running operations or cancel queued work before closing this session'})
                 with self.lock:
                     self.sessions.pop(ident, None)
                 session.close()

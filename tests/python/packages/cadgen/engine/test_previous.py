@@ -357,7 +357,7 @@ class ClosureTest(unittest.TestCase):
         self.assertEqual(record["key"], previous.key(record))
         # The same record, whole, through every door that reads it.
         self.assertEqual(document.Loaded(self.xbf).closure, record)
-        self.assertEqual(api.where(self.xbf), record)
+        self.assertEqual(api.inspect(self.xbf), record)
         self.assertIn(b"cadgen " + version.encode(), self.xbf.read_bytes()[:4096])
 
     def test_a_comment_changes_no_module_and_a_code_edit_names_its_module(self) -> None:

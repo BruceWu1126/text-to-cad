@@ -11,7 +11,7 @@ ordinary Python scripts call decorated models explicitly.
         [--size-profile P] [--json]
     cadgen serve DOC [--port N] [--three DIR]
     cadgen status [--json] | stop | daemon
-    cadgen where DOC [REF]                           a document's build closure, or what a ref names (``refs``)
+    cadgen inspect DOC [REF]                           a document's build closure, or what a ref names (``refs``)
 
 cadgen's command line runs each verb by its name (``parser_for``, ``run``); the engine's own entry,
 ``python -m cadgen.engine VERB ...``, takes the same verbs as subcommands (``main``). A verb's failure
@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 __all__ = ["VERBS", "Failed", "answered", "build_parser", "main", "parser_for", "run", "weighed",
-           "where_main", "where_parser"]
+           "inspect_main", "inspect_parser"]
 
 FILE_FLAGS = ("xbf", "step", "glb", "stl", "threemf", "dxf")
 _SUFFIX = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "dxf": ".dxf"}
@@ -87,7 +87,9 @@ def _no_arguments(_parser: argparse.ArgumentParser) -> None:
     return None
 
 
-def _where_arguments(parser: argparse.ArgumentParser) -> None:
+def _inspect_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--query", choices=("closure", "geometry", "build"),
+                        help="inspect closure, geometry (requires REF), or build metadata; never builds a model")
     parser.add_argument("document", help="a model address (SCRIPT::NAME or code::NAME), or an .xbf")
     parser.add_argument("ref", nargs="?", help="[FILE#][OWNER/]ELEMENT or [FILE#]OWNER (cadgen.engine.refs): OWNER a "
                                                "part's or an assembly's label, or its occurrence path (hand/finger.2); "
@@ -358,23 +360,23 @@ def weighed(structure: dict[str, Any], hit: Any, volumes: dict[str, float]) -> d
     return found
 
 
-def where_parser(prog: str = "cadgen where") -> argparse.ArgumentParser:
-    """``cadgen where``'s parser: a document, and a ref into it or none."""
-    return parser_for("where", prog)
+def inspect_parser(prog: str = "cadgen inspect") -> argparse.ArgumentParser:
+    """``cadgen inspect``'s parser: a document, and a ref into it or none."""
+    return parser_for("inspect", prog)
 
 
-def where_main(argv: list[str] | None = None, prog: str = "cadgen where") -> int:
-    """``cadgen where DOC``: the build closure the xbf holds; ``cadgen where DOC REF``: what the
+def inspect_main(argv: list[str] | None = None, prog: str = "cadgen inspect") -> int:
+    """``cadgen inspect DOC``: the build closure the xbf holds; ``cadgen inspect DOC REF``: what the
     kernel measures of the elements a ref names, and what made each (``made_by``, null for a
     document no live worker built)."""
-    return run("where", argv, prog)
+    return run("inspect", argv, prog)
 
 
-def _where(args: argparse.Namespace, prog: str) -> int:
+def _inspect(args: argparse.Namespace, prog: str) -> int:
     from cadgen.engine import api
 
     try:
-        found = api.where(args.document, args.ref)
+        found = api.inspect(args.document, args.ref, query=args.query)
     except ValueError as error:
         raise Failed(str(error), 2) from None
     except api.EngineError as error:
@@ -490,8 +492,8 @@ VERBS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[
     "snapshot": ("draw a document or a file the viewer opens as the CAD Viewer does, into a PNG", _snapshot_arguments,
                  _snapshot),
     "serve": ("serve a document over HTTP and print its URL", _serve_arguments, _serve),
-    "where": ("a document's build closure (its source, modules, inputs and key), or what one thing a ref names is "
-              "and what made it", _where_arguments, _where),
+    "inspect": ("a document's build closure (its source, modules, inputs and key), or what one thing a ref names is "
+              "and what made it", _inspect_arguments, _inspect),
     "status": ("the engine daemon's workers, what each is building, and its served documents", _status_arguments,
                _status),
     "stop": ("stop the engine daemon", _no_arguments, _stop),

@@ -575,7 +575,7 @@ def check_file(file: str | None, document: Path | None) -> None:
         raise RefError(f"the ref names {file}, not {os.path.basename(str(document))}")
 
 
-# --- a served document's structure (``cadgen where``) ----------------------------------------
+# --- a served document's structure (``cadgen inspect``) ----------------------------------------
 
 
 def resolve_structure(structure: dict[str, Any], ref: str, document: Path | None = None) -> list[Hit]:

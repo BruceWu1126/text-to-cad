@@ -208,22 +208,9 @@ class PromptFilesRouteTest(unittest.TestCase):
             self.assertIn(said, json.loads(body)["error"])
         self.assertEqual(sorted(path.name for path in self.files.iterdir()) if self.files.exists() else [], [])
 
-    def test_a_chips_copy_is_saved_as_the_file_snapshot_reads_and_answered_with_its_path(self) -> None:
-        mark = {"start": [0, 0, 0], "end": [10, 0, 0], "label": "10.00 mm", "color": "#d59090"}
-        status, body, _ = self.call("POST", "/__cad/prompt-files/save", {"name": "part.stl", "kind": "annotation", "data": ANNOTATION})
-        self.assertEqual((status, json.loads(body)), (200, {"ok": True, "path": str(self.files / "part-1.annotation.json")}))
-        self.assertEqual(json.loads((self.files / "part-1.annotation.json").read_text(encoding="utf-8")), ANNOTATION)
-        _, body, _ = self.call("POST", "/__cad/prompt-files/save", {"name": "part.stl", "kind": "measurement", "data": mark})
-        self.assertEqual(json.loads(Path(json.loads(body)["path"]).read_text(encoding="utf-8")), [mark])
-        for request, said in (
-            ({"name": "part.stl", "kind": "image", "data": {}}, "annotation or measurement"),
-            ({"name": "part.stl", "kind": "sketch", "data": ANNOTATION}, "annotation or measurement"),
-            ({"name": "part.stl", "kind": "annotation", "data": {"marks": {}}}, "marks (a list)"),
-            ({"name": "part.stl", "kind": "measurement", "data": {**mark, "start": [0, 0]}}, "start"),
-        ):
-            status, body, _ = self.call("POST", "/__cad/prompt-files/save", request)
-            self.assertEqual((status, json.loads(body)["ok"]), (400, False), request)
-            self.assertIn(said, json.loads(body)["error"])
+    def test_retired_save_route_does_not_write(self):
+        self.assertEqual(self.call("POST", "/__cad/prompt-files/save", {"kind": "annotation", "data": ANNOTATION})[0], 404)
+        self.assertFalse(self.files.exists())
 
     def test_render_polling_is_not_an_endpoint(self) -> None:
         self.assertEqual(self.call("GET", "/__cad/prompt-files?id=nope")[0], 404)
@@ -236,7 +223,7 @@ class PromptFilesRouteTest(unittest.TestCase):
         for name in ("..%2Fsecret.json", "../secret.json", "missing.png", "part-1.job.txt", ""):
             self.assertEqual(self.call("GET", f"/__cad/prompt-files/{name}")[0], 404, name)
         self.assertEqual(self.call("GET", "/__cad/prompt-files/part-1-current.png", guard=False)[0], 403)
-        self.assertEqual(self.call("GET", "/__cad/prompt-files?id=old", guard=False)[0], 403)
+        self.assertEqual(self.call("GET", "/__cad/prompt-files?id=old", guard=False)[0], 404)
 
 
 if __name__ == "__main__":

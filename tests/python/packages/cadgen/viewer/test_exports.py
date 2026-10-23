@@ -5,7 +5,7 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from cadgen.viewer.exports import ExportError, ExportJobs, specification
 
@@ -63,6 +63,8 @@ class ExportsTest(unittest.TestCase):
         self.finish.set()
         self.assertEqual(self.settled(first["id"])["state"], "ready")
         self.assertEqual(len(self.calls), 1)
+        with patch("cadgen.viewer.exports.MAX_RETAINED_BYTES", 1):
+            self.assertEqual(self.jobs.create(original)["id"], first["id"])
         self.jobs.release(first["id"])
 
     def test_artifact_can_be_saved_twice_and_transfer_prevents_expiry_cleanup(self):

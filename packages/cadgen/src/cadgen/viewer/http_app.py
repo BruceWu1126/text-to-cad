@@ -417,7 +417,7 @@ class CadApp:
                     else:
                         status, body = self.engine_documents.response(query.get("file") or "")
                         response.send_json(status, body)
-                elif pathname == "/__cad/prompt-files" or pathname.startswith("/__cad/prompt-files/"):
+                elif pathname.startswith("/__cad/prompt-files/"):
                     self._handle_prompt_files_get(request, response, pathname, query)
                 elif pathname == "/__cad/asset":
                     self._handle_asset(request, response, query)
@@ -436,7 +436,8 @@ class CadApp:
                     response.send_json(404, {"error": "Not found"})
             except Exception as error:  # noqa: BLE001
                 self._crashed(error, bugs_only=True)  # a bad request is the caller's; a mistake in our code is a crash
-                response.send_json(400, {"error": str(error)})
+                response.send_json(400 if isinstance(error, (ValueError, TypeError)) else 404 if isinstance(error, FileNotFoundError) else 500,
+                                   {"ok": False, "error": str(error)})
             return
 
         if method == "POST":
@@ -505,23 +506,17 @@ class CadApp:
                         return
                     status, body = self.prompt_files.create(request.body())
                     response.send_json(status, body)
-                elif pathname == "/__cad/prompt-files/save":
-                    from .prompt_files import MAX_BODY_BYTES
-                    if int(request.headers.get("content-length") or 0) > MAX_BODY_BYTES:
-                        response.send_empty(413, [("connection", "close")])
-                        return
-                    try:
-                        status, body = self.prompt_files.save(request.body())
-                    except ValueError as error:
-                        status, body = 400, {"ok": False, "error": str(error)}
-                    response.send_json(status, body)
+                elif pathname in {"/__cad/server", "/__cad/catalog", "/__cad/folder", "/__cad/search",
+                                  "/__cad/models", "/__cad/thumbnail", "/__cad/drawing", "/__cad/robot",
+                                  "/__cad/xbf", "/__cad/asset", "/__cad/version"}:
+                    response.send_bytes(405, b'{"ok":false,"error":"Method not allowed"}',
+                                        "application/json", [("allow", "GET, HEAD")])
                 else:
-                    response.send_empty(405, [("allow", "POST")])
+                    response.send_json(404, {"error": "Not found"})
             except Exception as error:  # noqa: BLE001
                 self._crashed(error, bugs_only=True)  # a bad request is the caller's; a mistake in our code is a crash
-                # Note the asymmetry with the GET funnel: this one carries
-                # ok:false and that one does not.
-                response.send_json(400, {"ok": False, "error": str(error)})
+                response.send_json(400 if isinstance(error, (ValueError, TypeError)) else 404 if isinstance(error, FileNotFoundError) else 500,
+                                   {"ok": False, "error": str(error)})
             return
 
         # Unreachable: handler.py answers 405 for every other method before
@@ -693,9 +688,6 @@ class CadApp:
         """Read a prompt JSON file; every request carries the viewer guard."""
         if not request.header(POST_GUARD_HEADER):
             response.send_json(403, {"ok": False, "error": f"missing {POST_GUARD_HEADER} header; send '{POST_GUARD_HEADER}: 1'"})
-            return
-        if pathname == "/__cad/prompt-files":
-            response.send_json(404, {"ok": False, "error": "Not found"})
             return
         found = self.prompt_files.file(pathname[len("/__cad/prompt-files/"):])
         if found is None:

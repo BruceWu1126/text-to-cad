@@ -1,7 +1,7 @@
 # Inspecting and checking documents in Python
 
 Checks are small Python scripts against a document, an `.xbf` or a STEP; there is
-no inspection command beyond `cadgen where`. A check reads the document as the
+no inspection command beyond `cadgen inspect`. A check reads the document as the
 latest build wrote it, so it sees a source edit only after the model runs. Paths
 resolve from the working directory and expand `~`.
 
@@ -64,7 +64,7 @@ plate/face 3                            in a document of one part, its elements 
   occurrences is refused with their paths (`finger names 3 occurrences in kit.xbf:
   hand/finger.1, hand/finger.2, hand/finger.3`).
 - **An element is named by its name or its number.** Numbers are the part's own
-  face, edge and vertex numbers, the ones the viewer and `cadgen where` show; a
+  face, edge and vertex numbers, the ones the viewer and `cadgen inspect` show; a
   name survives edits that a number does not. A bare element after an owner belongs
   to that owner (`palm,f:palm.body.1`).
 - **`FILE` must be the document resolved in**: the same file, or the last segments of
@@ -73,7 +73,7 @@ plate/face 3                            in a document of one part, its elements 
   resolves where it is; one it deleted fails, naming it; one whose making changed
   fails too, listing what its atom is named now (`plate.body.6 is now
   f:plate.body.6`), never guessing.
-- **The canonical ref**, what `select` labels a shape with and `cadgen where`
+- **The canonical ref**, what `select` labels a shape with and `cadgen inspect`
   answers, spells an element by its name under its part's label where that label
   names one occurrence, else under the occurrence's path from the root.
 
@@ -132,7 +132,7 @@ live shape.
 
 ## Which code made it
 
-`cadgen where DOC REF` answers what a ref names, placed where its occurrence stands:
+`cadgen inspect DOC REF` answers what a ref names, placed where its occurrence stands:
 
 - an element: its kind, number, name and canonical ref; the kernel's facts (a face's
   area, centroid, surface type, exact box, radius; an edge's length, curve type, class
@@ -142,7 +142,7 @@ live shape.
   with the parts that have no material listed under `unweighed`.
 
 ```text
-$ cadgen where XBF/bracket.xbf "bracket/face 7"
+$ cadgen inspect XBF/bracket.xbf "bracket/face 7"
 {
   "ref": "bracket/f:bracket.bore.1;M:bracket.body_dnjoch",
   "kind": "face",
@@ -160,7 +160,7 @@ The bore's wall is face 1 of the cylinder `bore`, modified by the cut whose resu
 `body` took. `made_by` comes from the worker that built the document, while it lives;
 after the daemon restarts it is `null` until the model builds again. A ref of several
 selectors answers a list; one that names nothing is refused (exit 2). Without a REF,
-`cadgen where DOC` prints the document's build closure.
+`cadgen inspect DOC` prints the document's build closure.
 
 ## Measurements
 
@@ -225,7 +225,7 @@ usually a sliver a boolean left.
 
 A part given a material (`part.material = materials.aluminium_6061`,
 [materials](build123d-modeling.md#colour-and-materials)) is weighed by
-`cadgen where DOC OWNER`. For explicit densities, a centre of mass or inertia:
+`cadgen inspect DOC OWNER`. For explicit densities, a centre of mass or inertia:
 
 ```python
 from cadgen.geometry import mass_properties

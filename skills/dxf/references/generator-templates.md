@@ -169,4 +169,4 @@ def drawing():
 - **Why did it (not) rebuild?** The build's report says how each body went (`run` or
   `replayed`) and each file (`written` or `kept`). A drawing that declares `@xbf` too
   keeps its build closure in its document: its report names what changed
-  (`rebuilt: ../src/bracket.py changed`), and `cadgen where <drawing>.xbf` prints it.
+  (`rebuilt: ../src/bracket.py changed`), and `cadgen inspect <drawing>.xbf` prints it.

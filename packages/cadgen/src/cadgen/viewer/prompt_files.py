@@ -8,7 +8,6 @@ every one of them; ``cadgen snapshot`` reads the packet as ``--annotation``, and
 authored`` draws a job's view). A packet with
 ink also names the parts hidden and isolated where the ink was last drawn, which
 ``--annotation`` leaves out of its stills. No PNG is produced by this route.
-POST /__cad/prompt-files/save writes an annotation or measurement chip's JSON.
 Guarded GET /__cad/prompt-files/<name> reads only JSON from this process's
 scratch directory. Files outlive the viewer until the system clears them.
 """
@@ -76,43 +75,6 @@ class PromptFiles:
             return self._directory
 
     # --- POST ----------------------------------------------------------------
-
-    def save(self, body: bytes) -> tuple[int, dict]:
-        """A Quick Edit chip's copy as a file, written at once: ``200 {"ok": true, "path"}``, or ``400``.
-
-        ``{"name", "kind": "annotation", "data": <an annotation>}`` writes ``<name>-<n>.annotation.json``
-        (``cadgen snapshot --annotation`` reads it); ``{"name", "kind": "measurement", "data":
-        {start, end, label, color}}`` writes ``<name>-<n>.measurement.json``, the list of that one
-        (``--measurements`` reads it). Nothing renders.
-        """
-        try:
-            request = json.loads(body or b"null")
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ValueError(f"a chip's file is requested as JSON: {error}") from None
-        if type(request) is not dict or not set(request) <= {"name", "kind", "data"}:
-            raise ValueError("a chip's file is requested as {name, kind, data}")
-        kind, data = request.get("kind"), request.get("data")
-        if kind == "annotation":
-            if type(data) is not dict or not set(data) <= _ANNOTATION_KEYS or type(data.get("marks")) is not list:
-                raise ValueError("an annotation is an object of units, parts and marks (a list)")
-            content, suffix = data, "annotation"
-        elif kind == "measurement":
-            from cadgen.engine.snapshot import SnapshotRefused, parse_measurements
-
-            try:
-                content = parse_measurements([data])
-            except SnapshotRefused as error:
-                raise ValueError(str(error)) from None
-            suffix = "measurement"
-        else:
-            raise ValueError("kind is annotation or measurement")
-        name = request.get("name")
-        directory = self.directory
-        with self._lock:
-            self._count += 1
-            path = directory / f"{_stem(name if type(name) is str and name else kind)}-{self._count}.{suffix}.json"
-        path.write_text(json.dumps(content, indent=2), encoding="utf-8")
-        return 200, {"ok": True, "path": str(path)}
 
     def create(self, body: bytes) -> tuple[int, dict]:
         """Validate one snapshot packet, then return inline JSON or its saved path with ``200``."""

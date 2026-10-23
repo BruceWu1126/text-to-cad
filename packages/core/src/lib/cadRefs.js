@@ -295,10 +295,10 @@ export function buildCadRefToken({ cadPath = "", selector = "", selectors } = {}
 
 // ---- The engine's grammar -----------------------------------------------------------------------
 //
-// An engine document (`.xbf`) is named as the engine names it, in the grammar `cadgen where` and
+// An engine document (`.xbf`) is named as the engine names it, in the grammar `cadgen inspect` and
 // `select` read: cadgen/engine/refs.py's `parse`, mirrored here case for case. The `refCases` of
 // cadRefs.parity.json are asserted against both parsers, and its `spellingCases` against
-// `spellEngineRefs` here and the resolution `cadgen where` runs there.
+// `spellEngineRefs` here and the resolution `cadgen inspect` runs there.
 //
 //   REF      = [FILE "#"] SELECTOR ("," SELECTOR)*     a bare ELEMENT after an owner is that owner's
 //   SELECTOR = OWNER | [OWNER "/"] ELEMENT              no OWNER: the document's root
@@ -537,7 +537,7 @@ function engineSegmentOf(text) {
 }
 
 /**
- * The canonical refs of a served engine document's occurrences and elements, as `cadgen where`
+ * The canonical refs of a served engine document's occurrences and elements, as `cadgen inspect`
  * answers them and `select` labels what it selects (`refs.owner_text`, `refs.path_text`): an
  * occurrence by its label where that names it alone in the document (`palm`), else by its path from
  * the root, each segment its label numbered among the siblings that share it (`hand/finger.2`); an

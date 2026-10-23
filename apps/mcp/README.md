@@ -36,6 +36,14 @@ with the model's link in this machine's CAD Viewer, started if none runs
 tells the shim that a client renders apps without advertising them, as the
 reference host `basic-host` does.
 
+The agent also has `cad_build`, `cad_export`, `cad_snapshot` and `cad_inspect` in
+all presentations, including text-only hosts. They use the Python operations,
+not page state. Each tool starts work with a request ID and polls or cancels its
+own operation; there is no `cad_job` tool. See the
+[operation contract](../../packages/cadgen/README.md#agent-operations) for progress,
+retry, cancellation and explicit server-host destinations. Inspection never builds
+source. Viewer export destinations are chosen on the browser user's filesystem.
+
 ## The rules
 
 - **One page, told what to show.** Every surface loads this one page. The tool

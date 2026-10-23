@@ -26,8 +26,6 @@ export interface PromptFiles {
     measurements?: Array<{ start: number[]; end: number[]; label: string; color: string }>;
   }): Promise<{ snapshot: string; inline?: never } | { inline: string; snapshot?: never }>;
   read(path: string): Promise<Blob>;
-  /** Legacy individual-file export for older clients; current annotation and measurement chips do not call it. */
-  save?(request: { name: string; kind: 'annotation'; data: Record<string, unknown> }): Promise<string>;
 }
 /**
  * What the app menu links to — the running version (its release notes), the source and the

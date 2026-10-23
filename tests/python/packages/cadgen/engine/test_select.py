@@ -1,4 +1,4 @@
-"""References to geometry: ``select`` and ``cadgen where`` resolve a ref -- a part's label or an
+"""References to geometry: ``select`` and ``cadgen inspect`` resolve a ref -- a part's label or an
 occurrence's path (``hand/finger.2``), and an element's name or ordinal -- by name in the latest
 build, into build123d shapes in world coordinates; a model never reads a file its own build
 writes."""
@@ -414,7 +414,7 @@ class ReadAndPlaceTest(_Folder):
 
 
 class WhereTest(unittest.TestCase):
-    """``cadgen where`` resolves the same grammar, through a daemon of the test's own."""
+    """``cadgen inspect`` resolves the same grammar, through a daemon of the test's own."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -434,7 +434,7 @@ class WhereTest(unittest.TestCase):
         shutil.rmtree(cls.state, ignore_errors=True)
 
     def where(self, ref: str) -> subprocess.CompletedProcess:
-        return engine_daemon.run([sys.executable, "-m", "cadgen.cli", "where", "XBF/hand.xbf", ref], cwd=self.folder,
+        return engine_daemon.run([sys.executable, "-m", "cadgen.cli", "inspect", "XBF/hand.xbf", ref], cwd=self.folder,
                                  env=self.env)
 
     def test_where_takes_an_occurrence_path(self) -> None:

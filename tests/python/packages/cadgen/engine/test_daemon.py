@@ -189,6 +189,39 @@ class DaemonTest(unittest.TestCase):
         self.script.write_text(textwrap.dedent(MODEL.format(size=size)), encoding="utf-8")
         return self.built("block")
 
+    def test_inspection_never_builds_missing_or_stale_script_models(self):
+        marker = self.folder / "executed.txt"
+        main = self.folder / "main.txt"
+        self.script.write_text(textwrap.dedent(MODEL.format(size=3)).replace(
+            'if __name__ == "__main__":',
+            f'from pathlib import Path\nPath({str(marker)!r}).write_text("imported", encoding="utf-8")\n'
+            f'if __name__ == "__main__":\n    Path({str(main)!r}).write_text("main", encoding="utf-8")'), encoding="utf-8")
+        address = str(self.script) + "::block"
+        for options in ((), ("face 1",), ("--query", "build")):
+            missing = self.cli("inspect", address, *options)
+            self.assertNotEqual(missing.returncode, 0, missing.stdout)
+            self.assertIn("no live model", missing.stderr)
+        self.assertFalse(marker.exists())
+        self.assertFalse((self.folder / "XBF/block.xbf").exists())
+        self.built("block")
+        self.assertTrue(marker.exists())
+        self.assertFalse(main.exists(), "explicit decorated-model build does not execute __main__")
+        saved = (self.folder / "XBF/block.xbf").read_bytes()
+        marker.unlink()
+        self.script.write_text('raise RuntimeError("inspection ran source")\n', encoding="utf-8")
+        for options in ((), ("face 1",), ("--query", "build")):
+            inspected = self.cli("inspect", address, *options)
+            self.assertEqual(inspected.returncode, 0, inspected.stderr)
+        self.assertEqual((self.folder / "XBF/block.xbf").read_bytes(), saved)
+        self.assertFalse(marker.exists())
+        self._stop_daemon()
+        missing = self.cli("inspect", address, "face 1")
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("no live model", missing.stderr)
+        inspected = self.cli("inspect", str(self.folder / "XBF/block.xbf"), "--query", "build")
+        self.assertEqual(inspected.returncode, 0, inspected.stderr)
+        self.assertIsNone(json.loads(inspected.stdout)["live"])
+
     def test_named_memory_model_updates_one_address_and_is_gone_after_restart(self) -> None:
         from urllib.parse import urlparse, parse_qs
 
@@ -210,7 +243,7 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(second["url"], first["url"])
         after = get_json(endpoint, token)
         self.assertNotEqual(before["version"], after["version"])
-        measured = self.cli("where", "code::bracket#face 1")
+        measured = self.cli("inspect", "code::bracket#face 1")
         self.assertEqual(measured.returncode, 0, measured.stderr)
         self.assertEqual(json.loads(measured.stdout)["kind"], "face")
         models = json.loads(self.cli("status", "--json").stdout)["models"]
@@ -371,7 +404,7 @@ if __name__ == '__main__':
         self.assertEqual(self.built("pair")["meshed"], 0)
 
     def where(self, ref: str) -> dict:
-        found = engine_daemon.run([sys.executable, "-m", "cadgen.cli", "where", "XBF/block.xbf", ref], cwd=self.folder,
+        found = engine_daemon.run([sys.executable, "-m", "cadgen.cli", "inspect", "XBF/block.xbf", ref], cwd=self.folder,
                                   env=self.env)
         self.assertEqual(found.returncode, 0, found.stderr)
         return json.loads(found.stdout)

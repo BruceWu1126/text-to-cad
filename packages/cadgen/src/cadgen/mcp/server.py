@@ -237,6 +237,8 @@ class Server:
         self._sidebar_views = sidebar_views
         self._model: str | None = None  # what this thread last opened or showed
         self._tools: list[dict[str, Any]] | None = None
+        from .operations import Operations
+        self.operations = Operations()
         self.tabs = False  # decided at initialize: see the module docstring
         self.text = False
         self._viewer_url = viewer_url
@@ -355,6 +357,8 @@ class Server:
     def tools(self) -> list[dict[str, Any]]:
         if self._tools is None:
             self._tools = self._tab_catalog() if self.tabs else self._text_catalog() if self.text else self._inline_catalog()
+            from .operations import catalog
+            self._tools += catalog()
         return self._tools
 
     def _tab_catalog(self) -> list[dict[str, Any]]:
@@ -456,7 +460,9 @@ class Server:
         # Only a tool this client was listed: text clients have no page tools.
         # Shared HTTP calls enforce their own route and consent authorization.
         listed = any(tool["name"] == name for tool in self.tools())
-        handler = getattr(self, f"_tool_{name}", None) if listed else None
+        from .operations import START
+        handler = ((lambda arguments, context: self._operation(name, arguments)) if name in START else
+                   getattr(self, f"_tool_{name}", None)) if listed else None
         if handler is None:
             raise RpcError(INVALID_PARAMS, f"unknown tool {name!r}")
         started = time.monotonic()
@@ -475,6 +481,10 @@ class Server:
             self.analytics.called(name, ok, reason)
             if name not in ("cad_sync", "cad_http"):
                 LOG.info("%s %.0fms", name, (time.monotonic() - started) * 1000)
+
+    def _operation(self, name, arguments):
+        result = self.operations.call(name, arguments)
+        return _text(json.dumps(result), result, error=result["state"] in ("failed", "rejected"))
 
     # launches -----------------------------------------------------------------
 

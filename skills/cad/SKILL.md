@@ -18,7 +18,7 @@ Use the installed local skill files for the current interface.
 | **Export STEP, STL, 3MF or GLB** | A decorator on the model, or `cadgen export` on its `.xbf`. | [Exports](references/supported-exports.md) |
 | **Use a vendor STEP in a model** | `cadgen export vendor.step vendor.xbf` once, then `read_xbf` in the model. | [Inputs](references/model-contract.md#inputs) |
 | **Resolve a reference from a prompt** | `select(document, ref)` in a Python check (below). | [References](references/inspection-and-validation.md#references) |
-| **Find the code that made a face or an edge** | `cadgen where <document> <ref>`. | [Which code made it](references/inspection-and-validation.md#which-code-made-it) |
+| **Find the code that made a face or an edge** | `cadgen inspect <document> <ref>`. | [Which code made it](references/inspection-and-validation.md#which-code-made-it) |
 | **Measure or check geometry** | A Python check: `read_xbf`, `select` and `cadgen.geometry`. | [Inspection](references/inspection-and-validation.md) |
 | **See a model or a pose** | `cadgen snapshot`. | [Snapshots](references/snapshot-review.md) |
 | **Articulate a model** | build123d joints in the body, then `configuration`, `couple` and `motion`. | [Kinematics](references/kinematics.md) |
@@ -166,7 +166,7 @@ print(face.label, face.area)                                          # a Face, 
 ```
 
 `select` returns build123d shapes, one per selector, and `kind="face"` every face
-under what a selector names. `cadgen where XBF/arm.xbf "fore/f:arm.fore.6"` answers
+under what a selector names. `cadgen inspect XBF/arm.xbf "fore/f:arm.fore.6"` answers
 the same ref from the command line: an element's measured facts and what made it,
 or a part's or an assembly's volume and mass. A ref is resolved in the document as
 the latest build left it; one that names nothing, or several things where it names
@@ -222,7 +222,7 @@ print(closest_points(plate, post).distance)   # 0: the standoff sits on the plat
   apart from fits named on purpose, and a part meant to rest on another touches it
   when their `closest_points` distance is 0. Both describe the parts as built, not a
   pose ([interference and contact](references/inspection-and-validation.md#measurements)).
-- `cadgen where XBF/assembly.xbf assembly` weighs an assembly: each part's volume
+- `cadgen inspect XBF/assembly.xbf assembly` weighs an assembly: each part's volume
   times its material's density, and the parts that have no material.
 - A check that fails or cannot decide has shown nothing about the design.
 - A retry that leaves out or shrinks a specified feature (a fillet skipped, a
@@ -235,7 +235,7 @@ print(closest_points(plate, post).distance)   # 0: the standoff sits on the plat
   runs on every build is named in `retention.fallbacks`, with why, in the report
   `bracket.build().models` returns from Python
   ([progress and the report](references/model-contract.md#progress-and-the-report)).
-- `cadgen where XBF/bracket.xbf "bracket/f:bracket.bore.1;M:bracket.body_dnjoch"`
+- `cadgen inspect XBF/bracket.xbf "bracket/f:bracket.bore.1;M:bracket.body_dnjoch"`
   names the function, file and line whose operation made the face a ref names
   ([which code made it](references/inspection-and-validation.md#which-code-made-it)):
   where to edit when a face is wrong.

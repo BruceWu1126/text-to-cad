@@ -623,6 +623,979 @@
    },
    "name": "cad_capture_reply",
    "title": "Answer CAD"
+  },
+  {
+   "annotations": {
+    "destructiveHint": true,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Build Python source assigning result, in the named working directory. Declare a live model and/or absolute file outputs. Does not select a script or execute its __main__; imported code and called decorated models may write their declared outputs. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status lasts up to 24 hours in this MCP session; restart loses it. Running file writes cannot be cancelled.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "anyOf": [
+     {
+      "additionalProperties": false,
+      "properties": {
+       "action": {
+        "enum": [
+         "start"
+        ],
+        "type": "string"
+       },
+       "code": {
+        "maxLength": 1000000,
+        "minLength": 1,
+        "type": "string"
+       },
+       "cwd": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "name": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "outputs": {
+        "additionalProperties": false,
+        "properties": {
+         "dxf": {
+          "minLength": 1,
+          "type": "string"
+         },
+         "glb": {
+          "minLength": 1,
+          "type": "string"
+         },
+         "model": {
+          "enum": [
+           true
+          ],
+          "type": "boolean"
+         },
+         "step": {
+          "minLength": 1,
+          "type": "string"
+         },
+         "stl": {
+          "minLength": 1,
+          "type": "string"
+         },
+         "threemf": {
+          "minLength": 1,
+          "type": "string"
+         },
+         "xbf": {
+          "minLength": 1,
+          "type": "string"
+         }
+        },
+        "required": [],
+        "type": "object"
+       },
+       "profile": {
+        "type": "boolean"
+       },
+       "requestId": {
+        "description": "Unique 16\u2013100 character request ID. Reuse only for an identical start in this session.",
+        "minLength": 1,
+        "type": "string"
+       },
+       "verify": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "requestId",
+       "code",
+       "name",
+       "cwd",
+       "outputs"
+      ],
+      "type": "object"
+     },
+     {
+      "additionalProperties": false,
+      "properties": {
+       "action": {
+        "enum": [
+         "status",
+         "cancel"
+        ],
+        "type": "string"
+       },
+       "afterSequence": {
+        "minimum": 0,
+        "type": "integer"
+       },
+       "epoch": {
+        "description": "Session epoch returned by start; required for status/cancel.",
+        "minLength": 1,
+        "type": "string"
+       },
+       "operationId": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "waitMs": {
+        "maximum": 25000,
+        "minimum": 0,
+        "type": "integer"
+       }
+      },
+      "required": [
+       "action",
+       "operationId",
+       "epoch"
+      ],
+      "type": "object"
+     }
+    ],
+    "properties": {
+     "action": {
+      "default": "start",
+      "enum": [
+       "start",
+       "status",
+       "cancel"
+      ],
+      "type": "string"
+     },
+     "afterSequence": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "code": {
+      "maxLength": 1000000,
+      "minLength": 1,
+      "type": "string"
+     },
+     "cwd": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "epoch": {
+      "description": "Session epoch returned by start; required for status/cancel.",
+      "minLength": 1,
+      "type": "string"
+     },
+     "name": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "operationId": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "outputs": {
+      "additionalProperties": false,
+      "properties": {
+       "dxf": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "glb": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "model": {
+        "enum": [
+         true
+        ],
+        "type": "boolean"
+       },
+       "step": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "stl": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "threemf": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "xbf": {
+        "minLength": 1,
+        "type": "string"
+       }
+      },
+      "required": [],
+      "type": "object"
+     },
+     "profile": {
+      "type": "boolean"
+     },
+     "requestId": {
+      "description": "Unique 16\u2013100 character request ID. Reuse only for an identical start in this session.",
+      "minLength": 1,
+      "type": "string"
+     },
+     "verify": {
+      "type": "boolean"
+     },
+     "waitMs": {
+      "maximum": 25000,
+      "minimum": 0,
+      "type": "integer"
+     }
+    },
+    "required": [],
+    "type": "object"
+   },
+   "name": "cad_build",
+   "outputSchema": {
+    "properties": {
+     "cancellable": {
+      "type": "boolean"
+     },
+     "epoch": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "error": {
+      "type": "string"
+     },
+     "id": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "operation": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "requestId": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "result": {
+      "type": "object"
+     },
+     "sequence": {
+      "type": "integer"
+     },
+     "stage": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "state": {
+      "enum": [
+       "queued",
+       "running",
+       "succeeded",
+       "failed",
+       "cancelled",
+       "rejected"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "state"
+    ],
+    "type": "object"
+   },
+   "title": "Build CAD"
+  },
+  {
+   "annotations": {
+    "destructiveHint": true,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf/.cadz). Reuses the Python export operation, including building a script model source first. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status lasts up to 24 hours in this MCP session; restart loses it. Running file writes cannot be cancelled.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "anyOf": [
+     {
+      "additionalProperties": false,
+      "properties": {
+       "action": {
+        "enum": [
+         "start"
+        ],
+        "type": "string"
+       },
+       "destinations": {
+        "items": {
+         "minLength": 1,
+         "type": "string"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "type": "array"
+       },
+       "inputs": {
+        "type": "boolean"
+       },
+       "part": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "pose": {
+        "type": [
+         "object",
+         "string"
+        ]
+       },
+       "requestId": {
+        "description": "Unique 16\u2013100 character request ID. Reuse only for an identical start in this session.",
+        "minLength": 1,
+        "type": "string"
+       },
+       "source": {
+        "minLength": 1,
+        "type": "string"
+       }
+      },
+      "required": [
+       "requestId",
+       "source",
+       "destinations"
+      ],
+      "type": "object"
+     },
+     {
+      "additionalProperties": false,
+      "properties": {
+       "action": {
+        "enum": [
+         "status",
+         "cancel"
+        ],
+        "type": "string"
+       },
+       "afterSequence": {
+        "minimum": 0,
+        "type": "integer"
+       },
+       "epoch": {
+        "description": "Session epoch returned by start; required for status/cancel.",
+        "minLength": 1,
+        "type": "string"
+       },
+       "operationId": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "waitMs": {
+        "maximum": 25000,
+        "minimum": 0,
+        "type": "integer"
+       }
+      },
+      "required": [
+       "action",
+       "operationId",
+       "epoch"
+      ],
+      "type": "object"
+     }
+    ],
+    "properties": {
+     "action": {
+      "default": "start",
+      "enum": [
+       "start",
+       "status",
+       "cancel"
+      ],
+      "type": "string"
+     },
+     "afterSequence": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "destinations": {
+      "items": {
+       "minLength": 1,
+       "type": "string"
+      },
+      "maxItems": 32,
+      "minItems": 1,
+      "type": "array"
+     },
+     "epoch": {
+      "description": "Session epoch returned by start; required for status/cancel.",
+      "minLength": 1,
+      "type": "string"
+     },
+     "inputs": {
+      "type": "boolean"
+     },
+     "operationId": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "part": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "pose": {
+      "type": [
+       "object",
+       "string"
+      ]
+     },
+     "requestId": {
+      "description": "Unique 16\u2013100 character request ID. Reuse only for an identical start in this session.",
+      "minLength": 1,
+      "type": "string"
+     },
+     "source": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "waitMs": {
+      "maximum": 25000,
+      "minimum": 0,
+      "type": "integer"
+     }
+    },
+    "required": [],
+    "type": "object"
+   },
+   "name": "cad_export",
+   "outputSchema": {
+    "properties": {
+     "cancellable": {
+      "type": "boolean"
+     },
+     "epoch": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "error": {
+      "type": "string"
+     },
+     "id": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "operation": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "requestId": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "result": {
+      "type": "object"
+     },
+     "sequence": {
+      "type": "integer"
+     },
+     "stage": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "state": {
+      "enum": [
+       "queued",
+       "running",
+       "succeeded",
+       "failed",
+       "cancelled",
+       "rejected"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "state"
+    ],
+    "type": "object"
+   },
+   "title": "Export CAD"
+  },
+  {
+   "annotations": {
+    "destructiveHint": true,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. Paths must be absolute on the engine host. A script model source may build first. A failed packet removes its requested pictures. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status lasts up to 24 hours in this MCP session; restart loses it. Running file writes cannot be cancelled.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "anyOf": [
+     {
+      "additionalProperties": false,
+      "properties": {
+       "action": {
+        "enum": [
+         "start"
+        ],
+        "type": "string"
+       },
+       "annotation": {
+        "type": [
+         "object",
+         "array",
+         "string"
+        ]
+       },
+       "camera": {
+        "type": [
+         "object",
+         "array",
+         "string"
+        ]
+       },
+       "display": {
+        "type": [
+         "object",
+         "array",
+         "string"
+        ]
+       },
+       "grid": {
+        "type": "boolean"
+       },
+       "height": {
+        "minimum": 1,
+        "type": "integer"
+       },
+       "measurements": {
+        "type": [
+         "object",
+         "array",
+         "string"
+        ]
+       },
+       "output": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "packet": {
+        "type": [
+         "object",
+         "array",
+         "string"
+        ]
+       },
+       "pose": {
+        "type": [
+         "object",
+         "string"
+        ]
+       },
+       "preview": {
+        "type": "boolean"
+       },
+       "requestId": {
+        "description": "Unique 16\u2013100 character request ID. Reuse only for an identical start in this session.",
+        "minLength": 1,
+        "type": "string"
+       },
+       "size_profile": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "source": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "width": {
+        "minimum": 1,
+        "type": "integer"
+       }
+      },
+      "required": [
+       "requestId"
+      ],
+      "type": "object"
+     },
+     {
+      "additionalProperties": false,
+      "properties": {
+       "action": {
+        "enum": [
+         "status",
+         "cancel"
+        ],
+        "type": "string"
+       },
+       "afterSequence": {
+        "minimum": 0,
+        "type": "integer"
+       },
+       "epoch": {
+        "description": "Session epoch returned by start; required for status/cancel.",
+        "minLength": 1,
+        "type": "string"
+       },
+       "operationId": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "waitMs": {
+        "maximum": 25000,
+        "minimum": 0,
+        "type": "integer"
+       }
+      },
+      "required": [
+       "action",
+       "operationId",
+       "epoch"
+      ],
+      "type": "object"
+     }
+    ],
+    "properties": {
+     "action": {
+      "default": "start",
+      "enum": [
+       "start",
+       "status",
+       "cancel"
+      ],
+      "type": "string"
+     },
+     "afterSequence": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "annotation": {
+      "type": [
+       "object",
+       "array",
+       "string"
+      ]
+     },
+     "camera": {
+      "type": [
+       "object",
+       "array",
+       "string"
+      ]
+     },
+     "display": {
+      "type": [
+       "object",
+       "array",
+       "string"
+      ]
+     },
+     "epoch": {
+      "description": "Session epoch returned by start; required for status/cancel.",
+      "minLength": 1,
+      "type": "string"
+     },
+     "grid": {
+      "type": "boolean"
+     },
+     "height": {
+      "minimum": 1,
+      "type": "integer"
+     },
+     "measurements": {
+      "type": [
+       "object",
+       "array",
+       "string"
+      ]
+     },
+     "operationId": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "output": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "packet": {
+      "type": [
+       "object",
+       "array",
+       "string"
+      ]
+     },
+     "pose": {
+      "type": [
+       "object",
+       "string"
+      ]
+     },
+     "preview": {
+      "type": "boolean"
+     },
+     "requestId": {
+      "description": "Unique 16\u2013100 character request ID. Reuse only for an identical start in this session.",
+      "minLength": 1,
+      "type": "string"
+     },
+     "size_profile": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "source": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "waitMs": {
+      "maximum": 25000,
+      "minimum": 0,
+      "type": "integer"
+     },
+     "width": {
+      "minimum": 1,
+      "type": "integer"
+     }
+    },
+    "required": [],
+    "type": "object"
+   },
+   "name": "cad_snapshot",
+   "outputSchema": {
+    "properties": {
+     "cancellable": {
+      "type": "boolean"
+     },
+     "epoch": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "error": {
+      "type": "string"
+     },
+     "id": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "operation": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "requestId": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "result": {
+      "type": "object"
+     },
+     "sequence": {
+      "type": "integer"
+     },
+     "stage": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "state": {
+      "enum": [
+       "queued",
+       "running",
+       "succeeded",
+       "failed",
+       "cancelled",
+       "rejected"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "state"
+    ],
+    "type": "object"
+   },
+   "title": "Snapshot CAD"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": true
+   },
+   "description": "Read closure, geometry (requires ref), or build metadata of an existing file or live model. Never builds source or writes declared model outputs; an unbuilt or expired model must be explicitly built first. Defaults to geometry with a ref, otherwise closure. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status lasts up to 24 hours in this MCP session; restart loses it. Running file writes cannot be cancelled.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "anyOf": [
+     {
+      "additionalProperties": false,
+      "properties": {
+       "action": {
+        "enum": [
+         "start"
+        ],
+        "type": "string"
+       },
+       "query": {
+        "enum": [
+         "closure",
+         "geometry",
+         "build"
+        ],
+        "type": "string"
+       },
+       "ref": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "requestId": {
+        "description": "Unique 16\u2013100 character request ID. Reuse only for an identical start in this session.",
+        "minLength": 1,
+        "type": "string"
+       },
+       "source": {
+        "minLength": 1,
+        "type": "string"
+       }
+      },
+      "required": [
+       "requestId",
+       "source"
+      ],
+      "type": "object"
+     },
+     {
+      "additionalProperties": false,
+      "properties": {
+       "action": {
+        "enum": [
+         "status",
+         "cancel"
+        ],
+        "type": "string"
+       },
+       "afterSequence": {
+        "minimum": 0,
+        "type": "integer"
+       },
+       "epoch": {
+        "description": "Session epoch returned by start; required for status/cancel.",
+        "minLength": 1,
+        "type": "string"
+       },
+       "operationId": {
+        "minLength": 1,
+        "type": "string"
+       },
+       "waitMs": {
+        "maximum": 25000,
+        "minimum": 0,
+        "type": "integer"
+       }
+      },
+      "required": [
+       "action",
+       "operationId",
+       "epoch"
+      ],
+      "type": "object"
+     }
+    ],
+    "properties": {
+     "action": {
+      "default": "start",
+      "enum": [
+       "start",
+       "status",
+       "cancel"
+      ],
+      "type": "string"
+     },
+     "afterSequence": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "epoch": {
+      "description": "Session epoch returned by start; required for status/cancel.",
+      "minLength": 1,
+      "type": "string"
+     },
+     "operationId": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "query": {
+      "enum": [
+       "closure",
+       "geometry",
+       "build"
+      ],
+      "type": "string"
+     },
+     "ref": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "requestId": {
+      "description": "Unique 16\u2013100 character request ID. Reuse only for an identical start in this session.",
+      "minLength": 1,
+      "type": "string"
+     },
+     "source": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "waitMs": {
+      "maximum": 25000,
+      "minimum": 0,
+      "type": "integer"
+     }
+    },
+    "required": [],
+    "type": "object"
+   },
+   "name": "cad_inspect",
+   "outputSchema": {
+    "properties": {
+     "cancellable": {
+      "type": "boolean"
+     },
+     "epoch": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "error": {
+      "type": "string"
+     },
+     "id": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "operation": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "requestId": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "result": {
+      "type": "object"
+     },
+     "sequence": {
+      "type": "integer"
+     },
+     "stage": {
+      "minLength": 1,
+      "type": "string"
+     },
+     "state": {
+      "enum": [
+       "queued",
+       "running",
+       "succeeded",
+       "failed",
+       "cancelled",
+       "rejected"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "state"
+    ],
+    "type": "object"
+   },
+   "title": "Inspect CAD"
   }
  ]
 }

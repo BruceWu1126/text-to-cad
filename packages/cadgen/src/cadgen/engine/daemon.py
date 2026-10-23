@@ -740,6 +740,15 @@ class Daemon:
         if op == "models":
             send({"ok": True, "models": self.models.listing()})
             return
+        if op == "model_info":
+            self.models.prune()
+            with self.models.lock:
+                record = self.models.records.get(request["address"])
+                if record is None:
+                    send({"failed": f"no live model {request['address']}; build it before inspecting"})
+                else:
+                    send({"model": {key: record[key] for key in ("address", "source", "builtAt", "version", "files")}})
+            return
         if op == "model_source":
             send({"ok": True, "source": self.models.resolve(request["address"])})
             return

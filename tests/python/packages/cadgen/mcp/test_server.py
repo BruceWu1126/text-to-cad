@@ -23,6 +23,7 @@ from cadgen.mcp.shim import initialize_params
 from cadgen.mcp.protocol import RequestContext, RpcError
 from cadgen.viewer.recents import RecentStore
 from cadgen.mcp.server import Server, local_path
+from cadgen.mcp.operations import START
 from cadgen.mcp.tunnel import MAX_REPLY_BYTES
 from cadgen.mcp.ui import AppPage
 
@@ -164,7 +165,7 @@ class TabServerTest(_Session):
         settings = self.tmp / "settings.json"
         settings.write_text('{"features":{"quickEdit":false}}', encoding="utf-8")
         with mock.patch.dict(os.environ, {"CADGEN_STATE_DIR": str(self.tmp)}):
-            for method, expected in (("GET", 404), ("POST", 405)):
+            for method, expected in (("GET", 404), ("POST", 404)):
                 self.assertEqual(request("/__cad/features", {"x-cadgen-app": token, **GUARDED}, method=method)["structuredContent"]["status"], expected)
 
     def test_the_catalog_names_every_surface_and_keeps_page_tools_from_the_agent(self) -> None:
@@ -174,12 +175,12 @@ class TabServerTest(_Session):
                        if "entrypoints" in value.get("openai/ui", {})}
         self.assertEqual(entrypoints, {"cad_home": "global", "cad_tab": "thread", "cad_file": "file"})
         agent = {name for name, value in meta.items() if value.get("ui", {}).get("visibility") != ["app"]}
-        self.assertEqual(agent, {"cad_open", "cad_show", "cad_view", "cad_screenshot", "cad_http"})
+        self.assertEqual(agent, {"cad_open", "cad_show", "cad_view", "cad_screenshot", "cad_http"} | START.keys())
         # The page's own: its sync, its answer to a capture, and the viewer's routes, which carry the rest.
         page = {name for name, value in meta.items() if value.get("ui", {}).get("visibility") == ["app"]} - set(entrypoints)
         self.assertEqual(page, {"cad_sync", "cad_capture_reply"})
         # All but one read: cad_http turns the person's telemetry off when they ask.
-        self.assertEqual([name for name, tool in tools.items() if not tool["annotations"]["readOnlyHint"]], ["cad_http"])
+        self.assertEqual([name for name, tool in tools.items() if not tool["annotations"]["readOnlyHint"]], ["cad_http", "cad_build", "cad_export", "cad_snapshot"])
         uri = tools["cad_home"]["_meta"]["ui"]["resourceUri"]
         self.assertRegex(uri, r"^ui://cad/[0-9a-f]{16}/app\.html$")
         self.assertEqual(tools["cad_open"]["_meta"]["ui"]["resourceUri"], uri)
@@ -279,7 +280,7 @@ class TabServerTest(_Session):
         self.assertEqual((status, folder["entries"]), (200, [{"name": "loose.stl", "kind": "file"}]))
         self.assertEqual(self.http("GET", "/__cad/catalog?file=parts%2Fbracket.stl")[0], 400)
         # A view copies through its host's frame, and no view stops a viewer (this app has no shutdown).
-        self.assertEqual((self.http("POST", "/__cad/clipboard", {})[0], self.http("POST", "/__cad/shutdown", {})[0]), (404, 405))
+        self.assertEqual((self.http("POST", "/__cad/clipboard", {})[0], self.http("POST", "/__cad/shutdown", {})[0]), (404, 404))
 
     def test_a_view_keeps_the_library_and_the_persons_settings_in_this_servers_own(self) -> None:
         # The model on screen joins the library this server lists on the home (each path in this
@@ -463,7 +464,7 @@ class InlineServerTest(_Session):
         tools = {tool["name"]: tool for tool in self.server.handle("tools/list", {}, None)["tools"]}
         agent = {name for name, tool in tools.items() if tool.get("_meta", {}).get("ui", {}).get("visibility") != ["app"]}
         # A chat shows files: no home.
-        self.assertEqual(agent, {"cad_show", "cad_view", "cad_screenshot", "cad_http"})
+        self.assertEqual(agent, {"cad_show", "cad_view", "cad_screenshot", "cad_http"} | START.keys())
         uri = tools["cad_show"]["_meta"]["ui"]["resourceUri"]
         self.assertFalse(any(key.startswith("openai/") for tool in tools.values() for key in tool.get("_meta", {})))
         self.assertEqual((tools["cad_view"]["inputSchema"]["required"], tools["cad_screenshot"]["inputSchema"]["required"]), (["view"], ["view"]))
@@ -535,7 +536,7 @@ class TextServerTest(_Session):
 
     def test_cad_show_links_the_model_in_this_machines_viewer(self) -> None:
         tools = self.server.handle("tools/list", {}, None)["tools"]
-        self.assertEqual([(tool["name"], "_meta" in tool) for tool in tools], [("cad_show", False), ("cad_http", False)])
+        self.assertEqual([(tool["name"], "_meta" in tool) for tool in tools], [("cad_show", False), ("cad_http", False)] + [(name, False) for name in START])
         self.assertIn("cannot show CAD views", self.initialized["instructions"])
         shown = self.call("cad_show", {"path": self.bracket})
         # Text alone: Claude Code shows a result's structured content in place of its text.

@@ -1,8 +1,8 @@
-"""``cadgen where DOC [REF]``: the build closure an xbf holds, or what one thing a ref names is
+"""``cadgen inspect DOC [REF]``: the build closure an xbf holds, or what one thing a ref names is
 and what made it (``cadgen.engine.cli``).
 
 The parser and the run are the engine's (``cadgen.engine.cli.parser_for``, ``run``), the same
-verb ``python -m cadgen.engine where`` takes.
+verb ``python -m cadgen.engine inspect`` takes.
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
-DEFAULT_PROG = "cadgen where"
-ENGINE_VERB = "where"
+DEFAULT_PROG = "cadgen inspect"
+ENGINE_VERB = "inspect"
 
 
 def build_parser(prog: str = DEFAULT_PROG) -> argparse.ArgumentParser:

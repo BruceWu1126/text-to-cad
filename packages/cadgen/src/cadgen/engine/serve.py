@@ -945,9 +945,20 @@ class Server:
 
     def route(self, handler: BaseHTTPRequestHandler, method: str) -> None:
         parsed = urlparse(handler.path)
-        parts = [unquote(part) for part in parsed.path.split("/") if part]
+        parts = [unquote(part) for part in parsed.path.removeprefix("/").split("/")] if parsed.path != "/" else []
         query = parse_qs(parsed.query)
         try:
+            post = len(parts) == 4 and parts[:2] == ["api", "doc"] and parts[3] in ("pose", "mesh")
+            if method not in (("POST",) if post else ("GET", "HEAD")):
+                handler.send_response(405)
+                handler.send_header("Allow", "POST" if post else "GET, HEAD")
+                handler.send_header("Content-Type", "application/json")
+                body = json.dumps({"error": "Method not allowed"}).encode()
+                handler.send_header("Content-Length", str(len(body)))
+                handler.end_headers()
+                if handler.command != "HEAD":
+                    handler.wfile.write(body)
+                return
             if not parts:
                 return self.file(handler, PAGE / "index.html")
             if parts[0] == "page" and len(parts) == 2:
@@ -956,7 +967,7 @@ class Server:
                 target = (self.three / "/".join(parts[1:])).resolve()
                 if self.three.resolve() in target.parents:
                     return self.file(handler, target)
-            if parts[:2] == ["api", "docs"]:
+            if parts == ["api", "docs"]:
                 return self.json(handler, self.listing())
             if parts == ["api", "look"]:
                 return self.json(handler, LOOK.json())

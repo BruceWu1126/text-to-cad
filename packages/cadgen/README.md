@@ -26,7 +26,7 @@ python arm.py                                 # builds it in the engine's warm w
 cadgen export XBF/arm.xbf arm.glb arm.stl     # more translations of the document it wrote
 cadgen snapshot XBF/arm.xbf arm.png           # a still of it, drawn by OCCT
 cadgen serve XBF/arm.xbf                      # the document on a local page
-cadgen where XBF/arm.xbf                      # its build closure
+cadgen inspect XBF/arm.xbf                      # its build closure
 ```
 
 **PURPOSE** — the engine and its command surface: models built in a warm worker whose memo
@@ -92,7 +92,7 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
    retire or the engine restarts. Reusing a code model's name updates that address.
 7. **Provenance is served live, never written.** What made an element -- the feature, its
    operation, the function, file and line of its call -- lives in the trace of the worker that
-   built the document, and is asked of it while it lives (`made_by`, `cadgen where`). A document
+   built the document, and is asked of it while it lives (`made_by`, `cadgen inspect`). A document
    opened with no such worker has none to give, and says so (`made_by: null`).
 8. **Poses and motion definitions, never frames.** The document carries kinematics -- the
    mechanism, its configurations and its motions -- as poses and definitions, never baked frames
@@ -119,7 +119,11 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     memory; the file flags declare files, additive among themselves. `--name`
     alone declares no output. The Python `cadgen.build()` function also accepts an already-built
     build123d shape, with the same output declarations. A script may call that function
-    or its decorated models (law 11).
+    or its decorated models (law 11). `cad_build` exposes the code form with explicit
+    `name`, `cwd` and outputs; it has no script-selection mode. Calling `Model.build()`
+    selects decorated models without running the script's `__main__`; importing that
+    script still runs its top-level Python. Running `python script.py` runs its
+    ordinary program, including `__main__`. Neither meaning is substituted for the other.
 13. **The document's kinematics are AP242's, and cadgen stores no kinematic fact the
     standard cannot name.** Every entity and attribute of the mechanism subtree is ISO
     10303-105's as Part 21 writes it (edition 4's domain model's where Part 21 has none);
@@ -188,13 +192,50 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     Every successful server-backed build reports its address and localhost viewer URL,
     including a build with file outputs. A cold `daemon=False` build has no served URL.
 
+
+## Agent operations
+
+Every MCP presentation exposes `cad_build`, `cad_export`, `cad_snapshot` and
+`cad_inspect`, independently of the viewer. They call the Python operations through
+the engine's workers. `cad_build` takes source text assigning `result`, a name,
+an absolute working directory and explicit live-model/file outputs. Export names
+absolute server-host destinations; snapshot names a PNG or a Quick Edit packet.
+Export and snapshot retain the Python API's script-model build behavior.
+
+Start with a unique `requestId` (16–100 letters, digits, underscores or hyphens).
+The result carries `id`, `epoch`, `state`, `sequence`, stage/progress and, when done,
+`result` or `error`. Use the same tool with `action: "status"`, `operationId` and
+`epoch`; `afterSequence` and `waitMs` (up to 25000) provide bounded waiting. A retry
+with the same request ID joins the identical operation; changed arguments are
+refused. `action: "cancel"` cancels queued work. Running operations can write
+explicit destinations and are not cancellable. Disconnecting does not cancel. File outputs are not a multi-file transaction: a
+failed operation may have written earlier outputs or a called model's declarations.
+Failure results state this explicitly; reports over 2 MiB are explicitly marked
+truncated and can be obtained through the Python API or CLI.
+There is no separate job tool or generic HTTP jobs API.
+
+Status is in session memory for up to 24 hours, bounded to 128 operations and 4096
+request identities; a restart loses it. Expired identities never replay writes.
+`jobs.py` owns admission, progress, waiting and cancellation for both agent
+operations and viewer exports. Viewer exports additionally own temporary artifact
+expiry, revision checks and download delivery; running cancellation discards that
+temporary artifact. Browser downloads choose the viewer user's local destination
+before starting. An agent's explicit host path is a different destination contract.
+
+`cadgen inspect`, `cadgen.inspect()` and `cad_inspect` read existing files or live
+models. They never execute source to obtain a missing model or write its declared
+outputs. An unbuilt or expired model requires an explicit build. With no reference,
+inspection returns the build closure; with a reference it returns geometry facts.
+`query="build"` (`--query build`) returns saved-file metadata and closure or live
+build metadata. File metadata does not imply a live worker. `where` is retired.
+
 ## The shape of the package
 
 ```
 src/cadgen/
   __init__.py            # the root: the engine's surface (xbf, step, ..., select, report)
                          #   and its verbs as functions (build, export, snapshot, serve,
-                         #   where, status, stop, daemon), every name loaded on first use;
+                         #   inspect, status, stop, daemon), every name loaded on first use;
                          #   the font guard and the kernel-import recorder, installed first
   engine/                # the engine: models, the daemon and its workers, documents,
                          #   exports, the mesh, references, the OCCT stills (its README)
@@ -241,7 +282,7 @@ src/cadgen/
                          #   committed, never edited
 ```
 
-Commands: `cadgen build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop` and
+Commands: `cadgen build`, `export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and
 `daemon` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
 snapshot for those files alone; `cadgen urdf|sdf|srdf validate` the validators; `cadgen
 doctor` the installation and a skill's pin; `cadgen viewer` the engine page launcher;

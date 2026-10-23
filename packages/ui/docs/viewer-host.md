@@ -292,14 +292,12 @@ document or revision never retargets it. A Quick Edit that reached its destinati
 `usage.used('quickEdit')`, for its count; a host that throws there changes nothing.
 
 `ViewerHost.promptFiles` is a `PromptFiles`: `create({ name, input, views, annotation })`
-answers `{ inline: compactJson }` or `{ snapshot: absolutePath }`, `read(path)` fetches JSON,
-and optional `save({ name, kind, data })` remains for older clients that export individual
-annotation files. Current chips do not call it. `createHttpPromptFiles({ origin, fetch })` from
+answers `{ inline: compactJson }` or `{ snapshot: absolutePath }`, and `read(path)` fetches JSON. `createHttpPromptFiles({ origin, fetch })` from
 `@text-to-cad/core/client` posts to `POST /__cad/prompt-files`, which validates the packet in memory and returns inline JSON or writes the larger
 snapshot and returns its path with HTTP 200. The client advertises `acceptInline: true`;
 requests without it always receive a saved path, so already-open clients remain compatible. There is no render worker
 or polling endpoint. Guarded `GET /__cad/prompt-files/<name>` serves JSON only;
-`POST /__cad/prompt-files/save` supports those older clients. The files
+The files
 are scratch in the system's temporary directory and outlive the viewer until the
 system clears them. The response and persisted snapshot name input and output
 files by absolute path; annotation data is inline, so replay works from another

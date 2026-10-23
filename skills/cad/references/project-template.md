@@ -78,12 +78,12 @@ def assembly():
 
 ```bash
 python src/assembly.py
-cadgen where XBF/assembly.xbf
+cadgen inspect XBF/assembly.xbf
 ```
 
 Running the root builds its children in the same run, and each writes its own
 `.xbf`; running a child alone leaves the root's document as it was until the root
-runs. `cadgen where` prints what the root's document was built from. For mating
+runs. `cadgen inspect` prints what the root's document was built from. For mating
 datums and joint relationships, see [positioning](positioning.md).
 
 ## Adding capabilities

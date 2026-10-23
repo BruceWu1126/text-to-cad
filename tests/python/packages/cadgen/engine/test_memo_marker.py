@@ -361,13 +361,13 @@ class MemoNamesTest(MemoCase):
         self.assertEqual(self.measured(plain), replayed)
 
     def measured(self, names: dict) -> list:
-        """What `cadgen where` measures of each named face of stage two, by its ref."""
+        """What `cadgen inspect` measures of each named face of stage two, by its ref."""
         from cadgen.engine import api
 
         xbf = self.folder / "XBF" / "staged.xbf"
         found = []
         for name in sorted(names["two"][0].values()):
-            facts = dict(api.where(xbf, f"two/{name}"))
+            facts = dict(api.inspect(xbf, f"two/{name}"))
             found.append((facts["ref"], round(facts["area"], 9), facts.get("kind")))
         return found
 

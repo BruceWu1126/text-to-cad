@@ -44,7 +44,10 @@ def document_route(server, request, response):
     server.route(handler, request.method)
     # Deliberately no CORS headers: all application reads are same-origin or authenticated MCP.
     response.send_bytes(handler.status, handler.wfile.getvalue(),
-                        handler.response_headers.get('content-type', 'application/octet-stream'), RAW_FILE_HEADERS)
+                        handler.response_headers.get('content-type', 'application/octet-stream'),
+                        list({**dict(RAW_FILE_HEADERS), **{key: value for key, value in handler.response_headers.items()
+                              if key not in ('content-type', 'content-length', 'connection', 'cache-control')
+                              and not key.startswith('access-control-')}}.items()))
 
 
 class SessionApp(CadApp):
@@ -80,7 +83,8 @@ class EngineApp:
     def active(self):
         with self.lock:
             apps = [*self.pages.values(), *([self._default] if self._default else [])]
-            return self.active_requests > 0 or any(app._exports and app._exports.keeps_alive() for app in apps)
+            active = self.active_requests > 0 or any(app._exports and app._exports.keeps_alive() for app in apps)
+        return active or bool(self._mcp and self._mcp.active())
 
     def close(self):
         if self._mcp is not None:

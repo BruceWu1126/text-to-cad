@@ -72,7 +72,7 @@ ADAPTERS: dict[str, frozenset[str]] = {
     "export": frozenset({"source", "destinations", "no_inputs", "pose", "part", "no_daemon", "json"}),
     "snapshot": SNAPSHOT,
     "serve": frozenset({"document", "port", "three"}),
-    "where": frozenset({"document", "ref"}),
+    "inspect": frozenset({"document", "ref", "query"}),
     "status": frozenset({"json"}),
     "stop": frozenset(),
     "daemon": frozenset(),
@@ -136,10 +136,10 @@ class Manifest(unittest.TestCase):
         # No backwards compatibility: a retired command has no entry and no module, so it gets the
         # same answer as any unknown command.
         for command in ("step build", "step compile", "step snapshot", "stl build", "stl snapshot", "3mf build",
-                        "3mf snapshot", "glb build", "glb snapshot", "store", "daemon status", "xbf"):
+                        "3mf snapshot", "glb build", "glb snapshot", "store", "daemon status", "xbf", "where"):
             self.assertNotIn(command, cli._COMMANDS)
         for module in ("cadgen.cli.step_build", "cadgen.cli.step_snapshot", "cadgen.cli.stl_build",
-                       "cadgen.cli.store", "cadgen.cli.daemon_status", "cadgen.step", "cadgen.store", "cadgen.daemon"):
+                       "cadgen.cli.where", "cadgen.cli.store", "cadgen.cli.daemon_status", "cadgen.step", "cadgen.store", "cadgen.daemon"):
             with self.subTest(module=module), self.assertRaises(ModuleNotFoundError):
                 importlib.import_module(module)
 
@@ -178,7 +178,7 @@ class Manifest(unittest.TestCase):
         code, out, err = self._dispatch("frobnicate", "build")
         self.assertEqual(2, code)
         self.assertIn("unknown command 'frobnicate'", err)
-        for command in ("build", "export", "snapshot", "dxf snapshot", "urdf validate", "viewer", "where"):
+        for command in ("build", "export", "snapshot", "dxf snapshot", "urdf validate", "viewer", "inspect"):
             self.assertIn(command, err)
 
     def test_a_name_that_is_not_a_verb_raises_the_plain_attribute_error(self):
@@ -191,7 +191,7 @@ class Manifest(unittest.TestCase):
 
     def test_the_engines_verbs_are_commands_of_their_own(self):
         # One parser per verb, the engine's (cadgen.engine.cli), named by the command that runs it.
-        for verb in ("build", "export", "snapshot", "serve", "where", "status", "stop", "daemon"):
+        for verb in ("build", "export", "snapshot", "serve", "inspect", "status", "stop", "daemon"):
             with self.subTest(verb=verb):
                 module = importlib.import_module(cli._COMMANDS[verb][0])
                 self.assertEqual(module.build_parser().prog, f"cadgen {verb}")

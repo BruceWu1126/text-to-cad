@@ -118,7 +118,7 @@ def hinge():
 7. **Provenance is served live, never written.** What made an element -- the
    feature, its operation, the function, file and line of its call -- lives in
    the trace of the worker that built the document, and is asked of it while it
-   lives (`made_by` on the facts endpoints, `cadgen where`). A document
+   lives (`made_by` on the facts endpoints, `cadgen inspect`). A document
    opened with no such worker has none to give, and says so (`made_by: null`).
 8. **Poses and motion definitions, never frames.** The document carries
    kinematics -- the mechanism, its configurations (each a pose: where its parts
@@ -252,7 +252,7 @@ is explicitly restarted. Session state is memory only and is recreated after res
 | Module | What it is |
 | --- | --- |
 | `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run, and the models a target's run ran (`BuildContext.children`); `@memo` and its calls; explicit model calls asking the daemon; a script's module and package (`module_of`); `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
-| `api.py` | the verbs as functions, through the daemon: `build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop`, `daemon` (`cadgen.build`, ...); `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
+| `api.py` | the verbs as functions, through the daemon: `build`, `export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `daemon` (`cadgen.build`, ...); `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`couple`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
 | `build.py` | one build: load the script (as Python imports it: a package's module by its dotted name) or code afresh, one memo run, document, element names, files: every model's that ran |
@@ -270,7 +270,7 @@ is explicitly restarted. Session state is memory only and is recreated after res
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, at most one per core alive (`Pool`), connect-or-start; a worker's memory cap |
 | `progress.py` | where a build is: the author's `report` and `track`, the engine's stages heard where they begin, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
-| `cli.py` | the verbs as commands: `cadgen build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop`, `daemon` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
+| `cli.py` | the verbs as commands: `cadgen build`, `export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `daemon` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
 
 ## CLI
@@ -287,7 +287,7 @@ cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera 
 cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
                                              every picture a Quick Edit packet (or a job file) names
 cadgen serve DOC [--port N] [--three DIR]
-cadgen where DOC [REF]                       the build closure; with REF (**References**): an element's facts and
+cadgen inspect DOC [REF]                       the build closure; with REF (**References**): an element's facts and
                                              what made it, or a part's or an assembly's volume and mass
 cadgen status [--json] | stop | daemon
 ```
@@ -816,7 +816,7 @@ any model has. `--json` prints the report, including `address` and `url`; the te
 `--no-daemon` builds in this process.
 
 **Functions** (`api`, also `cadgen.build`, `cadgen.export`, `cadgen.snapshot`, `cadgen.serve`,
-`cadgen.where`): one per command, each through the daemon. `build(code_or_shape, model=, name=, xbf=, ...)` takes
+`cadgen.inspect`): one per command, each through the daemon. `build(code_or_shape, model=, name=, xbf=, ...)` takes
 source text or an already-built build123d shape, and returns a `Built` (`.files`, `.report`, `.document` and `.shape`
 asked of the worker that holds them, `.export(...)`); `export(source, *destinations, pose=, part=,
 inputs=)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`; `where(doc)` the build
@@ -1070,7 +1070,7 @@ Solid, Shaded and Preview, and a plain finish in X-ray and Parts. In Solid and S
 finishes reflect the studio's neutral environment on those surfaces alone, so a part with no
 material is drawn as ever; an engine document's reflect its look's environment, which lights every
 surface of it, and OCCT's stills draw them the same way (**The look**). A part's chip card and
-`cadgen where` weigh it: volume by density, summed over an assembly.
+`cadgen inspect` weigh it: volume by density, summed over an assembly.
 
 ## Imports
 
@@ -1206,7 +1206,7 @@ during a build too) and never from a file: a document served cold, with no live
 worker that built it (for example, after a daemon restart), answers
 `made_by: null`, and so does an element the served version names otherwise than
 that worker's last build. The line is the call's in the run that named the part.
-`cadgen where DOC REF` serves the document on demand and resolves `REF` (**References**):
+`cadgen inspect DOC REF` serves the document on demand and resolves `REF` (**References**):
 an element answers its facts and `made_by`, with its canonical `ref`, its occurrence's `path`
 (`hand/finger.2`), its part, key, kind, ordinal and name, its points (centroid, position,
 endpoints, box) placed where that occurrence stands; a part or an assembly answers what it
@@ -1602,13 +1602,13 @@ Why that holds, checked:
   a cold build, a body re-run whose 2,673 kernel calls all replayed, and a second cold build
   in a new daemon wrote three different files of one size; their 15,646 element names are the
   same set, each on the same geometry (a face's area and centre, an edge's length and
-  centre, a vertex's point), and refs resolve to the same elements through `cadgen where`.
+  centre, a vertex's point), and refs resolve to the same elements through `cadgen inspect`.
   `test_memo_marker.py` holds the same for a cold build, a replay and a second cold build.
 - **`--verify` reads it as `same`.** A leaf whose BRep differs only in order measures alike
   (**Memo functions**): a verification reports it `same`, never `differs`.
 
 The snapshot's part listing (0.7's `--mode list`) is gone by decision: `read_xbf` and `read_step`
-(a document's tree) and `cadgen where DOC REF` (what a ref names) are the facts route.
+(a document's tree) and `cadgen inspect DOC REF` (what a ref names) are the facts route.
 
 ## Build closure
 
@@ -1640,7 +1640,7 @@ blank line changes no digest; a module the model loads and does not reach holds 
 `inputs` lists every file a body read -- through the engine (`file`: `read_step`, `read_xbf`,
 `read_mesh`, build123d's importers), itself (`read`, a `null` digest for one it found missing),
 or a text's font (`font`) -- by its digest; a file read past the engine's readers leaves the key
-null (**Body retention**). `cadgen where DOC` prints the closure, `cadgen.where(doc)` and
+null (**Body retention**). `cadgen inspect DOC` prints the closure, `cadgen.inspect(doc)` and
 `document.Loaded.closure` read it.
 
 **When the format moves.** The key takes the engine's `format` alone (`previous.FORMAT`),
@@ -1724,14 +1724,18 @@ address and open viewers. Neither code nor an address list is saved. Names are
 ASCII Python identifiers; no generated address or update flag is needed.
 
 `cadgen serve ADDRESS`, `cadgen snapshot ADDRESS view.png`,
-`cadgen export ADDRESS part.step`, and `cadgen where ADDRESS 'face 1'`
-accept model addresses. `cadgen where 'ADDRESS#face 1'` uses the same reference
-syntax. Opening a Python script in the viewer lists its declarations without
+`cadgen export ADDRESS part.step`, and `cadgen inspect ADDRESS 'face 1'`
+accept model addresses. `cadgen inspect 'ADDRESS#face 1'` uses the same reference
+syntax. Inspection reads existing files or live models only: an unbuilt or expired
+script address is refused, never imported or built. `--query build` returns saved-file
+metadata/closure or live-build metadata; `--query closure` and `--query geometry`
+select the other queries explicitly. Opening a Python script in the viewer lists its declarations without
 executing it; choosing one builds that function explicitly. The In memory
 section lists the live models, their addresses, build times and states. An
 expired code address needs another `build --model`; a script address can be
 rebuilt from its source. `--model` needs the warm engine and cannot be combined
-with CLI `--no-daemon`. An explicit export writes only the requested file.
+with CLI `--no-daemon`. Exporting a file or held code writes the requested
+destinations. Exporting a script model builds it first, including its declared files.
 
 Address parsing and declaration listing live in [addresses.py](addresses.py);
 the daemon's transient address book lives in [models.py](models.py).
