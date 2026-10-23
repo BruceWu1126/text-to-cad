@@ -274,12 +274,12 @@ function XbfSurface({ view, data }) {
     // A prompt's annotation is in the scene's coordinates: the document's millimetres.
     annotationUnits: scene?.units?.unit || "mm"
   });
+  // Export writes the document as its code built it: the displayed document and revision alone,
+  // never the selection or the pose (`docs/viewer-host.md`, Export destinations and jobs).
   const exportView = useMemo(() => loaded.document && !host.environment.compact ? {
     doc: loaded.document.source.doc, revision: loaded.revision, file: view.file.path, name: view.file.name,
-    part: !shell.previewing && selected.length === 1 && selectedNodeIds.length === 1 ? tree.refOf(selectedNodeIds[0]) : null,
-    pose: shell.previewing ? null : poseGiven, preview: shell.previewing
-  } : null, [loaded.document, loaded.revision, host.environment.compact, view.file.path, view.file.name,
-    shell.previewing, selected, selectedNodeIds, tree, poseGiven]);
+    preview: shell.previewing
+  } : null, [loaded.document, loaded.revision, host.environment.compact, view.file.path, view.file.name, shell.previewing]);
   useExportView(exportView);
   // A measurement taken, deleted or cleared is a step of the view's one history, with the ink's.
   measure.history.current = shell.frame.history;

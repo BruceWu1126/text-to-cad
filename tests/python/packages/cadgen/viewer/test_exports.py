@@ -147,6 +147,18 @@ class ExportsTest(unittest.TestCase):
         waiter.join(10)
         self.assertEqual(answered[0]["state"], "expired")
 
+    def test_a_running_job_s_status_waits_for_its_next_change(self):
+        # The page polls ``after`` the sequence it holds: a running job's answer is a long poll too,
+        # never an immediate repeat that spins the page's status loop while the kernel works.
+        ident = self.jobs.create(self.request())["id"]
+        self.assertTrue(self.entered.wait(10))
+        running = self.jobs.get(ident)
+        self.assertEqual(running["state"], "running")
+        waits = []
+        with patch.object(self.jobs.changed, "wait_for", side_effect=lambda predicate, timeout: waits.append(timeout) or False):
+            self.assertEqual(self.jobs.get(ident, running["sequence"], 25)["sequence"], running["sequence"])
+        self.assertEqual(waits, [25])
+
     def test_engine_stop_removes_every_artifact_and_discards_running_work(self):
         from cadgen.viewer.engine_app import EngineApp
 

@@ -14,6 +14,9 @@ import { createHarnessRenderer } from '@text-to-cad/ui/renderers/shell-harness';
 import type { ViewerHost } from '@text-to-cad/ui/host';
 import type { LiveViewController } from '@text-to-cad/ui/renderers/xbf';
 import type { ViewerCommands as CadCommands } from '@text-to-cad/ui/renderers/workspace';
+// The module the built renderers publish their export view through (the CAD Viewer's ExportControls
+// provides it): the same built file, so this harness's provider is the one they reach.
+import { ExportContext } from '../../../dist/export/context.js';
 
 // The one file both panes open, by its absolute path, as a CAD Viewer names files: a fixture server
 // lists each of its files under `/models`, so `?file=arm.urdf` (for a test whose fixture is not the
@@ -24,6 +27,9 @@ const promptMessages: string[] = [];
 const captures: { file: string; size: number; type: string; references: unknown }[] = [];
 // What a renderer asked the host to open (a mesh a robot description names, say).
 const opened: string[] = [];
+// What the first pane's renderer handed Export, in order: what a host's Export menu would offer.
+const exportViews: unknown[] = [];
+const publishExportView = (view: unknown) => { exportViews.push(view); };
 // The tab store, as a host builds it: over memory by default (a test seeds it through
 // `window.__cadTabRecord`, so "reopen this file" is a real open against a stored record), or over
 // this page's sessionStorage (`?store=session`), so a reload of the page is a reload of the tab
@@ -93,10 +99,10 @@ function App() {
   const { state: otherState, onStateChange: onOtherStateChange } = useTabViewerState(otherTabStore);
   const [second, setSecond] = useState(false);
   const [mounted, setMounted] = useState(true);
-  Object.assign(window, { cadHarness: { a, b, state, otherState, preferences, tabStore, record: tabStore.getSnapshot(), captures, promptMessages, opened, capture: a.capture, selectReference: a.selectReference, second: setSecond, mounted: setMounted } });
+  Object.assign(window, { cadHarness: { a, b, state, otherState, preferences, tabStore, record: tabStore.getSnapshot(), captures, promptMessages, opened, exportViews, capture: a.capture, selectReference: a.selectReference, second: setSecond, mounted: setMounted } });
   return <div className="dark" style={{ display: 'flex', width: '1200px', height: '720px' }}>
     <section data-testid="one" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-      {mounted && <FileViewer file={file} host={a.host} renderers={a.renderers} state={state} onStateChange={onStateChange} />}
+      {mounted && <ExportContext.Provider value={publishExportView}><FileViewer file={file} host={a.host} renderers={a.renderers} state={state} onStateChange={onStateChange} /></ExportContext.Provider>}
     </section>
     {second && <section data-testid="two" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
       <FileViewer file={file} host={b.host} renderers={b.renderers} state={otherState} onStateChange={onOtherStateChange} />
