@@ -162,13 +162,15 @@ def hinge():
 14. **Connected means warm.** A worker is not retired for idleness while any served
     document it built has a version wait outstanding or completed a sync within `serve.LIVE`
     seconds. Heartbeats use the canonical document address, including `code::NAME`
-    and `script.py::NAME`; they never turn a model address into a file path. The memory cap still applies. Closing a page never stops the engine or its
+    and `script.py::NAME`; they never turn a model address into a file path. The memory cap still applies; the
+    worker-count cap takes a watched worker only when every idle worker is watched. Closing a page never stops the engine or its
     worker; once its last sync expires, ordinary idle retirement applies.
 
 15. **One HTTP owner per installation.** The daemon serves page sessions and document
     reads on one authenticated listener. Both `serve` and `viewer` start or reuse it;
     neither command has a standalone serving mode. A launcher exits after handing its client the
-    engine URL; closing a client never stops the engine. Each page has its own catalog root.
+    engine URL; closing a client never stops the engine. Each page session has its own start
+    folder, which a relative `?file=` resolves against; files are read by absolute path.
     No page replaces or re-executes the engine; stopping it is an explicit engine operation.
 16. **No kernel in request threads.** Reading XBF/STEP, meshing, topology facts and poses
     run in child processes. The daemon holds structures and buffers, never live kernel objects.
@@ -199,7 +201,7 @@ Every successful build registers a lightweight document address and URL; registr
 A model's worker is a separate process, holding its memo and live kernel objects.
 The distribution injects its HTTP application through `daemon.HTTP_FACTORY`; this
 standalone engine imports no application module. The application serves the built
-viewer and per-launch catalog sessions on that listener. Document routes run in
+viewer and per-launch page sessions on that listener. Document routes run in
 process, with no network relay. Kernel reads, topology, poses and meshes run in
 reader/mesh subprocesses; even an inline-mesh request stays outside the daemon.
 
