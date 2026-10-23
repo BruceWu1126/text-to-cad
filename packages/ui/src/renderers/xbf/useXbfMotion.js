@@ -30,7 +30,8 @@ function motionRows(kinematics) {
  *
  * The motion owns the posed state while it is `enabled`: from the first play, scrub or choice of a
  * motion until Reset lets go of it; paused, its frame stays on the model. Letting go calls
- * `pose(null)`, which gives the pose back to what held it before (Position's), untouched meanwhile.
+ * `pose(null)`: the scene is posed as Position now holds it, which taking the motion up put at rest
+ * (one motion at a time, nothing set aside: `motionExclusion.js`).
  * The file opens with no motion owning anything, and so does each new revision of the model.
  *
  * @param {object | null} kinematics  The scene's mechanism (`xbfKinematics.js`).
@@ -80,7 +81,7 @@ export function useXbfMotion(kinematics, pose) {
     clock.resetAnimationClock();
     update({ enabled: true, playing: false, elapsedSec: 0 });
   }, [clock, update]);
-  // Stop: stopped, rewound, and the pose given back; the motion in hand, Speed and Loop stay.
+  // Stop: stopped, rewound and let go of; the motion in hand, Speed and Loop stay.
   const onRelease = useCallback(() => {
     if (!stateRef.current.enabled && !stateRef.current.playing) return;
     clock.resetAnimationClock();
@@ -114,7 +115,7 @@ export function useXbfMotion(kinematics, pose) {
     return () => window.cancelAnimationFrame(frameId);
   }, [activeClip, state.playing, clock, update]);
 
-  // The motion poses the scene exactly while it is enabled; letting go gives the pose back.
+  // The motion poses the scene exactly while it is enabled; letting go hands the scene back.
   const timeline = state.enabled ? activeClip?.timeline || null : null;
   const frameRef = useRef(null);
   usePlaybackFrames(clock, state.playing, frameRef);

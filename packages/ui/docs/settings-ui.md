@@ -220,11 +220,8 @@ pose back at rest, and using either puts the routine back at rest; paused, its f
 model as a pose does. Preview's routine is its own and moves nothing of the tools view's.
 Another file has the motions its tools have, under the same rule, decided by value
 (`kit/tools/model-effects/motionExclusion.js`): a GLB's Explode, routine and Clip; a robot's
-Position and Clip. An engine document's motions (its **Motion** section) take the pose and give
-it back instead: while one owns the pose — from a play, a scrub or a choice of motion until Reset
-motion — its frames pose the parts, Position shows them read-only and Select draws no knobs, and
-Reset puts Position's own pose back as it was left; Explode, Clip and every other tool's state
-stay as they are throughout.
+Position and Clip; an engine document's Explode, Position and its motions (its **Motion**
+section, where Position shows a motion's frame read-only while it owns the pose).
 
 A tree is the file sidebar's, on screen under every tool; a pick in it takes Select up
 before it acts.

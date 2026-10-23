@@ -154,7 +154,7 @@ export function useXbfPose(kinematics) {
  *   `NO_PRESET_VALUE` set by hand. `onValues` takes every pair's values, and every coupling's when a
  *   coupling's slider moved. `motion`: the motion that owns the pose while it does (`useXbfMotion.js`):
  *   the section shows its frame, read-only, each coupling where the frame stands on it, and takes no
- *   edit; Position's own pose is untouched underneath and comes back when the motion is let go.
+ *   edit (taking the motion up put Position's own pose at rest: one motion at a time).
  */
 export default function XbfPositionSection({ kinematics, motion = null, ...own }) {
   const frame = useMotionFrame(kinematics, motion);
