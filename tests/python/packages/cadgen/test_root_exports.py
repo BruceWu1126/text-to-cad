@@ -24,7 +24,8 @@ VERBS = ("export", "snapshot", "inspect")
 ROOT = (*ENGINE, *VERBS, "__version__")
 # The names that are the standards' rather than the engine's.
 NAMESPACES = {
-    "cadgen.ap242": ("mechanism_state", "configuration_sequence", "gear_pair", "rack_and_pinion_pair", "screw_pair"),
+    "cadgen.ap242": ("mechanism_state", "configuration_sequence", "gear_pair", "rack_and_pinion_pair", "screw_pair",
+                     "posed"),
     "cadgen.gltf": ("animation",),
 }
 
@@ -72,7 +73,8 @@ class RootExports(unittest.TestCase):
         from cadgen.engine import mechanism, model
 
         defined = {"mechanism_state": model, "configuration_sequence": model, "animation": model,
-                   "gear_pair": mechanism, "rack_and_pinion_pair": mechanism, "screw_pair": mechanism}
+                   "gear_pair": mechanism, "rack_and_pinion_pair": mechanism, "screw_pair": mechanism,
+                   "posed": mechanism}
         for namespace, names in NAMESPACES.items():
             module = importlib.import_module(namespace)
             self.assertEqual(sorted(names), sorted(module.__all__))

@@ -119,7 +119,7 @@ import numpy as np
 
 __all__ = ["CONFIGURATIONS", "COUPLINGS", "GUID", "MOTIONS", "Coupling", "KinematicsError", "Link", "Mechanism",
            "Motion", "Pair", "Timeline", "block", "configuration_sequence", "gear_pair", "harvest", "mechanism_state",
-           "posed_structure", "rack_and_pinion_pair", "read", "resolve", "screw_pair", "write"]
+           "posed", "posed_structure", "rack_and_pinion_pair", "read", "resolve", "screw_pair", "write"]
 
 GUID = "5b0e7a64-3c1d-4f8e-a2b9-6d4c1e7f9a20"
 TAG = 100  # Main():100, clear of XCAFDoc_DocumentTool's tool labels (1..10)
@@ -531,6 +531,102 @@ def configuration_sequence(assembly: Any, name: str, waypoints_or_fn: Any = None
 
 
 # --- harvest -----------------------------------------------------------------------------
+
+
+def posed(assembly: Any, state: Any) -> Any:
+    """A copy of ``assembly`` with every part where ``state`` puts it: a mechanism state's name, or
+    ``{joint label or coupling name: value}`` (the values ``mechanism_state`` takes, the rest as
+    built). The parts move by the forward kinematics the viewer and the snapshot use
+    (``link_worlds``): each link's placement at the asked values over its placement as built,
+    applied to that link's parts. The copy shares the geometry, and keeps the joints, couplings,
+    mechanism states and configuration sequences, the asked values its as-built state. An unknown
+    state, joint or coupling, or a value out of range, is refused by name (``resolve``). A posed
+    file is this, a function in the model's code: ``return posed(arm(), "folded")``."""
+    from collections.abc import Mapping
+
+    import build123d as bd
+    from build123d.topology.shape_core import _make_topods_compound_from_shapes, downcast
+    from OCP.gp import gp_Trsf
+    from OCP.TopAbs import TopAbs_COMPOUND
+    from OCP.TopLoc import TopLoc_Location
+
+    from cadgen.engine import document
+    from cadgen.engine.model import instance
+
+    if not isinstance(assembly, bd.Shape):
+        raise TypeError(f"posed() takes the assembly whose joints it sets, not {type(assembly).__name__}")
+    if isinstance(state, Mapping):
+        pose: Any = dict(state)
+    elif isinstance(state, str):
+        pose = state
+    else:
+        raise TypeError("posed() takes a mechanism state's name or a mapping of joint labels to values, "
+                        f"not {type(state).__name__}")
+    made = instance(assembly)
+    tree = document.collect(made, made.__dict__.get("label") or "posed")
+    children = made.__dict__.get("_NodeMixin__children") or ()
+    whole = (children and int(made.wrapped.ShapeType()) == int(TopAbs_COMPOUND)
+             and len(document._children(made.wrapped)) == len(children))
+    root_path = () if whole and made.wrapped.Location().IsIdentity() else (0,)
+    kinematics = None if tree.mechanism is None else block(
+        tree.mechanism, [], lambda at: _column(_numpy(_occurrence(tree, at)[0])))
+    values, _named = resolve(kinematics, pose)
+    if kinematics is None:
+        return made
+    now = link_worlds(kinematics, values)
+    then = link_worlds(kinematics, {label: _as_tuple(value) for label, value in kinematics["asBuilt"].items()})
+    moved = {tuple(path): now[at] @ np.linalg.inv(then[at])
+             for at, link in enumerate(tree.mechanism.links) for path in link.members}
+
+    def located(matrix: np.ndarray) -> Any:
+        trsf = gp_Trsf()
+        trsf.SetValues(*(float(matrix[row, column]) for row in range(3) for column in range(4)))
+        return TopLoc_Location(trsf)
+
+    # Every node from the root down: where it stood, where it stands now, its place in its parent.
+    objects = sorted(_objects(made, root_path), key=lambda item: len(item[1]))
+    built = {path: _numpy(_occurrence(tree, path)[0]) if path else np.eye(4) for _obj, path in objects}
+    worlds: dict[tuple[int, ...], np.ndarray] = {}
+    changed: set[tuple[int, ...]] = set()
+    for obj, path in objects:
+        above = path[:-1] if path != root_path else None
+        parent_then = built[above] if above is not None else np.eye(4)
+        parent_now = worlds[above] if above is not None else np.eye(4)
+        local = np.linalg.inv(parent_then) @ built[path]
+        if path in moved:
+            worlds[path] = moved[path] @ built[path]
+            local_now = np.linalg.inv(parent_now) @ worlds[path]
+        else:
+            local_now = local
+            worlds[path] = parent_now @ local
+        if not np.allclose(local_now, local, rtol=0, atol=1e-12):
+            obj.__dict__["_wrapped"] = downcast(obj.wrapped.Located(located(local_now)))
+            changed.add(path)
+    # Each compound holding a moved node is made again around its children, where it stood.
+    for obj, path in reversed(objects):
+        held = obj.__dict__.get("_NodeMixin__children") or ()
+        if held and any(path + (at,) in changed for at in range(len(held))):
+            own = obj.wrapped
+            compound = _make_topods_compound_from_shapes([child.wrapped for child in held]).Located(own.Location())
+            compound.Orientation(own.Orientation())
+            obj.__dict__["_wrapped"] = downcast(compound)
+            changed.add(path)
+    # The joints say the values they now stand at, as ``connect_to`` would have left them.
+    naming = {path: "/".join(_occurrence(tree, path)[1]) for _obj, path in objects}
+    for obj, path in objects:
+        for joint in (obj.__dict__.get("joints") or {}).values():
+            kind = _joint_kind(joint)
+            label = next((key for key in (joint.label, f"{naming[path]}:{joint.label}") if key in values), None)
+            if label is None or kind in (None, "rigid", "spherical"):
+                continue
+            value = values[label]
+            if kind == "revolute":
+                joint._angle = value[0]
+            elif kind == "prismatic":
+                joint.position = value[0]
+            else:
+                joint.angle, joint.position = value
+    return made
 
 
 def _objects(result: Any, root_path: tuple[int, ...]) -> list[tuple[Any, tuple[int, ...]]]:
