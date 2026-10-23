@@ -685,6 +685,23 @@ if __name__ == '__main__':
         self.assertEqual(found["name"], "plug")
         self.assertAlmostEqual(found["volume"], 8 - 3.14159265 * 0.25 * 2, places=2)
 
+    def test_a_build_with_no_page_starts_no_meshing_process(self) -> None:
+        """``python model.py`` serves its document, so the daemon starts its server; the meshing
+        pool waits for a page, a view or a mesh: the daemon's only child is the worker."""
+        env = {name: value for name, value in self.env.items() if name != "CADGEN_ENGINE_MESH"}
+        self.script.write_text(textwrap.dedent(MODEL.format(size=3)), encoding="utf-8")
+        done = self.run_script("block.py", env=env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("  view: http://127.0.0.1:", done.stdout, "the build registered its page")
+        status = json.loads(self.cli("status", "--json", env=env).stdout)
+        children = []
+        for path in Path(env[engine_daemon.JOURNAL]).glob("*-*.txt"):
+            role, _, pid = path.stem.partition("-")
+            first = path.read_text(encoding="utf-8").split("\n", 1)[0]
+            if pid.isdigit() and f"parent={status['pid']} " in first and engine_daemon._alive(int(pid)):
+                children.append((role, int(pid)))
+        self.assertEqual(children, [("worker", status["workers"][0]["pid"])])
+
     def test_warming_starts_the_server_before_any_document(self) -> None:
         """What the viewer asks at its launch (``{"op": "warm"}``): the daemon, its server and the
         processes a first document waits on, started with no document served; asked again, nothing more."""

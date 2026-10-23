@@ -55,7 +55,8 @@ page keeps the old version until the new one is in. Its structure says how long 
 took and which process made it (``read``).
 
 Meshing runs off the request's thread (``Mesher``): by default on a pool of processes
-started with the server and kept warm, each handed one part's shape bytes; or ``inline``
+started with the first page or view (``warm``) or the first mesh, topology or pose asked, and
+kept warm, each handed one part's shape bytes; or ``inline``
 (``CADGEN_ENGINE_MESH=inline``, or ``?mode=inline``), one part after another on one thread,
 each spread over the kernel's own threads. A document's parts go to the pool largest
 first, by their shape bytes (of face count, bounding diagonal and bytes, the bytes
@@ -182,7 +183,8 @@ MESHES = MeshCache()
 # The kernel's mesher holds the interpreter's lock for the whole of a call (measured: ten
 # threads mesh no faster than one), so parts are meshed in parallel two ways: ``inline``,
 # one part after another, each call spreading that part's faces over the kernel's own
-# threads; or ``processes``, a pool started with the server and kept warm, each job one
+# threads; or ``processes``, a pool started on its first job or ``Server.warm`` -- never
+# with the server, which every build starts -- and kept warm, each job one
 # part's shape handed over as the kernel's binary shape bytes -- no process reads a
 # document, so a large document costs its parts' bytes, not one read per process.
 
@@ -234,10 +236,10 @@ class Mesher:
         self._inline = concurrent.futures.ThreadPoolExecutor(1, thread_name_prefix="mesh")
         self._processes: concurrent.futures.ProcessPoolExecutor | None = None
         self.lock = threading.Lock()
-        if self.mode == "processes":
-            self.processes()
 
     def processes(self) -> concurrent.futures.ProcessPoolExecutor:
+        """The pool, started on its first use: a build serves its document with no page open,
+        and a pool started then would hold ``workers`` kernels nobody asked for."""
         with self.lock:
             if self._processes is None:
                 import multiprocessing
@@ -490,8 +492,8 @@ class Server:
         self.thread.start()
 
     def warm(self) -> None:
-        """The processes a first document waits on, started now (the viewer's launch asks it):
-        the meshing pool, warming since the server started, and a STEP reader when none has read
+        """The processes a first document waits on, started now (a viewer's launch and an app's
+        view ask it): the meshing pool, and a STEP reader when none has read
         yet -- a reader takes one read and goes, so a no-op takes the first and the one a read
         takes starts warm meanwhile."""
         if self.mesher.mode == "processes":

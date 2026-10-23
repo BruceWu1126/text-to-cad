@@ -228,9 +228,10 @@ def local_path(value: str, *, windows: bool = os.name == "nt") -> str:
 
 class Server:
     def __init__(self, *, page: AppPage | None = None, recents=None, tunnel=None, viewer_url=None,
-                 sidebar_views=None, analytics=None, sync_document=lambda path: None) -> None:
+                 sidebar_views=None, analytics=None, sync_document=lambda path: None, warm=lambda: None) -> None:
         self.page = page or AppPage()
         self.sync_document = sync_document
+        self.warm = warm  # the engine's meshing pool, started when a view is launched (``Server.warm``)
         self.views = ViewRegistry()
         self._recents = recents
         self._tunnel = tunnel
@@ -495,6 +496,7 @@ class Server:
         if surface:
             launch["surface"] = surface
         self._model = model
+        self.warm()  # the view's first document meshes on a pool already starting
         return _stamped(launch)
 
     def _home(self, *, surface: str | None = None) -> dict[str, Any]:
@@ -636,6 +638,7 @@ class Server:
             raise ToolFailed(f"This app cannot show CAD views, and the CAD Viewer did not start ({failure}). Run "
                              f"`cadgen viewer --host 127.0.0.1 --json` and open {model_link('<the url it prints>', model)}.",
                              "no_viewer") from failure
+        self.warm()  # the browser page's first document meshes on a pool already starting
         link = model_link(url, model)
         # Text alone: an app that shows a result's structured content shows it in place of the text
         # (Claude Code does), and the agent would get neither this guidance nor the update line.

@@ -48,6 +48,10 @@ def main(argv=None, *, prog=DEFAULT_PROG):
         answer = request({'op': 'viewer', **options})
         if not answer or 'failed' in answer:
             raise ValueError((answer or {}).get('failed', 'engine did not answer'))
+        # The meshing pool starts with the first page, not with the engine (every build starts
+        # that): started now, it warms while the browser opens. CADGEN_VIEWER_WARM=0 skips it.
+        if os.environ.get('CADGEN_VIEWER_WARM', '').strip() != '0':
+            request({'op': 'warm'})
     except (OSError, ValueError) as error:
         print(f'CAD Viewer: {error}', file=sys.stderr)
         return 1

@@ -483,6 +483,13 @@ class InlineServerTest(_Session):
         self.assertEqual(page, '<!doctype html><meta name="cad-presentation" content="inline"><title>CAD</title>')
         self.assertNotEqual(uri, AppPage(self.tmp / "app").uri)
 
+    def test_a_mounted_view_warms_the_engine_s_meshing_pool(self) -> None:
+        # The engine starts its pool with the first view, never with a build (law 19).
+        warmed = []
+        self.server.warm = lambda: warmed.append(True)
+        self.launch("cad_show", {"path": self.bracket})
+        self.assertEqual(warmed, [True])
+
     def test_each_show_mounts_a_new_view_named_and_ordered(self) -> None:
         first = self.launch("cad_show", {"path": self.bracket})
         second = self.launch("cad_show", {"path": self.loose})
