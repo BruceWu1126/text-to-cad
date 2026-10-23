@@ -301,6 +301,14 @@ class TabServerTest(_Session):
             self.assertEqual(self.http("POST", "/__cad/analytics", {"share": False})[0], 200)
         answered.assert_called_once_with(False, by="app")
 
+    def test_a_sync_renews_the_lease_of_the_address_it_names(self) -> None:
+        # A heartbeat names the document by its canonical address: a model address is never made a path.
+        synced = []
+        self.server.sync_document = synced.append
+        for model in ("code::bracket", "C:/parts/plate.py::plate", self.bracket):
+            self.call("cad_sync", {"view": "v1", "surface": "tab", "model": model})
+        self.assertEqual(synced, ["code::bracket", "C:/parts/plate.py::plate", self.bracket])
+
     def test_a_sync_says_when_the_catalog_moved(self) -> None:
         watch = {"file": self.bracket}
         first = self.call("cad_sync", {"view": "v1", "surface": "tab", "watch": watch})["structuredContent"]
