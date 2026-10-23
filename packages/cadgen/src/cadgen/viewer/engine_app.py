@@ -185,6 +185,7 @@ class EngineApp:
             launch = self.launch({'start': start})
             if 'failed' in launch:
                 return response.send_json(503, launch)
+            self.server.warm()  # a build's view link opened: its meshing pool starts as the page loads
             return response.send_bytes(302, b'', '', [('location', launch['apiUrl']+'/?'+urlencode({'file': str(path)}))])
         if request.path.startswith('/s/'):
             parts = request.path.split('/', 3)

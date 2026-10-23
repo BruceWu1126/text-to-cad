@@ -171,9 +171,9 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
 
 19. **Connected means warm.** A served document's outstanding version wait or recent
     sync protects the worker that built it from idle retirement. The engine outlives its
-    clients; a page closing never stops a worker. The memory cap still applies; the worker-count
-    cap takes a watched worker only when every idle worker is watched (the engine's
-    **Architecture** and **The daemon and its workers**).
+    clients; a page closing never stops a worker. The worker-count cap never retires a worker
+    whose document a page watches; it is exceeded instead. The memory cap may retire it (the
+    engine's **Architecture** and **The daemon and its workers**).
 
 20. **One engine serves the installation.** A page never replaces or re-executes it. Page sessions and document reads share its
     authenticated HTTP listener. `serve` and `viewer` always start or reuse it, with no

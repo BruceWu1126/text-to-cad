@@ -221,15 +221,33 @@ class ConnectedPoolTest(unittest.TestCase):
         third = daemon.pool.lease("third.py", {})
         self.assertTrue(unwatched.stopped, "the unwatched worker made room")
         self.assertFalse(watched.stopped, "a watched worker is not the count cap's victim")
+        self.assertEqual([row["reason"] for row in daemon.pool.retired], ["LRU"])
+
+    def test_at_the_cap_with_every_idle_worker_watched_a_new_build_starts_past_the_cap(self) -> None:
+        from cadgen.engine.serve import Server
+
+        daemon = Daemon(3600, cap=2)
+        daemon.pool.start = Fake
+        server = daemon.server = Server(mesh_mode="inline")
+        self.addCleanup(daemon.shutdown)
+        watched = []
+        for name in ("one", "two"):
+            worker = daemon.pool.lease(f"{name}.py", {})
+            daemon.pool.release(worker)
+            server.put(f"code::{name}", {"version": "one", "prototypes": []}, {})
+            daemon.builders[os.path.normcase(f"code::{name}")] = worker
+            server.sync(f"code::{name}")
+            watched.append(worker)
+        third = daemon.pool.lease("third.py", {})
+        self.assertEqual(len(daemon.pool.workers()), 3, "the cap is exceeded, not met by an eviction")
+        self.assertFalse(any(worker.stopped for worker in watched), "the watched workers live")
+        self.assertEqual(list(daemon.pool.retired), [])
+        # Past the cap, an unwatched idle worker is the next build's victim, the watched ones never.
         daemon.pool.release(third)
-        # Only watched idle workers left: the least recently used of them still goes, so a
-        # build never waits on an open page.
-        server.put("code::third", {"version": "one", "prototypes": []}, {})
-        daemon.builders[os.path.normcase("code::third")] = third
-        server.sync("code::third")
         daemon.pool.lease("fourth.py", {})
-        self.assertTrue(watched.stopped and not third.stopped)
-        self.assertEqual([row["reason"] for row in daemon.pool.retired], ["LRU", "LRU"])
+        self.assertTrue(third.stopped)
+        self.assertFalse(any(worker.stopped for worker in watched))
+        self.assertEqual([row["reason"] for row in daemon.pool.retired], ["LRU"])
 
     def test_memory_model_sync_keeps_its_worker_warm(self) -> None:
         from cadgen.engine.serve import LIVE, Server

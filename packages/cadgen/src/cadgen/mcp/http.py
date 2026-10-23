@@ -87,7 +87,7 @@ class Sessions:
             return answer['url']
         server = Server(page=page, tunnel=ViewerTunnel(app=app), analytics=self.engine.analytics,
                         sidebar_views=SidebarViews(self.sidebar), viewer_url=viewer_url,
-                        sync_document=self.engine.server.sync)
+                        sync_document=self.engine.server.sync, warm=self.engine.server.warm)
         result = server.handle('initialize', params, RequestContext(None, {}))
         client = params.get('clientInfo')
         client = client if isinstance(client, dict) else {}
