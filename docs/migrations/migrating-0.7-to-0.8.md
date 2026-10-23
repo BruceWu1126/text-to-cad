@@ -57,7 +57,7 @@ until it is used. The 0.7 store, sidecars and STEP-format commands are gone.
 Do these in order. Later steps assume earlier ones.
 
 - [ ] 1. Rewrite imports
-- [ ] 2. Convert each model to `@model`, parameters to `@memo` helpers
+- [ ] 2. Convert each model to `@model`, each variant a model of its own
 - [ ] 3. Move files out of the model: exports on request, or `exports.py`
 - [ ] 4. Move mates to build123d joints and the mechanism's AP242 functions
 - [ ] 5. Move clips to configuration sequences and animations
@@ -107,7 +107,7 @@ Everything else 0.7 exported from the root is gone:
 | `label_shape`, `label_text` | `shape.label = "name"` |
 | `ensure_step_topology_artifact` | nothing: the viewer reads a STEP as it is |
 
-### 2. Convert each model to `@model`, parameters to `@memo` helpers
+### 2. Convert each model to `@model`, each variant a model of its own
 
 ```python
 # bracket.py (0.7)
@@ -136,10 +136,9 @@ if __name__ == "__main__":
 ```python
 # bracket.py (0.8)
 import build123d as bd
-from cadgen import memo, model
+from cadgen import model
 
 
-@memo
 def bracket_body(width, bore):
     body = bd.Box(width, 20, 6)
     body = body - bd.Cylinder(bore / 2, 6)
@@ -166,11 +165,10 @@ Mechanically:
 
 1. **Replace each file decorator with `@model`.** A model still takes no parameters and
    returns a build123d shape: a part, or a `Compound` of labelled children.
-2. **Move parameters onto a `@memo` helper.** `@memo` marks a function the engine may
-   replay instead of running: a call is keyed by its code and its arguments (plain
-   values, build123d's value types, materials, shapes), and a later run with the same
-   key replays it, element names and all. It must return geometry and change nothing
-   outside itself.
+2. **Keep parameters on plain helper functions.** A model function takes none; its
+   values are the arguments of the helpers it calls, as a 0.7 factory's were. The helpers
+   need no marking: the engine keeps every kernel operation, keyed by its inputs, and
+   replays what an edit did not reach.
 3. **Make each variant a named model.** A configuration (a wide bracket, an M4
    standoff) is a `@model` of its own that calls the helper with its values. Each has
    its own document, id and page.
@@ -179,6 +177,12 @@ Mechanically:
 5. **Composition is unchanged.** An assembly's body calls its part models, places what
    they return and labels the placements. A child builds in the same run and keeps its
    own document.
+6. **Mark only big stages `@memo`.** `@memo` (new in 0.8) marks a function the engine
+   may replay whole instead of running, keyed by its code and its arguments. Since every
+   kernel call is replayed anyway, a memo hit saves only Python time (0.1 to 0.4 ms per
+   kernel call): mark a whole sub-assembly stage of a thousand kernel calls or more
+   (measured at 1.3 to 3 s each, twice as fast on an edit), never a part and never a
+   helper called many times.
 
 `python model.py` takes no options. 0.7's `--force`, `--json`, `--verbose`, `--profile`,
 `--mesh-tolerance` and `--no-daemon` are unrecognized arguments; there is nothing to
@@ -506,7 +510,7 @@ opt in.
 
 | Thing | 0.7 | 0.8 |
 | --- | --- | --- |
-| A model | `@step(out=...)` (or a mesh decorator) on a parameterless function | `@model` on a parameterless function; parameters on `@memo` helpers |
+| A model | `@step(out=...)` (or a mesh decorator) on a parameterless function | `@model` on a parameterless function; parameters on plain helpers |
 | A run | writes every declared file | writes nothing; updates the document and its pages |
 | A file | written by every run, or by `cadgen <format> build` | written on request by `cadgen export`, or by `exports.py` |
 | The model's document | a STEP plus a `<name>.step.json` sidecar | held by the engine at `/<uuid>`; an `.xbf` when saved as one |
@@ -539,7 +543,7 @@ opt in.
 
 ## Migration complete when
 
-- [ ] Every model is `@model` on a parameterless function, its values on `@memo` helpers,
+- [ ] Every model is `@model` on a parameterless function, its values on plain helpers,
       and each variant a named model.
 - [ ] `import build123d as bd` everywhere; no `from cadgen import build123d`.
 - [ ] No `kinematics=`, `materials=` or `animation=` anywhere; mechanisms use build123d
