@@ -89,5 +89,5 @@ def build_mirror(side, base):
         n, S.MIRROR_HEAD_RX - 7.0, 2.0,
     )
     glass = L.paint(glass, "mirror_glass", "left" if side > 0 else "right",
-                    color=(0.12, 0.14, 0.18, 1.0), material=S.MIRROR_GLASS)
+                    color="#616976", material=S.MIRROR_GLASS)
     return [mirror, glass]

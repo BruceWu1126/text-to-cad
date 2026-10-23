@@ -129,42 +129,42 @@ def _make_base():
     base = base - groove
 
     base.label = "base_plate"
-    base.color = bd.Color(0.58, 0.62, 0.66, 1.0)
+    base.color = bd.Color("#c8ced4")
     return base
 
 
 def _make_peg():
     peg = bd.Cylinder(radius=PEG_DIAMETER / 2.0, height=PEG_HEIGHT)
     peg.label = "cylindrical_peg"
-    peg.color = bd.Color(0.86, 0.24, 0.20, 1.0)
+    peg.color = bd.Color("#ef867c")
     return peg
 
 
 def _make_block():
     block = bd.Box(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
     block.label = "square_block"
-    block.color = bd.Color(0.18, 0.53, 0.88, 1.0)
+    block.color = bd.Color("#76c0f1")
     return block
 
 
 def _make_cone():
     cone = bd.Cone(0.0, CONE_BASE_DIAMETER / 2.0, CONE_HEIGHT)
     cone.label = "cone"
-    cone.color = bd.Color(0.95, 0.64, 0.16, 1.0)
+    cone.color = bd.Color("#f9d16f")
     return cone
 
 
 def _make_sphere():
     sphere = bd.Sphere(SPHERE_DIAMETER / 2.0)
     sphere.label = "sphere"
-    sphere.color = bd.Color(0.45, 0.72, 0.34, 1.0)
+    sphere.color = bd.Color("#b3dd9e")
     return sphere
 
 
 def _make_prism():
     prism = _triangular_prism(PRISM_SIDE, PRISM_LENGTH)
     prism.label = "triangular_prism"
-    prism.color = bd.Color(0.58, 0.34, 0.74, 1.0)
+    prism.color = bd.Color("#c89edf")
     return prism
 
 
@@ -173,7 +173,7 @@ def _make_cube_top_pad():
         bd.Location((0.0, 0.0, CUBE_TOP_PAD_HEIGHT / 2.0))
     )
     pad.label = "cube_top_pad"
-    pad.color = bd.Color(0.10, 0.14, 0.20, 1.0)
+    pad.color = bd.Color("#59697c")
     return pad
 
 
@@ -182,7 +182,7 @@ def _make_cube_top_post(x_offset: float, name: str):
         bd.Location((x_offset, 0.0, CUBE_TOP_PAD_HEIGHT + CUBE_TOP_POST_HEIGHT / 2.0))
     )
     post.label = name
-    post.color = bd.Color(0.84, 0.30, 0.50, 1.0)
+    post.color = bd.Color("#ec95bc")
     return post
 
 
@@ -197,7 +197,7 @@ def _make_cube_top_cap():
         )
     )
     cap.label = "cube_top_bridge_cap"
-    cap.color = bd.Color(0.12, 0.70, 0.74, 1.0)
+    cap.color = bd.Color("#61dadf")
     return cap
 
 
@@ -213,7 +213,7 @@ def _make_cube_top_bead():
         )
     )
     bead.label = "cube_top_bead"
-    bead.color = bd.Color(0.98, 0.86, 0.20, 1.0)
+    bead.color = bd.Color("#fdef7c")
     return bead
 
 

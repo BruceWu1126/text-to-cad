@@ -67,7 +67,7 @@ def falcon_heavy_exploded():
     ):
         rod = bd.Cylinder(radius=60.0, height=ln, rotation=rot).locate(bd.Location(loc))
         rod.label = label
-        rod.color = bd.Color(0.55, 0.57, 0.62, 0.45)
+        rod.color = bd.Color("#c4c7ce73")
         rods.append(rod)
     groups.append(bd.Compound(obj=rods, children=rods, label="explode_guides_group"))
     return bd.Compound(obj=groups, children=groups,

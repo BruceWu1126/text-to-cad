@@ -13,13 +13,13 @@ MODEL_LABEL = "photo_reference_takeaway_coffee_cup"
 
 # Plain RGB(A) tuples / sRGB hex strings: build123d's Shape.color setter
 # builds the Color on assignment.
-PAPER = (0.86, 0.78, 0.64, 1.0)
-PAPER_EDGE = (0.90, 0.82, 0.69, 1.0)
-LID_WHITE = (0.96, 0.94, 0.90, 1.0)
-LID_HIGHLIGHT = (1.0, 0.985, 0.955, 1.0)
-LID_SHADOW = (0.82, 0.80, 0.76, 1.0)
-BLUE_LOGO = (0.00, 0.62, 0.78, 1.0)
-DARK_OPENING = (0.08, 0.075, 0.065, 1.0)
+PAPER = "#efe5d1"
+PAPER_EDGE = "#f3ead8"
+LID_WHITE = "#faf8f3"
+LID_HIGHLIGHT = "#fffdfa"
+LID_SHADOW = "#eae7e2"
+BLUE_LOGO = "#00cee5"
+DARK_OPENING = "#504d48"
 
 BODY_HEIGHT = 108.0
 BODY_BOTTOM_RADIUS = 30.0

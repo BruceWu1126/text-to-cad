@@ -34,21 +34,21 @@ from cadgen.engine import Material, materials
 # Palette (linear RGBA). Theme does not override source colors.
 # ---------------------------------------------------------------------------
 
-CREAM = (0.925, 0.895, 0.815, 1.0)        # body panels, retro ivory
-CREAM_DEEP = (0.880, 0.845, 0.750, 1.0)   # under-seat body, inner covers
-SEAT_BROWN = (0.400, 0.235, 0.115, 1.0)   # saddle
-FRAME_BLACK = (0.075, 0.075, 0.085, 1.0)  # frame, fork, stand, bar
-RUBBER = (0.055, 0.055, 0.060, 1.0)       # tires, grips
-RIM_SILVER = (0.700, 0.710, 0.725, 1.0)   # cast wheels, brake disc
-ENGINE_SILVER = (0.640, 0.650, 0.650, 1.0)  # crankcase, cylinder barrel
-ENGINE_DARK = (0.330, 0.340, 0.345, 1.0)  # CVT / alternator covers
-CHROME = (0.800, 0.820, 0.850, 1.0)       # headlight shell, muffler, mirrors
-SHOCK_BODY = (0.120, 0.120, 0.130, 1.0)   # damper body
-SPRING_YELLOW = (0.900, 0.700, 0.090, 1.0)
-AMBER = (0.960, 0.520, 0.070, 0.95)       # turn-signal lenses
-RED_LENS = (0.720, 0.055, 0.060, 0.95)    # tail-light lens
-LENS_CLEAR = (0.930, 0.950, 0.960, 0.30)  # headlight lens
-STEEL = (0.600, 0.610, 0.630, 1.0)        # axles, fasteners, pipes
+CREAM = "#f6f3e9"        # body panels, retro ivory
+CREAM_DEEP = "#f1ede1"   # under-seat body, inner covers
+SEAT_BROWN = "#aa855f"   # saddle
+FRAME_BLACK = "#4d4d52"  # frame, fork, stand, bar
+RUBBER = "#424245"       # tires, grips
+RIM_SILVER = "#dadbdd"   # cast wheels, brake disc
+ENGINE_SILVER = "#d1d3d3"  # crankcase, cylinder barrel
+ENGINE_DARK = "#9b9e9f"  # CVT / alternator covers
+CHROME = "#e7eaed"       # headlight shell, muffler, mirrors
+SHOCK_BODY = "#616165"   # damper body
+SPRING_YELLOW = "#f3da55"
+AMBER = "#fabf4bf2"       # turn-signal lenses
+RED_LENS = "#dd4245f2"    # tail-light lens
+LENS_CLEAR = "#f7f9fa4c"  # headlight lens
+STEEL = "#cbcdd0"        # axles, fasteners, pipes
 
 # ---------------------------------------------------------------------------
 # Materials: what each part is made of, in the finish it wears. Every one is

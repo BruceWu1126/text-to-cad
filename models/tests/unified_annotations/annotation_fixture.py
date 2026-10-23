@@ -9,7 +9,7 @@ import build123d as bd
 # the paint is a colour, so it carries one: blue, at opacity 0.5.
 STEEL = materials.steel.but(color=None, metallic=0.8, roughness=0.32, description="Brushed steel")
 PAINT = Material(name="Blue paint", family="other", color="#2469ac80", roughness=0.42)
-ARM_GREEN = (0.0382, 0.305, 0.159, 0.6)  # "#37966F" in linear RGB, alpha 0.6
+ARM_GREEN = "#37966f99"  # "#37966F", alpha 0.6
 
 
 def _lift(t):

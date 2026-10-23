@@ -15,8 +15,8 @@ MODEL_LABEL = "six_blade_open_propeller_from_reference"
 
 # Plain RGB(A) tuples / sRGB hex strings: build123d's Shape.color setter
 # builds the Color on assignment.
-WARM_IVORY = (0.82, 0.78, 0.65, 1.0)
-WARM_TAUPE = (0.72, 0.70, 0.61, 1.0)
+WARM_IVORY = "#eae5d3"
+WARM_TAUPE = "#dddacd"
 
 BLADE_COUNT = 6
 BLADE_ROOT_RADIUS = 10.8

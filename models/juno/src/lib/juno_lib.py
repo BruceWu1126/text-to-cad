@@ -24,13 +24,13 @@ import build123d as bd
 # small repeated functional details (hub caps, bumpers, vents). No logos.
 # Plain RGB(A) tuples: build123d's Shape.color setter builds the Color on
 # assignment.
-SHELL = (0.82, 0.815, 0.79)     # warm porcelain composite shells
-STRUCT = (0.16, 0.17, 0.19)     # graphite structural cores
-ALU = (0.88, 0.90, 0.94)        # bright machined-aluminum joint rims
-VISOR = (0.02, 0.05, 0.11)      # gloss midnight-blue sensor glass
-RUBBER = (0.08, 0.08, 0.09)     # sole / grip rubber
-ACCENT = (0.93, 0.38, 0.16)     # coral-orange accent details
-EYE = (0.32, 0.90, 0.98)        # bright cyan display "pixels" (Anki-style)
+SHELL = "#eae9e6"     # warm porcelain composite shells
+STRUCT = "#6f7379"     # graphite structural cores
+ALU = "#f1f3f8"        # bright machined-aluminum joint rims
+VISOR = "#273f5d"      # gloss midnight-blue sensor glass
+RUBBER = "#505055"     # sole / grip rubber
+ACCENT = "#f7a66f"     # coral-orange accent details
+EYE = "#99f3fd"        # bright cyan display "pixels" (Anki-style)
 
 
 def styled(solid, label: str, color):

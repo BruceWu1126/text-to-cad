@@ -40,7 +40,7 @@ def _make_base():
         )
     part = base.part
     part.label = "base_disk"
-    part.color = bd.Color(0.42, 0.43, 0.45, 1.0)
+    part.color = bd.Color("#adafb3")
     return part
 
 
@@ -53,7 +53,7 @@ def _make_column():
         )
     part = column.part
     part.label = "central_column"
-    part.color = bd.Color(0.70, 0.72, 0.74, 1.0)
+    part.color = bd.Color("#dadddf")
     return part
 
 
@@ -76,7 +76,7 @@ def _make_tread(index: int):
     bottom_z = TREAD_FIRST_BOTTOM_Z + index * TREAD_RISE
     part = _make_tread_profile().moved(bd.Location((0.0, 0.0, bottom_z), (0.0, 0.0, angle)))
     part.label = f"helical_tread_{index + 1:02d}"
-    part.color = bd.Color(0.78, 0.58, 0.35, 1.0)
+    part.color = bd.Color("#e5c8a0")
     return part
 
 
@@ -104,7 +104,7 @@ def _make_handrail():
         bd.sweep(path=path, is_frenet=True)
     part = rail.part
     part.label = "helical_handrail"
-    part.color = bd.Color(0.22, 0.28, 0.34, 1.0)
+    part.color = bd.Color("#81909e")
     return part
 
 
@@ -121,7 +121,7 @@ def _make_baluster(index: int):
         )
     part = baluster.part.moved(bd.Location((x_pos, y_pos, tread_top_z)))
     part.label = f"baluster_{index + 1:02d}"
-    part.color = bd.Color(0.30, 0.33, 0.36, 1.0)
+    part.color = bd.Color("#959ba2")
     return part
 
 

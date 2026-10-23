@@ -47,18 +47,18 @@ OCTAWEB_R = 1290.0         # outer engine circle radius. cluster-fit estimate
 
 # Plain RGB(A) tuples: build123d's Shape.color setter builds the Color on
 # assignment.
-COL_WHITE = (0.92, 0.92, 0.93, 1.0)
-COL_SOOT = (0.78, 0.78, 0.79, 1.0)
-COL_BLACK = (0.10, 0.10, 0.11, 1.0)
-COL_BAY = (0.16, 0.16, 0.17, 1.0)
-COL_METAL = (0.55, 0.57, 0.60, 1.0)
-COL_TITAN = (0.48, 0.47, 0.50, 1.0)
-COL_LEG = (0.20, 0.20, 0.22, 1.0)
-COL_NIOB = (0.27, 0.26, 0.28, 1.0)
-COL_LOX = (0.20, 0.45, 0.95, 0.45)
-COL_RP1 = (0.85, 0.60, 0.15, 0.45)
-COL_GRAY = (0.62, 0.62, 0.68, 0.40)
-COL_GUIDE = (0.55, 0.57, 0.62, 0.45)
+COL_WHITE = "#f6f6f7"
+COL_SOOT = "#e5e5e6"
+COL_BLACK = "#59595d"
+COL_BAY = "#6f6f73"
+COL_METAL = "#c4c7cb"
+COL_TITAN = "#b8b6bc"
+COL_LEG = "#7c7c81"
+COL_NIOB = "#8e8b90"
+COL_LOX = "#7cb3f973"
+COL_RP1 = "#edcb6c73"
+COL_GRAY = "#ceced766"
+COL_GUIDE = "#c4c7ce73"
 
 CUT_START, CUT_ARC = 135.0, 270.0     # cutaway opening faces +Y
 

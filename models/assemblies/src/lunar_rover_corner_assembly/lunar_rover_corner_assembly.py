@@ -20,15 +20,15 @@ BASE_CENTER_X = -20.0
 BASE_TOP_Z = 8.0
 
 COLORS = {
-    "dark_graphite": (0.005, 0.006, 0.007, 1.0),
-    "matte_black": (0.002, 0.002, 0.002, 1.0),
-    "satin_titanium": (0.42, 0.43, 0.40, 1.0),
-    "pale_aluminum": (0.78, 0.80, 0.78, 1.0),
-    "brushed_steel": (0.50, 0.52, 0.54, 1.0),
-    "anodized_orange": (1.00, 0.34, 0.08, 1.0),
-    "spring_orange": (1.00, 0.42, 0.02, 1.0),
-    "brushed_aluminum": (0.66, 0.68, 0.66, 1.0),
-    "fastener_steel": (0.18, 0.19, 0.20, 1.0),
+    "dark_graphite": "#101214",
+    "matte_black": "#070707",
+    "satin_titanium": "#adafaa",
+    "pale_aluminum": "#e5e7e5",
+    "brushed_steel": "#bcbfc2",
+    "anodized_orange": "#ff9e50",
+    "spring_orange": "#ffad27",
+    "brushed_aluminum": "#d4d7d4",
+    "fastener_steel": "#76797c",
 }
 
 
@@ -72,14 +72,14 @@ def v_norm(a: Vector3) -> Vector3:
 
 def style(shape: bd.Shape, label: str, color_name: str) -> bd.Shape:
     shape.label = label
-    shape.color = bd.Color(*COLORS[color_name])
+    shape.color = bd.Color(COLORS[color_name])
     return shape
 
 
 def group(label: str, children: Sequence[bd.Shape], color_name: str | None = None) -> bd.Compound:
     compound = bd.Compound(obj=list(children), children=list(children), label=label)
     if color_name is not None:
-        compound.color = bd.Color(*COLORS[color_name])
+        compound.color = bd.Color(COLORS[color_name])
     return compound
 
 

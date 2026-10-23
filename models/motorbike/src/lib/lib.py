@@ -38,7 +38,7 @@ def paint(shape, name, *details, color, material):
     material (a ``spec`` finish: its colour None, so ``color`` shows), and return
     the shape."""
     shape.label = ":".join("_".join(str(token).replace(":", "_").split()) for token in (name, *details))
-    shape.color = bd.Color(*color)
+    shape.color = bd.Color(color)
     shape.material = material
     return shape
 

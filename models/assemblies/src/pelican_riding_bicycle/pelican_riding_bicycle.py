@@ -14,18 +14,18 @@ DISPLAY_NAME = "Pelican riding a bicycle"
 # X: rear-to-front bicycle direction, Y: wheel axle direction, +Z: up.
 
 COLORS = {
-    "rubber_black": (0.003, 0.003, 0.003, 1.0),
-    "rim_silver": (0.70, 0.72, 0.70, 1.0),
-    "spoke_steel": (0.82, 0.84, 0.82, 1.0),
-    "frame_blue": (0.05, 0.28, 0.75, 1.0),
-    "seat_brown": (0.28, 0.12, 0.05, 1.0),
-    "pelican_white": (0.96, 0.95, 0.88, 1.0),
-    "wing_gray": (0.66, 0.68, 0.64, 1.0),
-    "feather_dark": (0.08, 0.08, 0.075, 1.0),
-    "bill_yellow": (1.00, 0.78, 0.26, 1.0),
-    "pouch_orange": (0.95, 0.45, 0.12, 1.0),
-    "leg_orange": (0.98, 0.50, 0.12, 1.0),
-    "eye_black": (0.0, 0.0, 0.0, 1.0),
+    "rubber_black": "#0a0a0a",
+    "rim_silver": "#daddda",
+    "spoke_steel": "#eaecea",
+    "frame_blue": "#3f90e1",
+    "seat_brown": "#90613f",
+    "pelican_white": "#faf9f1",
+    "wing_gray": "#d4d7d1",
+    "feather_dark": "#50504d",
+    "bill_yellow": "#ffe58b",
+    "pouch_orange": "#f9b361",
+    "leg_orange": "#fdbc61",
+    "eye_black": "#000000",
 }
 
 Vector3 = tuple[float, float, float]
@@ -68,14 +68,14 @@ def _v_norm(a: Vector3) -> Vector3:
 
 def _style(shape: bd.Shape, label: str, color_name: str) -> bd.Shape:
     shape.label = label
-    shape.color = bd.Color(*COLORS[color_name])
+    shape.color = bd.Color(COLORS[color_name])
     return shape
 
 
 def _group(label: str, children: Sequence[bd.Shape], color_name: str | None = None) -> bd.Compound:
     compound = bd.Compound(obj=list(children), children=list(children), label=label)
     if color_name is not None:
-        compound.color = bd.Color(*COLORS[color_name])
+        compound.color = bd.Color(COLORS[color_name])
     return compound
 
 

@@ -87,12 +87,12 @@ DAMPER_STROKE = 30.0        # native linear joint travel range
 
 
 COLORS = {
-    "graphite": (0.05, 0.05, 0.06, 1.0),
-    "anodized_red": (0.62, 0.05, 0.05, 1.0),
-    "brushed_bronze": (0.55, 0.38, 0.16, 1.0),
-    "chrome": (0.78, 0.80, 0.82, 1.0),
-    "pale_aluminum": (0.74, 0.76, 0.75, 1.0),
-    "spring_yellow": (0.98, 0.72, 0.02, 1.0),
+    "graphite": "#3f3f45",
+    "anodized_red": "#ce3f3f",
+    "brushed_bronze": "#c4a66f",
+    "chrome": "#e5e7ea",
+    "pale_aluminum": "#dfe2e1",
+    "spring_yellow": "#fddd27",
 }
 
 
@@ -103,7 +103,7 @@ COLORS = {
 
 def _part(shape, name, *details, color_name):
     shape.label = ":".join("_".join(str(token).strip().replace(":", "_").split()) for token in (name, *details))
-    shape.color = bd.Color(*COLORS[color_name])
+    shape.color = bd.Color(COLORS[color_name])
     return shape
 
 

@@ -113,31 +113,31 @@ RTG_MOUNT = (-1060.0, 0.0, 1060.0)
 RTG_DIR = (-math.cos(math.radians(8.0)), 0.0, -math.sin(math.radians(8.0)))
 
 COLORS = {
-    "ivory_panel": (0.80, 0.77, 0.70, 1.0),
-    "graphite_panel": (0.045, 0.050, 0.055, 1.0),
-    "satin_titanium": (0.42, 0.43, 0.40, 1.0),
-    "brushed_steel": (0.50, 0.52, 0.54, 1.0),
-    "pale_aluminum": (0.66, 0.68, 0.66, 1.0),
-    "fastener_steel": (0.18, 0.19, 0.20, 1.0),
-    "wheel_graphite": (0.055, 0.058, 0.062, 1.0),
-    "grouser_steel": (0.14, 0.145, 0.15, 1.0),
-    "jpl_orange": (1.00, 0.30, 0.05, 1.0),
-    "copper_band": (0.65, 0.26, 0.10, 1.0),
-    "gold_mli": (0.85, 0.55, 0.12, 1.0),
-    "avionics_blue": (0.07, 0.16, 0.42, 1.0),
-    "solar_cell": (0.015, 0.04, 0.13, 1.0),
-    "science_teal": (0.03, 0.35, 0.32, 1.0),
-    "white_thermal": (0.88, 0.90, 0.92, 1.0),
-    "black_cable": (0.015, 0.015, 0.017, 1.0),
-    "battery_orange": (0.95, 0.38, 0.02, 1.0),
-    "mars_regolith": (0.42, 0.16, 0.07, 1.0),
-    "mars_rock": (0.16, 0.075, 0.045, 1.0),
-    "dust_tan": (0.60, 0.32, 0.16, 1.0),
-    "boot_rubber": (0.03, 0.03, 0.032, 1.0),
-    "dish_white": (0.90, 0.90, 0.88, 1.0),
-    "rtg_core": (0.10, 0.105, 0.11, 1.0),
-    "rtg_fin": (0.78, 0.80, 0.82, 1.0),
-    "camera_lens": (0.02, 0.03, 0.05, 1.0),
+    "ivory_panel": "#e7e3da",
+    "graphite_panel": "#3c3f42",
+    "satin_titanium": "#adafaa",
+    "brushed_steel": "#bcbfc2",
+    "pale_aluminum": "#d4d7d4",
+    "fastener_steel": "#76797c",
+    "wheel_graphite": "#424446",
+    "grouser_steel": "#696a6c",
+    "jpl_orange": "#ff953f",
+    "copper_band": "#d38b59",
+    "gold_mli": "#edc461",
+    "avionics_blue": "#4b6fad",
+    "solar_cell": "#213865",
+    "science_teal": "#30a099",
+    "white_thermal": "#f1f3f6",
+    "black_cable": "#212123",
+    "battery_orange": "#f9a627",
+    "mars_regolith": "#ad6f4b",
+    "mars_rock": "#6f4d3c",
+    "dust_tan": "#cb996f",
+    "boot_rubber": "#303032",
+    "dish_white": "#f3f3f1",
+    "rtg_core": "#595b5d",
+    "rtg_fin": "#e5e7ea",
+    "camera_lens": "#27303f",
 }
 
 
@@ -192,14 +192,14 @@ def _apply_rover_scale(shape: bd.Shape) -> bd.Shape:
 def style(shape: bd.Shape, label: str, color_name: str) -> bd.Shape:
     shape = _apply_rover_scale(shape)
     shape.label = label
-    shape.color = bd.Color(*COLORS[color_name])
+    shape.color = bd.Color(COLORS[color_name])
     return shape
 
 
 def group(label: str, children: Sequence[bd.Shape], color_name: str | None = None) -> bd.Compound:
     compound = bd.Compound(obj=list(children), children=list(children), label=label)
     if color_name is not None:
-        compound.color = bd.Color(*COLORS[color_name])
+        compound.color = bd.Color(COLORS[color_name])
     return compound
 
 
@@ -331,7 +331,7 @@ def terrain() -> bd.Compound:
             obj=list(compound.children), children=list(compound.children), label="terrain"
         ).rotate(bd.Axis((150.0, 0.0, 0.0), (0.0, 1.0, 0.0)), terrain_slope_angle)
         rotated.label = "terrain"
-        rotated.color = bd.Color(*COLORS["mars_regolith"])
+        rotated.color = bd.Color(COLORS["mars_regolith"])
         return rotated
     return compound
 

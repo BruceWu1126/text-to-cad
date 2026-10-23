@@ -214,7 +214,7 @@ def centrifugal_impeller():
         part = bd.fillet(root_edges, radius=BLADE_ROOT_FILLET_RADIUS)
 
     part.label = MODEL_LABEL
-    part.color = bd.Color(0.62, 0.66, 0.70, 1.0)
+    part.color = bd.Color("#ced4da")
     part.material = materials.aluminium_6061.but(color=None)
     return part
 
