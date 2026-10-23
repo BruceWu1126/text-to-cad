@@ -45,7 +45,7 @@ import math
 import re
 
 from cadgen.ap242 import configuration_sequence
-from cadgen.engine import track, xbf
+from cadgen.engine import xbf
 
 import build123d as bd
 
@@ -223,7 +223,7 @@ def _teardown_joints(aircraft, groups) -> None:
 
 @xbf(out="../XBF/f14d.xbf")
 def f14d():
-    groups = [system() for system in track(SYSTEMS, label=lambda system: system.__name__)]
+    groups = [system() for system in SYSTEMS]
     aircraft = bd.Compound(children=groups, label="f14d_super_tomcat")
     _teardown_joints(aircraft, groups)
     configuration_sequence(aircraft, "teardown", _teardown, duration=60)

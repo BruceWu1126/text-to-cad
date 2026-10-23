@@ -1,5 +1,4 @@
-"""A build says where it is: the author's ``report`` and ``track`` and the engine's stages, one
-frame each, over the worker's pipe and through the daemon -- to the build's caller, to ``cadgen
+"""A build says where it is: the engine's stages and each body it runs, by name, one frame each, over the worker's pipe and through the daemon -- to the build's caller, to ``cadgen
 status`` from another shell, to a page waiting on a served document, and, last, in each report."""
 
 from __future__ import annotations
@@ -42,80 +41,109 @@ class Terminal(io.StringIO):
         return True
 
 
-class AuthorTest(unittest.TestCase):
-    """``report`` and ``track`` in this process: what each frame says."""
+class BodiesTest(unittest.TestCase):
+    """The bodies a model's body runs (``Progress.entering``, ``leaving``): what each frame says."""
 
     def frames(self, body) -> list[dict]:
         sent: list[dict] = []
         with progress.building(progress.Progress(sent.append)) as current:
             current.stage("body", model="hand.py::hand", outputs=["/x/XBF/hand.xbf"])
-            body()
+            body(current)
         return sent
 
-    def test_outside_a_build_both_do_nothing(self) -> None:
-        self.assertEqual(list(progress.track(["a", "b"])), ["a", "b"])
-        self.assertIsNone(progress.report("nothing"))
-
-    def test_track_counts_the_items_done_and_names_the_one_in_flight(self) -> None:
-        def body() -> None:
-            for _name in progress.track(["thumb", "index", "middle"]):
-                time.sleep(progress.INTERVAL * 1.5)  # each item its own frames
-
-        sent = self.frames(body)
-        first = {}
-        for frame in sent[1:]:
-            first.setdefault(frame["detail"], (frame["done"], frame["total"]))
-        self.assertEqual(first, {"thumb": (0, 3), "index": (1, 3), "middle": (2, 3)},
-                         "each item named while in flight, the items before it counted done")
-        self.assertEqual((sent[-1]["done"], sent[-1]["detail"]), (3, "middle"), "the last frame: every item done")
-        self.assertTrue(all(frame["determinate"] for frame in sent[1:]))
-        self.assertEqual({frame["model"] for frame in sent}, {"hand.py::hand"})
-        self.assertEqual(sent[-1]["outputs"], ["/x/XBF/hand.xbf"])
-
-    def test_a_lazy_iterable_is_counted_without_a_total_and_a_label_names_its_items(self) -> None:
-        def body() -> None:
-            for _item in progress.track((n for n in range(2)), label=lambda n: f"part {n}"):
+    def test_a_body_is_named_while_it_runs_and_counted_when_it_ends(self) -> None:
+        def body(current) -> None:
+            for name in ("thumb", "index"):
+                current.entering(name)
+                time.sleep(progress.INTERVAL * 1.5)  # each body its own frames
+                current.leaving(name)
                 time.sleep(progress.INTERVAL * 1.5)
 
-        last = self.frames(body)[-1]
-        self.assertEqual((last["done"], last["total"], last["determinate"], last["detail"]), (2, None, False, "part 1"))
+        said = [(frame["detail"], frame["done"]) for frame in self.frames(body)]
+        self.assertEqual(said, [("", 0), ("thumb", 0), ("", 1), ("index", 1), ("", 2)])
 
-    def test_report_names_what_runs_and_frames_come_at_most_one_an_interval(self) -> None:
-        def body() -> None:
+    def test_a_body_inside_another_hands_the_detail_back_when_it_ends(self) -> None:
+        def body(current) -> None:
+            current.entering("finger")
+            time.sleep(progress.INTERVAL * 1.5)
+            current.entering("tip")
+            time.sleep(progress.INTERVAL * 1.5)
+            current.leaving("tip")
+            time.sleep(progress.INTERVAL * 1.5)
+            current.leaving("finger")
+
+        said = [(frame["detail"], frame["done"], frame["determinate"]) for frame in self.frames(body)]
+        self.assertEqual(said, [("", 0, False), ("finger", 0, False), ("tip", 0, False), ("finger", 1, False),
+                                ("", 2, False)])
+
+    def test_frames_come_at_most_one_an_interval(self) -> None:
+        def body(current) -> None:
             for n in range(200):
-                progress.report(f"loft {n}")
+                current.entering(f"loft{n}")
+                current.leaving(f"loft{n}")
 
         sent = self.frames(body)
-        self.assertLess(len(sent), 20, "two hundred reports in a moment are a few frames")
-        self.assertEqual(sent[-1]["detail"], "loft 199", "the last state is the last frame, sent as the build ends")
-        held = sent[:-1]  # the phase's own frame, then the author's, each an interval after the last
+        self.assertLess(len(sent), 20, "two hundred bodies in a moment are a few frames")
+        self.assertEqual((sent[-1]["detail"], sent[-1]["done"]), ("", 200),
+                         "the last state is the last frame, sent as the build ends")
+        held = sent[:-1]  # the phase's own frame, then the bodies', each an interval after the last
         gaps = [b["elapsedMs"] - a["elapsedMs"] for a, b in zip(held, held[1:])]
         self.assertTrue(all(gap >= progress.INTERVAL * 1000 - 5 for gap in gaps), gaps)
 
     def test_a_held_frame_is_sent_when_its_interval_is_up(self) -> None:
         sent: list[dict] = []
-
-        def body() -> None:
-            progress.report("first")  # held: the stage's frame was sent a moment ago
-            await_(lambda: any(frame["detail"] == "first" for frame in sent), "the held frame", 5)
-
         with progress.building(progress.Progress(sent.append)) as current:
             current.stage("body", model="m.py::m")
-            body()
+            current.entering("first")  # held: the stage's frame was sent a moment ago
+            await_(lambda: any(frame["detail"] == "first" for frame in sent), "the held frame", 5)
 
     def test_the_last_frame_of_each_model_is_its_report_s(self) -> None:
         current = progress.Progress(lambda frame: None)
         with progress.building(current):
             current.stage("body", model="a.py::a")
-            progress.report("one")
+            current.entering("one")
+            current.leaving("one")
             current.stage("write", model="a.py::a", detail="a.xbf")
             current.stage("body", model="a.py::b")
-            progress.report("raised here")
+            current.entering("raised_here")
         reports = [{"model": "a.py::a", "ok": True}, {"model": "a.py::b", "ok": False}, {"model": "a.py"}]
         current.attach(reports)
         self.assertEqual(reports[0]["progress"]["phase"], "write")
-        self.assertEqual((reports[1]["progress"]["phase"], reports[1]["progress"]["detail"]), ("body", "raised here"))
+        self.assertEqual((reports[1]["progress"]["phase"], reports[1]["progress"]["detail"]), ("body", "raised_here"))
         self.assertEqual(reports[2]["progress"]["model"], "a.py::b", "no frame of its own: the build's last")
+
+    def test_a_build_names_each_memo_call_and_child_model_its_body_runs(self) -> None:
+        from cadgen.engine import api
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-bodies-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        (folder / "hand.py").write_text(textwrap.dedent(f"""
+            import time
+            import build123d as bd
+            from cadgen.engine import memo, model, xbf
+
+            @memo
+            def finger(at):
+                time.sleep({progress.INTERVAL * 2})
+                return bd.Pos(at * 3, 0, 0) * bd.Box(2, 2, 6)
+
+            @model
+            def palm():
+                time.sleep({progress.INTERVAL * 2})
+                return bd.Box(12, 8, 2)
+
+            @xbf("XBF/hand.xbf")
+            def hand():
+                return bd.Compound(children=[palm(), finger(0), finger(1)], label="hand")
+        """), encoding="utf-8")
+        here = Path.cwd()
+        os.chdir(folder)
+        self.addCleanup(os.chdir, here)
+        frames: list[dict] = []
+        api.build_script(folder / "hand.py", ["hand"], daemon=False, progress=frames.append)
+        said = [(frame["detail"], frame["done"]) for frame in frames
+                if frame["phase"] == "body" and frame["model"] == "hand.py::hand"]
+        self.assertEqual(said, [("", 0), ("palm", 0), ("", 1), ("finger", 1), ("", 2), ("finger", 2), ("", 3)])
 
 
 class StagesTest(unittest.TestCase):
@@ -145,8 +173,10 @@ class StagesTest(unittest.TestCase):
         self.addCleanup(os.chdir, here)
         frames: list[dict] = []
         api.build_script(folder / "kit.py", ["kit"], daemon=False, progress=frames.append)
+        # Each stage's own frame: the child's body, named in the target's (``BodiesTest``), aside.
         said = [(frame["phase"], frame["model"], frame["detail"], frame["done"], frame["total"],
-                 [Path(path).name for path in frame["outputs"]]) for frame in frames]
+                 [Path(path).name for path in frame["outputs"]]) for frame in frames
+                if frame["phase"] != "body" or (frame["detail"], frame["done"]) == ("", 0)]
         self.assertEqual(said, [
             ("load", "kit.py", "", 0, None, []),
             ("body", "kit.py::kit", "", 0, None, ["kit.xbf", "kit.step"]),
@@ -199,22 +229,43 @@ class BarTest(unittest.TestCase):
 SLOW = """
 import pathlib, time
 import build123d as bd
-from cadgen.engine import report, track, xbf
+from cadgen.engine import memo, xbf
 
 FOLDER = pathlib.Path(__file__).parent
 
 
-@xbf("XBF/slow.xbf")
-def slow():
-    parts = []
-    for name in track(["one", "two", "three"]):
-        gate = FOLDER / f"{{name}}.go"
-        while not gate.exists():
-            time.sleep(0.01)
-        parts.append(bd.Pos(len(parts) * 3, 0, 0) * bd.Box(2, 2, {size}))
-    report("{last}")
+def gated(name, at, size):
+    gate = FOLDER / f"{{name}}.go"
+    while not gate.exists():
+        time.sleep(0.01)
+    return bd.Pos(at * 3, 0, 0) * bd.Box(2, 2, size)
+
+
+@memo
+def one(size):
+    return gated("one", 0, size)
+
+
+@memo
+def two(size):
+    return gated("two", 1, size)
+
+
+@memo
+def three(size):
+    return gated("three", 2, size)
+
+
+@memo
+def {last}(size):
     if {fail}:
         raise RuntimeError("no")
+    return bd.Pos(9, 0, 0) * bd.Box(1, 1, size)
+
+
+@xbf("XBF/slow.xbf")
+def slow():
+    parts = [one({size}), two({size}), three({size}), {last}({size})]
     return bd.Compound(children=parts, label="slow")
 
 if __name__ == "__main__":
@@ -243,6 +294,7 @@ class DaemonProgressTest(unittest.TestCase):
         return engine_daemon.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.folder, env=self.env)
 
     def write(self, size: int = 2, last: str = "lid", fail: bool = False) -> None:
+        """The slow model: three bodies, each waiting on its gate file, and a fourth named ``last``."""
         for gate in self.folder.glob("*.go"):
             gate.unlink()
         (self.folder / "slow.py").write_text(textwrap.dedent(SLOW.format(size=size, last=last, fail=fail)),
@@ -279,9 +331,9 @@ class DaemonProgressTest(unittest.TestCase):
             seen.append((frame["phase"], frame["done"], frame["total"], frame["detail"]))
             if name == "two":
                 text = self.cli("status").stdout
-                self.assertIn("building slow.py::slow · Building geometry · 1/3 two", text)
+                self.assertIn("building slow.py::slow · Building geometry · two", text)
             (self.folder / f"{name}.go").touch()
-        self.assertEqual(seen, [("body", 0, 3, "one"), ("body", 1, 3, "two"), ("body", 2, 3, "three")])
+        self.assertEqual(seen, [("body", 0, None, "one"), ("body", 1, None, "two"), ("body", 2, None, "three")])
         out, err = engine_daemon.communicate(building, self.env)
         self.assertEqual(building.returncode, 0, err)
         report = json.loads(out.strip().splitlines()[-1])
@@ -291,14 +343,14 @@ class DaemonProgressTest(unittest.TestCase):
         self.assertIsNone(self.busy(), "the build is over: no worker is busy")
 
         # A body that raises: its report says where the build was.
-        self.write(size=3, last="lid seal", fail=True)
+        self.write(size=3, last="seal", fail=True)
         for name in ("one", "two", "three"):
             (self.folder / f"{name}.go").touch()
         failed = self.start()
         out, _err = engine_daemon.communicate(failed, self.env)
         report = json.loads(out.strip().splitlines()[-1])
         self.assertFalse(report["ok"])
-        self.assertEqual((report["progress"]["phase"], report["progress"]["detail"]), ("body", "lid seal"))
+        self.assertEqual((report["progress"]["phase"], report["progress"]["detail"]), ("body", "seal"))
 
     def test_the_caller_takes_every_frame_in_order_and_no_bar_is_drawn_off_a_terminal(self) -> None:
         self.write()
@@ -384,7 +436,7 @@ class DaemonProgressTest(unittest.TestCase):
         engine_daemon.communicate(building, self.env)
         self.assertEqual(building.returncode, 0)
         # A build that fails says so to the page, and where it was.
-        self.write(size=5, last="lid seal", fail=True)
+        self.write(size=5, last="seal", fail=True)
         for name in ("one", "two", "three"):
             (self.folder / f"{name}.go").touch()
         failed = self.start("slow.py")
@@ -394,7 +446,7 @@ class DaemonProgressTest(unittest.TestCase):
         self.assertIsNone(answer["building"])
         self.assertEqual(answer["failed"]["model"], "slow.py::slow")
         self.assertIn("RuntimeError: no", answer["failed"]["error"])
-        self.assertEqual(answer["failed"]["progress"]["detail"], "lid seal")
+        self.assertEqual(answer["failed"]["progress"]["detail"], "seal")
         engine_daemon.communicate(failed, self.env)
         self.assertEqual(failed.returncode, 1)
 

@@ -777,7 +777,9 @@ class BuildContext:
             memo.used(key)  # the calling body's replay needs this one's run
             made = instance(found[1])
         else:
+            _say("entering", model.name)
             made = self.run(model)
+            _say("leaving", model.name)
             self.results[key] = (made, instance(made))
         if not made.__dict__.get("label"):
             made.label = model.name
@@ -826,12 +828,14 @@ class BuildContext:
             raise RecursionError(f"{marked.identity} calls itself with the same arguments")
         self.stack.append(name)
         started = time.perf_counter()
+        _say("entering", marked.name)
         try:
             with kernel.scope(name):
                 result = kernel.body(name, lambda: self.source(marked), lambda: marked.function(*args, **kwargs),
                                      inputs=inputs, family=family)
         finally:
             self.stack.pop()
+        _say("leaving", marked.name)
         self.timings[marked.identity] = self.timings.get(marked.identity, 0.0) + time.perf_counter() - started
         if not kernel.geometric(result):
             kernel.direct(name)
@@ -846,6 +850,21 @@ class BuildContext:
         if reason not in reasons:
             reasons.append(reason)
         self.timings.setdefault(marked.identity, 0.0)
+
+
+def _say(stage: str, name: str) -> None:
+    """A body inside the model's begins or ends (``progress.Progress.entering``, ``leaving``):
+    said to this process's build, by its function's name; nothing outside a build, and never a
+    failure. A body that raises says no end: the build's last frame is where it failed."""
+    from cadgen.engine import progress
+
+    said = progress.current()
+    if said is None:
+        return
+    try:
+        getattr(said, stage)(name)
+    except Exception:  # noqa: BLE001 - saying where a build is never fails it
+        pass
 
 
 def _placement(value: Any) -> Any:

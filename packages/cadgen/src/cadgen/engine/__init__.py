@@ -28,9 +28,8 @@ limits'), and ``configuration_sequence(assembly, name, ...)`` a sequence of stat
 GLB export bakes into a clip; ``animation(assembly, name, duration=)``
 a GLB's own choreography, never in the document, baked into the GLBs the model declares. ``read_step(path)`` and ``read_xbf(path)`` copy a file's geometry into
 the model, named, coloured and given its materials as the file has them; ``read_mesh(path)`` reads
-an STL as data -- vertices, triangles, ``bounding_box()`` -- never a shape. ``select(source, ref,
-kind=None)`` is the geometry a ref names -- ``hand/finger.2/f:finger.tip.1``, ``base/face 3`` --
-as build123d shapes in world coordinates (``refs``).
+an STL as data -- vertices, triangles, ``bounding_box()`` -- never a shape. A build says where it
+is without a word from the model: each body it runs, by name (``progress``).
 Importing this package imports no kernel: the names below load on first use. Decoration only declares: imports and definitions never build or exit the caller.
 Imported by a
 script run by its path from inside a package (``python proj/parts/model.py``), it gives the
@@ -41,8 +40,8 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Material", "dxf", "glb", "materials", "memo", "model", "paint", "read_mesh", "read_step", "read_xbf", "report",
-           "select", "step", "stl", "threemf", "track", "xbf"]
+__all__ = ["Material", "dxf", "glb", "materials", "memo", "model", "paint", "read_mesh", "read_step", "read_xbf", "step",
+           "stl", "threemf", "xbf"]
 
 
 def _main_in_a_package() -> None:
@@ -74,14 +73,6 @@ def __getattr__(name: str) -> Any:
         from cadgen.engine.materials import Material
 
         return Material
-    if name in ("report", "track"):
-        from cadgen.engine import progress
-
-        return getattr(progress, name)
-    if name == "select":
-        from cadgen.engine.refs import select
-
-        return select
     if name == "read_mesh":
         from cadgen.engine.reader import read_mesh
 

@@ -20,7 +20,8 @@ from pathlib import Path
 import build123d as bd
 
 from cadgen.engine import build as engine_build
-from cadgen.engine import previous, read_xbf, select
+from cadgen.engine import previous, read_xbf
+from cadgen.engine.refs import select
 from cadgen.engine.refs import RefError
 from tests.python.support import engine_daemon
 
@@ -241,7 +242,8 @@ class BuildSelectTest(_Folder):
             folder.mkdir()
             (folder / "part.py").write_text(textwrap.dedent(f"""
                 import build123d as bd
-                from cadgen.engine import select, xbf
+                from cadgen.engine import xbf
+                from cadgen.engine.refs import select
 
 
                 @xbf("XBF/part.xbf")
@@ -265,7 +267,8 @@ class BuildSelectTest(_Folder):
         clear = f"""
             from pathlib import Path
             import build123d as bd
-            from cadgen.engine import select, xbf
+            from cadgen.engine import xbf
+            from cadgen.engine.refs import select
 
             HERE = Path(__file__).resolve().parent
 
@@ -295,7 +298,8 @@ class BuildSelectTest(_Folder):
         own = """
             from pathlib import Path
             import build123d as bd
-            from cadgen.engine import select, xbf
+            from cadgen.engine import xbf
+            from cadgen.engine.refs import select
 
             HERE = Path(__file__).resolve().parent
 
@@ -319,7 +323,8 @@ class BuildSelectTest(_Folder):
         pair = """
             from pathlib import Path
             import build123d as bd
-            from cadgen.engine import select, xbf
+            from cadgen.engine import xbf
+            from cadgen.engine.refs import select
 
             HERE = Path(__file__).resolve().parent
 
@@ -466,7 +471,7 @@ class WhereTest(unittest.TestCase):
             import json, sys
             sys.path.insert(0, sys.argv[1])
             from hand import hand
-            from cadgen.engine import select
+            from cadgen.engine.refs import select
             (face,) = select(hand, "hand/finger.3/face 1")
             print(json.dumps([face.label, [round(v, 6) for v in face.center(__import__("build123d").CenterOf.MASS)]]))
         """)

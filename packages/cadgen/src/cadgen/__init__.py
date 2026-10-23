@@ -3,8 +3,7 @@ and the files they declare.
 
 The root exports the engine's surface -- ``model``, the decorators (``xbf``, ``step``, ``glb``,
 ``stl``, ``threemf``, ``dxf``), ``memo``, materials (``Material``, ``materials``, ``paint``), the
-readers (``read_step``, ``read_xbf``, ``read_mesh``), ``select``, progress (``report``, ``track``)
--- and its verbs as functions (``export``, ``snapshot``, ``serve``, ``inspect``, ``status``,
+readers (``read_step``, ``read_xbf``, ``read_mesh``) -- and its verbs as functions (``export``, ``snapshot``, ``serve``, ``inspect``, ``status``,
 ``stop``, ``daemon``). Two namespaces hold the rest: ``cadgen.ap242`` the mechanism's AP242 names
 (``mechanism_state``, ``configuration_sequence``, ``gear_pair``, ``rack_and_pinion_pair``,
 ``screw_pair``) and ``cadgen.gltf`` a GLB's own ``animation``. Every name loads on first use:
@@ -52,7 +51,7 @@ del _install_engine_host
 
 # The engine's surface (``cadgen.engine.__all__``) and its verbs as functions (``cadgen.engine.api``).
 _ENGINE = ("model", "xbf", "memo", "step", "glb", "stl", "threemf", "dxf", "Material", "materials", "paint",
-           "read_step", "read_xbf", "read_mesh", "select", "report", "track")
+           "read_step", "read_xbf", "read_mesh")
 _VERBS = ("export", "snapshot", "serve", "inspect", "status", "stop", "daemon")
 
 __all__ = [
@@ -117,9 +116,7 @@ if TYPE_CHECKING:
         threemf,
         xbf,
     )
-    from cadgen.engine.progress import report, track
     from cadgen.engine.reader import read_mesh
-    from cadgen.engine.refs import select
 
 
 @_cache

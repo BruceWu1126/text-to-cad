@@ -24,7 +24,7 @@ are, is exported on demand (`cadgen export XBF/w16.xbf w16.glb`).
 from __future__ import annotations
 
 from cadgen.ap242 import configuration_sequence
-from cadgen.engine import track, xbf
+from cadgen.engine import xbf
 
 import build123d as bd
 
@@ -65,7 +65,7 @@ SYSTEMS = [
 
 @xbf(out="../XBF/w16.xbf")
 def w16():
-    systems = [system() for system in track(SYSTEMS, label=lambda system: system.__name__)]
+    systems = [system() for system in SYSTEMS]
     engine = bd.Compound(children=systems, label="w16")
     apply_finishes(engine)
     kinematics.author_joints(engine)

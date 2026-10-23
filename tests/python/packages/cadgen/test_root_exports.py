@@ -18,7 +18,7 @@ HEAVY = ("OCP", "build123d")
 
 # The engine's names the root re-exports, and the verbs on documents as functions.
 ENGINE = ("model", "xbf", "step", "glb", "stl", "threemf", "dxf", "memo", "Material", "materials", "paint",
-          "read_step", "read_xbf", "read_mesh", "select", "report", "track")
+          "read_step", "read_xbf", "read_mesh")
 VERBS = ("export", "snapshot", "inspect", "serve", "status", "stop", "daemon")
 ROOT = (*ENGINE, *VERBS, "__version__", "build123d", "srgb")
 # The names that are the standards' rather than the engine's.
@@ -67,7 +67,7 @@ class RootExports(unittest.TestCase):
         # No backwards compatibility: a retired name is no name, and says nothing about history.
         # ``build`` among them: a model builds by a decorated function's call, never cadgen.build (law 12).
         for name in ("build", "read_scene", "AssemblyHelper", "label_shape", "revolute", "compound_from_instances",
-                     "mechanism_state", "animation"):
+                     "mechanism_state", "animation", "select", "report", "track"):
             with self.subTest(name=name), self.assertRaises(AttributeError) as caught:
                 getattr(cadgen, name)
             self.assertEqual(str(caught.exception), f"module 'cadgen' has no attribute {name!r}")
