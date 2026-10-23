@@ -150,8 +150,11 @@ engine's README, **The engine server and its workers** and **Body retention**):
 hits), `CADGEN_ENGINE_BODIES=0` (no body replay), `CADGEN_ENGINE_MESH=processes|inline`
 `CADGEN_ENGINE_THREE` (the three.js folder `cadgen serve` pages load) and
 `CADGEN_VIEWER_WARM=0` (no engine warm-up at `cadgen viewer`'s launch). The
-engine writes nothing but the files models declare: there is no cache folder to
-clear, and a restart is cold but for each model's `.xbf`.
+engine caches nothing on disk: what it builds is written only as the files models
+declare or a command exports. Beside cadgen's settings it keeps one record per model
+document (`documents/<uuid>/document.json`: the script and function that build it,
+never geometry; a copied model's source and inputs beside it), and a restart is cold
+but for each model's `.xbf`.
 
 The skills ship no launcher scripts: every operational verb is a `cadgen`
 subcommand (`cadgen <verb>`, or `python -m cadgen.cli <verb>` when the console
