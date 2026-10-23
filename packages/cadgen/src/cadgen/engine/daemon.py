@@ -313,10 +313,15 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
     def alive(self) -> bool:
         return self.process.poll() is None
 
-    def _write(self, request: dict[str, Any]) -> None:
+    def _write(self, request: dict[str, Any], payload: bytes = b"") -> None:
+        """One request, its ``payload`` (``bytes`` of them) after its line."""
         assert self.process.stdin is not None
+        if payload:
+            request = {**request, "bytes": len(payload)}
         with self.writing:
             self.process.stdin.write((json.dumps(request) + "\n").encode())
+            if payload:
+                self.process.stdin.write(payload)
             self.process.stdin.flush()
 
     def where(self, doc: str, key: str, kind: str, ordinal: int, timeout: float = 10.0) -> dict[str, Any] | None:
@@ -333,13 +338,14 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
         finally:
             self.asked.pop(ident, None)
 
-    def build(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+    def build(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None],
+              payload: bytes = b"") -> dict[str, Any]:
         with self.lock:
             self.sink = send
             self.document_read = bool(request.get("expected"))
             self.progress, self.touched = None, set()
             try:
-                self._write(request)
+                self._write(request, payload)
                 message = self.answers.get()
                 if message is None:
                     code = self.process.wait()
@@ -725,9 +731,40 @@ class Daemon:
             for paths in held:
                 self.server.release(paths)
 
+    def document(self, ident: str) -> tuple[dict[str, Any], bytes]:
+        """What an export of the document ``ident`` reads, and the bytes it carries: a model a live
+        worker holds (``{"script", "function", "held"}``, read from that worker, never built); one
+        whose worker is gone but whose bytes the server holds (``{"document", "structure",
+        "shapes"}``, the shape bytes after it: the documents worker reads them, and no worker of its
+        script starts); a file this engine served (``{"path"}``). ``ValueError`` naming the command
+        that builds it again for any other: the engine runs nothing."""
+        self.models.prune()
+        record = self.models.held(ident)
+        server = self.server
+        if record is not None:
+            worker = record["worker"]
+            if worker is not None and self.pool.holds(worker):
+                return {"script": record["source"]["script"], "function": record["source"]["name"], "held": ident}, b""
+            with server.load_lock:
+                doc = server.served.get(ident)
+            if doc is not None:
+                keys = [prototype["key"] for prototype in doc.structure["prototypes"]]
+                data = [server.shape_of(doc, key) for key in keys]
+                lost = self.models.command(ident)
+                return {"document": ident, "structure": doc.structure, "rebuild": lost,
+                        "shapes": [[key, len(part)] for key, part in zip(keys, data)]}, b"".join(data)
+        if server is not None:
+            with server.load_lock:
+                path = server.files.get(ident)
+            if path is not None:
+                return {"path": path}, b""
+        raise ValueError(self.models.missing(ident))
+
     def _routed(self, request: dict[str, Any]) -> tuple[str, str | None]:
         """The worker a request goes to (its key) and the folder that worker starts in."""
         source = request.get("source") or {}
+        if "document" in source:
+            return "documents", request.get("cwd")  # a held document's bytes: no worker of its script
         if "path" in source:
             builder = self.builders.get(file_id(source["path"]))
             if builder is not None and self.pool.holds(builder):
@@ -736,8 +773,10 @@ class Daemon:
         # A script's worker is keyed by its canonical path: a process key, not a document's id.
         return canonical(request.get("script") or source["script"]), None
 
-    def _call(self, request: dict[str, Any], order: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
-        """An export or a result asked of the worker the request routes to; its answer sent."""
+    def _call(self, request: dict[str, Any], order: dict[str, Any], send: Callable[[dict[str, Any]], None],
+              payload: bytes = b"") -> None:
+        """An export or a result asked of the worker the request routes to (with ``payload``, the
+        bytes its source carries, after its line); its answer sent."""
         with self.busy_lock:
             self.busy += 1
         try:
@@ -746,14 +785,17 @@ class Daemon:
                 worker = None
                 try:
                     environment = request.get("env") or {}
-                    if request.get("expected"):
-                        # Viewer exports borrow the held document's worker, including
-                        # its environment. An empty HTTP environment must not evict it.
+                    if request.get("expected") or (request.get("source") or {}).get("held"):
+                        # Viewer exports and a document named by its id borrow the held document's
+                        # worker, including its environment: another caller's environment must not
+                        # evict it (a different one starts a fresh worker, which holds nothing).
                         with self.pool.lock:
                             held = self.pool.live.get(os.path.normcase(key))
                             environment = held.environment if held else dict(os.environ)
                         if held is None and "script" in request["source"]:
-                            send({"failed": "The viewed model is no longer held. Reopen it before exporting."})
+                            named = request["source"].get("held")
+                            send({"failed": self.models.missing(named) if isinstance(named, str) else
+                                  "The viewed model is no longer held. Reopen it before exporting."})
                             return
                     worker = self.lease(key, environment, cwd)
                     expected = request.get("expected") or {}
@@ -767,12 +809,12 @@ class Daemon:
                         if not matches:
                             send({"failed": "The source changed. Open Export again to use the displayed revision."})
                             return
-                    answer = worker.build(order, send)
-                    payload = answer.pop("payload", b"")
-                    if payload:
+                    answer = worker.build(order, send, payload)
+                    returned = answer.pop("payload", b"")
+                    if returned:
                         import base64
 
-                        answer["payload"] = base64.b64encode(payload).decode("ascii")
+                        answer["payload"] = base64.b64encode(returned).decode("ascii")
                     done = answer.get("done")
                     # An export from a script built it first: that worker holds the xbf now.
                     for row in (done.get("reports") or []) if isinstance(done, dict) else []:
@@ -806,13 +848,37 @@ class Daemon:
             return
         if op == "model_info":
             self.models.prune()
+            ident = document_id(request["address"])
             with self.models.lock:
-                record = self.models.records.get(document_id(request["address"]))
+                record = self.models.records.get(ident)
                 if record is None:
-                    send({"failed": f"no live model {request['address']}; build it before inspecting"})
+                    send({"failed": self.models.missing(ident) if ident in self.models.expired else
+                          f"no live model {request['address']}; build it before inspecting"})
                 else:
-                    send({"model": {key: record[key] for key in ("id", "address", "source", "builtAt", "version", "files")}})
+                    model = {key: record[key] for key in ("id", "address", "source", "builtAt", "version", "files",
+                                                          "store", "program")}
+                    model["state"] = self.models.state(ident)
+                    lost = self.models.rebuild(ident)
+                    if lost is not None:
+                        model["rebuild"] = lost["rebuild"]
+                    send({"model": model})
             return
+        if op == "state":
+            # What the engine knows of a document by its id: held or not, and what builds it again.
+            ident = str(request.get("id"))
+            self.models.prune()
+            lost = self.models.rebuild(ident)
+            send({"ok": True, "state": self.models.state(ident) if lost is None else lost["state"],
+                  **({"rebuild": lost["rebuild"], "error": lost["error"]} if lost else {})})
+            return
+        payload = b""
+        if op == "export" and "id" in (request.get("source") or {}):
+            try:
+                source, payload = self.document(str(request["source"]["id"]))
+            except ValueError as error:
+                send({"failed": str(error)})
+                return
+            request = {**request, "source": source}
         if op == "model_source":
             send({"ok": True, "source": self.models.resolve(request["address"])})
             return
@@ -821,7 +887,7 @@ class Daemon:
                      "pose": request.get("pose"), "part": request.get("part"), "cwd": request.get("cwd"),
                      "draw": request.get("draw"), "draw_still": request.get("draw_still"),
                      "expected": request.get("expected"), "inspect": request.get("inspect"), "original": request.get("original")}
-            return self._call(request, order, send)
+            return self._call(request, order, send, payload)
         if op == "result":
             order = {"id": 1, "op": "result", "script": request["script"], "name": request["name"],
                      "cwd": request.get("cwd")}

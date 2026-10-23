@@ -297,10 +297,15 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
 
     source_spec = request["source"]
     built: list[dict[str, Any]] = []
-    if request.get("expected") and "script" in source_spec:
+    if "document" in source_spec:
+        source = _held_source(source_spec, request.get("payload") or b"", request.get("destinations") or [])
+    elif (request.get("expected") or source_spec.get("held")) and "script" in source_spec:
         source = engine_build.held(Path(source_spec["script"]), source_spec.get("function"))
         if source is None:
-            raise export.ExportRefused("The viewed model is no longer held. Reopen it before exporting.")
+            raise export.ExportRefused("The viewed model is no longer held. Reopen it before exporting."
+                                       if request.get("expected") else
+                                       f"{source_spec.get('function')} is no longer held: run the program that "
+                                       "builds it again")
     elif "script" in source_spec:
         script = Path(source_spec["script"])
         function = source_spec.get("function")
@@ -365,6 +370,25 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         drawn = _occt(source.path or out.with_suffix(".xbf"), out, Still.from_json(options["still"]),
                       False, source, time.perf_counter())
     return {"reports": built, "files": files, "drawn": drawn}
+
+
+def _held_source(spec: dict[str, Any], payload: bytes, destinations: list[str]) -> Any:
+    """A document the daemon holds and no worker does, as an ``export.Source``: its structure and
+    each part's shape bytes, as served. The mechanism and the placement of each assembly lived in
+    the worker that built it: a STEP or an xbf of a document with kinematics is refused, naming the
+    command that builds it again, rather than written without them."""
+    from cadgen.engine import export
+
+    shapes, at = {}, 0
+    for key, size in spec["shapes"]:
+        shapes[key] = payload[at:at + size]
+        at += size
+    structure = spec["structure"]
+    if structure.get("kinematics") and any(Path(path).suffix.lower() in (".step", ".stp", ".xbf")
+                                           for path in destinations):
+        raise export.ExportRefused(f"{structure.get('name')}'s mechanism is held by the worker that built it, "
+                                   f"which has retired: run `{spec.get('rebuild')}` to export it with its kinematics")
+    return export.Source(structure, shapes, live=False)
 
 
 def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
@@ -432,6 +456,8 @@ def main() -> int:
                 if not line.strip():
                     continue
                 request = json.loads(line)
+                if request.get("bytes"):
+                    request["payload"] = asked.read(int(request["bytes"]))
                 if request.get("op") == "patched":
                     _PATCHED.setdefault(str(request.get("path")), threading.Event()).set()
                 elif request.get("op") == "where":
