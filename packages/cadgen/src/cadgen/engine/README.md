@@ -61,7 +61,8 @@ them; where `connect_to` cannot place them (a nested assembly), give the two joi
 where the parts stand.
 
 ```python
-from cadgen.engine import mechanism_state, xbf
+from cadgen.ap242 import mechanism_state
+from cadgen.engine import xbf
 
 @xbf("XBF/hinge.xbf")
 def hinge():
@@ -917,7 +918,8 @@ configuration sequence says it.
 
 ```python
 import build123d as bd
-from cadgen.engine import configuration_sequence, gear_pair, mechanism_state, screw_pair, xbf
+from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state, screw_pair
+from cadgen.engine import xbf
 
 CURL = {"index_mcp_flexion": 90, "index_pip": 100, "index_dip": 70}  # degrees at a full curl
 BONES = {"base": 30, "proximal": 40, "middle": 25, "distal": 20}     # lengths along +X
@@ -1006,7 +1008,7 @@ A configuration sequence -- AP242's `interpolated_configuration_sequence`, a **m
 structure and the viewer -- is a definition in the model's code, beside its mechanism states:
 
 ```python
-from cadgen.engine import configuration_sequence, mechanism_state
+from cadgen.ap242 import configuration_sequence, mechanism_state
 
 mechanism_state(arm, "folded", shoulder=0, elbow=0)
 mechanism_state(arm, "reach", shoulder=45, elbow=90)
@@ -1089,7 +1091,9 @@ ignores the animation, the GLB bakes it.
 
 ```python
 import build123d as bd
-from cadgen import animation, configuration_sequence, glb, mechanism_state, xbf
+from cadgen import glb, xbf
+from cadgen.ap242 import configuration_sequence, mechanism_state
+from cadgen.gltf import animation
 
 @xbf("XBF/box.xbf")
 @glb("XBF/box.glb")

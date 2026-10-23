@@ -20,8 +20,9 @@ A function worth replaying on a later build -- an assembly's part, a derivation'
 is marked ``@memo``: it writes no file, and a build whose edit does not reach it replays it
 instead of running it. A part's material is a value set on the shape: ``part.material = materials.aluminium``
 (``Material`` for any other). An assembly's mechanism is build123d's joints, placed with
-``connect_to``, as built where the joints place the parts; ``mechanism_state(assembly, name,
-**values)`` names a state of it, ``gear_pair``, ``rack_and_pinion_pair`` and ``screw_pair(assembly,
+``connect_to``, as built where the joints place the parts. The functions that say more are
+``cadgen.ap242``'s and ``cadgen.gltf``'s, defined here (``model``, ``mechanism``, ``animations``)
+and exported there: ``mechanism_state(assembly, name, **values)`` names a state of it, ``gear_pair``, ``rack_and_pinion_pair`` and ``screw_pair(assembly,
 name, **joints)`` a constraint moving joints by ratio (their only way to move, its range their
 limits'), and ``configuration_sequence(assembly, name, ...)`` a sequence of states over time, which a
 GLB export bakes into a clip; ``animation(assembly, name, duration=)``
@@ -40,8 +41,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Material", "animation", "configuration_sequence", "dxf", "gear_pair", "glb", "materials", "mechanism_state",
-           "memo", "model", "paint", "rack_and_pinion_pair", "read_mesh", "read_step", "read_xbf", "report", "screw_pair",
+__all__ = ["Material", "dxf", "glb", "materials", "memo", "model", "paint", "read_mesh", "read_step", "read_xbf", "report",
            "select", "step", "stl", "threemf", "track", "xbf"]
 
 
@@ -82,10 +82,6 @@ def __getattr__(name: str) -> Any:
         from cadgen.engine.refs import select
 
         return select
-    if name in ("gear_pair", "rack_and_pinion_pair", "screw_pair"):
-        from cadgen.engine import mechanism
-
-        return getattr(mechanism, name)
     if name == "read_mesh":
         from cadgen.engine.reader import read_mesh
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from cadgen.engine import configuration_sequence, gear_pair, mechanism_state, xbf
+from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state
+from cadgen.engine import xbf
 
 import math
 from collections.abc import Sequence

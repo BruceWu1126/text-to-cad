@@ -36,7 +36,9 @@ The rules:
 
 ```python
 import build123d as bd
-from cadgen import animation, configuration_sequence, glb, mechanism_state, xbf
+from cadgen import glb, xbf
+from cadgen.ap242 import configuration_sequence, mechanism_state
+from cadgen.gltf import animation
 
 
 @xbf(out="../XBF/hinged_box_showcase.xbf")

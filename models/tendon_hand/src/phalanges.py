@@ -10,7 +10,8 @@ place `continuous_supports()`, the one `@memo` stage (about 20 s of kernel work)
 
 import copy
 
-from cadgen.engine import gear_pair, mechanism_state, memo, xbf
+from cadgen.ap242 import gear_pair, mechanism_state
+from cadgen.engine import memo, xbf
 
 import build123d as bd
 

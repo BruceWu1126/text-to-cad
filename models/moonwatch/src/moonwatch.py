@@ -40,7 +40,8 @@ joints are their own travel, stay in the case.
 import math
 
 import build123d as bd
-from cadgen.engine import configuration_sequence, gear_pair, glb, mechanism_state, xbf
+from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state
+from cadgen.engine import glb, xbf
 
 import chrono_works
 import keyless_works

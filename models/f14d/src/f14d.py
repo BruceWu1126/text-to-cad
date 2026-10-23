@@ -44,7 +44,8 @@ from __future__ import annotations
 import math
 import re
 
-from cadgen.engine import configuration_sequence, track, xbf
+from cadgen.ap242 import configuration_sequence
+from cadgen.engine import track, xbf
 
 import build123d as bd
 

@@ -23,7 +23,8 @@ are, is exported on demand (`cadgen export XBF/w16.xbf w16.glb`).
 
 from __future__ import annotations
 
-from cadgen.engine import configuration_sequence, track, xbf
+from cadgen.ap242 import configuration_sequence
+from cadgen.engine import track, xbf
 
 import build123d as bd
 

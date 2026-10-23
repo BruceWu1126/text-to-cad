@@ -28,7 +28,8 @@ from cadgen.engine.export import ExportRefused, Source, translate
 
 BOARD = """
 import build123d as bd
-from cadgen.engine import glb, materials, mechanism_state, paint, step, stl, threemf, xbf
+from cadgen.ap242 import mechanism_state
+from cadgen.engine import glb, materials, paint, step, stl, threemf, xbf
 
 
 @xbf("XBF/peg.xbf")
@@ -109,7 +110,8 @@ translate(Path(sys.argv[1]), None, Path(sys.argv[2]), pose=sys.argv[3])
 # sub-assembly repeated, posed three ways.
 HINGES = """
 import build123d as bd
-from cadgen.engine import mechanism_state, xbf
+from cadgen.ap242 import mechanism_state
+from cadgen.engine import xbf
 
 PLATE = bd.Box(10, 10, 2)
 PLATE.color = bd.Color(0.2, 0.3, 0.9)

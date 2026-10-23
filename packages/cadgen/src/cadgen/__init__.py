@@ -1,13 +1,14 @@
 """cadgen: CAD models as Python, built by its engine (``cadgen.engine``) into documents (``.xbf``)
 and the files they declare.
 
-The root exports the engine's surface -- the decorators (``xbf``, ``step``, ``glb``, ``stl``,
-``threemf``, ``dxf``), ``memo``, materials (``Material``, ``materials``, ``paint``), the mechanism
+The root exports the engine's surface -- ``model``, the decorators (``xbf``, ``step``, ``glb``,
+``stl``, ``threemf``, ``dxf``), ``memo``, materials (``Material``, ``materials``, ``paint``), the
+readers (``read_step``, ``read_xbf``, ``read_mesh``), ``select``, progress (``report``, ``track``)
+-- and its verbs as functions (``export``, ``snapshot``, ``serve``, ``inspect``, ``status``,
+``stop``, ``daemon``). Two namespaces hold the rest: ``cadgen.ap242`` the mechanism's AP242 names
 (``mechanism_state``, ``configuration_sequence``, ``gear_pair``, ``rack_and_pinion_pair``,
-``screw_pair``), animations (``animation``), the readers (``read_step``, ``read_xbf``,
-``read_mesh``), ``select``, progress (``report``, ``track``) -- and its verbs as functions
-(``export``, ``snapshot``, ``serve``, ``inspect``, ``status``, ``stop``, ``daemon``),
-every name loaded on first use: ``import cadgen`` imports no CAD kernel.
+``screw_pair``) and ``cadgen.gltf`` a GLB's own ``animation``. Every name loads on first use:
+``import cadgen`` imports no CAD kernel.
 """
 
 from functools import cache as _cache
@@ -51,7 +52,6 @@ del _install_engine_host
 
 # The engine's surface (``cadgen.engine.__all__``) and its verbs as functions (``cadgen.engine.api``).
 _ENGINE = ("model", "xbf", "memo", "step", "glb", "stl", "threemf", "dxf", "Material", "materials", "paint",
-           "mechanism_state", "configuration_sequence", "gear_pair", "rack_and_pinion_pair", "screw_pair", "animation",
            "read_step", "read_xbf", "read_mesh", "select", "report", "track")
 _VERBS = ("export", "snapshot", "serve", "inspect", "status", "stop", "daemon")
 
@@ -104,13 +104,9 @@ if TYPE_CHECKING:
     from cadgen.engine import materials
     from cadgen.engine.api import daemon, export, serve, snapshot, status, stop, inspect
     from cadgen.engine.materials import Material
-    from cadgen.engine.mechanism import gear_pair, rack_and_pinion_pair, screw_pair
     from cadgen.engine.model import (
-        animation,
-        configuration_sequence,
         dxf,
         glb,
-        mechanism_state,
         memo,
         model,
         paint,

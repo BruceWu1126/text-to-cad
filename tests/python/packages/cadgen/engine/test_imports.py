@@ -22,7 +22,8 @@ from cadgen.engine import document
 
 KIT = """
 import build123d as bd
-from cadgen.engine import materials, mechanism_state, paint, step, xbf
+from cadgen.ap242 import mechanism_state
+from cadgen.engine import materials, paint, step, xbf
 
 
 @xbf("XBF/kit.xbf")

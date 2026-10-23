@@ -1,5 +1,6 @@
 from __future__ import annotations
-from cadgen.engine import configuration_sequence, gear_pair, glb, mechanism_state, xbf
+from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state
+from cadgen.engine import glb, xbf
 from math import cos, pi, sin, tau
 
 import build123d as bd

@@ -38,7 +38,7 @@ import math
 import re
 
 import build123d as bd
-from cadgen.engine import configuration_sequence, gear_pair, mechanism_state
+from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state
 
 from lib import kin
 from lib import spec as S

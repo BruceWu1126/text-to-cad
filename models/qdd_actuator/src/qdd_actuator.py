@@ -29,7 +29,8 @@ two configurations, and the old clips as motions -- `drive`, `inspect` and
 
 from __future__ import annotations
 
-from cadgen.engine import Material, configuration_sequence, gear_pair, materials, mechanism_state, xbf
+from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state
+from cadgen.engine import Material, materials, xbf
 
 import math
 

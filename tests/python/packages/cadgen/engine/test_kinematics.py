@@ -31,7 +31,8 @@ from tests.python.support import opengl
 
 HINGE = """
 import build123d as bd
-from cadgen.engine import mechanism_state, step, xbf
+from cadgen.ap242 import mechanism_state
+from cadgen.engine import step, xbf
 
 
 @xbf("XBF/hinge.xbf")
@@ -54,7 +55,8 @@ CONNECT = 'base.joints["elbow"].connect_to(arm.joints["mount"], angle=30)'
 
 CHAIN = """
 import build123d as bd
-from cadgen.engine import mechanism_state, xbf
+from cadgen.ap242 import mechanism_state
+from cadgen.engine import xbf
 
 
 @xbf("XBF/lift.xbf")
@@ -600,7 +602,8 @@ BENCH = """
 import math
 
 import build123d as bd
-from cadgen.engine import configuration_sequence, gear_pair, mechanism_state, rack_and_pinion_pair, screw_pair, xbf
+from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state, rack_and_pinion_pair, screw_pair
+from cadgen.engine import xbf
 
 
 @xbf("XBF/bench.xbf")
@@ -735,7 +738,8 @@ class ConformanceTest(_Folder):
 # configuration sequences (waypoints naming the state, and a sweep).
 NAMED = """
 import build123d as bd
-from cadgen.engine import configuration_sequence, gear_pair, mechanism_state, rack_and_pinion_pair, screw_pair, xbf
+from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state, rack_and_pinion_pair, screw_pair
+from cadgen.engine import xbf
 
 PARTS = (("wheel_a", 20, "revolute"), ("wheel_b", 60, "revolute"), ("pinion", 100, "revolute"),
          ("rack", 140, "linear"), ("nut", 180, "cylindrical"))

@@ -32,7 +32,8 @@ child stays where it was built; connected at another value, it moves there, and 
 value is as built:
 
 ```python
-from cadgen.engine import configuration_sequence, glb, mechanism_state, xbf
+from cadgen.ap242 import configuration_sequence, mechanism_state
+from cadgen.engine import glb, xbf
 import build123d as bd
 
 ELBOW = bd.Axis((40, 0, 20), (0, -1, 0))   # +angle lifts the arm
@@ -108,7 +109,8 @@ joint none. Two joints of other kinds (two slides, a slide and a cylindrical joi
 turn) have no pair: drive them by a configuration sequence.
 
 ```python
-from cadgen.engine import configuration_sequence, gear_pair, xbf
+from cadgen.ap242 import configuration_sequence, gear_pair
+from cadgen.engine import xbf
 import build123d as bd
 
 CURL = {"index_mcp": 90, "index_pip": 100, "index_dip": 70}           # degrees at a full curl

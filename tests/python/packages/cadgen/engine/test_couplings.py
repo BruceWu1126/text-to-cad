@@ -32,7 +32,8 @@ from tests.python.support import opengl
 # built, and one control curling all three knuckles.
 FINGER = """
 import build123d as bd
-from cadgen.engine import configuration_sequence, gear_pair, mechanism_state, rack_and_pinion_pair, screw_pair, xbf
+from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state, rack_and_pinion_pair, screw_pair
+from cadgen.engine import xbf
 
 CURL = {{"index_mcp_flexion": 90, "index_pip": 100, "index_dip": 70}}  # degrees at a full curl
 BONES = {{"base": 30, "proximal": 40, "middle": 25, "distal": 20}}  # lengths along +X
@@ -66,7 +67,8 @@ BARE = FINGER.format(coupling="return finger", extra="")
 # and sliding each door.
 HYPERCAR = """
 import build123d as bd
-from cadgen.engine import gear_pair, mechanism_state, screw_pair, xbf
+from cadgen.ap242 import gear_pair, mechanism_state, screw_pair
+from cadgen.engine import xbf
 
 SWEEP = {"left": -70, "right": 70}  # each door's turn when open, degrees
 TRAVEL = 40  # and its travel along the hinge, mm
@@ -95,7 +97,8 @@ def hypercar():
 # A gear train: three wheels on a plate, one coupling turning them at fixed ratios.
 TRAIN = """
 import build123d as bd
-from cadgen.engine import configuration_sequence, gear_pair, mechanism_state, xbf
+from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state
+from cadgen.engine import xbf
 
 RATIOS = {{"sun": 1.0, "idler": -2.0, "ring": 0.5}}
 
@@ -123,7 +126,8 @@ def train():
 # Two fingers, one function's: each placement's joints and coupling labelled alike.
 HAND = """
 import build123d as bd
-from cadgen.engine import gear_pair, mechanism_state, xbf
+from cadgen.ap242 import gear_pair, mechanism_state
+from cadgen.engine import xbf
 
 
 def finger(name):
@@ -234,7 +238,7 @@ class AuthoringTest(unittest.TestCase):
     def test_each_pair_says_what_is_wrong_by_name_and_returns_the_assembly(self) -> None:
         import build123d as bd
 
-        from cadgen.engine import gear_pair, rack_and_pinion_pair, screw_pair
+        from cadgen.ap242 import gear_pair, rack_and_pinion_pair, screw_pair
 
         box = bd.Box(1, 1, 1)
         for call, error in (

@@ -1,4 +1,5 @@
-from cadgen.engine import Material, configuration_sequence, materials, mechanism_state, xbf
+from cadgen.ap242 import configuration_sequence, mechanism_state
+from cadgen.engine import Material, materials, xbf
 
 import math
 

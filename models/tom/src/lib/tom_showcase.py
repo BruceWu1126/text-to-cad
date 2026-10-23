@@ -28,7 +28,7 @@ import math
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
-from cadgen.engine import configuration_sequence, mechanism_state
+from cadgen.ap242 import configuration_sequence, mechanism_state
 
 __all__ = ["CLIPS", "MATES", "add_poses", "add_clips", "beat_table", "clip_pose", "occurrence_ids",
            "check_occurrence_ids"]
