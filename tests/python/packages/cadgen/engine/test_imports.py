@@ -368,7 +368,7 @@ class ReadsTest(unittest.TestCase):
         self.built("enclosure")
         self.assertEqual(self.size("enclosure"), (46.0, 36.0, 6.0))
         again = self.built("enclosure")
-        self.assertEqual((again["bodies"], again["retention"]["fallbacks"]), ({"reads.py::enclosure": "replayed"}, {}))
+        self.assertEqual((again["bodies"], again["retention"]["fallbacks"]), ({"reads.py::enclosure": "loaded"}, {}))
         _writer, record = previous.scan(self.folder / "XBF/enclosure.xbf")
         closure = json.loads(record)
         self.assertEqual([row[:2] for row in closure["inputs"]], [["file", "../scans/pcb.stl"]])

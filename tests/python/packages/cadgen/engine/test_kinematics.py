@@ -293,7 +293,13 @@ class HingeTest(_Folder):
 
 class JointMemoTest(_Folder):
     def test_a_body_with_joints_is_retained_and_an_edited_joint_runs_it_again(self) -> None:
-        # A joint on a part keys the compound that holds it: an unchanged build replays the body.
+        from unittest import mock
+
+        # A joint on a part keys the compound that holds it: an unchanged build replays the body
+        # (the whole-model skip of a warm worker, held by test_previous, set aside to see it).
+        skip = mock.patch.object(engine_build, "_as_built", return_value=False)
+        skip.start()
+        self.addCleanup(skip.stop)
         self.hinge()
         warm = self.hinge()
         self.assertEqual((warm["memo"]["uncached"], warm["memo"]["bodies_run"], warm["memo"]["bodies_skipped"]),

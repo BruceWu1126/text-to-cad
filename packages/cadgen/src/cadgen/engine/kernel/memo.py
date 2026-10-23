@@ -1582,6 +1582,34 @@ def _replayable(record: _Body) -> bool:
     return True
 
 
+def keep(name: str) -> None:
+    """Body ``name`` and every body it called count as used by this run, as a replay counts
+    them, and are not replayed: their entries and keys move behind this run's marker and
+    their records take its generation. A build that takes its model's document from memory
+    (``build._previous``) so leaves the memo holding what an edit after it replays."""
+    record = _BODIES.get(name)
+    if record is None:
+        return
+    generation = _MARKS[-1] if _MARKS else 0
+    pending, seen = [record], set()
+    with _LOCK:
+        while pending:
+            current = pending.pop()
+            if current.name in seen:
+                continue
+            seen.add(current.name)
+            for event in current.log.events:
+                if event[0] == "body":
+                    pending.append(event[1])
+                elif _MEMO.get(event[1].key) is event[1]:
+                    _MEMO.move_to_end(event[1].key)
+            for key, found in zip(current.log.keys, current.log.ids):
+                _KEY_IDS[key] = found
+                _KEY_IDS.move_to_end(key)
+            if _BODIES.get(current.name) is current:
+                current.generation = generation
+
+
 def _replay(record: _Body, state: _Run) -> Any:
     """The body's last run, again, without its code: each entry bound to this run as a hit
     binds it and each feature recorded as it was; the result restored as it returned."""

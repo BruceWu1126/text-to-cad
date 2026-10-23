@@ -91,12 +91,22 @@ def _counts(report: dict) -> tuple[int, int]:
     return report["memo"]["bodies_run"], report["memo"]["bodies_skipped"]
 
 
+def _replays_unchanged(case: unittest.TestCase) -> None:
+    """Body retention is what these tests watch, on unchanged builds too: the whole-model skip
+    a warm worker takes when its document holds the model's key (``build._previous``, held by
+    test_previous) is set aside, so an unchanged root is replayed as a body."""
+    patch = mock.patch.object(engine_build, "_as_built", return_value=False)
+    patch.start()
+    case.addCleanup(patch.stop)
+
+
 class BodiesCase(unittest.TestCase):
     def setUp(self) -> None:
         memo.clear()
         engine_build._WRITTEN.clear()
         engine_build._PARTS.clear()
         self.addCleanup(memo.clear)
+        _replays_unchanged(self)
         patch = mock.patch.dict(os.environ)
         patch.start()
         self.addCleanup(patch.stop)
@@ -441,6 +451,7 @@ class ReadTracingTest(unittest.TestCase):
     def setUp(self) -> None:
         memo.clear()
         self.addCleanup(memo.clear)
+        _replays_unchanged(self)
         self.folder = Path(tempfile.mkdtemp(prefix="engine-reads-")).resolve()
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
         self.script = self.folder / "reader.py"

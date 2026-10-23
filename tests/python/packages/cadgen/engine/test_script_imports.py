@@ -78,7 +78,7 @@ class PackageScriptTest(unittest.TestCase):
         modules = {path for path, _digest in previous.of(self.xbf)["modules"]}
         self.assertLessEqual({"../lib.py", "../helper.py", "../../common/dims.py", "../../__init__.py"}, modules)
         warm = self.build(self.script)
-        self.assertEqual(warm["bodies"], {"model.py::bracket": "replayed"})
+        self.assertEqual((warm["bodies"], warm["cache"]), ({"model.py::bracket": "loaded"}, {"used": True, "from": "memory"}))
         self.assertFalse(warm["files"][str(self.xbf)]["written"])
         write(self.root, {"proj/common/dims.py": "HEIGHT = 7\n"})
         edited = self.build(self.script)
@@ -105,7 +105,7 @@ class PackageScriptTest(unittest.TestCase):
         xbf = self.root / "craft/XBF/f14.xbf"
         self.build(script)
         self.assertIn("../lib/empennage.py", {path for path, _digest in previous.of(xbf)["modules"]})
-        self.assertEqual(self.build(script)["bodies"], {"f14.py::f14": "replayed"})
+        self.assertEqual(self.build(script)["bodies"], {"f14.py::f14": "loaded"})
         write(self.root, {"craft/lib/empennage.py": "SPAN = 9\n"})
         edited = self.build(script)
         self.assertEqual(edited["bodies"], {"f14.py::f14": "run"})
