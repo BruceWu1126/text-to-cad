@@ -15,8 +15,10 @@ Build from this folder: `python hypercar.py`. The GLB is exported on demand
 python hypercar.py
 python -m cadgen.engine snapshot ../XBF/hypercar.xbf open.png --pose open
 python -m cadgen.engine snapshot ../XBF/hypercar.xbf half.png --pose '{"door_left": [-31, 155], "door_right": [31, 155]}'
-cadgen export ../XBF/hypercar.xbf half.step --pose '{"door_left": [-31, 155], "door_right": [31, 155]}'
 ```
+
+A half-open STEP is a model of its own: one returning `posed(hypercar(), {"door_left": [-31, 155],
+"door_right": [31, 155]})` (`cadgen.ap242`) and declaring `@step`.
 
 ## How it is built
 

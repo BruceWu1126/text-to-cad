@@ -82,6 +82,17 @@ def hinge():
     return mechanism_state(bd.Compound(children=[base, arm], label="hinge"), "raised", elbow=90)
 ```
 
+A posed or partial file is a function, never an option (law 22): `export` writes the document
+as its code built it. `posed(assembly, state)` (`cadgen.ap242`, beside `mechanism_state`) is a
+copy of the assembly, sharing its geometry, with every part where a mechanism state, or
+`{joint label or coupling name: value}`, puts it -- each link moved by its placement at those
+values over its placement as built, the forward kinematics the viewer and the snapshot pose
+by (`mechanism.link_worlds`). The copy keeps the joints, couplings, states and sequences, the
+asked values its as-built state, so its viewer Position and motions still work; an unknown
+state, joint or coupling, or a value out of range, is refused by name as `--pose` refuses it.
+A folded arm's STEP is a model: `@step(out="arm_folded.step") def arm_folded(): return
+posed(arm(), "folded")`.
+
 ## Laws
 
 1. **An xbf carries its build closure as pointers and digests** -- script and
@@ -290,7 +301,7 @@ is explicitly restarted. Session state is memory only and is recreated after res
 | `api.py` | the verbs as functions, through the daemon: `export`, `snapshot`, `inspect` (the root's `cadgen.export`, ...), and `serve`, `status`, `stop`, `daemon`, which only the CLI calls (process control is the CLI's alone), and `build_script`, a script's models built by `Model.build()`; `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
 | `colors.py` | a colour as the author gives it (sRGB hex, 0-255 integers, a build123d `Color`) held linear, and the way back (**Materials**) |
-| `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`gear_pair`, `rack_and_pinion_pair`, `screw_pair`), mechanism states (`mechanism_state`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and configuration sequences (`configuration_sequence`, a function's samples, `Timeline`: a sequence's pair values over time) |
+| `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`gear_pair`, `rack_and_pinion_pair`, `screw_pair`), mechanism states (`mechanism_state`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground; `posed`, an assembly copied at a state), and configuration sequences (`configuration_sequence`, a function's samples, `Timeline`: a sequence's pair values over time) |
 | `build.py` | one build: load the script afresh (as Python imports it: a package's module by its dotted name), one memo run, document, element names, files: every model's that ran |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
@@ -313,7 +324,7 @@ is explicitly restarted. Session state is memory only and is recreated after res
 
 ```
 python SCRIPT.py                             the models the script explicitly calls
-cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--json]
+cadgen export SRC DST [DST ...] [--json]
                                              SRC an .xbf or a .step
 cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
                 [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
@@ -751,15 +762,15 @@ result without killing a worker shared with another caller.
 ### Translation formats
 
 The xbf is the model's result; STEP, GLB, STL, 3MF and DXF are exports of a document, and an
-xbf can be one too. One writer, `export.translate(document, kind, path, pose=, part=)`,
+xbf can be one too. One writer, `export.translate(document, kind, path)`,
 writes every one, whether a decorator declares the file or `cadgen export` asks for it: the
-same document and the same options write the same bytes. Every file is written beside its
+same document writes the same bytes. The file holds what the code built (law 22). Every file is written beside its
 target and moved over it; a DXF only when its bytes change.
 
 - **Sources are documents**: an `.xbf` or a `.step` (read into a document first); from Python,
   a `Model` (built first, in its worker) too. A mesh is never a
-  source: it has no B-rep. An xbf is written from a STEP, or from an xbf with `--part`; a posed xbf is refused (a
-  pose is a request, never a document). Several destinations read the document once; an export
+  source: it has no B-rep. An xbf is written from a STEP; never from an xbf, which already is the
+  document. Several destinations read the document once; an export
   runs in the worker that built the document while the file is as it left it, else in the
   daemon's documents worker, which reads it.
 - **STEP** (AP242, `export/step.py`): the assembly with instance and product names, colours per
@@ -798,16 +809,10 @@ target and moved over it; a DXF only when its bytes change.
   zero-length or duplicate entity, every cut profile closed, something drawn; open geometry
   only on a layer its name's whole tokens make a bend, engrave or reference one -- and an
   error refuses the file, saying which. `export.dxf.validate_dxf_file` runs them on any DXF.
-- `--pose` places the mechanism's links by forward kinematics before anything is written;
-  `--part` (one part or assembly as a ref's owner names it, **References**: `board/rack`,
-  `kit2/axle.2/wheel`, `rack`) writes that subtree as a document of its own, its root at the
-  subtree's frame, an xbf of it with the mechanism's share of it (the links wholly inside, the
-  pairs between them, their configurations). Every assembly of a posed or parted document is an
-  assembly of its own placement. An owner that names several occurrences (`kit2/axle/wheel`,
-  where two axles each hold a wheel) is refused, each listed as the grammar tells them apart
-  (`kit2/axle.1/wheel, kit2/axle.2/wheel`).
-- `--pose` (on `export` and `snapshot`) and `--part` (on `export`) are the verbs' alone: ad hoc, never cached, never
-  declared.
+- **No option selects a part or a state** (law 22): a file of one part is that part's own
+  model (a function returning it), and a posed file a model returning the assembly posed
+  (`posed(arm(), "folded")`, `cadgen.ap242`). Snapshot's `--pose` is the picture's: ad
+  hoc, never cached, never declared.
 
 **Motions in a GLB.** Each motion (**Configuration sequences**) is baked into a glTF animation of its name:
 CUBICSPLINE translation and rotation channels for each placement it moves, over one key time
@@ -856,7 +861,7 @@ the patch (`{"op": "patched"}` on its pipe) before it writes a derived file.
 **Functions** (`api`, also `cadgen.export`, `cadgen.snapshot` and `cadgen.inspect`; `serve`,
 `status`, `stop` and `daemon` only the CLI calls): one per command, each through the daemon. No function builds source text
 or a shape made elsewhere: a shape is built by wrapping it in a decorated function (law 12).
-`export(source, *destinations, pose=, part=, inputs=)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`, and `snapshot(job=PACKET, ...)` (with `source` in place of the packet's input, as `--job PACKET SRC`) a list of them, one verb with two input shapes, anything else refused as Python refuses a call; `where(doc)` the build
+`export(source, *destinations)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`, and `snapshot(job=PACKET, ...)` (with `source` in place of the packet's input, as `--job PACKET SRC`) a list of them, one verb with two input shapes, anything else refused as Python refuses a call; `where(doc)` the build
 closure an xbf holds, `where(doc, ref)` an element's facts. A `Model` builds, exports and draws
 itself the same way (`.build(verify=, profile=, daemon=)`, a `Report`: it and its children, as declared;
 `.export()`, `.snapshot()`), and `.document` is its xbf as last built, read-only
@@ -991,8 +996,8 @@ def hypercar():
 `cadgen snapshot XBF/index_finger.xbf c.png --pose '{"index_curl": 0.6}'` draws the
 knuckles at 54, 60 and 42 degrees: the picture of the same finger with no coupling at
 `--pose '{"index_mcp_flexion": 54, "index_pip": 60, "index_dip": 42}'`; its range, `[0, 1]`, is
-where every knuckle stays within its own. `cadgen export XBF/hypercar.xbf half.step --pose
-'{"left": -35, "right": 35}'` writes the doors a half turn and a half travel open. A gear train
+where every knuckle stays within its own. A model returning `posed(car(), {"left": -35,
+"right": 35})` exports the doors a half turn and a half travel open. A gear train
 is a gear pair: `gear_pair(actuator, "drive", rotor_spin=360, output=80, ...)`, a
 quasi-direct-drive actuator's, ranged by its joints' limits. A coupling's joint in no pair is
 left out of it and warned. A label names the joint in each placement of a
@@ -1012,14 +1017,13 @@ segment's `discontinuous_interpolation_type`), and a coupling is its couplers un
 range null where nothing bounds it. **STEP carries none of it**: OCCT reads AP242
 kinematics but cannot write them, so every STEP, posed or not, is placements only.
 
-`--pose` on `cadgen snapshot` and `cadgen export` poses the mechanism at a
+`--pose` on `cadgen snapshot` poses the mechanism at a
 mechanism state (its name, among the structure's `configurations`) or at joint and coupling values (`'{"elbow": 45}'`, `'{"curl": 0.6}'`,
 the rest as built): the engine places each link by composing its pairs from the ground down,
-exact forward kinematics, and draws or writes that (a posed STEP is written from the document's
-tree with every placement its own). No flag is as built. An unknown configuration, joint or
+exact forward kinematics, and draws that. No flag is as built. An unknown configuration, joint or
 coupling, a value out of range (a joint's, a coupling's, or a joint's a coupling puts it at), a
 coupling's joint set alone, a coupling set with one of its joints and a pair of a loop are
-refused by name before anything renders or is written.
+refused by name before anything renders.
 
 **The viewer's Position** shows a slider per coupling under the Pose row (0 as built, its range
 the coupling's, an open side spanning one turn or 100 mm of its first value): dragging it poses
