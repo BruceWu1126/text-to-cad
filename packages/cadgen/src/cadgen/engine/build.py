@@ -2,7 +2,8 @@
 declare written -- in this process, with the memo this process holds.
 
 ``build(script, functions)`` loads the script afresh (its own first-party modules
-too: an edit anywhere in the model's code is read), runs each model named, or every
+too: an edit anywhere in the model's code is read; one run's later calls reuse a load
+whose files stand, ``_Load``), runs each model named, or every
 model the script defines, in one memo run, and then, outside the run, makes each
 result a document (``document.collect``), names its parts' elements from the run's
 history, writes the xbf when its content changed, and writes the exports in order:
@@ -226,6 +227,99 @@ def load_script(script: Path) -> Any:
     return module
 
 
+# --- one load per run ---------------------------------------------------------------------------
+#
+# ``python model.py`` calling its models one after another sends one request per call, each loading
+# the script again. Within one run (``run``: the calling process's token, ``api._run``) the worker
+# serves the later calls from the load it kept, as the calling process itself loaded the script
+# once: only a load that made no kernel call (its module holds no shape a run made), and only after
+# a build that ran nothing (each model taken from its key: no body ran, so the module is as its
+# import left it), while every file the load read -- each first-party module and its folder, and
+# each file or folder the import opened or listed -- stands as the load found it. Anything else
+# loads again, as every build did: a later run, an edit, a verification, a build that ran a body.
+
+
+@dataclass
+class _Load:
+    """A script's load kept for its run's later calls: the module and the models it defined, the
+    first-party modules it imported, the stat of every file it read, and the build's key
+    resolution (``sources.Symbols``), made against that module."""
+
+    key: tuple
+    stats: dict[str, tuple | None]
+    module: Any
+    models: dict[str, Any]
+    loaded: set[str]
+    symbols: Any = None
+    resolved: dict | None = None
+    others: dict | None = None
+
+
+_LOAD: list[_Load] = []  # the one kept, if any
+# The files a load opens or lists, heard while ``_HEARD`` is a list (``_heard``).
+_HEARD: list[Any] = [None]
+_HEARING = ("open", "os.listdir", "os.scandir")
+_HOOKED: list[bool] = []
+
+
+def _heard(event: str, args: tuple) -> None:
+    heard = _HEARD[0]
+    if heard is None or event not in _HEARING:
+        return
+    path = args[0] if args else None
+    if path is None:
+        path = "."
+    if isinstance(path, (str, bytes, os.PathLike)):
+        try:
+            heard.append(os.path.abspath(os.fsdecode(path)))
+        except (TypeError, ValueError):
+            pass
+
+
+def _hear() -> None:
+    """Hear what a load opens and lists (``_heard``): once a process, an audit hook that does
+    nothing while no load is heard."""
+    if not _HOOKED:
+        sys.addaudithook(_heard)
+        _HOOKED.append(True)
+
+
+def _loaded_files(script: Path, heard: list[str]) -> list[str]:
+    """Every file a load read: the script, each first-party module it imported and that
+    module's folder (a module added beside it is a load's change), each namespace package's
+    folders, and what it opened or listed."""
+    files = {str(script), str(script.parent)}
+    for name in _first_party_modules():
+        module = sys.modules.get(name)
+        file = getattr(module, "__file__", None)
+        if file:
+            files.update((file, os.path.dirname(file)))
+        files.update(str(folder) for folder in getattr(module, "__path__", None) or ())
+    # A library's files are not the model's: a load never imports a library again (it stays in
+    # ``sys.modules``), so what one reads at its import is no change a load would see.
+    from cadgen.engine.kernel.trace import _library_roots
+
+    roots = tuple(str(root) + os.sep for root in _library_roots())
+    files.update(path for path in heard if not path.startswith(roots) and "__pycache__" not in path)
+    return sorted(files)
+
+
+def _made(run: Any) -> tuple:
+    """What a run has made so far: its calls and its trace's features."""
+    return (tuple(run.tally.values()), len(run.trace.features), len(run.registered), len(run.transient))
+
+
+def _kept_load(key: tuple) -> _Load | None:
+    """The load kept for ``key``'s run, when every file it read stands as it found it; taken, so
+    a build that does not end as ``_keep_load`` keeps it leaves none kept."""
+    if not _LOAD:
+        return None
+    kept = _LOAD.pop()
+    if kept.key != key or any(_stat(Path(path)) != stat for path, stat in kept.stats.items()):
+        return None
+    return kept
+
+
 def _model_traceback(error: BaseException) -> str:
     """The error with the model's own frames: those of its first-party files."""
     from cadgen.engine.kernel.trace import first_party_file
@@ -237,18 +331,21 @@ def _model_traceback(error: BaseException) -> str:
 
 
 def build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
-          cwd: Path | None = None, verify: bool = False, profile: bool = False) -> list[dict[str, Any]]:
+          cwd: Path | None = None, verify: bool = False, profile: bool = False,
+          run: str | None = None) -> list[dict[str, Any]]:
     """Run a build, optionally profiling this execution in its worker (or explicit cold caller).
 
     The profile covers the whole request, including child models and output processing.
     Each top-level report carries that same request-wide profile, never a cached profile.
+    ``run`` names the calling process's run: its later calls may be served from this one's load
+    (``_Load``); None loads the script afresh.
     """
     if not profile:
-        return _build(script, functions, log=log, cwd=cwd, verify=verify)
+        return _build(script, functions, log=log, cwd=cwd, verify=verify, run_token=run)
     from cadgen.engine.profiling import Profile
 
     with Profile(project=Path(script).parent) as measured:
-        reports = _build(script, functions, log=log, cwd=cwd, verify=verify)
+        reports = _build(script, functions, log=log, cwd=cwd, verify=verify, run_token=run)
     summary = measured.report()
     for report in reports:
         report["profile"] = summary
@@ -256,7 +353,7 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
 
 
 def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
-          cwd: Path | None = None, verify: bool = False) -> list[dict[str, Any]]:
+          cwd: Path | None = None, verify: bool = False, run_token: str | None = None) -> list[dict[str, Any]]:
     """Build the script's models (``functions``, or every model it defines); one report
     per model, holding those of the child models its run ran, each of which wrote its own
     files (``child_models``). Raises BuildError for a script or function that is not there;
@@ -291,14 +388,39 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
     with memo.run(script) as run, BuildContext() as context, reader.session():
         run.verify = verify
         _MODELS.clear()  # the models this build defines, known by name to what its replays ran
-        try:
-            module = load_script(script)
-        except BuildError:
-            raise
-        except Exception as error:  # noqa: BLE001 - the model's own error, reported
-            return [{"ok": False, "model": f"{shown}", "error": _model_traceback(error)}]
+        load_key = (run_token, str(script), str(cwd))
+        kept = _kept_load(load_key) if run_token and not verify else None
+        fresh = None
+        if kept is not None:
+            from cadgen.engine.model import module_of, seat
+
+            module = kept.module
+            _MODELS.update(kept.models)
+            seat(script, module_of(script)[2])
+            context.loaded, context.symbols = kept.loaded, kept.symbols
+            context.resolved, context.others = kept.resolved, kept.others
+        else:
+            _LOAD.clear()  # this load replaces the modules any kept one held
+            made, began, heard = _made(run), time.time_ns(), []
+            if run_token and not verify:
+                _hear()
+                _HEARD[0] = heard
+            try:
+                module = load_script(script)
+            except BuildError:
+                raise
+            except Exception as error:  # noqa: BLE001 - the model's own error, reported
+                return [{"ok": False, "model": f"{shown}", "error": _model_traceback(error)}]
+            finally:
+                _HEARD[0] = None
+            context.loaded = set(_first_party_modules())
+            if run_token and not verify and _made(run) == made:
+                stats = {path: _stat(Path(path)) for path in _loaded_files(script, heard)}
+                sources = [stats.get(getattr(sys.modules.get(name), "__file__", None) or "") for name in context.loaded]
+                # A module edited while it loaded: the load may hold either version, so it is not kept.
+                if all(stat is None or stat[0] < began for stat in sources):
+                    fresh = _Load(load_key, stats, module, dict(_MODELS), context.loaded)
         loaded = time.perf_counter()
-        context.loaded = set(_first_party_modules())
         context.base = script.parent
         context.script = script
         models = models_in(vars(module), script)
@@ -423,7 +545,19 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
             if not row["ok"]:
                 report["ok"] = False
                 report.setdefault("error", f"{identity}: {row['error']}")
+    _keep_load(kept or fresh, reports, context)
     return reports
+
+
+def _keep_load(load: _Load | None, reports: list[dict[str, Any]], context: Any) -> None:
+    """Keep the build's load for its run's next call when the build ran nothing: every model
+    taken from its key (``_previous``), so no body touched the module (``_Load``)."""
+    _LOAD.clear()
+    if load is None or not reports or not all(
+            report.get("ok") and (report.get("cache") or {}).get("used") for report in reports):
+        return
+    load.symbols, load.resolved, load.others = context.symbols, context.resolved, context.others
+    _LOAD.append(load)
 
 
 def _written(model: Any, result: Any, run: Any, report: dict[str, Any], log: Callable[[str], None], plan: list,

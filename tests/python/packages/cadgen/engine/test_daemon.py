@@ -178,7 +178,7 @@ def peg():
 
 class WorkerLoopTest(unittest.TestCase):
     """A worker's request loop, driven as the daemon drives it: its collection waits until it is
-    idle."""
+    idle, and one run's calls of a script are served from one load while its files stand."""
 
     def setUp(self) -> None:
         import queue
@@ -248,6 +248,25 @@ class WorkerLoopTest(unittest.TestCase):
         self.until_settled(2, seen)
         self.assertFalse(any("collected" in frame for frame in seen), "no collection between the two answers")
         self.assertIsInstance(self.next().get("collected"), float, "it collected once idle")
+
+    def test_one_run_s_calls_share_a_load_until_a_file_changes(self) -> None:
+        self.until_settled(self._asked(1, None, "one"))  # a cold build: bodies ran, nothing kept
+        self.until_settled(self._asked(2, ["block"], "one"))  # nothing ran: this load is kept
+        self.assertEqual(self.loads(), 2)
+        taken = self.until_settled(self._asked(3, ["peg"], "one"))
+        self.assertEqual(self.loads(), 2, "the run's next call is served from its load")
+        self.assertEqual(taken[0]["cache"], {"used": True, "from": "memory"})
+        self.script.write_text(self.script.read_text(encoding="utf-8") + "# edited\n", encoding="utf-8")
+        self.until_settled(self._asked(4, ["block"], "one"))
+        self.assertEqual(self.loads(), 3, "an edit between two calls of one run loads the script again")
+        self.until_settled(self._asked(5, ["peg"], "two"))
+        self.assertEqual(self.loads(), 4, "another run loads the script again")
+        self.until_settled(self._asked(6, ["peg"], None))
+        self.assertEqual(self.loads(), 5, "a request of no run loads it again")
+
+    def _asked(self, ident: int, functions: list | None, run: str | None) -> int:
+        self.ask(ident, functions, run)
+        return ident
 
 
 class ConnectTest(unittest.TestCase):

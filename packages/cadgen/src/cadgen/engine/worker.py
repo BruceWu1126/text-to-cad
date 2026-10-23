@@ -2,7 +2,7 @@
 
 The daemon starts one per script and talks to it over the worker's stdin and its
 original stdout. A request is one JSON object per line: ``{"id", "op": "build", "script",
-"functions", "cwd"}``, and, when the daemon serves documents, ``served`` (each served
+"functions", "cwd", "run"}`` (``run``: the calling process's run, ``build.build``), and, when the daemon serves documents, ``served`` (each served
 document's id and the version served of it), ``served_keys`` (each served document's id and
 the keys of the parts it holds), ``held`` (the geometry keys it holds a mesh for) and
 ``shapes`` (the keys it holds a shape for). The answers are frames: a JSON object on one
@@ -522,7 +522,8 @@ def main() -> int:
                 said.load()
                 reports = build(script, request.get("functions") or None,
                                 log=lambda text: send({"id": ident, "log": text}), cwd=Path(cwd) if cwd else None,
-                                verify=bool(request.get("verify")), profile=bool(request.get("profile")))
+                                verify=bool(request.get("verify")), profile=bool(request.get("profile")),
+                                run=request.get("run"))
             said.attach(reports)
             patcher.finish(reports)
             resident = resident_after_build()

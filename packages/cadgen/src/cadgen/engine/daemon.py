@@ -822,7 +822,8 @@ class Daemon:
                         fresh = worker.builds == 0
                         order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
                                  "cwd": request.get("cwd"), "verify": bool(request.get("verify")),
-                                 "profile": bool(request.get("profile")), "acknowledged": True}
+                                 "profile": bool(request.get("profile")), "acknowledged": True,
+                                 "run": request.get("run")}
                         server = self.server
                         if server is not None:
                             # The worker sends each served document it builds back as a patch,
