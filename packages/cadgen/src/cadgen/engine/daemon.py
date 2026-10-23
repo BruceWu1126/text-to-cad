@@ -89,9 +89,12 @@ def worker_idle(idle: float) -> float:
 
 def state_dir() -> Path:
     """Where the daemon's socket and lock live: ``tempfile.gettempdir()/cadgen-engine``,
-    or ``CADGEN_ENGINE_DIR``."""
+    or ``CADGEN_ENGINE_DIR``. Resolved once, here, for the client and the server alike
+    (``os.path.realpath``): a ``..``, a symlink or a trailing slash in either spelling names
+    the same socket, lock and port file."""
     override = os.environ.get("CADGEN_ENGINE_DIR")
-    return Path(override) if override else Path(tempfile.gettempdir()) / "cadgen-engine"
+    folder = override if override else os.path.join(tempfile.gettempdir(), "cadgen-engine")
+    return Path(os.path.realpath(folder))
 
 
 def _tag(protocol: int | None = None) -> str:

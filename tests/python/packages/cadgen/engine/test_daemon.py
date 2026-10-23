@@ -366,6 +366,38 @@ class SweepTest(unittest.TestCase):
         self.assertEqual((done.returncode, json.loads(done.stdout)), (0, {"ok": True, "stopped": []}))
 
 
+class StateDirSpellingTest(unittest.TestCase):
+    def test_a_server_started_under_a_dotted_spelling_is_found_and_stopped_under_the_plain_one(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine import client
+
+        state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
+        self.addCleanup(shutil.rmtree, state, True)
+        (state / "sub").mkdir()
+        # Long enough that the socket is named by its folder's digest (``SOCKET_PATH_LIMIT``): two
+        # spellings of one folder must hash alike.
+        engine = "engine-" * 14
+        dotted = f"{state / 'sub'}{os.sep}..{os.sep}{engine}{os.sep}"  # a `..` and a trailing separator
+        plain = str(state / engine)
+        env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_IDLE": "60"}
+        dotted_env = engine_daemon.watched({**env, "CADGEN_ENGINE_DIR": dotted}, self.addCleanup)
+        plain_env = engine_daemon.watched({**env, "CADGEN_ENGINE_DIR": plain}, self.addCleanup)
+        self.addCleanup(engine_daemon.run, [sys.executable, "-m", "cadgen.engine", "stop"], env=plain_env)
+        probe = "from cadgen.engine.client import request; print(request({'op': 'status'})['pid'])"
+        started = engine_daemon.run([sys.executable, "-c", probe], env=dotted_env)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": plain}):
+            found = client.request({"op": "status"}, start=False)
+            address = client._daemon.port_path() if client._daemon.WINDOWS else client._daemon.socket_path()
+        self.assertIsNotNone(found, "the plain spelling reaches the server the dotted one started")
+        self.assertEqual(str(found["pid"]), started.stdout.split()[-1])
+        done = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "stop"], env=plain_env)
+        self.assertEqual((done.returncode, done.stdout), (0, f"stopped the engine server at {address}\n"), done.stderr)
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": dotted}):
+            self.assertIsNone(client.request({"op": "status"}, start=False), "stopped under either spelling")
+
+
 class LongStatePathTest(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "a socket's path limit is a Unix socket's")
     def test_a_state_folder_past_the_socket_path_limit_works_and_nobody_changes_folder(self) -> None:
