@@ -13,7 +13,7 @@ repository link is only for provenance and release review.
 ## Setup
 
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
-one installation, and its engine server, with the CAD app's:
+one installation, and its engine, with the CAD app's server:
 
 - `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen`
 - `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 python`
@@ -21,8 +21,8 @@ one installation, and its engine server, with the CAD app's:
 The first run downloads that installation; later runs reuse it.
 
 `cadgen doctor <skill-dir>` reports the installation in use and checks that it is
-the one this skill pins, that the CAD kernel loads, and whether the engine server
-every build runs in is running; use it for installation or kernel load errors.
+the one this skill pins, that the CAD kernel loads, and whether the engine every
+build runs in is running; use it for installation or kernel load errors.
 
 Drawings are build123d geometry, so a drawing builds in the engine's warm worker
 like any model: the first build of a script loads the CAD kernel (a few seconds),
@@ -36,7 +36,7 @@ drawing's source of truth is a Python file named `<name>.py` defining one
 parameterless `@dxf` model function.
 
 **A drawing is a model.** It builds as any `$cad` model does: `python <name>.py`
-hands the build to the engine's daemon, whose warm worker for the script replays
+hands the build to the engine, whose warm worker for the script replays
 what an edit does not reach, and an unchanged drawing leaves its file as it was. The
 DXF is a translation of the model's planar document, written by build123d's own
 exporter once the drawing checks pass. A drawing that calls a part model
@@ -51,7 +51,7 @@ sketch, a face, wires or edges. The engine writes the DXF.** You never construct
 document, name an entity, or write a file.
 
 ```python
-from cadgen.engine import dxf   # first: the script hands its build to the engine here
+from cadgen import dxf
 import build123d as bd
 
 HOLE_D = 4.5
@@ -63,6 +63,10 @@ def gasket():
         bd.Rectangle(60, 40)
         bd.Circle(HOLE_D / 2, mode=bd.Mode.SUBTRACT)
     return cut.sketch          # one shape: the CUT layer
+
+
+if __name__ == "__main__":
+    gasket()                   # decoration only declares: this call builds it
 ```
 
 - **One shape** is one layer, `CUT`. That is the whole contract for most drawings.
@@ -105,7 +109,7 @@ Copy the full template for the applicable workflow from
    geometry.
 
    ```python
-   from cadgen.engine import dxf
+   from cadgen import dxf
    from cadgen import flatten
 
    from bracket import bracket        # the model: importing builds nothing
@@ -116,6 +120,10 @@ Copy the full template for the applicable workflow from
    @dxf(out="../DXF/bracket_drawing.dxf")
    def bracket_drawing():
        return flatten.flat_pattern(bracket(), coordinate=3.0, kerf=KERF)   # the top face's height
+
+
+   if __name__ == "__main__":
+       bracket_drawing()
    ```
 
    An edit to the part re-runs the drawing's body on its next build; an edit the
@@ -129,7 +137,7 @@ Copy the full template for the applicable workflow from
    ```python
    from pathlib import Path
 
-   from cadgen.engine import dxf, read_step
+   from cadgen import dxf, read_step
    from cadgen import flatten
 
    HERE = Path(__file__).resolve().parent
@@ -141,6 +149,10 @@ Copy the full template for the applicable workflow from
    def panel_flat():
        panel = read_step(HERE / "vendor" / "vendor_panel.step")   # an input, by its bytes
        return flatten.flat_pattern(panel, coordinate=3.0, kerf=KERF)
+
+
+   if __name__ == "__main__":
+       panel_flat()
    ```
 
    **Never read a file this project's builds write.** A drawing reading the `.step`
@@ -150,8 +162,9 @@ Copy the full template for the applicable workflow from
    workflow 2: import the model and call it.
 
 One model per file is the recommendation, and a drawing gets its own script. A
-file MAY declare several models (two `@dxf` drawings, or a `@dxf` beside an `@xbf`
-part): `python <file>.py` builds every one, each writing its own files. A drawing
+file MAY declare several models (two `@dxf` drawings, or a `@dxf` beside a part's
+`@model`): `python <file>.py` builds every one its `__main__` block calls, each writing
+its own files. A drawing
 composes models, never the reverse.
 
 ## Use this skill when
@@ -191,7 +204,7 @@ Use these defaults unless the user specifies otherwise:
 ## Tool
 
 ```bash
-python path/to/drawing.py                                   # builds every model in it, writing each .dxf
+python path/to/drawing.py                                   # builds every model its __main__ calls, writing each .dxf
 cadgen snapshot path/to/drawing.dxf review.png              # draws it
 cadgen snapshot path/to/drawing.dxf review.png --display '{"appearance": "dark"}'
 ```
@@ -248,13 +261,14 @@ python path/to/source.py
 
 ## Show the model
 
-Show the user each file you create or change, and any they ask to see. Snapshots and
-validation don't replace this.
+Show the user each model and file you create or change, and any they ask to see.
+Snapshots and validation don't replace this.
 
-- If your tools include `cad_show` (your host may prefix it), use it with the file's
-  absolute path, and follow its description for when to call it again. `cad_view` reads
-  what the user selected; `cad_screenshot` shows you what they see.
-- Otherwise run the CAD Viewer, from any folder:
+- If your tools include `cad_show` (your host may prefix it), call it with the model's id
+  or the file's absolute path, and follow its description for when to call it again.
+  `cad_view` reads what the user selected; `cad_screenshot` shows you what they see.
+- Otherwise give the user the page's link once: a model's page is the `view:` line its
+  run prints. For a file, run the CAD Viewer, from any folder:
 
   ```bash
   cadgen viewer --host 127.0.0.1 --json FILE [FILE ...]
@@ -262,8 +276,8 @@ validation don't replace this.
 
   The command ensures this installation's engine, registers each file and prints
   its page, `/<id>`, then exits. Read each file's `url` from `documents` in its one
-  JSON line (never guess the port); the URL carries its token query. A model's page is the
-  `view:` line `python SCRIPT.py` prints; a script is never a document.
+  JSON line (never guess the port); the URL carries its token query. A page follows
+  every later run of its model and every rewrite of its file, so share it once.
   Return that link to the user. If it fails to launch, say so.
 
 The viewer renders saved DXF files as read-only 2D drawings; it never runs

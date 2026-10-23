@@ -14,7 +14,7 @@ from enclosure import HOLES, L, H, W, enclosure
 
 @eng_drawing(out="../PDF/enclosure_drawing.pdf")
 def enclosure_drawing():
-    part = enclosure()    # the model's body, run here; a big model: read_xbf its .xbf instead
+    part = enclosure()    # the model, built by the engine (a replay when it holds it)
     sheet = Sheet("A3", title="ENCLOSURE", part_number="ENC-001", material="ABS",
                   revision="A", general_tolerance="ISO 2768-m",
                   notes=["BREAK SHARP EDGES."])
@@ -47,19 +47,19 @@ argument list carries that, so the decorator is the whole surface.
 
 ## The part
 
-Call the model: outside a build a model is its function, so `enclosure()` runs its
-body in the drawing's process and returns the part, cold. For a big model, read the
-document its last build wrote instead (run `python enclosure.py` first):
+Call the model: `enclosure()` is built by cadgen's engine, a replay when the engine
+already holds it, and returns the part as a build123d tree. A part with no model is
+read from its file instead:
 
 ```python
 from pathlib import Path
 
-from cadgen.engine import read_xbf
+from cadgen import read_step
 
-part = read_xbf(Path(__file__).parent / "../XBF/enclosure.xbf")
+part = read_step(Path(__file__).parent / "../vendor/enclosure.step")
 ```
 
-`read_step` reads a STEP that has no model the same way. Anchor the path on the
+`read_xbf` reads an xbf the same way. Anchor the path on the
 script, since it resolves against the process's working directory otherwise. Any
 build123d shape works: a drawing takes geometry, not a file.
 

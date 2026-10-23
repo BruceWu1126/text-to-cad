@@ -25,7 +25,7 @@ patterns, which are toolpaths, not documents; the two are different jobs.
 ## Setup
 
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
-one installation, and its engine server, with the CAD app's:
+one installation, and its engine, with the CAD app's server:
 
 - `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen`
 - `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 python`
@@ -35,11 +35,10 @@ The first run downloads that installation; later runs reuse it.
 ## Workflow
 
 1. Get the part. Call the model: `enclosure()`, imported from the model's script,
-   runs its body in the drawing's process and returns the part (outside a build, a
-   model is its function). For a big model, read the document its last build wrote
-   instead: `read_xbf(Path(__file__).parent / "../XBF/enclosure.xbf")` (run
-   `python <model>.py` first), or `read_step` for a STEP with no model. Any
-   build123d shape works. The drawing documents geometry, it does not build it.
+   is built by cadgen's engine (a replay when the engine already holds it) and
+   returns the part. For a part with no model, read its file: `read_step` for a
+   STEP, `read_xbf` for an xbf, anchored on `Path(__file__).parent`. Any build123d
+   shape works. The drawing documents geometry, it does not build it.
 2. Write `<name>_drawing.py` beside the model, from
    [the template](references/sheet-api.md#template). Import the model facts the
    dimensions reference (hole pitch, overall size, wall) from the model module

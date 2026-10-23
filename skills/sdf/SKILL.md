@@ -19,7 +19,7 @@ The `.sdf` file is the source of truth: author and edit the XML directly. There 
 ## Setup
 
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
-one installation, and its engine server, with the CAD app's:
+one installation, and its engine, with the CAD app's server:
 
 - `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen`
 - `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 python`
@@ -47,13 +47,14 @@ Use this skill for SDFormat outputs. Do not use it for signed-distance-field mod
 
 ## Show the model
 
-Show the user each file you create or change, and any they ask to see. Snapshots and
-validation don't replace this.
+Show the user each model and file you create or change, and any they ask to see.
+Snapshots and validation don't replace this.
 
-- If your tools include `cad_show` (your host may prefix it), use it with the file's
-  absolute path, and follow its description for when to call it again. `cad_view` reads
-  what the user selected; `cad_screenshot` shows you what they see.
-- Otherwise run the CAD Viewer, from any folder:
+- If your tools include `cad_show` (your host may prefix it), call it with the model's id
+  or the file's absolute path, and follow its description for when to call it again.
+  `cad_view` reads what the user selected; `cad_screenshot` shows you what they see.
+- Otherwise give the user the page's link once: a model's page is the `view:` line its
+  run prints. For a file, run the CAD Viewer, from any folder:
 
   ```bash
   cadgen viewer --host 127.0.0.1 --json FILE [FILE ...]
@@ -61,8 +62,8 @@ validation don't replace this.
 
   The command ensures this installation's engine, registers each file and prints
   its page, `/<id>`, then exits. Read each file's `url` from `documents` in its one
-  JSON line (never guess the port); the URL carries its token query. A model's page is the
-  `view:` line `python SCRIPT.py` prints; a script is never a document.
+  JSON line (never guess the port); the URL carries its token query. A page follows
+  every later run of its model and every rewrite of its file, so share it once.
   Return that link to the user. If it fails to launch, say so.
 
 Review placement, resources and joints. The viewer does not execute simulator

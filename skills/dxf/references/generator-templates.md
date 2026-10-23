@@ -18,8 +18,8 @@ construct a document, name a file, or think about entities.
   than silently writing its XY shadow.
 - The drawing checks run before the file is written: cut layers must hold closed
   profiles, and open geometry belongs on a bend/engrave/reference-named layer.
-- The engine import comes first in the script, and running the script builds it:
-  `python <name>.py`. No `__main__` block is needed.
+- Decoration only declares: the script's `__main__` block calls the drawing, and
+  `python <name>.py` builds what it calls.
 
 ## 1. Standalone drafting (DXF from scratch)
 
@@ -29,7 +29,7 @@ behind them. Keep meaningful dimensions as named constants.
 ```python
 """Standalone 2D drawing: <description>."""
 
-from cadgen.engine import dxf
+from cadgen import dxf
 import build123d as bd
 
 # TODO: named dimension constants
@@ -44,6 +44,10 @@ def drawing():
         bd.Rectangle(WIDTH_MM, HEIGHT_MM)
         bd.Circle(HOLE_D_MM / 2, mode=bd.Mode.SUBTRACT)
     return cut.sketch
+
+
+if __name__ == "__main__":
+    drawing()
 ```
 
 Two layers, when the part is both cut and marked:
@@ -51,7 +55,7 @@ Two layers, when the part is both cut and marked:
 ```python
 """Standalone 2D drawing with a marking layer."""
 
-from cadgen.engine import dxf
+from cadgen import dxf
 import build123d as bd
 
 WIDTH_MM = 40.0
@@ -67,6 +71,10 @@ def drawing():
     profile, text = cut.sketch, mark.sketch
     profile.label, text.label = "CUT", "ENGRAVE"
     return bd.Compound(children=[profile, text], label="drawing")
+
+
+if __name__ == "__main__":
+    drawing()
 ```
 
 Text is engraved **outlines**, not DXF `TEXT` entities: cut and marking
@@ -84,7 +92,7 @@ its value.
 ```python
 """Flat-pattern DXF drawing for <name>; geometry reused from <name>.py."""
 
-from cadgen.engine import dxf
+from cadgen import dxf
 from cadgen import flatten
 
 from <name> import <name>          # the model: importing builds nothing
@@ -100,6 +108,10 @@ def drawing():
         coordinate=THICKNESS_MM,   # TODO: which face plane defines the profile
         kerf=KERF,
     )
+
+
+if __name__ == "__main__":
+    drawing()
 ```
 
 `flat_pattern` is selection + flatten + union + optional kerf offset in one
@@ -140,7 +152,7 @@ stem:
 
 from pathlib import Path
 
-from cadgen.engine import dxf, read_step
+from cadgen import dxf, read_step
 from cadgen import flatten
 
 STEP_PATH = Path(__file__).resolve().parent / "vendor" / "vendor_panel.step"
@@ -152,6 +164,10 @@ def drawing():
     part = read_step(STEP_PATH)
     top_z = part.bounding_box().max.Z
     return flatten.flat_pattern(part, coordinate=top_z, kerf=KERF)
+
+
+if __name__ == "__main__":
+    drawing()
 ```
 
 ## Common additions
@@ -167,6 +183,6 @@ def drawing():
   included. If a drawing comes out as hundreds of short `LINE`s, something fell
   back to the sampled path: check the union inputs rather than accepting it.
 - **Why did it (not) rebuild?** The build's report says how each body went (`run` or
-  `replayed`) and each file (`written` or `kept`). A drawing that declares `@xbf` too
-  keeps its build closure in its document: its report names what changed
-  (`rebuilt: ../src/bracket.py changed`), and `cadgen inspect <drawing>.xbf` prints it.
+  `replayed`), each file (`written` or `kept`), and what changed
+  (`rebuilt: ../src/bracket.py changed`); `cadgen inspect <id>`, the id the run printed,
+  prints what the drawing was built from.
