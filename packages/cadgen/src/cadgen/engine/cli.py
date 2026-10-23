@@ -41,7 +41,7 @@ _DEFAULT = {"xbf": "XBF/<name>.xbf", "step": "<name>.step", "glb": "<name>.glb",
 
 def _build_arguments(build: argparse.ArgumentParser) -> None:
     build.usage = ("%(prog)s SOURCE [--model NAME] [--name N] [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] "
-                   "[--dxf [F]] [--json] [--verify] [--no-daemon]")
+                   "[--dxf [F]] [--json] [--verify] [--profile] [--no-daemon]")
     build.add_argument("source", metavar="SOURCE", help="the code (- reads it from stdin)")
     build.add_argument("--model", metavar="NAME", help="build or update the named document in memory")
     build.add_argument("--name", metavar="N",
@@ -49,6 +49,7 @@ def _build_arguments(build: argparse.ArgumentParser) -> None:
     for kind in FILE_FLAGS:
         build.add_argument(f"--{kind}", nargs="?", const=True, metavar="F",
                            help=f"write the {kind} at F (default: {_DEFAULT[kind]} in the working folder)")
+    build.add_argument("--profile", action="store_true", help="profile actual worker execution, preserving cache hits")
     build.add_argument("--json", action="store_true", help="print the report as JSON")
     build.add_argument("--verify", action="store_true",
                        help="run every function the engine would replay and compare its result with the logged one")
@@ -245,6 +246,10 @@ def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as
             print(json.dumps({**report, "wall": round(wall, 4)}))
         else:
             print(_describe(report, wall, fresh))
+            if report.get("profile"):
+                from cadgen.engine.profiling import describe
+
+                print(describe(report["profile"]))
             if report.get("address"):
                 print(f"  model: {report['address']}")
                 if report.get("url"):
@@ -270,7 +275,7 @@ def _build(args: argparse.Namespace, prog: str) -> int:
         raise Failed("--model needs the engine to hold its document; omit --no-daemon", 2)
     code = sys.stdin.read() if args.source == "-" else args.source
     try:
-        built = api.build(code, model=args.model, name=args.name, **flags, verify=args.verify, log=_log, daemon=not args.no_daemon)
+        built = api.build(code, model=args.model, name=args.name, **flags, verify=args.verify, profile=args.profile, log=_log, daemon=not args.no_daemon)
     except api.EngineError as error:
         raise Failed(str(error)) from None
     return _reported([built.report], built.report.get("wall", 0.0), None, args.json)

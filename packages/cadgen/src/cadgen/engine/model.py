@@ -206,13 +206,14 @@ class Model:
 
     # --- the verbs, through the daemon (``cadgen.engine.api``) -----------------------------
 
-    def build(self, *, verify: bool = False, log: Callable[[str], None] | None = None, daemon: bool = True) -> Any:
+    def build(self, *, verify: bool = False, profile: bool = False, log: Callable[[str], None] | None = None, daemon: bool = True) -> Any:
         """Build this model, through the daemon (``daemon=False``: in this process): it and every
         child model it calls write what their decorators declare, when the script explicitly calls it (``api.build_script``); a ``Report``. ``verify`` runs every body
-        the memo would replay and compares its result with the logged one."""
+        the memo would replay and compares its result with the logged one. ``profile`` measures
+        the actual build call without forcing cache misses (engine README, Profiling)."""
         from cadgen.engine import api
 
-        return api.build_script(self.script, [self.name], verify=verify, log=log, daemon=daemon)
+        return api.build_script(self.script, [self.name], verify=verify, profile=profile, log=log, daemon=daemon)
 
     def export(self, *destinations: Any, pose: Any = None, part: str | None = None) -> Any:
         """Build this model, then write its document to each destination (by suffix)."""

@@ -262,7 +262,7 @@ is explicitly restarted. Session state is memory only and is recreated after res
 ```
 python SCRIPT.py                             the models the script explicitly calls
 cadgen build SOURCE | - [--name N]           one model from source text (stdin with -), its files
-    [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify] [--no-daemon]
+    [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify] [--profile] [--no-daemon]
 cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] [--no-daemon] [--json]
                                              SRC an .xbf or a .step
 cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
@@ -289,7 +289,7 @@ build that model and the children its body calls, prints its report when called
 from `__main__`, and returns its shape when the caller uses it. A failed build
 raises; a successful call resumes the script. Put executable model calls under
 `if __name__ == "__main__":` so other models can import their definitions.
-`Model.build(verify=, daemon=)` explicitly requests a build and returns its report.
+`Model.build(verify=, profile=, daemon=)` explicitly requests a build and returns its report.
 No watcher selects, suppresses or introduces calls in a Python script.
 
 A script is plain Python, loaded afresh by each build as Python imports it
@@ -352,6 +352,43 @@ document is served meanwhile), and one rewritten while it is served is read
 again in the background: the page keeps the old version until the new one is
 in. Its structure says how long the parse took and which process made it
 (`read`: `{seconds, process}`).
+
+## Profiling
+
+Request function timings with `arm.build(profile=True)` or
+`cadgen.build(code, model="part", profile=True)`. The script remains plain Python,
+run as `python model.py`; it takes no engine flags. The CLI mirror is
+`cadgen build CODE --model part --profile`, with `--json` for the same structured report.
+
+Profiling measures **actual execution**, preserving normal memo, body and XBF hits.
+It does not force a rebuild: a replayed body has no function timings for its earlier
+execution, and a kernel memo hit measures lookup/replay, not the skipped operation.
+Read the existing `cache`, `memo` and `bodies` fields alongside the timings. `verify=True`
+retains its usual verification behavior when combined with profiling; it is not a cold run.
+
+The `profile` field in `Built.report` or each top-level `Report.models` entry covers
+one entire build request, including script loading, all requested and child models,
+document processing and declared exports. For multiple targets those entries carry
+the **same request-wide profile**, not separate per-model measurements to add together.
+It runs in the worker (or the caller with `daemon=False`), excludes client/daemon startup
+and queuing, and includes waits during that worker call. Work in other processes is
+not function-profiled. An already-created shape can also request `profile=True`, but
+only its remaining worker processing is measured: construction and packing in the
+caller happened before this scope. `supplied_shape: true` makes that distinction explicit.
+
+The JSON profile identifies `scope: "build_request"`, `mode: "actual_execution"`, the
+process id, elapsed `seconds`, total `self_seconds`, and `function_count`. Its two
+lists hold at most 20 rows each: `project_cumulative` (functions under the script's
+folder, or the code build's working folder, excluding installed dependencies) and
+`top_self` (all functions by self time). A row names `file`, `line`, `function`, total
+`calls`, `primitive_calls` (non-recursive calls), `self_seconds` and
+`cumulative_seconds`. CLI human output prints those tables; Python callers receive
+these fields without printing or writing a profile file. No profile is saved or
+reused by a later build. Failed model reports include the work observed before failure.
+
+`cProfile` slows call-heavy Python code, so compare shares with care. It runs with
+`builtins=False`: native OCCT time belongs to the Python function that called it,
+which also avoids pybind11's unmatched profile events on Python 3.12 and later.
 
 ## The daemon and its workers
 
@@ -749,7 +786,7 @@ source text or an already-built build123d shape, and returns a `Built` (`.files`
 asked of the worker that holds them, `.export(...)`); `export(source, *destinations, pose=, part=,
 inputs=)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`; `where(doc)` the build
 closure an xbf holds, `where(doc, ref)` an element's facts. A `Model` builds, exports and draws
-itself the same way (`.build(verify=, daemon=)`, a `Report`: it and its children, as declared;
+itself the same way (`.build(verify=, profile=, daemon=)`, a `Report`: it and its children, as declared;
 `.export()`, `.snapshot()`), and `.document` is its xbf as last built, read-only
 (`.document.closure` its closure).
 

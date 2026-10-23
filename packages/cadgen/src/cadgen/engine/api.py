@@ -207,7 +207,7 @@ def _outputs(flags: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
 
 
 def _built(script: Path, functions: list[str] | None, *, code: str | None = None, name: str | None = None,
-           outputs: dict[str, dict[str, Any]] | None = None, verify: bool = False,
+           outputs: dict[str, dict[str, Any]] | None = None, verify: bool = False, profile: bool = False,
            log: Callable[[str], None] | None = None, daemon: bool = True,
            progress: Any = None, shape: dict | None = None) -> tuple[list[dict[str, Any]], Any, float]:
     """One build -- of code, or of a script's models -- in the warm worker that holds it, or in
@@ -235,7 +235,7 @@ def _built(script: Path, functions: list[str] | None, *, code: str | None = None
                 with progressing.building(said):
                     said.load()
                     reports = engine_build.build(script, functions, log=shown, cwd=cwd, outputs=outputs, code=code,
-                                                 verify=verify, shape=shape)
+                                                 verify=verify, profile=profile, shape=shape)
             except BuildError as error:
                 raise EngineError(str(error)) from None
             said.attach(reports)
@@ -245,7 +245,7 @@ def _built(script: Path, functions: list[str] | None, *, code: str | None = None
                 shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")
 
             answer = _ask({"op": "build", "script": str(script), "functions": functions, "cwd": str(cwd),
-                           "outputs": outputs, "code": code, "shape": shape, "name": name, "verify": verify}, relay, frames)
+                           "outputs": outputs, "code": code, "shape": shape, "name": name, "verify": verify, "profile": profile}, relay, frames)
             reports, fresh = answer["done"], answer.get("worker", {}).get("fresh")
     finally:
         if bar is not None:
@@ -254,7 +254,7 @@ def _built(script: Path, functions: list[str] | None, *, code: str | None = None
 
 
 def build(code: Any, *, model: str | None = None, name: str | None = None, xbf: Any = None, step: Any = None, glb: Any = None,
-          stl: Any = None, threemf: Any = None, dxf: Any = None, verify: bool = False,
+          stl: Any = None, threemf: Any = None, dxf: Any = None, verify: bool = False, profile: bool = False,
           log: Callable[[str], None] | None = None, daemon: bool = True, progress: Any = None) -> Built:
     """Build source text or a build123d shape. Source text assigns its final shape to
     ``result``, and is built as ``name`` (``model`` by default) in the warm worker of that name.
@@ -267,7 +267,9 @@ def build(code: Any, *, model: str | None = None, name: str | None = None, xbf: 
     builds in this process; ``progress`` as ``_built`` has it. Returns once every file is on
     disk. For a supplied shape, its geometry already exists in the caller; metadata
     and geometry travel in memory to the worker's normal document writer. Its prior
-    operations cannot be replayed or verified. A script's decorated models use ``Model.build()``."""
+    operations cannot be replayed or verified. ``profile=True`` reports the actual worker
+    build call, preserving cache hits; for a supplied shape only the remaining worker
+    processing is measured. A script's decorated models use ``Model.build()``."""
     from cadgen.engine.build import code_script
 
     outputs = _outputs({"xbf": xbf, "step": step, "glb": glb, "stl": stl, "threemf": threemf, "dxf": dxf})
@@ -290,7 +292,7 @@ def build(code: Any, *, model: str | None = None, name: str | None = None, xbf: 
         shape = pack(code, name)
         code = ""  # the same named worker/address as a source-code build
     reports, _fresh, wall = _built(script, [name], code=code, name=name, outputs=outputs, verify=verify, log=log,
-                                   daemon=daemon, progress=progress, shape=shape)
+                                   daemon=daemon, progress=progress, profile=profile, shape=shape)
     result = Built(name, script, {**reports[0], "wall": round(wall, 4)}, cwd)
     if not daemon and result.ok:
         from cadgen.engine.build import held
@@ -299,7 +301,7 @@ def build(code: Any, *, model: str | None = None, name: str | None = None, xbf: 
     return result
 
 
-def build_script(script: Path, functions: list[str] | None = None, *, verify: bool = False,
+def build_script(script: Path, functions: list[str] | None = None, *, verify: bool = False, profile: bool = False,
                  log: Callable[[str], None] | None = None, daemon: bool = True, progress: Any = None) -> Report:
     """A script's models -- ``functions``, or every one it defines -- each built as its
     decorators declare, and every child model each calls as its own declare (law 10): what
@@ -307,7 +309,7 @@ def build_script(script: Path, functions: list[str] | None = None, *, verify: bo
     flags: its decorators are the whole definition of what it writes (law 11). ``progress`` as
     ``_built`` has it."""
     reports, fresh, wall = _built(Path(script).resolve(), functions, verify=verify, log=log, daemon=daemon,
-                                  progress=progress)
+                                  progress=progress, profile=profile)
     return Report(reports, round(wall, 4), fresh)
 
 

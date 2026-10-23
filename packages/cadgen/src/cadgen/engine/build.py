@@ -331,6 +331,27 @@ def _declared(name: str, outputs: dict[str, dict[str, Any]] | None, base: Path) 
 
 def build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
           cwd: Path | None = None, outputs: dict[str, dict[str, Any]] | None = None, code: str | None = None,
+          verify: bool = False, profile: bool = False, shape: dict | None = None) -> list[dict[str, Any]]:
+    """Run a build, optionally profiling this execution in its worker (or explicit cold caller).
+
+    The profile covers the whole request, including child models and output processing.
+    Each top-level report carries that same request-wide profile, never a cached profile.
+    """
+    if not profile:
+        return _build(script, functions, log=log, cwd=cwd, outputs=outputs, code=code, verify=verify, shape=shape)
+    from cadgen.engine.profiling import Profile
+
+    with Profile(project=Path(script).parent if code is None else Path(cwd or Path.cwd()),
+                 supplied_shape=shape is not None) as measured:
+        reports = _build(script, functions, log=log, cwd=cwd, outputs=outputs, code=code, verify=verify, shape=shape)
+    summary = measured.report()
+    for report in reports:
+        report["profile"] = summary
+    return reports
+
+
+def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
+          cwd: Path | None = None, outputs: dict[str, dict[str, Any]] | None = None, code: str | None = None,
           verify: bool = False, shape: dict | None = None) -> list[dict[str, Any]]:
     """Build the script's models (``functions``, or every model it defines); one report
     per model, holding those of the child models its run ran, each of which wrote its own
