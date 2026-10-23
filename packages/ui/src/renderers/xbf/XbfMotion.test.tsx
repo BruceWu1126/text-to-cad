@@ -6,11 +6,13 @@ import FileSidebar from '../../../dist/renderers/kit/tools/FileSidebar.js';
 import AnimationSection from '../../../dist/renderers/kit/tools/playbar/AnimationSection.js';
 import XbfPositionSection, { useXbfPose } from '../../../dist/renderers/xbf/XbfPositionSection.js';
 import { useXbfMotion } from '../../../dist/renderers/xbf/useXbfMotion.js';
+import { useMotionExclusion } from '../../../dist/renderers/kit/tools/model-effects/motionExclusion.js';
 
 // An engine document's motions played from the file sidebar's Motion section (`useXbfMotion.js`
 // through the shell's `AnimationSection`), over Position as the renderer composes them: while a
-// motion owns the pose its frames pose the scene and Position shows them read-only; Reset lets go
-// and Position's own pose, untouched meanwhile, is posed again. Frames are driven by hand: the
+// motion owns the pose its frames pose the scene and Position shows them read-only. A motion and
+// the pose are one motion at a time (`motionExclusion.js`): taking the motion up puts the pose at
+// rest, nothing set aside, so Reset leaves the model as built. Frames are driven by hand: the
 // clock's animation frames are queued and run at chosen times.
 
 Object.assign(globalThis, { React });
@@ -56,7 +58,8 @@ const kinematics = {
 };
 
 // The renderer's composition (`XbfRenderer.jsx`): the scene posed by Position unless a motion owns
-// the pose, by the motion's frames while it does, and by Position again as it lets go.
+// the pose, by the motion's frames while it does, and by Position as it lets go; the pose and the
+// motion one motion at a time.
 function Harness({ mechanism = kinematics, scene }: { mechanism?: any, scene: { setPose: (values: any) => void } }) {
   const [layout, setLayout] = useState<any>({ panels: {}, collapsed: {} });
   const pose = useXbfPose(mechanism);
@@ -65,6 +68,10 @@ function Harness({ mechanism = kinematics, scene }: { mechanism?: any, scene: { 
   const motion = useXbfMotion(mechanism, (values: any) => scene.setPose(values || (position.current.applied ? position.current.values : null)));
   const owns = useRef(false);
   owns.current = Boolean(motion?.enabled);
+  useMotionExclusion('arm.xbf', {
+    position: { applied: pose.applied, reset: pose.reset },
+    motion: { applied: Boolean(motion?.enabled), reset: () => motion?.onRelease() }
+  });
   useEffect(() => { if (!owns.current) scene.setPose(pose.applied ? pose.values : null); }, [pose.values, pose.applied]);
   return <FileSidebar layout={layout} onLayoutChange={(patch: any) => setLayout((current: any) => ({ ...current, ...patch }))}>
     <XbfPositionSection kinematics={mechanism} motion={motion?.enabled ? motion : null} values={pose.values} couplings={pose.couplings}
@@ -139,7 +146,7 @@ it("the Motion section lists the document's motions with their durations, and pl
   expect(hingeAt(scene)).toBe(90);
 });
 
-it("while a motion owns the pose Position shows its frame read-only; Reset gives Position's pose back as it was", async () => {
+it("a motion replaces Position's pose, shown read-only while it owns it, and Reset leaves the model as built, nothing set aside", async () => {
   const user = userEvent.setup({ pointerEventsCheck: 0 });
   const scene = { setPose: vi.fn() };
   render(<Harness scene={scene} />);
@@ -165,13 +172,13 @@ it("while a motion owns the pose Position shows its frame read-only; Reset gives
   expect((within(position).getByRole('button', { name: 'Pose: Custom' }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole('button', { name: 'Reset position' }) as HTMLButtonElement).disabled).toBe(true);
 
-  // Reset lets go: the scene is posed at `open` again, and Position is Position's.
+  // Reset lets go: `open` was put at rest as the motion took the pose, so the model is as built.
   await user.click(screen.getByRole('button', { name: 'Motion' }));
   await user.click(screen.getByRole('button', { name: 'Reset motion' }));
-  expect(hingeAt(scene)).toBe(90);
+  expect(lastPose(scene)).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Position' }));
   const again = screen.getByRole('region', { name: 'Position controls' });
-  const restored = within(again).getByRole('textbox', { name: 'hinge slider value' }) as HTMLInputElement;
-  expect([restored.value, restored.disabled]).toEqual(['90.0°', false]);
-  expect(within(again).getByRole('button', { name: 'Pose: open' })).toBeTruthy();
+  const after = within(again).getByRole('textbox', { name: 'hinge slider value' }) as HTMLInputElement;
+  expect([after.value, after.disabled]).toEqual(['0.00°', false]);
+  expect(within(again).getByRole('button', { name: 'Pose: Default' })).toBeTruthy();
 });

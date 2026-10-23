@@ -166,8 +166,8 @@ function XbfSurface({ view, data }) {
     setValues: setPoseValues, choosePreset, reset: resetPose } = pose;
   // ---- Motion: the document's motions played (`useXbfMotion.js`) ------------------------------
   // While a motion owns the pose (playing, or paused off its start, until Reset lets go of it) its
-  // frames pose the scene and Position shows them, read-only; Position's own pose is untouched
-  // underneath and posed again as the motion lets go. Every other tool's state stays as it is.
+  // frames pose the scene and Position shows them, read-only. It is a motion as Explode and the
+  // pose are (below): playing it puts both at rest, and Explode used puts it at rest.
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
   const positionRef = useRef(null);
@@ -298,13 +298,13 @@ function XbfSurface({ view, data }) {
   useDeclinedSelectReference(document);
   const ensureSelect = useCallback(() => { if (shellRef.current?.toolMode !== XBF_TOOL.SELECT) shellRef.current?.selectTool(XBF_TOOL.SELECT); }, []);
 
-  // ---- one motion at a time: Explode and the pose (a motion playing sets neither aside) -------
+  // ---- one motion at a time: Explode, the pose and a motion, nothing set aside -----------------
   const { view: viewSettings, store } = shell.viewSettings;
   const explodeApplied = Boolean(viewSettings.exploded?.enabled && viewSettings.exploded.amount > 0);
   useMotionExclusion(document.modelKey, {
     explode: { applied: explodeApplied, reset: () => store.patch(EXPLODE_OFF) },
-    // Explode set while a motion owns the pose leaves Position's pose for the motion to give back.
-    position: { applied: poseApplied, reset: () => { if (!motionRef.current?.enabled) resetPose(); } }
+    position: { applied: poseApplied, reset: resetPose },
+    motion: { applied: motionOwns, reset: () => motionRef.current?.onRelease() }
   });
 
   // The edges the display mode draws, as the view resolved them; Preview's scene draws none.

@@ -622,9 +622,9 @@ linear; synchronous, each step eased in and out with every pair arriving togethe
 motion's stored samples, linear between them; the clip finite, repeated while Loop is on), the same
 values the engine's GLB baker keys (`xbfMotion.test.js` holds them to its bake), posed through
 Position's forward kinematics. While a motion owns the pose (from a play, a scrub or a choice of
-motion until Reset) Position shows its frame read-only and Select draws no knobs; Reset gives the
-pose back to Position, whose own pose was left untouched. Explode, Clip, Measure, the annotations,
-the selection and what is hidden or isolated stay as they are throughout.
+motion until Reset) Position shows its frame read-only and Select draws no knobs. A motion is one
+of the document's motions with Explode and the pose (below): taking it up puts both at rest,
+and Explode used puts it at rest, nothing set aside.
 
 What an `.xbf`'s selection copies -- a chip, Copy Reference, Copy Prompt -- is the
 engine's canonical ref of each thing, the file's path first, the ref `cadgen inspect` answers and
@@ -678,8 +678,7 @@ a STEP's, is measured the first time Explode is used).
 
 Explode, a routine, Position and Clip are one motion at a time
 (`kit/tools/model-effects/motionExclusion.js`): the one SET off its default — by value, never
-by a tool taken up — puts the others back. An engine document has Explode and Position (its
-motions set neither aside: a motion owns the pose while it plays and gives Position's back);
+by a tool taken up — puts the others back. An engine document has Explode, Position and its motions;
 a GLB Explode, its routine and Clip; a robot Position and Clip; an STL or a 3MF only Clip.
 
 ## Host integration
