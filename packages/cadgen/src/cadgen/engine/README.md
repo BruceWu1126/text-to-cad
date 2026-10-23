@@ -121,17 +121,18 @@ def hinge():
    the first run made, and a miss makes everything downstream of it miss. So an
    edit costs what it changed, and an element keeps the name its feature history
    gave it across edits. Tessellations live in the serving process's memory,
-   keyed by a part's geometry, under a size cap. Across a restart, a model's only
+   keyed by a part's geometry, under its one memory budget (**Document lifetime**). Across a restart, a model's only
    cache is its own xbf, taken whole or not at all (**Build closure**).
-6. **One document per model, with one id; only declared files.** Every called model makes
-   one document, with an id derived from its script and function (`ids.model_id`): the same
-   in every process, worked out without asking the engine. A file the engine serves is known
-   inside it by the id of its canonical path (`ids.file_id`); its public name stays its path.
-   Bare `@model` keeps its document in the worker's memory. File decorators imply a model
-   and write only their named outputs. No implicit XBF, source file, sidecar, registry,
-   cache or thumbnail is written for an in-memory model. Model documents disappear when
-   their workers retire or the engine restarts; their ids are then refused with the command that
-   builds them again.
+6. **One document per model, with one id.** Every called model makes one document, with an
+   id derived from its script and function (`ids.model_id`): the same in every process, worked
+   out without asking the engine. A file the engine serves is known inside it by the id of its
+   canonical path (`ids.file_id`); its public name stays its path. Its store is `pointer` (a
+   model in a saved file, the default) or `memory` (asked for with `store="memory"`). File
+   decorators imply a model and write only their named outputs. No xbf, mesh, memo,
+   provenance or derived file is written for a document beyond what it declares. A document
+   lives until the engine exits or memory evicts it; its worker retiring does not end it,
+   except a `memory` document's. A document that is not held names the command that builds it
+   again; the engine never runs it (**Document lifetime**).
 7. **Provenance is served live, never written.** What made an element -- the
    feature, its operation, the function, file and line of its call -- lives in
    the trace of the worker that built the document, and is asked of it while it
@@ -177,8 +178,9 @@ def hinge():
     seconds. Heartbeats use the document's id (`ids`): a file's `file_id`, a model's
     `model_id`; they never turn a model into a file path. The worker-count
     cap never retires a worker whose document a page watches; it is exceeded instead. The memory
-    cap may retire it. Closing a page never stops the engine or its worker; once its last sync
-    expires, ordinary idle retirement applies.
+    cap may retire it. Memory may evict a worker's document only when nothing watches it
+    (**Document lifetime**). Closing a page never stops the engine or its worker; once its last
+    sync expires, ordinary idle retirement applies.
 
 15. **One HTTP owner per installation.** The daemon serves its one page and document
     reads on one authenticated listener. Both `serve` and `viewer` start or reuse it;
@@ -239,7 +241,8 @@ alive. To admit a new script at the worker-count cap, the least recently used
 unwatched idle worker is retired. When every idle worker is watched, the new worker
 starts past the cap instead: a build never waits on an open page, and never costs one
 its warm worker. The per-worker memory cap remains enforced after each build, watched
-or not.
+or not. A retired worker's documents stay served: the daemon takes them from it first, and
+holds them under one memory budget that never evicts a watched one (**Document lifetime**).
 
 The installation's private socket supplies its HTTP token. Page URLs exchange it
 for a same-site cookie; programmatic clients use Bearer authentication. All routes
@@ -389,6 +392,7 @@ place), so two cold builds of the same code are the same bytes on any day.
 If a body raises, the error is reported with the model's frames and the
 previous files stay. Builds run in the daemon's warm workers, at most one per core alive
 (**The engine server and its workers**). `CADGEN_ENGINE_DIR` moves its socket and lock.
+`CADGEN_ENGINE_MEMORY_MB` sets the server's memory budget (**Document lifetime**).
 `CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_VIEWER_WARM=0` keeps `cadgen viewer`
 from warming the engine at its launch (**The viewer and the snapshot**). `CADGEN_ENGINE_MESH=processes|inline`
 picks how parts are meshed. The default, `processes`, uses a warm pool of
@@ -458,15 +462,16 @@ foreground), started on demand by the first command that needs
 it and gone after an idle hour (`CADGEN_ENGINE_IDLE` seconds; a page waiting on a served
 document keeps it). It holds a pool of warm workers, one per model script (and one for the documents no
 worker built), each a process whose memo lives as long as
-it does. Its rules are a standard pool's, and nothing else: no memory budget, no admission
-guess, no refusal; the operating system does the rest.
+it does. Its rules are a standard pool's, and nothing else: no admission guess, no refusal;
+the operating system does the rest. (What the daemon itself holds, the documents and their
+tessellations, is under one memory budget: **Document lifetime**.)
 
 - **A cap.** At most `CADGEN_ENGINE_WORKERS` workers are alive (default: the machine's
   cores). A build for a script whose worker is alive goes to it, waiting while it builds
   something else: one build at a time per worker, builds of different scripts at once.
 - **First come, first served.** A build for a script with no worker starts one under the cap.
-  At the cap, the least recently used idle worker no page watches is retired first (its stdin
-  closed, so it exits), and its slot is the new one's. With every worker busy, the build waits
+  At the cap, the least recently used idle worker no page watches is retired first (drained of
+  its documents, then its stdin closed, so it exits), and its slot is the new one's. With every worker busy, the build waits
   for the first to come free, and every build that needs a slot after it waits behind it. A
   build that waits for its own script's busy worker takes no slot.
 - **The cap never retires a watched worker.** When every idle worker has a document a page
@@ -476,7 +481,8 @@ guess, no refusal; the operating system does the rest.
   an outstanding version wait or a sync within `serve.LIVE` (90 seconds).
 - **A memory cap.** A worker whose resident memory is over `CADGEN_ENGINE_WORKER_RSS_MB` after
   a build (default: a quarter of the machine's memory, at least 2 GiB; `0` for no cap) is
-  retired: the report says so (`retired`), and the worker exits once it has answered.
+  retired: the report says so (`retired`), and once it has answered the daemon drains it and
+  closes its stdin.
 - **Collected when idle.** A worker builds with Python's cyclic collector off and collects once
   no request has come for half a second, so a script's calls one after another never wait on
   it. A worker over its memory cap collects before it measures again.
@@ -519,14 +525,99 @@ engine server 98307, up 2h10m · workers 2/10 · idle timeout 1h · RSS cap 16.0
   idle  motorbike.py   98410    3 builds   0.6 GB  4m
   waiting  2 builds, first come first served
 retired: finger_01.py (LRU) 3m ago · qdd_actuator.py (idle) 41m ago · tom.py (RSS) 2h ago
-serving http://127.0.0.1:52811: 1 document
+serving http://127.0.0.1:52811: 3 documents · 2.1 GB of 16.0 GB held
+documents:
+  live      tom      8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12
+  held      bracket  3e9b7c21-55aa-5f0e-8d11-6c2a9b4e7d30
+  evicted   arm      71d0c4e8-9b2a-5c13-a6f4-0e8d2b5c9a17  run `python /work/assemble.py`
 ```
 
 A worker's memory is as it measured it after its last build; a busy one's build is where its
 last progress frame says (**Progress**); the time is how long it has been busy, or idle. A
 retirement's reason is `LRU` (room at the cap), `idle`, `RSS` (over its memory cap),
 `environment` (a build asked for the script with another `PYTHONPATH`, `PATH` or `VIRTUAL_ENV`:
-its worker is replaced in its slot) or `exited` (it died).
+its worker is replaced in its slot) or `exited` (it died). The `documents:` lines are each model
+document, its state and, for one not held, the command that builds it again (**Document
+lifetime**); `--json` lists them as `models`, and `serving.documents` the files served, each
+`held` or `evicted`, with the bytes it holds.
+
+## Document lifetime
+
+A document outlives the worker that built it, and lives until the engine exits or memory
+evicts it ([models.py](models.py), [serve.py](serve.py)). Its state (`models.STATES`, what
+`cadgen status` lists):
+
+- `live`: a live worker holds it, with its memo and its trace.
+- `held`: its worker is gone and the daemon holds it whole: its served structure and shape bytes,
+  and the document as the xbf bytes `@xbf` would write of it, mechanism and every assembly's
+  placement included. A page and `cadgen inspect` read the served structure; an export or a
+  snapshot by its id, and the viewer's export, go to the documents worker with the xbf bytes
+  (`Daemon.document`), which reads them as it reads an xbf on disk, so no worker of its script
+  starts. What made an element is null (law 7: provenance is the worker's). A document its worker
+  exited before draining, but that a page had opened, is held for viewing only: an export of it
+  names the command that builds it again.
+- `building`, `failed`: its build now, or its last one.
+- `evicted`: the daemon holds it no more -- memory evicted its bytes, or its worker crashed
+  before it was drained.
+- `expired`: a `store="memory"` document whose worker went.
+
+**Store.** `@model(store="memory")`, `@xbf("XBF/a.xbf", store="memory")` (any file decorator)
+keeps a document in its worker's memory only: it is forgotten when the worker goes, and its id
+answers `expired` from then on. The default is `pointer`: the engine holds the document and knows
+the program that builds it again. Any other value is refused, naming the two.
+
+**Drain.** Before the pool stops a worker -- idle past `CADGEN_ENGINE_WORKER_IDLE`, the count cap's
+least recently used, replaced for another environment, over its memory cap -- the daemon asks it
+(the `result` request with `whole`, nothing meshed) for every `pointer` document of it the server
+does not hold whole at its version (`Models.drain`), out of the pool, then closes its stdin. The
+worker serializes the document in memory (`document.to_bytes`: `TDocStd_Application.SaveAs` to a
+stream, the bytes `@xbf` writes), and the documents worker reads them in memory too
+(`document.read_bytes`: the application's stream read, overwriting into a document of its own).
+Nothing is written to disk. A worker over its
+memory cap no longer exits on its own: it answers, is drained, and is stopped. A worker that died
+drains nothing: its documents the server lacked are `evicted`.
+
+**One budget.** Everything the daemon holds is counted against one budget: each served
+document's structure (as JSON), its shape bytes, the bytes made from live shapes and a held
+document's xbf bytes (`Served.size`), and every tessellation (`MeshCache`, which has no cap of its
+own in the daemon). Evicting a document drops all of it.
+Bytes are counted as they are put, never sampled. Workers and render processes are processes of
+their own, held to their own memory cap. The budget is `CADGEN_ENGINE_MEMORY_MB`, else a quarter
+of the machine's physical memory (`serve.memory_budget`: macOS `hw.memsize`, Linux
+`sysconf(SC_PHYS_PAGES)` or the cgroup's `memory.max` when that is less, Windows
+`GlobalMemoryStatusEx`). Past it, what is held is evicted down to 80 % of it (`Server.trim`):
+tessellations first, least recently used first (a tessellation is made again from its shape);
+then documents, in two tiers, least recently used first within each:
+
+1. documents the engine reads again itself: files on disk, read again under the same id on
+   their next access (reading runs no code);
+2. every other: model documents, `pointer` and `memory` together.
+
+A document a page watches is never evicted, nor its tessellations (connected means warm), nor
+the document being served as it is put. The STEP reads held by their bytes go with the first
+document evicted.
+
+**Pressure.** The daemon's server asks the operating system's memory-pressure signal every two
+seconds (`serve.Pressure`) and, under pressure, evicts in the same order down to the low-water
+mark, half the budget:
+
+- macOS: `sysctlbyname("kern.memorystatus_vm_pressure_level")`, 1 normal, 2 warning, 4 critical;
+  warning and critical are pressure. It is the level `DISPATCH_SOURCE_TYPE_MEMORYPRESSURE`
+  reports, polled: the dispatch source wants a block callback, which Python cannot hand it.
+- Windows: `CreateMemoryResourceNotification(LowMemoryResourceNotification)` once, then
+  `QueryMemoryResourceNotification` each time.
+- Linux: pressure stall information, the cgroup's `memory.pressure`, else `/proc/pressure/memory`;
+  `some avg10` over 10 is pressure.
+
+Where none can be read, the budget alone applies. `Pressure.simulate` is the tests' hook.
+
+**The rebuild command.** A document that is not held -- `evicted`, `expired` -- names the exact
+command that builds it again: `python` and the program whose call built it (its `__main__`
+file, else the model's script), from the daemon's record of it, process memory only. The page
+reads it from its document's 404 (`GET /api/doc/<id>`: `{"error", "state", "rebuild"}`),
+`cadgen inspect` and `cad_show` of its id refuse with it, and `cadgen status` lists it. A `memory`
+document's words add that it is kept in memory only. The engine never runs it: no access, no start
+and no restart runs code to bring a document back.
 
 `cadgen stop` stops every server of the installation, whatever protocol it speaks: the socket and
 lock names carry the protocol (`daemon._tag`), and `daemon.endpoints()` lists this one's and each
@@ -1864,7 +1955,8 @@ parts.py` prints each model's `id:` and `view:` lines (`<engine>/<id>`). No list
 inspect ID 'face 1'` take the id; `cadgen inspect 'ID#face 1'` uses the same reference syntax.
 Each reads the document the engine holds, as it is: editing the script changes nothing until
 Python runs it again, and no verb imports, runs or builds a script. An id the engine no longer
-holds is refused with the command that builds it again (`python <the program that built it>`).
+holds (evicted, expired) is refused with its state and the command that builds it again
+(`python <the program that built it>`; **Document lifetime**).
 `--query build` returns saved-file metadata/closure or live-build metadata; `--query closure` and
 `--query geometry` select the other queries explicitly. In the CAD Viewer a model's page is
 `/<id>`; it has no file of its own, so no Select File and no file menu.

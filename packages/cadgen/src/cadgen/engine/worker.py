@@ -39,8 +39,15 @@ says how many parts the build meshed (``meshed``).
 
 A worker whose resident memory is over its cap after a build (``CADGEN_ENGINE_WORKER_RSS_MB``,
 by default a quarter of the machine's memory) is retired: its reports say so (``retired``),
-and it exits once it has answered. The daemon starts a fresh one for the next build, a
-restart: a model whose xbf holds its closure unchanged is taken in seconds.
+and the daemon, once it has taken the worker's documents from it (``models.Models.drain``),
+closes its stdin. The daemon starts a fresh one for the next build, a restart: a model whose
+xbf holds its closure unchanged is taken in seconds.
+
+A request may carry bytes after its line (``{"bytes": N}``, the frame's form): an export of a
+document the daemon holds and no worker does (``{"document", "name"}``: the whole document's xbf
+bytes, which its worker made of it before it retired: a ``result`` request with ``whole``) reads
+them as an on-disk xbf, so the documents worker exports, inspects and draws it, kinematics and
+all, with no worker of its script started.
 
 A build runs with the cyclic collector off, and the worker collects once it is idle: the memo
 keeps every live result of the last builds, millions of objects, and a full collection walks
@@ -257,9 +264,9 @@ def rss_cap_mb() -> float | None:
 
 def retirement(reports: list[dict[str, Any]], resident: float | None = None) -> bool:
     """After a build: this worker's resident memory (``resident``, else measured now) against its
-    cap. Over it, each report says so (``retired``) and the worker is retired: it exits once it
-    has answered, and the next build is a fresh worker's -- a restart, which takes a model's xbf
-    when nothing changed."""
+    cap. Over it, each report says so (``retired``) and the worker is retired: the daemon drains
+    and stops it once it has answered, and the next build is a fresh worker's -- a restart, which
+    takes a model's xbf when nothing changed."""
     resident, cap = resident if resident is not None else resident_mb(), rss_cap_mb()
     if resident is None or cap is None or resident <= cap:
         return False
@@ -295,10 +302,12 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
     source_spec = request["source"]
     built: list[dict[str, Any]] = []
     if "id" in source_spec:
-        # The daemon names a held document's worker (``Daemon.document``); in this process, none is.
+        # The daemon names a held document's worker or bytes (``Daemon.document``); in this process, none is.
         raise export.ExportRefused(f"no document {source_spec['id']} is held in this process: a document id is "
-                                   "the engine's, read through its daemon")
-    if (request.get("expected") or source_spec.get("held")) and "script" in source_spec:
+                                   "the engine's, read through its server")
+    if "document" in source_spec:
+        source = _held_source(request.get("payload") or b"", str(source_spec.get("name") or "document"))
+    elif (request.get("expected") or source_spec.get("held")) and "script" in source_spec:
         source = engine_build.held(Path(source_spec["script"]), source_spec.get("function"))
         if source is None:
             raise export.ExportRefused("The viewed model is no longer held. Reopen it before exporting."
@@ -332,7 +341,8 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
             log(f"read {path.name} in {time.perf_counter() - clock:.2f}s")
     if request.get("expected"):
         from cadgen.engine.export.viewer import check, options
-        check(source, request["expected"])
+        if "document" not in source_spec:  # a held document's revision the daemon checked
+            check(source, request["expected"])
         if request.get("inspect"):
             return {"reports": [], "files": [], "formats": options(source, pose=request.get("pose"), part=request.get("part"), original_allowed="version" in request["expected"])}
     files = []
@@ -371,6 +381,21 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
     return {"reports": built, "files": files, "drawn": drawn}
 
 
+def _held_source(payload: bytes, name: str) -> Any:
+    """A document the daemon holds and no worker does -- the xbf bytes its worker made of it before
+    it retired (``models.Models.drain``) -- as an ``export.Source``, read in memory as an on-disk xbf
+    is (``document.read_bytes``): its mechanism and its assemblies' placements with it, named as the
+    document is (``name``). The source has no path: it is no file."""
+    from cadgen.engine import document, export
+
+    stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in name).strip(".") or "document"
+    loaded = document.Loaded(Path(tempfile.gettempdir()) / f"{stem}.xbf", document.read_bytes(payload))
+    structure = {**loaded.structure(), "path": ""}
+    return export.Source(structure, {p.key: p.shape for p in loaded.prototypes}, live=False,
+                         xcaf=loaded.doc, world=lambda occurrence: loaded.worlds.get(occurrence),
+                         mechanism=loaded.mechanism, foreign=False, path=None)
+
+
 def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     """A ``result`` request: the document of a model this worker built, as its structure and each
     part's shape bytes (``[key, size]`` in ``shapes``, the bytes after the line in order)."""
@@ -384,10 +409,16 @@ def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     from cadgen.engine import previous
 
     _writer, closure = previous.read_record(source.xcaf)
-    return {"structure": source.structure, "closure": json.loads(closure) if closure else None,
-            "shapes": [[key, len(part)] for key, part in zip(keys, data)]}, \
-        b"".join(data)
+    answer = {"structure": source.structure, "closure": json.loads(closure) if closure else None,
+              "shapes": [[key, len(part)] for key, part in zip(keys, data)]}
+    if request.get("whole"):
+        # The drain's: the whole document as the xbf bytes ``@xbf`` writes, after the shapes.
+        from cadgen.engine import document
 
+        whole = document.to_bytes(source.xcaf, source.shapes.values())
+        answer["xbf"] = len(whole)
+        data.append(whole)
+    return answer, b"".join(data)
 
 
 def refusal(error: BaseException) -> dict[str, str]:
@@ -448,6 +479,8 @@ def main() -> int:
                 if not line.strip():
                     continue
                 request = json.loads(line)
+                if request.get("bytes"):
+                    request["payload"] = asked.read(int(request["bytes"]))
                 if request.get("op") == "patched":
                     _PATCHED.setdefault(str(request.get("path")), threading.Event()).set()
                 elif request.get("op") == "where":
@@ -495,7 +528,6 @@ def main() -> int:
         ident = request.get("id")
         op = request.get("op")
         if op in ("export", "result"):
-            retire = False
             try:
                 cwd = request.get("cwd")
                 os.chdir(cwd or home)
@@ -507,7 +539,8 @@ def main() -> int:
                         done = _export(request, lambda text: send({"id": ident, "log": text}))
                     said.attach(done.get("reports") or [])
                     resident = resident_after_build()
-                    retire = retirement(done.get("reports") or [], resident) if done.get("reports") else False
+                    if done.get("reports"):
+                        retirement(done["reports"], resident)  # said in its reports; the daemon retires it
                     send({"id": ident, "done": done, "rssMb": None if resident is None else round(resident)})
                 else:
                     answer, payload = _result(request)
@@ -522,8 +555,6 @@ def main() -> int:
             finally:
                 leave()
                 send({"id": ident, "settled": True, "op": op})
-            if retire:
-                return 0
             owed = True
             continue
         if op != "build":
@@ -533,7 +564,6 @@ def main() -> int:
         patcher = Patcher(request, lambda message, payload: send({"id": ident, **message}, payload),
                           acknowledged=bool(request.get("acknowledged")))
         document.SAVED_LISTENERS.append(patcher.saved)
-        retire = False
         try:
             cwd = request.get("cwd")
             os.chdir(cwd or home)
@@ -549,7 +579,7 @@ def main() -> int:
             said.attach(reports)
             patcher.finish(reports)
             resident = resident_after_build()
-            retire = retirement(reports, resident)
+            retirement(reports, resident)  # said in its reports: the daemon drains it, then retires it
             # Its memory now, which the daemon's status shows (``rssMb``).
             send({"id": ident, "done": reports, "rssMb": None if resident is None else round(resident)})
         except BuildError as error:
@@ -562,8 +592,6 @@ def main() -> int:
             leave()
             document.SAVED_LISTENERS.remove(patcher.saved)
             send({"id": ident, "settled": True})
-        if retire:
-            return 0  # over its memory cap: gone, with all it held
         owed = True  # answered: the cycles the build left, collected once idle
     return 0
 

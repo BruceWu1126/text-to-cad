@@ -127,6 +127,20 @@ ICON = {
 }
 
 
+def _say_not_held(named: Any) -> None:
+    """A document id the engine knows but holds no more (evicted, expired): refused with the command
+    that builds it again, which nothing here runs."""
+    from cadgen.engine.ids import is_id
+
+    if not is_id(named):
+        return
+    from cadgen.engine.client import request
+
+    answer = request({"op": "state", "id": named}, start=False) or {}
+    if answer.get("error"):
+        raise ToolFailed(f"{answer['error']}. Nothing runs it for you; once it is run, show {named} again.", "no_file")
+
+
 class ToolFailed(Exception):
     """A tool call that fails the way its caller should read: as the tool's result. ``reason`` is why, in
     telemetry's words (``cadgen.analytics.FAILURES``), named where it is raised: never read from the message."""
@@ -604,6 +618,7 @@ class Server:
         return views
 
     def _tool_cad_show(self, arguments, context):
+        _say_not_held(arguments.get("path"))
         if self.text:
             return self._show_in_browser(self._model_path(arguments.get("path")))
         if not self.tabs:

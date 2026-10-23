@@ -7,13 +7,17 @@ script with a live worker waits for it while it is busy. One for a script with n
 when fewer than the cap are alive; at the cap the least recently used idle worker no page
 watches is retired first (its stdin closed: it exits), and when every idle worker is watched the
 new one starts past the cap; with every worker busy, the build waits, first come first served,
-for the first to come free. Nothing is refused, and nothing is predicted: no memory
-budget, no admission. A worker idle ``CADGEN_ENGINE_WORKER_IDLE`` seconds (by default the
-daemon's own idle time, an hour) is retired, and so is one over its memory cap after a build
-(``worker.retirement``). A retired script's next build is a fresh worker's, a restart.
+for the first to come free. Nothing is refused, and nothing is predicted: no admission. A
+worker idle ``CADGEN_ENGINE_WORKER_IDLE`` seconds (by default the daemon's own idle time, an
+hour) is retired, and so is one over its memory cap after a build (``worker.retirement``).
+Before a worker is stopped, every ``pointer`` document of it the server does not hold is taken
+from it (``models.Models.drain``): a document outlives its worker. A retired script's next build
+is a fresh worker's, a restart.
 
 It also serves documents over HTTP (``serve``), holding each loaded document and its
-parts' tessellations in its memory, and draws them (``draw``): each served document a
+parts' tessellations in its memory under one budget (``serve.memory_budget``,
+``CADGEN_ENGINE_MEMORY_MB``; past it, or on the system's memory-pressure signal, what is held
+is evicted: ``serve.Server.trim``), and draws them (``draw``): each served document a
 snapshot asks for gets a render process of its own (``render/service.py``), started on its
 first picture, sent every version the document is patched to, gone with the daemon or after
 the workers' idle time, and held to their memory cap; render processes are not workers, and
@@ -328,10 +332,15 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
     def alive(self) -> bool:
         return self.process.poll() is None
 
-    def _write(self, request: dict[str, Any]) -> None:
+    def _write(self, request: dict[str, Any], payload: bytes = b"") -> None:
+        """One request, its ``payload`` (``bytes`` of them) after its line."""
         assert self.process.stdin is not None
+        if payload:
+            request = {**request, "bytes": len(payload)}
         with self.writing:
             self.process.stdin.write((json.dumps(request) + "\n").encode())
+            if payload:
+                self.process.stdin.write(payload)
             self.process.stdin.flush()
 
     def where(self, doc: str, key: str, kind: str, ordinal: int, timeout: float = 10.0) -> dict[str, Any] | None:
@@ -348,13 +357,14 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
         finally:
             self.asked.pop(ident, None)
 
-    def build(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+    def build(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None],
+              payload: bytes = b"") -> dict[str, Any]:
         with self.lock:
             self.sink = send
             self.document_read = bool(request.get("expected"))
             self.progress, self.touched = None, set()
             try:
-                self._write(request)
+                self._write(request, payload)
                 message = self.answers.get()
                 if message is None:
                     code = self.process.wait()
@@ -436,14 +446,18 @@ class Pool:
     new worker starts past the cap: the count cap never retires a watched worker (connected means
     warm); its memory cap may. With every worker busy the request waits, and so does every request
     that needs a slot after it. A worker idle ``idle`` seconds is retired (``retire_idle``), as is one that is
-    gone or over its memory cap when let go. ``start(key, environment, cwd)`` starts a worker."""
+    gone or over its memory cap when let go. ``start(key, environment, cwd)`` starts a worker;
+    ``drain(worker)`` is asked of every worker retired, out of the pool and before it is stopped
+    (the daemon's: its documents taken from it, ``models.Models.drain``)."""
 
     def __init__(self, cap: int, idle: float, start: Callable[[str, dict[str, str], str | None], Any],
-                 connected: Callable[[Any], bool] = lambda worker: False) -> None:
+                 connected: Callable[[Any], bool] = lambda worker: False,
+                 drain: Callable[[Any], None] = lambda worker: None) -> None:
         self.cap = max(1, int(cap))
         self.idle = idle
         self.start = start
         self.connected = connected
+        self.drain = drain
         self.lock = threading.Condition()
         self.live: dict[str, Any] = {}  # by key
         self.starting: set[str] = set()  # the keys whose worker is being started, each holding a slot
@@ -462,7 +476,7 @@ class Pool:
         if ticket.worker is not None:
             return ticket.worker
         if ticket.victim is not None:
-            ticket.victim.stop()  # the worker whose slot this is exits before the new one starts
+            self._stop(ticket.victim)  # the worker whose slot this is exits before the new one starts
         try:
             worker = self.start(script, environment, cwd)
         except BaseException:
@@ -489,7 +503,15 @@ class Pool:
                     self._note(worker, "RSS" if worker.retired else "exited")
             self._grant()
         if gone:
-            worker.stop()
+            self._stop(worker)
+
+    def _stop(self, worker: Any) -> None:
+        """A worker retired: drained (``drain``), then stopped. A drain that fails stops it all the same."""
+        try:
+            self.drain(worker)
+        except Exception:  # noqa: BLE001 - what the drain could not take is evicted
+            pass
+        worker.stop()
 
     def retire_idle(self, now: float | None = None) -> list[Any]:
         """Retire workers idle ``idle`` seconds with no connected document; the retired."""
@@ -503,7 +525,7 @@ class Pool:
             if gone:
                 self._grant()
         for worker in gone:
-            worker.stop()
+            self._stop(worker)
         return gone
 
     def holds(self, worker: Any) -> bool:
@@ -601,7 +623,7 @@ class Daemon:
     def __init__(self, idle: float, cap: int | None = None, retire_after: float | None = None) -> None:
         self.idle = idle
         self.pool = Pool(cap or worker_cap(), retire_after if retire_after is not None else worker_idle(idle),
-                         self._start, self.connected)
+                         self._start, self.connected, lambda worker: self.models.drain(worker))
         self.workers_lock = threading.Lock()  # each worker's ``held``
         self.born = time.time()
         self.last = time.monotonic()
@@ -699,7 +721,7 @@ class Daemon:
 
     def serve(self, request: dict[str, Any]) -> Any:
         """The daemon's server, started on the first request that needs one."""
-        from cadgen.engine.serve import MESHES, Server
+        from cadgen.engine.serve import MESHES, Server, memory_budget
 
         with self.serving:
             if self.server is None:
@@ -707,10 +729,11 @@ class Daemon:
                 try:
                     self.server = Server(port=port, three=request.get("three"), touch=self.touch,
                                          provenance=self.provenance, cache=MESHES, isolated=True,
-                                         host=host, http_factory=HTTP_FACTORY)
+                                         host=host, http_factory=HTTP_FACTORY, budget=memory_budget())
                 except OSError as error:
                     raise ValueError(f"cannot listen on {host}:{port}: {error.strerror or error}"
                                      + ("; pass another --port" if port else "")) from None
+                self.server.lost = self.models.rebuild
                 self.server.start()
             elif ((request.get("port") and int(request["port"]) != self.server.port)
                   or (request.get("host") and request["host"] != self.server.http.server_address[0])):
@@ -727,25 +750,55 @@ class Daemon:
             for paths in held:
                 self.server.release(paths)
 
-    def document(self, ident: str) -> dict[str, Any]:
-        """What the document ``ident`` is while this engine holds it: a model a live worker holds
-        (``{"script", "function", "held": ident}``, read from that worker and never built), or a
-        file it serves (``{"path"}``). ``ValueError`` naming the command that builds it again
-        for any other id: the engine runs nothing (``Models.missing``)."""
+    def document(self, ident: str) -> tuple[dict[str, Any], bytes]:
+        """What the document ``ident`` is while this engine holds it, as an export reads it, and the
+        bytes it carries: a model a live worker holds (``{"script", "function", "held"}``, read from
+        that worker, never built); one whose worker is gone but whose whole document the server
+        holds (``{"document", "name"}``, its xbf bytes after it: the documents worker reads them as
+        an on-disk xbf, and no worker of its script starts); a file this engine serves or served
+        (``{"path"}``). Refused (``Models.not_held``), naming its state and the command that
+        builds it again, for any other id: the engine runs nothing."""
+        self.models.prune()
         record = self.models.held(ident)
-        if record is not None:
-            return {"script": record["source"]["script"], "function": record["source"]["name"], "held": ident}
         server = self.server
+        if record is not None:
+            worker = record["worker"]
+            if worker is not None and self.pool.holds(worker):
+                return {"script": record["source"]["script"], "function": record["source"]["name"], "held": ident}, b""
+            held = self.held_document(ident)
+            if held is not None:
+                return held
         if server is not None and ident in server.served and not isinstance(server.served[ident].path, str):
-            return {"path": str(server.served[ident].path)}
+            return {"path": str(server.served[ident].path)}, b""
         known = server.file_of(ident) if server is not None else None
         if known is not None:
-            return {"path": known}
-        raise ValueError(self.models.missing(ident))
+            return {"path": known}, b""
+        raise self.models.not_held(ident)
+
+    def held_document(self, ident: str) -> tuple[dict[str, Any], bytes] | None:
+        """A model document the server holds whole and no worker does, as an export reads it: its
+        source and its xbf bytes. ``ValueError`` for one held for viewing alone (its worker exited
+        before it was drained), naming the command that builds it again. None when it is not held."""
+        server = self.server
+        if server is None:
+            return None
+        with server.load_lock:
+            doc = server.served.get(ident)
+        if doc is None:
+            return None
+        if doc.xbf is None:
+            with self.models.lock:
+                record = self.models.records.get(ident)
+            name = record["source"]["name"] if record else ident
+            raise ValueError(f"{name} ({ident}) is held for viewing only: its worker exited before the engine "
+                             f"took it whole; run `{self.models.command(ident)}` to build it again")
+        return {"document": ident, "name": doc.structure.get("name") or ident}, doc.xbf
 
     def _routed(self, request: dict[str, Any]) -> tuple[str, str | None]:
         """The worker a request goes to (its key) and the folder that worker starts in."""
         source = request.get("source") or {}
+        if "document" in source:
+            return "documents", request.get("cwd")  # a held document's bytes: no worker of its script
         if "path" in source:
             builder = self.builders.get(file_id(source["path"]))
             if builder is not None and self.pool.holds(builder):
@@ -754,8 +807,10 @@ class Daemon:
         # A script's worker is keyed by its canonical path: a process key, not a document's id.
         return canonical(request.get("script") or source["script"]), None
 
-    def _call(self, request: dict[str, Any], order: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
-        """An export or a result asked of the worker the request routes to; its answer sent."""
+    def _call(self, request: dict[str, Any], order: dict[str, Any], send: Callable[[dict[str, Any]], None],
+              payload: bytes = b"") -> None:
+        """An export or a result asked of the worker the request routes to (with ``payload``, the
+        bytes its source carries, after its line); its answer sent."""
         with self.busy_lock:
             self.busy += 1
         try:
@@ -778,7 +833,7 @@ class Daemon:
                             return
                     worker = self.lease(key, environment, cwd)
                     expected = request.get("expected") or {}
-                    if "modelRevision" in expected:
+                    if "modelRevision" in expected and "document" not in request["source"]:
                         # The lease excludes a rebuild: validate the generation here,
                         # including a rebuild that produced identical geometry.
                         with self.models.lock:
@@ -788,12 +843,12 @@ class Daemon:
                         if not matches:
                             send({"failed": "The source changed. Open Export again to use the displayed revision."})
                             return
-                    answer = worker.build(order, send)
-                    payload = answer.pop("payload", b"")
-                    if payload:
+                    answer = worker.build(order, send, payload)
+                    returned = answer.pop("payload", b"")
+                    if returned:
                         import base64
 
-                        answer["payload"] = base64.b64encode(payload).decode("ascii")
+                        answer["payload"] = base64.b64encode(returned).decode("ascii")
                     done = answer.get("done")
                     # An export from a script built it first: that worker holds the xbf now.
                     for row in (done.get("reports") or []) if isinstance(done, dict) else []:
@@ -827,31 +882,61 @@ class Daemon:
             return
         if op == "model_info":
             self.models.prune()
-            record = self.models.held(str(request.get("id")))
+            ident = str(request.get("id"))
+            with self.models.lock:
+                record = self.models.records.get(ident) or self.models.expired.get(ident)
             if record is None:
-                send({"failed": self.models.missing(str(request.get("id")))})
+                send({"failed": self.models.missing(ident)})
             else:
-                send({"model": {key: record[key] for key in ("id", "source", "program", "builtAt", "version", "files")}})
+                model = {key: record.get(key) for key in ("id", "source", "program", "builtAt", "version", "files",
+                                                          "store")}
+                model["state"] = self.models.state(ident)
+                lost = self.models.rebuild(ident)
+                if lost is not None:
+                    model["rebuild"] = lost["rebuild"]
+                send({"model": model})
             return
         if op == "document":
             # What an id names while this engine holds it (``document``), asked without building.
             try:
-                send({"ok": True, "document": self.document(str(request.get("id")))})
+                send({"ok": True, "document": self.document(str(request.get("id")))[0]})
             except ValueError as error:
                 send({"failed": str(error)})
             return
+        if op == "state":
+            # What the engine knows of a document by its id: held or not, and what builds it again.
+            ident = str(request.get("id"))
+            self.models.prune()
+            lost = self.models.rebuild(ident)
+            send({"ok": True, "state": self.models.state(ident) if lost is None else lost["state"],
+                  **({"rebuild": lost["rebuild"], "error": lost["error"]} if lost else {})})
+            return
+        payload = b""
         if op == "export" and "id" in (request.get("source") or {}):
+            ident = str(request["source"]["id"])
             try:
-                request = {**request, "source": self.document(request["source"]["id"])}
+                source, payload = self.document(ident)
             except ValueError as error:
                 send({"failed": str(error)})
                 return
+            expected = request.get("expected") or {}
+            if "document" in source and "modelRevision" in expected:
+                # The viewer's export of a model whose worker is gone reads the whole document the
+                # server holds, at the revision the page shows: checked here, as no worker holds it.
+                with self.models.lock:
+                    record = self.models.records.get(ident)
+                served = self.server.served.get(ident) if self.server is not None else None
+                if (record is None or served is None or f"{record['version']}-0" != expected["modelRevision"]
+                        or served.structure.get("exportRevision") != expected.get("digest")):
+                    send({"failed": "The source changed. Open Export again to use the displayed revision."})
+                    return
+            request = {**request, "source": source}
         if op == "export":
             order = {"id": 1, "op": "export", "source": request["source"], "destinations": request["destinations"],
                      "pose": request.get("pose"), "part": request.get("part"), "cwd": request.get("cwd"),
                      "draw": request.get("draw"), "draw_still": request.get("draw_still"),
                      "expected": request.get("expected"), "inspect": request.get("inspect"), "original": request.get("original")}
-            return self._call(request, order, send)
+            return self._call(request, order, send, payload)
         if op == "result":
             order = {"id": 1, "op": "result", "script": request["script"], "name": request["name"],
                      "cwd": request.get("cwd")}
@@ -914,7 +999,7 @@ class Daemon:
                 elif self.models.held(named) is not None:
                     server, ident = self.models.serve(named)
                 else:
-                    found = self.document(named)  # a file this engine knows by its id, or refused
+                    found, _payload = self.document(named)  # a file this engine knows by its id, or refused
                     ident = server.add(Path(found["path"]))
             except Exception as error:  # noqa: BLE001
                 send({"failed": f"cannot serve {named}: {error}"})
@@ -988,8 +1073,9 @@ class Daemon:
                 "rssCapMb": rss_cap_mb(), "retired": list(self.pool.retired),
                 "idle": round(now - self.last, 1),
                 "serving": None if self.server is None else {"url": self.server.url,
-                                                             "documents": self.server.listing()},
-                "models": self.models.listing(),
+                                                             "documents": self.server.listing(every=True),
+                                                             "memory": self.server.memory()},
+                "models": self.models.listing(every=True),
                 "renders": [] if self.renders is None else self.renders.status(),
                 "sessions": (self.server.http.app.sessions() if self.server is not None
                              and hasattr(self.server.http, "app") else [])}

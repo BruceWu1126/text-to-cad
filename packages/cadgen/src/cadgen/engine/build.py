@@ -532,6 +532,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
     for report, (model, result, body, children) in zip(reports, results):
         report["id"] = model.id
         report["source"] = {"script": str(model.script), "name": model.name}
+        report["store"] = model.store
         if result is not None:
             report["timings"] = {"load": round(load_seconds, 4), "body": round(body, 4)}
             _written(model, result, run, report, log, model.plan(), context)
@@ -730,6 +731,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
     report["files"] = {str(target.path): written[str(target.path)] for target in plan}
     report["id"] = model.id
     report["source"] = {"script": str(model.script), "name": model.name}
+    report["store"] = model.store
 
 
 def held(script: Path | None = None, name: str | None = None, *, path: Path | None = None) -> Any:

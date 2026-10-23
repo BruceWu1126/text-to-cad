@@ -145,7 +145,8 @@ build runs the new code. Never stop one you did not start.
 The engine's switches are environment variables, never script options (the
 engine's README, **The engine server and its workers** and **Body retention**):
 `CADGEN_ENGINE_WORKERS`, `CADGEN_ENGINE_WORKER_IDLE`,
-`CADGEN_ENGINE_WORKER_RSS_MB`, `CADGEN_ENGINE_IDLE`, `CADGEN_ENGINE_MEMO=0` (no memo
+`CADGEN_ENGINE_WORKER_RSS_MB`, `CADGEN_ENGINE_MEMORY_MB` (the daemon's one memory budget,
+**Document lifetime**), `CADGEN_ENGINE_IDLE`, `CADGEN_ENGINE_MEMO=0` (no memo
 hits), `CADGEN_ENGINE_BODIES=0` (no body replay), `CADGEN_ENGINE_MESH=processes|inline`
 `CADGEN_ENGINE_THREE` (the three.js folder `cadgen serve` pages load) and
 `CADGEN_VIEWER_WARM=0` (no engine warm-up at `cadgen viewer`'s launch). The
