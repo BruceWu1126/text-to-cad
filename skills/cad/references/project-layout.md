@@ -88,7 +88,7 @@ prints what the root's document was built from.
 | Need | Add |
 | --- | --- |
 | A file of a model | `cadgen export "$ID" STEP/assembly.step` when asked; `exports.py` when the person keeps files current. See [exports](exports.md). |
-| A variant | Another `@model` calling the part's `@memo` helper with other values. |
+| A variant | Another `@model` calling the part's helper with other values. |
 | Shared factory or hole pattern | A plain helper under `src/lib/`, with `src/lib/__init__.py`. |
 | Left/right geometry | Mirror inline, or separate models for independent files and reuse. |
 | Subassembly | A model that calls its child models. |
@@ -132,7 +132,7 @@ become separate left and right models.
 
 A big assembly stays fast to edit without splitting: the worker replays what an edit
 does not reach, and a sub-assembly stage marked `@memo` is replayed whole
-([`@memo`](model-contract.md#parameters-configurations-and-memo)). Separate root scripts
+([`@memo`](model-contract.md#memo-marks-stages)). Separate root scripts
 run at once, each in its own worker, so subsystem scripts let several agents build and
 check their parts before the root takes them in.
 

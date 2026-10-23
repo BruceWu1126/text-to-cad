@@ -75,12 +75,13 @@ cadgen export "$ID" STEP/bracket.step     # the file, when asked
 | 0.7 | 0.8 |
 | --- | --- |
 | `@step(out=...)`, `@stl`, `@glb`, `@threemf` on a model | `@model`; files by `cadgen export <id> FILE` when asked, or an `exports.py` calling `export(model, path)` |
+| `@dxf(out=...)` on a drawing | `@model` returning the planar geometry; `cadgen export <id> drawing.dxf` writes it, running the drawing checks (`$dxf`) |
 | `@step(out=..., kinematics=..., materials=..., animation=...)` | `@model`; joints, materials and motions in the body (below) |
 | `@stl(mesh_tolerance=..., mesh_angular_tolerance=...)`, `--mesh-tolerance` | none: every mesh is made at FreeCAD's default tolerance |
 | `python model.py --force`, `--json`, `--verbose` | `python model.py` takes no options. `CADGEN_ENGINE_MEMO=0` runs without memo hits; `bracket.build()` returns the report as data; `bracket.build(verify=True)` checks every replay |
 | `python model.py --profile` | `bracket.build(profile=True)` |
 | `python model.py --no-daemon`, `CADGEN_DAEMON=0` | none: every run goes through the engine (`Model.build(daemon=False)` is a seam for tests: cold, nothing served) |
-| a parameterised factory a model calls (`return _bracket(WIDTH)`) | a `@memo` helper the model calls; each variant its own `@model` |
+| a model's dimensions as module constants and one model | a helper function taking the values; each variant its own `@model` calling it |
 | a run that writes `STEP/x.step` beside the script | a run that writes nothing: the page updates |
 | `compound_from_instances(...)` | `bd.Pos(...) * part`: every placement shares its shape |
 | `label_shape(shape, name, ...)`, `label_text(...)` | `shape.label = "name"` |

@@ -56,15 +56,14 @@ them on `__file__` in code that must run from any folder.
 ## Write a model and run it
 
 A part or an assembly is a function with no parameters, decorated `@model`, that returns
-a build123d shape. Its dimensions are the arguments of a `@memo` helper, and each
+a build123d shape. Its dimensions are the arguments of a plain helper function, and each
 configuration is a `@model` of its own. For example, `src/bracket.py`:
 
 ```python
 import build123d as bd
-from cadgen import memo, model
+from cadgen import model
 
 
-@memo
 def bracket_body(width, thickness, bore):
     body = bd.Box(width, 20, thickness)
     hole = bd.Cylinder(bore / 2, thickness)
@@ -111,9 +110,13 @@ so it is the same run after run, and the open page follows every run.
   the script replays every operation an edit did not reach, so a comment re-runs nothing
   and a dimension edit re-runs what reads it. Decoration only declares: keep the calls
   under `if __name__ == "__main__":` so other scripts can import the models.
-- **A model takes no parameters.** Values live on `@memo` helpers; a variant is another
-  named `@model` that calls them with other values: a configuration, with its own id and
-  page. Constants several models share live in a module they import.
+- **A model takes no parameters.** Values live on plain helper functions; a variant is
+  another named `@model` that calls them with other values: a configuration, with its own
+  id and page. Constants several models share live in a module they import.
+- **`@memo` marks stages, never parts.** The engine already replays every kernel call, so
+  mark only a function holding seconds of kernel work that an edit elsewhere leaves
+  alone, such as a whole sub-assembly stage; never a part, never a helper called many
+  times ([`@memo`](references/model-contract.md#memo-marks-stages)).
 - **An assembly calls its parts.** Its body calls each part model (`plate()`), places and
   labels what they return, and returns a `Compound`. Each child builds in the same run and
   keeps its own document. Running a child's script alone leaves the assemblies that use

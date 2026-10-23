@@ -7,7 +7,8 @@ why a run ran what it ran.
 ## Contents
 
 - [A model is a function](#a-model-is-a-function)
-- [Parameters, configurations and `@memo`](#parameters-configurations-and-memo)
+- [Parameters and configurations](#parameters-and-configurations)
+- [`@memo` marks stages](#memo-marks-stages)
 - [Assemblies call their parts](#assemblies-call-their-parts)
 - [What a run runs](#what-a-run-runs)
 - [Inputs](#inputs)
@@ -61,19 +62,18 @@ if __name__ == "__main__":
   and its call returns the result as a build123d tree: every assembly a `Compound`,
   every part placed, named, coloured and given its material.
 
-## Parameters, configurations and `@memo`
+## Parameters and configurations
 
-A model has no parameters, so a part's dimensions are the arguments of a `@memo`
-helper, and each set of values is a model of its own: a configuration, with its own
+A model has no parameters, so a part's dimensions are the arguments of a plain helper
+function, and each set of values is a model of its own: a configuration, with its own
 id and page.
 
 ```python
 # src/standoff.py
 import build123d as bd
-from cadgen import memo, model
+from cadgen import model
 
 
-@memo
 def standoff_body(height, outer_d, bore_d):
     post = bd.Cylinder(outer_d / 2, height) - bd.Cylinder(bore_d / 2, height)
     post.label = "standoff"
@@ -90,11 +90,22 @@ def standoff_m4():
     return standoff_body(16, 10, 4.5)
 ```
 
-`@memo` marks a function the engine may replay instead of running. A call of it in a
-run is keyed by its code and its arguments, and a later run with the same key replays
-it, names and all; a second call with the same arguments in one run is a new placement
-of the first one's result. Outside a run it is its function. Its contract:
+The helper needs no marking: the engine keeps every kernel operation it runs, keyed by
+its inputs, so a run after an edit elsewhere replays it.
 
+## `@memo` marks stages
+
+`@memo` marks a function the engine may replay whole instead of running. A call of it in
+a run is keyed by its code and its arguments, and a later run with the same key replays
+it, names and all; a second call with the same arguments in one run is a new placement
+of the first one's result. Outside a run it is its function.
+
+- **Mark rarely.** The engine already replays every kernel call of any model, so a memo
+  hit saves only the Python cost of those calls (0.1 to 0.4 ms each). Mark a function
+  that holds seconds of kernel work an edit elsewhere leaves alone, roughly a thousand
+  kernel calls or more: whole sub-assembly stages (measured: 1.3 to 3 s each, twice as
+  fast on an edit). Never mark per part, or a helper called many times: those measured
+  under 0.1 s.
 - **Arguments by value**: numbers, strings, bools, `None`, tuples, lists and dicts of
   them, enums and paths; build123d's `Location`, `Vector`, `Axis`, `Plane`, `Color`
   and `Rotation`; a `Material`; a shape this run made. A call given anything else (a
@@ -107,10 +118,20 @@ of the first one's result. Outside a run it is its function. Its contract:
 - **Return an assigned name.** A `@memo` function names what its `return` statement makes
   in itself, so marking a helper that returns `body - holes` renames those elements
   once; marking one that returns `body` renames nothing.
-- **Mark stages, not loops.** Mark a part's parametric helper and a whole sub-assembly
-  stage; leave unmarked a helper a part's body calls many times over (a rib in a loop,
-  a hole in a pattern): the engine already keeps every kernel operation, and a memo call
-  per tiny shape only adds keys.
+
+```python
+from cadgen import memo, model
+
+
+@memo
+def drivetrain():                       # seconds of kernel work: a whole stage
+    ...
+
+
+@model
+def rover():
+    ...
+```
 
 Each call that runs every time is named, with why, in the report's
 `retention.fallbacks` ([progress and the report](#progress-and-the-report)).
