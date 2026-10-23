@@ -4,9 +4,10 @@ It holds a pool of warm workers, one per model script (``Pool``), and hands each
 script's worker: one build at a time per worker, builds of different scripts at once, and at
 most ``CADGEN_ENGINE_WORKERS`` workers alive (by default, the machine's cores). A build for a
 script with a live worker waits for it while it is busy. One for a script with none starts one
-when fewer than the cap are alive; at the cap the least recently used idle worker is retired
-first (its stdin closed: it exits); with every worker busy, the build waits, first come first
-served, for the first to come free. Nothing is refused, and nothing is predicted: no memory
+when fewer than the cap are alive; at the cap the least recently used idle worker no page
+watches is retired first (its stdin closed: it exits), and when every idle worker is watched the
+new one starts past the cap; with every worker busy, the build waits, first come first served,
+for the first to come free. Nothing is refused, and nothing is predicted: no memory
 budget, no admission. A worker idle ``CADGEN_ENGINE_WORKER_IDLE`` seconds (by default the
 daemon's own idle time, an hour) is retired, and so is one over its memory cap after a build
 (``worker.retirement``). A retired script's next build is a fresh worker's, a restart.
@@ -405,12 +406,14 @@ def _shared(environment: dict[str, str]) -> dict[str, str]:
 
 class Pool:
     """The daemon's live workers, one per key (a script's path, ``code::<name>``, ``documents``),
-    at most ``cap`` of them (see the module): ``lease`` a key's worker for one request, and
-    ``release`` it after. Requests are granted first come first served: one whose key has a live
-    worker takes it when it is free; one that needs a worker of its own takes a slot under the cap,
-    else the slot of the least recently used idle worker -- one no page watches, then one no
-    request waits for, if there is one -- which is retired; with every worker busy it waits, and so does every request that needs
-    a slot after it. A worker idle ``idle`` seconds is retired (``retire_idle``), as is one that is
+    at most ``cap`` of them but for watched ones (see the module): ``lease`` a key's worker for one
+    request, and ``release`` it after. Requests are granted first come first served: one whose key
+    has a live worker takes it when it is free; one that needs a worker of its own takes a slot
+    under the cap, else the slot of the least recently used idle worker no page watches -- one no
+    request waits for, if there is one -- which is retired. When every idle worker is watched, the
+    new worker starts past the cap: the count cap never retires a watched worker (connected means
+    warm); its memory cap may. With every worker busy the request waits, and so does every request
+    that needs a slot after it. A worker idle ``idle`` seconds is retired (``retire_idle``), as is one that is
     gone or over its memory cap when let go. ``start(key, environment, cwd)`` starts a worker."""
 
     def __init__(self, cap: int, idle: float, start: Callable[[str, dict[str, str], str | None], Any],
@@ -546,10 +549,15 @@ class Pool:
             if not idle:
                 blocked = True
                 continue
-            # Connected means warm: a worker whose document a page watches makes room only after
-            # every unwatched one; at a cap of watched idle workers alone the least recently used
-            # of them still goes, so a build never waits on an open page.
-            victim = min(idle, key=lambda held: (self.connected(held), held.key in wanted, held.used))
+            # Connected means warm: a worker whose document a page watches is never the count
+            # cap's victim. With only watched idle workers the cap is exceeded instead, so a
+            # build never waits on an open page and never costs one its warm worker.
+            unwatched = [held for held in idle if not self.connected(held)]
+            if not unwatched:
+                self._slot(ticket, None)
+                granted = True
+                continue
+            victim = min(unwatched, key=lambda held: (held.key in wanted, held.used))
             del self.live[victim.key]
             self._note(victim, "LRU")
             self._slot(ticket, victim)
