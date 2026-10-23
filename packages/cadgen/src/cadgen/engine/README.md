@@ -618,6 +618,9 @@ reads it from its document's 404 (`GET /api/doc/<id>`: `{"error", "state", "rebu
 `cadgen inspect` and `cad_show` of its id refuse with it, and `cadgen status` lists it. A `memory`
 document's words add that it is kept in memory only. The engine never runs it: no access, no start
 and no restart runs code to bring a document back.
+Asked of the server, a document it does not hold is a refusal (`serve.NotHeld`): the server answers
+its type, state and command with its words (`daemon.refused`) and the caller raises it as that
+type (`api._failed`), so `cadgen inspect`, `export`, `snapshot` and `serve` of such an id exit 2.
 
 `cadgen stop` stops every server of the installation, whatever protocol it speaks: the socket and
 lock names carry the protocol (`daemon._tag`), and `daemon.endpoints()` lists this one's and each

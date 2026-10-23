@@ -337,7 +337,7 @@ class NotHeld(ValueError):
     """A document the engine knows but no longer holds: its ``state`` (``evicted``, ``expired``)
     and the command that builds it again (``rebuild``), which the engine never runs."""
 
-    def __init__(self, text: str, state: str, rebuild: str | None) -> None:
+    def __init__(self, text: str, state: str = "evicted", rebuild: str | None = None) -> None:
         super().__init__(text)
         self.state, self.rebuild = state, rebuild
 

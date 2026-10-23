@@ -394,6 +394,19 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
             self.process.kill()
 
 
+def refused(error: Exception) -> dict[str, Any]:
+    """A refusal as the daemon answers it: its words, its type (``worker.refusal``), and for a
+    document the engine does not hold (``serve.NotHeld``) its state and the command that builds it
+    again, so the caller raises it as that type (``api._failed``) and the CLI exits 2."""
+    from cadgen.engine.serve import NotHeld
+    from cadgen.engine.worker import refusal
+
+    found: dict[str, Any] = {"failed": str(error), **refusal(error)}
+    if isinstance(error, NotHeld):
+        found.update(state=error.state, rebuild=error.rebuild)
+    return found
+
+
 def _written(report: dict[str, Any]) -> list[str]:
     """Every file a build's report names: its model's, and each child model's
     (``child_models``: the models its run ran, each of which wrote its own)."""
@@ -828,8 +841,8 @@ class Daemon:
                             environment = held.environment if held else dict(os.environ)
                         if held is None and "script" in request["source"]:
                             named = request["source"].get("held")
-                            send({"failed": self.models.missing(named) if isinstance(named, str) else
-                                  "The viewed model is no longer held. Reopen it before exporting."})
+                            send(refused(self.models.not_held(named)) if isinstance(named, str) else
+                                 {"failed": "The viewed model is no longer held. Reopen it before exporting."})
                             return
                     worker = self.lease(key, environment, cwd)
                     expected = request.get("expected") or {}
@@ -886,7 +899,7 @@ class Daemon:
             with self.models.lock:
                 record = self.models.records.get(ident) or self.models.expired.get(ident)
             if record is None:
-                send({"failed": self.models.missing(ident)})
+                send(refused(self.models.not_held(ident)))
             else:
                 model = {key: record.get(key) for key in ("id", "source", "program", "builtAt", "version", "files",
                                                           "store")}
@@ -901,7 +914,7 @@ class Daemon:
             try:
                 send({"ok": True, "document": self.document(str(request.get("id")))[0]})
             except ValueError as error:
-                send({"failed": str(error)})
+                send(refused(error))
             return
         if op == "state":
             # What the engine knows of a document by its id: held or not, and what builds it again.
@@ -917,7 +930,7 @@ class Daemon:
             try:
                 source, payload = self.document(ident)
             except ValueError as error:
-                send({"failed": str(error)})
+                send(refused(error))
                 return
             expected = request.get("expected") or {}
             if "document" in source and "modelRevision" in expected:
@@ -1002,7 +1015,11 @@ class Daemon:
                     found, _payload = self.document(named)  # a file this engine knows by its id, or refused
                     ident = server.add(Path(found["path"]))
             except Exception as error:  # noqa: BLE001
-                send({"failed": f"cannot serve {named}: {error}"})
+                from cadgen.engine.serve import NotHeld
+
+                # A document id the engine does not hold is a refusal: its state and the command
+                # that builds it again travel with it, and the caller raises it as its type.
+                send(refused(error) if isinstance(error, NotHeld) else {"failed": f"cannot serve {named}: {error}"})
                 return
             app = getattr(server.http, "app", None)
             token = app.token if app is not None else ""

@@ -125,6 +125,30 @@ class BudgetTest(unittest.TestCase):
         self.assertIn(ident, self.server.served)
 
 
+class NotHeldRefusalTest(unittest.TestCase):
+    """An id the daemon does not hold is refused as ``NotHeld``, its state and rebuild with it."""
+
+    def test_the_refusal_crosses_the_daemon_as_its_type(self) -> None:
+        from cadgen.engine import api, daemon
+        from cadgen.engine.serve import NotHeld
+
+        engine = daemon.Daemon(60)
+        self.addCleanup(engine.pool.stop)
+        ident = model_id(Path("/nowhere/cell.py"), "cell")
+        engine.models.expired[ident] = {"id": ident, "source": {"script": "/nowhere/cell.py", "name": "cell"},
+                                        "program": "/nowhere/caller.py", "store": "memory", "version": 1, "builtAt": 0}
+        answers: list[dict] = []
+        engine.handle({"op": "document", "id": ident}, answers.append)
+        (answer,) = answers
+        self.assertEqual((answer["state"], answer["rebuild"]), ("expired", "python /nowhere/caller.py"))
+        error = api._failed(answer)
+        self.assertIsInstance(error, NotHeld, "raised as its type: the CLI exits 2 for a ValueError")
+        self.assertEqual((error.state, error.rebuild, str(error)), ("expired", "python /nowhere/caller.py", answer["failed"]))
+        answers.clear()
+        engine.handle({"op": "document", "id": model_id(Path("/nowhere/other.py"), "other")}, answers.append)
+        self.assertIsInstance(api._failed(answers[0]), NotHeld, "an id it never built is refused the same")
+
+
 SCRIPT = """
 import pathlib
 import build123d as bd
@@ -293,7 +317,7 @@ class LifetimeDaemonTest(unittest.TestCase):
         self.assertEqual((status, body["state"], body["rebuild"]), (404, "evicted", command))
         inspected = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "inspect", evicted],
                                       cwd=self.folder, env=self.env)
-        self.assertNotEqual(inspected.returncode, 0)
+        self.assertEqual(inspected.returncode, 2, "a document not held is a refusal, not a failure")
         self.assertIn(f"run `{command}`", inspected.stderr)
         row = self.row(expired, "expired")
         self.assertEqual(row["rebuild"], f"python {self.folder / 'caller_cell.py'}")

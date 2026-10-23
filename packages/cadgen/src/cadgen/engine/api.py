@@ -195,6 +195,9 @@ def _failed(answer: dict[str, Any]) -> Exception:
         error = kind(text)
     except TypeError:  # a refusal whose type takes more than its words
         error = ValueError(text)
+    for key in ("state", "rebuild"):  # a document not held: what it is, and what builds it again
+        if key in answer and hasattr(error, key):
+            setattr(error, key, answer[key])
     error._engine_refusal = True  # type: ignore[attr-defined]  # the worker's, not this process's (``_error``)
     return error
 
