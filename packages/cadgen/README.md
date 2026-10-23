@@ -63,7 +63,8 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
    **Build closure**).
 2. **Only requested files to disk.** The engine writes the files a model declares -- the xbf and the exports
    its decorators name, nothing beside them -- and the operating system's coordination for its
-   warm process: a socket and a lock in `tempfile.gettempdir()/cadgen-engine`. It writes no
+   warm process: a socket and a lock in `tempfile.gettempdir()/cadgen-engine` (a socket path past
+   the Unix limit lives in the user's own `/tmp/cadgen-<uid>` instead). It writes no
    sidecar, record of a build, cache, index, memo, mesh or parsed document, and no derived file
    beside an input. A restart is cold, but for the xbf itself: a model whose xbf holds the
    closure the model has now is not run. Explicit viewer exports write only the requested
@@ -170,14 +171,15 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
 
 19. **Connected means warm.** A served document's outstanding version wait or recent
     sync protects the worker that built it from idle retirement. The engine outlives its
-    clients; a page closing never stops a worker. Memory and worker-count caps still apply
-    (the engine's **Architecture** and **The daemon and its workers**).
+    clients; a page closing never stops a worker. The memory cap still applies; the worker-count
+    cap takes a watched worker only when every idle worker is watched (the engine's
+    **Architecture** and **The daemon and its workers**).
 
 20. **One engine serves the installation.** A page never replaces or re-executes it. Page sessions and document reads share its
     authenticated HTTP listener. `serve` and `viewer` always start or reuse it, with no
     standalone serving mode. Launchers exit; clients closing never stop it. Kernel
     operations run in child processes, never in the engine's request threads. Each
-    page session keeps its own root; each MCP session owns its views and resource. The
+    page session keeps its own start folder; each MCP session owns its views and resource. The
     stdio shim owns only connection metadata. Sidebar sharing stays in memory, and host
     quirks stay in the shim and page. MCP's shared `cad_http` exposes only telemetry
     status and opt-out to agents; other viewer routes require the session capability

@@ -18,7 +18,11 @@ def http_factory(server, host, port):
     app = EngineApp(server, host, session_factory=Sessions)
     server.clients_active = app.active
     server.on_close = app.close
-    return CadHTTPServer((host, port), make_handler_class(app), app)
+    try:
+        return CadHTTPServer((host, port), make_handler_class(app), app)
+    except BaseException:
+        app.close()  # its analytics recorder, started with it, ends with the failed bind
+        raise
 
 
 def on_start():

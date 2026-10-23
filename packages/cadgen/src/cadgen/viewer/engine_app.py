@@ -159,8 +159,12 @@ class EngineApp:
             pass
         cookie_name = f'cadgen-engine-{self.server.port}'
         saved = cookie.get(cookie_name)
-        supplied = bearer or (saved.value if saved else '') or request.query.get('token', '')
-        if not secrets.compare_digest(str(supplied), self.token):
+        # Any one credential suffices: a cookie left by an engine that held this port before
+        # must not outrank the token of the URL a launch just printed.
+        supplied = (bearer, saved.value if saved else '', request.query.get('token', ''))
+        expected = self.token.encode()
+        if not any(secrets.compare_digest(str(value).encode('utf-8', 'surrogateescape'), expected)
+                   for value in supplied if value):
             return response.send_json(403, {'error': 'engine token required'})
         if request.query.get('token') == self.token and request.method == 'GET':
             query = {k: v for k, v in request.query if k != 'token'}

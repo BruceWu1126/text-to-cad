@@ -78,7 +78,8 @@ def hinge():
 2. **Only requested files to disk.** The engine writes the files a model declares -- the xbf
    and the exports its decorators name, nothing beside them -- and the operating
    system's coordination for its warm process: a socket and a lock in
-   `tempfile.gettempdir()/cadgen-engine`. It writes no sidecar, record of a build,
+   `tempfile.gettempdir()/cadgen-engine` (a socket path past the Unix limit lives in the
+   user's own `/tmp/cadgen-<uid>` instead). It writes no sidecar, record of a build,
    cache, index, memo, mesh or parsed document, and no derived file beside an input
    (a STEP converted to an xbf is an export the author asks for). A restart is cold,
    but for the xbf itself: a model whose xbf holds the closure the model has now is
@@ -162,13 +163,15 @@ def hinge():
 14. **Connected means warm.** A worker is not retired for idleness while any served
     document it built has a version wait outstanding or completed a sync within `serve.LIVE`
     seconds. Heartbeats use the canonical document address, including `code::NAME`
-    and `script.py::NAME`; they never turn a model address into a file path. The memory cap still applies. Closing a page never stops the engine or its
+    and `script.py::NAME`; they never turn a model address into a file path. The memory cap still applies; the
+    worker-count cap takes a watched worker only when every idle worker is watched. Closing a page never stops the engine or its
     worker; once its last sync expires, ordinary idle retirement applies.
 
 15. **One HTTP owner per installation.** The daemon serves page sessions and document
     reads on one authenticated listener. Both `serve` and `viewer` start or reuse it;
     neither command has a standalone serving mode. A launcher exits after handing its client the
-    engine URL; closing a client never stops the engine. Each page has its own catalog root.
+    engine URL; closing a client never stops the engine. Each page session has its own start
+    folder, which a relative `?file=` resolves against; files are read by absolute path.
     No page replaces or re-executes the engine; stopping it is an explicit engine operation.
 16. **No kernel in request threads.** Reading XBF/STEP, meshing, topology facts and poses
     run in child processes. The daemon holds structures and buffers, never live kernel objects.
@@ -200,15 +203,17 @@ A model's worker is a separate process, holding its memo and live kernel objects
 The distribution injects its HTTP application through `daemon.HTTP_FACTORY`, and what the
 daemon runs once it holds its lock through `daemon.ON_START`; this
 standalone engine imports no application module. The application serves the built
-viewer and per-launch catalog sessions on that listener. Document routes run in
+viewer and per-launch page sessions on that listener. Document routes run in
 process, with no network relay. Kernel reads, topology, poses and meshes run in
 reader/mesh subprocesses; even an inline-mesh request stays outside the daemon.
 
 The daemon maps each built document to its worker. HTTP watcher accounting has its
 own lock, independent of document reads and pool admission. Outstanding version
 waits and recent syncs preserve that worker from idle retirement and keep the daemon
-alive. The worker-count cap still uses LRU eviction to admit a new script, and the
-per-worker memory cap remains enforced after each build.
+alive. To admit a new script at the worker-count cap, the least recently used
+unwatched idle worker is retired; a watched one goes only when every idle worker is
+watched, so a build never waits on an open page. The per-worker memory cap remains
+enforced after each build.
 
 The installation's private socket supplies its HTTP token. Page URLs exchange it
 for a same-site cookie; programmatic clients use Bearer authentication. All routes
@@ -421,8 +426,8 @@ guess, no refusal; the operating system does the rest.
   cores). A build for a script whose worker is alive goes to it, waiting while it builds
   something else: one build at a time per worker, builds of different scripts at once.
 - **First come, first served.** A build for a script with no worker starts one under the cap.
-  At the cap, the least recently used idle worker is retired first -- its stdin closed, so it
-  exits -- and its slot is the new one's. With every worker busy, the build waits for the first
+  At the cap, the least recently used idle worker is retired first -- one no page watches
+  before a watched one; its stdin closed, so it exits -- and its slot is the new one's. With every worker busy, the build waits for the first
   to come free, and every build that needs a slot after it waits behind it. A build that waits
   for its own script's busy worker takes no slot.
 - **Unwatched idle workers go.** A worker idle `CADGEN_ENGINE_WORKER_IDLE` seconds (default:
@@ -442,6 +447,12 @@ has a console of its own and no window (`daemon.windowless`: `CREATE_NO_WINDOW`)
 a process group of its own too (`daemon.detached`), never no console at all: a console program
 started with none gets a new console, with a window (#597). What they start in turn (the
 meshing and reading pools) shares their windowless console.
+
+A worker runs each request in that request's folder (its script's, or the caller's), so a model's
+relative reads resolve as they would under `python SCRIPT`, and stands in the temporary folder
+between requests: an idle worker holds no project folder (on Windows, one a process stands in
+cannot be renamed or deleted). A meshing or reading pool's processes exit with the process that
+started them, however it ends.
 
 `cadgen status` says what the daemon holds (`--json`: the same as data, `api.status()`):
 

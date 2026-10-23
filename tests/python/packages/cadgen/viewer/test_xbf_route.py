@@ -101,34 +101,48 @@ class XbfRouteTest(unittest.TestCase):
     def test_request_process_never_imports_kernel(self):
         code = r"""
 import http.client, json, sys
+from urllib.parse import quote
 from cadgen._internal.engine_host import http_factory
 from cadgen.engine.serve import Server
 server = Server(isolated=True, mesh_mode='inline', http_factory=http_factory)
 server.start()
 try:
-    ident = server.add(sys.argv[1])
     token = server.http.app.token
     def get(path, body=None, status=200):
         connection = http.client.HTTPConnection('127.0.0.1', server.port, timeout=90)
-        connection.request('POST' if body else 'GET', path, body=body,
+        connection.request('POST' if body is not None else 'GET', path, body=body,
                            headers={'Authorization': 'Bearer '+token, 'x-cadgen-viewer': '1'})
         response = connection.getresponse()
         data = response.read()
-        assert response.status == status, (response.status, data)
+        assert response.status == status, (path, response.status, data)
         connection.close()
         return data
-    document = json.loads(get('/__cad/api/doc/'+ident))
-    part = document['prototypes'][0]['key']
-    get('/__cad/api/doc/'+ident+'/part/'+part)
-    get('/__cad/api/doc/'+ident+'/part/'+part+'/volume')
-    get('/__cad/api/doc/'+ident+'/pose', b'{"pose":{}}', status=400)
+    # Every document route a page reads, of an xbf and of a STEP, opened as the page opens them.
+    for document_path in sys.argv[1:]:
+        while True:
+            connection = http.client.HTTPConnection('127.0.0.1', server.port, timeout=90)
+            connection.request('GET', '/__cad/xbf?file='+quote(document_path), headers={'Authorization': 'Bearer '+token})
+            response = connection.getresponse()
+            opened = json.loads(response.read())
+            connection.close()
+            if response.status != 202:
+                break
+        assert response.status == 200, opened
+        doc = opened['url']
+        document = json.loads(get(doc))
+        part = doc+'/part/'+document['prototypes'][0]['key']
+        for tail in ('', '/face/1', '/edge/1', '/vertex/1', '/groups', '/volume'):
+            get(part+tail)
+        get(doc+'/version?after='+quote(document['version'])+'&wait=0')
+        get(doc+'/mesh', b'')
+        get(doc+'/pose', b'{"pose":{}}', status=400)
     get('/__cad/server')
     assert not any(n == 'OCP' or n.startswith('OCP.') or n == 'build123d'
                    or n.startswith('build123d.') for n in sys.modules), sorted(sys.modules)
 finally:
     server.stop()
 """
-        done = subprocess.run([sys.executable, '-c', code, str(self.document)],
+        done = subprocess.run([sys.executable, '-c', code, str(self.document), str(self.step)],
                               capture_output=True, text=True, timeout=120)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 

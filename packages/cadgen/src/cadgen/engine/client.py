@@ -23,19 +23,11 @@ def _connect() -> socket.socket | None:
             port, _token = _daemon.port_path().read_text(encoding="utf-8").split()
             return socket.create_connection(("127.0.0.1", int(port)), timeout=5)
         path = _daemon.socket_path()
-        if not path.exists():
+        if not path.exists() or not _daemon.socket_folder_ok(path):
             return None
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            if len(str(path).encode()) < 100:
-                client.connect(str(path))
-            else:
-                previous = os.getcwd()
-                os.chdir(path.parent)
-                try:
-                    client.connect(path.name)
-                finally:
-                    os.chdir(previous)
+            client.connect(str(path))
         except OSError:
             client.close()  # a failed connect leaves no socket open
             raise
