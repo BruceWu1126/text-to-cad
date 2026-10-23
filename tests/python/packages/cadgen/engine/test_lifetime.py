@@ -278,14 +278,10 @@ class LifetimeDaemonTest(unittest.TestCase):
         self.row(ident, "held")
         out = {kind: self.folder / f"held.{kind}" for kind in ("xbf", "step")}
 
-        def export(destinations: list[Path], pose: str | None = None) -> None:
-            answer = self.ask({"op": "export", "source": {"id": ident}, "destinations": [str(p) for p in destinations],
-                               "pose": pose, "cwd": str(self.folder), "env": dict(os.environ)})
-            self.assertIn("done", answer, answer)
-
-        export(list(out.values()))
-        posed = self.folder / "raised.step"
-        export([posed], "raised")
+        # The document as built, mechanism and all: a posed file is a model of its own (law 22).
+        answer = self.ask({"op": "export", "source": {"id": ident}, "destinations": [str(p) for p in out.values()],
+                           "cwd": str(self.folder), "env": dict(os.environ)})
+        self.assertIn("done", answer, answer)
         held = document.Loaded(out["xbf"])
         (pair,) = held.mechanism.pairs
         self.assertEqual((pair.label, pair.kind, pair.limits), ("elbow", "revolute", ((-10.0, 120.0),)))
@@ -293,8 +289,6 @@ class LifetimeDaemonTest(unittest.TestCase):
                          ({"elbow": (30.0,)}, {"raised": {"elbow": (90.0,)}}), "the xbf carries the mechanism")
         self.assertTrue(_has_point(_vertices(document.Loaded(out["step"]), "arm"), _arm_tip(30)),
                         "the STEP places the arm as built")
-        self.assertTrue(_has_point(_vertices(document.Loaded(posed), "arm"), _arm_tip(90)),
-                        "a pose of the held document is its mechanism's")
         # The viewer's export of the page's revision reads the hold too.
         _status, shown = self.page(ident)
         viewed = self.folder / "viewed.xbf"
