@@ -175,8 +175,8 @@ Mechanically:
 4. **Keep the `__main__` calls.** Decoration only declares; a call builds. Each call your
    `__main__` makes prints its model's id and page.
 5. **Composition is unchanged.** An assembly's body calls its part models, places what
-   they return and labels the placements. A child builds in the same run and keeps its
-   own document.
+   they return and labels the placements. A child builds in the same run; running its
+   own script gives it its own page.
 6. **Mark only big stages `@memo`.** `@memo` (new in 0.8) marks a function the engine
    may replay whole instead of running, keyed by its code and its arguments. Since every
    kernel call is replayed anyway, a memo hit saves only Python time (0.1 to 0.4 ms per
@@ -338,8 +338,9 @@ moving occurrences directly. 0.8 has two layers, each true to its format:
   show.hide("latch", at=3)
   ```
 
-  It is baked into a GLB exported from the model (`cadgen export <id> box.glb`, or
-  `export(box, "box.glb")`); a GLB exported from a saved `.xbf` carries the sequences
+  It is baked into a GLB exported from the model while its worker holds it
+  (`export(box, "box.glb")`, or `cadgen export <id> box.glb` right after a run); a GLB
+  exported from a saved `.xbf`, or once the worker has retired, carries the sequences
   only. The viewer's Animation section plays a GLB's animations.
 
 Remove helper joints that existed only to slide parts apart for an explode: that is an
