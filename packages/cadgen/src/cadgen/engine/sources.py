@@ -644,17 +644,13 @@ class _Node:
     and each global binding its code reads), the functions and classes it reaches, and the
     modules that fall back to their bytes, each with the reason."""
 
-    __slots__ = ("pairs", "children", "fallbacks", "content", "owners", "loose")
+    __slots__ = ("pairs", "children", "fallbacks", "content", "owners")
 
     def __init__(self) -> None:
         self.pairs: set[tuple] = set()
         self.children: list[Any] = []
         self.fallbacks: list[tuple[tuple[str, Path], str]] = []
         self.content = ""
-        # What a function holds itself -- a default, an attribute, a closure cell -- that has no
-        # canonical form: its module's bytes stand for it (``fallbacks``), which say what it is
-        # only where it was made at import (``loose``).
-        self.loose: list[str] = []
         # Per pair, the module whose binding or code it is: what a build closure lists it under.
         self.owners: dict[tuple, str | None] = {}
 
@@ -715,24 +711,6 @@ class Symbols:
         self._held.append(function)
         found = self._reached[id(function)] = (pairs, owners, fallbacks)
         return found
-
-    def loose(self, function: Any) -> list[str]:
-        """What the functions ``function`` reaches hold themselves -- defaults, attributes,
-        closure cells -- with no canonical form, sorted: a module's bytes stand for each in
-        ``key``, which is what it is only for a function made at import. A function made while
-        a build runs (a motion's, ``memo.sampled``) holds what that run made."""
-        found: set[str] = set()
-        seen: set[int] = set()
-        pending = [function]
-        while pending:
-            obj = pending.pop()
-            if id(obj) in seen:
-                continue
-            seen.add(id(obj))
-            node = self._node(obj)
-            found.update(node.loose)
-            pending.extend(node.children)
-        return sorted(found)
 
     def key(self, function: Any) -> tuple[str, list[str]]:
         """A body's key and, sorted, the reasons any module of its reach fell back to its
@@ -909,8 +887,6 @@ class Symbols:
         for label, value in (("defaults", function.__defaults__), ("keyword defaults", function.__kwdefaults__),
                              ("attributes", dict(function.__dict__))):
             parts.append(self._value(value, node, module, f"{where}: {label}", code.co_filename))
-            if parts[-1] == "?":
-                node.loose.append(f"{where}: its {label}")
         for name, cell in zip(code.co_freevars, function.__closure__ or ()):
             try:
                 value = cell.cell_contents
@@ -918,8 +894,6 @@ class Symbols:
                 value = _MISSING
             parts.append(name + "=" + self._value(value, node, module, f"{where}: closure variable {name}",
                                                   code.co_filename))
-            if parts[-1].endswith("=?"):
-                node.loose.append(f"{where}: closure variable {name}")
         node.content = _hash(parts)
         node.add((where, node.content), module)
         if first_party_file(code.co_filename):
