@@ -15,13 +15,13 @@ placement whose own colour is not its part's is drawn by a second mesh of the sa
 accessors in that colour. The placements are in the document's millimetres, Z up; the
 root node shows them in glTF's frame, Y up and metres, as cadgen's other GLBs do.
 
-Every motion of the document is an animation of the same name (``export/motion.py``):
+Every configuration sequence of the document is an animation of the same name (``export/motion.py``):
 CUBICSPLINE translation and rotation channels for each placement it moves, over one shared
 key time accessor, its duration in the animation's ``extras`` (``{"cadgen": {"duration":
-seconds}}``). A clip is the motion once; a player repeats it. After them, a built source's
+seconds}}``). A clip is the sequence once; a player repeats it. After them, a built source's
 animations (``animation()``, ``export/animation.py``), each one glTF animation of its name: STEP,
 LINEAR or CUBICSPLINE translation, rotation and scale channels on the nodes its references
-place, their duration in ``extras`` as a motion's. A GLB written from an xbf alone has none of
+place, their duration in ``extras`` as a configuration sequence's. A GLB written from an xbf alone has none of
 them: the document holds no animation. A placement anything moves stands by translation and
 rotation, as glTF asks of an animated node; every other one by its matrix.
 """
@@ -238,7 +238,7 @@ def _size(held: dict[int, Any], shown: list[Any]) -> float:
 
 def _animations(view: Any, held: dict[int, Any], shown: list[Any], node_of: dict[int, int], nodes: list[dict],
                 add: Any, accessors: list[dict]) -> list[dict]:
-    """Every motion baked into an animation, then every ``animation()`` of a built source (see the
+    """Every configuration sequence baked into an animation, then every ``animation()`` of a built source (see the
     module docstring); the nodes they move are given translation and rotation in place of their
     matrices."""
     motions = bool((view.source.structure.get("kinematics") or {}).get("motions"))

@@ -34,7 +34,7 @@ FIXTURES = REPO_ROOT / "packages/core/src/lib/render/fixtures"
 CHANNELS = '''
 import math
 import build123d as bd
-from cadgen import animation, configuration, glb, xbf
+from cadgen import animation, glb, mechanism_state, xbf
 
 HINGE = bd.Axis((-40, 0, 30), (0, -1, 0))
 
@@ -54,7 +54,7 @@ def channels():
     bd.RigidJoint("hinge", lid, bd.Plane(origin=HINGE.position, z_dir=HINGE.direction).location)
     body.joints["hinge"].connect_to(lid.joints["hinge"], angle=0)
     box = bd.Compound(children=[body, lid, latch, knob, bd.Compound(children=feet, label="feet")], label="channels")
-    configuration(box, "open", hinge=100)
+    mechanism_state(box, "open", hinge=100)
     half = (0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4))
     show = animation(box, "showcase", duration=2)
     show.pose(at={0: {}, 1: "open", 2: {}})
@@ -73,7 +73,7 @@ def channels():
 # The same box with a motion alone: an AP242 configuration sequence, which every GLB of it carries.
 MOTION = '''
 import build123d as bd
-from cadgen import configuration, glb, motion, xbf
+from cadgen import configuration_sequence, glb, mechanism_state, xbf
 
 HINGE = bd.Axis((-40, 0, 30), (0, -1, 0))
 
@@ -88,8 +88,8 @@ def motion_box():
     bd.RigidJoint("hinge", lid, bd.Plane(origin=HINGE.position, z_dir=HINGE.direction).location)
     body.joints["hinge"].connect_to(lid.joints["hinge"], angle=0)
     box = bd.Compound(children=[body, lid], label="motion_box")
-    configuration(box, "open", hinge=100)
-    return motion(box, "open_close", [(0, {"hinge": 0}), (1, "open"), (2, {"hinge": 0})])
+    mechanism_state(box, "open", hinge=100)
+    return configuration_sequence(box, "open_close", [(0, {"hinge": 0}), (1, "open"), (2, {"hinge": 0})])
 '''
 
 
@@ -226,11 +226,11 @@ class HarvestTest(_Folder):
                 report = self.channels(more, ok=False)
                 self.assertRegex(report["error"], error)
 
-    def test_an_animation_named_as_a_motion_is_refused(self) -> None:
-        report = self.build(MOTION.replace('    return motion(box', '    from cadgen import animation\n'
+    def test_an_animation_named_as_a_configuration_sequence_is_refused(self) -> None:
+        report = self.build(MOTION.replace('    return configuration_sequence(box', '    from cadgen import animation\n'
                                            '    animation(box, "open_close", duration=1).translation("lid", by=(0, 0, 1))\n'
-                                           '    return motion(box'), "motion_box", ok=False)
-        self.assertIn("animation 'open_close' has the name of a motion of the mechanism", report["error"])
+                                           '    return configuration_sequence(box'), "motion_box", ok=False)
+        self.assertIn("animation 'open_close' has the name of a configuration sequence of the mechanism", report["error"])
 
     def test_the_document_is_the_same_bytes_with_an_animation_or_without(self) -> None:
         import build123d as bd
@@ -349,18 +349,18 @@ class GlbTest(_Folder):
     def test_a_glb_from_the_xbf_alone_carries_the_motions_only_and_an_edit_of_one_rewrites_the_glb(self) -> None:
         from cadgen.engine.export import translate
 
-        self.build(MOTION.replace("    return motion(box", "    from cadgen import animation\n"
+        self.build(MOTION.replace("    return configuration_sequence(box", "    from cadgen import animation\n"
                                   "    animation(box, 'drop', duration=1).translation('lid', by=(0, 0, 5))\n"
-                                  "    return motion(box"), "motion_box")
+                                  "    return configuration_sequence(box"), "motion_box")
         declared, _read = _glb(self.folder / "motion.glb")
         self.assertEqual([animation["name"] for animation in declared["animations"]], ["open_close", "drop"])
         again = self.folder / "again.glb"
         translate(self.folder / "XBF/motion.xbf", None, again)
         self.assertEqual([animation["name"] for animation in _glb(again)[0]["animations"]], ["open_close"])
         before = (self.folder / "motion.glb").read_bytes()
-        report = self.build(MOTION.replace("    return motion(box", "    from cadgen import animation\n"
+        report = self.build(MOTION.replace("    return configuration_sequence(box", "    from cadgen import animation\n"
                                            "    animation(box, 'drop', duration=1).translation('lid', by=(0, 0, 9))\n"
-                                           "    return motion(box"), "motion_box")
+                                           "    return configuration_sequence(box"), "motion_box")
         self.assertTrue(report["files"][str(self.folder / "motion.glb")]["written"])
         self.assertNotEqual((self.folder / "motion.glb").read_bytes(), before)
 

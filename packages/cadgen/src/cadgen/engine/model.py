@@ -6,9 +6,9 @@ and ``@dxf`` (the drawing of a planar result: a sketch, a face, wires or edges).
 identity is ``script.py::function``. Every file decorator requires its output path:
 ``@xbf("XBF/part.xbf")`` or ``@step(out="part.step")``. Relative paths are relative
 to the script. Bare ``@model`` declares a document with no file. Everything else is the model's code: its material, colours, joints, the pose
-its joints are connected at (the pose every file shows), its configurations and its
-motions (``configuration``, ``motion``). A picture is the ``snapshot`` verb's, never a
-declaration. The outputs are kept in the order the decorators are written, top to
+its joints are connected at (the pose every file shows), its mechanism states, couplings and
+configuration sequences (``mechanism_state``, ``gear_pair`` and its siblings,
+``configuration_sequence``). A picture is the ``snapshot`` verb's, never a declaration. The outputs are kept in the order the decorators are written, top to
 bottom, and the xbf, when declared, is always written first.
 
 The decorated function is a ``Model``: ``.build()``, ``.export(*destinations)``,
@@ -39,8 +39,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-__all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration", "dxf", "glb", "memo", "model", "motion", "paint",
-           "read_step", "read_xbf", "step", "stl", "threemf", "xbf", "models_in"]
+__all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration_sequence", "dxf", "glb", "mechanism_state", "memo",
+           "model", "paint", "read_step", "read_xbf", "step", "stl", "threemf", "xbf", "models_in"]
 
 # The suffix each output kind writes, and the default file name's.
 SUFFIXES = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "dxf": ".dxf"}
@@ -458,41 +458,43 @@ def paint(shape: Any, faces: Any, color: Any) -> Any:
     return shape
 
 
-def configuration(assembly: Any, name: str, **values: Any) -> Any:
-    """Name a configuration of an assembly's mechanism: ``configuration(arm, "raised",
-    elbow=90)`` sets the joint labelled ``elbow`` to 90 degrees in the configuration
-    ``raised`` (a number per joint, or for a joint of several values a sequence: a
-    cylindrical joint's angle and position, a ball joint's three angles). The joints are
-    build123d's, placed with ``connect_to``; the values they were connected at are the
-    as-built configuration, and a joint a configuration does not name stays as built. The
-    document keeps every configuration (AP242's mechanism states); the viewer offers them
-    as presets, ``--pose NAME`` poses a snapshot or an export at one, and a motion's
-    waypoint may name one. A configuration never changes the build: every file shows the
-    model as built. Returns ``assembly``."""
+def mechanism_state(assembly: Any, name: str, **values: Any) -> Any:
+    """Name a state of an assembly's mechanism (AP242's ``mechanism_state_representation``):
+    ``mechanism_state(arm, "raised", elbow=90)`` sets the joint labelled ``elbow`` to 90
+    degrees in the state ``raised`` (a number per joint, or for a joint of several values a
+    sequence: a cylindrical joint's angle and position, a ball joint's three angles). The
+    joints are build123d's, placed with ``connect_to``; the values they were connected at are
+    the as-built state, and a joint a mechanism state does not name stays as built. The
+    document keeps every mechanism state; the viewer offers them as presets, ``--pose NAME``
+    poses a snapshot or an export at one, and a configuration sequence's waypoint may name
+    one. A mechanism state never changes the build: every file shows the model as built.
+    Returns ``assembly``."""
     from cadgen.engine import mechanism
 
-    return mechanism.configuration(assembly, name, **values)
+    return mechanism.mechanism_state(assembly, name, **values)
 
 
-def motion(assembly: Any, name: str, waypoints_or_fn: Any = None, *, sweep: Any = None, duration: Any = None,
-           ease: str = "cubic", **removed: Any) -> Any:
-    """Name a motion of an assembly's mechanism, by joint label: waypoints ``[(t, pose),
-    ...]`` (``t`` in seconds from 0, ``pose`` a configuration's name or ``{joint: value}``,
-    the rest as built), ``sweep={joint: (from, to)}`` with ``duration``, or a function ``t ->
-    {joint: value}`` with ``duration``. ``ease`` is ``cubic`` (eased in and out at every
-    waypoint: AP242's synchronous interpolation) or ``linear``. A motion is a finite clip; a
-    player repeats it::
+def configuration_sequence(assembly: Any, name: str, waypoints_or_fn: Any = None, *, sweep: Any = None,
+                           duration: Any = None, ease: str = "cubic", **removed: Any) -> Any:
+    """Name a configuration sequence of an assembly's mechanism (AP242's
+    ``interpolated_configuration_sequence``), by joint label: waypoints ``[(t, pose), ...]``
+    (``t`` in seconds from 0, ``pose`` a mechanism state's name or ``{joint: value}``, the rest
+    as built), ``sweep={joint: (from, to)}`` with ``duration``, or a function ``t -> {joint:
+    value}`` with ``duration``. ``ease`` is ``cubic`` (eased in and out at every waypoint:
+    AP242's synchronous interpolation) or ``linear``. A sequence is a finite clip; a player
+    repeats it::
 
-        motion(arm, "cycle", [(0, "folded"), (2, "reach"), (5, "folded")])
-        motion(arm, "wave", [(0, {"wrist": -30}), (1, {"wrist": 30}), (2, {"wrist": -30})])
-        motion(arm, "nod", lambda t: {"elbow": 45 + 20 * math.sin(t)}, duration=6)
+        configuration_sequence(arm, "cycle", [(0, "folded"), (2, "reach"), (5, "folded")])
+        configuration_sequence(arm, "wave", [(0, {"wrist": -30}), (1, {"wrist": 30}), (2, {"wrist": -30})])
+        configuration_sequence(arm, "nod", lambda t: {"elbow": 45 + 20 * math.sin(t)}, duration=6)
 
     The document keeps the definition, never frames (a function as its samples); a GLB
     export bakes it into a clip of the same name, and STEP, STL and 3MF ignore it. It never
     moves the build: the model is as its joints connect it. Returns ``assembly``."""
     from cadgen.engine import mechanism
 
-    return mechanism.motion(assembly, name, waypoints_or_fn, sweep=sweep, duration=duration, ease=ease, **removed)
+    return mechanism.configuration_sequence(assembly, name, waypoints_or_fn, sweep=sweep, duration=duration, ease=ease,
+                                            **removed)
 
 
 def animation(assembly: Any, name: str, *, duration: Any) -> Any:
@@ -511,7 +513,7 @@ def animation(assembly: Any, name: str, *, duration: Any) -> Any:
     ``translation``, ``rotation`` or ``scale``; ``interpolation`` ``CUBICSPLINE``, ``LINEAR`` or
     ``STEP``); ``.translation``, ``.rotation`` and ``.scale`` are channels from a start to an end.
     Parts are named as a ref's owner names them (a label, ``hand/finger.2``), or by a glob
-    (``wheel*``). A motion is the mechanism's and the document keeps it; an animation is the GLB's:
+    (``wheel*``). A configuration sequence is the mechanism's and the document keeps it; an animation is the GLB's:
     never written into the xbf, baked into every GLB the model declares when that GLB is written.
     Returns the builder."""
     from cadgen.engine.animations import animation as build

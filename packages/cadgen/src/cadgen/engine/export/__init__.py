@@ -13,10 +13,10 @@ owner names it, ``refs``: ``hand/finger.2``, ``palm``) writes that subtree alone
 document of its own: its root at the subtree's frame. Meshes are never sources: there is
 no B-rep in them. An xbf is written from a STEP (read into a document
 first), or from an xbf with ``part`` (a sub-assembly extracted); a posed xbf is refused,
-since a pose is a request, never a document. A GLB carries every motion the document defines as a glTF animation of the same
-name, baked by forward kinematics (``export/motion.py``), and, from a build's source, every
+since a pose is a request, never a document. A GLB carries every configuration sequence the document defines as a glTF
+animation of the same name, baked by forward kinematics (``export/motion.py``), and, from a build's source, every
 ``animation()`` its code made (``export/animation.py``): the document holds none, so a GLB
-exported from the xbf alone carries the motions only. STEP, STL and 3MF ignore both. A
+exported from the xbf alone carries the configuration sequences only. STEP, STL and 3MF ignore both. A
 DXF is drawn from a planar document alone (``export/dxf.py``): a 3D one is refused.
 
 Every file is written to a temporary file beside its target and moved over it; a DXF only

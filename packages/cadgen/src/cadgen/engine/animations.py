@@ -1,10 +1,11 @@
 """Animations: a GLB's own choreography, in glTF's terms, baked when a declared GLB is written.
 
-A **motion** (``mechanism.motion``) is the mechanism's: pair values over time, AP242's
-interpolated configuration sequence, kept in the document. An **animation** is the GLB's: glTF
+A **configuration sequence** (``mechanism.configuration_sequence``; a motion, as the structure and
+the viewer say) is the mechanism's: pair values over time, AP242's interpolated configuration
+sequence, kept in the document. An **animation** is the GLB's: glTF
 channels on the nodes a GLB places. It is never written into the document: the harvest keeps it on
 the build's tree (``harvest``), the GLB writer bakes it (``export/animation.py``), and a GLB
-exported later from the xbf alone carries the motions only.
+exported later from the xbf alone carries the configuration sequences only.
 
 ``animation(assembly, name, duration=...)`` returns a builder. Its one primitive is glTF's own:
 ``.channel(parts, path=, keys=[(t, value), ...], interpolation=)``, ``path`` one of
@@ -43,7 +44,7 @@ time fail the build by name; so do two ``pose`` calls overlapping, and a part wh
 channel would interpolate by ``STEP`` and by another interpolation.
 
 Validation is ordinary: a builder call checks its own arguments (a time outside ``[0, duration]``
-among them), the harvest the names it resolves (a part no occurrence is, a configuration or joint
+among them), the harvest the names it resolves (a part no occurrence is, a mechanism state or joint
 the mechanism lacks), the overlaps and the interpolations. Nothing here imports the kernel.
 """
 
@@ -272,7 +273,7 @@ class Animation:
         return self._add("scale", refs, "STEP", ((when, 0.0),), None, where)
 
     def pose(self, *, at: Any, interpolation: str = "CUBICSPLINE") -> "Animation":
-        """A helper driving the mechanism: ``at={t: pose}``, each ``pose`` a configuration's name or
+        """A helper driving the mechanism: ``at={t: pose}``, each ``pose`` a mechanism state's name or
         ``{joint or coupling: value}`` (the rest as built). It compiles to translation and rotation
         channels on every part the mechanism moves, placed by forward kinematics with the joint
         values interpolated between the keys (``CUBICSPLINE`` eased in and out at each). Before its
@@ -280,7 +281,7 @@ class Animation:
         where = self._where("pose")
         interpolation = self._interpolation(interpolation, where)
         if not isinstance(at, dict) or not at:
-            raise TypeError(f"{where}: at is {{t: configuration or joint values}}, not {at!r}")
+            raise TypeError(f"{where}: at is {{t: mechanism state or joint values}}, not {at!r}")
         keys = []
         for t in sorted(at, key=lambda t: _number(t, f"{where}: a time")):
             pose = at[t]
@@ -301,7 +302,7 @@ class Animation:
                                         f"numbers for a joint of several values, not {value!r}") from None
                 keys.append((when, tuple(values)))
             else:
-                raise TypeError(f"{where}: at {when:g} s is a configuration's name or a dict of joint values, "
+                raise TypeError(f"{where}: at {when:g} s is a mechanism state's name or a dict of joint values, "
                                 f"not {pose!r}")
         return self._add("pose", (), interpolation, tuple(keys), None, where)
 
@@ -347,9 +348,9 @@ class Animation:
 
 def animation(assembly: Any, name: str, *, duration: Any) -> Animation:
     """An animation of ``assembly`` named ``name``, ``duration`` seconds long (the length its GLB
-    animation's ``extras`` say, as a motion's): the builder its channels are added to (see the
-    module). Baked into a GLB the model declares, never kept in the document; naming one again
-    starts it afresh."""
+    animation's ``extras`` say, as a configuration sequence's): the builder its channels are added
+    to (see the module). Baked into a GLB the model declares, never kept in the document; naming
+    one again starts it afresh."""
     import build123d as bd
 
     if not isinstance(assembly, bd.Shape):
@@ -488,7 +489,8 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...], mechanism: Any) 
         for name, (duration, raw) in found.items():
             key = name if counts[name] == 1 else f"{_shown(base)}:{name}"
             if key in motions:
-                raise AnimationError(f"animation {key!r} has the name of a motion of the mechanism: give it its own")
+                raise AnimationError(f"animation {key!r} has the name of a configuration sequence of the mechanism: "
+                                     "give it its own")
             tracks: list[Track] = []
             for order, (channel, refs_, interpolation, keys, extra, label) in enumerate(raw):
                 if channel == "pose":

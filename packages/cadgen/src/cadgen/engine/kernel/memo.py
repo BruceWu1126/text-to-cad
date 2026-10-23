@@ -200,8 +200,8 @@ _EDGE, _VERTEX, _FACE, _COMPOUND = int(TopAbs_EDGE), int(TopAbs_VERTEX), int(Top
 # The attribute a model's painted face colours live in (``cadgen.engine.paint``).
 FACE_COLORS = "xbf_face_colors"
 FACE_MATERIALS = "xbf_face_materials"
-CONFIGURATIONS = "xbf_configurations"  # an assembly's poses by name (``mechanism.configuration``)
-COUPLINGS = "xbf_couplings"  # and its couplings by name (``mechanism.couple``)
+CONFIGURATIONS = "xbf_configurations"  # an assembly's mechanism states by name (``mechanism.mechanism_state``)
+COUPLINGS = "xbf_couplings"  # and its couplings by name (``mechanism.gear_pair`` and its two siblings)
 ANIMATIONS = "xbf_animations"  # and its animations by name (``animations.animation``): plain values
 
 
@@ -2983,9 +2983,9 @@ def _shape_key(shape: Any, state: _Run) -> int:
         tuple(sorted((int(ordinal), _normalize(tuple(rgba), state)) for ordinal, rgba in face_colors.items())),
         tuple(sorted((int(ordinal), _normalize(value, state)) for ordinal, value in dict(face_materials).items())),
         _normalize(state_dict.get("joints") or {}, state),  # a hit hands back the joints the first run held
-        # and the configurations an assembly was given (``mechanism.configuration``): a hit of an
-        # operation on it hands back what the first run held, so a configuration is its input,
-        # and a coupling (``mechanism.couple``) too, and an animation (``animations.animation``).
+        # and the mechanism states an assembly was given (``mechanism.mechanism_state``): a hit of an
+        # operation on it hands back what the first run held, so a state is its input, and a
+        # coupling (``mechanism.gear_pair`` and its two siblings) too, and an animation (``animations.animation``).
         _normalize(state_dict.get(CONFIGURATIONS) or {}, state),
         _normalize(state_dict.get(COUPLINGS) or {}, state),
         _normalize(state_dict.get(ANIMATIONS) or {}, state),

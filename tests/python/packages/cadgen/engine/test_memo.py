@@ -311,7 +311,7 @@ class ConfigurationTest(MemoCase):
 
         def model(angle):
             assembly = bd.Compound(children=[bd.Solid.make_box(1, 2, 3)], label="arm")
-            mechanism.configuration(assembly, "open", hinge=angle)
+            mechanism.mechanism_state(assembly, "open", hinge=angle)
             placed = assembly.moved(bd.Location((5, 0, 0)))
             return placed.__dict__.get(mechanism.CONFIGURATIONS)
 

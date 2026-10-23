@@ -1,14 +1,15 @@
-"""A motion baked into a glTF clip: keys where forward kinematics needs them, no more.
+"""A configuration sequence (a motion, as the structure says) baked into a glTF clip: keys where
+forward kinematics needs them, no more.
 
-Each motion of the document (``mechanism.Timeline``) is one clip of the same name. Its keys
-start at the motion's waypoints (each one a key: there the speed may jump) and the halfway point between each two; at each key every moving placement's
+Each configuration sequence of the document (``mechanism.Timeline``) is one clip of the same
+name. Its keys start at the sequence's waypoints (each one a key: there the speed may jump) and the halfway point between each two; at each key every moving placement's
 translation and rotation is the true forward kinematics through the mechanism (couplings
 included), and its in- and out-tangents the one-sided derivatives of that FK there. Between
 two keys glTF's CUBICSPLINE (a cubic Hermite, the rotation normalized after) stands for the
-motion; a step is halved while, at any eighth of it, a placement's interpolated origin strays
+sequence; a step is halved while, at any eighth of it, a placement's interpolated origin strays
 from the true FK by more than ``LINEAR_TOLERANCE`` of the model's size (the diagonal of what
 the view places) or its rotation by more than ``ANGULAR_TOLERANCE`` radians. Few keys where
-the motion is smooth, more where it is not. A placement the motion does not move has no
+the sequence is smooth, more where it is not. A placement the sequence does not move has no
 channel.
 """
 
