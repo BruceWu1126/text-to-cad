@@ -119,7 +119,8 @@ The script raises rather than writing a wrong or missing document:
   `angle()` legs that are collinear or zero-length, a non-finite `at=` or
   `offset=`.
 - A missing renderer. The PDF is the drawing, so no matplotlib is a failure,
-  not a skipped half. A failed render leaves no file behind.
+  not a skipped half. A failed render leaves no file
+  it wrote; an earlier PDF stays byte for byte.
 - `out=` missing or not naming a `.pdf`, at import time.
 
 ## Limits to state in the handoff

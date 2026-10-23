@@ -148,7 +148,7 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     is an error naming the supported set, never silently ignored.
 17. **Loud failure or correct output, nothing between.** The cardinal sin is plausible-wrong
     output at exit 0. No silent fallbacks, no globs, no guessing; a failed write or render leaves
-    NO file at the requested path.
+    no file this run wrote; an earlier file stays byte for byte.
 18. **Nothing waits on the network.** Once installed, cadgen works offline: every command,
     build, snapshot, server and page. Its own requests are two: telemetry (`analytics.py`, usage
     counts under a random id, sent by default once a `cadgen` command has said so, and never
