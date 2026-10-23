@@ -23,7 +23,7 @@ python -m cadgen.engine export ../XBF/radial.xbf radial.glb      # the three cli
 `lib/` holds the system builders and the shared modules (`spec.py`, the source of
 truth for the frame and every number, with its sources; `kin.py`, every motion;
 `geo.py`, `castings.py`, `fasteners.py`, `palette.py`), unchanged but for
-`import build123d as bd`, `lib/color.py`'s `srgb` and the two changes below.
+`import build123d as bd`, colours as the sRGB hex a shape takes, and the two changes below.
 
 The old project was nineteen models: one per system, each with its own STEP and
 worker, which `radial.py` called. Here the systems are `@memo` stages of the one model,

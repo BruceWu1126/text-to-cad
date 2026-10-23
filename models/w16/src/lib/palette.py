@@ -1,4 +1,4 @@
-"""Material and color language for the W16, authored as sRGB hex via srgb().
+"""Material and color language for the W16, authored as the sRGB hex a shape takes.
 
 Four surface languages, kept distinct (see the brief):
   CAST      raw cast alloy — block, heads, sump, turbo centre housings
@@ -18,45 +18,33 @@ import build123d as bd
 from cadgen.engine import Material, materials
 
 
-def _to_linear(channel_8bit):
-    c = channel_8bit / 255.0
-    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-
-def srgb(hex_string, alpha=1.0):
-    """Build a Color from the sRGB hex you want to SEE on screen."""
-    h = hex_string.lstrip("#")
-    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
-    return bd.Color(_to_linear(r), _to_linear(g), _to_linear(b), alpha)
-
-
-CAST = srgb("#7f8288")           # raw cast alloy, warm mid grey (reads matte next to MACHINED)
-CAST_DARK = srgb("#6a6e74")      # cast, shadowed / as-cast texture zones
-MACHINED = srgb("#d6d9dd")       # bright machined aluminium
-MACHINED_STEEL = srgb("#b9bcc2") # ground steel: journals, valves, pins
-ALUMINIUM_TUBE = srgb("#aeb3ba")  # mandrel-bent aluminium pipe: satin, darker than a machined face
-CARBON = srgb("#1e2124")         # carbon composite, near black
-COMPOSITE = srgb("#2c2f33")      # dark composite / anodised covers
-TITANIUM = srgb("#9da3ab")       # titanium fasteners, rods
-TITANIUM_DARK = srgb("#6e737a")  # anodised titanium
-STEEL = srgb("#aeb2b8")          # zinc-plated / bright steel
-STEEL_DARK = srgb("#4b4f55")     # black-oxide steel: studs, chain, cams
-STEEL_BLUE = srgb("#5b6a80")     # heat-treated blue steel (springs, retainers)
-HEAT_TINT = srgb("#6a4e3f")      # turbine housings: bronze/brown heat tint
-HEAT_TINT_BLUE = srgb("#4a5470") # hotter blue tint band
-HEAT_TINT_BRONZE = srgb("#8a6a4a")  # mid-way tint band on the turbine inlet duct
-INCONEL = srgb("#8b8f96")        # exhaust primaries, turbine wheels
-BRASS = srgb("#b8975a")
-COPPER = srgb("#a86a45")
-RUBBER = srgb("#26282b")
-HOSE = srgb("#303338")
-RED_ANODISE = srgb("#a8322c")
-GOLD_HEAT_WRAP = srgb("#b59a5e")
-GASKET = srgb("#3a3d42")
-INTERCOOLER_CORE = srgb("#6f7378")
-OIL_FILTER = srgb("#2b2e33")
-BELT = srgb("#1c1e21")
-LENS_CLEAR = srgb("#9fb3c8", 0.35)
+CAST = "#7f8288"           # raw cast alloy, warm mid grey (reads matte next to MACHINED)
+CAST_DARK = "#6a6e74"      # cast, shadowed / as-cast texture zones
+MACHINED = "#d6d9dd"       # bright machined aluminium
+MACHINED_STEEL = "#b9bcc2" # ground steel: journals, valves, pins
+ALUMINIUM_TUBE = "#aeb3ba"  # mandrel-bent aluminium pipe: satin, darker than a machined face
+CARBON = "#1e2124"         # carbon composite, near black
+COMPOSITE = "#2c2f33"      # dark composite / anodised covers
+TITANIUM = "#9da3ab"       # titanium fasteners, rods
+TITANIUM_DARK = "#6e737a"  # anodised titanium
+STEEL = "#aeb2b8"          # zinc-plated / bright steel
+STEEL_DARK = "#4b4f55"     # black-oxide steel: studs, chain, cams
+STEEL_BLUE = "#5b6a80"     # heat-treated blue steel (springs, retainers)
+HEAT_TINT = "#6a4e3f"      # turbine housings: bronze/brown heat tint
+HEAT_TINT_BLUE = "#4a5470" # hotter blue tint band
+HEAT_TINT_BRONZE = "#8a6a4a"  # mid-way tint band on the turbine inlet duct
+INCONEL = "#8b8f96"        # exhaust primaries, turbine wheels
+BRASS = "#b8975a"
+COPPER = "#a86a45"
+RUBBER = "#26282b"
+HOSE = "#303338"
+RED_ANODISE = "#a8322c"
+GOLD_HEAT_WRAP = "#b59a5e"
+GASKET = "#3a3d42"
+INTERCOOLER_CORE = "#6f7378"
+OIL_FILTER = "#2b2e33"
+BELT = "#1c1e21"
+LENS_CLEAR = "#9fb3c859"
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +141,7 @@ FINISH_COLORS = {
 def _color_key(color):
     # OpenCascade stores assigned colors as single-precision floats, so allow
     # for its last-place round trip while keeping every palette color distinct.
-    return tuple(round(float(channel), 5) for channel in color)
+    return tuple(round(float(channel), 5) for channel in bd.Color(color))
 
 
 _FINISH_BY_COLOR = {_color_key(color): FINISHES[name] for name, color in FINISH_COLORS.items()}

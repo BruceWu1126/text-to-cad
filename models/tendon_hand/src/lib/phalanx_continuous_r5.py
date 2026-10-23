@@ -9,8 +9,6 @@ from math import sqrt
 
 import build123d as bd
 
-from lib.color import srgb
-
 
 def _swept_rib(points, radius=.66):
     path = bd.Edge.make_bezier(*points)
@@ -164,7 +162,7 @@ def make_phalanx(length=45., width=18., distal=False, label='skeletal_proximal_p
     except ValueError as exc:
         raise ValueError(f'{label}: D-bore entry rim fillet failed: {exc}') from exc
     shape.label=label
-    shape.color=srgb('#a9b7c1')
+    shape.color='#a9b7c1'
     if not shape.is_valid or shape.volume <=0:
         raise ValueError(f'{label}: invalid or nonpositive frame')
     return shape

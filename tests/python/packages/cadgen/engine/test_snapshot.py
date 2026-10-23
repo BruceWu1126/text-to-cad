@@ -38,7 +38,7 @@ from cadgen.engine import paint, xbf
 @xbf("XBF/stand.xbf")
 def stand():
     plate = bd.Box(40, 20, 4) - bd.Cylinder(4, 10)
-    plate = paint(plate, plate.faces().sort_by(bd.Axis.Z)[-1], "orange")
+    plate = paint(plate, plate.faces().sort_by(bd.Axis.Z)[-1], "#ffa500")
     plate.label = "plate"
     peg = bd.Cylinder(3, 12)
     peg.label = "peg"
@@ -107,7 +107,7 @@ class SnapshotTest(unittest.TestCase):
         out = self.folder / "wire.png"
         env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_MESH": "inline"}
         done = subprocess.run([sys.executable, "-m", "cadgen.engine", "snapshot", str(self.document), str(out),
-                               "--display", "wireframe", "--grid", "--width", "200", "--height", "160", "--no-daemon",
+                               "--display", "wireframe", "--grid", "--width", "200", "--height", "160",
                                "--json"], env=env, capture_output=True, text=True, timeout=300)
         self.assertEqual(done.returncode, 0, done.stderr)
         report = json.loads(done.stdout.strip().splitlines()[-1])
@@ -155,7 +155,7 @@ class SnapshotTest(unittest.TestCase):
         env = {**os.environ, "PYTHONPATH": str(SRC)}
         stale()
         done = subprocess.run([sys.executable, "-m", "cadgen.engine", "snapshot", str(self.single), str(out),
-                               "--display", '{"exploded": {"enabled": true}}', "--no-daemon"],
+                               "--display", '{"exploded": {"enabled": true}}'],
                               env=env, capture_output=True, text=True, timeout=120)
         self.assertEqual(done.returncode, 2)
         self.assertIn("display.exploded", done.stderr)
@@ -355,7 +355,7 @@ class SnapshotTest(unittest.TestCase):
         packet, _camera = self.packet(folder)
         path = folder / "stand-1.snapshot.json"
         path.write_text(json.dumps(packet), encoding="utf-8")
-        done = subprocess.run([sys.executable, "-m", "cadgen.engine", "snapshot", "--job", str(path), "--no-daemon"],
+        done = subprocess.run([sys.executable, "-m", "cadgen.engine", "snapshot", "--job", str(path)],
                               env={**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_MESH": "inline"},
                               capture_output=True, text=True, timeout=300)
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -388,7 +388,7 @@ class SnapshotTest(unittest.TestCase):
         job = {**packet["jobs"][1], "output": {"padding": 0.15, "renderScale": 2},
                "outputs": [{"path": str(folder / "opaque.png"), "width": 200, "height": 150}]}
         opaque.write_text(json.dumps({"input": str(self.document), "jobs": [job]}), encoding="utf-8")
-        self.assertEqual(cli.main(["snapshot", "--job", str(opaque), "--no-daemon", "--json"]), 0)
+        self.assertEqual(cli.main(["snapshot", "--job", str(opaque), "--json"]), 0)
         drawn, clear = rgba(folder / "opaque.png")[..., :3], rgba(top)
 
         def linear(srgb: np.ndarray) -> np.ndarray:
@@ -403,7 +403,7 @@ class SnapshotTest(unittest.TestCase):
         tight = folder / "tight.json"
         tight.write_text(json.dumps({"input": str(self.document), "jobs": [{**job, "output": {"padding": 0}, "outputs": [
             {"path": str(folder / "tight.png"), "width": 200, "height": 150}]}]}), encoding="utf-8")
-        self.assertEqual(cli.main(["snapshot", "--job", str(tight), "--no-daemon"]), 0)
+        self.assertEqual(cli.main(["snapshot", "--job", str(tight)]), 0)
 
         def reach(found: Path) -> int:
             picture = rgba(found)[..., :3]

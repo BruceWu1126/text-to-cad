@@ -32,7 +32,7 @@ after drawing nothing for as long as a worker may sit idle (``Renders.retire_idl
 the next snapshot starts another. A render process is no worker: it does not count toward the
 workers' cap.
 
-**In process** (``draw_here``): ``--no-daemon`` and a model drawn from its worker's memory serve
+**In process** (``draw_here``): ``daemon=False`` and a model drawn from its worker's memory serve
 the document from a server of this process, and draw it once.
 
 **A file that is not a document** -- a mesh file, a robot, a DXF (``formats/``) -- is read by its

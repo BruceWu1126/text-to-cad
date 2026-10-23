@@ -3,21 +3,16 @@ materials the parts carry.
 
 Two layers, because they are consumed by different things:
 
-* a **colour** per leaf (`srgb()` hex) — what normal-CAD snapshots, the viewer
+* a **colour** per leaf (an sRGB hex) — what normal-CAD snapshots, the viewer
   and the STEP's XCAF labels show;
 * a **material** per part (`cadgen.engine.Material`: name, density, PBR) — set on
   the shapes by `apply_materials` at the end of the build, which colour alone
   cannot express.
 
-Colour is authored through srgb() rather than as raw channels, which is not a
-style preference: the render pipeline treats a build123d Color's channels as
-LINEAR and converts to sRGB on the way to the screen, so a hex pasted in as raw
-channels displays far too pale. srgb() takes the hex you actually want to SEE.
+Colour is authored as the sRGB hex you actually want to SEE: a shape takes it as
+it is, and the engine stores it linear.
 """
 from __future__ import annotations
-
-
-from lib.color import srgb
 
 
 # --- 5052-H32 sheet finishes ---------------------------------------------------------------------
@@ -66,7 +61,7 @@ SHEET_FINISHES = {
 SHEET_FINISH = 'mill'  # Gray aluminum for the demo; production order finish is black.
 
 ALUMINUM_5052_HEX = SHEET_FINISHES[SHEET_FINISH]['hex']
-ALUMINUM_5052_COLOR = srgb(ALUMINUM_5052_HEX)
+ALUMINUM_5052_COLOR = ALUMINUM_5052_HEX
 
 # --- hardware ------------------------------------------------------------------------------------
 # Three materials, because the box holds three. The M2 kit is "gold and silver": its posts are
@@ -89,9 +84,9 @@ STANDOFF_FINISH = 'brass'      # the M2 kit's posts
 NUT_FINISH = 'stainless'       # the M2 kit's nuts, its "silver" half
 SCREW_FINISH = 'black_oxide'   # the 12.9 socket caps
 
-STANDOFF_COLOR = srgb(HARDWARE_FINISHES[STANDOFF_FINISH]['hex'])
-NUT_COLOR = srgb(HARDWARE_FINISHES[NUT_FINISH]['hex'])
-SCREW_COLOR = srgb(HARDWARE_FINISHES[SCREW_FINISH]['hex'])
+STANDOFF_COLOR = HARDWARE_FINISHES[STANDOFF_FINISH]['hex']
+NUT_COLOR = HARDWARE_FINISHES[NUT_FINISH]['hex']
+SCREW_COLOR = HARDWARE_FINISHES[SCREW_FINISH]['hex']
 
 
 # --- the off-the-shelf boards ---------------------------------------------------------------------
@@ -120,7 +115,7 @@ BOARD_FINISHES = {
 # engine has no decorator argument): the catalogue's entry for the alloy or the board, in the
 # finish's look (`.but`): its metallic and roughness, its finish name as the description, and the
 # entry's own look beyond them (the sheet's rolled grain, the solder mask's gloss). `color=None`, so
-# every part keeps the srgb() colour its builder gave it.
+# every part keeps the colour its builder gave it.
 from cadgen.engine import materials as _catalogue
 
 
@@ -151,10 +146,13 @@ def apply_materials(assembly):
     material: the colour IS the assignment here, since every sheet part reads ALUMINUM_5052_COLOR
     and every M2/M3 part its hardware colour; a vendor board takes its finish by its label
     (``BOARD_LABELS``). Returns the count per material description."""
-    by_color = [(ALUMINUM_5052_COLOR, SHEET_MATERIAL),
-                (STANDOFF_COLOR, HARDWARE_MATERIALS[STANDOFF_FINISH]),
-                (NUT_COLOR, HARDWARE_MATERIALS[NUT_FINISH]),
-                (SCREW_COLOR, HARDWARE_MATERIALS[SCREW_FINISH])]
+    import build123d as bd
+
+    by_color = [(tuple(bd.Color(color)), material) for color, material in (
+        (ALUMINUM_5052_COLOR, SHEET_MATERIAL),
+        (STANDOFF_COLOR, HARDWARE_MATERIALS[STANDOFF_FINISH]),
+        (NUT_COLOR, HARDWARE_MATERIALS[NUT_FINISH]),
+        (SCREW_COLOR, HARDWARE_MATERIALS[SCREW_FINISH]))]
     counts = {}
 
     def walk(node):

@@ -27,7 +27,8 @@ from cadgen.engine import build as engine_build
 ARM = """
 import math
 import build123d as bd
-from cadgen.engine import configuration_sequence, mechanism_state, xbf
+from cadgen.ap242 import configuration_sequence, mechanism_state
+from cadgen.engine import xbf
 
 
 @xbf("XBF/arm.xbf")
@@ -90,7 +91,7 @@ class AuthoringTest(unittest.TestCase):
     def test_a_motion_is_one_of_waypoints_a_sweep_or_a_function_and_says_what_is_wrong(self) -> None:
         import build123d as bd
 
-        from cadgen.engine import configuration_sequence
+        from cadgen.ap242 import configuration_sequence
 
         box = bd.Box(1, 1, 1)
         for call, error in (
@@ -257,7 +258,8 @@ def table(t):
 
 HINGE = """
 import build123d as bd
-from cadgen.engine import configuration_sequence, xbf
+from cadgen.ap242 import configuration_sequence
+from cadgen.engine import xbf
 import moves
 
 

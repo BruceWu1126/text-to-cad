@@ -99,20 +99,21 @@ class SignatureTest(unittest.TestCase):
         self.assertEqual(found["frames"][-1], {"file": "cadgen/_internal/generation.py", "function": "broke", "line": 9})
 
     def test_what_a_model_asks_wrongly_of_cadgens_helpers_is_its_own_mistake(self) -> None:
-        # cadgen's frame is the innermost, but only to name what the model asked for: a name build123d does
-        # not have (still with Python's suggestion), a colour that is not a string.
+        # A name build123d does not have, asked of the module cadgen's finder bound lazily (still with Python's
+        # suggestion), and a colour that is none: the person's mistakes, never cadgen's crash.
         import traceback
 
-        from cadgen import build123d as bd
-        from cadgen.color import srgb
+        import build123d as bd
+
+        from cadgen.engine import Material
 
         missing = _caught(_user_calls(lambda: bd.Boxx))
         self.assertIsInstance(missing, AttributeError)
         self.assertIn("Did you mean: 'Box'?", "".join(traceback.format_exception_only(missing)))
-        not_a_string = _caught(_user_calls(lambda: srgb(0x2E3742)))
-        self.assertIsInstance(not_a_string, TypeError)
-        self.assertIn("got int", str(not_a_string))
-        for error in (missing, not_a_string):
+        not_a_colour = _caught(_user_calls(lambda: Material("x", color=0x2E3742)))
+        self.assertIsInstance(not_a_colour, ValueError)
+        self.assertIn("not 3028802", str(not_a_colour))
+        for error in (missing, not_a_colour):
             with self.subTest(error=type(error).__name__):
                 self.assertIsNone(analytics.signature(error, "build", bugs_only=True))
         self.assertIs(bd.Box, __import__("build123d").Box, "a name it has is build123d's own")

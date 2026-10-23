@@ -499,7 +499,7 @@ class DaemonTest(unittest.TestCase):
         self.assertIn(f"no document {address} is held", missing.stderr)
         self.assertEqual(json.loads(self.cli("status", "--json").stdout)["models"], [])
 
-    def test_snapshot_job_draws_a_memory_model_without_an_intermediate_document(self) -> None:
+    def test_a_snapshot_of_a_job_draws_a_memory_model_without_an_intermediate_document(self) -> None:
         from tests.python.packages.cadgen.engine.test_snapshot import gl
 
         gl()

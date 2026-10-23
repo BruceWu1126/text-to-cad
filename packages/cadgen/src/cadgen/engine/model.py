@@ -422,8 +422,10 @@ def models_in(namespace: dict[str, Any], script: Path) -> list[Model]:
 
 def paint(shape: Any, faces: Any, color: Any) -> Any:
     """Colour faces of a part, or give them a material: ``faces`` (a face, or several) of
-    ``shape`` take ``color`` -- anything ``build123d.Color`` takes, or a ``Material`` --
-    in the document, by their ordinal in the part. A face holds one paint: a colour
+    ``shape`` take ``color`` -- an sRGB hex string (``"#e68019"``, ``"#e68019cc"``), 0-255
+    integers (three, or four with alpha), a build123d ``Color``, or a ``Material`` -- in the
+    document, by their ordinal in the part. The colour is the one ``shape.color`` would give
+    the same value (``colors``). A face holds one paint: a colour
     replaces its material, a material its colour. Returns ``shape``, whose paints the
     memo keys like its label.
 
@@ -440,12 +442,12 @@ def paint(shape: Any, faces: Any, color: Any) -> Any:
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
 
+    from cadgen.engine.colors import linear
     from cadgen.engine.kernel.memo import FACE_COLORS, FACE_MATERIALS
     from cadgen.engine.materials import Material
 
     material = color if isinstance(color, Material) else None
-    rgba = None if material is not None else tuple(
-        float(value) for value in (color if isinstance(color, bd.Color) else bd.Color(color)))
+    rgba = None if material is not None else tuple(linear(color, "paint's color"))
     mapped = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(shape.wrapped, TopAbs_FACE, mapped)
     painted = dict(shape.__dict__.get(FACE_COLORS) or {})
@@ -779,7 +781,9 @@ class BuildContext:
             memo.used(key)  # the calling body's replay needs this one's run
             made = instance(found[1])
         else:
+            _say("entering", model.name)
             made = self.run(model)
+            _say("leaving", model.name)
             self.results[key] = (made, instance(made))
         if not made.__dict__.get("label"):
             made.label = model.name
@@ -828,12 +832,14 @@ class BuildContext:
             raise RecursionError(f"{marked.identity} calls itself with the same arguments")
         self.stack.append(name)
         started = time.perf_counter()
+        _say("entering", marked.name)
         try:
             with kernel.scope(name):
                 result = kernel.body(name, lambda: self.source(marked), lambda: marked.function(*args, **kwargs),
                                      inputs=inputs, family=family)
         finally:
             self.stack.pop()
+        _say("leaving", marked.name)
         self.timings[marked.identity] = self.timings.get(marked.identity, 0.0) + time.perf_counter() - started
         if not kernel.geometric(result):
             kernel.direct(name)
@@ -848,6 +854,21 @@ class BuildContext:
         if reason not in reasons:
             reasons.append(reason)
         self.timings.setdefault(marked.identity, 0.0)
+
+
+def _say(stage: str, name: str) -> None:
+    """A body inside the model's begins or ends (``progress.Progress.entering``, ``leaving``):
+    said to this process's build, by its function's name; nothing outside a build, and never a
+    failure. A body that raises says no end: the build's last frame is where it failed."""
+    from cadgen.engine import progress
+
+    said = progress.current()
+    if said is None:
+        return
+    try:
+        getattr(said, stage)(name)
+    except Exception:  # noqa: BLE001 - saying where a build is never fails it
+        pass
 
 
 def _placement(value: Any) -> Any:

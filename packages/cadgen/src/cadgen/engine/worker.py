@@ -8,7 +8,7 @@ the keys of the parts it holds), ``held`` (the geometry keys it holds a mesh for
 ``shapes`` (the keys it holds a shape for). The answers are frames: a JSON object on one
 line and, when it has ``bytes``, exactly that many bytes after it. A build is answered by
 ``{"id", "log"}`` frames while it builds and ``{"id", "progress"}`` frames saying where it is
-(``progress.py``: each stage, ``report`` and ``track``), a ``{"id", "patch", "bytes"}`` frame (below) for
+(``progress.py``: each stage, and each body a build runs), a ``{"id", "patch", "bytes"}`` frame (below) for
 each served xbf the moment the build has put it in place -- before the build goes on to
 its exports -- one ``{"id", "done", "rssMb"}`` (the build's reports, and the worker's resident
 memory after it, in MiB) or ``{"id", "failed"}``, and last ``{"id", "settled"}``. What the

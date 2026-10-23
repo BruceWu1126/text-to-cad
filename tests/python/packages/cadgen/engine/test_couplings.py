@@ -32,7 +32,8 @@ from tests.python.support import opengl
 # built, and one control curling all three knuckles.
 FINGER = """
 import build123d as bd
-from cadgen.engine import configuration_sequence, gear_pair, mechanism_state, rack_and_pinion_pair, screw_pair, xbf
+from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state, rack_and_pinion_pair, screw_pair
+from cadgen.engine import xbf
 
 CURL = {{"index_mcp_flexion": 90, "index_pip": 100, "index_dip": 70}}  # degrees at a full curl
 BONES = {{"base": 30, "proximal": 40, "middle": 25, "distal": 20}}  # lengths along +X
@@ -66,7 +67,8 @@ BARE = FINGER.format(coupling="return finger", extra="")
 # and sliding each door.
 HYPERCAR = """
 import build123d as bd
-from cadgen.engine import gear_pair, mechanism_state, screw_pair, xbf
+from cadgen.ap242 import gear_pair, mechanism_state, screw_pair
+from cadgen.engine import xbf
 
 SWEEP = {"left": -70, "right": 70}  # each door's turn when open, degrees
 TRAVEL = 40  # and its travel along the hinge, mm
@@ -95,7 +97,8 @@ def hypercar():
 # A gear train: three wheels on a plate, one coupling turning them at fixed ratios.
 TRAIN = """
 import build123d as bd
-from cadgen.engine import configuration_sequence, gear_pair, mechanism_state, xbf
+from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state
+from cadgen.engine import xbf
 
 RATIOS = {{"sun": 1.0, "idler": -2.0, "ring": 0.5}}
 
@@ -123,7 +126,8 @@ def train():
 # Two fingers, one function's: each placement's joints and coupling labelled alike.
 HAND = """
 import build123d as bd
-from cadgen.engine import gear_pair, mechanism_state, xbf
+from cadgen.ap242 import gear_pair, mechanism_state
+from cadgen.engine import xbf
 
 
 def finger(name):
@@ -198,6 +202,20 @@ def _run(*argv: str) -> tuple[int, str]:
     return code, err.getvalue()
 
 
+def _refused(source, out, pose: str) -> str:
+    """The words a pose named wrong is refused with, by the export itself, before anything is written:
+    through the seam (``daemon=False``), where the refusal keeps its type (the daemon passes its words)."""
+    from cadgen.engine import api
+    from cadgen.engine.cli import _pose
+    from cadgen.engine.export import ExportRefused
+
+    try:
+        api.export(source, out, pose=_pose(pose), daemon=False)
+    except (ExportRefused, ValueError) as error:
+        return str(error)
+    raise AssertionError(f"{pose} was not refused")
+
+
 class _Folder(unittest.TestCase):
     def setUp(self) -> None:
         from cadgen.engine.kernel import memo
@@ -234,7 +252,7 @@ class AuthoringTest(unittest.TestCase):
     def test_each_pair_says_what_is_wrong_by_name_and_returns_the_assembly(self) -> None:
         import build123d as bd
 
-        from cadgen.engine import gear_pair, rack_and_pinion_pair, screw_pair
+        from cadgen.ap242 import gear_pair, rack_and_pinion_pair, screw_pair
 
         box = bd.Box(1, 1, 1)
         for call, error in (
@@ -326,7 +344,7 @@ class FingerTest(_Folder):
             if name == "by_hand":
                 self.build("index_finger", BARE)
             out = self.folder / f"{name}.step"
-            code, err = _run("export", str(path), str(out), "--no-daemon", "--pose", pose)
+            code, err = _run("export", str(path), str(out), "--pose", pose)
             self.assertEqual(code, 0, err)
             posed[name] = _vertices(document.Loaded(out), "distal")
         np.testing.assert_allclose(posed["coupled"], posed["by_hand"], atol=1e-6)
@@ -343,8 +361,7 @@ class FingerTest(_Folder):
                              ["joint 'index_pip' moves only with its coupling 'index_curl'"]),
                             ('{"index_curl": [0.5, 1]}', ["coupling 'index_curl' takes a number"]),
                             ('{"crul": 1}', ["names no joint 'crul'", "its couplings: index_curl"])):
-            code, err = _run("export", path, str(out), "--no-daemon", "--pose", pose)
-            self.assertEqual(code, 2, pose)
+            err = _refused(path, out, pose)
             for word in words:
                 self.assertIn(word, err, pose)
             self.assertFalse(out.exists(), pose)
@@ -434,17 +451,16 @@ class DoorTest(_Folder):
         np.testing.assert_allclose(values["door_left"], (-35.0, 20.0), atol=1e-9)
         np.testing.assert_allclose(values["door_right"], (35.0, 20.0), atol=1e-9)
         half = self.folder / "half.step"
-        code, err = _run("export", str(self.folder / "XBF/hypercar.xbf"), str(half), "--no-daemon", "--pose",
+        code, err = _run("export", str(self.folder / "XBF/hypercar.xbf"), str(half), "--pose",
                          '{"left": -35, "right": 35}')
         self.assertEqual(code, 0, err)
         # Its joint is posed through it alone; the car with no coupling poses them by hand.
         by_hand = self.folder / "by_hand.step"
         pose = '{"door_left": [-35, 20], "door_right": [35, 20]}'
-        code, err = _run("export", str(self.folder / "XBF/hypercar.xbf"), str(by_hand), "--no-daemon", "--pose", pose)
-        self.assertEqual(code, 2)
+        err = _refused(str(self.folder / "XBF/hypercar.xbf"), by_hand, pose)
         self.assertIn("joint 'door_left' moves only with its coupling 'left'", err)
         self.build("hypercar", HYPERCAR.split("    screw_pair(car")[0] + "    return car\n")
-        self.assertEqual(_run("export", str(self.folder / "XBF/hypercar.xbf"), str(by_hand), "--no-daemon", "--pose",
+        self.assertEqual(_run("export", str(self.folder / "XBF/hypercar.xbf"), str(by_hand), "--pose",
                               pose)[0], 0)
         for door in ("door_left", "door_right"):
             np.testing.assert_allclose(_vertices(document.Loaded(half), door),

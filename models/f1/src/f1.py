@@ -37,7 +37,8 @@ clips are the five motions below.
 
 from __future__ import annotations
 
-from cadgen.engine import configuration_sequence, glb, mechanism_state, xbf
+from cadgen.ap242 import configuration_sequence, mechanism_state
+from cadgen.engine import glb, xbf
 
 import math
 

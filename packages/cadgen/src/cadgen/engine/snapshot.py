@@ -2,7 +2,7 @@
 drawn by OCCT as the CAD Viewer draws it. One dispatcher by SRC's suffix:
 
 - ``.xbf``, ``.step``: a document, served by the engine (the daemon, so its meshes are the ones
-  the viewer and every build share, or ``--no-daemon`` a server in this process; a model's own
+  the viewer and every build share, or with ``daemon=False`` a server in this process; a model's own
   document, which ``Model.snapshot`` and ``cadgen.snapshot(model, ...)`` draw, from its worker's
   memory over its one mesh cache), meshed there and drawn from those meshes (``render/service.py``).
 - ``.stl``, ``.3mf``, ``.glb``: a mesh file, read by its reader (``formats/``: numpy, zip and XML,
@@ -13,7 +13,7 @@ drawn by OCCT as the CAD Viewer draws it. One dispatcher by SRC's suffix:
 - ``.dxf``: a drawing, from above, in its pens, in the viewer's 2D look (``render/drawing.py``).
 
 Through the daemon each file drawn gets a render process of its own, warm, read again when a file
-it read changes; ``--no-daemon`` draws in this process. Every kind is drawn in the engine's one
+it read changes; ``daemon=False`` (Python's alone) draws in this process. Every kind is drawn in the engine's one
 look (``render/look.py``). The modes, the camera fit, clip, grid and Preview are the viewer's, in
 the look the viewer's viewport resolves for the same display settings. The answer is PNG bytes,
 which this writes to OUT.
@@ -696,7 +696,7 @@ def _snapshot(document: Path, out: Path, *, display: dict[str, Any] | None, came
 def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, started: float) -> dict[str, Any]:
     """A document drawn by OCCT from the engine's meshes, or a file from what its reader read
     (``render/service.py``): by the daemon's render process for it, warm, or in this process
-    (``--no-daemon``, a model's own document from its worker's memory). The answer is the PNG's
+    (``daemon=False``, a model's own document from its worker's memory). The answer is the PNG's
     bytes; this writes the one file. A document named by its id is drawn by the engine from what
     it holds (``api._source``): read, never built."""
     if _by_id(document) and source is None:
@@ -1034,7 +1034,6 @@ def _arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
                                                               "model, on the parts it was drawn on")
     parser.add_argument("--measurements", metavar="FILE", help="Measure's dimensions (a JSON list of {start, end, label, "
                                                                 "color}), drawn over the model")
-    parser.add_argument("--no-daemon", action="store_true", help="serve the document from this process")
     parser.add_argument("--json", action="store_true", help="print what was drawn and its timings as JSON")
     return parser
 
@@ -1084,7 +1083,7 @@ def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
         # The verb as a function (``api.snapshot``), which checks the flags as ``snapshot`` does.
         report = api.snapshot(Path(args.document), args.out, display=args.display, camera=args.camera, grid=args.grid,
                               preview=args.preview, pose=args.pose, width=args.width, height=args.height,
-                              size_profile=args.size_profile, daemon=not args.no_daemon, annotation=args.annotation,
+                              size_profile=args.size_profile, annotation=args.annotation,
                               measurements=args.measurements).report
     except SnapshotRefused as error:
         raise Failed(str(error), 2) from None
@@ -1108,7 +1107,7 @@ def _run_held(args: argparse.Namespace, prog: str) -> int:
     try:
         drawn = api.snapshot(args.document, args.out, display=args.display, camera=args.camera, grid=args.grid,
                              preview=args.preview, pose=args.pose, width=args.width, height=args.height,
-                             size_profile=args.size_profile, daemon=not args.no_daemon, annotation=args.annotation,
+                             size_profile=args.size_profile, annotation=args.annotation,
                              measurements=args.measurements)
     except (SnapshotRefused, ValueError) as error:
         raise Failed(str(error), 2) from None
@@ -1123,7 +1122,7 @@ def _run_held(args: argparse.Namespace, prog: str) -> int:
 
 
 def _run_job(args: argparse.Namespace, prog: str) -> int:
-    """``cadgen snapshot --job PACKET [SRC]``: every picture the job names (``api.snapshot_job``),
+    """``cadgen snapshot --job PACKET [SRC]``: every picture the job names (``api.snapshot(job=)``),
     a line each; with ``--json``, ``{"ok": true, "pictures": [what each drew]}``."""
     from cadgen.engine import api
     from cadgen.engine.cli import Failed, _shown
@@ -1132,9 +1131,9 @@ def _run_job(args: argparse.Namespace, prog: str) -> int:
         raise Failed(f"--job writes the pictures its outputs name, so it takes no OUT ({args.out})", 2)
     started = time.perf_counter()
     try:
-        drawn = api.snapshot_job(args.job, args.document, display=args.display, camera=args.camera, grid=args.grid,
+        drawn = api.snapshot(args.document, job=args.job, display=args.display, camera=args.camera, grid=args.grid,
                                  preview=args.preview, pose=args.pose, width=args.width, height=args.height,
-                                 size_profile=args.size_profile, daemon=not args.no_daemon, annotation=args.annotation,
+                                 size_profile=args.size_profile, annotation=args.annotation,
                                  measurements=args.measurements)
     except SnapshotRefused as error:
         raise Failed(str(error), 2) from None

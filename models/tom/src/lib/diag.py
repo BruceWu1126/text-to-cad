@@ -6,7 +6,7 @@ to stdout corrupts that -- `python model.py --json | jq .` fails on the first su
 every diagnostic in this repo goes through here instead.
 
 `2>/dev/null` therefore leaves a clean parseable result, and `>/dev/null` leaves a readable log.
-Phase labels for a long build are a different thing and belong in `cadgen.report`/`track`.
+Phase labels for a long build are a different thing: the engine names each `@memo` stage it runs.
 """
 
 from __future__ import annotations

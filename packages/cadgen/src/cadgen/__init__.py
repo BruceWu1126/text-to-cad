@@ -1,17 +1,20 @@
 """cadgen: CAD models as Python, built by its engine (``cadgen.engine``) into documents (``.xbf``)
 and the files they declare.
 
-The root exports the engine's surface -- the decorators (``xbf``, ``step``, ``glb``, ``stl``,
-``threemf``, ``dxf``), ``memo``, materials (``Material``, ``materials``, ``paint``), the mechanism
-(``mechanism_state``, ``configuration_sequence``, ``gear_pair``, ``rack_and_pinion_pair``,
-``screw_pair``), animations (``animation``), the readers (``read_step``, ``read_xbf``,
-``read_mesh``), ``select``, progress (``report``, ``track``) -- and its verbs as functions
-(``export``, ``snapshot``, ``serve``, ``inspect``, ``status``, ``stop``, ``daemon``),
-every name loaded on first use: ``import cadgen`` imports no CAD kernel.
+The root exports exactly the engine's surface -- ``model``, the decorators (``xbf``, ``step``,
+``glb``, ``stl``, ``threemf``, ``dxf``), ``memo``, materials (``Material``, ``materials``,
+``paint``), the readers (``read_step``, ``read_xbf``, ``read_mesh``) -- its operations on
+documents as functions (``export``, ``snapshot``, ``inspect``) and ``__version__``; process
+control (``serve``, ``status``, ``stop``, ``daemon``) is the ``cadgen`` command's alone. Two
+namespaces hold the standards' names: ``cadgen.ap242`` the mechanism's (``mechanism_state``,
+``configuration_sequence``, ``gear_pair``, ``rack_and_pinion_pair``, ``screw_pair``) and
+``cadgen.gltf`` a GLB's own ``animation``. Every name loads on first use: ``import cadgen``
+imports no CAD kernel, and ``import build123d`` binds a module the kernel loads into on its
+first attribute (``_internal/lazy_kernel.py``).
 """
 
 from functools import cache as _cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING as _TYPE_CHECKING
 
 # Before anything imports build123d, which every cadgen entry point eventually does:
 # build123d parses EVERY font in the system font folders at import time, with no
@@ -28,10 +31,17 @@ from typing import TYPE_CHECKING
 # opts out.
 from cadgen._internal.font_scan import install_font_guard as _install_font_guard
 from cadgen._internal.kernel_import_site import install as _install_kernel_import_site
+from cadgen._internal.lazy_kernel import install as _install_lazy_kernel
 from cadgen._internal.engine_telemetry import install as _install_engine_telemetry
 
 _install_kernel_import_site()
 del _install_kernel_import_site
+
+# ``import build123d as bd`` binds a module the kernel loads into on its first attribute
+# (``_internal/lazy_kernel.py``). The wheel's cadgen-lazy-kernel.pth installs it at interpreter
+# start; this covers an editable install, where that file is not placed. Idempotent.
+_install_lazy_kernel()
+del _install_lazy_kernel
 
 _install_font_guard()
 del _install_font_guard
@@ -49,18 +59,16 @@ from cadgen._internal.engine_host import install as _install_engine_host
 _install_engine_host()
 del _install_engine_host
 
-# The engine's surface (``cadgen.engine.__all__``) and its verbs as functions (``cadgen.engine.api``).
+# The engine's surface (``cadgen.engine.__all__``) and its operations on documents as functions
+# (``cadgen.engine.api``).
 _ENGINE = ("model", "xbf", "memo", "step", "glb", "stl", "threemf", "dxf", "Material", "materials", "paint",
-           "mechanism_state", "configuration_sequence", "gear_pair", "rack_and_pinion_pair", "screw_pair", "animation",
-           "read_step", "read_xbf", "read_mesh", "select", "report", "track")
-_VERBS = ("export", "snapshot", "serve", "inspect", "status", "stop", "daemon")
+           "read_step", "read_xbf", "read_mesh")
+_VERBS = ("export", "snapshot", "inspect")
 
 __all__ = [
     "__version__",
     *_ENGINE,
     *_VERBS,
-    "build123d",
-    "srgb",
 ]
 
 
@@ -73,44 +81,21 @@ def __getattr__(name: str):
         from cadgen.engine import api
 
         return getattr(api, name)
-    if name == "build123d":
-        # `from cadgen import build123d as bd` -- the lazy transparent re-export.
-        # Importing the submodule is cheap; the real build123d import happens on
-        # first attribute touch inside cadgen.build123d.
-        import cadgen.build123d as _bd
-
-        return _bd
-    if name in {"srgb", "srgb_to_linear", "linear_to_srgb"}:
-        from cadgen import color
-
-        return getattr(color, name)
     if name == "__version__":
         return _resolve_version()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-if TYPE_CHECKING:
+if _TYPE_CHECKING:
     # Mirrors the lazy __getattr__ above so type checkers and editors see the root exports
     # without importing OCP. Every name here must have a branch there, and comes from the
     # module that defines it.
-    from cadgen import build123d
-    from cadgen.color import (
-        srgb,
-        # __getattr__ serves these two without advertising them in __all__;
-        # the alias is how the mirror says "re-export" rather than "unused".
-        linear_to_srgb as linear_to_srgb,
-        srgb_to_linear as srgb_to_linear,
-    )
     from cadgen.engine import materials
-    from cadgen.engine.api import daemon, export, serve, snapshot, status, stop, inspect
+    from cadgen.engine.api import export, inspect, snapshot
     from cadgen.engine.materials import Material
-    from cadgen.engine.mechanism import gear_pair, rack_and_pinion_pair, screw_pair
     from cadgen.engine.model import (
-        animation,
-        configuration_sequence,
         dxf,
         glb,
-        mechanism_state,
         memo,
         model,
         paint,
@@ -121,9 +106,7 @@ if TYPE_CHECKING:
         threemf,
         xbf,
     )
-    from cadgen.engine.progress import report, track
     from cadgen.engine.reader import read_mesh
-    from cadgen.engine.refs import select
 
 
 @_cache

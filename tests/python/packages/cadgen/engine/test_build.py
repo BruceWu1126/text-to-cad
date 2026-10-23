@@ -16,6 +16,7 @@ from unittest import mock
 
 from cadgen.engine import build as engine_build
 from cadgen.engine import document, materials
+from cadgen.engine.colors import linear
 from cadgen.engine.model import Model, step, stl, xbf
 
 MODEL = """
@@ -41,7 +42,7 @@ def frame():
     right = bracket().moved(bd.Location((0, 20, 0)))
     right.label = "right"
     rail = bd.Box(4, 40, 4).moved(bd.Location((WIDTH, 10, 0)))
-    rail = paint(rail, rail.faces().sort_by(bd.Axis.Z)[-1], (1, 0, 0))
+    rail = paint(rail, rail.faces().sort_by(bd.Axis.Z)[-1], "#ff0000")
     rail.label = "rail"
     return bd.Compound(children=[left, right, rail], label="frame")
 """
@@ -132,7 +133,10 @@ class BuildTest(EngineCase):
         self.assertEqual(structure["instances"][1]["matrix"][12:15], [0.0, 20.0, 0.0])
         bracket, rail = loaded.prototypes
         self.assertEqual(bracket.name, "bracket")
-        self.assertEqual(bracket.color, (0.1, 0.5, 0.9, 1.0))
+        # A build123d Color's channels are sRGB, held linear (``colors``).
+        import build123d as bd
+
+        self.assertEqual(bracket.color, tuple(linear(bd.Color(0.1, 0.5, 0.9))))
         self.assertEqual(list(rail.face_colors.values()), [(1.0, 0.0, 0.0, 1.0)])
         self.assertTrue(bracket.face_names and all(name.startswith("f:bracket.") for name in bracket.face_names.values()))
         # The third assignment to ``plate``, a reassignment: the target and its statement's tag.
@@ -526,7 +530,9 @@ class PatchTest(EngineCase):
         self.assertEqual(self.xbf.read_bytes(), self.cold(pin="aluminium"))
         self.patched(pin="aluminium", top="0.9, 0.9, 0.1")
         plate = next(p for p in document.Loaded(self.xbf).prototypes if p.name == "plate")
-        self.assertIn((0.9, 0.9, 0.1, 1.0), plate.face_colors.values())
+        import build123d as bd
+
+        self.assertIn(tuple(linear(bd.Color(0.9, 0.9, 0.1))), plate.face_colors.values())
         self.assertEqual(self.xbf.read_bytes(), self.cold(pin="aluminium", top="0.9, 0.9, 0.1"))
         # A field the file keeps beside XCAF's own (a coat) converts it too.
         self.patched(pin="aluminium.but(coat=0.5)", top="0.9, 0.9, 0.1")

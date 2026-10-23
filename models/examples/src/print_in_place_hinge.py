@@ -21,8 +21,6 @@ from cadgen.engine import materials, xbf
 
 import build123d as bd
 
-from lib.color import srgb
-
 
 HINGE_LENGTH = 40.0
 PLATE_WIDTH = 20.0
@@ -124,7 +122,7 @@ def _make_leaf_a():
     )
     leaf = leaf - [_bore_tool(*KNUCKLE_A1), _bore_tool(*KNUCKLE_A2), _notch_tool(-1.0, *KNUCKLE_B)]
     leaf.label = "leaf_a_barrel_bores"
-    leaf.color = srgb("#5B6B7A")
+    leaf.color = "#5B6B7A"
     return leaf
 
 
@@ -135,7 +133,7 @@ def _make_leaf_b():
     )
     leaf = leaf - [_notch_tool(1.0, *KNUCKLE_A1), _notch_tool(1.0, *KNUCKLE_A2)]
     leaf.label = "leaf_b_captive_pin"
-    leaf.color = srgb("#C98056")
+    leaf.color = "#C98056"
     return leaf
 
 

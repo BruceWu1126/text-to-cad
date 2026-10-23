@@ -68,7 +68,8 @@ The document is what the viewer follows build by build, what refs and
 | `@stl(mesh_tolerance=..., mesh_angular_tolerance=...)`, `--mesh-tolerance` | none: every mesh is made at FreeCAD's default tolerance |
 | `python model.py --force`, `--json`, `--verbose` | `python model.py` takes no options. `CADGEN_ENGINE_MEMO=0` builds without memo hits; `Model.build()` returns the report as data; `Model.build(verify=True)` checks every replay |
 | `python model.py --profile` | `Model.build(profile=True)`. Measures actual worker execution with normal cache hits; skipped work has no timings |
-| `python model.py --no-daemon` | `Model.build(daemon=False)` from Python |
+| `python model.py --no-daemon` | none: every build goes through the engine (`Model.build(daemon=False)` is a seam for tests and debugging: cold, no document served) |
+| `cadgen export ... --no-daemon`, `cadgen snapshot ... --no-daemon` | the same command without the flag: every verb goes through the engine. `export(..., daemon=False)` and `snapshot(..., daemon=False)` from Python are a seam for tests and debugging only: in this process, cold, with no id, page or `inspect` |
 | `cadgen step build IN.step OUT.step` | `cadgen export IN.step OUT.step`, or `OUT.xbf` to read it in models |
 | `cadgen step compile` | none: the viewer and snapshots read a STEP as it is |
 | `cadgen stl build`, `cadgen 3mf build`, `cadgen glb build` | `cadgen export XBF/model.xbf OUT.stl` (`.3mf`, `.glb`), or from a STEP |
@@ -77,18 +78,19 @@ The document is what the viewer follows build by build, what refs and
 | a `--job` file's `kinematics`, a STEP job's `selection`, `animation`, `video`, `quality`, `mode`, `output.viewLabels` | a job's pose is `jointValues` (as `--pose` takes it); a document's hidden and isolated parts are its `display.hidden` and `display.isolated` |
 | snapshot `--kinematics` | `--pose` |
 | snapshot `--animation`, `--time`, `--video` | none: export a GLB and play its clips |
-| snapshot `--mode list` | none: list parts with `read_xbf(path).leaves`, and pick them with `select` |
+| snapshot `--mode list` | none: list parts with `read_xbf(path).leaves`, and pick them by their labels |
 | snapshot `--focus`, `--hide` | `--display '{"isolated": ["lid"]}'` and `--display '{"hidden": ["lid"]}'` (part refs); a Quick Edit packet given to `--annotation` or `--job` carries the person's own |
 | `cadgen where`, `cadgen.where()` | `cadgen inspect`, `cadgen.inspect()`; existing files or live models only, never an implicit build |
 | `cadgen store why`, `store where`, `store forget`, `store gc`, `store info` | none: no store. `cadgen inspect DOC` prints a document's build closure, `cadgen inspect DOC REF` what made an element |
 | `cadgen daemon status` | `cadgen status` (and `cadgen stop`) |
 | `cadgen serve DOC --foreground` | `cadgen serve DOC`: start or reuse the installation's server, print its URL, and exit |
 | `CADGEN_CACHE_DIR`, `CADGEN_STORE_MAX`, `CADGEN_DAEMON_STATE_DIR` | none; `CADGEN_ENGINE_DIR` moves the engine daemon's socket |
-| `read_scene(path).resolve(ref).shape()` | `select(path, ref)[0]` |
+| `read_scene(path).resolve(ref).shape()` | `cadgen inspect PATH REF` for what a ref names; `read_xbf(path)`'s tree, walked by labels, for its shapes |
 | `cadgen.revolute`, `slider`, `cylindrical`, `fastened`, `MateTarget`, `AssemblyHelper` | build123d joints in the body |
-| `cadgen.couple(name, {dof: ratio}, limits=...)` | `gear_pair`, `rack_and_pinion_pair` or `screw_pair(assembly, name, **ratios)`, by the joints' kinds, ranged by their limits |
-| `cadgen.clip(update, duration=...)` | `configuration_sequence(assembly, name, ...)` |
-| `from cadgen import report, track` | `from cadgen.engine import report, track` |
+| `cadgen.couple(name, {dof: ratio}, limits=...)` | `cadgen.ap242`'s `gear_pair`, `rack_and_pinion_pair` or `screw_pair(assembly, name, **ratios)`, by the joints' kinds, ranged by their limits |
+| `cadgen.clip(update, duration=...)` | `cadgen.ap242`'s `configuration_sequence(assembly, name, ...)` |
+| `from cadgen import report, track` | none: the engine names each `@memo` call and child model a body runs ([the public surface](#the-public-surface-in-08)) |
+| `from cadgen import build123d as bd`, `cadgen.build123d` | `import build123d as bd`: cadgen makes the import lazy, the kernel loading on the first attribute; `from build123d import X` loads it at that line |
 | `<name>.step.json` sidecars, `.params.js` | none: the document carries the mechanism; delete them |
 | `cadgen build SOURCE` (`--model`, `--name`, file flags), `cad_build`, an 0.8 preview's | none: no command or tool builds source text. Write the code as a decorated function in a `.py` file and run it (`python parts/x.py`); a bare `@model` keeps its document in memory, a file decorator writes its file |
 | `cadgen.build(code_or_shape, model=..., step=...)`, an 0.8 preview's | none: wrap the shape in a decorated function and call it; its document and exports are a model's like any other |
@@ -152,7 +154,7 @@ def arm():
   revolute joint and prismatic ones) or `screw_pair` (one cylindrical joint's pitch). A coupling of one joint is
   that joint, so `curl` above is dropped and `elbow` poses alone.
 - A mate's `axis` given as a ref becomes an `Axis` computed in the body, from the
-  live shape (`select(part, ref)[0]`).
+  live shape (`part.faces().sort_by(...)`, the element `cadgen inspect` names).
 
 ## Materials are values on the parts
 
@@ -166,7 +168,7 @@ housing.material = materials.steel.but(name="As-cast steel", roughness=0.85, met
 ```
 
 A definition becomes a `Material` (or a catalogue entry, [materials](build123d-modeling.md#colour-and-materials)):
-`metalness` is `metallic`, `baseColor` a linear RGBA `color` (`cadgen.srgb("#RRGGBB")`),
+`metalness` is `metallic`, `baseColor` the `color` as its hex (`"#RRGGBB"`, sRGB),
 `clearcoat` and `clearcoatRoughness` are `coat` and `coat_roughness`, and `opacity`
 is the colour's alpha. An assignment to a group is the material set on that assembly,
 the default of every part below it that has none.
@@ -213,5 +215,26 @@ element by the operations' call counts. It is now
 `/work/XBF/robot.xbf#robot/bracket/f:bracket.body.6`: an occurrence by the labels on
 its way from the root, and an element by the function and the variable that made it
 ([references](inspection-and-validation.md#references)). The old spellings resolve to
-nothing. Take refs again from the viewer's copy, or from the `label` of what `select`
-returns, after rebuilding the model.
+nothing. Take refs again from the viewer's copy, or from what `cadgen inspect` answers,
+after rebuilding the model.
+
+## The public surface in 0.8
+
+The root (`from cadgen import ...`) is exactly `model`, `xbf`, `step`, `glb`, `stl`,
+`threemf`, `dxf`, `memo`, `Material`, `materials`, `paint`, `read_step`, `read_xbf`,
+`read_mesh`, `export`, `snapshot`, `inspect` and `__version__`; `cadgen.engine` exports the
+same names but the three verbs. Everything else an 0.8 preview had there moved or went:
+
+| Before | Now |
+| --- | --- |
+| `from cadgen import mechanism_state, configuration_sequence, gear_pair, rack_and_pinion_pair, screw_pair` (or `cadgen.engine`) | `from cadgen.ap242 import ...`, the same functions |
+| `from cadgen import animation` (or `cadgen.engine`) | `from cadgen.gltf import animation` |
+| `select(source, ref, kind=None)` | none in a model or a check. `cadgen inspect DOC REF` (`cadgen.inspect(DOC, REF)`) answers what a ref names and which code made it; a check walks `read_xbf`'s tree by labels; a body picks an element with build123d's selectors ([a picked element](inspection-and-validation.md#a-picked-element-in-a-models-body)) |
+| `report(detail)`, `track(items, label=)` | none: delete the calls. While a body runs the bar and the viewer's build card name each `@memo` call and child model it calls, as it begins, and count it when it ends |
+| `cadgen.engine.api.snapshot_job(packet, source)` | `cadgen.snapshot(source, job=packet)`: one verb, a picture from `source` and `out` or every picture a job names |
+| `cadgen.serve(doc)`, `cadgen.status()`, `cadgen.stop()`, `cadgen.daemon()` | the commands `cadgen serve DOC`, `cadgen status`, `cadgen stop`, `cadgen daemon`: process control is the CLI's alone |
+| `cadgen.srgb("#2E3742")`, `srgb("#38414D", 0.42)`, `srgb_to_linear`, `linear_to_srgb`, `cadgen.color` | the hex itself: `"#2E3742"`, `"#38414D6B"` (alpha as a byte), or 0-255 integers; `shape.color`, `paint` and `Material` take it and the engine stores it linear |
+| `Material(color=(0.2, 0.3, 0.9))`, `transmission_color=`, `emissive=`: linear floats | a hex string or 0-255 integers, sRGB; floats are refused |
+| `paint(shape, faces, (1, 0, 0))`, `paint(..., "orange")` | `paint(shape, faces, "#ff0000")`: a hex string, 0-255 integers or a build123d `Color` |
+| `shape.color = bd.Color(r, g, b)` or `(r, g, b)` floats meant as linear | the same colour read as build123d defines it, sRGB: such a part now shows its channels as written (`bd.Color(0.5, 0.5, 0.5)` is `#808080`). To keep its old look, give the hex of the linear values (`"#bcbcbc"` for 0.5) |
+

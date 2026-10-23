@@ -87,7 +87,7 @@ class OperationsTest(unittest.TestCase):
 
     def test_snapshot_packet_checks_nested_paths_before_rendering(self):
         jobs = Operations()
-        with patch('cadgen.engine.api.snapshot_job') as snapshot:
+        with patch('cadgen.engine.api.snapshot') as snapshot:
             packet = {'input': str(Path('/tmp/model.xbf').resolve()), 'jobs': [{'input': 'relative.xbf', 'outputs': ['/tmp/out.png']}]}
             answer = jobs.call('cad_snapshot', {'requestId': 'snapshot-request-01', 'packet': packet})
             self.assertEqual(self.finish(jobs, answer)['state'], 'failed')
@@ -145,10 +145,10 @@ class OperationsTest(unittest.TestCase):
             root = Path(directory).resolve()
             packet = {'input': str(root / 'part.xbf'), 'jobs': [{'outputs': [str(root / 'view.png')]}]}
             jobs = Operations()
-            with patch('cadgen.engine.api.snapshot_job', return_value=[Drawn(root / 'view.png', 40, 30, {})]) as snapshot:
+            with patch('cadgen.engine.api.snapshot', return_value=[Drawn(root / 'view.png', 40, 30, {})]) as snapshot:
                 result = self.finish(jobs, jobs.call('cad_snapshot', {'requestId': 'snapshot-request-01', 'packet': json.dumps(packet)}))
             self.assertEqual(result['state'], 'succeeded')
-            snapshot.assert_called_once_with(packet)
+            snapshot.assert_called_once_with(job=packet)
             self.assertEqual(result['result']['pictures'][0]['path'], str(root / 'view.png'))
 
     def test_failure_reports_possible_outputs_and_long_result_is_explicit(self):

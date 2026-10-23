@@ -178,18 +178,23 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     a model's id, or a file's id after a launcher registers it; Python scripts are never
     documents. A page never replaces or re-executes the engine. Its one page and document reads
     share its authenticated HTTP listener. `serve` and `viewer` always start or reuse it, with no
-    standalone serving mode. Launchers exit; clients closing never stop it. Kernel
-    operations run in child processes, never in the engine's request threads. There are no page
-    sessions: the home shows the folder of the most recent launch; each MCP session owns its views and resource. The
+    standalone serving mode, and no Python function starts, stops or serves it (law 21). Launchers
+    exit; clients closing never stop it. Kernel operations run in child processes, never in the
+    engine's request threads. There are no page sessions: the home shows the folder of the most
+    recent launch; each MCP session owns its views and resource. The
     stdio shim owns only connection metadata. Sidebar sharing stays in memory, and host
     quirks stay in the shim and page. MCP's shared `cad_http` exposes only telemetry
     status and opt-out to agents; other viewer routes require the session capability
     delivered in UI-only launch metadata. Only the person can opt in through a page
     or the telemetry CLI. See the engine's **Architecture**.
 
-21. **Python functions own operations; decorators and CLIs expose them.** Every
-    successful server-backed build reports its id and localhost viewer URL,
-    including a build with file outputs. A cold `daemon=False` build has no served URL.
+21. **Operations on documents are Python functions the CLI exposes; process control is the
+    CLI's alone.** `export`, `snapshot` and `inspect` are functions of the root
+    (`cadgen.export`, ...) and commands that call them; serving, the engine's status, stopping it
+    and running it (`cadgen serve`, `status`, `stop`, `daemon`) are commands only, with no
+    function of the root. Every successful server-backed build reports its id and localhost
+    viewer URL, including a build with file outputs. A cold `daemon=False` build has no served
+    URL.
 
 
 ## Agent operations
@@ -234,10 +239,15 @@ build metadata. File metadata does not imply a live worker. `where` is retired.
 
 ```
 src/cadgen/
-  __init__.py            # the root: the engine's surface (xbf, step, ..., select, report)
-                         #   and its verbs as functions (build, export, snapshot, serve,
-                         #   inspect, status, stop, daemon), every name loaded on first use;
-                         #   the font guard and the kernel-import recorder, installed first
+  __init__.py            # the root, exactly: model, the decorators (xbf, step, glb, stl,
+                         #   threemf, dxf), memo, Material, materials, paint, read_step,
+                         #   read_xbf, read_mesh, and the operations on documents (export,
+                         #   snapshot, inspect), every name loaded on first use; the font
+                         #   guard, the kernel-import recorder and the lazy kernel, first
+  ap242.py               # the mechanism's AP242 names: mechanism_state,
+                         #   configuration_sequence, gear_pair, rack_and_pinion_pair,
+                         #   screw_pair (product and manufacturing information to join them)
+  gltf.py                # what glTF says and the document does not: animation
   engine/                # the engine: models, the daemon and its workers, documents,
                          #   exports, the mesh, references, the OCCT stills (its README)
   cli/                   # the `cadgen` command: a module per command, each a shell over
@@ -271,11 +281,12 @@ src/cadgen/
   language.py            # the language the person chose for the CAD views
   updates.py             # the daily version check, for a copy nothing else keeps current
   assets.py              # where the bundled runtime is
-  build123d.py           # `from cadgen import build123d as bd`, the lazy re-export
-  color.py               # sRGB helpers
   check_fonts.py         # `python -m cadgen.check_fonts`: the font that breaks
                          #   `import build123d`
   _internal/             # the launch command, the font guard, the kernel-import recorder,
+                         #   the lazy kernel (lazy_kernel: `import build123d` binds, the
+                         #   kernel loads on first use; cadgen-lazy-kernel.pth, at the root
+                         #   of site-packages, installs it at interpreter start),
                          #   the engine observer and the telemetry sender, the install
                          #   channel, atomic replace, file locks, the CLI derivation
   _runtime/              # BUILT: the CAD Viewer client, the CAD app page and the headless

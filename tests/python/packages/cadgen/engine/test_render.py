@@ -53,9 +53,10 @@ PLATFORM = context.platform()  # a row a platform draws apart has a golden of it
 # plate's back edge, to pose.
 BENCH = """
 import build123d as bd
-from cadgen.engine import Material, materials, mechanism_state, paint, xbf
+from cadgen.ap242 import mechanism_state
+from cadgen.engine import Material, materials, paint, xbf
 
-LACQUER = Material("Red lacquer", 1200, family="other", color=(0.6, 0.02, 0.02), roughness=0.4, coat=1.0,
+LACQUER = Material("Red lacquer", 1200, family="other", color="#cb2727", roughness=0.4, coat=1.0,
                    coat_roughness=0.05)
 
 
@@ -603,7 +604,7 @@ if __name__ == "__main__":
 class DaemonRenderTest(unittest.TestCase):
     """`cadgen snapshot` drawn by OCCT through the daemon: a render process per served
     document, warm from its second picture, sent each build's patch with only the parts it
-    lacks, gone with the daemon; and in this process with --no-daemon. Nothing is written but
+    lacks, gone with the daemon; and in this process with ``daemon=False`` from Python. Nothing is written but
     the pictures, and the daemon's socket and lock."""
 
     def setUp(self) -> None:
@@ -679,9 +680,15 @@ class DaemonRenderTest(unittest.TestCase):
                 time.sleep(0.1)
             self.assertFalse(_alive(pid), "gone with the daemon")
 
-    def test_no_daemon_draws_in_this_process(self) -> None:
+    def test_daemon_false_draws_in_this_process(self) -> None:
+        # A seam of the Python function's alone: no command draws outside the engine.
         self.build(10, daemon=False)
-        report = self.snapshot("cold.png", "--no-daemon", "--display", "exploded=0.5")
+        code = ("import json; from cadgen.engine import api; print(json.dumps(api.snapshot('XBF/pair.xbf', "
+                "'cold.png', width=200, height=150, display='exploded=0.5', daemon=False).report))")
+        done = subprocess.run([sys.executable, "-c", code], cwd=self.folder, env=self.env, capture_output=True,
+                              text=True, timeout=300)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        report = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertEqual((report["renderer"], report["exploded"]), ("occt", 0.5))
         self.assertNotIn("process", report)
         self.assertEqual([path for path in self.state.iterdir() if path.suffix == ".sock"], [], "no daemon started")

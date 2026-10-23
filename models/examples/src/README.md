@@ -38,8 +38,8 @@ The 24 parts after the first five are the old project's, ported as they were: `@
 became `@xbf(out="../XBF/<name>.xbf")`, `build123d` is imported directly, and the two
 that also declared STL, 3MF and GLB keep those as decorators on the same function,
 writing beside the xbf. Their shared builders are `lib/simple_model_library.py` (the
-`make_*` parts) and `lib/part_common.py`, plain modules; `lib/color.py`'s `srgb` is the
-old `cadgen.srgb`. Each takes a catalogue material, in brackets above: a part that
+`make_*` parts) and `lib/part_common.py`, plain modules; a colour is the sRGB hex itself,
+which a shape takes as it is. Each takes a catalogue material, in brackets above: a part that
 authors its own colour keeps it (`color=None`), one that does not takes the catalogue's.
 The two print-in-place assemblies' `AssemblyHelper` frames are build123d joints: a
 `RevoluteJoint` on the bored link and a `RigidJoint` on the pinned one, on the same pin

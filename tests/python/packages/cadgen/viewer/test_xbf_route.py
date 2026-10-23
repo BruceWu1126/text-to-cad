@@ -210,7 +210,8 @@ finally:
         structure = self.structure(self.open(self.step))
         by_name = {prototype["name"]: prototype for prototype in structure["prototypes"]}
         self.assertEqual(set(by_name), {"plate", "peg"})
-        self.assertEqual([round(value, 2) for value in by_name["plate"]["color"][:3]], [0.8, 0.1, 0.1])
+        # The plate's Color(0.8, 0.1, 0.1), sRGB, held linear.
+        self.assertEqual([round(value, 2) for value in by_name["plate"]["color"][:3]], [0.6, 0.01, 0.01])
         self.assertEqual((by_name["peg"]["material"]["name"], by_name["peg"]["material"]["density"]),
                          ("Aluminum 6061-T6", 2700.0))
         self.assertEqual(sorted(instance["path"] for instance in structure["instances"]), ["pair/peg", "pair/plate"])

@@ -37,7 +37,7 @@ later build's read of the same bytes this very object.
 export, a child's, a sibling's. Read, the file would be an input the build rewrites -- its
 key moving on every build, so the model would never be taken from its file -- or, keyed by
 anything but its bytes, a model depending on its own past. A model takes what it makes from
-the live shape instead (``select(shape, ref)``, or the child it calls).
+the live shape instead: the shape a body returns, or the child model it calls.
 """
 
 from __future__ import annotations
@@ -217,10 +217,11 @@ def _material(found: dict[str, Any] | None) -> Any:
 def assemble(header: dict[str, Any], shapes: list[Any], locations: list[Any]) -> Any:
     """The build123d tree a description makes (see the module): the free shape's node, or a
     ``Compound`` of the free shapes' nodes when the document has several."""
-    from build123d import Color, Compound, Location
+    from build123d import Compound, Location
     from build123d.importers import topods_lut
     from build123d.topology.shape_core import downcast
 
+    from cadgen.engine.colors import color as as_color
     from cadgen.engine.kernel import imported
     from cadgen.engine.kernel.memo import FACE_COLORS, FACE_MATERIALS
 
@@ -249,7 +250,7 @@ def assemble(header: dict[str, Any], shapes: list[Any], locations: list[Any]) ->
                     node.__dict__[FACE_MATERIALS] = {int(o): _material(given)
                                                      for o, given in found["face_materials"].items()}
             color = entry["color"] or found["color"]
-            node.color = None if color is None else Color(*color)
+            node.color = None if color is None else as_color(color)
             node.label = entry["name"] or found["name"]
             node.move(Location(locations[entry["location"]]))
             made.append(node)
@@ -462,7 +463,7 @@ def refuse_written(path: Any, verb: str) -> None:
     writer = written_by_build(path)
     if writer is not None:
         raise ValueError(f"{verb} {os.fspath(path)}: this build writes it ({writer}), and a model reads no file "
-                         "its own build writes; select from the live shape instead, select(shape, ref)")
+                         "its own build writes; take it from the live shape instead, or call the model that makes it")
 
 
 def read_step(path: Any) -> Any:

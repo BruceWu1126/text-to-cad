@@ -1,20 +1,20 @@
-"""Where a build is: the author's ``report`` and ``track``, and the engine's stages, one frame each.
+"""Where a build is: the engine's stages and the bodies it runs, one frame each.
 
-    from cadgen.engine import report, track, xbf
+Nothing in a model says it: the engine reports what it runs, by name. A model's body opens its
+``body`` stage; inside it each ``@memo`` call and each child model the body calls is a body of
+its own, said where it begins and where it ends by its function's name::
+
+    @memo
+    def finger(name): ...                    # "Building geometry  finger"
 
     @xbf("XBF/hand.xbf")
     def hand():
-        fingers = [finger(name) for name in track(FINGERS)]  # "Building geometry  2/5  middle"
-        report("palm loft")                                   # "Building geometry  palm loft"
+        fingers = [finger(name) for name in FINGERS]
         return bd.Compound(children=[palm(), *fingers], label="hand")
 
-``track(items, label=)`` iterates ``items`` and counts them: the count moves when an item's work
-is done, and the detail names the item in flight (``label(item)``, or the item itself when it is a
-string). A sized iterable gives the count its total; a lazy one is passed through lazily, counted
-without one. A ``track`` inside another counts on its own while it runs. ``report(detail)`` names
-what the build is doing now, in place of whatever was showing. Outside a build both do nothing:
-``track`` yields the items, ``report`` returns. A body the memo replays is not run, so it says
-nothing: it takes no time.
+While a body runs the frame's detail is its name (the innermost, when they nest); when it ends
+the detail goes back to the body around it, and the count of bodies done moves. A body the memo
+replays still begins and ends; a placement of one this build already made says nothing.
 
 A build's progress is a sequence of frames, each the whole of where the build is::
 
@@ -25,12 +25,12 @@ A build's progress is a sequence of frames, each the whole of where the build is
 ``model`` names the model the stage is of as its report does (``script::function``, the script
 relative to the build's folder; the script alone while it loads); ``outputs`` are the absolute
 paths of the files that model's build writes; ``phase`` is one of ``PHASES``, ``label`` its words;
-``done`` of ``total`` is the innermost running ``track``'s count, or the files written of the
-model's files while they are written (``total`` null and ``determinate`` false for a lazy
-``track``, or none); ``elapsedMs`` counts from the build's start. A phase opens with a frame of its
-own. The author's frames are at least ``INTERVAL`` apart: one that comes sooner is held, and the
-latest held is sent when the interval is up (or with the next frame), so a count is never left
-stale behind a long item and a build's last state is always its last frame.
+``done`` of ``total`` is the files written of the model's files while they are written, and in
+``body`` the bodies done inside it (``total`` null and ``determinate`` false: how many there will
+be is not known); ``elapsedMs`` counts from the build's start. A phase opens with a frame of its
+own. A body's frames are at least ``INTERVAL`` apart: one that comes sooner is held, and the
+latest held is sent when the interval is up (or with the next frame), so a build of a thousand
+small bodies sends a frame an interval, and a build's last state is always its last frame.
 
 The stages are the engine's own steps, said where the build reaches them (``build.py``, through
 ``current``): the files each model writes, planned, give its frames their ``outputs``; a model's
@@ -50,14 +50,14 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator, Sized, TextIO
+from typing import Any, Callable, Iterable, Iterator, TextIO
 
-__all__ = ["INTERVAL", "PHASES", "Bar", "Progress", "building", "current", "describe", "report", "track"]
+__all__ = ["INTERVAL", "PHASES", "Bar", "Progress", "building", "current", "describe"]
 
 # Each phase, in the order a build passes them, and its words.
 PHASES = {"load": "Loading the script", "body": "Building geometry", "names": "Naming elements",
           "document": "Making the document", "write": "Writing files"}
-# The least time between two of the author's frames, in seconds; a phase's own frame is never held.
+# The least time between two of a body's frames, in seconds; a phase's own frame is never held.
 INTERVAL = 0.1
 
 
@@ -77,8 +77,8 @@ class Progress:
         self.outputs: list[str] = []
         self.phase = "load"
         self.detail = ""
-        self.count: list[Any] | None = None  # the phase's own [done, total]: the files written
-        self.tracks: list[list[Any]] = []  # each running ``track``'s [done, total], the innermost last
+        self.count: list[Any] | None = None  # the phase's own [done, total]: files written, bodies done
+        self.bodies: list[str] = []  # the bodies running inside the model's, the innermost last
         # Per model, by its script and function: its name in a frame and the files its build writes.
         self.planned: dict[tuple[str, str], tuple[str, list[str]]] = {}
         self.sent = float("-inf")
@@ -92,14 +92,14 @@ class Progress:
 
     def frame(self) -> dict[str, Any]:
         """Where the build is now."""
-        count = self.tracks[-1] if self.tracks else self.count
+        count = self.count
         done, total = (count[0], count[1]) if count is not None else (0, None)
         return {"model": self.model, "outputs": list(self.outputs), "phase": self.phase,
                 "label": PHASES.get(self.phase, self.phase), "detail": self.detail, "done": done, "total": total,
                 "determinate": bool(total), "elapsedMs": round((time.monotonic() - self.started) * 1000)}
 
     def _emit(self, force: bool = False) -> None:
-        """Send where the build is; the author's frames (not ``force``) ``INTERVAL`` apart, a held
+        """Send where the build is; a body's frames (not ``force``) ``INTERVAL`` apart, a held
         one sent when the interval is up. Call with ``lock`` held."""
         if self.closed:
             return
@@ -173,7 +173,7 @@ class Progress:
                 self.outputs = list(outputs)
             self.detail = detail
             self.count = count
-            self.tracks = []
+            self.bodies = []
             self._emit(force=True)
 
     def load(self) -> None:
@@ -214,36 +214,25 @@ class Progress:
             self.stage("write", model=name, outputs=paths, detail=Path(text).name,
                        count=[paths.index(text), len(paths)])
 
-    # --- the author's frames -----------------------------------------------------------------
+    # --- the bodies inside a model's ---------------------------------------------------------
 
-    def say(self, detail: str) -> None:
+    def entering(self, name: str) -> None:
+        """A body inside the model's begins (a ``@memo`` call, a child model): its name is the
+        detail while it runs."""
         with self.lock:
-            self.detail = detail
+            self.bodies.append(name)
+            self.detail = name
             self._emit()
 
-    def counting(self, total: int | None) -> list[Any]:
+    def leaving(self, name: str) -> None:
+        """That body is done: it counts, and the detail is the body around it again."""
         with self.lock:
-            count = [0, total]
-            self.tracks.append(count)
+            if self.bodies and self.bodies[-1] == name:
+                self.bodies.pop()
+            done = self.count[0] if self.phase == "body" and self.count is not None else 0
+            self.count = [done + 1, None]
+            self.detail = self.bodies[-1] if self.bodies else ""
             self._emit()
-            return count
-
-    def item(self, detail: str) -> None:
-        with self.lock:
-            self.detail = detail
-            self._emit()
-
-    def advance(self, count: list[Any]) -> None:
-        with self.lock:
-            count[0] += 1
-            self._emit()
-
-    def counted(self, count: list[Any]) -> None:
-        """A ``track`` is through: its last count is sent if it was held, and it counts no more."""
-        with self.lock:
-            if self.held and not self.closed:
-                self._send(time.monotonic())
-            self.tracks = [held for held in self.tracks if held is not count]
 
 
 # --- the build of this process -----------------------------------------------------------------
@@ -257,12 +246,9 @@ def current() -> Progress | None:
     return _BUILDS[-1] if _BUILDS else None
 
 
-_current = current
-
-
 @contextlib.contextmanager
 def building(progress: Progress) -> Iterator[Progress]:
-    """Inside it, ``progress`` is this process's build: the author's calls and the engine's stages
+    """Inside it, ``progress`` is this process's build: the engine's stages and the bodies it runs
     are its frames. It is closed after (``Progress.close``)."""
     with _LOCK:
         _BUILDS.append(progress)
@@ -272,40 +258,6 @@ def building(progress: Progress) -> Iterator[Progress]:
         with _LOCK:
             _BUILDS.remove(progress)
         progress.close()
-
-
-def report(detail: str) -> None:
-    """Name what the build is doing now (see the module); nothing outside a build."""
-    current = _current()
-    if current is not None:
-        current.say(str(detail or ""))
-
-
-def _label_for(item: Any, label: Callable[[Any], str] | None) -> str:
-    if label is not None:
-        try:
-            return str(label(item) or "")
-        except Exception:  # noqa: BLE001 - a label never fails a build
-            return ""
-    return item if isinstance(item, str) else ""
-
-
-def track(items: Iterable[Any], *, label: Callable[[Any], str] | None = None) -> Iterator[Any]:
-    """Iterate ``items``, counting the build's way through them (see the module): the count moves
-    when an item's work is done, the detail names the item in flight. ``items`` is measured only
-    when it has a length; a lazy iterable is never consumed ahead of the loop."""
-    current = _current()
-    if current is None:
-        yield from items
-        return
-    count = current.counting(len(items) if isinstance(items, Sized) and len(items) else None)
-    try:
-        for item in items:
-            current.item(_label_for(item, label))
-            yield item
-            current.advance(count)
-    finally:
-        current.counted(count)
 
 
 # --- in words, and on a terminal ---------------------------------------------------------------

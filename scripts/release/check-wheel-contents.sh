@@ -53,7 +53,10 @@ REQUIRED=(
   "cadgen/viewer/main.py"
   "cadgen/viewer/documents.py"
   "cadgen/viewer/collation.json"
-  "cadgen/build123d.py"
+  # `import build123d` made lazy at interpreter start: the finder, and the .pth at the root of
+  # site-packages that installs it.
+  "cadgen/_internal/lazy_kernel.py"
+  "cadgen-lazy-kernel.pth"
   # The robot validators moved out of skills/{sdf,srdf,urdf}/scripts into cadgen, so a
   # packaging regression here would ship a cadgen whose `cadgen urdf validate` cannot import.
   "cadgen/cli/urdf_validate.py"

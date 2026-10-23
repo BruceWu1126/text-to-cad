@@ -317,7 +317,7 @@ class PreviousTest(unittest.TestCase):
         import sys
 
         out = self.folder / name
-        done = subprocess.run([sys.executable, "-m", "cadgen.engine", "export", str(self.xbf), str(out), "--no-daemon"],
+        done = subprocess.run([sys.executable, "-m", "cadgen.engine", "export", str(self.xbf), str(out)],
                               cwd=self.folder, capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
         # The STEP header's time stamp is the second it was written: masked.

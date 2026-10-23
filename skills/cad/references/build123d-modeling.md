@@ -15,9 +15,9 @@ skips such an edge (and fails when none is left); a chamfer fails on it. Shape
 equality compares native handles, so `edge in solid.edges()` is true only for the
 solid's own edge.
 
-A face or edge a person picked is selected by its name, which stays put across
-edits that leave its making alone: `select(base, "f:plate.body.6;M:plate.relief")`
-in the body ([selecting in a model's body](inspection-and-validation.md#selecting-in-a-models-body)).
+A face or edge a person picked is named by a ref: `cadgen inspect` says what it is
+and which code made it, and the body picks the same element with build123d's
+selectors ([a picked element in a model's body](inspection-and-validation.md#a-picked-element-in-a-models-body)).
 
 ## Labels and assemblies
 
@@ -45,20 +45,22 @@ See [positioning](positioning.md) for datums and joints, and
 ## Colour and materials
 
 A part's colour and material are set on the shape, after its last operation, so
-changing one costs no kernel call. Native `Color` channels are linear RGB;
-`cadgen.srgb` converts a display hex value:
+changing one costs no kernel call. A colour is what you see, in sRGB: a hex string
+(`"#2E3742"`, `"#38414D6B"` with alpha), 0-255 integers, or a build123d `Color`,
+whose channels build123d defines as sRGB (`bd.Color(0.5, 0.5, 0.5)` is `#808080`);
+the engine stores it linear. `shape.color`, `paint` and `Material(color=)` take the
+same values and store the same colour:
 
 ```python
-from cadgen import srgb
 from cadgen.engine import Material, materials, paint
 
-body.color = srgb("#2E3742")
-glass.color = srgb("#38414D", 0.42)                  # alpha is opacity
+body.color = "#2E3742"
+glass.color = "#38414D6B"                            # alpha (6B: 0.42) is opacity
 
 body.material = materials.aluminium_6061            # the catalogue, by attribute
 insert.material = materials("brass c360")           # or by name or alias, in any case
 seal.material = Material(name="Viton 75A", family="elastomer", density=1850.0,
-                         color=(0.05, 0.05, 0.05, 1.0), roughness=0.8)
+                         color="#3f3f3f", roughness=0.8)
 paint(body, body.faces().filter_by(bd.Axis.Z)[-1:], materials.aluminium_6061.but(roughness=0.15))
 ```
 

@@ -18,7 +18,6 @@ This is checked fit geometry, not a qualified clamp load rating.
 """
 from pathlib import Path
 import build123d as b
-from lib.color import srgb
 from cadgen.engine import read_step
 from lib.booleans import as_single_shape as one
 from lib.materials import ALUMINUM_5052_COLOR, SCREW_COLOR
@@ -160,7 +159,7 @@ def pressure_pad():
     p = cyl(16,PAD_T,CLAMP_SCREW_X,-.5,bottom)
     # Blind pocket seats over the existing M8 screw end.
     p = p.cut(cyl(4.1,PAD_T/2,CLAMP_SCREW_X,-.5,bottom))
-    return finish(p,'clamp_pressure_pad_32mm',srgb('#B4B8BC'))
+    return finish(p,'clamp_pressure_pad_32mm','#B4B8BC')
 
 
 def carrier():

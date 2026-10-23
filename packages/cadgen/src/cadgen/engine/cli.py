@@ -2,7 +2,7 @@
 ordinary Python scripts call decorated models explicitly.
 
     python SCRIPT.py                                 the models the script explicitly calls
-    cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-daemon] [--json]
+    cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--json]
     cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--camera PRESET|az:el|JSON|authored] [--grid]
         [--preview] [--pose NAME|JSON] [--annotation FILE] [--measurements FILE] [--width N] [--height N]
         [--size-profile P] [--json]
@@ -45,7 +45,6 @@ def _export_arguments(export: argparse.ArgumentParser) -> None:
     export.add_argument("--part", metavar="OWNER",
                         help="one part or assembly, as a ref names it (hand/finger.2, palm; cadgen.engine.refs): that "
                              "subtree as a document of its own")
-    export.add_argument("--no-daemon", action="store_true", help="export in this process (cold, no worker kept)")
     export.add_argument("--json", action="store_true", help="print what was written as JSON")
 
 
@@ -219,7 +218,7 @@ def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as
             if report.get("id"):
                 print(f"  id: {report['id']}")
             if report.get("url"):
-                # Only a build the engine holds has a page to open: a --no-daemon
+                # Only a build the engine holds has a page to open: a daemon=False
                 # build's document went with its process.
                 print(f"  view: {report['url']}")
         if not report.get("ok"):
@@ -245,8 +244,7 @@ def _export(args: argparse.Namespace, prog: str) -> int:
         raise Failed(f"{args.source} is no document: an export reads an .xbf, a .step or a document id", 2)
     try:
         written = api.export(args.source, *args.destinations, pose=_pose(args.pose), part=args.part,
-                             log=lambda text: print(text, file=sys.stderr),
-                             daemon=not args.no_daemon)
+                             log=lambda text: print(text, file=sys.stderr))
     except (ExportRefused, ValueError) as error:
         raise Failed(str(error), 2) from None
     except api.EngineError as error:

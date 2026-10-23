@@ -34,7 +34,8 @@ OCCURRENCE ORDER IS FROZEN — top to bottom below.
 
 from __future__ import annotations
 
-from cadgen.engine import configuration_sequence, mechanism_state, xbf
+from cadgen.ap242 import configuration_sequence, mechanism_state
+from cadgen.engine import xbf
 
 import build123d as bd
 

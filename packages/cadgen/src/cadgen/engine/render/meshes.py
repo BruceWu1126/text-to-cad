@@ -4,7 +4,7 @@
   (``POST /api/doc/<id>/mesh``), then hands each part's XBM buffer (``GET .../part/<key>``) --
   the bytes the viewer draws.
 - ``from_server``: the same from a server of this process (``serve.Server``), as
-  ``cadgen snapshot --no-daemon`` meshes.
+  ``snapshot(..., daemon=False)`` meshes.
 - ``save``/``load``: those buffers kept in a folder, a cold run's pre-built cache (prototype
   only: the engine itself writes no mesh to disk).
 """

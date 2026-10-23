@@ -27,7 +27,6 @@ from cadgen.engine import xbf
 
 import build123d as bd
 
-from lib.color import srgb
 
 from lib.mx_switch_socket import MX_POCKET_DEPTH, mx_socket_cutter
 
@@ -76,7 +75,7 @@ LENS_H = 2.5
 LENS_X = -28.5
 
 
-# (sRGB hex, alpha) pairs: _part() turns them into linear colours with srgb().
+# (sRGB hex, alpha) pairs: a colour build123d takes as it is, which the engine reads as sRGB.
 COLORS = {
     "trim_black": ("#17191C", 1.0),
     "tan_leather": ("#8A6642", 1.0),
@@ -88,7 +87,7 @@ COLORS = {
 
 def _part(shape, name, *details, color):
     shape.label = ":".join([name, *(str(d) for d in details)])
-    shape.color = srgb(*color)
+    shape.color = color
     return shape
 
 

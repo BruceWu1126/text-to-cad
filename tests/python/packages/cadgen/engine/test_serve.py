@@ -127,7 +127,7 @@ def shelf():
     right.label = "right"
     right.color = bd.Color(0.8, 0.1, 0.1)
     board = bd.Pos(10, 0, -6) * bd.Box(30, 6, 2)
-    board = paint(board, board.faces().sort_by(bd.Axis.Z)[-1], (0.1, 0.2, 0.9))
+    board = paint(board, board.faces().sort_by(bd.Axis.Z)[-1], "#1a33e6")
     board.label = "board"
     board.color = bd.Color(0.3, 0.6, 0.2)
     unnamed = bd.Pos(0, 10, 0) * bd.Sphere(2)

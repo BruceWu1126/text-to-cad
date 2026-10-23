@@ -21,15 +21,19 @@ from pathlib import Path
 
 from cadgen.engine import Material, materials
 from cadgen.engine import build as engine_build
+from cadgen.engine.colors import Linear
 from cadgen.engine import cli, document, export, refs
 from cadgen.engine.serve import Server
 
+# The fixtures' colours are linear (``colors.Linear``), as the document holds them, so what is read
+# back is compared exactly; how an author's sRGB becomes linear is ``test_colors``'.
 MODEL = """
 import build123d as bd
 from cadgen.engine import Material, materials, paint, step, xbf
+from cadgen.engine.colors import Linear
 
-GLOW = Material("Glow", 1500, color=(0.2, 0.9, 0.3), metallic=0.25, roughness=0.75, emissive=(0.5, 0.25, 0.0),
-                description="a lit plastic")
+GLOW = Material("Glow", 1500, color=Linear((0.2, 0.9, 0.3)), metallic=0.25, roughness=0.75,
+                emissive=Linear((0.5, 0.25, 0.0)), description="a lit plastic")
 
 
 @xbf("XBF/plate.xbf")
@@ -49,21 +53,24 @@ def plate():
     return root
 """
 
-# Every field away from its default.
-FULL = Material("Full", 1234.5, family="composite", standard="X-1", description="every field", source="the test",
-                young_modulus=1.5e9, poisson_ratio=0.31, yield_strength=2.5e7, ultimate_strength=3.5e7,
-                thermal_expansion=-1.25e-6, thermal_conductivity=0.75, specific_heat=1100.5, isotropic=False,
-                color=(0.25, 0.5, 0.75, 0.8), metallic=0.3, roughness=0.6, ior=1.45, anisotropy=0.4,
-                anisotropy_rotation=0.7, transmission=0.5, transmission_color=(0.9, 0.8, 0.7),
-                transmission_depth=0.02, coat=0.6, coat_roughness=0.15, emissive=(0.1, 0.2, 0.3), emissive_strength=2.5)
+# Every field away from its default: its source, which the model's script holds too.
+FULL_SOURCE = ('Material("Full", 1234.5, family="composite", standard="X-1", description="every field", '
+               'source="the test", young_modulus=1.5e9, poisson_ratio=0.31, yield_strength=2.5e7, '
+               'ultimate_strength=3.5e7, thermal_expansion=-1.25e-6, thermal_conductivity=0.75, specific_heat=1100.5, '
+               'isotropic=False, color=Linear((0.25, 0.5, 0.75, 0.8)), metallic=0.3, roughness=0.6, ior=1.45, '
+               'anisotropy=0.4, anisotropy_rotation=0.7, transmission=0.5, transmission_color=Linear((0.9, 0.8, 0.7)), '
+               'transmission_depth=0.02, coat=0.6, coat_roughness=0.15, emissive=Linear((0.1, 0.2, 0.3)), '
+               'emissive_strength=2.5)')
+FULL = eval(FULL_SOURCE, {"Material": Material, "Linear": Linear})  # noqa: S307 - the test's own source
 
 # The material fixture: a steel block, a brushed aluminium plate, a PLA part, a glass pane,
 # a clear-coated paint on one face, and two placements of one bracket apart by a look alone.
 FIXTURE = """
 import build123d as bd
 from cadgen.engine import Material, glb, materials, paint, xbf
+from cadgen.engine.colors import Linear
 
-LACQUER = Material("Red lacquer", 1200, family="other", color=(0.6, 0.02, 0.02), roughness=0.4, coat=1.0,
+LACQUER = Material("Red lacquer", 1200, family="other", color=Linear((0.6, 0.02, 0.02)), roughness=0.4, coat=1.0,
                    coat_roughness=0.05)
 
 
@@ -98,13 +105,14 @@ def _glb_json(path: Path) -> dict:
 
 class MaterialValueTest(unittest.TestCase):
     def test_fields_are_validated_by_name(self) -> None:
-        made = Material("Thing", 1000, color=(1, 0, 0))
+        made = Material("Thing", 1000, color="#ff0000")
         self.assertEqual(made.color, (1.0, 0.0, 0.0, 1.0))
         self.assertEqual((made.metallic, made.roughness, made.emissive, made.ior, made.emissive_strength),
                          (0.0, 0.5, None, 1.5, 1.0))
         self.assertEqual((made.family, made.young_modulus, made.isotropic), (None, None, True), "unknown, not guessed")
         for fields, named in (({"name": ""}, "name"), ({"density": -1}, "density"), ({"density": "x"}, "density"),
-                              ({"color": (1, 0)}, "color"), ({"color": (2, 0, 0)}, "color"), ({"color": "red"}, "color"),
+                              ({"color": (1, 0)}, "color"), ({"color": (256, 0, 0)}, "color"), ({"color": "red"}, "color"),
+                              ({"color": (1.0, 0.0, 0.0)}, "color"),
                               ({"metallic": 1.5}, "metallic"), ({"roughness": -0.1}, "roughness"),
                               ({"emissive": (1, 1, 1, 1)}, "emissive"), ({"description": 3}, "description"),
                               ({"family": "cheese"}, "family"), ({"young_modulus": 0}, "young_modulus"),
@@ -119,7 +127,7 @@ class MaterialValueTest(unittest.TestCase):
         with self.assertRaises(Exception):
             made.name = "Other"  # a frozen value
         with self.assertRaises(TypeError):
-            Material("Thing", 1000, (1, 0, 0))  # past the density, every field by name
+            Material("Thing", 1000, "#ff0000")  # past the density, every field by name
 
     def test_but_copies_with_changes_and_mass_weighs_a_volume(self) -> None:
         polished = materials.steel_1018.but(roughness=0.2, description="polished")
@@ -225,7 +233,7 @@ class MaterialDocumentTest(unittest.TestCase):
                                                      if m["name"] == "Glow")]["emissive"], [0.5, 0.25, 0.0])
 
     def test_every_field_round_trips_through_the_xbf_and_the_structure(self) -> None:
-        self.build(pin=f"FULL = {FULL!r}\n    pin.material = FULL\n"
+        self.build(pin=f"FULL = {FULL_SOURCE}\n    pin.material = FULL\n"
                        "    paint(pin, pin.faces()[0], FULL.but(name='Full face', coat=0.0))")
         pin = self.prototypes()["pin"]
         self.assertEqual(pin.material, document.as_read(FULL, pin.color))
