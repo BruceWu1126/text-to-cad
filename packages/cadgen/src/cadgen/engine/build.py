@@ -42,6 +42,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from cadgen.engine.addresses import document_id
+from cadgen.engine.ids import canonical, file_id
+
 __all__ = ["BuildError", "build", "load_script"]
 
 
@@ -86,7 +89,7 @@ _TOKENS = __import__("itertools").count(1)
 # Per model: the document this process last wrote, kept to be patched by the next build,
 # and each declared file as it left it.
 _WRITTEN: dict[str, _Written] = {}
-# Per xbf this process last built (its path, ``os.path.normcase``d): per part key, what
+# Per document this process last built (its id: each xbf's, and its model's): per part key, what
 # the build made of the part -- what ``made_by`` answers from. In memory only: provenance
 # is served while this process lives, never written.
 _BUILT: dict[str, dict[str, _Named]] = {}
@@ -405,6 +408,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
             context.timings.clear()
     load_seconds = loaded - started
     for report, (model, result, body, children) in zip(reports, results):
+        report["id"] = model.id
         report["address"] = model.address
         report["source"] = {"script": str(model.script), "name": model.name}
         if result is not None:
@@ -524,8 +528,8 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     report["named"] = named
     for kind, path in targets:
         if kind == "xbf":
-            _BUILT[os.path.normcase(str(path))] = built
-    _BUILT[os.path.normcase(model.address)] = built
+            _BUILT[file_id(path)] = built
+    _BUILT[model.id] = built
     _write(model, plan, tree, signature, report, log)
     timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
 
@@ -603,6 +607,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
     _WRITTEN[key] = _Written(signature, {str(target.path): _stat(target.path) for target in plan}, kept, tree.closure,
                              files, tree)
     report["files"] = {str(target.path): written[str(target.path)] for target in plan}
+    report["id"] = model.id
     report["address"] = model.address
     report["source"] = {"script": str(model.script), "name": model.name}
 
@@ -618,11 +623,11 @@ def held(script: Path | None = None, name: str | None = None, *, path: Path | No
         model_script, _sep, function = key.rpartition("::")
         xbf = next((Path(target) for target in written.stats if target.endswith(".xbf")), None)
         if path is not None:
-            if xbf is None or os.path.normcase(str(xbf)) != os.path.normcase(str(Path(path).resolve())):
+            if xbf is None or file_id(xbf) != file_id(path):
                 continue
             if _stat(xbf) != written.stats.get(str(xbf)):
                 continue
-        elif script is not None and (Path(model_script) != Path(script) or (name is not None and function != name)):
+        elif script is not None and (model_script != canonical(script) or (name is not None and function != name)):
             continue
         if written.kept is not None and written.tree is not None or (xbf is not None and _stat(xbf) == written.stats.get(str(xbf))):
             found.append((written, xbf))
@@ -844,14 +849,14 @@ def _names(run: Any, part: Any) -> tuple[Any, dict[str, dict[str, Any]], dict[tu
 _KINDS = {"face": "faces", "edge": "edges", "vertex": "vertices"}
 
 
-def made_by(path: str, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
+def made_by(document: str, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
     """What made element ``ordinal`` (1-based) of kind ``kind`` (face, edge, vertex) of
-    part ``key`` of the xbf at ``path``, as this process's last build of that xbf named
-    it: the element's name, the feature that made it (its last step's), that feature's
+    part ``key`` of ``document`` (its id, or the xbf's path), as this process's last build
+    of it named it: the element's name, the feature that made it (its last step's), that feature's
     operation and the function, file and line of its call, and, where the name folds
     part of its derivation, the derivation spelled out. None for a document this process
     did not build, or an element its build gave no name."""
-    named = _BUILT.get(os.path.normcase(str(path)), {}).get(key)
+    named = _BUILT.get(document_id(document), {}).get(key)
     if named is None or not named.names:
         return None
     texts = named.names.get(_KINDS[kind]) or []

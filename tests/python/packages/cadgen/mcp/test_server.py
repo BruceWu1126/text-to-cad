@@ -65,7 +65,7 @@ class _Session(unittest.TestCase):
     viewer_url = None
 
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = Path(os.path.realpath(tempfile.mkdtemp()))  # as the viewer spells every path (ids.canonical)
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.workspace = self.tmp / "project"
         (self.workspace / "parts").mkdir(parents=True)

@@ -85,11 +85,14 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
    makes everything downstream of it miss. So an edit costs what it changed, and an element
    keeps the name its feature history gave it across edits. Across a restart, a model's only
    cache is its own xbf, taken whole or not at all.
-6. **One document per model, only declared files.** Bare `@model` keeps its document
-   in the worker's memory. File decorators imply a model and write only their named
-   outputs. No implicit XBF, source file, sidecar, registry, cache or thumbnail is
-   written for an in-memory model. Model addresses and the viewer's In memory list
-   disappear when their workers retire or the engine restarts.
+6. **One document per model, with one id; only declared files.** Every called model makes
+   one document, with an id derived from its script and function (`ids.model_id`): the same
+   in every process, worked out without asking the engine. A file the engine serves is known
+   inside it by the id of its canonical path (`ids.file_id`); its public name stays its path.
+   Bare `@model` keeps its document in the worker's memory. File decorators imply a model
+   and write only their named outputs. No implicit XBF, source file, sidecar, registry,
+   cache or thumbnail is written for an in-memory model. Model documents and the viewer's
+   In memory list disappear when their workers retire or the engine restarts.
 7. **Provenance is served live, never written.** What made an element -- the feature, its
    operation, the function, file and line of its call -- lives in the trace of the worker that
    built the document, and is asked of it while it lives (`made_by`, `cadgen inspect`). A document
@@ -177,7 +180,7 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     or the telemetry CLI. See the engine's **Architecture**.
 
 21. **Python functions own operations; decorators and CLIs expose them.** Every
-    successful server-backed build reports its address and localhost viewer URL,
+    successful server-backed build reports its id and localhost viewer URL,
     including a build with file outputs. A cold `daemon=False` build has no served URL.
 
 

@@ -111,11 +111,14 @@ def hinge():
    gave it across edits. Tessellations live in the serving process's memory,
    keyed by a part's geometry, under a size cap. Across a restart, a model's only
    cache is its own xbf, taken whole or not at all (**Build closure**).
-6. **One document per model, only declared files.** Bare `@model` keeps its document
-   in the worker's memory. File decorators imply a model and write only their named
-   outputs. No implicit XBF, source file, sidecar, registry, cache or thumbnail is
-   written for an in-memory model. Model addresses and the viewer's In memory list
-   disappear when their workers retire or the engine restarts.
+6. **One document per model, with one id; only declared files.** Every called model makes
+   one document, with an id derived from its script and function (`ids.model_id`): the same
+   in every process, worked out without asking the engine. A file the engine serves is known
+   inside it by the id of its canonical path (`ids.file_id`); its public name stays its path.
+   Bare `@model` keeps its document in the worker's memory. File decorators imply a model
+   and write only their named outputs. No implicit XBF, source file, sidecar, registry,
+   cache or thumbnail is written for an in-memory model. Model documents and the viewer's
+   In memory list disappear when their workers retire or the engine restarts.
 7. **Provenance is served live, never written.** What made an element -- the
    feature, its operation, the function, file and line of its call -- lives in
    the trace of the worker that built the document, and is asked of it while it
@@ -157,8 +160,8 @@ def hinge():
 
 14. **Connected means warm.** A worker is not retired for idleness while any served
     document it built has a version wait outstanding or completed a sync within `serve.LIVE`
-    seconds. Heartbeats use the canonical document address, a file's path or
-    `script.py::NAME`; they never turn a model address into a file path. The worker-count
+    seconds. Heartbeats use the document's id (`ids`): a file's `file_id`, a model's
+    `model_id`; they never turn a model into a file path. The worker-count
     cap never retires a worker whose document a page watches; it is exceeded instead. The memory
     cap may retire it. Closing a page never stops the engine or its worker; once its last sync
     expires, ordinary idle retirement applies.
@@ -180,7 +183,7 @@ def hinge():
     request handlers act on declared capabilities, never on a host's identity.
 
 21. **Python functions own operations; decorators and CLIs expose them.** Every
-    successful server-backed build reports its address and localhost viewer URL,
+    successful server-backed build reports its id and localhost viewer URL,
     including a build with file outputs. A cold `daemon=False` build has no served URL.
 
 ## Architecture
@@ -195,6 +198,22 @@ standalone engine imports no application module. The application serves the buil
 viewer and per-launch page sessions on that listener. Document routes run in
 process, with no network relay. Kernel reads, topology, poses and meshes run in
 reader/mesh subprocesses; even an inline-mesh request stays outside the daemon.
+
+Every document has one id, a lower-case UUID string ([ids.py](ids.py)): a model's is
+uuid5 of its script's canonical path and its function's name (`model_id`), worked out in the
+script's own process (`Model.id`) as in the engine; a file's is uuid5 of its canonical path
+(`file_id`), inside the engine only. The canonical path (`ids.canonical`) is `realpath` and, on
+macOS, the name as the file system spells it, so a symlink and a case variant of one file are one
+document; the viewer's document reads (by id) and its Recents key by the same function, so it
+serves one document and keeps one Recents entry for it too, while a page names a file by the path
+it was given. The server keys everything by the id: its served documents and
+the models registered to be served, their watchers and syncs, their builds, the documents a build
+holds; `GET /api/doc/<id>` takes it, and a document served at a pose is `<id>~<digest>`. The
+daemon keys by it the worker that built each document (`builders`, from which `connected` asks
+the server's watched ids) and the live models' book (`models.py`); a worker keys by it what its
+builds named (`build._BUILT`, which `made_by` answers from) and the served documents it patches.
+The worker pool alone is keyed otherwise: by the canonical path of the script a worker runs, a
+process's key, not a document's.
 
 The daemon maps each built document to its worker. HTTP watcher accounting has its
 own lock, independent of document reads and pool admission. Outstanding version
@@ -1795,9 +1814,11 @@ if __name__ == "__main__":
     bracket()
 ```
 
-The address is `/absolute/path/parts.py::bracket`. Different scripts can use the
-same function name. Running the script again with changed code updates the same
-address and open viewers. No address list is saved.
+The address is `/absolute/path/parts.py::bracket`, and the document's id is
+`bracket.id`: uuid5 of the script's canonical path and the function's name, the same in every
+process (**Architecture**). Different scripts can use the same function name. Running the
+script again with changed code updates the same document and open viewers; `python parts.py`
+prints each model's `id:` and `view:` lines. No address list is saved.
 
 `cadgen serve ADDRESS`, `cadgen snapshot ADDRESS view.png`,
 `cadgen export ADDRESS part.step`, and `cadgen inspect ADDRESS 'face 1'`
@@ -1812,5 +1833,5 @@ expired script address is rebuilt by running its script. Exporting a file writes
 the requested destinations. Exporting a script model builds it first, including its
 declared files.
 
-Address parsing and declaration listing live in [addresses.py](addresses.py);
-the daemon's transient address book lives in [models.py](models.py).
+Address parsing and declaration listing live in [addresses.py](addresses.py), ids in
+[ids.py](ids.py); the daemon's transient book of live models, by id, lives in [models.py](models.py).

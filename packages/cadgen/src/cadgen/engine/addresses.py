@@ -1,7 +1,8 @@
-"""Document addresses: file paths and script.py::name.
+"""Document addresses: file paths and script.py::name, and the document id each names.
 
-Names select documents; #owner/element selects geometry inside the document.
-Scripts use their absolute path. Nothing here reads, builds, or persists a model.
+Names select documents; #owner/element selects geometry inside the document. A path is keyed
+by its canonical spelling (``ids.canonical``), a script's too. Every document is known inside
+the engine by its id (``document_id``). Nothing here reads, builds, or persists a model.
 """
 from __future__ import annotations
 
@@ -9,6 +10,8 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+from cadgen.engine.ids import canonical, file_id, is_id, model_id
 
 _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
@@ -32,13 +35,23 @@ def parse(value: str | os.PathLike) -> ModelAddress | None:
     script = Path(source).expanduser()
     if script.suffix.lower() != ".py":
         raise ValueError("a model address is script.py::NAME")
-    return ModelAddress(script.resolve(), name)
+    return ModelAddress(Path(canonical(script)), name)
 
 
 def key(value: str | os.PathLike) -> Path | str:
     """File keys stay Paths; model keys are canonical addresses, never fake files."""
     found = parse(value)
-    return str(found) if found is not None else Path(value).expanduser().resolve()
+    return str(found) if found is not None else Path(canonical(Path(value).expanduser()))
+
+
+def document_id(value: str | os.PathLike) -> str:
+    """The id of the document ``value`` names: an id itself, a model address's model, else a file's."""
+    if is_id(value):
+        return value
+    found = parse(value)
+    if found is not None:
+        return model_id(found.script, found.name)
+    return file_id(Path(value).expanduser())
 
 
 def split(value: str | os.PathLike) -> tuple[str, str | None]:

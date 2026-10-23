@@ -24,7 +24,7 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
 class LibraryTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = Path(os.path.realpath(tempfile.mkdtemp()))  # as the viewer spells it (ids.canonical)
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.model = self.tmp / "anywhere" / "a.stl"
         self.model.parent.mkdir()
@@ -67,6 +67,21 @@ class LibraryTest(unittest.TestCase):
         status, png = self.request("GET", f"/__cad/thumbnail?name={entry['thumbnail']}")
         self.assertEqual((status, png), (200, PNG))
         self.assertEqual(self.change("remove", str(self.model)), (200, {"recents": []}))
+
+    def test_a_link_its_target_and_a_case_variant_are_one_entry(self) -> None:
+        # One file, one entry, however it is spelled: the spelling the engine keys it by (ids.canonical).
+        link = self.tmp / "link.stl"
+        try:
+            link.symlink_to(self.model)
+        except OSError as error:  # Windows without the symlink privilege
+            self.skipTest(f"no symlinks here: {error}")
+        spellings = [str(link), str(self.model), str(self.model.parent / ".." / "anywhere" / "a.stl")]
+        if os.path.exists(str(self.model).upper()):  # a case-insensitive file system (macOS, Windows)
+            spellings.append(str(self.model.parent / "A.STL"))
+        for spelling in spellings:
+            status, answer = self.change("open", spelling)
+        self.assertEqual((status, [entry["path"] for entry in answer["recents"]]), (200, [str(self.model)]))
+        self.assertEqual(self.change("remove", str(link)), (200, {"recents": []}))
 
     def test_a_change_names_a_cad_file_by_its_absolute_path(self) -> None:
         (self.tmp / "notes.txt").write_text("x", encoding="utf-8")

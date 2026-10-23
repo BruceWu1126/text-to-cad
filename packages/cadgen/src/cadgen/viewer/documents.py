@@ -6,6 +6,8 @@ import threading
 import time
 from pathlib import Path
 
+from cadgen.engine.addresses import document_id
+
 from .backend import absolute_path
 from .scanner import node_basename
 
@@ -47,8 +49,9 @@ class _Serve:
 class EngineDocuments:
     """Acquire each document once in the engine, off the HTTP request thread.
 
-    Concurrent requests join one read. ``hold_seconds`` bounds the time a caller
-    waits before a 202 response; the client uses ``retry_ms`` to request again.
+    Concurrent requests for one document -- by its id, however its path is spelled -- join one
+    read. ``hold_seconds`` bounds the time a caller waits before a 202 response; the client uses
+    ``retry_ms`` to request again.
     ``on_crash`` hears unexpected failures once.
     """
 
@@ -60,7 +63,7 @@ class EngineDocuments:
         self._on_crash = on_crash
         self._clock = clock
         self._lock = threading.Lock()
-        self._serves: dict[str, _Serve] = {}
+        self._serves: dict[str, _Serve] = {}  # by document id
 
     def any_in_flight(self) -> bool:
         """Whether a serve is running: a page is waiting on it."""
@@ -73,7 +76,8 @@ class EngineDocuments:
         """``(status, body)``: ``{"doc", "url"}`` at 200, 202 while the engine reads the file, or
         the engine's refusal at 400. ``ValueError`` for a request that names no engine document."""
         path = engine_document_path(file_ref)
-        serve = self._joined(path) or self._started(path)
+        ident = document_id(path)
+        serve = self._joined(ident) or self._started(ident, path)
         if serve.done.wait(self.hold_seconds):
             return serve.status, serve.body
         return 202, {"state": "reading", "retryMs": self.retry_ms}
@@ -81,25 +85,23 @@ class EngineDocuments:
     def held(self, file_ref) -> dict:
         """``{"held": bool}``: whether the engine serves the document now (its daemon lists it),
         asked without starting the daemon or a read."""
-        path = engine_document_path(file_ref)
-        from cadgen.engine.addresses import key
+        ident = document_id(engine_document_path(file_ref))
+        return {"held": self.server is not None and self.server.holds(ident)}
 
-        return {"held": self.server is not None and key(path) in self.server.idents}
-
-    def _joined(self, path: str) -> _Serve | None:
+    def _joined(self, ident: str) -> _Serve | None:
         now = self._clock()
         with self._lock:
             for name, serve in list(self._serves.items()):
                 if serve.done.is_set() and now - serve.finished_at > FINISHED_SECONDS:
                     del self._serves[name]
-            return self._serves.get(path)
+            return self._serves.get(ident)
 
-    def _started(self, path: str) -> _Serve:
+    def _started(self, ident: str, path: str) -> _Serve:
         with self._lock:
-            serve = self._serves.get(path)
+            serve = self._serves.get(ident)
             if serve is not None:
                 return serve
-            serve = self._serves[path] = _Serve()
+            serve = self._serves[ident] = _Serve()
         threading.Thread(target=self._run, args=(serve, path), name="cadgen-engine-serve", daemon=True).start()
         return serve
 

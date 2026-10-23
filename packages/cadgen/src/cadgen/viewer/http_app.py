@@ -28,6 +28,8 @@ import stat
 import sys
 from pathlib import Path
 
+from cadgen.engine.ids import canonical
+
 from .backend import absolute_path, asset_path
 from .content_types import content_type_for_path, content_type_for_static_asset, extension_of
 from .encoding import UriError, strict_decode_uri_component
@@ -573,18 +575,21 @@ class CadApp:
         if payload.get("path") and parse(payload["path"]) is not None:
             return self._recents_payload()
         action, path = payload.get("action"), absolute_path(payload.get("path"))
+        # The library keys a model by its canonical path, the engine's (``ids.canonical``): a
+        # symlink, its target and a case variant of one file are one entry.
+        key = canonical(path)
         if action == "open":
             if extension_of(path) not in (*VIEWER_EXTENSIONS, ".py") or not os.path.isfile(path):
                 raise ValueError(f"no CAD file at {path}")
-            self.recents.opened(path)
+            self.recents.opened(key)
             if self.analytics is not None:
                 self.analytics.opened(path)
         elif action in ("pin", "unpin"):
-            self.recents.pin(path, action == "pin")
+            self.recents.pin(key, action == "pin")
         elif action == "remove":
-            self.recents.remove(path)
+            self.recents.remove(key)
         elif action == "thumbnail":
-            self.recents.thumbnail(path, thumbnail_png(payload.get("png")))
+            self.recents.thumbnail(key, thumbnail_png(payload.get("png")))
         else:
             raise ValueError(f"unknown recents action {action!r}")
         return self._recents_payload()

@@ -148,9 +148,11 @@ class PatcherTest(unittest.TestCase):
         first = self.build(10)
         served = sorted({part.key for part in first.parts})
         edited = self.build(12)
-        path = str(self.folder / "XBF/pair.xbf")
+        from cadgen.engine.ids import file_id
+
+        ident = file_id(self.folder / "XBF/pair.xbf")
         # The daemon serves the first build's document and holds no mesh yet (a cold daemon).
-        sent = self.patch({"served": {path: "0-0"}, "served_keys": {path: served}, "held": [], "shapes": []}, edited)
+        sent = self.patch({"served": {ident: "0-0"}, "served_keys": {ident: served}, "held": [], "shapes": []}, edited)
         self.assertEqual(len(sent), 1)
         self.assertEqual(len(sent[0]["patch"]["meshes"]), 1, "the changed part alone")
 
@@ -360,6 +362,10 @@ class DaemonTest(unittest.TestCase):
         (self.folder / "bracket.py").write_text(textwrap.dedent(BARE.format(size=2)), encoding="utf-8")
         second = self.built("bracket")
         self.assertEqual(second["url"], first["url"])
+        from cadgen.engine.ids import model_id
+
+        self.assertEqual((first["id"], second["id"], doc), (model_id(self.folder / "bracket.py", "bracket"),) * 3,
+                         "two builds of one function are one document, served by its id")
         after = get_json(endpoint, token)
         self.assertNotEqual(before["version"], after["version"])
         measured = self.cli("inspect", f"{address}#face 1")
@@ -606,6 +612,17 @@ if __name__ == '__main__':
                          ["built block.py::block cold", "built block.py::peg warm"])
         self.assertEqual(sum(line.startswith("  view: http://127.0.0.1:") for line in done.stdout.splitlines()), 2,
                          "each model reports its viewer link, including file-output builds")
+        from urllib.parse import parse_qs, urlparse
+
+        from cadgen.engine.ids import model_id
+
+        # Each model reports its id, the one the script's own process derives (ids.model_id), and
+        # its page is that id's.
+        expected = [model_id(self.script, "block"), model_id(self.script, "peg")]
+        self.assertEqual([line.removeprefix("  id: ") for line in done.stdout.splitlines() if line.startswith("  id: ")],
+                         expected)
+        views = [line for line in done.stdout.splitlines() if line.startswith("  view: ")]
+        self.assertEqual([parse_qs(urlparse(line.removeprefix("  view: ")).query)["doc"][0] for line in views], expected)
         workers = json.loads(self.cli("status", "--json").stdout)["workers"]
         self.assertEqual([(Path(w["script"]).name, w["builds"]) for w in workers], [("block.py", 2)],
                          "the daemon's worker built it, not the script's own process")

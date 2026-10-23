@@ -23,7 +23,9 @@ SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from cadgen.engine.addresses import document_id  # noqa: E402
 from cadgen.engine.daemon import Daemon, Pool  # noqa: E402
+from cadgen.engine.ids import file_id  # noqa: E402
 
 _PIDS = itertools.count(1)
 
@@ -181,7 +183,7 @@ class ConnectedPoolTest(unittest.TestCase):
             path = Path(folder).resolve() / "part.xbf"
             ident = server.put(path, {"version": "one", "prototypes": []}, {})
             builder, other = daemon.pool.lease("a.py", {}), daemon.pool.lease("b.py", {})
-            daemon.builders[os.path.normcase(str(path))] = builder
+            daemon.builders[file_id(path)] = builder
             daemon.pool.release(builder)
             daemon.pool.release(other)
             waiting = threading.Event()
@@ -205,7 +207,7 @@ class ConnectedPoolTest(unittest.TestCase):
                     thread.join(5)
                 self.assertFalse(thread.is_alive())
             self.assertFalse(server.watchers, "the completed wait releases its watcher")
-            synced = server.synced[path]
+            synced = server.synced[ident]
             with mock.patch("time.monotonic", return_value=synced + LIVE - 1):
                 self.assertEqual(daemon.pool.retire_idle(), [], "recent sync keeps the worker warm")
             with mock.patch("time.monotonic", return_value=synced + LIVE + 1):
@@ -223,7 +225,7 @@ class ConnectedPoolTest(unittest.TestCase):
         unwatched = daemon.pool.lease("unwatched.py", {})
         daemon.pool.release(unwatched)
         server.put(_address("watched"), {"version": "one", "prototypes": []}, {})
-        daemon.builders[os.path.normcase(_address("watched"))] = watched
+        daemon.builders[document_id(_address("watched"))] = watched
         server.sync(_address("watched"))
         third = daemon.pool.lease("third.py", {})
         self.assertTrue(unwatched.stopped, "the unwatched worker made room")
@@ -242,7 +244,7 @@ class ConnectedPoolTest(unittest.TestCase):
             worker = daemon.pool.lease(f"{name}.py", {})
             daemon.pool.release(worker)
             server.put(_address(name), {"version": "one", "prototypes": []}, {})
-            daemon.builders[os.path.normcase(_address(name))] = worker
+            daemon.builders[document_id(_address(name))] = worker
             server.sync(_address(name))
             watched.append(worker)
         third = daemon.pool.lease("third.py", {})
@@ -266,7 +268,7 @@ class ConnectedPoolTest(unittest.TestCase):
         address = _address("part")
         server.put(address, {"version": "one", "prototypes": []}, {})
         worker = daemon.pool.lease("part.py", {})
-        daemon.builders[os.path.normcase(address)] = worker
+        daemon.builders[document_id(address)] = worker
         daemon.pool.release(worker)
         synced = worker.used + 10
         with mock.patch("time.monotonic", return_value=synced):
@@ -286,7 +288,7 @@ class ConnectedPoolTest(unittest.TestCase):
             path = Path(folder).resolve() / "part.xbf"
             ident = server.put(path, {"version": "one", "prototypes": []}, {})
             worker = daemon.pool.lease("a.py", {})
-            daemon.builders[os.path.normcase(str(path))] = worker
+            daemon.builders[file_id(path)] = worker
             with mock.patch.object(server, "document", side_effect=ValueError("unreadable")):
                 with self.assertRaisesRegex(ValueError, "unreadable"):
                     server.wait(ident, "one", 60)

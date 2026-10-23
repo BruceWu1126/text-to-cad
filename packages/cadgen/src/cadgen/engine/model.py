@@ -39,6 +39,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from cadgen.engine.ids import canonical, model_id
+
 __all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration", "dxf", "glb", "memo", "model", "motion", "paint",
            "read_step", "read_xbf", "step", "stl", "threemf", "xbf", "models_in"]
 
@@ -143,10 +145,16 @@ class Model:
         self.function = function
         self.name = function.__name__
         source = inspect.getsourcefile(function) or inspect.getfile(function)
-        self.script = Path(source).resolve()
+        self.script = Path(canonical(source))
         self.outputs: list[Output] = []
         self.__xbf_model__ = True
         _MODELS[f"{self.script}::{self.name}"] = self
+
+    @property
+    def id(self) -> str:
+        """This model's document id, worked out here from its script and function, never asked
+        of the engine: any process that knows both knows it (``ids.model_id``)."""
+        return model_id(self.script, self.name)
 
     @property
     def address(self) -> str:
@@ -366,7 +374,7 @@ class Memo:
         self.function = function
         self.name = function.__qualname__
         source = inspect.getsourcefile(function) or inspect.getfile(function)
-        self.script = Path(source).resolve()
+        self.script = Path(canonical(source))
         self.__xbf_memo__ = True
 
     @property

@@ -1,18 +1,17 @@
-"""The daemon's address book for documents held by live model workers.
+"""The daemon's book of documents held by live model workers, each by its id (``ids.model_id``).
 
 Only metadata lives here. Opening a document asks its worker for the structure
 and shape bytes; registration never meshes or materializes an unviewed model.
-The address book is process memory and is never saved.
+The book is process memory and is never saved.
 """
 from __future__ import annotations
 
 import base64
-import os
 import threading
 import time
 from typing import Any
 
-from cadgen.engine.addresses import parse
+from cadgen.engine.addresses import document_id, parse
 
 
 class Models:
@@ -28,52 +27,54 @@ class Models:
             return
         for root in reports:
             for report in [root, *(root.get("child_models") or {}).values()]:
-                address, source = report.get("address"), report.get("source")
-                if not report.get("ok") or not address or not source:
+                ident, address, source = report.get("id"), report.get("address"), report.get("source")
+                if not report.get("ok") or not ident or not source:
                     continue
                 with self.lock:
-                    old = self.records.get(address)
+                    old = self.records.get(ident)
                     version = (old["version"] if old else 0) + 1
-                    self.records[address] = {"address": address, "source": source, "worker": worker,
-                                             "builtAt": time.time(), "version": version,
-                                             "files": list(report.get("files") or {})}
-                self.daemon.builders[os.path.normcase(address)] = worker
-                server, ident = self.register_page(address)
+                    self.records[ident] = {"id": ident, "address": address, "source": source, "worker": worker,
+                                           "builtAt": time.time(), "version": version,
+                                           "files": list(report.get("files") or {})}
+                self.daemon.builders[ident] = worker
+                server = self.register_page(ident)
                 app = getattr(server.http, "app", None)
                 token = app.token if app is not None else ""
                 report["url"] = f"{server.url}/?doc={ident}" + (f"&token={token}" if token else "")
 
-    def register_page(self, address: str) -> tuple[Any, str]:
+    def register_page(self, ident: str) -> Any:
         server = self.daemon.serve({})
         with self.lock:
-            record = self.records[address]
+            record = self.records[ident]
             record["opened"] = True
-            version = record["version"]
-        ident = server.register_model(address, lambda: self.load(address), version)
-        return server, ident
+            version, address = record["version"], record["address"]
+        server.register_model(ident, address, lambda: self.load(ident), version)
+        return server
 
     def paths(self, worker: Any, model: str | None = None) -> list[str]:
+        """The ids of the documents ``worker`` holds (of model ``model``'s name, when given)."""
         name = model.rsplit("::", 1)[-1] if model else None
         with self.lock:
-            return [address for address, row in self.records.items() if row["worker"] is worker
+            return [ident for ident, row in self.records.items() if row["worker"] is worker
                     and (name is None or row["source"]["name"] == name)]
 
     def resolve(self, address: str) -> dict[str, Any]:
         found = parse(address)
         if found is None:
             raise ValueError("expected script.py::NAME")
-        address = str(found)
         with self.lock:
-            record = self.records.get(address)
+            record = self.records.get(document_id(address))
             if record is not None and self.daemon.pool.holds(record["worker"]):
                 source = record["source"]
                 return {"script": source["script"], "function": source["name"]}
         return {"script": str(found.script), "function": found.name}
 
     def serve(self, address: str, request: dict) -> tuple[Any, str]:
-        address = str(parse(address))
+        """The server and the id of the model ``address`` names, built first when no live
+        worker holds it (unless ``request`` says ``build: false``)."""
+        address, ident = str(parse(address)), document_id(address)
         with self.lock:
-            record = self.records.get(address)
+            record = self.records.get(ident)
         if record is None or not self.daemon.pool.holds(record["worker"]):
             if request.get("build") is False:
                 raise ValueError(f"no live model {address}; build it before inspecting")
@@ -86,15 +87,15 @@ class Models:
             if failure:
                 raise ValueError(failure)
             with self.lock:
-                if address not in self.records:
+                if ident not in self.records:
                     errors = [r.get("error") for row in replies for r in row.get("done", []) if not r.get("ok")]
                     raise ValueError(next((e for e in errors if e), f"model {address} did not build"))
-        return self.register_page(address)
+        return self.register_page(ident), ident
 
-    def load(self, address: str) -> tuple[dict, dict[str, bytes]]:
+    def load(self, ident: str) -> tuple[dict, dict[str, bytes]]:
         with self.lock:
-            record = self.records[address]
-            source, worker, version = record["source"], record["worker"], record["version"]
+            record = self.records[ident]
+            source, worker, version, address = record["source"], record["worker"], record["version"], record["address"]
         if not self.daemon.pool.holds(worker):
             raise ValueError(f"model {address} retired; open its address again to rebuild")
         replies = []
@@ -111,25 +112,26 @@ class Models:
             at += size
         from cadgen.engine.export.viewer import fingerprint
 
-        return {**done["structure"], "exportRevision": fingerprint(done["structure"]), "path": address, "address": address, "closure": done.get("closure"), "version": f"{version}-0"}, shapes
+        return {**done["structure"], "exportRevision": fingerprint(done["structure"]), "path": address, "address": address,
+                "id": ident, "closure": done.get("closure"), "version": f"{version}-0"}, shapes
 
     def prune(self) -> None:
         with self.lock:
-            gone = [address for address, row in self.records.items() if not self.daemon.pool.holds(row["worker"])]
-            for address in gone:
-                self.records.pop(address)
+            gone = [ident for ident, row in self.records.items() if not self.daemon.pool.holds(row["worker"])]
+            for ident in gone:
+                self.records.pop(ident)
                 if self.daemon.server is not None:
-                    self.daemon.server.forget_model(address)
+                    self.daemon.server.forget_model(ident)
 
     def listing(self) -> list[dict[str, Any]]:
         self.prune()
         with self.lock:
-            return [{"address": address, "script": row["source"]["script"],
+            return [{"id": ident, "address": row["address"], "script": row["source"]["script"],
                      "name": row["source"]["name"], "builtAt": row["builtAt"], "version": row["version"],
-                     "state": self.state(address, row)}
-                    for address, row in self.records.items() if not row["files"]]
+                     "state": self.state(ident)}
+                    for ident, row in self.records.items() if not row["files"]]
 
-    def state(self, address: str, row: dict) -> str:
+    def state(self, ident: str) -> str:
         server = self.daemon.server
-        build = server.build_of(address) if server is not None else {}
+        build = server.build_of(ident) if server is not None else {}
         return "building" if build.get("building") else "failed" if build.get("failed") else "idle"

@@ -3,8 +3,8 @@
 The daemon starts one per script and talks to it over the worker's stdin and its
 original stdout. A request is one JSON object per line: ``{"id", "op": "build", "script",
 "functions", "cwd"}``, and, when the daemon serves documents, ``served`` (each served
-path and the version served of it), ``served_keys`` (each served path and the keys of the
-parts its served document holds), ``held`` (the geometry keys it holds a mesh for) and
+document's id and the version served of it), ``served_keys`` (each served document's id and
+the keys of the parts it holds), ``held`` (the geometry keys it holds a mesh for) and
 ``shapes`` (the keys it holds a shape for). The answers are frames: a JSON object on one
 line and, when it has ``bytes``, exactly that many bytes after it. A build is answered by
 ``{"id", "log"}`` frames while it builds and ``{"id", "progress"}`` frames saying where it is
@@ -15,8 +15,8 @@ memory after it, in MiB) or ``{"id", "failed"}``, and last ``{"id", "settled"}``
 model prints goes to the worker's stderr, which the daemon passes on. The worker exits when
 its stdin closes: the daemon's pool closes it to retire the worker (``daemon.Pool``).
 
-A ``{"id", "op": "where", "path", "key", "kind", "ordinal"}`` request asks what made one
-element of a document this worker built (``build.made_by``): it is answered at once,
+A ``{"id", "op": "where", "doc", "key", "kind", "ordinal"}`` request asks what made one
+element of a document this worker built (``doc``, its id) (``build.made_by``): it is answered at once,
 ``{"id", "where": {...} | null}``, by the thread that reads the requests -- during a
 build too, from the last build that named the document -- so a page asking about an
 element never waits on a build.
@@ -61,6 +61,8 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable
 
+from cadgen.engine.ids import canonical, file_id
+
 # How long a build waits for the daemon to say it holds a patch before it writes its
 # derived files: the viewer is woken first, unless the daemon is too slow to say so.
 PATCH_WAIT = 30.0
@@ -76,9 +78,10 @@ class Patcher:
 
     def __init__(self, request: dict[str, Any], send: Callable[[dict[str, Any], bytes], None], *,
                  acknowledged: bool = False) -> None:
-        self.served = {Path(path).resolve(): version for path, version in (request.get("served") or {}).items()}
+        # By document id (``ids.file_id`` of each xbf the daemon serves).
+        self.served = dict(request.get("served") or {})
         self.held = set(request.get("held") or [])
-        self.served_keys = {Path(path).resolve(): set(keys) for path, keys in (request.get("served_keys") or {}).items()}
+        self.served_keys = {ident: set(keys) for ident, keys in (request.get("served_keys") or {}).items()}
         self.meshed = 0
         self.have = set(request.get("shapes") or [])
         self.send = send
@@ -86,7 +89,7 @@ class Patcher:
 
     def saved(self, path: Path, tree: Any) -> None:
         try:
-            self._patch(Path(path).resolve(), tree)
+            self._patch(Path(canonical(path)), tree)
         except Exception:  # noqa: BLE001 - without a patch the daemon reads the file
             traceback.print_exc()
 
@@ -95,10 +98,11 @@ class Patcher:
         from cadgen.engine.mesh import mesh_shape, shape_bytes
         from cadgen.engine.serve import MESHES
 
-        if path not in self.served:
+        ident = file_id(path)
+        if ident not in self.served:
             return
         stat = path.stat()
-        if self.served[path] == f"{stat.st_mtime_ns}-{stat.st_size}":
+        if self.served[ident] == f"{stat.st_mtime_ns}-{stat.st_size}":
             return  # the daemon serves this very file
         clock = time.perf_counter()
         structure = structure_of(tree, path)
@@ -107,7 +111,7 @@ class Patcher:
         parts = {}
         for part in tree.parts:
             parts.setdefault(part.key, part)
-        served = self.served_keys.get(path, set())
+        served = self.served_keys.get(ident, set())
         for key, part in parts.items():
             fresh = key not in served and key not in self.held
             if not fresh and key in self.have:
@@ -130,7 +134,7 @@ class Patcher:
                 shapes.append([key, len(shape)])
                 self.have.add(key)
         done = time.perf_counter()
-        self.served[path] = structure["version"]
+        self.served[ident] = structure["version"]
         waiting = _PATCHED.setdefault(str(path), threading.Event()) if self.acknowledged else None
         if waiting is not None:
             waiting.clear()
@@ -408,7 +412,7 @@ def main() -> int:
                     _PATCHED.setdefault(str(request.get("path")), threading.Event()).set()
                 elif request.get("op") == "where":
                     try:
-                        found = made_by(request["path"], request["key"], request["kind"], int(request["ordinal"]))
+                        found = made_by(request["doc"], request["key"], request["kind"], int(request["ordinal"]))
                     except Exception:  # noqa: BLE001 - a question it cannot answer is answered with nothing
                         found = None
                     send({"id": request.get("id"), "where": found})
