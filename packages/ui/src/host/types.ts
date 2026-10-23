@@ -56,16 +56,14 @@ export interface ViewerLinks {
    */
   open?(url: string): Promise<void>;
 }
-export interface DownloadDestination {
-  name: string;
-  write(response: Response, options: { signal: AbortSignal; progress(bytes: number): void }): Promise<void>;
-}
-/** A host-local destination. No server path or filesystem handle crosses this port. */
+/** One export the page started: its request, the name it downloads as, and whether the browser was handed it. */
+export interface ExportRecord { request: import('@text-to-cad/core/client').ExportRequest; filename: string; delivered: boolean }
+/** The browser's own downloads. No picker, handle or server path crosses this port. */
 export interface DownloadPort {
-  unavailable?: string;
-  choose(name: string, extension: string): Promise<DownloadDestination | null>;
-  restore?(): Array<{ request: import('@text-to-cad/core/client').ExportRequest; filename: string }>;
-  remember?(value: Array<{ request: import('@text-to-cad/core/client').ExportRequest; filename: string }>): void;
+  /** Hands the browser a same-origin file URL to download as `filename`; where it goes is the browser's setting. */
+  save(url: string, filename: string): void;
+  restore?(): ExportRecord[];
+  remember?(value: ExportRecord[]): void;
 }
 export interface ViewerHost {
   downloads?: DownloadPort;

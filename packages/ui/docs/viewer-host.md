@@ -78,17 +78,17 @@ use the [explicit fake host](../src/host/testing/host.ts).
 
 ## Export destinations and jobs
 
-`ViewerHost.downloads` is an optional `DownloadPort`: `choose(name, extension)`
-opens a host-owned local picker directly in the initiating gesture, returning a
-`DownloadDestination` or null on cancel. Its `write(response, {signal, progress})`
-streams to that destination and resolves only after commit. `unavailable` explains
-an environmental limitation. Optional `remember`/`restore` persist an array of job
-requests and filenames, never handles or server paths. No shared UI detects a browser
-or writes to the host filesystem.
+`ViewerHost.downloads` is an optional `DownloadPort`: `save(url, filename)` hands the
+browser a ready job's same-origin file URL (`ExportService.fileUrl`) as a plain download,
+so the browser's own download setting decides where it goes. Optional `remember`/`restore`
+persist the page's export records (request, filename, whether the file was handed over),
+never a file, handle or server path. No shared UI detects a browser or writes to the host
+filesystem.
 
 `CadViewer` combines that port with `CadWorkspaceService.exports` (`ExportService`).
-Both are required to show Export. A host without a local-save capability, including
-the MCP host, omits the port. The XBF renderer publishes only displayed revision,
+Both are required to show Export. A host whose page cannot make a browser download
+omits the port: the MCP host has no HTTP origin (every request is a `cad_http` call), so
+it has no Export. The XBF renderer publishes only displayed revision,
 selection and joint values. `FileViewer.navbarActions` and `overlay` are named
 composition slots: the first is in the navbar's right group; the second is in the
 relative viewport below it. The generic FileViewer knows nothing about export jobs.

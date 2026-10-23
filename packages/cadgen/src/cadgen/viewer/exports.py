@@ -186,6 +186,12 @@ class ExportJobs(Jobs):
                 return self._submit(request_id, normalized)
             if sum(j.get("bytes", 0) for j in self.jobs.values() if j["state"] == "ready") >= MAX_RETAINED_BYTES:
                 raise ExportError("Export storage is full. Release a previous export first.", 429)
+            # A released, expired, failed or cancelled job holds no file: past the history bound
+            # it is forgotten (its request ID stays a tombstone), so the session keeps exporting.
+            for ident in [i for i, j in self.jobs.items() if j["state"] in TERMINAL and not j["directory"] and not j["readers"]]:
+                if len(self.jobs) < 128:
+                    break
+                self.jobs.pop(ident)
             self._start()
             spec["format"] = kind
             return self._submit(request_id, normalized, spec=spec, expiresAt=0, readers=0,
@@ -193,7 +199,8 @@ class ExportJobs(Jobs):
 
     def _perform(self, job, progress):
         _source, _expected, name = self._source(job["spec"])
-        filename = (re.sub(r"[^\w .-]", "_", name)[:100].strip(" .") or "export") + FORMATS[job["spec"]["format"]]
+        stem = (re.sub(r"[^\w .-]", "_", name)[:100].strip(" .") or "export") + ("-part" if job["spec"]["part"] else "")
+        filename = stem + FORMATS[job["spec"]["format"]]
         directory = Path(tempfile.mkdtemp(prefix="cadgen-download-", dir=self.root))
         with self.changed:
             job["directory"] = directory
@@ -218,6 +225,16 @@ class ExportJobs(Jobs):
     def _finished(self, job):
         if job["state"] != "ready":
             self._remove(job)
+
+    def close(self):
+        """The engine is stopping: no artifact outlives the process that manages it."""
+        with self.changed:
+            for job in self.jobs.values():
+                job["cancel"] = job["cancel"] or job["state"] not in TERMINAL
+                self._remove(job)
+                if job["state"] == "ready":
+                    self._change(job, state="expired", stage="Export expired")
+            self.changed.notify_all()
 
     def _remove(self, job):
         if job["directory"]:
@@ -275,8 +292,11 @@ class ExportJobs(Jobs):
                 if len(tail) == 2 and tail[1] == "file":
                     with self.artifact(tail[0]) as path:
                         from urllib.parse import quote
+                        # A plain browser download: every browser names it, the ASCII form for any
+                        # that ignores RFC 5987 (the page's link names it too, with `download`).
+                        plain = re.sub(r"[^ -~]", "_", path.name).replace('"', "_").replace("\\", "_")
                         return response.stream_file(path, path.stat(), "application/octet-stream", [
-                            ("content-disposition", "attachment; filename*=UTF-8''" + quote(path.name)),
+                            ("content-disposition", f'attachment; filename="{plain}"; filename*=UTF-8\'\'{quote(path.name)}'),
                             ("x-content-type-options", "nosniff")])
             raise ExportError("Export route not found.", 404)
         except (ValueError, OSError) as error:

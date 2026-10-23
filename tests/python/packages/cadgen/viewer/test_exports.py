@@ -92,6 +92,40 @@ class ExportsTest(unittest.TestCase):
         self.assertEqual(caught.exception.status, 410)
         self.assertEqual(len(self.calls), 1)
 
+    def test_engine_stop_removes_every_artifact_and_discards_running_work(self):
+        from cadgen.viewer.engine_app import EngineApp
+
+        self.finish.set()
+        ready = self.settled(self.jobs.create(self.request())["id"])
+        self.assertEqual(len(list(Path(self.tmp.name).iterdir())), 1)
+        self.finish.clear(); self.entered.clear()
+        running = self.jobs.create(self.request("two"))
+        self.assertTrue(self.entered.wait(10))
+        engine = SimpleNamespace(lock=threading.RLock(), pages={"page": SimpleNamespace(_exports=self.jobs)},
+                                 _default=SimpleNamespace(_exports=None), _mcp=None, analytics=Mock())
+        EngineApp.close(engine)
+        self.assertEqual(list(Path(self.tmp.name).iterdir()), [])
+        self.finish.set()
+        self.assertEqual(self.settled(running["id"])["state"], "cancelled")
+        self.assertEqual(list(Path(self.tmp.name).iterdir()), [])
+        with self.assertRaises(ExportError):
+            with self.jobs.artifact(ready["id"]):
+                pass
+
+    def test_a_long_session_keeps_exporting_and_forgotten_requests_never_regenerate(self):
+        self.finish.set()
+        first = self.request("first")
+        for index in range(130):
+            request = first if index == 0 else {**first, "requestId": f"request-{index:016d}"}
+            ident = self.jobs.create(request)["id"]
+            self.settled(ident)
+            self.jobs.release(ident)
+        self.assertLessEqual(len(self.jobs.jobs), 128)
+        with self.assertRaises(ExportError) as caught:
+            self.jobs.create(first)
+        self.assertEqual(caught.exception.status, 410)
+        self.assertEqual(len(self.calls), 130)
+
     def test_stale_epoch_closed_formats_and_nonfinite_pose_are_refused(self):
         for change in ({"epoch": "old"}, {"format": "cadz"}, {"format": []}, {"output": "/tmp/unasked"}):
             with self.assertRaises(ExportError):
@@ -110,6 +144,22 @@ class ExportsTest(unittest.TestCase):
         self.assertEqual(args[0].read_bytes(), b"model")
         self.assertIn("attachment;", dict(args[3])["content-disposition"])
         self.jobs.release(ident)
+
+    def test_plain_download_names_the_file_for_every_browser_and_serves_it_repeatedly(self):
+        self.finish.set()
+        self.jobs._source = lambda spec: ({}, {}, "ブラケット v2")
+        ident = self.jobs.create(self.request())["id"]
+        self.settled(ident)
+        for _ in range(2):  # a toast's Download again, or the browser's own retry
+            response = Mock()
+            self.jobs.handle(SimpleNamespace(path=f"/__cad/exports/{ident}/file", method="GET", query={}), response)
+            disposition = dict(response.stream_file.call_args.args[3])["content-disposition"]
+            self.assertEqual(disposition, "attachment; filename=\"_____ v2.step\"; filename*=UTF-8''%E3%83%96%E3%83%A9%E3%82%B1%E3%83%83%E3%83%88%20v2.step")
+        self.assertEqual(self.jobs.get(ident)["state"], "ready")
+        self.jobs.release(ident)
+        part = self.jobs.create({**self.request("two"), "source": {"doc": "d", "revision": "v", "part": "hinge/lid"}})
+        self.assertEqual(self.settled(part["id"])["filename"], "ブラケット v2-part.step")
+        self.jobs.release(part["id"])
 
 
 if __name__ == "__main__":

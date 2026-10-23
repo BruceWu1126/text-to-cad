@@ -685,7 +685,7 @@ explode are not geometry inputs. DXF requires a planar drawing; XBF refuses a po
 An existing whole XBF uses a separate original-byte download. There is no source bundle
 or CADZ in this interface.
 
-The enclosing distribution owns the HTTP queue, local save dialog and temporary
+The enclosing distribution owns the HTTP queue, the browser download and temporary
 artifact lifetime; the standalone engine owns inspection, revision validation and
 translation only. One explicit job names one temporary output, with no intermediate
 XBF. Cancellation takes effect between worker operations, discarding an in-flight
