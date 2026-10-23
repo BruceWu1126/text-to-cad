@@ -734,10 +734,10 @@ class Daemon:
     def document(self, ident: str) -> tuple[dict[str, Any], bytes]:
         """What an export of the document ``ident`` reads, and the bytes it carries: a model a live
         worker holds (``{"script", "function", "held"}``, read from that worker, never built); one
-        whose worker is gone but whose bytes the server holds (``{"document", "structure",
-        "shapes"}``, the shape bytes after it: the documents worker reads them, and no worker of its
-        script starts); a file this engine served (``{"path"}``). ``ValueError`` naming the command
-        that builds it again for any other: the engine runs nothing."""
+        whose worker is gone but whose whole document the server holds (``{"document", "name"}``,
+        its xbf bytes after it: the documents worker reads them as an on-disk xbf, and no worker of
+        its script starts); a file this engine served (``{"path"}``). ``ValueError`` naming the
+        command that builds it again for any other: the engine runs nothing."""
         self.models.prune()
         record = self.models.held(ident)
         server = self.server
@@ -745,20 +745,34 @@ class Daemon:
             worker = record["worker"]
             if worker is not None and self.pool.holds(worker):
                 return {"script": record["source"]["script"], "function": record["source"]["name"], "held": ident}, b""
-            with server.load_lock:
-                doc = server.served.get(ident)
-            if doc is not None:
-                keys = [prototype["key"] for prototype in doc.structure["prototypes"]]
-                data = [server.shape_of(doc, key) for key in keys]
-                lost = self.models.command(ident)
-                return {"document": ident, "structure": doc.structure, "rebuild": lost,
-                        "shapes": [[key, len(part)] for key, part in zip(keys, data)]}, b"".join(data)
+            held = self.held_document(ident)
+            if held is not None:
+                return held
         if server is not None:
             with server.load_lock:
                 path = server.files.get(ident)
             if path is not None:
                 return {"path": path}, b""
         raise ValueError(self.models.missing(ident))
+
+    def held_document(self, ident: str) -> tuple[dict[str, Any], bytes] | None:
+        """A model document the server holds whole and no worker does, as an export reads it: its
+        source and its xbf bytes. ``ValueError`` for one held for viewing alone (its worker exited
+        before it was drained), naming the command that builds it again. None when it is not held."""
+        server = self.server
+        if server is None:
+            return None
+        with server.load_lock:
+            doc = server.served.get(ident)
+        if doc is None:
+            return None
+        if doc.xbf is None:
+            with self.models.lock:
+                record = self.models.records.get(ident)
+            name = record["source"]["name"] if record else ident
+            raise ValueError(f"{name} ({ident}) is held for viewing only: its worker exited before the engine "
+                             f"took it whole; run `{self.models.command(ident)}` to build it again")
+        return {"document": ident, "name": doc.structure.get("name") or ident}, doc.xbf
 
     def _routed(self, request: dict[str, Any]) -> tuple[str, str | None]:
         """The worker a request goes to (its key) and the folder that worker starts in."""
@@ -799,7 +813,7 @@ class Daemon:
                             return
                     worker = self.lease(key, environment, cwd)
                     expected = request.get("expected") or {}
-                    if "modelRevision" in expected:
+                    if "modelRevision" in expected and "document" not in request["source"]:
                         # The lease excludes a rebuild: validate the generation here,
                         # including a rebuild that produced identical geometry.
                         with self.models.lock:
@@ -879,6 +893,29 @@ class Daemon:
                 send({"failed": str(error)})
                 return
             request = {**request, "source": source}
+        elif op == "export" and "modelRevision" in (request.get("expected") or {}):
+            # The viewer's export of a model: one whose worker is gone is read from the whole
+            # document the server holds, at the revision the page shows.
+            expected = request["expected"]
+            ident = document_id(expected.get("address") or "")
+            with self.models.lock:
+                record = self.models.records.get(ident)
+            if record is not None and not (record["worker"] is not None and self.pool.holds(record["worker"])):
+                try:
+                    held = self.held_document(ident)
+                except ValueError as error:
+                    send({"failed": str(error)})
+                    return
+                served = self.server.served.get(ident) if held is not None else None
+                if served is None:
+                    send({"failed": self.models.missing(ident)})
+                    return
+                if (f"{record['version']}-0" != expected["modelRevision"]
+                        or served.structure.get("exportRevision") != expected.get("digest")):
+                    send({"failed": "The source changed. Open Export again to use the displayed revision."})
+                    return
+                source, payload = held
+                request = {**request, "source": source}
         if op == "model_source":
             send({"ok": True, "source": self.models.resolve(request["address"])})
             return

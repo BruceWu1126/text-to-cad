@@ -141,8 +141,10 @@ class Models:
 
     def drain(self, worker: Any) -> None:
         """Before ``worker`` is retired: every ``pointer`` document of it the server does not hold
-        at its version is taken from it (its ``result``, never meshed), so it outlives the worker.
-        A worker that is gone (a crash) drains nothing: its documents the server lacks are evicted."""
+        whole at its version is taken from it -- its ``result``, never meshed, with the whole
+        document as xbf bytes (``document.to_bytes``) -- so it outlives the worker and answers every
+        verb as an on-disk xbf does. A worker that is gone (a crash) drains nothing: its documents
+        the server lacks are evicted."""
         server = self.daemon.server
         if server is None or not worker.alive():
             return
@@ -152,10 +154,10 @@ class Models:
             owed = [(ident, row["version"], row["address"]) for ident, row in self.records.items()
                     if row["worker"] is worker and row["store"] == "pointer"]
         for ident, version, address in owed:
-            if server.has(ident, version):
+            if server.has(ident, version, whole=True):
                 continue
             try:
-                structure, shapes = self.load(ident, worker)
+                structure, shapes, whole = self.load(ident, worker, whole=True)
             except WorkerGone:
                 return
             except (OSError, ValueError, KeyError):
@@ -164,7 +166,7 @@ class Models:
                 record = self.records.get(ident)
                 current = record is not None and record["version"] == version
             if current:  # a build of it since, by another worker, is newer
-                server.keep(ident, address, structure, shapes, version)
+                server.keep(ident, address, structure, shapes, version, whole)
 
     def resolve(self, address: str) -> dict[str, Any]:
         found = parse(address)
@@ -203,10 +205,11 @@ class Models:
                     raise ValueError(next((e for e in errors if e), f"model {address} did not build"))
         return self.register_page(ident), ident
 
-    def load(self, ident: str, leaving: Any = None) -> tuple[dict, dict[str, bytes]]:
+    def load(self, ident: str, leaving: Any = None, whole: bool = False) -> tuple:
         """A model document's structure and shape bytes, asked of the worker that holds it -- through
-        the pool, or of ``leaving``, a worker being retired (``drain``), directly. ``serve.NotHeld``
-        when no worker holds it: nothing is built to bring it back."""
+        the pool, or of ``leaving``, a worker being retired (``drain``), directly, and then
+        (``whole``) with the whole document's xbf bytes third. ``serve.NotHeld`` when no worker holds
+        it: nothing is built to bring it back."""
         with self.lock:
             record = self.records.get(ident)
             if record is None:
@@ -216,14 +219,14 @@ class Models:
         if worker is None or not worker.alive():
             raise self.not_held(ident)
         order = {"op": "result", "script": source["script"], "name": source["name"]}
-        if leaving is None and self.daemon.pool.holds(worker):
+        if leaving is None and not whole and self.daemon.pool.holds(worker):
             replies = []
             self.daemon.handle({**order, "env": worker.environment}, replies.append)
             answer = next((row for row in reversed(replies) if "done" in row or "failed" in row), {})
             payload = base64.b64decode(answer.get("payload", ""))
         else:
             # Out of the pool and still alive: being retired, and asked before it goes.
-            answer = worker.build({"id": 1, **order}, lambda _message: None)
+            answer = worker.build({"id": 1, **order, "whole": whole}, lambda _message: None)
             payload = answer.pop("payload", b"")
         if "failed" in answer:
             raise ValueError(answer["failed"])
@@ -234,8 +237,11 @@ class Models:
             at += size
         from cadgen.engine.export.viewer import fingerprint
 
-        return {**done["structure"], "exportRevision": fingerprint(done["structure"]), "path": address, "address": address,
-                "id": ident, "closure": done.get("closure"), "version": f"{version}-0"}, shapes
+        structure = {**done["structure"], "exportRevision": fingerprint(done["structure"]), "path": address,
+                     "address": address, "id": ident, "closure": done.get("closure"), "version": f"{version}-0"}
+        if whole:
+            return structure, shapes, payload[at:at + int(done.get("xbf") or 0)]
+        return structure, shapes
 
     def prune(self) -> None:
         """Each record whose worker is gone keeps its document, with no worker (``drain`` took it

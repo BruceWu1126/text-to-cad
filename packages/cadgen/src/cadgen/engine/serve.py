@@ -541,6 +541,9 @@ class Served:
     names: dict[str, str]
     patch: dict[str, Any] | None = None
     data: dict[str, bytes] = field(default_factory=dict)  # shape bytes made from live shapes
+    # A model's whole document, as the xbf bytes its worker made of it before it retired (the
+    # drain): what an export, a snapshot or an inspection of it reads once no worker holds it.
+    xbf: bytes | None = None
     _size: int | None = field(default=None, repr=False, compare=False)
 
     @property
@@ -550,11 +553,12 @@ class Served:
     @property
     def size(self) -> int:
         """The bytes it holds, as the memory budget counts them: its structure as JSON, its shape
-        bytes and the bytes made from its live shapes (a live shape itself is not counted)."""
+        bytes, the bytes made from its live shapes (a live shape itself is not counted) and its
+        whole document's xbf bytes."""
         if self._size is None:
             self._size = (len(json.dumps(self.structure, separators=(",", ":"), default=str))
                           + sum(len(shape) for shape in self.shapes.values() if isinstance(shape, (bytes, bytearray)))
-                          + sum(len(made) for made in self.data.values()))
+                          + sum(len(made) for made in self.data.values()) + len(self.xbf or b""))
         return self._size
 
     def shape_data(self, key: str) -> bytes | None:
@@ -782,20 +786,24 @@ class Server:
             self._grown(ident)
         return ident
 
-    def keep(self, ident: str, address: str, structure: dict[str, Any], shapes: dict[str, Any], version: int) -> None:
+    def keep(self, ident: str, address: str, structure: dict[str, Any], shapes: dict[str, Any], version: int,
+             xbf: bytes) -> None:
         """A model's document, version ``version``, held from now on whatever becomes of its worker
-        (the daemon's drain: ``models.Models.drain``)."""
+        (the daemon's drain: ``models.Models.drain``): its served structure and shapes, and the whole
+        document as ``xbf`` bytes. Evicted, both go."""
         lock = self.model_locks.setdefault(ident, threading.Lock())
         with lock:
             with self.load_lock:
-                self.put(address, structure, shapes, grow=False)
+                self.served[self.put(address, structure, shapes, grow=False)].xbf = xbf
                 self.model_versions[ident] = version
         self._grown()
 
-    def has(self, ident: str, version: int) -> bool:
-        """Whether a model's document is held at ``version``."""
+    def has(self, ident: str, version: int, whole: bool = False) -> bool:
+        """Whether a model's document is held at ``version`` (``whole``: with its xbf bytes)."""
         with self.load_lock:
-            return ident in self.served and self.model_versions.get(ident) == version
+            found = self.served.get(ident)
+            return (found is not None and self.model_versions.get(ident) == version
+                    and (not whole or found.xbf is not None))
 
     def holds(self, ident: str) -> bool:
         """Whether a document of this id is served, or registered to be (a live model's), or is a

@@ -516,12 +516,14 @@ evicts it ([models.py](models.py), [serve.py](serve.py)). Its state (`models.STA
 `cadgen status` lists):
 
 - `live`: a live worker holds it, with its memo and its trace.
-- `held`: its worker is gone and the daemon holds its structure and shape bytes. A page, `cadgen
-  inspect` and a snapshot read it from them; an export or a snapshot by its id goes to the
-  documents worker with those bytes (`Daemon.document`), so no worker of its script starts. What
-  made an element is null (law 7: provenance is the worker's). The mechanism and each assembly's
-  placement were the worker's too: a STEP or an xbf of a held document with kinematics is refused,
-  naming the command that builds it again, never written without them.
+- `held`: its worker is gone and the daemon holds it whole: its served structure and shape bytes,
+  and the document as the xbf bytes `@xbf` would write of it, mechanism and every assembly's
+  placement included. A page and `cadgen inspect` read the served structure; an export or a
+  snapshot by its id, and the viewer's export, go to the documents worker with the xbf bytes
+  (`Daemon.document`), which reads them as it reads an xbf on disk, so no worker of its script
+  starts. What made an element is null (law 7: provenance is the worker's). A document its worker
+  exited before draining, but that a page had opened, is held for viewing only: an export of it
+  names the command that builds it again.
 - `building`, `failed`: its build now, or its last one.
 - `evicted`: the daemon holds it no more -- memory evicted its bytes, or its worker crashed
   before it was drained.
@@ -534,14 +536,19 @@ the program that builds it again. Any other value is refused, naming the two.
 
 **Drain.** Before the pool stops a worker -- idle past `CADGEN_ENGINE_WORKER_IDLE`, the count cap's
 least recently used, replaced for another environment, over its memory cap -- the daemon asks it
-(the `result` request, nothing meshed) for every `pointer` document of it the server does not
-hold at its version (`Models.drain`), out of the pool, then closes its stdin. A worker over its
+(the `result` request with `whole`, nothing meshed) for every `pointer` document of it the server
+does not hold whole at its version (`Models.drain`), out of the pool, then closes its stdin. The
+worker serializes the document in memory (`document.to_bytes`: `TDocStd_Application.SaveAs` to a
+stream, the bytes `@xbf` writes), and the documents worker reads them in memory too
+(`document.read_bytes`: the application's stream read, overwriting into a document of its own).
+Nothing is written to disk. A worker over its
 memory cap no longer exits on its own: it answers, is drained, and is stopped. A worker that died
 drains nothing: its documents the server lacked are `evicted`.
 
 **One budget.** Everything the daemon holds is counted against one budget: each served
-document's structure (as JSON), its shape bytes and the bytes made from live shapes
-(`Served.size`), and every tessellation (`MeshCache`, which has no cap of its own in the daemon).
+document's structure (as JSON), its shape bytes, the bytes made from live shapes and a held
+document's xbf bytes (`Served.size`), and every tessellation (`MeshCache`, which has no cap of its
+own in the daemon). Evicting a document drops all of it.
 Bytes are counted as they are put, never sampled. Workers and render processes are processes of
 their own, held to their own memory cap. The budget is `CADGEN_ENGINE_MEMORY_MB`, else a quarter
 of the machine's physical memory (`serve.memory_budget`: macOS `hw.memsize`, Linux

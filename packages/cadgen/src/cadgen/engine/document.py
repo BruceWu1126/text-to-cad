@@ -1195,11 +1195,15 @@ class Loaded:
     ``.step``/``.stp`` through the XCAF reader. Its prototypes are its simple-shape labels,
     each once; its instances are every placement of one, through the assembly tree."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, doc: Any = None) -> None:
         self.path = Path(path).resolve()
-        stat = self.path.stat()
-        self.version = (stat.st_mtime_ns, stat.st_size)
-        self.doc = _read(self.path)
+        if doc is None:
+            stat = self.path.stat()
+            self.version = (stat.st_mtime_ns, stat.st_size)
+            self.doc = _read(self.path)
+        else:  # read already, from bytes (``read_bytes``): ``path`` names it, and no file is there
+            self.version = (0, 0)
+            self.doc = doc
         self.writer = _label_text(self.doc.Main(), WRITER_GUID)  # None for a file this engine did not write
         self.prototypes: list[Prototype] = []
         self.instances: list[Instance] = []
@@ -1472,6 +1476,44 @@ def _read(path: Path) -> Any:
         else:
             raise ValueError(f"not a document the engine reads: {path.name}")
     return doc
+
+
+def read_bytes(data: bytes) -> Any:
+    """An xbf's bytes read into a document, in memory: the application's stream read, overwriting
+    into a document made here (``PCDM_ReaderFilter.AppendMode_Overwrite``), since the document a
+    plain stream read makes is one OCP cannot hand back (``_new_document``)."""
+    import io
+
+    from OCP.PCDM import PCDM_ReaderFilter, PCDM_ReaderStatus
+
+    with _XCAF_LOCK:
+        doc = _new_document()
+        status = _application().Open(io.BytesIO(data), doc, PCDM_ReaderFilter(PCDM_ReaderFilter.AppendMode_Overwrite))
+    if status != PCDM_ReaderStatus.PCDM_RS_OK:
+        raise ValueError(f"cannot read the document's bytes: {status.name}")
+    return doc
+
+
+def to_bytes(doc: Any, shapes: Iterable[Any] | None = None) -> bytes:
+    """A document as the bytes ``save`` writes of it, in memory: the application's stream write
+    (which saves a document the application has opened: this one is, from now on), its parts'
+    ``shapes`` written as ``save`` writes them (``unchecked``), with the written date ``WRITTEN_DATE``."""
+    import io
+
+    from OCP.PCDM import PCDM_StoreStatus
+
+    stream = io.BytesIO()
+    with _XCAF_LOCK, unchecked(list(shapes) if shapes is not None else _free_shapes(doc)):
+        if not doc.IsOpened():
+            doc.Open(_application())
+        status = _application().SaveAs(doc, stream)
+    if status != PCDM_StoreStatus.PCDM_SS_OK:
+        raise OSError(f"could not write the document's bytes: {status}")
+    data = stream.getvalue()
+    found = _HEADER_DATE.search(data, 0, _INFO_BYTES)
+    if found is None:
+        raise OSError("the document's bytes have no BinXCAF creation date")
+    return data[:found.start(1)] + WRITTEN_DATE + data[found.end(1):]
 
 
 @functools.cache

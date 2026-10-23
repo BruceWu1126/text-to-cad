@@ -137,6 +137,28 @@ def {name}():
     return bd.Box(3, 2, 1)
 """
 
+HINGE = """
+import pathlib
+import build123d as bd
+from cadgen.engine import mechanism_state, model
+
+pathlib.Path(__file__).with_suffix(".ran").write_text("ran", encoding="utf-8")
+
+
+@model
+def {name}():
+    base = bd.Box(100, 60, 20)
+    base.label = "base"
+    arm = bd.Box(120, 20, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.MIN))
+    arm.label = "arm"
+    bd.RevoluteJoint("elbow", base, axis=bd.Axis((40, 0, 20), (0, 1, 0)), angular_range=(-10, 120))
+    bd.RigidJoint("mount", arm, bd.Location())
+    base.joints["elbow"].connect_to(arm.joints["mount"], angle=30)
+    root = bd.Compound(children=[base, arm], label="hinge")
+    mechanism_state(root, "raised", elbow=90)
+    return root
+"""
+
 CALLER = """
 import {name}
 
@@ -184,9 +206,9 @@ class LifetimeDaemonTest(unittest.TestCase):
         return await_(lambda: (lambda row: row if row.get("state") == state else None)(found()),
                       f"{ident} {state}") if state else found()
 
-    def built(self, name: str, store: str = "", env: dict | None = None) -> str:
+    def built(self, name: str, store: str = "", env: dict | None = None, script: str = SCRIPT) -> str:
         """``python caller_NAME.py`` builds model ``name`` of ``NAME.py``: its id, once its worker retired."""
-        (self.folder / f"{name}.py").write_text(textwrap.dedent(SCRIPT.format(name=name, store=store)), encoding="utf-8")
+        (self.folder / f"{name}.py").write_text(textwrap.dedent(script.format(name=name, store=store)), encoding="utf-8")
         caller = self.folder / f"caller_{name}.py"
         caller.write_text(textwrap.dedent(CALLER.format(name=name)), encoding="utf-8")
         done = engine_daemon.run([sys.executable, caller.name], cwd=self.folder, env=env or self.env)
@@ -221,6 +243,42 @@ class LifetimeDaemonTest(unittest.TestCase):
         again = engine_daemon.run([sys.executable, "caller_bracket.py"], cwd=self.folder, env=self.env)
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertEqual((self.row(ident)["version"], self.row(ident)["id"]), (2, ident))
+
+    def test_a_held_mechanism_exports_whole_from_the_hold(self) -> None:
+        from cadgen.engine import document
+        from tests.python.packages.cadgen.engine.test_kinematics import _arm_tip, _has_point, _vertices
+
+        ident = self.built("hinge", script=HINGE)
+        self.row(ident, "held")
+        out = {kind: self.folder / f"held.{kind}" for kind in ("xbf", "step")}
+
+        def export(destinations: list[Path], pose: str | None = None) -> None:
+            answer = self.ask({"op": "export", "source": {"id": ident}, "destinations": [str(p) for p in destinations],
+                               "pose": pose, "cwd": str(self.folder), "env": dict(os.environ)})
+            self.assertIn("done", answer, answer)
+
+        export(list(out.values()))
+        posed = self.folder / "raised.step"
+        export([posed], "raised")
+        held = document.Loaded(out["xbf"])
+        (pair,) = held.mechanism.pairs
+        self.assertEqual((pair.label, pair.kind, pair.limits), ("elbow", "revolute", ((-10.0, 120.0),)))
+        self.assertEqual((held.mechanism.as_built, held.mechanism.configurations),
+                         ({"elbow": (30.0,)}, {"raised": {"elbow": (90.0,)}}), "the xbf carries the mechanism")
+        self.assertTrue(_has_point(_vertices(document.Loaded(out["step"]), "arm"), _arm_tip(30)),
+                        "the STEP places the arm as built")
+        self.assertTrue(_has_point(_vertices(document.Loaded(posed), "arm"), _arm_tip(90)),
+                        "a pose of the held document is its mechanism's")
+        # The viewer's export of the page's revision reads the hold too.
+        _status, shown = self.page(ident)
+        viewed = self.folder / "viewed.xbf"
+        answer = self.ask({"op": "export", "source": {"script": str(self.folder / "hinge.py"), "function": "hinge"},
+                           "expected": {"address": f"{self.folder / 'hinge.py'}::hinge", "digest": shown["exportRevision"],
+                                        "modelRevision": shown["version"]}, "destinations": [str(viewed)]})
+        self.assertIn("done", answer, answer)
+        self.assertIsNotNone(document.Loaded(viewed).mechanism)
+        self.assertEqual([Path(w["script"]).name for w in self.ask({"op": "status"})["workers"]], ["documents"])
+        self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
 
     def test_an_evicted_and_an_expired_document_name_their_rebuild_and_nothing_runs_it(self) -> None:
         tiny = {**self.env, "CADGEN_ENGINE_MEMORY_MB": "0.001"}  # every document is evicted once drained

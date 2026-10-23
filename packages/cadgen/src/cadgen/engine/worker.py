@@ -43,9 +43,10 @@ closes its stdin. The daemon starts a fresh one for the next build, a restart: a
 xbf holds its closure unchanged is taken in seconds.
 
 A request may carry bytes after its line (``{"bytes": N}``, the frame's form): an export of a
-document the daemon holds and no worker does (``{"document", "structure", "shapes"}``: its shape
-bytes, ``[key, size]`` each, in order) reads them in place of a file, so the documents worker
-exports, inspects and draws it with no worker of its script started.
+document the daemon holds and no worker does (``{"document", "name"}``: the whole document's xbf
+bytes, which its worker made of it before it retired: a ``result`` request with ``whole``) reads
+them as an on-disk xbf, so the documents worker exports, inspects and draws it, kinematics and
+all, with no worker of its script started.
 
 A build runs with the cyclic collector off, and the worker collects once it is idle: the memo
 keeps every live result of the last builds, millions of objects, and a full collection walks
@@ -298,7 +299,7 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
     source_spec = request["source"]
     built: list[dict[str, Any]] = []
     if "document" in source_spec:
-        source = _held_source(source_spec, request.get("payload") or b"", request.get("destinations") or [])
+        source = _held_source(request.get("payload") or b"", str(source_spec.get("name") or "document"))
     elif (request.get("expected") or source_spec.get("held")) and "script" in source_spec:
         source = engine_build.held(Path(source_spec["script"]), source_spec.get("function"))
         if source is None:
@@ -333,7 +334,8 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
             log(f"read {path.name} in {time.perf_counter() - clock:.2f}s")
     if request.get("expected"):
         from cadgen.engine.export.viewer import check, options
-        check(source, request["expected"])
+        if "document" not in source_spec:  # a held document's revision the daemon checked
+            check(source, request["expected"])
         if request.get("inspect"):
             return {"reports": [], "files": [], "formats": options(source, pose=request.get("pose"), part=request.get("part"), original_allowed="version" in request["expected"])}
     files = []
@@ -372,23 +374,19 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
     return {"reports": built, "files": files, "drawn": drawn}
 
 
-def _held_source(spec: dict[str, Any], payload: bytes, destinations: list[str]) -> Any:
-    """A document the daemon holds and no worker does, as an ``export.Source``: its structure and
-    each part's shape bytes, as served. The mechanism and the placement of each assembly lived in
-    the worker that built it: a STEP or an xbf of a document with kinematics is refused, naming the
-    command that builds it again, rather than written without them."""
-    from cadgen.engine import export
+def _held_source(payload: bytes, name: str) -> Any:
+    """A document the daemon holds and no worker does -- the xbf bytes its worker made of it before
+    it retired (``models.Models.drain``) -- as an ``export.Source``, read in memory as an on-disk xbf
+    is (``document.read_bytes``): its mechanism and its assemblies' placements with it, named as the
+    document is (``name``). The source has no path: it is no file."""
+    from cadgen.engine import document, export
 
-    shapes, at = {}, 0
-    for key, size in spec["shapes"]:
-        shapes[key] = payload[at:at + size]
-        at += size
-    structure = spec["structure"]
-    if structure.get("kinematics") and any(Path(path).suffix.lower() in (".step", ".stp", ".xbf")
-                                           for path in destinations):
-        raise export.ExportRefused(f"{structure.get('name')}'s mechanism is held by the worker that built it, "
-                                   f"which has retired: run `{spec.get('rebuild')}` to export it with its kinematics")
-    return export.Source(structure, shapes, live=False)
+    stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in name).strip(".") or "document"
+    loaded = document.Loaded(Path(tempfile.gettempdir()) / f"{stem}.xbf", document.read_bytes(payload))
+    structure = {**loaded.structure(), "path": ""}
+    return export.Source(structure, {p.key: p.shape for p in loaded.prototypes}, live=False,
+                         xcaf=loaded.doc, world=lambda occurrence: loaded.worlds.get(occurrence),
+                         mechanism=loaded.mechanism, foreign=False, path=None)
 
 
 def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
@@ -404,9 +402,18 @@ def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     from cadgen.engine import previous
 
     _writer, closure = previous.read_record(source.xcaf)
-    return {"structure": source.structure, "closure": json.loads(closure) if closure else None,
-            "shapes": [[key, len(part)] for key, part in zip(keys, data)]}, \
-        b"".join(data)
+    answer = {"structure": source.structure, "closure": json.loads(closure) if closure else None,
+              "shapes": [[key, len(part)] for key, part in zip(keys, data)]}
+    if request.get("whole"):
+        # The drain's: the whole document as the xbf bytes ``@xbf`` writes, after the shapes.
+        from cadgen.engine import document
+
+        whole = document.to_bytes(source.xcaf, source.shapes.values())
+        answer["xbf"] = len(whole)
+        data.append(whole)
+    return answer, b"".join(data)
+
+
 
 
 def main() -> int:
