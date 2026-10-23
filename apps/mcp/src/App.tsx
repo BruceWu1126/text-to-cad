@@ -84,9 +84,11 @@ function Frame({ bridge, context, insets, inline = false, floatingComposer = fal
  * Corner brackets, the host's own way to full size.
  */
 function FullSizeButton({ bridge }: { bridge: Bridge }) {
+  const { t } = useI18n();
+  const label = t('navbar.fullSize');
   const expand = () => void bridge.request('ui/request-display-mode', { mode: 'fullscreen' }).catch(() => {});
-  return <TooltipHint content="Full size">
-    <Button variant="ghost" size="icon-xs" className="size-6 text-muted-foreground hover:text-foreground" aria-label="Full size" onClick={expand}>
+  return <TooltipHint content={label}>
+    <Button variant="ghost" size="icon-xs" className="size-6 text-muted-foreground hover:text-foreground" aria-label={label} onClick={expand}>
       <Maximize className="size-3.5" aria-hidden="true" />
     </Button>
   </TooltipHint>;

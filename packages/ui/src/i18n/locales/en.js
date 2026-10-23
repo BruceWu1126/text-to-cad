@@ -58,6 +58,7 @@ export default {
   "navbar.back": "Back",
   "navbar.forward": "Forward",
   "navbar.fileActions": "File actions",
+  "navbar.fullSize": "Full size",
   "navbar.openInBrowser": "Open in browser",
 
   // The ⋯ menu's actions on the file.
