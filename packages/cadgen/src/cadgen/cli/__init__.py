@@ -3,7 +3,7 @@
 Every subcommand is also reachable as ``python -m cadgen.<module>``; this is the friendly
 front door, not a second implementation. A subcommand's parser lives in its own module and
 owns its arguments, so the console and module entry points cannot drift. The engine's verbs
-(``export``, ``snapshot``, ``serve``, ``inspect``, ``status``, ``stop``, ``daemon``) are
+(``export``, ``snapshot``, ``serve``, ``inspect``, ``status``, ``stop``, ``server``) are
 ``cadgen.engine.cli``'s, each run by its name; the robot validators' parsers are DERIVED from
 the verb function's signature (``cadgen._internal.cli_from_function``).
 
@@ -30,14 +30,14 @@ import sys
 #
 # A model script builds by running it (``python <model>.py``): no command takes its place.
 _COMMANDS: dict[str, tuple[str, str]] = {
-    # The engine (cadgen.engine): documents exported, drawn and served, its daemon.
+    # The engine (cadgen.engine): documents exported, drawn and served, its server.
     "export": ("cadgen.cli.export", "write an .xbf or a .step to STEP, GLB, STL, 3MF, DXF or xbf"),
     "snapshot": ("cadgen.cli.snapshot", "render any supported file to an image"),
     "serve": ("cadgen.cli.serve", "serve a document over HTTP and print its URL"),
     "inspect": ("cadgen.cli.inspect", "an xbf's build closure, or what made one element of it"),
-    "status": ("cadgen.cli.status", "show the engine daemon's workers and what it serves"),
-    "stop": ("cadgen.cli.stop", "stop the engine daemon"),
-    "daemon": ("cadgen.cli.daemon", "run the engine daemon in this process"),
+    "status": ("cadgen.cli.status", "show the engine server's workers and what it serves"),
+    "stop": ("cadgen.cli.stop", "stop the engine server"),
+    "server": ("cadgen.cli.server", "run the engine server in this process"),
     # DXF and robot descriptions: each format's snapshot draws its own files alone (the engine's
     # snapshot), and the robot validators check a description.
     "dxf snapshot": ("cadgen.cli.dxf_snapshot", "render a DXF to an image"),
@@ -235,8 +235,8 @@ def _report(error: Exception) -> None:
 
 
 # Commands that never carry the analytics notice: a CAD app's server, whose output only the host's log
-# reads; the engine's daemon, writing nowhere; and `telemetry`, which says it its own way.
-_UNTOLD = frozenset({"mcp", "daemon", "telemetry"})
+# reads; the engine's server, writing nowhere; and `telemetry`, which says it its own way.
+_UNTOLD = frozenset({"mcp", "server", "telemetry"})
 
 
 def _tell() -> None:

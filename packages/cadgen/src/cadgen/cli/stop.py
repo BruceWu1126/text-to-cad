@@ -1,4 +1,4 @@
-"""``cadgen stop``: the engine daemon stopped, and gone (``cadgen.engine.cli``).
+"""``cadgen stop``: the engine server stopped, and gone (``cadgen.engine.cli``).
 
 The parser and the run are the engine's (``cadgen.engine.cli.parser_for``, ``run``), the same
 verb ``python -m cadgen.engine stop`` takes.

@@ -37,7 +37,7 @@ python src/bracket.py
   builds that model and its children, writes its declared outputs, and returns.
   Keep executable calls under `if __name__ == "__main__":` so imports are safe.
   Watchers never change which calls execute. The engine consumes no script
-  arguments; engine switches are environment variables ([the daemon](#the-daemon)).
+  arguments; engine switches are environment variables ([the engine server](#the-engine-server)).
 - **A script is plain Python, loaded afresh by each build.** Its folder is first on
   the module search path, so a module beside it imports by its own name. A script
   inside a package (its folder holds an `__init__.py`) is that package's module, so
@@ -336,13 +336,13 @@ build, and the files it `reads`), `timings`, `files` and `child_models`:
 python -c "import bracket; print(bracket.bracket.build().models[0]['retention'])"
 ```
 
-## The daemon
+## The engine server
 
-One daemon per installation, started by the first build and gone after an idle
+One engine server (a daemon) per installation, started by the first build and gone after an idle
 hour. It keeps a warm worker per model script, each with its own memo, and builds of different scripts run at once.
 
 - `cadgen status` lists the workers: each one's script, builds, memory and what it
-  is building now (`--json` as data). `cadgen stop` stops the daemon and its
+  is building now (`--json` as data). `cadgen stop` stops the server and its
   workers.
 - At most `CADGEN_ENGINE_WORKERS` workers live (default: the machine's cores); at
   the cap the least recently used idle one is retired. A worker idle for

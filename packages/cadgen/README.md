@@ -50,7 +50,7 @@ the two disagree, the engine's README is right.
 
 | Document | What it is for | Go there when |
 |---|---|---|
-| [`src/cadgen/engine/README.md`](src/cadgen/engine/README.md) | The engine: models and decorators, the daemon and its workers, progress, the viewer and the snapshot, exports, kinematics, couplings and configuration sequences, materials, imports, placements, the mesh and its wire format, element names, references, body retention, memo functions and the build closure | changing anything a build, an export, a snapshot or a served document does |
+| [`src/cadgen/engine/README.md`](src/cadgen/engine/README.md) | The engine: models and decorators, the engine server and its workers, progress, the viewer and the snapshot, exports, kinematics, couplings and configuration sequences, materials, imports, placements, the mesh and its wire format, element names, references, body retention, memo functions and the build closure | changing anything a build, an export, a snapshot or a served document does |
 
 ## The design laws
 
@@ -172,7 +172,7 @@ Laws 1 to 13 and 19 to 21 are the engine's; 14 to 18 hold for the whole package.
     sync protects the worker that built it from idle retirement. The engine outlives its
     clients; a page closing never stops a worker. The worker-count cap never retires a worker
     whose document a page watches; it is exceeded instead. The memory cap may retire it (the
-    engine's **Architecture** and **The daemon and its workers**).
+    engine's **Architecture** and **The engine server and its workers**).
 
 20. **One engine serves the installation; tabs select documents at `/<uuid>`.** A tab names
     a model's id, or a file's id after a launcher registers it; Python scripts are never
@@ -238,7 +238,7 @@ src/cadgen/
                          #   and its verbs as functions (build, export, snapshot, serve,
                          #   inspect, status, stop, daemon), every name loaded on first use;
                          #   the font guard and the kernel-import recorder, installed first
-  engine/                # the engine: models, the daemon and its workers, documents,
+  engine/                # the engine: models, the server and its workers, documents,
                          #   exports, the mesh, references, the OCCT stills (its README)
   cli/                   # the `cadgen` command: a module per command, each a shell over
                          #   the function or parser that does the work
@@ -284,7 +284,7 @@ src/cadgen/
 ```
 
 Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and
-`daemon` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
+`server` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
 snapshot for those files alone; `cadgen urdf|sdf|srdf validate` the validators; `cadgen
 doctor` the installation and a skill's pin; `cadgen viewer` the engine page launcher;
 `cadgen mcp` the stateless proxy an agent host starts; and `cadgen telemetry` the person's answer. A

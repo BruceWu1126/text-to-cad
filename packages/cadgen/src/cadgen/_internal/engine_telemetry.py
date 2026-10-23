@@ -40,7 +40,7 @@ from typing import Any
 # Python caller.
 command: str | None = None
 # Commands that serve others and count their own work: a verb one asks for is a view's, not a build.
-SERVERS = frozenset({"viewer", "mcp", "daemon"})
+SERVERS = frozenset({"viewer", "mcp", "server"})
 API = "cadgen.engine.api"
 # An engine kind as telemetry names a format (``analytics.KINDS``); a model's document is an xbf.
 KINDS = {"xbf": "xbf", "step": "step", "glb": "glb", "stl": "stl", "threemf": "3mf", "dxf": "dxf", "urdf": "urdf",

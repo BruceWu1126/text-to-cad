@@ -67,7 +67,7 @@ def connect(*, start: bool = True, timeout: float = 60.0) -> socket.socket | Non
             # left at once: start another once the lock is free.
             _start()
             started = time.monotonic()
-    raise ConnectionError("the engine daemon did not start")
+    raise ConnectionError("the engine server did not start")
 
 
 def wait_gone(timeout: float = 60.0) -> bool:
@@ -112,4 +112,4 @@ def request(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] = 
                     on_progress(answer["progress"])
                 continue
             return answer
-    raise ConnectionError("the engine daemon closed the connection")
+    raise ConnectionError("the engine server closed the connection")

@@ -82,8 +82,9 @@ The document is what the viewer follows build by build, what refs and
 | `cadgen where`, `cadgen.where()` | `cadgen inspect`, `cadgen.inspect()`; existing files or live models only, never an implicit build |
 | `cadgen store why`, `store where`, `store forget`, `store gc`, `store info` | none: no store. `cadgen inspect DOC` prints a document's build closure, `cadgen inspect DOC REF` what made an element |
 | `cadgen daemon status` | `cadgen status` (and `cadgen stop`) |
+| `cadgen daemon` | `cadgen server` |
 | `cadgen serve DOC --foreground` | `cadgen serve DOC`: start or reuse the installation's server, print its URL, and exit |
-| `CADGEN_CACHE_DIR`, `CADGEN_STORE_MAX`, `CADGEN_DAEMON_STATE_DIR` | none; `CADGEN_ENGINE_DIR` moves the engine daemon's socket |
+| `CADGEN_CACHE_DIR`, `CADGEN_STORE_MAX`, `CADGEN_DAEMON_STATE_DIR` | none; `CADGEN_ENGINE_DIR` moves the engine server's socket |
 | `read_scene(path).resolve(ref).shape()` | `select(path, ref)[0]` |
 | `cadgen.revolute`, `slider`, `cylindrical`, `fastened`, `MateTarget`, `AssemblyHelper` | build123d joints in the body |
 | `cadgen.couple(name, {dof: ratio}, limits=...)` | `gear_pair`, `rack_and_pinion_pair` or `screw_pair(assembly, name, **ratios)`, by the joints' kinds, ranged by their limits |

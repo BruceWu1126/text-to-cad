@@ -73,7 +73,7 @@ ADAPTERS: dict[str, frozenset[str]] = {
     "inspect": frozenset({"document", "ref", "query"}),
     "status": frozenset({"json"}),
     "stop": frozenset(),
-    "daemon": frozenset(),
+    "server": frozenset(),
 }
 
 # Commands that own their parser outright and mirror no function.
@@ -134,10 +134,10 @@ class Manifest(unittest.TestCase):
         # No backwards compatibility: a retired command has no entry and no module, so it gets the
         # same answer as any unknown command.
         for command in ("build", "step build", "step compile", "step snapshot", "stl build", "stl snapshot", "3mf build",
-                        "3mf snapshot", "glb build", "glb snapshot", "store", "daemon status", "xbf", "where"):
+                        "3mf snapshot", "glb build", "glb snapshot", "store", "daemon", "daemon status", "xbf", "where"):
             self.assertNotIn(command, cli._COMMANDS)
         for module in ("cadgen.cli.build", "cadgen.engine.shape_input", "cadgen.cli.step_build", "cadgen.cli.step_snapshot", "cadgen.cli.stl_build",
-                       "cadgen.cli.where", "cadgen.cli.store", "cadgen.cli.daemon_status", "cadgen.step", "cadgen.store", "cadgen.daemon"):
+                       "cadgen.cli.where", "cadgen.cli.store", "cadgen.cli.daemon", "cadgen.cli.daemon_status", "cadgen.step", "cadgen.store", "cadgen.daemon"):
             with self.subTest(module=module), self.assertRaises(ModuleNotFoundError):
                 importlib.import_module(module)
 
@@ -189,7 +189,7 @@ class Manifest(unittest.TestCase):
 
     def test_the_engines_verbs_are_commands_of_their_own(self):
         # One parser per verb, the engine's (cadgen.engine.cli), named by the command that runs it.
-        for verb in ("export", "snapshot", "serve", "inspect", "status", "stop", "daemon"):
+        for verb in ("export", "snapshot", "serve", "inspect", "status", "stop", "server"):
             with self.subTest(verb=verb):
                 module = importlib.import_module(cli._COMMANDS[verb][0])
                 self.assertEqual(module.build_parser().prog, f"cadgen {verb}")

@@ -148,7 +148,7 @@ restarting an engine you own, then rerunning the launcher. Vite handles client H
 - **Warm work survives navigation.** The app retains one client across navigation, so the
   caches keyed to its resources stay valid across file switches. The cadgen engine holds
   every document it served, a STEP's read held by its bytes, so reopening one reads and
-  meshes nothing again while its daemon lives.
+  meshes nothing again while its engine server lives.
   Inactive WebGL scenes are released, and a file's view (its camera, Display
   settings and pose) lasts only while it is the file on screen: a refresh brings it
   back, and leaving the file drops it.

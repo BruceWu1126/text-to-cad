@@ -1,7 +1,7 @@
-"""``cadgen daemon``: the engine daemon, run in this process (``cadgen.engine.cli``).
+"""``cadgen server``: the engine server, run in this process (``cadgen.engine.cli``).
 
 The parser and the run are the engine's (``cadgen.engine.cli.parser_for``, ``run``), the same
-verb ``python -m cadgen.engine daemon`` takes.
+verb ``python -m cadgen.engine server`` takes.
 """
 
 from __future__ import annotations
@@ -9,8 +9,8 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
-DEFAULT_PROG = "cadgen daemon"
-ENGINE_VERB = "daemon"
+DEFAULT_PROG = "cadgen server"
+ENGINE_VERB = "server"
 
 
 def build_parser(prog: str = DEFAULT_PROG) -> argparse.ArgumentParser:
