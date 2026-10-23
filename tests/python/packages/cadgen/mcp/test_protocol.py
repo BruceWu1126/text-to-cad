@@ -136,5 +136,22 @@ class ClaimStdoutTest(unittest.TestCase):
         self.assertIn(b"child", done.stderr)
 
 
+class ClaimStdinTest(unittest.TestCase):
+    def test_requests_arrive_on_their_own_handle_and_standard_input_is_null(self) -> None:
+        import subprocess
+        import sys
+
+        script = (
+            "import os,sys\n"
+            "from cadgen.mcp.protocol import claim_stdin\n"
+            "requests = claim_stdin()\n"
+            "null = os.stat(os.devnull)\n"
+            "zero = os.fstat(0)\n"
+            "print((zero.st_dev, zero.st_ino) == (null.st_dev, null.st_ino) if os.name != 'nt' else True, sys.stdin.read() == '')\n"
+            "print(requests.readline().decode().strip())\n"
+        )
+        done = subprocess.run([sys.executable, "-c", script], input=b'{"id":1}\n', capture_output=True, timeout=60)
+        self.assertEqual(done.stdout.decode().split(), ["True", "True", '{"id":1}'], done.stderr)
+
 if __name__ == "__main__":
     unittest.main()

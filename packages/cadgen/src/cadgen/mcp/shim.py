@@ -13,7 +13,7 @@ import sys
 import threading
 
 from cadgen.viewer.engine_client import EngineClient
-from .protocol import Connection, RequestContext, RpcError, claim_stdout
+from .protocol import Connection, RequestContext, RpcError, claim_stdin, claim_stdout
 
 LOG = logging.getLogger('cadgen.mcp')
 
@@ -146,11 +146,12 @@ class Proxy:
 def serve(argv=None):
     logging.basicConfig(stream=sys.stderr, level=logging.INFO, format='cadgen mcp: %(message)s')
     output = claim_stdout()
+    requests = claim_stdin()
     from cadgen._internal.channel import remember
     remembering = threading.Thread(target=remember, daemon=True)
     remembering.start()
     proxy = Proxy()
-    connection = Connection(sys.stdin.buffer, output, proxy.handle, workers=64, notification=proxy.notify)
+    connection = Connection(requests, output, proxy.handle, workers=64, notification=proxy.notify)
     try:
         connection.serve()
     finally:

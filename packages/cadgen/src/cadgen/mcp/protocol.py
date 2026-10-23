@@ -72,6 +72,21 @@ def claim_stdout() -> BinaryIO:
     return os.fdopen(protocol_fd, "wb", buffering=0)
 
 
+def claim_stdin() -> BinaryIO:
+    """Return the host's requests on a handle of their own; point fd 0 at the null device.
+
+    On Windows a thread blocked reading a pipe holds every other call on that pipe --
+    GetFileType, which a DLL's C runtime asks of the standard handles as it loads -- so a
+    request thread loading one would wait for the host's next message (the engine worker's
+    deadlock, ``cadgen.engine.worker``). Nothing but the reader touches the request pipe."""
+    requests = os.fdopen(os.dup(0), "rb")
+    null = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(null, 0)
+    os.close(null)
+    sys.stdin = open(os.devnull, encoding="utf-8")  # noqa: SIM115 - standard input, for the process's life
+    return requests
+
+
 class Connection:
     """One peer: reads frames from ``reader``, writes frames to ``writer``."""
 
