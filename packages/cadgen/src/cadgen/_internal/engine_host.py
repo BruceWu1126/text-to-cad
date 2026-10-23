@@ -1,7 +1,8 @@
 """Attach cadgen's applications to the standalone engine through its host factory.
 
 The engine imports only itself. The distribution supplies the HTTP application and its
-launcher when the engine's client/daemon modules are imported; model workers load neither app.
+launcher when the engine's client/daemon modules are imported, and what the daemon runs once
+it holds its lock (the sweep of cadgen 0.7's store); model workers load neither app.
 """
 from __future__ import annotations
 
@@ -20,11 +21,19 @@ def http_factory(server, host, port):
     return CadHTTPServer((host, port), make_handler_class(app), app)
 
 
+def on_start():
+    """The daemon holds its lock: cadgen 0.7's store goes, on a thread of its own."""
+    from cadgen._internal.legacy_store import start
+
+    return start()
+
+
 def _attach(module):
     if module.__name__ == "cadgen.engine.client":
         module.DAEMON_MODULE = "cadgen._internal.engine_daemon"
     else:
         module.HTTP_FACTORY = http_factory
+        module.ON_START = on_start
 
 
 class _Loader:

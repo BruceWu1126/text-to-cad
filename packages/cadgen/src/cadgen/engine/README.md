@@ -197,7 +197,8 @@ A Python shape build sends plain metadata and binary geometry encoded as JSON (`
 only the worker reconstructs it, then calls the same writer as a source build.
 Every successful build registers a lightweight document address and URL; registration does not mesh it.
 A model's worker is a separate process, holding its memo and live kernel objects.
-The distribution injects its HTTP application through `daemon.HTTP_FACTORY`; this
+The distribution injects its HTTP application through `daemon.HTTP_FACTORY`, and what the
+daemon runs once it holds its lock through `daemon.ON_START`; this
 standalone engine imports no application module. The application serves the built
 viewer and per-launch catalog sessions on that listener. Document routes run in
 process, with no network relay. Kernel reads, topology, poses and meshes run in

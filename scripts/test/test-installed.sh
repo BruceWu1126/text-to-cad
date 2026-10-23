@@ -65,7 +65,7 @@ DIST="$WORK/dist"
 mkdir -p "$EMPTY" "$DIST"
 # The builds below run on the engine's daemon, as every build does: this run's own, in a private
 # folder, stopped on the way out -- and gone by itself after two idle minutes if it is not.
-export CADGEN_ENGINE_DIR="$WORK/engine" CADGEN_ENGINE_IDLE=120
+export CADGEN_ENGINE_DIR="$WORK/engine" CADGEN_ENGINE_IDLE=120 CADGEN_CACHE_DIR="$WORK/no-0.7-store"
 cleanup() {
   # The installed cadgen stops the daemon its builds started.
   if [ -x "$VENV/bin/python" ]; then

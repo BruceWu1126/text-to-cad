@@ -48,10 +48,11 @@ from typing import Any, Callable
 
 from cadgen.engine.atomic_replace import replace_atomic
 
-__all__ = ["IDLE_SECONDS", "Pool", "lock", "lock_path", "main", "socket_path", "state_dir", "worker_cap",
+__all__ = ["IDLE_SECONDS", "ON_START", "Pool", "lock", "lock_path", "main", "socket_path", "state_dir", "worker_cap",
            "worker_idle"]
 
 HTTP_FACTORY = None  # optional application supplied by the enclosing distribution
+ON_START = None  # optional callable the enclosing distribution runs once this process is the daemon
 
 IDLE_SECONDS = 3600.0
 PROTOCOL = 2
@@ -1002,6 +1003,11 @@ def main(argv: list[str] | None = None) -> int:
         replace_atomic(temporary, port_path())
     server.settimeout(0.5)
     threading.Thread(target=daemon.watch, daemon=True).start()
+    if ON_START is not None:
+        try:
+            ON_START()
+        except Exception:  # noqa: BLE001 -- the distribution's work never stops the daemon
+            pass
     try:
         while not daemon.stopping.is_set():
             try:

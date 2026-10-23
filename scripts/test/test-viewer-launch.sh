@@ -74,7 +74,8 @@ from playwright.sync_api import sync_playwright
 with tempfile.TemporaryDirectory(prefix="cv-") as temporary:
     root = Path(temporary)
     env = {**os.environ, "CADGEN_ENGINE_DIR": str(root / "engine"),
-           "CADGEN_STATE_DIR": str(root / "state"), "CADGEN_ENGINE_MESH": "inline"}
+           "CADGEN_STATE_DIR": str(root / "state"), "CADGEN_ENGINE_MESH": "inline",
+           "CADGEN_CACHE_DIR": str(root / "no-0.7-store")}
     def launch(*options):
         result = subprocess.run([sys.executable, "-m", "cadgen.viewer", "--json", *options],
                                 cwd=root, env=env, capture_output=True, text=True, timeout=120)
