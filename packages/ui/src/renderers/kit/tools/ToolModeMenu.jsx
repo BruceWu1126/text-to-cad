@@ -5,10 +5,11 @@ import { FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 import { TOOL_PANEL_BUTTON_CLASS } from "./ToolPanel.jsx";
 import { useStripTouch } from "./stripTouch.js";
 
-// The strip's chevron: a small button of its own after its tool's, lit by its own hover and while
-// its menu is open, never with the tool. As tall as the strip's 24px tile and touching it, so the
-// strip's own gap is the only space before the next tool, as between any two.
-const CHEVRON_CLASS = "grid h-6 w-3 shrink-0 place-items-center rounded-sm text-sidebar-foreground/70 outline-none transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-50 aria-expanded:bg-sidebar-accent aria-expanded:text-sidebar-accent-foreground";
+// The strip's chevron: the second half of its tool's control (`FloatingToolBar.js` draws the two under
+// one fill), as tall as the strip's 24px tile and touching it, so the strip's own gap is the only
+// space before the next tool, as between any two. Over the pair's fill it only brightens, on its own
+// hover and while its menu is open, with no line between the halves.
+const CHEVRON_CLASS = "grid h-6 w-3 shrink-0 place-items-center rounded-l-none rounded-r-sm text-sidebar-foreground/70 outline-none transition group-hover/split:text-sidebar-accent-foreground hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-50 aria-expanded:bg-foreground/10 aria-expanded:text-sidebar-accent-foreground";
 
 /**
  * A tool's settings: a button and the ordinary dropdown it opens with whatever the tool offers
@@ -26,7 +27,7 @@ export function ToolSettingsMenu({ label, triggerLabel = label, disabled = false
   return <DropdownMenu modal={false} onOpenChange={onOpenChange}>
     <DropdownMenuTrigger asChild>
       <button type="button" aria-label={triggerLabel} disabled={disabled} {...triggerProps}
-        className={chevron ? cn(CHEVRON_CLASS, touch && "h-9 w-5 rounded-md")
+        className={chevron ? cn(CHEVRON_CLASS, touch && "h-9 w-5 rounded-r-md")
           : cn(TOOL_PANEL_BUTTON_CLASS, "disabled:pointer-events-none disabled:opacity-50 aria-expanded:bg-accent aria-expanded:text-foreground")}>
         {chevron ? <ChevronDown className={cn("shrink-0", touch ? "size-3" : "size-2")} strokeWidth={3} aria-hidden="true" /> : <SlidersHorizontal className="size-3" aria-hidden="true" />}
       </button>

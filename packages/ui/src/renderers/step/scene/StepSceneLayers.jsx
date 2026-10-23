@@ -52,7 +52,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
   const hover = useViewerHover(surfaceProps.hoverStore, surfaceProps.resolveHover);
   const props = { ...surfaceProps, hoveredPartId: hover.hoveredPartId, hoveredReferenceId: hover.hoveredReferenceId };
   const {
-    meshData, modelKey, isLoading, renderMode, preview = false, pickMode, hiddenPartIds, selectedPartIds,
+    meshData, modelKey, isLoading, renderMode, preview = false, pickMode, measureSnaps, hiddenPartIds, selectedPartIds,
     hoveredPartId, selectorRuntime, stepParameterRuntime, stepAnimationRuntime, animateMode,
     jointHandles, measureState, activeMeasurementId, selectedMeasurementIds = [], hoveredMeasurementId = "", measureModeActive,
     onLodCameraChange, onMeshSourceAdoption, onViewerAlertChange,
@@ -190,7 +190,8 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
     normalizedClipSettings.axis,
     normalizedClipSettings.enabled,
     normalizedClipSettings.invert,
-    normalizedClipSettings.offset
+    normalizedClipSettings.at,
+    normalizedClipSettings.partColors
   ]);
 
   const refs = {
@@ -225,7 +226,8 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
     if (pick && !measureLockedAnchorRef.current) {
       measureLockedAnchorRef.current = pick;
       measureHoverRef.current = pick;
-    } else if (pick && measureLockedAnchorRef.current) {
+    } else {
+      // The second end, the held pick pressed again, or a press on nothing: each lets go of it.
       measureLockedAnchorRef.current = null;
     }
     onMeasurePick?.(pick);
@@ -254,6 +256,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
     sceneMountRef: mountRef,
     preview,
     pickMode,
+    measureSnaps,
     selectorRuntime: activeSelectorRuntime,
     pickableFaces: filteredPickableFaces,
     pickableEdges: filteredPickableEdges,
@@ -264,6 +267,9 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
     onDoubleActivateReference,
     deferActivation,
     pickAtRef: props.pickAtRef,
+    topologyAtRef: props.topologyAtRef,
+    measureAtRef: props.measureAtRef,
+    onMeasureWantsTopology: props.onMeasureWantsTopology,
     onMeasurePick: handleMeasurePick,
     onMeasureHoverPoint: handleMeasureHoverPoint,
     viewerReadyTick,

@@ -63,12 +63,12 @@ test('camera commands activate explicit projection and lens while pose-only upda
 test('live clip patches place the plane in millimetres; a new axis without a place cuts through the middle', () => {
   const initial = { mode: 'solid', clip: { axis: 'x', at: 2 } };
   const moved = mergeViewerDisplaySettings(initial, { clip: { at: 4.5 } });
-  assert.deepEqual(moved.clip, { enabled: true, axis: 'x', invert: false, at: 4.5 });
+  assert.deepEqual(moved.clip, { enabled: true, axis: 'x', invert: false, partColors: true, at: 4.5 });
   assert.deepEqual(mergeViewerDisplaySettings(moved, { clip: { invert: true } }).clip,
-    { enabled: true, axis: 'x', invert: true, at: 4.5 }, 'flipping never moves the plane');
-  assert.deepEqual(mergeViewerDisplaySettings(moved, { clip: { axis: 'y' } }).clip, { enabled: true, axis: 'y', invert: false });
+    { enabled: true, axis: 'x', invert: true, partColors: true, at: 4.5 }, 'flipping never moves the plane');
+  assert.deepEqual(mergeViewerDisplaySettings(moved, { clip: { axis: 'y' } }).clip, { enabled: true, axis: 'y', invert: false, partColors: true });
   assert.deepEqual(mergeViewerDisplaySettings(moved, { clip: { axis: 'y', at: -3 } }).clip,
-    { enabled: true, axis: 'y', invert: false, at: -3 });
+    { enabled: true, axis: 'y', invert: false, partColors: true, at: -3 });
   assert.throws(() => mergeViewerDisplaySettings(moved, { clip: { offset: 0.5 } }), /Unsupported display\.clip fields: offset/);
 });
 

@@ -91,16 +91,17 @@ async function open(t, file, { record = null } = {}) {
 const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
 
 // A GLB of two nodes that draw has a GLB's every tool on its strip, Select in hand; its view's
-// controls end the strip after its rule: Projection, Display, then Preview.
-const GLB_TOOLS = ['Select:true', 'Annotate:false', 'Measure:false', 'Explode:false', 'Clip:false'];
+// controls end the strip, in the section of Explode and Clip: Projection, Display, then Preview.
+const GLB_TOOLS = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false', 'Explode:false', 'Clip:false'];
 const glbTools = async (pane) => {
   assert.deepEqual(await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button')
     .evaluateAll(buttons => buttons.filter(button => button.hasAttribute('aria-pressed') && !button.closest('[data-view-controls]')).map(button => `${button.getAttribute('aria-label')}:${button.getAttribute('aria-pressed')}`)),
-  GLB_TOOLS, 'Select, Annotate, Measure, Explode and Clip');
+  GLB_TOOLS, 'Select, Pencil, Shapes, Measure, Explode and Clip');
   const strip = pane.getByRole('group', { name: 'Interaction tools' });
   assert.deepEqual(await strip.locator('[data-view-controls]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
     ['Projection: Orthographic', 'Display mode: Solid', 'Preview'], 'its view\'s controls end the strip');
-  assert.equal(await strip.locator('[data-strip-rule] + [data-view-controls]').count(), 1, 'after the strip\'s rule');
+  assert.equal(await strip.locator('[data-strip-rule]').count(), 1, 'one rule, after the tools that pick');
+  assert.equal(await strip.locator('[data-view-controls]').evaluate(element => element.previousElementSibling?.getAttribute('aria-label')), 'Clip', 'the view\'s controls follow Clip, no rule between');
   assert.equal(await pane.locator('[data-viewer-navbar] [data-view-controls] button').count(), 0, 'nothing of the view in the navbar');
   for (const name of ['Orbit', 'Draw', 'Position']) assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, name);
 };
@@ -454,12 +455,16 @@ test('a GLB\'s tools: Select picks a node into Quick Edit, Measure reads metres 
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedNodes?.join() === 'n0');
   assert.deepEqual(await chips(), ['base'], 'the node, by its name: model.glb#n0');
 
-  // Measure: the base's top edge, corner to corner, snapped to its triangles' vertices.
+  // Measure: two points on the base's top, 16 mm apart, each where it is pressed: a mesh's triangles are not snapped to.
   await pane.getByRole('button', { name: 'Measure', exact: true }).click();
-  assert.equal(await pane.locator('[data-measure-size], [data-model-tool="measure"]').count(), 0, 'Measure has no row under the strip');
-  for (const corner of [[0.2, -0.2, 20], [19.8, -0.2, 20]]) { await page.mouse.click(...at(corner)); await settle(page); }
-  await page.waitForFunction(() => document.querySelectorAll('[data-quick-edit-box] [data-quick-edit-ref]').length === 2);
-  assert.ok((await chips()).includes('Measurement 1: ≈ 0.0200 m (approximate)'), JSON.stringify(await chips()));
+  assert.equal(await pane.locator('[data-measurements]').count(), 0, 'no row under the strip until something is measured');
+  for (const corner of [[2, -10, 20], [18, -10, 20]]) { await page.mouse.click(...at(corner)); await settle(page); }
+  // Its chip is Measure's row's, under the strip; Quick Edit carries the pick alone.
+  const measured = pane.locator('[data-measurements] [data-quick-edit-ref]');
+  await measured.waitFor();
+  assert.deepEqual(await measured.locator('> button:first-child').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    ['Measurement 1: ≈ 0.0160 m (approximate)']);
+  assert.deepEqual(await pane.locator('[data-quick-edit-box] [data-quick-edit-ref]').count(), 1);
 
   // Explode: the two nodes move apart, and the stage follows the box they make.
   const width = (await page.evaluate(() => window.__cadStage().bounds)).max[0];

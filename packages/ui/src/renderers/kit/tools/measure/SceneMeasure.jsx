@@ -1,11 +1,10 @@
 import { useEffect, useRef } from "react";
 import { Ruler } from "lucide-react";
-import { projectWorldPointToClient } from "@text-to-cad/core/lib/viewer/measureRuler.js";
 import { meshMeasurePick } from "@text-to-cad/core/lib/viewer/meshMeasure.js";
 import { usePointerPick } from "../select/usePointerPick.js";
 import { useMeasureOverlay } from "./useMeasureOverlay.js";
 
-// Measure on a scene of triangles: points snapped to the triangles under the pointer
+// Measure on a scene of triangles: two points on its surface, at the pointer
 // (`meshMeasure.js`), lengths in the file's unit (the scene's `units`) and approximate, drawn and
 // listed as exact measurements are (`useMeasureOverlay.js`, `measurementChips.jsx`). The session
 // is the renderer's (`useMeasureSession`), since Quick Edit reads it before the shell is made.
@@ -22,7 +21,7 @@ const pointArray = point => (Array.isArray(point) ? point : point?.toArray?.() ?
 
 /**
  * Measure's layer over the viewport: the measurements drawn, and while the tool is in hand
- * (`picking`) a pick per tap and a snap marker under the resting pointer. Draws nothing for a
+ * (`picking`) a pick per tap and a marker under the resting pointer. Draws nothing for a
  * scene that cannot be picked.
  *
  * @param {{ viewport: object, scene: object | null, measure: ReturnType<typeof import("./useMeasureSession.js").useMeasureSession>,
@@ -34,25 +33,20 @@ export function SceneMeasureOverlay({ viewport, scene, measure, picking, preview
   const anchorRef = useRef(null);
   useEffect(() => { if (!picking) { hoverRef.current = null; anchorRef.current = null; } }, [picking]);
   useEffect(() => { if (!measure.state?.draft?.anchor) anchorRef.current = null; }, [measure.state]);
-  const snap = (hit, pointer) => {
-    const runtime = viewport.runtimeRef.current;
-    if (!hit || !pointer || !runtime?.camera || !scene?.units) return null;
-    const rect = { left: 0, top: 0, width: pointer.width, height: pointer.height };
-    return meshMeasurePick({ ...hit, point: pointArray(hit.point) }, pointer, point => projectWorldPointToClient(point, runtime.camera, rect), scene.units);
-  };
+  const take = hit => (hit && scene?.units ? meshMeasurePick({ ...hit, point: pointArray(hit.point) }, scene.units) : null);
   usePointerPick({
     viewport, scene, enabled: picking && !preview,
-    // Every pointer move snaps anew: the corner or side nearest it changes within one triangle.
+    // Every pointer move takes its point anew: it is where the pointer is, not what it is over.
     sameHit: () => false,
-    onPick(hit, _modifiers, pointer) {
-      const pick = snap(hit, pointer);
-      if (!pick) return;
-      // The first end holds the snap marker until the second is taken.
-      if (!anchorRef.current) { anchorRef.current = pick; hoverRef.current = pick; } else anchorRef.current = null;
+    onPick(hit) {
+      // A press on nothing is null: it lets go of the first end, as in every view.
+      const pick = take(hit);
+      // The first end holds the marker until the second is taken.
+      if (pick && !anchorRef.current) { anchorRef.current = pick; hoverRef.current = pick; } else anchorRef.current = null;
       measure.onPick(pick);
     },
-    onHover(hit, pointer) {
-      const pick = snap(hit, pointer);
+    onHover(hit) {
+      const pick = take(hit);
       hoverRef.current = pick || anchorRef.current;
       measure.onHoverPoint(pick);
     }

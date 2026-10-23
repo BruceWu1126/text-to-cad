@@ -1,20 +1,15 @@
 /**
- * What is drawn OVER a drawing: an annotation's ink and Measure's results, on its 2D canvas, under
- * the view's transform. The viewer's DXF pane paints a person's ink with this as they draw it, and
- * `cadgen dxf snapshot` paints a job's `annotation` and `measurements` with it, so a Quick Edit's
- * views come back as the person saw them.
+ * What is drawn OVER a drawing: an annotation's ink, on its 2D canvas, under the view's transform.
+ * The viewer's DXF pane paints a person's ink with this as they draw it, and `cadgen dxf snapshot`
+ * paints a job's `annotation` with it, so a Quick Edit's views come back as the person saw them.
  *
  * The ink is an annotation's marks (`../../common/annotation.js`) lying on the sheet: on no part, their
  * points in drawing coordinates (x, y, 0). A stroke's width is in screen pixels at any zoom, as it is
- * over a model; a text mark's four corners are on the sheet, so its words grow and shrink with it. A
- * measurement is a mark `{ start, end, label, color }`, drawn as the viewer draws a taken one.
+ * over a model; a text mark's four corners are on the sheet, so its words grow and shrink with it.
  */
-import { drawMeasurementMark, measurementMarkLayout } from "../viewer/measureDimension.js";
 import { REFERENCE_SELECTED_COLOR } from "../viewer/referenceGeometry.js";
-import { planProjection } from "./planView.js";
 import { modelToScreen } from "./transform.js";
 
-const DASH = Object.freeze({ solid: [], dashed: [8, 6], dotted: [1.5, 5] });
 const TEXT_LINE_HEIGHT = 1.25;
 const HALO_PX = 6;
 
@@ -75,11 +70,9 @@ function paintStroke(ctx, mark, points, lineScale) {
     return;
   }
   ctx.lineWidth = mark.width * lineScale;
-  ctx.setLineDash((DASH[mark.dash] || []).map(length => length * lineScale));
   ctx.beginPath();
   path.forEach((point, index) => (index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y)));
   ctx.stroke();
-  ctx.setLineDash([]);
 }
 
 /**
@@ -120,28 +113,6 @@ export function drawAnnotationMarks(ctx, marks, { transform, pixelRatio = 1, lin
       ctx.closePath();
       ctx.fill();
     } else paintText(ctx, mark, screen.points);
-  }
-  ctx.restore();
-}
-
-/**
- * Paint Measure's results over a drawing, each as the viewer draws a taken measurement
- * (`drawMeasurementMark`), labelled.
- *
- * @param {CanvasRenderingContext2D} ctx
- * @param {readonly { start: number[], end: number[], label: string, color: string }[]} marks
- * @param {{ transform: import("./transform.js").DrawingTransform, width: number, height: number, pixelRatio?: number }} options
- *   `width` × `height`: the picture's CSS size, which the transform is of.
- */
-export function drawMeasurementMarks(ctx, marks, { transform, width, height, pixelRatio = 1 }) {
-  const camera = planProjection(transform, width, height);
-  if (!marks?.length || !camera) return;
-  const rect = { left: 0, top: 0, width, height };
-  ctx.save();
-  ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-  for (const mark of marks) {
-    const layout = measurementMarkLayout(mark, camera, rect);
-    if (layout) drawMeasurementMark(ctx, layout, mark, { active: true, bounds: { width, height } });
   }
   ctx.restore();
 }

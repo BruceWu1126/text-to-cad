@@ -105,11 +105,11 @@ async function open(t, file) {
 }
 
 const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
-// A mesh file's strip: an STL's Select (in hand, picking nothing), Annotate and Clip; a 3MF's Select (in hand),
-// Annotate, Measure and Clip. Its view's controls end the strip after its rule: Projection,
+// A mesh file's strip: an STL's Select (in hand, picking nothing), Pencil, Shapes and Clip; a 3MF's Select (in hand),
+// Pencil, Shapes, Measure and Clip. Its view's controls end the strip, in Clip's section: Projection,
 // Display, then Preview.
-const STL_TOOLS = ['Select:true', 'Annotate:false', 'Clip:false'];
-const THREE_MF_TOOLS = ['Select:true', 'Annotate:false', 'Measure:false', 'Clip:false'];
+const STL_TOOLS = ['Select:true', 'Pencil:false', 'Shapes:false', 'Clip:false'];
+const THREE_MF_TOOLS = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false', 'Clip:false'];
 const meshTools = async (pane, expected) => {
   assert.deepEqual(await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button')
     .evaluateAll(buttons => buttons.filter(button => button.hasAttribute('aria-pressed') && !button.closest('[data-view-controls]')).map(button => `${button.getAttribute('aria-label')}:${button.getAttribute('aria-pressed')}`)),
@@ -117,7 +117,8 @@ const meshTools = async (pane, expected) => {
   const strip = pane.getByRole('group', { name: 'Interaction tools' });
   assert.deepEqual(await strip.locator('[data-view-controls]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
     ['Projection: Orthographic', 'Display mode: Solid', 'Preview'], 'its view\'s controls end the strip');
-  assert.equal(await strip.locator('[data-strip-rule] + [data-view-controls]').count(), 1, 'after the strip\'s rule');
+  assert.equal(await strip.locator('[data-strip-rule]').count(), 1, 'one rule, after the tools that pick');
+  assert.equal(await strip.locator('[data-view-controls]').evaluate(element => element.previousElementSibling?.getAttribute('aria-label')), 'Clip', 'the view\'s controls follow Clip, no rule between');
   assert.equal(await pane.locator('[data-viewer-navbar] [data-view-controls] button').count(), 0, 'nothing of the view in the navbar');
   for (const name of ['Orbit', 'Draw', 'Explode', 'Position', 'Animation']) assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, name);
 };
@@ -387,10 +388,14 @@ test('a 3MF\'s tools: Select picks an object by its place in the build, Measure 
   assert.deepEqual(await chips(), ['base'], 'the object, by its name: pair.3mf#o1');
 
   await pane.getByRole('button', { name: 'Measure', exact: true }).click();
-  assert.equal(await pane.locator('[data-measure-size], [data-model-tool="measure"]').count(), 0, 'Measure has no row under the strip');
-  for (const corner of [[0.2, 0.2, 20], [19.8, 0.2, 20]]) { await page.mouse.click(...at(corner)); await settle(page); }
-  await page.waitForFunction(() => document.querySelectorAll('[data-quick-edit-box] [data-quick-edit-ref]').length === 2);
-  assert.ok((await chips()).includes('Measurement 1: ≈ 20.0 mm (approximate)'), JSON.stringify(await chips()));
+  assert.equal(await pane.locator('[data-measurements]').count(), 0, 'no row under the strip until something is measured');
+  for (const corner of [[2, 10, 20], [18, 10, 20]]) { await page.mouse.click(...at(corner)); await settle(page); }
+  // Its chip is Measure's row's, under the strip; Quick Edit carries the pick alone.
+  const measured = pane.locator('[data-measurements] [data-quick-edit-ref]');
+  await measured.waitFor();
+  assert.deepEqual(await measured.locator('> button:first-child').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    ['Measurement 1: ≈ 16.0 mm (approximate)']);
+  assert.deepEqual(await pane.locator('[data-quick-edit-box] [data-quick-edit-ref]').count(), 1);
 
   await display(page, { clip: { enabled: true, axis: 'x' } });
   await page.waitForFunction(() => window.__cadStage().cut === 1);

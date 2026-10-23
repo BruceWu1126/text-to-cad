@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getKeyboardOrbitCommand,
   reframeReason,
   runtimeFramingBounds,
   VIEWING_MODE,
@@ -239,4 +240,12 @@ test('the lit cube face follows the camera direction, and the cube reads the cam
   assert.equal(runtime.viewPlaneScratch.axis, scratch.axis);
   assert.ok(Math.abs(front.z[1] - 1) < 1e-9, 'from the front, +Z points up the screen');
   assert.ok(Math.abs(side.x[2] - 1) < 1e-9, 'from the +X side, +X points at the viewer');
+});
+
+test("the arrow keys orbit and the letters reach nothing in the camera", () => {
+  assert.deepEqual(getKeyboardOrbitCommand({ key: "ArrowLeft" }), { direction: "left", keyId: "ArrowLeft" });
+  assert.deepEqual(getKeyboardOrbitCommand({ key: "ArrowDown" }), { direction: "down", keyId: "ArrowDown" });
+  for (const letter of ["w", "a", "s", "d", "W", "A", "S", "D"]) {
+    assert.equal(getKeyboardOrbitCommand({ key: letter, code: `Key${letter.toUpperCase()}` }), null);
+  }
 });

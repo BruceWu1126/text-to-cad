@@ -3,6 +3,7 @@ import { Check } from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@text-to-cad/ui/primitives/popover";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { cn } from "@text-to-cad/ui/utils";
 import { FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 import { OrthographicProjectionIcon, PerspectiveProjectionIcon } from "../camera/ProjectionModeIcons.js";
@@ -36,6 +37,7 @@ const PROJECTIONS = Object.freeze([
  */
 export default function ProjectionPopover({ projection, disabled = false, boundary = null, tooltipSide = "top",
   anchor = null, open: held, onOpenChange }) {
+  const { t } = useI18n();
   const [ownOpen, setOpen] = useState(false);
   const open = held ?? ownOpen;
   const stripClass = useStripButtonClass();
@@ -43,17 +45,17 @@ export default function ProjectionPopover({ projection, disabled = false, bounda
   const changeOpen = next => { setOpen(next); onOpenChange?.(next); };
   return <Popover open={open} onOpenChange={changeOpen}>
     {anchor ? <PopoverAnchor virtualRef={anchor} /> : <PopoverTrigger asChild>
-      <ToolbarButton label={`Projection: ${current.label}`} tooltip="Projection" tooltipSide={tooltipSide} disabled={disabled}
+      <ToolbarButton label={t("projection.current", { mode: t(`projection.${current.value}`) })} tooltip={t("projection.label")} tooltipSide={tooltipSide} disabled={disabled}
         className={stripClass} data-projection={current.value}>
         <current.Icon />
       </ToolbarButton>
     </PopoverTrigger>}
-    <PopoverContent align="center" sideOffset={6} collisionPadding={8} collisionBoundary={boundary || undefined} aria-label="Projection"
+    <PopoverContent align="center" sideOffset={6} collisionPadding={8} collisionBoundary={boundary || undefined} aria-label={t("projection.label")}
       className={cn(FLOATING_SURFACE_CLASS, "w-36 p-1 text-tiny data-[state=closed]:animate-none!")}>
-      <div className="px-2 py-1.5 text-muted-foreground">Projection</div>
-      <RadioGroup.Root aria-label="Projection" value={current.value} onValueChange={value => { projection.onChange(value); changeOpen(false); }}>
-        {PROJECTIONS.map(({ value, label, Icon }) => <ModeChoice key={value} value={value} Icon={Icon}
-          onClick={() => { if (value === current.value) changeOpen(false); }}>{label}</ModeChoice>)}
+      <div className="px-2 py-1.5 text-muted-foreground">{t("projection.label")}</div>
+      <RadioGroup.Root aria-label={t("projection.label")} value={current.value} onValueChange={value => { projection.onChange(value); changeOpen(false); }}>
+        {PROJECTIONS.map(({ value, Icon }) => <ModeChoice key={value} value={value} Icon={Icon}
+          onClick={() => { if (value === current.value) changeOpen(false); }}>{t(`projection.${value}`)}</ModeChoice>)}
       </RadioGroup.Root>
     </PopoverContent>
   </Popover>;

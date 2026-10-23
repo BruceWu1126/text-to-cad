@@ -1,5 +1,4 @@
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
-import { hitTriangle } from "../viewer/meshMeasure.js";
 import { scheduleRuntimeRaycastBvh } from "../viewer/raycastBvh.js";
 import { createSceneExplode } from "../viewer/sceneExplode.js";
 import { createSceneHighlight } from "../viewer/sceneHighlight.js";
@@ -194,7 +193,7 @@ export function createGlbScene(THREE, document, { sibling = false } = {}) {
       highlight = { hovered: indices(hovered), selected: indices(selected) };
       applyHighlight();
     },
-    // The first surface under the ray, as the node that draws it, and the triangle it hit there.
+    // The first surface under the ray, as the node that draws it, and the point it hit there.
     pick(ray) {
       if (disposed) return null;
       root.updateMatrixWorld();
@@ -205,7 +204,7 @@ export function createGlbScene(THREE, document, { sibling = false } = {}) {
       const node = hit ? owningNode(hit.object) : null;
       if (!node) return null;
       const index = node.userData.gltfNode;
-      return { id: `n${index}`, node: index, name: nodeName(nodes.get(index)), point: hit.point.toArray(), triangle: hitTriangle(hit) };
+      return { id: `n${index}`, node: index, name: nodeName(nodes.get(index)), point: hit.point.toArray() };
     },
     /**
      * A second scene of the same document (the viewer's Preview beside its editor): its own copy of

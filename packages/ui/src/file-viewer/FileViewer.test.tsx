@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { isMissingFileError } from '@text-to-cad/core/client';
@@ -28,7 +28,7 @@ const navbar = () => document.querySelector('[data-viewer-navbar]');
 const fileName = () => document.querySelector<HTMLElement>('[data-file-name]')!;
 const labels = (selector = '[data-viewer-navbar]') => [...document.querySelectorAll(`${selector} a, ${selector} button`)].map(node => node.getAttribute('aria-label'));
 
-it('draws the navbar over every file, named by its name, and never over the home or a view shown small', async () => {
+it('draws the navbar over every file, named by its name, and over the home with only its menu, update and Full size; never over a view shown small', async () => {
   open({});
   await screen.findByText('shown');
   // The name, as words where nothing can be browsed; no logo with no home, no ⋯ where the host can do nothing.
@@ -39,10 +39,21 @@ it('draws the navbar over every file, named by its name, and never over the home
   await screen.findByText('shown');
   expect(navbar()).toBeNull();
   cleanup();
-  // The home is the host's own page, which holds its links itself.
-  open({ host: { ...host, navigation: { openFile() {}, home() {} } }, file: null, presentation: { home: <p>home</p> } });
+  // The home has the same navbar: the logo's menu, Back and Forward where the host keeps the view's
+  // history, and the host's update and Full size, as over a file; no file, no box for view controls.
+  const back = vi.fn();
+  open({ host: { ...host, links: viewerLinks({ version: '0.7.4' }), navigation: { openFile() {}, home() {} } }, file: null,
+    history: { canGoBack: true, canGoForward: false, back, forward() {} },
+    update: <button type="button" aria-label="Update to 0.7.5" />, fullSize: <button type="button" aria-label="Full size" />,
+    presentation: { home: <p>home</p> } } as any);
   await screen.findByText('home');
-  expect(navbar()).toBeNull();
+  expect([labels(), document.querySelector('[data-file-name]'), document.querySelector('[data-view-controls]')])
+    .toEqual([['Menu', 'Back', 'Forward', 'Update to 0.7.5', 'Full size'], null, null]);
+  expect((screen.getByRole('button', { name: 'Forward' }) as HTMLButtonElement).disabled).toBe(true);
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Back' }));
+  expect(back).toHaveBeenCalledOnce();
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Menu' }));
+  expect(screen.queryByRole('menuitem', { name: 'Back to files' })).toBeNull();
 });
 
 it('keeps the right of the navbar for the host\'s update button and Full size, then hands the renderer a box for its own view controls, last; a view shown small has no navbar and no box', async () => {
@@ -144,6 +155,34 @@ it('the app menu holds the person\'s theme in one row: System, Light and Dark as
   expect([change.mock.calls, Boolean(document.querySelector('[data-app-menu]'))]).toEqual([[['dark']], true]);
 });
 
+it('the app menu holds the person\'s language: the one in force, Automatic naming what it infers, then each language under its own name', async () => {
+  const user = userEvent.setup();
+  const change = vi.fn();
+  const language = (choice: string | null, inferred = 'ja') => ({ locale: choice ?? inferred, inferred, choice, onChoiceChange: change });
+  // The view reads in the language the host names (`environment.locale`): the whole menu, Theme and all.
+  open({ host: { ...host, environment: { colorScheme: 'light', locale: 'ja' } }, colorScheme: { preference: 'system', onPreferenceChange() {} },
+    language: language(null) } as any);
+  await screen.findByText('shown');
+  await user.click(screen.getByRole('button', { name: 'メニュー' }));
+  const row = document.querySelector<HTMLElement>('[data-menu-language]')!;
+  expect(row.textContent).toBe('言語日本語');
+  expect(screen.getAllByRole('menuitemradio').map(item => item.getAttribute('aria-label'))).toEqual(['システム', 'ライト', 'ダーク']);
+  await user.hover(row);
+  const options = await screen.findAllByRole('menuitemradio', { name: /自動|English|中文|日本語|한국어/ });
+  expect(options.map(option => [option.textContent, option.getAttribute('aria-checked')])).toEqual([
+    ['自動（日本語）', 'true'], ['English', 'false'], ['简体中文', 'false'], ['繁體中文', 'false'], ['日本語', 'false'], ['한국어', 'false']]);
+  fireEvent.click(screen.getByRole('menuitemradio', { name: '繁體中文' }));
+  expect(change.mock.calls).toEqual([['zh-TW']]);
+  cleanup();
+  // A choice made: it is checked, and Automatic gives the choice back to the context.
+  open({ host: { ...host, environment: { colorScheme: 'light', locale: 'zh-TW' } }, language: language('zh-TW') } as any);
+  await screen.findByText('shown');
+  await user.click(screen.getByRole('button', { name: '選單' }));
+  await user.hover(document.querySelector<HTMLElement>('[data-menu-language]')!);
+  fireEvent.click(await screen.findByRole('menuitemradio', { name: '自動（日本語）' }));
+  expect(change.mock.calls.at(-1)).toEqual([null]);
+});
+
 it('ends the app menu with the version the host runs, a link to its release notes: the release as it is, a custom build with its id', async () => {
   const user = userEvent.setup();
   const footer = async (links: object) => {
@@ -156,8 +195,8 @@ it('ends the app menu with the version the host runs, a link to its release note
     return shown;
   };
   const notes = 'https://github.com/earthtojake/text-to-cad/releases/tag/v0.7.15';
-  expect(await footer(viewerLinks({ version: '0.7.15' }))).toEqual(['v0.7.15·Made by @earthtojake', notes]);
-  expect(await footer(viewerLinks({ version: '0.7.15', build: 'b80844940-dirty' }))).toEqual(['v0.7.15-dev.b80844940-dirty·Made by @earthtojake', notes]);
+  expect(await footer(viewerLinks({ version: '0.7.15' }))).toEqual(['v0.7.15Made by @earthtojake', notes]);
+  expect(await footer(viewerLinks({ version: '0.7.15', build: 'b80844940-dirty' }))).toEqual(['v0.7.15-dev.b80844940-dirtyMade by @earthtojake', notes]);
 });
 
 it('opens the explorer from the file\'s name where the host\'s files can be browsed, and a pick there is shown through the host', async () => {

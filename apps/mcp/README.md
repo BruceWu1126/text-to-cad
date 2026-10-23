@@ -47,7 +47,8 @@ reference host `basic-host` does.
   opens, goes to it: the library (the models opened before, in any view or the web
   viewer) and Open with the desktop's chooser, where this computer has one
   (`pick`). The sidebar (`cad_home`) and a tab with nothing to show open on it; a
-  model opened from it is shown in place. Under the home's wordmark are GitHub,
+  model opened from it is shown in place. The home has the same navbar (the C menu, Back
+  and Forward, the update button and Full size); under its wordmark are GitHub,
   Discord and X.
 - **A view browses from its file's folder.** The file name in the navbar opens
   the explorer: one folder at a time, its subfolders and then its CAD files,
@@ -58,13 +59,12 @@ reference host `basic-host` does.
   the file and closes it. Nothing says where a view may browse: a tab, a card and
   the web viewer browse the same way.
 - **A view keeps its own history.** As a browser keeps a tab's: every file a
-  view showed, in order, the agent's shows and the person's own moves alike
-  (`ModelView.tsx`). The navbar's Back and Forward, between its logo and the
-  file's name, walk it, each disabled where it has nowhere to go; a move after a
-  Back drops what was ahead, and a show of what is already on screen adds nothing.
-  The home is no step: it is a bigger way to pick a recent file, so going there
-  leaves the history as it stands, and the file picked there follows the one the
-  view left.
+  view showed, and the home, in order, the agent's shows and the person's own
+  moves alike (`ModelView.tsx`). The navbar's Back and Forward, after its logo,
+  over a file and on the home, walk it, each disabled where it has nowhere to go:
+  from a file opened on the home, Back returns home and Forward to the file. A
+  move after a Back drops what was ahead, and a show of what is already on screen
+  adds nothing.
   It is the view's, in memory: another tab or card has its own, and a view opened
   again starts with one step. Going back opens that model afresh, as a browser's
   Back does in the web viewer. A file handler's view, which shows its file alone,
@@ -90,7 +90,7 @@ reference host `basic-host` does.
   nothing about the person (`CADGEN_UPDATE_CHECK=0` turns it off; never in CI or from
   a source tree). While this install is behind, the navbar and the home show the
   shared blue `UpdateButton` (`@text-to-cad/ui/update`): first among the navbar's
-  controls, and on the home a row of its own, labeled Update. A launch carries the
+  controls, over a file and over the home. A launch carries the
   notice the server last read, so the button draws with the page; the page reads it
   again (`/__cad/version`) when the person comes back to it. It opens the update card: "A new version of text-to-cad
   is available. Send a message to your agent asking it to update to the latest
@@ -148,7 +148,7 @@ reference host `basic-host` does.
   whether or not its frame declares it. **Send** (the person's message now,
   `ui/message`) needs `message`. Both actions capture the current view and distinct drawn views at the
   press. Up to 1024 bytes of compact UTF-8 snapshot JSON goes into the text; larger
-  packets are written as `.snapshot.json` and named by saved path. Views share annotation and measurements. No images or file bytes are attached,
+  packets are written as `.snapshot.json` and named by saved path. Views share the annotation. No images or file bytes are attached,
   even where the host accepts images. A host that takes neither gets Copy Prompt alone
   (`unavailablePromptContext`): Queue and Send are left out, not disabled. In
   Codex, Send from a thread's CAD tab posts into that thread; from the

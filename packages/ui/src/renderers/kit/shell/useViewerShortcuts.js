@@ -9,15 +9,17 @@ import { isEditableTarget } from "../viewport/dom.js";
  *
  * Delete (or Backspace) reaches `onDelete` the same way, for what Select has picked; it is the
  * key's only while `onDelete` says it deleted something. ⌘Z (Ctrl+Z) reaches `onUndo`, and ⇧⌘Z or
- * Ctrl+Y `onRedo`, the same way; a text field keeps its own.
+ * Ctrl+Y `onRedo`, the same way; a text field keeps its own. A single key with no ⌘, Ctrl or Alt
+ * (a tool's letter, `kit/tools/toolShortcuts.js`) reaches `onKey` the same way, and is the key's
+ * only while `onKey` says it did something.
  *
  * @param {{ viewerElement: { current: HTMLElement | null } | null, escapeActive: boolean,
  *   onEscape: (event: KeyboardEvent) => void, onCopy?: () => boolean, onDelete?: () => boolean,
- *   onUndo?: () => boolean, onRedo?: () => boolean }} options
+ *   onUndo?: () => boolean, onRedo?: () => boolean, onKey?: (event: KeyboardEvent) => boolean }} options
  *   `escapeActive`: there is something for Escape to do (so idle viewers hold no listener).
  */
 export function useViewerShortcuts({
-  viewerElement, escapeActive, onEscape, onCopy, onDelete, onUndo, onRedo
+  viewerElement, escapeActive, onEscape, onCopy, onDelete, onUndo, onRedo, onKey
 }) {
   const pointerInside = useRef(false);
   const copy = useRef(onCopy);
@@ -30,13 +32,15 @@ export function useViewerShortcuts({
   undo.current = onUndo;
   const redo = useRef(onRedo);
   redo.current = onRedo;
+  const press = useRef(onKey);
+  press.current = onKey;
   useEffect(() => {
     const onPointerDown = event => { pointerInside.current = Boolean(viewerElement?.current?.contains(event.target)); };
     window.addEventListener("pointerdown", onPointerDown, true);
     return () => window.removeEventListener("pointerdown", onPointerDown, true);
   }, [viewerElement]);
   useEffect(() => {
-    if (!(escapeActive || onCopy || onDelete || onUndo || onRedo)) return undefined;
+    if (!(escapeActive || onCopy || onDelete || onUndo || onRedo || onKey)) return undefined;
     const handleKeyDown = (event) => {
       const element = viewerElement?.current;
       if (!element) return;
@@ -57,8 +61,10 @@ export function useViewerShortcuts({
         const step = key === "z" ? (event.shiftKey ? redo : undo) : key === "y" && event.ctrlKey && !event.shiftKey ? redo : null;
         if (step?.current?.()) { event.preventDefault(); event.stopPropagation(); }
       }
+      if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.repeat && !event.defaultPrevented && !isEditableTarget(event.target)
+        && press.current?.(event)) { event.preventDefault(); event.stopPropagation(); }
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [viewerElement, escapeActive, Boolean(onCopy), Boolean(onDelete), Boolean(onUndo), Boolean(onRedo)]);
+  }, [viewerElement, escapeActive, Boolean(onCopy), Boolean(onDelete), Boolean(onUndo), Boolean(onRedo), Boolean(onKey)]);
 }

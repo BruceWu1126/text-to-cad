@@ -11,7 +11,7 @@
  *   selection?: { hide?: string[], focus?: string[] },
  *   width: number, height: number
  * }} PromptView
- * @typedef {PromptView & { label: string }} LabelledView
+ * @typedef {PromptView & { label: string }} LabelledView  A view ink was drawn in, by its label ("view 1"…).
  */
 
 // The job reserves this resolution for an optional later snapshot, preserving the viewport's shape.

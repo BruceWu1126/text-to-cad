@@ -20,7 +20,7 @@ import { CAD_DEFAULT_VERTICAL_FOV_DEGREES, explicitViewerFocalLength, perspectiv
 import { PREVIEW_AUTO_ROTATE_SPEED } from "../camera/orbitControls.js";
 import {
   DEFAULT_DAMPING_FACTOR, applyPerspectiveSnapshot, boundsModelRadius, cancelCameraTransition, captureRuntimeViewportFitScale,
-  readOrthographicHalfHeight, readRuntimeZoomPercent, readScopedPerspectiveSnapshot, resetRuntimeZoomBaseline, setRuntimePerspectiveFocalLength, stepCameraTransition,
+  readOrthographicHalfHeight, readPerspectiveSnapshot, readRuntimeZoomPercent, readScopedPerspectiveSnapshot, resetRuntimeZoomBaseline, setRuntimePerspectiveFocalLength, stepCameraTransition,
   syncRuntimeCameraClipPlanes, syncRuntimeCameraProjection, syncRuntimeViewportFraming, transitionCameraToPerspectiveSnapshot,
   zoomRuntimeToBounds
 } from "../camera/runtimeCamera.js";
@@ -29,8 +29,9 @@ import {
   DEFAULT_VIEW_DIRECTION, DEFAULT_VIEW_PLANE_ORIENTATION, KEYBOARD_ORBIT_NUDGE_RAD, VIEWING_MODE, VIEW_PLANE_FACES,
   WHEEL_PINCH_DELTA_BOOST, WORLD_UP, applyOrbitDelta, clearKeyboardOrbitState, createViewPlaneOrientationStore,
   getActiveViewPlaneFaceId, getKeyboardOrbitAxes, getKeyboardOrbitCommand, orbitControlsBoostsPinch, isTrackpadLikeWheelEvent,
-  reframeReason, stepKeyboardOrbit
+  reframeReason, stepKeyboardOrbit, viewPlaneCameraBasis
 } from "../camera/viewportCameraKit.js";
+import { boundsAbout, lineOfPoints, lookAtFor, planeOfPoints, planeThroughLine } from "../camera/lookAt.js";
 import {
   ACCELERATED_WHEEL_ZOOM_SPEED, COARSE_POINTER_PINCH_ZOOM_SPEED, COARSE_POINTER_ZOOM_SPEED, DEFAULT_ZOOM_SPEED,
   TRACKPAD_PINCH_ZOOM_SPEED, restingZoomSpeed
@@ -45,7 +46,7 @@ import AnnotationOverlay from "../tools/annotate/AnnotationOverlay.jsx";
 import { useSceneEffects } from "../tools/model-effects/useSceneEffects.js";
 import { TOUCH_HIT_PX, prefersCoarsePointer } from "../viewport/dom.js";
 import { annotationAt } from "../../../annotation/geometry.js";
-import { annotationsOnScreen, mountAnnotations } from "../tools/annotate/annotation3d.js";
+import { annotationWorldPoints, annotationsOnScreen, mountAnnotations } from "../tools/annotate/annotation3d.js";
 import { createViewerRenderStateResolver } from "../view-settings/renderState.js";
 import { shareSettingsValue } from "../view-settings/shareSettingsValue.js";
 import { createViewUpdateGate } from "../view-settings/viewUpdateGate.js";
@@ -115,6 +116,8 @@ const ShellViewport = forwardRef(function ShellViewport({
   hoveredAnnotation = null,
   // The view on screen as a prompt carries it (`annotation/views.js`), for each mark Annotate puts down.
   annotationView = null,
+  // What the model is under a point of the view, for what each mark touches (`RendererShell`'s `inkTouches`).
+  annotationTouches = null,
   onPerspectiveChange = null,
   onPresentationChange = null,
   onViewerAlertChange = null,
@@ -381,6 +384,31 @@ const ShellViewport = forwardRef(function ShellViewport({
     annotationMount.current?.update(items || [], annotation?.selected || [], hoveredAnnotation || []);
   }, [items, annotation?.selected, hoveredAnnotation, viewerReadyTick]);
 
+  // The camera turned square to a look-at subject (`camera/lookAt.js`): framed about its zero
+  // point, or — nothing to frame — moved to it at the zoom it is.
+  const lookAtSubject = subject => {
+    const runtime = runtimeRef.current;
+    if (!runtime?.camera || !runtime?.controls || !subject) return false;
+    runtime.camera.updateMatrixWorld();
+    const view = new THREE.Vector3();
+    runtime.camera.getWorldDirection(view);
+    const look = lookAtFor(subject, view.negate().toArray());
+    const basis = look && viewPlaneCameraBasis({ direction: look.direction, up: [0, 1, 0] }, WORLD_UP);
+    if (!basis) return false;
+    runtime.openFitPending = false;
+    let moved;
+    if (look.fit) {
+      moved = zoomRuntimeToBounds(runtime, boundsAbout(look.point, look.fit), sceneScaleModeRef.current, {
+        modelOffset: modelTransformRef.current.offset, viewDirection: basis.direction, viewUp: basis.up });
+    } else {
+      const now = readPerspectiveSnapshot(runtime);
+      const distance = runtime.camera.position.distanceTo(runtime.controls.target);
+      moved = transitionCameraToPerspectiveSnapshot(runtime, { ...now, target: look.point,
+        position: look.point.map((c, i) => c + basis.direction[i] * distance), up: basis.up }, { orthographicHalfHeight: now?.orthographicHalfHeight });
+    }
+    if (moved) runtime.userMovedCamera = true;
+    return moved;
+  };
   useImperativeHandle(ref, () => ({
     async prepareViewSettings(nextScene, signal) {
       const runtime = runtimeRef.current;
@@ -486,6 +514,48 @@ const ShellViewport = forwardRef(function ShellViewport({
       syncSceneBounds();
       runtime.requestRender?.();
       return true;
+    },
+    // Turn the view square to what a double-click under Select was on (`camera/lookAt.js`): a face,
+    // an edge or ink, its zero point the orbit centre, framed, or at the zoom it is for what has no
+    // plane. The camera is then the person's, as a dragged one is: navigation only, it sets no
+    // plane for ink.
+    lookAt(subject) { return lookAtSubject(subject); },
+    // The same for the annotation's mark `id`: a straight line, the plane through it as square to the
+    // view as it can be; flat ink, its plane; else the view it was drawn in.
+    lookAtAnnotation(id) {
+      const runtime = runtimeRef.current, session = annotationRef.current;
+      const item = session?.items?.find(mark => mark.id === id);
+      if (!runtime || !item) return false;
+      const all = annotationWorldPoints(runtime, item).map(point => point.toArray());
+      const points = item.kind === "area" && item.outline ? all.slice(0, item.outline) : all;
+      const span = Math.max(0, ...points.map(point => Math.hypot(...point.map((c, i) => c - points[0][i]))));
+      // Drawn ink is noisy: straight, or flat, within 5% of its size.
+      const tolerance = Math.max(span * 0.05, 1e-6);
+      const line = lineOfPoints(points, tolerance);
+      if (line) {
+        runtime.camera.updateMatrixWorld();
+        const toEye = new THREE.Vector3();
+        runtime.camera.getWorldDirection(toEye);
+        const normal = planeThroughLine(line.direction, toEye.negate().toArray());
+        // Framed on the model as the plane shows it, not the line alone.
+        const bounds = runtime.modelBounds;
+        const corners = Array.isArray(bounds?.min) && Array.isArray(bounds?.max)
+          ? [0, 1, 2, 3, 4, 5, 6, 7].map(corner => [0, 1, 2].map(axis => ((corner >> axis) & 1 ? bounds.max : bounds.min)[axis]))
+            .map(corner => { const off = [0, 1, 2].reduce((sum, axis) => sum + (corner[axis] - line.origin[axis]) * normal[axis], 0); return corner.map((value, axis) => value - off * normal[axis]); })
+          : [];
+        if (normal) return lookAtSubject({ kind: "plane", normal, origin: line.origin, points: [...points, ...corners] });
+      }
+      const flat = planeOfPoints(points, tolerance);
+      if (flat) return lookAtSubject({ kind: "plane", normal: flat.normal, points });
+      const drawn = session.views?.find(view => view.label === item.view)?.camera;
+      if (drawn?.position && drawn?.target) {
+        runtime.openFitPending = false;
+        const moved = transitionCameraToPerspectiveSnapshot(runtime, { ...readPerspectiveSnapshot(runtime),
+          position: drawn.position, target: drawn.target, up: drawn.up || [0, 0, 1] }, { orthographicHalfHeight: drawn.orthographicHalfHeight });
+        if (moved) runtime.userMovedCamera = true;
+        return moved;
+      }
+      return lookAtSubject({ kind: "free", points });
     },
     // Frame part of the scene: what a renderer's "Zoom to selection" moves the camera to. The
     // camera is then the person's choice, as one they dragged is.
@@ -1098,7 +1168,7 @@ const ShellViewport = forwardRef(function ShellViewport({
           />
         </div>
       ) : null}
-      {annotationOverlayActive ? <AnnotationOverlay annotation={annotation} runtimeRef={runtimeRef} viewOf={annotationView} /> : null}
+      {annotationOverlayActive ? <AnnotationOverlay annotation={annotation} runtimeRef={runtimeRef} viewOf={annotationView} touchesAt={annotationTouches} /> : null}
       {overlay}
       {/* The cube is the tools view's: preview has no cube to draw or keep in step with the orbit,
           a model still loading has none to orient, and a compact view (`viewCube`) has no room. */}

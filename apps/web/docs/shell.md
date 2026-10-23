@@ -11,8 +11,8 @@ Web supplies its file source (`createCadFileSource` from `@text-to-cad/ui/catalo
 over its CAD client), URL navigation (`onShow`, `?file=` and history),
 browser persistence, the document title and appearance. It hands the viewer its
 links (`ViewerHost.links`: its version, its build's GitHub and Discord, and what
-its release check found, `src/host/viewerLinks.js`) and its colour scheme control
-(`colorSchemeControl`: `ViewerAppearance`, last in the navbar and the home's links row); the
+its release check found, `src/host/viewerLinks.js`) and the tab's colour scheme
+(`colorScheme`: the app menu's Theme row, over a file and on the home); the
 navbar, the explorer, the tool strip, the file sidebar and preview are the shared package's. The root workspace builds UI's ESM, declarations, CSS and
 worker assets before building the app; no source alias or JSX loader is needed.
 

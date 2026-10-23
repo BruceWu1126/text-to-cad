@@ -78,7 +78,7 @@ these peers are not bundled into UI.
 ```text
 src/
   host/              explicit host ports, prompt actions and React binding
-  annotation/        Annotate's session, toolbar and ink geometry (its 3D ink is renderers/kit/tools/annotate)
+  annotation/        the drawing tools' (Pencil and Shapes) session, toolbar and ink geometry (its 3D ink is renderers/kit/tools/annotate)
   cad-viewer/        CadViewer (FileViewer + the six CAD renderers + the home), and a CAD client as a FileSource
   file-viewer/       FileViewer, typed source/renderer contracts, the document lifecycle hook
     navigation/     the navbar, the app menu and its links, the folder explorer, the file menu
@@ -158,7 +158,7 @@ const host = { files: createCadFileSource(client), clipboard, promptContext, env
 Declarations are owned here; apps need no ambient shims or aliases into this
 source tree.
 
-The viewer's Annotate tool is native ink projected into the model, with no drawing
+The viewer's drawing tools (Pencil and Shapes) are native ink projected into the model, with no drawing
 SDK and no persistent storage. Read [annotation](docs/annotation.md) before extending it.
 
 The required host contract, typed prompt bundles, delivery receipts and host
@@ -247,12 +247,12 @@ and demand.
 
 A CAD file's controls are the shell's chrome over the viewport. The tool strip at the top
 centre holds the file's tools — a STEP's Select (its selection filter the chevron after it),
-Annotate, Measure, Explode and Clip; a robot's Select, Annotate, Measure and Clip; a GLB's
-Select (its nodes), Annotate, Measure, Explode (several parts) and Clip; a 3MF's Select (its
-objects), Annotate, Measure and Clip; an STL's Annotate and Clip — then, after a thin rule, a
+Pencil and Shapes (plain buttons: what each draws with is the row under the strip), Measure, then, after a thin rule, Explode and Clip; a robot's Select, Pencil, Shapes, Measure and Clip; a GLB's
+Select (its nodes), Pencil, Shapes, Measure, Explode (several parts) and Clip; a 3MF's Select (its
+objects), Pencil, Shapes, Measure and Clip; an STL's Pencil, Shapes and Clip — then, with no rule between, a
 3D view's Display (its settings, a popover that opens down) and Preview. The tool in hand's
 controls are one row under the strip, its sub-toolbar (`kit/tools/SubToolbar.jsx`):
-Annotate's tools, style and history; Explode's and Clip's slider rows.
+the drawing tools' colour, stroke width, placement and history; Explode's and Clip's slider rows.
 What there is to read of the file is the file sidebar at the top-left, whatever the tool
 (`kit/tools/FileSidebar.jsx`): an assembly's Model tree, a robot's Links, Position, an SDF's
 metadata, and Animation for a file with routines, a tile each at the top-left, a tile opening its
@@ -297,11 +297,12 @@ app's views), Back and Forward follow, disabled where they have nowhere to go. I
 file — the name opens the explorer — and offers its ⋯ menu (Copy path, Reveal). They share one look: transparent until the
 pointer is on them or their menu is open, with no tooltip. At the right is only what a host
 or a file adds: the host's update button, a dismissed alert's icon, the host's Full size
-and, last, the host's colour scheme control (`colorSchemeControl`, the web viewer's System,
-Light and Dark), where it has one. A 3D view's Display and Preview are its tool strip's.
-With no file a view shows the host's home, the model library: the models opened before,
-pinned first, with their pictures, and Open where the host has a file chooser, under its
-wordmark and GitHub, Discord and X. A file that
+and, last, the view's own controls (a 3D view's Display and Preview). With no file a view
+shows the host's home, the model library, under the same navbar (its logo and menu, without
+Back to files, Back and Forward where the host keeps the view's history, and the host's
+update and Full size): its wordmark, byline and GitHub,
+Discord and X, then the models opened before, pinned first, with their pictures, and Open
+where the host has a file chooser. A file that
 does not exist shows "File does not exist" and its path, and any other failure to open
 "Could not open that file" and why, each with Go home where the host has a home. A
 renderer's loading and update status is its own, in its viewport. An error appears as a

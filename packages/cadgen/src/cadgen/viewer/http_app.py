@@ -526,6 +526,10 @@ class CadApp:
                     from cadgen import features
 
                     response.send_json(200, features.read())
+                elif pathname == "/__cad/language":
+                    from cadgen import language
+
+                    response.send_json(200, language.read())
                 elif pathname == "/__cad/version":
                     response.send_json(200, self._version())
                 else:
@@ -570,6 +574,14 @@ class CadApp:
                         response.send_empty(413, [("connection", "close")])
                         return
                     response.send_json(200, features.change(json.loads(request.body() or b"{}")))
+                elif pathname == "/__cad/language":
+                    # The app menu's Language: the person's choice, one for every CAD view (``cadgen/language.py``).
+                    from cadgen import language
+
+                    if int(request.headers.get("content-length") or 0) > 4096:
+                        response.send_empty(413, [("connection", "close")])
+                        return
+                    response.send_json(200, language.change(json.loads(request.body() or b"{}")))
                 elif pathname == "/__cad/recents":
                     if int(request.headers.get("content-length") or 0) > _LIBRARY_BODY_LIMIT:
                         response.send_empty(413, [("connection", "close")])

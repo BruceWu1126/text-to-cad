@@ -1,24 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sameView } from './views.js';
 import { useViewerHistory } from '../renderers/kit/shell/useViewerHistory.js';
-import { penWidth } from './geometry.js';
+import { strokeWidthAt } from './geometry.js';
+import { DEFAULT_PENCIL_TOOL, DEFAULT_SHAPE_TOOL, styleSlot, toolFamily } from './tools.js';
+
+/**
+ * @typedef {{ color: string, strokeWidth: number, placement: import('./toolbar.jsx').AnnotationPlacement }} DrawingStyle
+ */
 
 /**
  * The annotation: one annotation, its ink in the model (`renderers/kit/tools/annotate/annotation3d.js`'s items), what
- * Annotate's tools put down next (`tool`, `color`, `strokeWidth`, `strokeStyle`, `placement`) and its history. It
- * outlives Annotate being put down — the ink stays in the model, and the next time Annotate is taken up it
- * draws on it — and goes when the person clears it or the model it was drawn on changes (`discard`).
+ * the drawing tools put down next (`tool`, `style`) and its history. Pencil and Shapes, the two strip tools that
+ * draw, share the ink and the history: each keeps the tool last chosen in it (`pencil`, `shape`), and `tool` is the
+ * one of the strip tool in hand. The style is kept per drawing kind, three slots (`styles`): the pen, the highlighter
+ * and Shapes (all five shapes share one), each with its own colour, stroke width and placement; `style` is the slot of
+ * the tool in hand, and the eraser, which puts nothing down, has none (it shows the pen's, and sets nothing). It outlives the drawing tools being put down — the
+ * ink stays in the model, and the next time one is taken up it draws on it — and goes when the person clears
+ * it or the model it was drawn on changes (`discard`).
  * Each change to the ink is a step in the file view's one history (`useViewerHistory`), which
  * Undo and Redo walk whatever tool took the step.
  *
  * @typedef {object} AnnotationSession
  * @property {boolean} ready  Always: the toolbar's tools are the session's own.
- * @property {import('./toolbar.jsx').AnnotationTool} tool
- * @property {string} color
- * @property {number} strokeWidth
- * @property {import('./toolbar.jsx').AnnotationStrokeStyle} strokeStyle
- * @property {import('./toolbar.jsx').AnnotationPlacement} placement  Where what is drawn next lies: on
- *   the model, or in space on a plane facing the view.
+ * @property {import('./tools.js').AnnotationTool} tool  The drawing tool in hand: Shapes' `shape` while Shapes is the strip tool,
+ *   else Pencil's `pencil`.
+ * @property {import('./tools.js').PencilTool} pencil  What Pencil draws with (the pen first), kept while Shapes is up.
+ * @property {import('./tools.js').ShapeTool} shape  What Shapes draws with (the line first), kept while Pencil is up.
+ * @property {DrawingStyle} style  What the tool in hand puts down next: its slot's colour, stroke width and placement
+ *   (`surface`, the default, each point on the visible surface under it, or `plane`, each on the plane of the surface the
+ *   mark starts on; off the model both carry on at that plane: `annotation3d.js`'s `projectAnnotations`).
+ * @property {Readonly<Record<import('./tools.js').StyleSlot, DrawingStyle>>} styles  Every slot's.
  * @property {readonly import('../renderers/kit/tools/annotate/annotation3d.js').AnnotationItem[]} items
  * @property {readonly string[]} selected  The ink the viewer's Select has picked: what the selection's bar
  *   (`restyle`, `fill`) and Delete act on. Annotate's tools never pick ink.
@@ -26,14 +37,13 @@ import { penWidth } from './geometry.js';
  * @property {boolean} canRedo
  * @property {boolean} hasContent  There is ink.
  * @property {boolean} hasAnnotation  The same: there is an annotation.
- * @property {(tool: import('./toolbar.jsx').AnnotationTool) => void} selectTool
- * @property {(color: string) => void} selectColor  What is drawn next.
- * @property {(width: number) => void} selectStrokeWidth  What is drawn next.
- * @property {(style: import('./toolbar.jsx').AnnotationStrokeStyle) => void} selectStrokeStyle  What is drawn next.
- * @property {(placement: import('./toolbar.jsx').AnnotationPlacement) => void} selectPlacement  What is drawn next: ink already down stays where it lies.
- * @property {(style: { color?: string, width?: number, dash?: import('./toolbar.jsx').AnnotationStrokeStyle }) => void} restyle
+ * @property {(tool: import('./tools.js').AnnotationTool) => void} selectTool  Chooses what its strip tool draws with (Pencil's or Shapes'), a button of the sub-toolbar's row.
+ * @property {(color: string) => void} selectColor  What the tool in hand draws next: its slot's, the others keep theirs.
+ * @property {(width: number) => void} selectStrokeWidth  The same.
+ * @property {(placement: import('./toolbar.jsx').AnnotationPlacement) => void} selectPlacement  The same: ink already down stays where it lies.
+ * @property {(style: { color?: string, width?: number }) => void} restyle
  *   The ink selected, as one step: its colour, a stroke's weight (a shape's at that width, the pen's
- *   heavier, as each draws), a shape's line style.
+ *   heavier, as each draws).
  * @property {(shape: string, areas: readonly import('../renderers/kit/tools/annotate/annotation3d.js').AnnotationItem[]) => void} fill
  *   A closed shape filled, as one step: the fill joins the shape's group, picked and deleted with it.
  * @property {(items: readonly import('../renderers/kit/tools/annotate/annotation3d.js').AnnotationItem[]) => void} add  Ink put down: one step.
@@ -43,33 +53,43 @@ import { penWidth } from './geometry.js';
  * @property {() => void} redo
  * @property {() => void} clear  Every piece of ink, as one step to undo.
  * @property {() => void} forget  The same as `clear`.
- * @property {() => void} discard  Every piece of ink and the history with it: nothing to undo.
+ * @property {() => void} discard  Every piece of ink and the history with it, and the views: nothing to undo.
  * @property {readonly import('./views.js').LabelledView[]} views  The views ink was drawn in, in order
  *   ("view 1", "view 2"…): a mark names its own (`view`).
- * @property {(view: import('./views.js').PromptView | null) => string | undefined} noteView  The label of
- *   the view ink is being put down in: the one drawn in before that is the same (`sameView`), or a new one.
+ * @property {(view: import('./views.js').PromptView | null) => string | undefined} noteView
+ *   The label of the view ink is being put down in: the one drawn in before that is the same
+ *   (`sameView`), or a new one.
  */
 
-const DEFAULTS = Object.freeze({ tool: 'freedraw', color: '#ff2d55', strokeWidth: 2, strokeStyle: 'solid', placement: 'surface' });
+// The pen and Shapes open in the neon red; the highlighter in the palette's neon yellow (`ANNOTATION_COLORS`), as a highlighter is.
+const DEFAULT_STYLES = Object.freeze({
+  pen: Object.freeze({ color: '#ff2d55', strokeWidth: 2, placement: 'surface' }),
+  highlighter: Object.freeze({ color: '#ffe600', strokeWidth: 2, placement: 'surface' }),
+  shapes: Object.freeze({ color: '#ff2d55', strokeWidth: 2, placement: 'surface' }),
+});
+const SLOTS = Object.keys(DEFAULT_STYLES);
 const NO_ANNOTATIONS = Object.freeze([]);
 
 /**
- * @param {boolean} [active]  Annotate is the tool. Put down, it goes back to its first tool (the pen);
- *   the ink, its selection, the colour, the weight, the line style and the placement stay.
- * @param {{ tool?: string, color?: string, strokeWidth?: number, strokeStyle?: import('./toolbar.jsx').AnnotationStrokeStyle,
- *   placement?: import('./toolbar.jsx').AnnotationPlacement }} [initial]
+ * @param {import('./tools.js').AnnotationFamily | null} [family]  The drawing strip tool in hand, Pencil or Shapes; none while another
+ *   tool is. Put down, the ink, its selection, what each draws with, the colour, the weight and the placement stay.
+ * @param {{ pencil?: string, shape?: string,
+ *   styles?: Partial<Record<import('./tools.js').StyleSlot, Partial<DrawingStyle>>> }} [initial]  Where it opens: what
+ *   each strip tool draws with, and any of each slot's style over the defaults.
  * @param {import('../renderers/kit/shell/useViewerHistory.js').ViewerHistory | null} [history]  The file
  *   view's; without one the session keeps its own.
  * @returns {AnnotationSession}
  */
-export function useAnnotationSession(active = true, initial = {}, history = null) {
-  const start = useMemo(() => ({ ...DEFAULTS, ...Object.fromEntries(Object.entries(initial).filter(([, value]) => value != null)) }),
-    [initial.tool, initial.color, initial.strokeWidth, initial.strokeStyle, initial.placement]);
-  const [tool, setTool] = useState(start.tool);
-  const [color, setColor] = useState(start.color);
-  const [strokeWidth, setStrokeWidth] = useState(start.strokeWidth);
-  const [strokeStyle, setStrokeStyle] = useState(start.strokeStyle);
-  const [placement, setPlacement] = useState(start.placement);
+export function useAnnotationSession(family = 'pencil', initial = {}, history = null) {
+  const start = useMemo(() => ({
+    pencil: initial.pencil ?? DEFAULT_PENCIL_TOOL,
+    shape: initial.shape ?? DEFAULT_SHAPE_TOOL,
+    styles: Object.fromEntries(SLOTS.map(slot => [slot, { ...DEFAULT_STYLES[slot],
+      ...Object.fromEntries(Object.entries(initial.styles?.[slot] ?? {}).filter(([, value]) => value != null)) }])),
+  }), [initial.pencil, initial.shape, initial.styles]);
+  const [pencil, setPencil] = useState(start.pencil);
+  const [shape, setShape] = useState(start.shape);
+  const [styles, setStyles] = useState(start.styles);
   const own = useViewerHistory();
   const log = history ?? own;
   const logRef = useRef(log);
@@ -112,14 +132,23 @@ export function useAnnotationSession(active = true, initial = {}, history = null
   }, [step]);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const tool = family === 'shapes' ? shape : pencil;
+  const slot = styleSlot(tool);
+  const slotRef = useRef(slot);
+  slotRef.current = slot;
+  // A style is set on the slot of the tool in hand, whichever it is when the change is made; the eraser has none.
+  const setStyle = useCallback(change => {
+    const target = slotRef.current;
+    if (target) setStyles(current => (Object.entries(change).every(([key, value]) => current[target][key] === value) ? current
+      : { ...current, [target]: { ...current[target], ...change } }));
+  }, []);
   const actions = useMemo(() => ({
-    selectTool: next => setTool(next),
-    selectColor: next => setColor(next),
-    selectStrokeWidth: next => setStrokeWidth(next),
-    selectStrokeStyle: next => setStrokeStyle(next),
+    selectTool: next => (toolFamily(next) === 'shapes' ? setShape(next) : setPencil(next)),
+    selectColor: next => setStyle({ color: next }),
+    selectStrokeWidth: next => setStyle({ strokeWidth: next }),
+    selectPlacement: next => setStyle({ placement: next }),
     // Not a style: ink already down, selected or not, stays where it lies.
-    selectPlacement: next => setPlacement(next),
-    restyle: ({ color: nextColor, width, dash }) => {
+    restyle: ({ color: nextColor, width }) => {
       const ids = new Set(selectedRef.current);
       if (!ids.size) return;
       step(current => {
@@ -129,12 +158,10 @@ export function useAnnotationSession(active = true, initial = {}, history = null
           const styled = { ...item };
           if (nextColor != null && item.color !== nextColor) styled.color = nextColor;
           if (width != null && item.kind === 'stroke') {
-            // The pen's own weight is heavier than a shape's at the same setting (`inkGeometry.js`).
-            const drawn = item.widths ? penWidth(width) : width;
+            // The pen's own weight is heavier than a shape's at the same setting, the highlighter's broad (`geometry.js`).
+            const drawn = strokeWidthAt(item, width);
             if (item.width !== drawn) styled.width = drawn;
           }
-          // The pen's freehand ink stays solid.
-          if (dash != null && item.kind === 'stroke' && !item.widths && item.dash !== dash) styled.dash = dash;
           if (Object.keys(styled).some(key => styled[key] !== item[key])) { changed = true; return styled; }
           return item;
         });
@@ -164,9 +191,9 @@ export function useAnnotationSession(active = true, initial = {}, history = null
       viewsRef.current = [];
       setViews([]);
     },
-  }), [step, put]);
+  }), [step, put, setStyle]);
   const hasContent = items.length > 0;
-  return { ready: true, tool, color, strokeWidth, strokeStyle, placement, items, selected, views,
+  return { ready: true, tool, pencil, shape, style: styles[slot ?? 'pen'], styles, items, selected, views,
     canUndo: log.canUndo, canRedo: log.canRedo, hasContent, hasAnnotation: hasContent,
     add, remove, noteView, forget: actions.clear, ...actions };
 }

@@ -21,12 +21,17 @@ import { projectWorldPointToClient } from "@text-to-cad/core/lib/viewer/measureR
 
 import { measureRulerDraftMeasurement } from "./measureRulerState.js";
 
+/** What a pick is, in words, beside the pointer: its kind and what it is worth on its own ("Edge ⌀ 6.60 mm L 20.73 mm"). */
+function entityChipText(pick) {
+  return [MEASURE_SNAP_LABELS[pick?.snapKind] || "", formatEntityMeasurement(entityMeasurementFromPick(pick))].filter(Boolean).join("  ");
+}
+
 // What Select has picked, as the annotations and the parts are: the one selection blue.
 const MEASURE_SELECTED_COLOR = "#2979ff";
 
 /**
  * Measure's drawing over the viewport, on its own 2D canvas (`measureCanvasRef`): every measurement
- * taken, as a snapshot draws it (`drawMeasurementMark`), the one in hand labelled; the draft's rubber
+ * taken, as a mark (`drawMeasurementMark`), the one in hand labelled; the draft's rubber
  * band to the live hover (`measureHoverRef`); and, while the tool is in hand, the snap marker and
  * what it snapped to. It draws right after each render of the scene, so a dimension moves in the
  * frame the model does, and runs no loop at all while there is nothing to draw. Format-blind: a
@@ -53,6 +58,7 @@ export function useMeasureOverlay({
   selectedIdsRef.current = selectedMeasurementIds;
   const hoveredIdRef = useRef(hoveredMeasurementId);
   hoveredIdRef.current = hoveredMeasurementId;
+  const draftMemo = useRef({ anchor: null, end: null, measurement: null });
 
   // Nothing to draw means no loop at all. An unconditional rAF would clear an
   // empty canvas every frame, for the whole session, on every model, whether or
@@ -113,8 +119,7 @@ export function useMeasureOverlay({
         const bounds = { width: cssWidth, height: cssHeight };
         const activeId = activeIdRef.current;
 
-        // Each as a mark, drawn by the code a snapshot draws it with (`drawMeasurementMark`): the one in
-        // hand, or the one the pointer rests on, labelled.
+        // Each as a mark (`drawMeasurementMark`): the one in hand, or the one the pointer rests on, labelled.
         for (const item of state.measurements || []) {
           const mark = measurementMark(item);
           const layout = measurementMarkLayout(mark, camera, localRect);
@@ -146,6 +151,12 @@ export function useMeasureOverlay({
               snapKind: lockedAnchor.snapKind || "vertex",
               now
             });
+            // What the first press took reads out beside it for as long as it is held: one entity is a
+            // result of its own (a hole's diameter, a face's area, a vertex's position), before a second joins it.
+            const heldText = formatEntityMeasurement(entityMeasurementFromPick(lockedAnchor)) ? entityChipText(lockedAnchor) : "";
+            if (heldText) {
+              drawMeasureSnapChip(context, start, heldText, { bounds, color: MEASURE_DIMENSION_DRAFT_COLOR });
+            }
           }
         }
         // The rubber band ends at the LIVE hover (the ref the snap marker reads): the draft's own
@@ -154,7 +165,11 @@ export function useMeasureOverlay({
         const draftEnd = draft?.anchor && draft?.hover
           ? (liveHover?.point && liveHover !== draft.anchor ? liveHover : draft.hover) : null;
         if (draftEnd) {
-          const draftMeasurement = measureRulerDraftMeasurement({ draft: { anchor: draft.anchor, hover: draftEnd } });
+          // The pair's reading is asked once per pointer move, not once per frame.
+          const memo = draftMemo.current;
+          const draftMeasurement = memo.anchor === draft.anchor && memo.end === draftEnd ? memo.measurement
+            : measureRulerDraftMeasurement({ draft: { anchor: draft.anchor, hover: draftEnd } });
+          draftMemo.current = { anchor: draft.anchor, end: draftEnd, measurement: draftMeasurement };
           const layout = screenSpaceDimensionLayout(draft.anchor, draftEnd, draftMeasurement, camera, localRect);
           if (layout) {
             drawMeasureDimension(context, layout, {
@@ -180,9 +195,7 @@ export function useMeasureOverlay({
           const hoverPoint = projectWorldPointToClient(hover.point, camera, localRect);
           if (hoverPoint) {
             drawMeasureSnapMarker(context, hoverPoint, { snapKind: hover.snapKind, now });
-            const entityText = formatEntityMeasurement(entityMeasurementFromPick(hover));
-            const snapLabel = MEASURE_SNAP_LABELS[hover.snapKind] || "";
-            const chipText = [snapLabel, entityText].filter(Boolean).join("  ");
+            const chipText = entityChipText(hover);
             if (chipText) {
               drawMeasureSnapChip(context, hoverPoint, chipText, { bounds });
             }

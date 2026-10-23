@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import { MousePointer2 } from "lucide-react";
 import { cn } from "@text-to-cad/ui/utils";
-import { AnnotationMenu, AnnotationToolbar, annotationToolIcon } from "../../../annotation/toolbar.jsx";
+import { AnnotationToolbar, DRAWING_TOOLS, annotationToolIcon, drawingToolVariant } from "../../../annotation/toolbar.jsx";
 import ViewerAlertCard from "../status/ViewerAlertCard.jsx";
 import ViewerLoadingOverlay from "../status/ViewerLoadingOverlay.js";
 import { ViewUpdateStatus } from "../status/ViewUpdateStatus.jsx";
@@ -9,7 +9,9 @@ import FloatingToolBar, { StripTouchProvider } from "../tools/FloatingToolBar.js
 import FileSidebar from "../tools/FileSidebar.jsx";
 import PreviewChrome from "../tools/PreviewChrome.jsx";
 import { MeasureIcon } from "../tools/measure/SceneMeasure.jsx";
+import { MeasurementsBar } from "../tools/measure/measurementChips.jsx";
 import QuickEdit from "../tools/quick-edit/QuickEdit.jsx";
+import { DRAWING_SHORTCUTS, TOOL_SHORTCUTS } from "../tools/toolShortcuts.js";
 import { FLAT_TOOL } from "./useFlatView.js";
 import { VIEWPORT_INSET_PX, VIEWPORT_TOP_BAR_PX } from "./viewportLayout.js";
 import { ViewportTopRight } from "./ViewportTopRight.jsx";
@@ -38,28 +40,32 @@ const SIDEBAR_POSITION = Object.freeze({ top: INSET, left: INSET, bottom: INSET 
 const SIDEBAR_POSITION_PHONE = Object.freeze({ top: INSET, left: INSET, bottom: `calc(var(--cad-quick-edit-peek, 0px) + ${INSET})` });
 
 /**
- * A flat view's strip, Select, Annotate and Measure, and the row of the tool in hand under it
- * (Annotate's; on a phone, its chevron's menu instead). `selectMenu`: Select's filter, the chevron
+ * A flat view's strip, Select, Pencil, Shapes and Measure, each with its key, and the row of the
+ * tool in hand under it: the drawing tools' (their tools, colours and widths) or Measure's (its
+ * measurements, while there are any); Select has none. `selectMenu`: Select's filter, the chevron
  * after its button, where the view offers one.
  *
  * @param {ReturnType<typeof import("./useFlatView.js").useFlatTools>} tools
- * @param {{ mobile: boolean, colorScheme: "light" | "dark", shown: boolean, selectMenu?: import("react").ReactNode }} options
+ * @param {{ colorScheme: "light" | "dark", shown: boolean, selectMenu?: import("react").ReactNode }} options
  */
-export function flatViewTools(tools, { mobile, colorScheme, shown, selectMenu = null }) {
-  const { toolMode, selectTool, annotation, history, annotating } = tools;
-  const AnnotateIcon = annotationToolIcon(annotation.tool);
+export function flatViewTools(tools, { colorScheme, shown, selectMenu = null }) {
+  const { toolMode, selectTool, annotation, annotating, measuring, measure, toolKeys } = tools;
   const stripTool = (id, label, icon, extra = {}) => ({ id, label, icon, active: toolMode === id, disabled: !shown, onSelect: () => selectTool(id), ...extra });
   const strip = [
-    stripTool(FLAT_TOOL.SELECT, "Select", SELECT_ICON, selectMenu ? { menu: selectMenu } : {}),
-    stripTool(FLAT_TOOL.ANNOTATE, "Annotate", <AnnotateIcon className="size-3" strokeWidth={2} aria-hidden="true" />,
-      // On a phone Annotate's controls are its chevron's menu on the strip, and it has no row.
-      mobile ? { menu: <AnnotationMenu annotation={annotation} history={history} colorScheme={colorScheme} placements={false}
-        onTakeUp={() => selectTool(FLAT_TOOL.ANNOTATE)} /> } : {}),
-    stripTool(FLAT_TOOL.MEASURE, "Measure", MEASURE_ICON)
+    stripTool(FLAT_TOOL.SELECT, "Select", SELECT_ICON, { shortcut: TOOL_SHORTCUTS.select, ...(selectMenu ? { menu: selectMenu } : {}) }),
+    // Pencil and Shapes: plain buttons, each the tool last chosen in it, its tooltip that tool and its key; the tools are the row's.
+    ...DRAWING_TOOLS.map(({ id, label, entries }) => {
+      const variant = drawingToolVariant(id, annotation);
+      const Icon = annotationToolIcon(variant);
+      return stripTool(id, label, <Icon className="size-3" strokeWidth={2} aria-hidden="true" />,
+        { tooltip: entries.find(entry => entry.id === variant)?.label ?? label, shortcut: DRAWING_SHORTCUTS[variant] });
+    }),
+    stripTool(FLAT_TOOL.MEASURE, "Measure", MEASURE_ICON, { shortcut: TOOL_SHORTCUTS.measure })
   ];
-  // Annotate's row under the strip (on a phone, its chevron's menu instead); Select and Measure have none.
-  const row = annotating && !mobile
-    ? <AnnotationToolbar annotation={annotation} history={history} colorScheme={colorScheme} placements={false} /> : null;
+  toolKeys.current = strip;
+  const row = annotating
+    ? <AnnotationToolbar annotation={annotation} colorScheme={colorScheme} placements={false} />
+    : measuring ? <MeasurementsBar measure={measure} /> : null;
   return { strip, row };
 }
 

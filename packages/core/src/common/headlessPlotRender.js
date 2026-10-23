@@ -13,10 +13,10 @@
  * what those rasters are made of. So a CLI render cannot show what the view cannot.
  *
  * A job may frame it (an output's plan-view `camera`: the window a Quick Edit's view was looking
- * at, in the plan of that view) and draw over it (an `annotation` whose marks lie on the board, and
- * Measure's `measurements`, both in the sheet's millimetres), with the code the view draws them
- * with (`../lib/drawing2d/marks.js`, through `plot2d/boardView.js`'s frames, the board mirrored
- * from below): so a prompt's views come back as they were seen.
+ * at, in the plan of that view) and draw over it (an `annotation` whose marks lie on the board, in
+ * the sheet's millimetres), with the code the view draws it with (`../lib/drawing2d/marks.js`,
+ * through `plot2d/boardView.js`'s frames, the board mirrored from below): so a prompt's views come
+ * back as they were seen.
  *
  * The payload arrives over the snapshot host's loopback asset server rather than inside the
  * job, as a drawing's does: cadgen reads the board, caches the payload in the store and writes
@@ -27,34 +27,25 @@ import { appThemeColors } from "../lib/appTheme.js";
 import { createBoardIndex } from "../lib/board2d/boardIndex.js";
 import { drawBoardOverlay } from "../lib/board2d/boardOverlay.js";
 import { clearSurface } from "../lib/drawing2d/index.js";
-import { drawAnnotationMarks, drawMeasurementMarks } from "../lib/drawing2d/marks.js";
+import { drawAnnotationMarks } from "../lib/drawing2d/marks.js";
 import { planTransform } from "../lib/drawing2d/planView.js";
 import {
-  boardDisplayAirwires, boardDrawView, boardMirrorX, drawPlot, fitPlotTransform, layoutPlot, marksInPlan, measurementsInPlan,
+  boardDisplayAirwires, boardDrawView, boardMirrorX, drawPlot, fitPlotTransform, layoutPlot, marksInPlan,
   readBoardDisplay
 } from "../lib/plot2d/index.js";
 import { ANNOTATION_REFERENCE_HEIGHT_PX, normalizeAnnotation } from "./annotation.js";
 import { paintOutput, renderOutputs, renderScale } from "./headlessCanvas.js";
 
 /**
- * A job's annotation, checked as every annotation is, and lying on the board: a board has no parts
- * for ink to hang on, so every mark is on none, its points in the sheet's millimetres.
+ * A job's annotation, checked as every annotation is: on a board its points are in the sheet's
+ * millimetres.
  */
 function boardAnnotation(raw) {
-  if (raw == null) return null;
-  const annotation = normalizeAnnotation(raw);
-  const onPart = annotation.marks.find(mark => mark.part != null);
-  if (Object.keys(annotation.parts).length || onPart) {
-    throw new Error(
-      `annotation: a board has no parts for ink to hang on${onPart ? ` (${onPart.id} is on part ${onPart.part})` : ""}; `
-      + "its marks lie on the board, on no part, their points in the sheet's millimetres"
-    );
-  }
-  return annotation;
+  return raw == null ? null : normalizeAnnotation(raw);
 }
 
 /** One output's PNG: the board framed (its plan view, else fitted) under its Display, on the appearance's background. */
-function drawOutput(layout, display, { width, height, scale, background, camera = null, annotation = null, measurements = null }) {
+function drawOutput(layout, display, { width, height, scale, background, camera = null, annotation = null }) {
   const [sheet] = layout.sheets;
   const view = boardDrawView(display, sheet);
   const mirrorX = boardMirrorX(sheet, view.side);
@@ -71,9 +62,6 @@ function drawOutput(layout, display, { width, height, scale, background, camera 
     }
     if (annotation?.marks?.length) {
       drawAnnotationMarks(context, marksInPlan(annotation.marks, mirrorX), { transform, pixelRatio: scale, lineScale: height / ANNOTATION_REFERENCE_HEIGHT_PX });
-    }
-    if (measurements?.length) {
-      drawMeasurementMarks(context, measurementsInPlan(measurements, mirrorX), { transform, width, height, pixelRatio: scale });
     }
   });
 }
@@ -99,7 +87,6 @@ export async function runHeadlessPlotJob(job) {
   const layout = layoutPlot(await response.json());
   const display = readBoardDisplay(job?.display);
   const annotation = boardAnnotation(job?.annotation);
-  const measurements = Array.isArray(job?.measurements) ? job.measurements : null;
   const warnings = [];
   if (layout.unrouted) {
     // A true answer, and one a thin line in a PNG does not shout — or one the Display leaves out.
@@ -118,8 +105,7 @@ export async function runHeadlessPlotJob(job) {
     scale,
     background: transparent ? null : background,
     camera: output?.camera && typeof output.camera === "object" ? output.camera : null,
-    annotation,
-    measurements
+    annotation
   }));
   return {
     ok: true,

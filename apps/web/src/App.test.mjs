@@ -21,14 +21,13 @@ await build({
       external: true,
     }));
     // The shared CAD viewer, reduced to what this host hands it: what it draws is its own suite's.
-    plugin.onResolve({ filter: /^@text-to-cad\/ui\/cad-viewer$|ViewerAppearance\.jsx$|useViewerAutoReload\.js$|host\/viewerLinks\.js$/ }, args => ({ path: args.path, namespace: 'host-test' }));
+    plugin.onResolve({ filter: /^@text-to-cad\/ui\/cad-viewer$|useViewerAutoReload\.js$|host\/viewerLinks\.js$/ }, args => ({ path: args.path, namespace: 'host-test' }));
     // The tab store the host really uses; nothing else of the shared UI renders here.
     plugin.onResolve({ filter: /^@text-to-cad\/ui\/tab-store$/ }, () => ({ path: fileURLToPath(new URL('../../../packages/ui/src/tab-store/index.ts', import.meta.url)) }));
     plugin.onLoad({ filter: /.*/, namespace: 'host-test' }, args => {
       if (args.path.endsWith('/cad-viewer')) return { contents: `let current; export function CadViewer(props){current=props; return null;} export const snapshot=()=>current; export const createCadFileSource=client=>({id:'local',client}); export const normalizePath=path=>String(path||'').trim().replace(/\\\\/g,'/').replace(/(.)\\/+$/,'$1');`, loader: 'js' };
       if (args.path.endsWith('useViewerAutoReload.js')) return { contents: 'let reloadOptions;export const autoReloadOptions=()=>reloadOptions;export const useViewerAutoReload=(_server,options)=>{reloadOptions=options;return false;};', loader: 'js' };
-      if (args.path.endsWith('viewerLinks.js')) return { contents: `const links={version:'0.7.4',release:'r',x:'x',github:'g',discord:'d',issues:'i'}; export const useViewerLinks=()=>links;`, loader: 'js' };
-      return { contents: 'export default function ViewerAppearance(){return null}', loader: 'js' };
+      return { contents: `const links={version:'0.7.4',release:'r',x:'x',github:'g',discord:'d',issues:'i'}; export const useViewerLinks=()=>links;`, loader: 'js' };
     });
   } }],
 });
@@ -84,14 +83,15 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     assert.deepEqual(await autoReloadOptions().fetchServerInfo(), { ok: true, identityToken: 'restarted' });
     assert.deepEqual(serverCalls[0], { fresh: true });
 
-    // The appearance is the tab's, resolved against the OS; its control is the navbar's, last.
-    assert.equal(viewer().colorSchemeControl.props.colorSchemePreference, 'system');
-    assert.equal(viewer().colorSchemeControl.props.resolvedColorSchemeMode, 'light');
+    // The appearance is the tab's, resolved against the OS; its control is the app menu's Theme row,
+    // over every file and on the home: the host has no light/dark button of its own.
+    assert.equal(viewer().colorScheme.preference, 'system');
     assert.equal(viewer().host.environment.colorScheme, 'light');
     await act(() => { systemDark = true; for (const listener of appearanceListeners) listener(); });
     assert.equal(viewer().host.environment.colorScheme, 'dark');
     assert.equal(window.document.documentElement.classList.contains('dark'), true);
-    await act(() => viewer().colorSchemeControl.props.onColorSchemePreferenceChange('light'));
+    await act(() => viewer().colorScheme.onPreferenceChange('light'));
+    assert.equal(viewer().colorScheme.preference, 'light');
     assert.equal(viewer().host.environment.colorScheme, 'light');
     assert.equal(window.document.documentElement.classList.contains('dark'), false);
     // In the tab's record, under no key of its own and in no cookie.
@@ -113,7 +113,7 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     libraryCalls.splice(libraryCalls.findIndex(([url]) => url === '/__cad/analytics/activity'), 1);
     // The app menu: Analytics.
     assert.deepEqual(viewer().appSettings.map(setting => [setting.label, setting.checked]),
-      [['Share anonymous usage data', false]]);
+      [['Telemetry', false]]);
     // Nothing asks (a cadgen command says it once): the viewer has no notice, and the app menu's toggle
     // is the person's answer.
     assert.equal(viewer().notice, undefined);
@@ -159,9 +159,13 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     assert.deepEqual(libraryCalls.at(-1), ['/__cad/pick', null]);
     assert.equal(viewer().file, '/m/picked.step');
     assert.equal(new URL(window.location.href).searchParams.get('file'), '/m/picked.step');
-    // The home's home button (the logo) leads to the bare URL.
+    // Back to files leads to the bare URL: the home is a step of the browser's history, as a file is,
+    // so the browser's Back and Forward walk between them (the page hands no history of its own).
+    const beforeHome = window.history.length;
     await act(() => viewer().onShow(''));
     assert.equal(new URL(window.location.href).search, '');
+    assert.equal(window.history.length, beforeHome + 1);
+    assert.equal(viewer().history, undefined);
   } finally {
     globalThis.fetch = fetchBefore;
     await act(() => root.unmount());

@@ -3,8 +3,8 @@ import { createToolModes } from "../kit/tools/toolModes.js";
 
 // A board's tools are a drawing's (`../dxf/tools.js`): Select picks its pads, copper and parts, as
 // its filter ticks them — what Quick Edit names (`blinky.kicad_pcb#R1.2`, the pad 2 of R1) — and is
-// the view's hand: a drag pans, the wheel or a pinch zooms, a double-click fits; Annotate draws on
-// the board; Measure takes distances between points snapped to its pad, via and hole centres, its
+// the view's hand: a drag pans, the wheel or a pinch zooms, a double-click fits; Pencil and Shapes
+// draw on the board; Measure takes distances between points snapped to its pad, via and hole centres, its
 // track ends and its outline's corners, in millimetres. Its one view control is its Display.
 export const BOARD_TOOL = FLAT_TOOL;
 

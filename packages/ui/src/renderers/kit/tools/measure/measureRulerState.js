@@ -1,4 +1,5 @@
 import { isFinitePoint, measurementFromPicks } from "@text-to-cad/core/lib/viewer/measurement.js";
+import { pickEntityKey } from "@text-to-cad/core/lib/viewer/measureEntities.js";
 
 export const MEASURE_RULER_MAX_MEASUREMENTS = 20;
 
@@ -26,8 +27,19 @@ export function applyMeasureRulerPick(state, pick, {
   createId = createMeasureMeasurementId,
   createSeriesIndex = createMeasureSeriesIndex
 } = {}) {
+  // A press on nothing (null: no entity under the pointer) lets go of what is held, as in a CAD tool.
+  if (pick === null) {
+    return state?.draft ? cancelMeasureRulerDraft(state) : state || null;
+  }
   if (!pick || !isFinitePoint(pick?.point)) {
     return state || null;
+  }
+  if (state?.draft) {
+    // A press on what is already held takes it back: the selection toggles.
+    const key = pickEntityKey(pick);
+    if (key && key === pickEntityKey(state.draft.anchor)) {
+      return cancelMeasureRulerDraft(state);
+    }
   }
   if (!state?.draft) {
     return {

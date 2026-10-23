@@ -70,13 +70,13 @@ test('a single-part STEP names a picked face after its part, by the name the vie
   assert.equal(await view.tool('Explode').count(), 0, 'no Explode for a part file');
   assert.equal(await view.tool('Clip').count(), 1, 'Clip stays');
   // A single part has no tree under Select (its one row would be all of it), and no panel in its
-  // place: Select's selection filter is the chevron after its button on the strip, everything
-  // ticked, with no Parts (a part is one thing) and no Position (nothing moves).
+  // place: Select's menu is the chevron after its button on the strip, on All, with no
+  // Parts (a part is one thing) and no Position (nothing moves).
   assert.equal(await pane.locator('[data-tool-panel][aria-label="Model tree"]').count(), 0, 'no tree for a part file');
   assert.equal(await pane.getByRole('region', { name: 'Select', exact: true }).count(), 0, 'and no Select card');
   await pane.locator('[data-cad-toolbar]').getByRole('button', { name: 'Selection filter: everything', exact: true }).click();
   assert.deepEqual(await page.locator('[role=menu][aria-label="Selection filter"] [data-select-filter]').allInnerTexts(),
-    ['Select all', 'Faces', 'Edges', 'Annotations', 'Measurement']);
+    ['All', 'Faces', 'Edges']);
   await page.keyboard.press('Escape');
   await page.locator('[role=menu]').waitFor({ state: 'detached' });
   // Its faces load once Select is up: picking everything, a press picks one.

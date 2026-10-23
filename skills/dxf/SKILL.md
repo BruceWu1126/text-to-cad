@@ -15,8 +15,8 @@ repository link is only for provenance and release review.
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
 one installation, and its warm build daemon, with the CAD app's server:
 
-- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.23 cadgen`
-- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.23 python`
+- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.26 cadgen`
+- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.26 python`
 
 The first run downloads that installation and the first snapshot its headless
 browser; later runs reuse both.
@@ -277,7 +277,7 @@ light|dark`, `--size-profile`, `--width`/`--height`, `--job`, `--debug`,
 `--mode` and `--view-labels` are not CLI flags. A job can frame a window of the
 drawing with a plan-view `camera`
 (`{"target": [x, y, 0], "position": [x, y, d], "up": [0, 1, 0],
-"orthographicHalfHeight": h}`) and draw an `annotation` and `measurements` over it,
+"orthographicHalfHeight": h}`) and draw an `annotation` over it,
 in drawing coordinates: a Quick Edit prompt's views file is such a job, and
 `cadgen dxf snapshot --job <it>` renders the views the person saw again.
 Other camera poses, per-output cameras, scene display settings, `scale`, list mode,
@@ -328,7 +328,7 @@ validation don't replace this.
 
 The viewer renders saved DXF files as read-only 2D drawings; it never runs
 generation scripts. Drag to pan, wheel/pinch to zoom, double-click to fit. Its
-Select, Annotate and Measure feed Quick Edit, whose prompt names what the person
+Select, Pencil, Shapes and Measure feed Quick Edit, whose prompt names what the person
 picked as references into the drawing by entity HANDLE: `panel.dxf#h2F` is the
 modelspace entity whose handle is `2F` (`doc.entitydb["2F"]` in ezdxf); anything a
 block reference draws is named by its INSERT, and a dimension is one entity. The

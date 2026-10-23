@@ -810,14 +810,10 @@ test("capture diagnostics separate readiness, pose, tight framing, draw submissi
   assert.deepEqual(listStages, {}, "a list does not report image stages");
 });
 
-test("a snapshot draws the job's annotation on its parts as the scene places them, cut by its clip, as heavy as on the viewer", async () => {
-  // A mark on the right part follows it where the exploded view moved it; a mark on a part the
-  // scene lacks sits where that part was when the annotation was made; a mark on no part stays put.
-  const moved = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 0, 0, 1];
-  const annotation = { units: "mm", parts: { gone: { placement: moved } }, marks: [
-    { id: "1", kind: "stroke", part: "right", points: [2, 0, 0, 3, 1, 0], color: "#ff2d55", width: 3 },
-    { id: "2", kind: "stroke", part: "gone", points: [0, 0, 0, 1, 1, 0], color: "#007aff", width: 3 },
-    { id: "3", kind: "area", part: null, points: [0, 0, 1, 1, 0, 1, 1, 1, 1], triangles: [0, 1, 2], color: "#00aa44" }
+test("a snapshot draws the job's annotation where it was drawn, whatever the exploded view does, cut by its clip, as heavy as on the viewer", async () => {
+  const annotation = { units: "mm", marks: [
+    { id: "1", kind: "stroke", points: [2, 0, 0, 3, 1, 0], color: "#ff2d55", width: 3 },
+    { id: "2", kind: "area", points: [0, 0, 1, 1, 0, 1, 1, 1, 1], triangles: [0, 1, 2], color: "#00aa44" }
   ] };
   const job = { mode: "view", kind: "step", annotation, display: { mode: "solid", exploded: { enabled: true, amount: 1 }, clip: { axis: "x" } },
     outputs: [{ path: "a.png", width: 64, height: 450, camera: "iso" }, { path: "b.png", width: 64, height: 450, camera: "top" }] };
@@ -832,17 +828,15 @@ test("a snapshot draws the job's annotation on its parts as the scene places the
     await captureModel(viewport, { job });
     const layer = scene.getObjectByName("annotation");
     assert.ok(layer, "the annotation is in the scene");
-    const [onRight, onGone, onNothing] = layer.children;
+    const [stroke] = layer.children;
     const right = model.root.getObjectsByProperty("isMesh", true).find(object => object.userData.partId === "right" && !object.isInstancedMesh);
     assert.ok(right.matrixWorld.elements[12] !== 0 || right.matrixWorld.elements[13] !== 0, "the exploded view moved the part");
-    assert.deepEqual(onRight.matrixWorld.elements, right.matrixWorld.elements);
-    assert.deepEqual(onGone.matrixWorld.elements, moved);
-    assert.deepEqual(onNothing.matrixWorld.elements, new THREE.Matrix4().elements);
+    for (const mark of layer.children) assert.deepEqual(mark.matrixWorld.elements, new THREE.Matrix4().elements, "the ink stays put");
     assert.equal(viewport.clipRuntime.activeClipPlanes.length, 1);
     for (const mark of layer.children) assert.deepEqual(mark.material.clippingPlanes, viewport.clipRuntime.activeClipPlanes, "cut as the model is");
     // A 450-pixel output is half the viewer's reference height: its ink is drawn half as wide.
-    assert.equal(onRight.material.linewidth, 1.5);
-    assert.equal(layer.children.length, 3, "one layer serves every output of a height");
+    assert.equal(stroke.material.linewidth, 1.5);
+    assert.equal(layer.children.length, 2, "one layer serves every output of a height");
   } finally {
     viewport.annotationLayer?.layer.dispose();
     model.dispose();

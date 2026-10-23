@@ -13,6 +13,7 @@ import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } 
 import { GLB_DECLINED_LIVE_COMMANDS, GLB_TOOL, GLB_TOOL_MODES } from "./tools.js";
 import { useGlbAnimation } from "./useGlbAnimation.js";
 import { useGlbScene } from "./useGlbScene.js";
+import { TOOL_SHORTCUTS } from "../kit/tools/toolShortcuts.js";
 
 const SELECT_ICON = <MousePointer2 className="size-3" strokeWidth={2} aria-hidden="true" />;
 const NO_REFERENCES = Object.freeze([]);
@@ -83,7 +84,7 @@ function GlbSurface({ view, data }) {
     view, services: document.services, resource: document.resource, modelKey: document.modelKey, revisionKey: loaded.revision,
     features, toolModes: GLB_TOOL_MODES, tool: tools.tool, previewable: true, preview, scene, sceneEffects: true,
     load: { busy: loaded.busy && !scene, updating: loaded.busy && Boolean(scene), progress: loaded.progress, alert: loadAlert },
-    animation: routine, live, escape, measurements: tools.measurements, deleteSelection: measure.removeSelected
+    animation: routine, live, escape, deleteSelection: measure.removeSelected
   });
   shellRef.current = shell;
   useDeclinedSelectReference(document);
@@ -106,7 +107,7 @@ function GlbSurface({ view, data }) {
 
   const sceneTools = useSceneTools({ shell, scene, features, state: tools, measurable: true, clearParts: selection.clear });
   const selectActive = !previewing && Boolean(scene) && shell.toolMode === GLB_TOOL.SELECT;
-  const strip = [shell.tools.own({ id: GLB_TOOL.SELECT, label: "Select", icon: SELECT_ICON }), ...sceneTools.tools];
+  const strip = [shell.tools.own({ id: GLB_TOOL.SELECT, label: "Select", shortcut: TOOL_SHORTCUTS.select, icon: SELECT_ICON }), ...sceneTools.tools];
   const { references, chips } = useSceneReferences({ scene, selection, resource: shell.frame.resource });
   const resourcePath = shell.frame.resource?.path;
   const nameNode = useCallback(reference => {

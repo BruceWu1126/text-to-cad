@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createHttpPromptFiles, type CadClient } from '@text-to-cad/core/client';
 import { unavailablePromptContext } from '@text-to-cad/core/prompt';
 import { CadViewer, createCadFileActions, createCadFileSource, normalizePath } from '@text-to-cad/ui/cad-viewer';
-import type { AppSetting, ColorSchemeSetting } from '@text-to-cad/ui/file-viewer';
+import type { AppSetting, ColorSchemeSetting, LanguageSetting } from '@text-to-cad/ui/file-viewer';
 import type { ViewerHost, ViewerLinks } from '@text-to-cad/ui/host';
 import type { ModelLibrarySource } from '@text-to-cad/ui/library';
 import type { TabStore } from '@text-to-cad/ui/tab-store';
@@ -30,7 +30,7 @@ export interface ViewReporter {
  * Codex's file handler (`surface: file`, `alone`) shows its file alone: the host's own file tree is
  * its navigation.
  */
-export default function ModelView({ launch, sequence, alone = false, bridge, client, tunnel, tabStore, live, links, colorScheme, theme, platform, reporter, sync, chat, appSettings, update, fullSize }: {
+export default function ModelView({ launch, sequence, alone = false, bridge, client, tunnel, tabStore, live, links, colorScheme, theme, locale, language, platform, reporter, sync, chat, appSettings, update, fullSize }: {
   launch: Launch; sequence: number; bridge: Bridge; tabStore: TabStore; live: LiveRegistry; links: ViewerLinks;
   /**
    * The view shows the one file its host opened, and nothing else (Codex's file handler): no home,
@@ -45,6 +45,9 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
   colorScheme: 'light' | 'dark'; platform: string; reporter: ViewReporter;
   /** The person's theme, the app menu's Theme rows. */
   theme?: ColorSchemeSetting;
+  /** The language the view reads in, and the person's choice of it: the app menu's Language row. */
+  locale?: string;
+  language?: LanguageSetting;
   /** The view's one call each second: it carries what this view's client would otherwise poll for. */
   sync: ViewSync;
   /** What the chat takes from a Quick Edit: context for the next message, a message now, or neither (Copy Prompt alone). */
@@ -63,26 +66,21 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
     const { list, search, ...alone } = createCadFileSource(client);
     return homed ? { ...alone, list, search } : alone;
   }, [client, homed]);
-  // The view's own history, as a browser keeps a tab's: the files it showed, by absolute path, the
-  // agent's shows and the person's own moves alike. Back and Forward walk them; a move after a Back
-  // drops what was ahead, and showing what is already on screen adds nothing. The home ('') is no
-  // step: it is a bigger way to pick a recent file, so going there leaves the history where it
-  // stands, and a file picked there follows the one the view left.
+  // The view's own history, as a browser keeps a tab's: what it showed — files, by absolute path,
+  // and the home ('') — the agent's shows and the person's own moves alike. Back and Forward walk
+  // them; a move after a Back drops what was ahead, and showing what is already on screen adds
+  // nothing.
   const launched = () => normalizePath(launch.model || '');
-  const [history, setHistory] = useState(() => {
-    const first = launched();
-    return { entries: first ? [first] : [], index: first ? 0 : -1, home: !first };
-  });
-  const file = history.home ? '' : history.entries[history.index] ?? '';
+  const [history, setHistory] = useState(() => ({ entries: [launched()], index: 0 }));
+  const file = history.entries[history.index] ?? '';
   const navigate = useCallback((next: string) => setHistory(current => {
-    if (!next) return current.home ? current : { ...current, home: true };
-    if (current.entries[current.index] === next) return current.home ? { ...current, home: false } : current;
+    if (current.entries[current.index] === next) return current;
     const entries = [...current.entries.slice(0, current.index + 1), next].slice(-HISTORY_LIMIT);
-    return { entries, index: entries.length - 1, home: false };
+    return { entries, index: entries.length - 1 };
   }), []);
-  const back = useCallback(() => setHistory(current => current.index > 0 ? { ...current, index: current.index - 1, home: false } : current), []);
+  const back = useCallback(() => setHistory(current => current.index > 0 ? { ...current, index: current.index - 1 } : current), []);
   const forward = useCallback(() => setHistory(current =>
-    current.index < current.entries.length - 1 ? { ...current, index: current.index + 1, home: false } : current), []);
+    current.index < current.entries.length - 1 ? { ...current, index: current.index + 1 } : current), []);
   const showing = useRef(file);
   showing.current = file;
   // A Quick Edit's views, annotation and pictures are made by the server, which is on this machine.
@@ -125,12 +123,12 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
     files: source, fileActions, clipboard: frameClipboard, promptContext, promptFiles, links,
     // A Quick Edit copied, queued or sent, counted by the CAD app's server for its telemetry.
     usage: { used: feature => { if (feature === 'quickEdit') client.reportActivity({ quickEdit: true }); } },
-    environment: { colorScheme, platform },
-  }), [client, source, fileActions, promptContext, promptFiles, links, colorScheme, platform]);
+    environment: { colorScheme, locale, platform },
+  }), [client, source, fileActions, promptContext, promptFiles, links, colorScheme, locale, platform]);
 
   // The file on screen joins the library every CAD view shares, with its picture.
   return <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={navigate}
     onShown={path => { if (path) void client.changeRecents({ action: 'open', path }).catch(() => {}); }}
-    library={library} appSettings={appSettings} colorScheme={theme} update={update} fullSize={fullSize} history={viewerHistory}
+    library={library} appSettings={appSettings} colorScheme={theme} language={language} update={update} fullSize={fullSize} history={viewerHistory}
     onThumbnail={(png, pictured) => client.keepThumbnail(png, pictured)} />;
 }

@@ -23,7 +23,7 @@ boundaries, never preset names:
 | Surface style/color source, crossing opaque/transparent | Surface color, opacity within one transparency class |
 | Edge enable/visibility | Edge color |
 | Floor enable | Floor color, opacity, placement |
-| Clip enable/disable | Clip position and Flip after preparation |
+| Clip enable/disable | Clip position, Reverse and Part colors after preparation |
 | Appearance shader change | Projection, background, grid, axes, Explode |
 
 Both paths yield until the controls have painted, then apply the latest recipe.

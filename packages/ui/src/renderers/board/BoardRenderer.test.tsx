@@ -113,11 +113,11 @@ const tap = (pane: HTMLElement, at: [number, number], init: Record<string, unkno
   fireEvent.pointerUp(canvas, event);
 };
 
-it("a board's strip is a drawing's — Select (in hand), Annotate, Measure — then its Display after the rule, and no Preview", async () => {
+it("a board's strip is a drawing's — Select (in hand), Pencil, Shapes, Measure — then its Display after the rule, and no Preview", async () => {
   const { pane, dispose } = await open();
   await opened(pane);
   const tools = strip(pane);
-  expect([...tools.querySelectorAll(':scope button[aria-pressed]')].map(button => button.getAttribute('aria-label'))).toEqual(['Select', 'Annotate', 'Measure']);
+  expect([...tools.querySelectorAll(':scope button[aria-pressed]')].map(button => button.getAttribute('aria-label'))).toEqual(['Select', 'Pencil', 'Shapes', 'Measure']);
   expect(within(tools).getByRole('button', { name: 'Select' }).getAttribute('aria-pressed')).toBe('true');
   expect(within(tools).getByRole('button', { name: 'Selection filter: everything' })).toBeTruthy();
   expect(tools.querySelector('[data-strip-rule] + [data-view-controls]')).not.toBeNull();
@@ -188,7 +188,7 @@ it('a tap picks the most specific thing: a pad, then copper, then nothing; Shift
   dispose();
 });
 
-it("Select's filter ticks what a press can take: Pads off takes the part; Nets alone takes the whole net", async () => {
+it("Select's filter is one choice of what a press takes: Parts takes the part, over copper too; Nets takes the whole net", async () => {
   const user = userEvent.setup({ skipHover: true, pointerEventsCheck: 0 });
   const view = await open();
   const { pane, dispose } = view;
@@ -196,19 +196,15 @@ it("Select's filter ticks what a press can take: Pads off takes the part; Nets a
   const controller = await controllerOf(view);
   await user.click(within(strip(pane)).getByRole('button', { name: 'Selection filter: everything' }));
   const menu = await openMenu('Selection filter');
-  expect(within(menu).getAllByRole('menuitemcheckbox').map(item => item.textContent)).toEqual(['Select all', 'Parts', 'Pads', 'Nets']);
-  await user.click(within(menu).getByRole('menuitemcheckbox', { name: 'Pads' }));
-  // Ticking leaves the menu open, so several change in one go.
-  expect(menuShown('Selection filter')).not.toBeNull();
-  // R1's unrouted pad: no copper under it, so the part (R1.1 is under the VBUS track's end, its copper).
-  tap(pane, [35.825, 15]);
-  expect(selected(controller)).toEqual(['#R1']);
-  tap(pane, [34.175, 15]);
-  expect(selected(controller)).toEqual(['#net:VBUS@x34.17y15']);
-  // A press on the board closed the menu; open again, Parts off leaves Nets alone.
+  expect(within(menu).getAllByRole('menuitemradio').map(item => item.textContent)).toEqual(['All', 'Parts', 'Pads', 'Nets']);
+  await user.click(within(menu).getByRole('menuitemradio', { name: 'Parts' }));
+  // Choosing one puts the menu away.
   await waitFor(() => expect(menuShown('Selection filter')).toBeNull());
-  await user.click(within(strip(pane)).getByRole('button', { name: 'Selection filter: Parts, Nets' }));
-  await user.click(within(await openMenu('Selection filter')).getByRole('menuitemcheckbox', { name: 'Parts' }));
+  // R1.1, under the VBUS track's end: the part, not the pad or the copper.
+  tap(pane, [34.175, 15]);
+  expect(selected(controller)).toEqual(['#R1']);
+  await user.click(within(strip(pane)).getByRole('button', { name: 'Selection filter: Parts' }));
+  await user.click(within(await openMenu('Selection filter')).getByRole('menuitemradio', { name: 'Nets' }));
   expect(within(strip(pane)).getByRole('button', { name: 'Selection filter: Nets' })).toBeTruthy();
   tap(pane, [34.175, 15]);
   expect(selected(controller)).toEqual(['#net:VBUS']);
@@ -284,7 +280,7 @@ it('Display is a stock menu: a mode closes it; View from below and the pours lea
   dispose();
 });
 
-it('Measure snaps to pad centres, in millimetres, and a note carries the view, its Display and the measurement', async () => {
+it("Measure snaps to pad centres, in millimetres, as its row's chip, and opens no Quick Edit; a note on a pick carries the view and its Display", async () => {
   const promptFiles = { create: vi.fn(async () => ({ snapshot: '/tmp/board.snapshot.json' })), read: vi.fn(), save: vi.fn() };
   const { pane, dispose } = await open('blinky.kicad_pcb', { promptFiles });
   await opened(pane);
@@ -292,15 +288,20 @@ it('Measure snaps to pad centres, in millimetres, and a note carries the view, i
   // A little off each pad's centre: the ends land on the centres.
   tap(pane, [34.2, 15.1]);
   tap(pane, [35.8, 14.9]);
+  const row = await within(pane).findByRole('toolbar', { name: 'Measurements' });
+  expect(within(row).getByRole('button', { name: 'Measurement 1: 1.65 mm' })).toBeTruthy();
+  expect(box(pane)).toBeNull();
+  // Select takes a measurement first, so the note's pick is D1.1, off the measurement's ends.
+  fireEvent.click(within(strip(pane)).getByRole('button', { name: 'Select' }));
+  tap(pane, [20, 24.825]);
   const quickEdit = await waitFor(() => { expect(box(pane)).not.toBeNull(); return box(pane)!; });
-  expect(quickEdit.textContent).toContain('1.65 mm');
   const note = within(quickEdit).getByRole('textbox', { name: 'Describe your changes' });
-  note.textContent = 'Spread these pads.';
+  note.textContent = 'Move this pad.';
   fireEvent.input(note);
   fireEvent.click(within(quickEdit).getByRole('button', { name: 'Copy Prompt' }));
   await waitFor(() => expect(promptFiles.create).toHaveBeenCalledTimes(1));
   const request = promptFiles.create.mock.calls[0][0] as any;
-  expect(request.measurements).toEqual([{ start: [34.175, 15, 0], end: [35.825, 15, 0], label: '1.65 mm', color: expect.stringMatching(/^#[0-9a-f]{6}$/i) }]);
+  expect(request).not.toHaveProperty('measurements');
   expect(request.views).toEqual([expect.objectContaining({ label: 'current view', display: { mode: 'board', side: 'top', poured: true } })]);
   expect(request.views[0].camera).toMatchObject({ up: [0, 1, 0] });
   dispose();

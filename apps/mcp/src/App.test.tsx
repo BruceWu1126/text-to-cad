@@ -199,7 +199,7 @@ it('an inline host gets the whole viewer in a card of a height it is told, with 
   expect(viewer.mounts).toBe(1);
 });
 
-it("a view keeps its own history of files, as a browser's tab does: the agent's shows and the person's moves, Back and Forward over them, a move after a Back dropping what was ahead, the home no step", async () => {
+it("a view keeps its own history of files, as a browser's tab does: the agent's shows and the person's moves, Back and Forward over them, a move after a Back dropping what was ahead, the home a step like a file", async () => {
   const { bridge, server } = host({ displayMode: 'fullscreen' });
   // The agent's shows reach the view on its sync, one reply at a time.
   const replies: ((reply: { events: unknown[] }) => void)[] = [];
@@ -221,25 +221,34 @@ it("a view keeps its own history of files, as a browser's tab does: the agent's 
   expect(at()).toEqual(['/work/a.step', false, true]);
   act(() => viewer.props!.history!.forward());
   expect(at()).toEqual(['/work/b.step', true, true]);
-  // The home is no step, a bigger way to pick a recent file: going there leaves the history where
-  // it stands, and the file picked there follows the one the view left, dropping what was ahead (c).
+  // The home is a step like a file: going there drops what was ahead (c), Back from it returns to
+  // the file the view left, and Forward goes home again.
   act(() => viewer.props!.onShow(''));
-  expect(at()).toEqual(['', true, true]);
+  expect(at()).toEqual(['', true, false]);
+  act(() => viewer.props!.history!.back());
+  expect(at()).toEqual(['/work/b.step', true, true]);
+  act(() => viewer.props!.history!.forward());
+  expect(at()).toEqual(['', true, false]);
   act(() => viewer.props!.onShow('/work/d.step'));
   expect(at()).toEqual(['/work/d.step', true, false]);
   act(() => viewer.props!.history!.back());
-  expect(at()).toEqual(['/work/b.step', true, true]);
-  // Picking, on the home, the file the view left adds nothing; nor does a show of what is on screen.
-  act(() => viewer.props!.onShow(''));
-  act(() => viewer.props!.onShow('/work/b.step'));
-  expect(at()).toEqual(['/work/b.step', true, true]);
-  await agentShows('/work/b.step', 2);
-  expect(at()).toEqual(['/work/b.step', true, true]);
+  expect(at()).toEqual(['', true, true]);
+  // A show of what is on screen adds nothing, the agent's included.
+  act(() => viewer.props!.history!.forward());
+  act(() => viewer.props!.onShow('/work/d.step'));
+  await agentShows('/work/d.step', 2);
+  expect(at()).toEqual(['/work/d.step', true, false]);
   cleanup();
-  // A view opened on the home: its first file is its first step, with nothing behind it.
+  // A view opened on the home: the home is its first step, so Back from the first file returns
+  // there, and Forward to the file.
   render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 5, page: 'home', model: null, surface: 'tab', pick: false }} />);
+  expect(at()).toEqual(['', false, false]);
   act(() => viewer.props!.onShow('/work/a.step'));
-  expect(at()).toEqual(['/work/a.step', false, false]);
+  expect(at()).toEqual(['/work/a.step', true, false]);
+  act(() => viewer.props!.history!.back());
+  expect(at()).toEqual(['', false, true]);
+  act(() => viewer.props!.history!.forward());
+  expect(at()).toEqual(['/work/a.step', true, false]);
   cleanup();
   // A file handler shows its file alone, with no home to go to: no Back or Forward.
   render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 5, page: 'viewer', model: '/work/a.step', surface: 'file' }} />);
@@ -319,7 +328,7 @@ it('an answer is never undone by a read sent just before it, and a choice the en
   fixed.server.answers['/__cad/analytics'] = () => ({ sharing: false, reason: 'environment', policy: POLICY });
   render(<App bridge={fixed.bridge as any} server={fixed.server as any} launch={home} />);
   await act(async () => {});
-  expect(viewer.props!.appSettings![0]).toEqual(expect.objectContaining({ disabled: true, label: 'Share anonymous usage data (set by your environment)' }));
+  expect(viewer.props!.appSettings![0]).toEqual(expect.objectContaining({ disabled: true, label: 'Telemetry (set by your environment)' }));
 });
 
 it('a newer release is the blue update button: its card sends the prompt to the chat where the host takes messages, copies it elsewhere, the full instructions a link away', async () => {

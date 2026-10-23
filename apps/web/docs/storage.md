@@ -48,7 +48,7 @@ The record is `{ version, settings, files }`:
 | --- | --- |
 | A file the tab left: its whole view | The defaults, when it is opened again |
 | The tool in hand | The renderer's default tool (Select) |
-| The selection (a STEP's tree and topology, a robot's links), measurements, Annotate's ink | Empty |
+| The selection (a STEP's tree and topology, a robot's links), measurements, the drawing tools' ink | Empty |
 | Preview, its camera and its Orbit | Off, opening still; its settings are the file's, above |
 | The routine, its time and whether it is playing | At rest |
 | Quick Edit's note | Empty, its box closed |

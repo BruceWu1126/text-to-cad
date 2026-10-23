@@ -2,7 +2,7 @@ import { getStrokePoints } from "perfect-freehand";
 import { FILL_ANALYSIS_MAX_DIMENSION, FILL_CONNECT_GAP_PX, findFillRegion, pairNearbyBoundaryEndpoints } from "@text-to-cad/core/lib/annotation/fillRegion.js";
 
 // Ink on the screen: what each Annotate tool puts down, as marks in CSS pixels from the viewport's
-// top-left — a stroke (a polyline of a width, solid, dashed or dotted), an area (a filled polygon:
+// top-left — a stroke (a polyline of a width), an area (a filled polygon:
 // a fill), or a text mark (words, on a flat rectangle) — before `kit/tools/annotate/annotation3d.js` projects them
 // into the model; and the ink already in the model, projected back onto the screen, to hit-test
 // (the eraser, select) and to bound a fill. Pure: no DOM, no WebGL.
@@ -15,10 +15,10 @@ export const FILL_OPACITY = 0.35;
 
 /**
  * @typedef {{ x: number, y: number }} ScreenPoint
- * @typedef {{ color: string, width: number, dash: "solid" | "dashed" | "dotted" }} AnnotationStyle  `width`: the
- *   stroke's weight (1, 2, 4), in CSS pixels on screen.
+ * @typedef {{ color: string, width: number }} AnnotationStyle  `width`: the
+ *   stroke's weight (1, 2, 4, 6), in CSS pixels on screen.
  * @typedef {{ kind: "stroke", id: string, points: ScreenPoint[], closed: boolean, color: string,
- *   width: number, opacity: number, dash: "solid" | "dashed" | "dotted", widths?: number[], group?: string }} ScreenStroke
+ *   width: number, opacity: number, widths?: number[], group?: string }} ScreenStroke
  *   `widths`: the pen's, each point's width as a share of `width` (its pressure). `group`: the
  *   marks drawn as one thing (an arrow's line and its head), which are erased, picked and moved together.
  * @typedef {{ kind: "area", id: string, outline: ScreenPoint[], color: string, opacity: number }} ScreenArea
@@ -33,6 +33,17 @@ export const annotationId = () => `ink-${Date.now().toString(36)}-${(made += 1).
 
 /** The pen draws a little heavier than a shape at the same weight, as a felt tip does next to a ruler. */
 export const penWidth = width => Math.max(1, width * 1.5);
+
+/** The highlighter is broad and translucent: five times the weight chosen, at this opacity. */
+export const HIGHLIGHTER_WIDTH_FACTOR = 5;
+export const HIGHLIGHTER_OPACITY = 0.35;
+export const highlighterWidth = width => width * HIGHLIGHTER_WIDTH_FACTOR;
+/** A stroke the highlighter drew: an ordinary stroke, told by its opacity (no pressure `widths`, a shape is opaque). */
+export const isHighlighterStroke = item => item.kind === "stroke" && !item.widths && Math.abs((item.opacity ?? 1) - HIGHLIGHTER_OPACITY) < 1e-3;
+/** A stroke's width in px at the weight `setting` (1, 2, 4, 6), as its own tool draws it: the pen's heavier, the highlighter's broad. */
+export const strokeWidthAt = (item, setting) => (item.widths ? penWidth(setting) : isHighlighterStroke(item) ? highlighterWidth(setting) : setting);
+/** The weight a stroke was drawn at, whichever tool drew it (`strokeWidthAt` undone). */
+export const strokeSettingOf = item => (item.widths ? item.width / penWidth(1) : isHighlighterStroke(item) ? item.width / HIGHLIGHTER_WIDTH_FACTOR : item.width);
 
 // The pen: perfect-freehand's handling of a freehand line: the path smoothed as it is drawn (streamline ½), and each point's width from its
 // pressure — a stylus's own, or with a mouse simulated from speed, so a quick stroke thins and a
@@ -87,8 +98,8 @@ export function arrowWings(from, tip, width) {
 }
 
 // A stroke mark of a style: its points, open or closed, at the style's weight.
-const stroke = (points, closed, { color, width, dash }, { id = annotationId(), weight = width, opacity = 1 } = {}) =>
-  ({ kind: "stroke", id, points: densify(points, closed), closed, color, width: weight, opacity, dash });
+const stroke = (points, closed, { color, width }, { id = annotationId(), weight = width, opacity = 1 } = {}) =>
+  ({ kind: "stroke", id, points: densify(points, closed), closed, color, width: weight, opacity });
 
 /**
  * The pen's mark: the line it was drawn along, smoothed, each point as wide as its pressure made it
@@ -100,7 +111,20 @@ export function penMark(points, style, pressures = null) {
     pressures && pressures.length === points.length ? pressures : null);
   if (path.length < 2) path.push({ ...path[0], x: path[0].x + 0.01 });
   return { kind: "stroke", id: annotationId(), points: path.map(({ x, y }) => ({ x, y })), closed: false, color: style.color,
-    width: penWidth(style.width), opacity: 1, dash: "solid", widths: path.map(point => point.width) };
+    width: penWidth(style.width), opacity: 1, widths: path.map(point => point.width) };
+}
+
+/**
+ * The highlighter's mark: the line it was drawn along, smoothed as the pen's is, but of one broad
+ * width (`highlighterWidth`) and translucent (`HIGHLIGHTER_OPACITY`), with no pressure taper: a
+ * plain stroke, round at its ends. A press with no drag is a dot.
+ */
+export function highlighterMark(points, style) {
+  if (!points.length) return null;
+  const path = penPath(points.length === 1 ? [points[0], { x: points[0].x + 0.01, y: points[0].y }] : points, null);
+  if (path.length < 2) path.push({ ...path[0], x: path[0].x + 0.01 });
+  return { kind: "stroke", id: annotationId(), points: path.map(({ x, y }) => ({ x, y })), closed: false, color: style.color,
+    width: highlighterWidth(style.width), opacity: HIGHLIGHTER_OPACITY };
 }
 
 // A rectangle's corners, rounded: a quarter of its shorter side, at most 32px.
@@ -128,7 +152,7 @@ export function shapeMarks(tool, from, to, style) {
   if (tool === "line") return [stroke([from, to], false, style)];
   if (tool === "arrow") {
     const group = annotationId();
-    return [stroke([from, to], false, style), ...arrowWings(from, to, style.width).map(wing => stroke(wing, false, { ...style, dash: "solid" }))]
+    return [stroke([from, to], false, style), ...arrowWings(from, to, style.width).map(wing => stroke(wing, false, style))]
       .map(mark => ({ ...mark, group }));
   }
   const left = Math.min(from.x, to.x), right = Math.max(from.x, to.x), top = Math.min(from.y, to.y), bottom = Math.max(from.y, to.y);

@@ -152,7 +152,7 @@ export function syncRuntimeStepClipPlane(runtime, clipSettings) {
   syncObjectClipPlanes(runtime.facePickGroup, clipPlanes);
   syncObjectClipPlanes(runtime.edgePickGroup, clipPlanes);
   syncObjectClipPlanes(runtime.topologyDisplayEdgeLine, clipPlanes);
-  syncSectionCaps(runtime, clipPlane);
+  syncSectionCaps(runtime, clipPlane, clipSettings);
   // Clipping changes draw materials, not occurrence membership, transforms or
   // colours. A visual/effects pass still reconciles those independently.
   const seenSurfaceSets = new Set();

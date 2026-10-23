@@ -27,7 +27,7 @@ inspects a format's parts, joints or topology. No pick or tool opens or closes t
 | The host (web, desktop) supplies | The shared UI decides |
 | --- | --- |
 | Where the tab record lives (`TabRecordStorage`: the web's sessionStorage, the CAD app's memory) | The record: its settings (the file sidebar's and tool stack's layout, the appearance, the home's layout) and the view of the file on screen (its camera, Display settings, its playback settings, and renderer slices), what is written when, and what is never stored (`@text-to-cad/ui/tab-store`, `kit/shell/fileView.js`) |
-| `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings), `colorScheme` (the person's theme and how it changes) and `colorSchemeControl` (the home's light/dark button, where it has one) | The navbar's order and look, the app menu (one menu in the viewer and on the home) and what a new issue says |
+| `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings), `colorScheme` (the person's theme and how it changes) | The navbar's order and look, over a file and over the home, the app menu (one menu in the viewer and on the home) and what a new issue says |
 | `host.files`, `fileActions`, `navigation`, `clipboard`, `promptContext`, `promptFiles` | When a copy, capture or open happens and what it carries |
 | `host.environment`: color scheme, keyboard `platform`, `reducedMotion` | How the chrome honours them |
 | `onError`, for errors the viewer hands up | Preview, tooltips, keyboard scope, the tool strip and sidebar, the camera |
@@ -35,12 +35,12 @@ inspects a format's parts, joints or topology. No pick or tool opens or closes t
 Hosts pass no Preview, chrome-visibility or notification props; there are
 none.
 
-- **Navbar.** One row, the same in every app, over every file. Left: the text-to-cad "C"
+- **Navbar.** One row, the same in every app, over every file and over the home. Left: the text-to-cad "C"
   logo, named Menu, the size of the row's icon buttons, with no chevron, which opens the
   **app menu** (see [Settings](#settings)) — a host with no home has it too — then, where the
   host keeps the view's own history (`history`: the CAD app's views, which no browser holds),
-  **Back** and **Forward**, two arrows walking it as a browser's do, from file to file (the home
-  is no step: it is a way to pick a recent file), each there always and disabled where it has
+  **Back** and **Forward**, two arrows walking it as a browser's do, from file to file and to
+  and from the home (a step like a file), each there always and disabled where it has
   nowhere to go; then the open file's name and its ⋯. Each of these that
   is a control (`NAV_ITEM_CLASS`) is transparent at rest, takes the same accent background
   while the pointer is on it and while its menu is open, has a pointer cursor and no tooltip:
@@ -71,12 +71,15 @@ none.
   Preview's pair in the view's top-right corner. A new per-file button that is no tool goes
   with them.
 
-  A host's home has no navbar: under its TEXTTOCAD wordmark and byline, its update, when there is
-  one, is a row of its own (the blue button, labeled **Update**, its card centred under it), then
-  GitHub (its mark, a link to the project: it is open source), Discord and X, as icon links, and,
-  where the host shows the view small, **Full size**, then the host's colour scheme control,
-  where it has one, last in that row, above its Recent Files: the models opened before,
-  pinned first, as cards or rows, with Open where the host has a file chooser.
+  A host's home has the same navbar, with only the logo and its app menu (without Back to
+  files) and, where the host keeps the view's history, **Back** and **Forward** at the left
+  and, at the right end, the host's update, when there is one, and **Full size**, where the
+  host shows the view small — the same buttons, sizes and places as over a file. Under it,
+  the page: the TEXTTOCAD wordmark and byline, then GitHub (its mark, a link to the project:
+  it is open source), Discord and X, as icon links (GitHub and Discord are the app menu's
+  too, X its footer's "Made by"; no light/dark button: Theme is the menu's), then Recent Files with its search, grid/list switch
+  and Open where the host has a file chooser: the models opened before, pinned first, as cards
+  or rows.
   The update shows only for a release
   later than the version the page names, whatever the host says. A file that will not open
   shows a page under the navbar: "File does not exist" and the file's path, or "Could not
@@ -109,8 +112,12 @@ none.
   rows on screen, the rows of a folder open inline among them. A pick opens the file and
   closes it, as do Escape and a press anywhere outside it.
 - **Tool strip** at the top centre, 8px down, never wider than the view less 8px at each
-  side (it wraps before it would be): the tools, left to right (with no navbar, then a thin
-  rule and the view's controls, **Display** and **Preview**: below). 24px tiles with 14px icons,
+  side (it wraps before it would be): the tools, left to right, in **two sections** parted by one
+  thin rule (a tool's `group`: the tools that pick, Select, Pencil, Shapes and Measure; then the
+  model's effects, Explode and Clip), and, where there is no navbar, the view's controls,
+  **Display** and **Preview**, directly after the last tool, in the same second section with no rule
+  between (a file with only tools that pick has its view's controls after a rule, as their own second
+  section). Where a navbar holds the view's controls the strip is the tools alone: below. 24px tiles with 14px icons,
   an even 4px apart, a tool's chevron touching its button, in a 34px row (`FloatingToolBar`,
   `data-cad-toolbar`). A file with no tools has no strip. On a phone
   ([mobile](#the-file-sidebar-and-the-tool-stack)) the tiles are 36px with 18px icons, a chevron
@@ -167,13 +174,13 @@ none.
 
 | File | Tool strip, left to right |
 | --- | --- |
-| STEP | Select, Annotate, Measure, Explode (two or more parts), Clip; then Display and Preview |
-| URDF / SRDF / SDF | Select, Annotate, Measure, Clip; then Display and Preview |
-| GLB | Select, Annotate, Measure, Explode (several rigid nodes that draw), Clip; then Display and Preview |
-| 3MF | Select, Annotate, Measure, Clip; then Display and Preview |
-| STL | Select (in hand, the view's navigation: an STL picks nothing), Annotate, Clip; then Display and Preview |
-| DXF | Select (in hand, and the view's hand: a drag pans, a tap picks an entity), Annotate, Measure; no view controls: a drawing is 2D |
-| KiCad board | Select (in hand, and the view's hand: a drag pans, a tap picks a pad, copper or a part), Annotate, Measure; then Display, the board's one view control (a board without its index: Display alone) |
+| STEP | Select, Pencil, Shapes, Measure; Explode (two or more parts), Clip, Display and Preview |
+| URDF / SRDF / SDF | Select, Pencil, Shapes, Measure; Clip, Display and Preview |
+| GLB | Select, Pencil, Shapes, Measure; Explode (several rigid nodes that draw), Clip, Display and Preview |
+| 3MF | Select, Pencil, Shapes, Measure; Clip, Display and Preview |
+| STL | Select (in hand, the view's navigation: an STL picks nothing), Pencil, Shapes; Clip, Display and Preview |
+| DXF | Select (in hand, and the view's hand: a drag pans, a tap picks an entity), Pencil, Shapes, Measure; no view controls: a drawing is 2D |
+| KiCad board | Select (in hand, and the view's hand: a drag pans, a tap picks a pad, copper or a part), Pencil, Shapes, Measure; Display, the board's one view control (a board without its index: Display alone) |
 
 There is no activity dot. A thin rule parts the tools from the view's controls, which
 are no tools (see [Ownership and layout](#ownership-and-layout)). Position is no tool:
@@ -198,10 +205,10 @@ Explode or Clip with its effect set takes it up again, as it is; unset, it start
 
 | Tool | Pressing it | Its sub-toolbar | Leaving it |
 | --- | --- | --- | --- |
-| Select | The default tool of every 3D file but an STL, and of a drawing and a board; picks what its filter ticks, or a GLB's nodes, a 3MF's objects (Shift adds; Delete deletes annotations and measurements); what is picked is Quick Edit's chips | None: its filter is the chevron after its button (a board's: Select all, then Parts, Pads and Nets; Nets alone takes a pad's or a track's whole net) | The selection stays, lit and in Quick Edit, under any tool |
-| Annotate | Draws on the view | Its tools, what is drawn next, Undo, Redo and Clear annotations (on a phone, the menu of a chevron after its tile instead) | The annotations stay in the model, their chip in Quick Edit; the tool in hand stays, the strip's Annotate showing its icon |
-| Measure | Arms picking between points on the model (a STEP's exact vertices, edges and faces; a mesh's triangles, approximately, in its file's unit; a drawing's ends, centres and lines, in the unit it declares, else "units"; a board's pad, via and hole centres, track ends and outline corners, in millimetres); each result a chip in Quick Edit, in its colour | None | Unfinished picks are cancelled; completed measurements stay, Quick Edit's chips |
-| Explode / Clip | The effect as it is set, or neutral; an edit applies it (Explode's, as a motion: see below) | The slider, its amount beside it, Reset (Clip's: its axis first, and Flip clip before Reset) | The effect stays on the model |
+| Select | The default tool of every 3D file but an STL, and of a drawing and a board; picks what its filter ticks, or a GLB's nodes, a 3MF's objects (Shift adds; Delete deletes annotations and measurements); what is picked is Quick Edit's chips | None: its filter is the chevron after its button (a board's: All, then Parts, Pads or Nets alone; Nets takes a pad's or a track's whole net) | The selection stays, lit and in Quick Edit, under any tool |
+| Pencil / Shapes | Draws on the view: Pencil with the pen, the highlighter or the eraser, Shapes with the rectangle, line, arrow, ellipse or text; each button is the tool last chosen in it | One row for both: the tools of the one that is up, then Color, Stroke width, Placement and Clear annotations (Undo and Redo are ⌘Z, ⇧⌘Z) | The annotations stay in the model, their chip in Quick Edit; each tool keeps what it draws with, the strip showing its icon |
+| Measure | Arms picking two entities and reading what the pair makes (a STEP's exact vertices, edges and faces, what its filter ticks; on a mesh, two points on its surface, approximately, in its file's unit; a drawing's ends, centres and lines, in the unit it declares, else "units"; a board's pad, via and hole centres, track ends and outline corners, in millimetres); each result a chip in its colour | Its measurements, as chips, then Clear measurements; none while nothing is measured | Unfinished picks are cancelled; completed measurements stay, drawn on the model, their row back with the tool |
+| Explode / Clip | The effect as it is set, or neutral; an edit applies it (Explode's, as a motion: see below) | The slider, its amount beside it, Reset (Clip's: its axis first, whose dropdown holds its settings) | The effect stays on the model |
 
 **One motion at a time.** Every tool's state stands beside every other's — the selection,
 measurements, the annotations, Clip — except the two that move the parts: **Explode** and
@@ -221,48 +228,56 @@ before it acts.
 
 **Removing an effect.** Explode's and Clip's sub-toolbars end in
 Reset ("Reset explode", "Reset clip"): always there, disabled while there
-is nothing to take away, it removes the effect and leaves the tool up. Position's way back is its Pose row's Default. A
-measurement's chip X deletes it; the Annotation chip's X clears the annotations.
+is nothing to take away, it removes the effect — the amount back at zero, nothing else (Clip's
+axis and its settings stay as set) — and leaves the tool up. Position's way back is its Pose row's Default. A
+measurement's chip X deletes it, and Measure's Clear measurements all of them; the Annotation chip's X clears the annotations.
 
-**Select is the one tool with a menu on the strip**: the chevron right after its button
-(`ToolSettingsMenu`'s "chevron" trigger, `kit/tools/ToolModeMenu.jsx`), a small button of
-its own as tall as the tile and touching it, lit by its own hover and while its menu is
-open, never with the tool. A press on any other tool is its only action. Whatever a tool can
+**Select and Measure are the tools with a menu on the strip** (Measure's on a STEP only), each its selection filter: the
+chevron right after the button (`ToolSettingsMenu`'s "chevron" trigger, `kit/tools/ToolModeMenu.jsx`),
+as tall as the tile and touching it. The button and its chevron are **one control**
+(`FloatingToolBar.js`): one rounded fill lights the pair on hover, while the tool is in hand and
+while its menu is open, and the chevron's half only brightens over it, on its own hover and
+while its menu is open, with no line between the halves. A change
+to a filter takes its tool up. A press on any other tool is its only action. Whatever a tool can
 be set to while it is up is its sub-toolbar. A dropdown is ordinary — under its own button,
 free to overlap the view — and closes with no exit animation, so a quick second tap (touch
 included) always reaches its trigger. Choosing a value closes it; ticking an option leaves
-it open. Menu checks sit on the right. The other dropdowns over the viewport are Display,
-the sub-toolbars' (Clip's axis, Annotate's colour, weight, line style and placement), its
+it open, as do Clip's axes and the app menu's Theme. Menu checks sit on the right. The other dropdowns over the viewport are Display,
+the sub-toolbars' (Clip's axis and settings, the drawing tools' colour, stroke width and placement), its
 context menu, and the Animation section's routine and Playback settings (`PlaybackMenu.jsx`, on
 `ToolPopover`). Preview's settings are a panel, not a dropdown (see [Preview](#camera-animation-and-preview)).
 
-**Select's filter** (`kit/tools/select/SelectFilterMenu.jsx`), as a CAD tool's selection
-filter is: the chevron's dropdown, headed "Selection filter", then **Select all** — ticked
-when every kind is, a dash (indeterminate) when some are; pressing it ticks every kind, or,
-with every kind ticked, none — then, after a rule, a checkbox per kind of thing Select picks,
-each with its glyph and each on its own. A STEP's (`SelectionModes.jsx`): **Parts** (a whole
-cube; an assembly's only — a part file's filter offers none, and a press that reaches no face
-or edge picks the whole part), **Faces** (a faint cube, its top face filled), **Edges** (a
-faint cube, one edge heavy), **Position** (where the file has joints to move: its knobs),
-**Annotations** and **Measurement**. A robot's: **Links** and **Position** (where a
-joint can be driven). Every kind is ticked when a file opens; the filter holds while the file
-is open, across updates of it, and another file starts with every kind. Ticking leaves the
-menu open, so several change in one go, and takes Select up. The chevron's name says what is
-picked ("Selection filter: everything", "Selection filter: Faces, Edges", "…: nothing").
-Select's button is the pointer, whatever the filter. After another rule, a STEP's filter ends
-in how a face or edge pick grows, each with its glyph and independent of the filter and of
-each other: **Group edges** (the connected edges with a picked edge), shown while Edges is
-ticked, and **Group faces** (the smoothly joined faces with a picked face), shown while Faces
-is; a hidden one keeps its choice for when it shows again.
+**Select's menu** (`kit/tools/select/SelectFilterMenu.jsx`) is a CAD tool's selection
+priority (Fusion's Select > Face Priority, Blender's vertex, edge and face modes), not a
+checklist: the chevron's dropdown, headed "Pick", lists ONE choice of what a click on the model
+takes, each with its glyph — **All** first, the default, then each kind alone. Choosing
+one puts the menu away and takes Select up. A STEP's (`SelectionModes.jsx`'s `stepSelectModes`):
+**All** (the pointer: a face or an edge where a part's are loaded, the part elsewhere,
+Position's knobs, the annotations and the measurements), **Parts** (a whole cube; an assembly's
+only — in a part file a press that reaches no face or edge picks the whole part), **Faces** (a
+faint cube, its top face filled), **Edges** (a faint cube, one edge heavy) and **Position**
+(where the file has joints to move: its knobs alone, the model picking nothing). A robot's:
+**All**, **Links** and **Position** (where a joint can be driven; a robot with nothing to
+drive has no menu). The annotations and measurements are no choice of their own: they are drawn
+over the model, so a click on one is never taken for the face under it, and a kind alone (Faces)
+picks that kind only. All is chosen when a file opens; the choice holds while the file is
+open, across updates of it, and another file starts on All. The chevron's name says what
+is chosen ("Selection filter: everything", "Selection filter: Faces"), and Select's button wears
+it as a badge on the pointer (`modeGlyphs.jsx`'s `ToolModeIcon`; none for All), so what a
+click takes is on the strip, not only in the menu. After a rule, a STEP's menu ends in how a face
+or edge pick grows, each with its glyph and independent of each other: **Group edges** (the
+connected edges with a picked edge), shown while edges are picked, and **Group faces** (the
+smoothly joined faces with a picked face), shown while faces are; a hidden one keeps its choice
+for when it shows again.
 
-The geometry ticked is picked as one mode (`step/workbench/selectionFilter.js`'s
-`selectGeometryMode`): Parts with Faces or Edges, a press takes the face or edge it lands on
-where the part's topology can be picked, and the part elsewhere; Parts alone, the part;
-Faces or Edges without Parts, that topology alone. The mode never shapes the model tree (it
+The geometry chosen is picked as one mode (`step/workbench/selectionFilter.js`'s
+`selectGeometryMode`): All, a press takes the face or edge it lands on where the part's
+topology can be picked, and the part elsewhere; Parts, the part; Faces or Edges, that topology
+alone. The mode never shapes the model tree (it
 opens as every tree does: [the file sidebar](#the-file-sidebar-and-the-tool-stack)): Parts,
 Faces and Edges reach every part in the viewport whatever the tree has open, a press revealing
-its part's row; with Parts and Faces or Edges, or no geometry at all, a press takes what the
-tree has open. A part is a leaf: nothing opens under it, and a face or edge picked in the
+its part's row; under All, or Position (no geometry at all), a press takes what the tree has
+open. A part is a leaf: nothing opens under it, and a face or edge picked in the
 viewport is revealed at its part's row. Leaving Faces or Edges puts the parts whose topology
 loaded for them back as they were (the owners of what is still selected stay loaded). Under Faces
 or Edges a part's topology is asked for as its row comes on screen in the tree, never for a
@@ -273,55 +288,106 @@ nothing: the pointer resting on the part in the viewport (150ms) or pressing it 
 
 **Sub-toolbars** (`kit/tools/SubToolbar.jsx`): the tool in hand's controls, one row hung
 under the strip, centred, 8px below it, on the strip's surface, its buttons the strip's
-24px tiles, its groups — what the tool does, how it looks, what it can undo — parted by a
+24px tiles, its groups — what the tool does, then how it looks and what clears it — parted by a
 thin rule. It stays up for as long as its tool does, and has no heading: the tool's lit
 button above names it. Explode's and Clip's are one shape — what leads
 the slider, the slider, its value right beside it and only as wide as
-its text, the tool's actions, then Reset, last, at the same spot in both, with no rules —
-and one width (`SLIDER_SUB_TOOLBAR_CLASS`, `w-56`). The slider takes the rest of the row.
+its text, the tool's actions (neither has any), then Reset, last, at the same spot in both,
+with no rules — and one width (`SLIDER_SUB_TOOLBAR_CLASS`, 202px; a phone's 320px). The slider
+takes the rest of the row. A tool's options never sit in the row as checkboxes, labels or
+buttons of their own, which would squeeze the slider: they are the dropdown of what leads it
+(Clip's axis).
 
-**Annotate.** Its sub-toolbar, "Annotation controls", while Annotate is up
-(`annotation/toolbar.jsx`'s `AnnotationToolbar`): **Annotation tools**, a button each — Pen,
-Line, Arrow, Rectangle, Ellipse, Text (a mark put down in place) and Eraser — then a rule and
-**Annotation style**, what is drawn next, each a dropdown whose button shows its value, no
-chevron: **Color** (a grid of swatches, unnamed but for assistive technology: the neons and
+**Pencil and Shapes.** Drawing is two plain strip tools, a button each, with no chevron and no menu:
+**Pencil**, drawing with the **Pen** (the freehand ink, tapering with pressure or
+speed), the **Highlighter** or the **Eraser**; and **Shapes**, with the **Rectangle** (what it opens on), **Line**, **Arrow**,
+**Ellipse** or **Text** (a mark put down in place). The tool's button shows the icon of what it draws with
+now, and a press takes up the one last chosen. Pencil and Shapes share the annotation and its history, whichever is up, but not the style: the colour, stroke width
+and placement are kept **per drawing kind** — the Pen, the Highlighter (which opens in neon yellow) and Shapes (all five
+shapes share one) — and the row shows and sets the tool in hand's own — and **one sub-toolbar**,
+"Annotation controls" (`annotation/toolbar.jsx`'s `AnnotationToolbar`), a single row, never a
+second, from the left: the **tools of the one that is up**, a button each, the one in hand pressed (with Pencil up, Pen,
+Highlighter, Eraser; with Shapes up, Rectangle, Line, Arrow, Ellipse, Text: choosing one is how the strip tool changes what it
+draws with); a thin rule; then what is drawn next, each a dropdown whose button shows its value, no
+chevron: **Color** (no heading, a grid of swatches, unnamed but for assistive technology: the neons and
 one neutral that reads against the viewer, white in dark mode and near-black in light, then
 the colour wheel, which opens the system's colour picker for any other colour, kept once the
-picker closes), **Stroke width** (Thin, Medium, Bold — a shape's 1, 2 or 4px, the pen drawn to
-look the same weight, its glyph a dot 3, 5 or 7px across) and **Line style** (Solid, Dashed,
-Dotted — a shape's line; the pen's freehand ink is always solid; its glyph a diagonal line
-drawn in the style), each a row of glyphs alone, the current one marked, and **Placement**
-(**Draw on surface**, the default, its glyph a sphere: ink carried with the part under it;
-**Draw on plane**, on a plane facing the view through the orbit point, on no part, its glyph a
-plane), its glyphs with their names; then **Annotation history** — **Undo**, **Redo** — and
-**Clear annotations** (the trash), each disabled while there is nothing for it, with no rule
-before them. In a view narrower than 32rem the seven tools and the seven after them are two
-rows, column for column, with no rule. Annotate has no Select or Pan of its own (Select picks
+picker closes), **Stroke width** (no heading, four weights, 1, 2, 4 and 6px, the pen drawn to look the
+same weight; on the button and as each row, a straight line drawn at that weight, unnamed but for assistive
+technology, the current one checked) and **Placement** (laid out as the strip's menus are: headed with its name, a
+row per choice, the check on the right: **On surface**, the default, its glyph a sphere: each point of the next mark on the visible
+surface under it; **On plane**, its glyph a sheet: the whole mark on the plane of the surface it
+starts on; a flat view, a DXF, has none); then **Clear annotations** (the trash), disabled while there is
+nothing to clear. Under the **Eraser**, which draws nothing, Color, Stroke width and Placement are disabled (greyed out, still
+on the row so it does not jump). Undo and Redo have no buttons: they are ⌘Z and ⇧⌘Z (Ctrl+Z, Ctrl+Y). The row is the same row for both tools at every width; on a phone its
+buttons are 36px tiles and, where the row is wider than the view, it wraps rather than scrolls (there is no second menu on
+the strip for it). The **Highlighter** draws a freehand stroke like the pen's, but broad and translucent: five times
+the chosen stroke width, 35% opaque, round at its ends, with no pressure taper; it is an ordinary stroke, picked,
+erased and recoloured as any (its Stroke width in the selection's bar is the same setting). The tools have no Select or Pan of their own (Select picks
 annotations, a right drag or Space orbits). Never a restyle of ink already down: the
 annotations Select picks have their own bar, a small floating toolbar on the tool strip's
-surface just above them — Color, Stroke width and Line style dropdowns, Fill for a closed
+surface just above them — Color and Stroke width dropdowns, Fill for a closed
 shape, a rule, Delete. An update of the model forgets the annotations too, their history with
-them (Undo has nothing to bring back), and leaves Annotate the tool, on the tool, colour,
-weight, line style and placement in hand. The pen and the shapes share one default stroke
+them (Undo has nothing to bring back), and leaves the tool in hand, with its tool, colour,
+weight and placement. The pen and the shapes share one default stroke
 width. The annotations have no panel: while there are any they are Quick Edit's
-**Annotation** chip (its X clears them), and while Annotate is up the copy shortcut writes
+**Annotation** chip (its X clears them), and while Pencil or Shapes is up the copy shortcut writes
 the view with its annotations to the clipboard as a PNG. A first stroke opens
-[Quick Edit](#quick-edit), whose header says **annotation** while there is ink. Annotate
-disables the cube without hiding it.
+[Quick Edit](#quick-edit), whose header says **annotation** while there is ink. The drawing tools
+disable the cube without hiding it.
 
-**Measure.** It has no sub-toolbar and no menu: it measures between points on the model,
-snapping to no edge or face, and its button is the ruler. Each completed measurement
-is a chip in [Quick Edit](#quick-edit): the ruler in the measurement's own colour (the
-colour of its line on the model) and its reading; its X deletes it, resting on it lights
-its line and labels it, and its card is the full reading (the distance, the angle where
-there is one, the delta along each axis, what each end bound to). Measurements stay under
-every other tool; a press on Measure while it is up does nothing.
+**Measure.** Its button is the ruler, badged as Select's is with what it
+picks alone. On a STEP, its menu is Select's own (`kit/tools/measure/MeasureFilterMenu.jsx`):
+**All** (when a file opens), **Vertices**, **Edges** or **Faces**, one chosen. A press takes an
+ENTITY, whole, as a CAD measure tool does: an edge's end within 10px of the pointer is its
+vertex, else the edge, else the face (`measureFilter.js`). What lights under the resting pointer
+is what a press takes, with what it is worth on its own beside it (a vertex's X Y Z, an edge's
+length or ⌀, a face's area). With one kind chosen, only that kind is taken: an edge's end is still
+its vertex under Vertices, and anywhere else a press takes nothing. Shift held, a press takes the
+point on the model as it is. In an assembly, a press on a part whose faces and edges are not loaded asks
+for them and takes the pick there once they arrive.
+
+The reading follows from the pair (`@text-to-cad/core/lib/viewer/measureEntities.js`), not from
+where on each the pointer happened to be:
+
+- two vertices: the distance, with ΔX ΔY ΔZ;
+- parallel faces, parallel edges, a vertex to a face or an edge: the perpendicular distance, "⟂";
+- a hole (a circular edge or a cylinder) to anything: from its centre or axis, so two holes
+  read "C-C" and a hole to a face its distance from that face;
+- faces or edges at an angle: the angle, "∠", the acute one;
+- anything else: the shortest distance between the two.
+
+A pair with no gap (an edge in its face, two flats at one height) reads as the distance between
+the two points picked. A press on the entity already held lets go of it, as does a press on
+nothing. On a mesh there are no vertices, edges or faces to take: a press takes the point on its
+surface under the pointer, and the menu goes. A drawing's Measure has no filter.
+
+Its sub-toolbar is its measurements (`kit/tools/measure/measurementChips.jsx`'s `MeasurementsBar`),
+there while Measure is the tool and something is measured, and no row at all while nothing is:
+each completed measurement a chip, Quick Edit's own (`ReferenceChips.jsx`, a few then "+N more"),
+the ruler in the measurement's colour (the colour of its line on the model) and its reading; its
+X deletes it, resting on it lights its line and labels it, and its card, opening under it, is the
+full reading (what the pair makes, the angle or the shortest distance with it, the delta along
+each axis between two points, what each end bound to); then a rule and **Clear measurements**.
+Measurements are the person's alone: none of them goes to the agent, in Quick Edit or its
+snapshots, and measuring never opens Quick Edit. They stay, drawn on the model, under every other
+tool; a press on Measure while it is up does nothing.
 
 **Explode and Clip** have no enabled checkbox, and their sub-toolbars are drawn alike.
 Explode's: its slider, the amount (a percentage), **Reset explode**. Clip's: its axis — a
-borderless button reading the axis in hand, "X ⌄", whose dropdown lists X, Y and Z — its
-slider, the amount, **Flip clip** (which side of the plane is cut away, the cut keeping its
-share; disabled while nothing is cut), **Reset clip**. Explode opens at 0%, Clip at no
+borderless button reading the axis in hand, "X ⌄", lit while its menu is open — its slider, the
+amount, **Reset clip**. The axis's dropdown holds all of Clip's settings, on Display's surface
+and in its type, as narrow as its content, with no heading and no glyphs: first X, Y and Z, a
+compact group of the app menu's Theme buttons (24px squares, its radius, no track) in a row as
+tall as an item (a phone's 40px, as Theme's row), the axis in hand in the accent a highlighted
+item wears; a rule; then two of Display's `DropdownMenuCheckboxItem`s, plain text with the check
+at the right: **Part colors** (ticked by default: each section cap in its
+part's normal colour, without hover or selection tints; unticked, every cap one amber) and
+**Reverse** (unticked by default: which side of the plane is kept). Caps stay opaque, a
+transparent part's too. A press on any of them leaves the menu open, and none of them applies a
+cut; on a cut, a new axis or Reverse turns it keeping its share. They are settings of the
+file's view (`clip.axis`, `clip.partColors`, `clip.invert`, stored and restored with its
+display), kept across tools, by Reset clip and by taking up an unset Clip. Explode opens at 0%, Clip at no
 cut; an edit applies the effect, and the slider back at zero removes it. An axis alone is not
 an effect. The view settings own both effects, so a mode reset preserves them and a restored
 effect reappears on the model. Clip's slider, left to right, cuts deeper through the original
@@ -496,7 +562,7 @@ guidance (Apple's 44pt and Material's 48dp touch targets, an 11pt type floor and
 text, and iOS Safari zooming into any field under 16px): type 12, 13, 14 and 15px for `text-micro`,
 `text-tiny`, `text-xs` and `text-ui`; text entry 16px; menu, select and tree rows 36-40px; the
 navbar a 48px row of 36px controls; the strip and the sub-toolbars 36px tiles (the strip one row,
-**More tools** holding what does not fit; Annotate's controls its chevron's menu, with no row).
+**More tools** holding what does not fit; the drawing tools' row the same single row, wrapping where it must).
 The scale is set once, in `globals.css`, for the whole page while a phone's view is on it, so a
 portalled menu, select or hint is the same size as the chrome it opened from. There is no view
 cube; the file sidebar is one tile at the strip's left, its sections tabs of one panel; and
@@ -593,30 +659,48 @@ icon is unambiguous, and always keep the accessible name.
 ## Settings
 
 Settings are the person's, never a file's, and live in the app menu: one dropdown
-(`file-viewer/navigation/AppMenu.jsx`) on the floating surface, 15rem wide, from the
-navbar's logo over every file (FileViewer builds it from the host's `links`, the
+(`file-viewer/navigation/AppMenu.jsx`) on the floating surface, 12rem wide, from the
+navbar's logo over every file and over the home (FileViewer builds it from the host's `links`, the
 `appSettings` `CadViewer` hands it and `environment.platform`, while a model loads and after
-it failed to as well); the home has no menu. Its rows, a rule between each group, are only
-what the host supplies:
+it failed to as well). Its rows, a rule between each group, are only
+what the host supplies, the person's settings in the order Language, Telemetry, Theme:
 
 - **Back to files**, where the host has a home
   (`navigation.home`): it shows the home in this view. The home's own menu has none.
+- **Language**, where the host hands the person's language (`language`, both apps): one row,
+  its name and then the language in force, whose submenu offers **Automatic (<the inferred
+  language>)** and then each language under its own name — English, 简体中文, 繁體中文, 日本語,
+  한국어 — whatever the menu is reading in; a press changes it without closing the menu. The
+  row is a setting row like Theme: its name, then the language in force, muted, right-aligned
+  before the chevron, centred on the column Theme's last segment and the checkboxes share. A
+  phone has no room beside the menu for a submenu: there a press of the same row opens the
+  choices under it, in the menu itself (closed each time the menu opens, the chevron turning
+  down while they show), and a choice closes them again.
+  Automatic is the default: the web infers the language from the browser's languages, the CAD
+  app from its host's locale (then the frame's browser languages); Simplified script or
+  mainland China and Singapore read 简体中文, Traditional script or Taiwan, Hong Kong and Macau
+  繁體中文, any Japanese 日本語, any Korean 한국어, anything else English. A language chosen
+  overrides the inference until Automatic clears it. The host resolves the language and hands
+  it down as `environment.locale` (`@text-to-cad/ui/i18n`'s `useLanguage`); the shared UI holds
+  no locale of its own.
+- The host's own on/off settings (`appSettings`), a checkbox item each, in the order they
+  come, checked at the right; a press turns one without closing the menu. An info icon after
+  a setting's name, where the host gives its meaning (`info`), shows it as a hint to the
+  menu's right. **Telemetry**, in both apps: anonymous usage data and crash reports, never
+  prompts, models or files.
 - **Theme**, where the host hands the person's colour scheme (`colorScheme`, both apps): one
   row, its name and then **System**, **Light** and **Dark** as a segmented control of their
   glyphs (each a radio item, named), the one in force lit; a press changes it without closing
   the menu. The web's System follows the OS and is
   the tab's; the CAD app's follows its host's theme, Light or Dark overriding it for as long as
-  the view is open. The web's home, which has no menu, keeps its light/dark button
-  (`colorSchemeControl`) last in its row.
-- The host's own on/off settings (`appSettings`), a checkbox item each, in the order they
-  come, checked at the right; a press turns one without closing the menu. **Share
-  usage stats**, in both apps.
+  the view is open. Neither app has a light/dark button of its own: Theme is the one
+  control, the same on the home.
 - **Send feedback**, where the host has a tracker (`links.issues`): a link to a new issue
   titled "Feedback: " for the person to finish, naming the version and the platform, with
   no label (what is said may be a bug, a request or a question). Then **GitHub** and
   **Discord**.
-- Last, in gray, a footer: "v<version> · Made by @<handle>" — the version a link to its
-  release notes, the handle one to the host's X account. A build that is not the release's
+- Last, in gray, a footer of two rows: "v<version>", a link to its release notes, and under
+  it "Made by @<handle>", the handle a link to the host's X account. A build that is not the release's
   own adds its id to the version: `v0.7.15-dev.b80844940`, the commit it was built from.
 
 Nothing of a file is in it: a file's view is
@@ -624,6 +708,13 @@ Nothing of a file is in it: a file's view is
 view's or a tab's: the host keeps it where every view of theirs reads it (both apps: their
 settings, `settings.json` in cadgen's state directory), and a view reads it again whenever
 the person comes back to the page.
+
+Every string of the chrome reads through `@text-to-cad/ui/i18n` (`useI18n().t`), English
+first: `en.js` holds every key, each other locale the same keys (a parity test), and a key a
+locale misses reads English. What a file or cadgen says (an alert's own title and message,
+a part's name) stays as it was written. The loading and view-update lines are a closed
+vocabulary (`kit/status/loadingState.js`), English in the code and said in the view's language
+on screen (`kit/status/statusLabels.js`).
 
 ## Position and references
 
@@ -686,8 +777,9 @@ then, hovering such a part lights the whole part.
 Shift-click adds to a selection in the viewport; Shift, Ctrl or Cmd does in a
 tree (robots select several links this way). Double-click, or a row's Isolate,
 isolates a component or subassembly; double-click on empty space leaves
-isolation, as do the isolation bar's Exit and the lit Isolate. Only topology that
-cannot be isolated copies on double-click, and it stays selected.
+isolation, as do the isolation bar's Exit and the lit Isolate. A double-click on a face,
+an edge or ink turns the view square to it (CAD's Normal To, `kit/camera/lookAt.js`) and
+selects nothing: the selection is as its first click found it.
 
 ## Quick Edit
 
@@ -729,20 +821,19 @@ then an X. The file always goes and is not named. Under the header, the note
 buttons at its bottom-right.
 
 While the note is empty the box follows what it would carry: it opens when something
-is picked, annotated or measured, and closes when that goes. Every chip leads with its
-icon — the Annotation chip's pen, a measurement's ruler in its colour, a reference's pick glyph
+is picked or annotated, and closes when that goes. Every chip leads with its
+icon — the Annotation chip's pen, a reference's pick glyph
 (a part's cube, a face, an edge, a vertex; on a board the part, pad and net of Select's filter) — then its words, and they stand in the order
 they came, whatever their kind. A chip's copy pasted into the note is a pill there,
 drawn as the chip is, 20px like the note's lines so it sits in its rows without spacing
 them out. A click on a pill selects it whole, highlighted in the selection's colour, so
 Backspace, Delete or typing replaces it as it would selected text. Its chips are
-**Annotation** (its X clears the ink), each measurement (the ruler in its colour and its
-reading, with a details card and an X to remove it), then the selection. Annotation and
-measurement chips do not copy references or write files. Copy Prompt, Queue and Send
+**Annotation** (its X clears the ink), then the selection. The Annotation chip does not copy
+references or write files. Copy Prompt, Queue and Send
 include their data in the snapshot packet; only selection chips copy individual references. A written note keeps it open whatever
 is picked, even with nothing picked or annotated, until the X. The X clears everything:
-the note, the selection (as a press on the model's background does), the annotations and the
-measurements, so the box goes. A note that has gone (Copy Prompt, Queue, Send) clears the same way.
+the note, the selection (as a press on the model's background does) and the annotations, so the
+box goes; measurements are not Quick Edit's, and stay. A note that has gone (Copy Prompt, Queue, Send) clears the same way.
 Escape in an empty box is the viewer's Escape (clearing the selection, and so the box);
 in a box with a note it only hands the keyboard back to the model.
 
@@ -771,7 +862,7 @@ Every prompt captures the current view and the recorded views with remaining ink
 If the current view matches a recorded view, its exact current framing replaces
 that entry for this export; otherwise a `current view` job is appended. Text and
 selection alone also capture the current view. The packet stores shared input,
-annotation and measurements once, with a `jobs` list of view states.
+annotation once, with a `jobs` list of view states.
 At Copy, Queue or Send, packets up to 1024 bytes of compact UTF-8 JSON are included
 in the prompt as JSON. Larger packets are written to system temporary storage as
 one `.snapshot.json` and named by path. Drawing, selecting and typing write nothing.
@@ -900,7 +991,7 @@ pressed in while focus is on the page. Editable targets keep their own keys.
 
 - **Escape**, innermost first: an open popup in this viewer (a menu, the app menu
   included, a Select, a color picker, Display, the explorer) closes itself; then Preview closes;
-  then Annotate's canvas spends its own Escape; then the selected ink; then an unfinished
+  then the drawing surface's canvas (Pencil's or Shapes') spends its own Escape; then the selected ink; then an unfinished
   measurement; then the tool in hand, any but Select, which goes down and takes Select up, what
   it set kept; then the renderer's own (STEP: the selection, then isolation; robots: the
   selection). The file sidebar and the tool stack's panels are
@@ -909,28 +1000,41 @@ pressed in while focus is on the page. Editable targets keep their own keys.
   separator in the tab order: Left/Right nudge its width and Up/Down its cap by 16px, and Home and
   End take both to their bounds.
 - **Copy** (⌘C or Ctrl+C, and Ctrl+Insert) copies the view with its annotations
-  while Annotate is up, otherwise the selection's references — unless a text field
+  while Pencil or Shapes is up, otherwise the selection's references — unless a text field
   has focus or text is selected.
 - **Quick Edit's box** keeps its own keys: Enter presses the primary button and
   Shift+Enter is a new line. Escape hands the keyboard back to the view and keeps
   a note; in an empty box it closes the box and is also the viewer's own Escape
   (it clears the selection). ⌘C or Ctrl+C with none of its text selected is the
   viewer's copy.
-- **Arrow keys and WASD** orbit the viewer that has focus or the pointer over
+- **Arrow keys** orbit the viewer that has focus or the pointer over
   it, never every mounted viewport; they do nothing in Preview or with a
   modifier held.
+- **Undo and Redo** (⌘Z and ⇧⌘Z, Ctrl+Z and Ctrl+Y) walk the view's one history: each piece of
+  ink put down, erased, restyled or cleared, and each measurement taken, deleted or cleared. The
+  camera, the selection, Display, Explode, Clip, hiding and isolating, and Position's pose are
+  not steps: they are how the model is looked at, each with its own way back. There are no
+  Undo and Redo buttons.
+- **Single keys** (`kit/tools/toolShortcuts.js`), with no ⌘, Ctrl or Alt and never in a text
+  field or Preview, take a tool up as a design or CAD tool's do: **V** Select, **M** Measure;
+  **P** the Pen, **⇧P** the Highlighter, **E** the Eraser; **R** the Rectangle, **L** the Line,
+  **⇧L** the Arrow, **O** the Ellipse, **T** Text (each taking up Pencil or Shapes with that
+  tool in hand); and **F** frames the model (Zoom to fit). A tool already in hand stays so.
+  Each key shows after its name in its button's tooltip ("Measure M", muted), and Pencil's and
+  Shapes' tooltips name what they draw with now ("Rectangle R").
 
 ## Tooltips and feedback
 
 Every hint is a `TooltipHint`: compact text, one surface and arrow, a 400ms
 delay. No native `title` anywhere in chrome. Prefer one or two words; show a
 full technical name only when it is truncated (`overflowOnly`). Quick Edit's buttons, the
-strip's buttons (Display and Preview among them), the navbar's right-hand controls (the
+strip's buttons (Display and Preview among them; a tool with a key shows it after its name,
+muted), the drawing row's tools (each with its key), the navbar's right-hand controls (the
 update, an alert's icon, Full size), Preview's corner (Preview settings, Exit preview) and the
 Animation section's Reset are hinted by name — the strip's hints above their
 buttons, the others' below; there is no hint on the navbar's left (the logo,
 the file's name and the ⋯ say what they are), on Display's settings button, Playback settings, an X,
-the transport (play, pause, the scrubber), annotation tools or labelled text
+the transport (play, pause, the scrubber), the drawing row's settings or labelled text
 buttons (Quick Edit's alone say what they do). A disabled, selected or expanded control has none; pressing or leaving cancels a
 pending one. A hint appears on focus only for keyboard navigation (a Tab), never
 when a closing menu hands focus back.

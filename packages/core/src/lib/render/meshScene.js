@@ -1,4 +1,3 @@
-import { hitTriangle } from "../viewer/meshMeasure.js";
 import { scheduleRuntimeRaycastBvh } from "../viewer/raycastBvh.js";
 import { createSceneHighlight } from "../viewer/sceneHighlight.js";
 import { UNITLESS_SCENE_UNITS, threeMfSceneUnits } from "../viewer/sceneUnits.js";
@@ -109,7 +108,7 @@ export function createMeshScene(THREE, objects, { units = UNITLESS_SCENE_UNITS }
       highlight = { hovered: hovered.filter(path => byPath.has(path)), selected: selected.filter(path => byPath.has(path)) };
       applyHighlight();
     },
-    // A 3MF's object under the ray, and the triangle hit; an STL picks nothing.
+    // A 3MF's object under the ray, and the point hit; an STL picks nothing.
     pick(ray) {
       if (disposed || !pickable.length) return null;
       raycaster.ray.copy(ray);
@@ -117,7 +116,7 @@ export function createMeshScene(THREE, objects, { units = UNITLESS_SCENE_UNITS }
       const hit = raycaster.intersectObjects(pickable, false).find(candidate => clipPlanes.every(plane => plane.distanceToPoint(candidate.point) >= 0));
       if (!hit) return null;
       const path = hit.object.userData.objectPath;
-      return { id: path, name: objectName(path, hit.object.name), point: hit.point.toArray(), triangle: hitTriangle(hit) };
+      return { id: path, name: objectName(path, hit.object.name), point: hit.point.toArray() };
     },
     /**
      * A second scene of the same file (the viewer's Preview beside its editor): its own meshes,

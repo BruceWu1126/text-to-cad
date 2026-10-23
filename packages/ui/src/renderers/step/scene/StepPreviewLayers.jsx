@@ -56,7 +56,8 @@ export default function StepPreviewLayers({ viewport, drawn, previewStepScene, m
     onHoverReferenceChange: null, onActivateReference: null, onDoubleActivateReference: null,
     onMeasurePick: null, onMeasureHoverPoint: null,
     deferActivation: false,
-    pickAtRef: null
+    pickAtRef: null,
+    topologyAtRef: null
   };
   return <AnimationClockProvider value={motion.clock}>
     <StepSceneLayers viewport={viewport} stepScene={previewStepScene} policy={policy} props={props} api={api} />

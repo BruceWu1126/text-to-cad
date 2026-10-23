@@ -3,19 +3,20 @@ import { sceneFramingBounds } from "@text-to-cad/core/lib/viewer/sceneContract.j
 import { boundsInUnits } from "@text-to-cad/core/lib/viewer/sceneUnits.js";
 import { useModelTools } from "./model-effects/ModelTools.jsx";
 import { useMeasureSession } from "./measure/useMeasureSession.js";
-import { useQuickEditMeasurements } from "./measure/measurementChips.jsx";
+import { MeasurementsBar } from "./measure/measurementChips.jsx";
 import { measureSelectHandlers } from "./measure/measureSelection.js";
 import { MeasureIcon, SCENE_MEASURE_TOOL, SceneMeasureOverlay } from "./measure/SceneMeasure.jsx";
+import { TOOL_SHORTCUTS } from "./toolShortcuts.js";
 
 // The tools a scene the kit draws offers, in two halves around the shell: what Quick Edit must know
 // before the shell is made (the tool in hand, Measure's session), and the strip, the row under it
 // and the layer over the view, made from the shell. Which of them a file has is its renderer's:
-// Select is the renderer's own, Annotate the shell's, Measure where the file says its unit, and the
+// Select is the renderer's own, Pencil and Shapes the shell's, Measure where the file says its unit, and the
 // model effects where its view's features offer them (`model-effects/ModelTools.jsx`).
 
 /**
  * The first half: the tool in hand (never saved; a file opens in its default), and Measure's session
- * and Quick Edit's view of it where the file can be measured.
+ * where the file can be measured.
  *
  * @param {{ toolModes: ReturnType<typeof import("./toolModes.js").createToolModes>, previewing: boolean,
  *   fileKey: string, revision: string, measurable: boolean, resource: object }} options
@@ -23,12 +24,11 @@ import { MeasureIcon, SCENE_MEASURE_TOOL, SceneMeasureOverlay } from "./measure/
 export function useSceneToolState({ toolModes, previewing, fileKey, revision, measurable, resource }) {
   const [mode, set] = useState(toolModes.defaultMode);
   const measure = useMeasureSession({ fileKey, revision, picking: measurable && !previewing && mode === SCENE_MEASURE_TOOL });
-  const measurements = useQuickEditMeasurements(measure);
-  return { tool: { mode, set }, measure, measurements: measurable ? measurements : null, measuring: measurable && !previewing && mode === SCENE_MEASURE_TOOL };
+  return { tool: { mode, set }, measure, measuring: measurable && !previewing && mode === SCENE_MEASURE_TOOL };
 }
 
 /**
- * The second half: the strip's tools after Select (Annotate, Measure, the model effects), the tool in
+ * The second half: the strip's tools after Select (Pencil, Shapes, Measure, the model effects), the tool in
  * hand's row under the strip, Measure's layer over the view, and Select's press and hover on a
  * measurement.
  *
@@ -39,19 +39,22 @@ export function useSceneToolState({ toolModes, previewing, fileKey, revision, me
  */
 export function useSceneTools({ shell, scene, features, state, measurable, clearParts = () => {} }) {
   const { measure, measuring } = state;
+  // A measurement taken, deleted or cleared is a step of the view's one history, with the ink's.
+  measure.history.current = shell.frame.history;
   const { view, store } = shell.viewSettings;
   // Clip's slider maps in the box the camera frames, in the file's unit, as `clip.at` is.
   const bounds = scene ? boundsInUnits(sceneFramingBounds(scene), scene.units) : null;
   const effects = useModelTools({ view, features, store, mesh: bounds ? { bounds } : null,
     disabled: shell.idle, selectedTool: shell.toolMode, onSelect: shell.selectTool });
   const tools = [
-    { ...shell.tools.annotate, disabled: shell.idle },
-    measurable ? shell.tools.own({ id: SCENE_MEASURE_TOOL, label: "Measure", icon: <MeasureIcon className="size-3.5" aria-hidden="true" />,
+    ...shell.tools.drawing.map(tool => ({ ...tool, disabled: shell.idle })),
+    measurable ? shell.tools.own({ id: SCENE_MEASURE_TOOL, label: "Measure", shortcut: TOOL_SHORTCUTS.measure, icon: <MeasureIcon className="size-3.5" aria-hidden="true" />,
+      // A mesh has no vertices, edges or faces to filter: two points on its surface, so no menu.
       onSelect: () => { if (shell.toolMode !== SCENE_MEASURE_TOOL) shell.selectTool(SCENE_MEASURE_TOOL); } }) : null,
     ...effects.tools
   ].filter(Boolean);
-  // Measure has no row under the strip: its measurements are its own chips.
-  const subToolbar = measuring ? null : effects.subToolbar;
+  // Measure's row under the strip: its measurements, as chips, while there are any.
+  const subToolbar = measuring ? <MeasurementsBar measure={measure} /> : effects.subToolbar;
   const runtime = useRef(null);
   const overlay = viewport => {
     runtime.current = viewport.runtimeRef;

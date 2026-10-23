@@ -22,28 +22,48 @@ const NO_MEASUREMENTS = Object.freeze([]);
  * (`hovered`/`hover`, `selected`/`select`), haloed in the view, and Delete deletes them
  * (`removeSelected`).
  *
+ * Each measurement taken, deleted or cleared is a step of the view's one undo history, with the
+ * ink's (`kit/shell/useViewerHistory.js`): `history` is the ref the renderer points at it once its
+ * shell is made, so ⌘Z and ⇧⌘Z walk measurements and ink alike. A new file or revision takes the
+ * steps out with the measurements.
+ *
  * @param {{ fileKey: string, revision: string, picking: boolean }} options  `picking`: the tool
  *   is in hand and can pick now.
  */
 export function useMeasureSession({ fileKey, revision, picking }) {
   const [state, setState] = useState(null);
   const [activeId, setActiveId] = useState("");
-  const onPick = useCallback((pick) => {
-    setState((current) => applyMeasureRulerPick(current, pick));
+  // The state as last set, so a change and the step it makes are one synchronous act.
+  const stateRef = useRef(null);
+  const history = useRef(null);
+  const set = useCallback((next) => {
+    const before = stateRef.current;
+    const after = typeof next === "function" ? next(before) : next;
+    stateRef.current = after;
+    setState(after);
+    return [before?.measurements || NO_MEASUREMENTS, after?.measurements || NO_MEASUREMENTS];
   }, []);
+  // A change of the list is a step: undone, the list goes back as it was (the draft, if any, kept as it is now).
+  const step = useCallback(([before, after]) => {
+    if (before === after || !history.current) return;
+    const restore = list => () => set(current => (list.length || current?.draft ? { draft: current?.draft || null, hover: current?.hover || null, measurements: list } : null));
+    history.current.record({ source: "measure", undo: restore(before), redo: restore(after) });
+  }, [set]);
+  const onPick = useCallback((pick) => { step(set((current) => applyMeasureRulerPick(current, pick))); }, [set, step]);
   const onHoverPoint = useCallback((hover) => {
-    setState((current) => applyMeasureRulerHover(current, hover));
-  }, []);
-  const onDelete = useCallback((id) => setState((current) => applyMeasureRulerDelete(current, id)), []);
-  const cancelDraft = useCallback(() => setState((current) => cancelMeasureRulerDraft(current)), []);
-  const clear = useCallback(() => { setState(null); setActiveId(""); }, []);
+    set((current) => applyMeasureRulerHover(current, hover));
+  }, [set]);
+  const onDelete = useCallback((id) => { step(set((current) => applyMeasureRulerDelete(current, id))); }, [set, step]);
+  const cancelDraft = useCallback(() => set((current) => cancelMeasureRulerDraft(current)), [set]);
+  const clear = useCallback(() => { step(set(null)); setActiveId(""); }, [set, step]);
   const measurements = state?.measurements || NO_MEASUREMENTS;
   useEffect(() => {
-    setState((current) => measureRulerStateForChange(current, { entryChanged: true }));
-  }, [fileKey, revision]);
+    set((current) => measureRulerStateForChange(current, { entryChanged: true }));
+    history.current?.forget("measure");
+  }, [fileKey, revision, set]);
   useEffect(() => {
-    if (!picking) setState((current) => measureRulerStateForChange(current, { toolActive: false }));
-  }, [picking]);
+    if (!picking) set((current) => measureRulerStateForChange(current, { toolActive: false }));
+  }, [picking, set]);
   const countRef = useRef(0);
   useEffect(() => {
     const count = measurements.length;
@@ -63,15 +83,15 @@ export function useMeasureSession({ fileKey, revision, picking }) {
   const removeSelected = useCallback(() => {
     const ids = selectedRef.current;
     if (!ids.length) return false;
-    setState((current) => ids.reduce((next, id) => applyMeasureRulerDelete(next, id), current));
+    step(set((current) => ids.reduce((next, id) => applyMeasureRulerDelete(next, id), current)));
     setSelected(NO_MEASUREMENTS);
     return true;
-  }, []);
+  }, [set, step]);
   // What the pointer rests on under Select: lit as a part is, until it moves off or the measurement goes.
   const [hovered, setHovered] = useState("");
   useEffect(() => {
     setHovered((current) => (current && !measurements.some((item) => item.id === current) ? "" : current));
   }, [measurements]);
-  return { state, measurements, activeId, setActiveId, drafting: Boolean(state?.draft?.anchor),
+  return { state, measurements, history, activeId, setActiveId, drafting: Boolean(state?.draft?.anchor),
     onPick, onHoverPoint, onDelete, cancelDraft, clear, selected, select: setSelected, removeSelected, hovered, hover: setHovered };
 }

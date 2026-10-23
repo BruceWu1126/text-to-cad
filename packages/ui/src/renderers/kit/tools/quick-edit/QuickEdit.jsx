@@ -46,9 +46,7 @@ export function quickEditReferenceIds(selection) {
  * stroke once the pen lifts — never for an agent's selection.
  *
  * Under its header, what goes with the note is chips: first "Annotation" while Annotate has ink (`annotation`:
- * its X wipes the ink), then each measurement
- * (`measurements.chips`: its colour's ruler and its reading; its X deletes it, resting on it lights
- * it; the note's views carry them all, drawn over each picture), then the selected references,
+ * its X wipes the ink), then the selected references,
  * as the renderer describes them (`chips`,
  * `ReferenceChips.jsx`: a few, then "+N more"; each a card of what it is, its picks lit while the
  * pointer is on it, its X dropping them). A renderer that describes none has its references
@@ -60,8 +58,7 @@ export function quickEditReferenceIds(selection) {
  * host can carry out, the rightmost primary and pressed by Enter (Shift+Enter is a new line): Copy
  * Prompt always — the note as text to paste into an agent's prompt box, its references by their
  * files' absolute paths, and the files the host makes for it (`prompt`, `host.promptFiles`) by
- * theirs: one .snapshot.json containing the drawn views and shared inline annotation and
- * measurements, written only when Copy, Queue or Send is pressed, without rendering. Every way
+ * theirs: one .snapshot.json containing the drawn views and the shared inline annotation, written only when Copy, Queue or Send is pressed, without rendering. Every way
  * it goes carries the same; Queue where the destination is a composer (the host's context for the next
  * message); Send where the host can post a message now (`promptContext.send`). Queue and Send
  * clear and close the box once the note has gone; Copy Prompt keeps it all (nothing has gone yet),
@@ -73,7 +70,6 @@ export function quickEditReferenceIds(selection) {
  *   references?: readonly import("@text-to-cad/core/prompt").PromptReference[],
  *   chips?: readonly import("./ReferenceChips.jsx").ReferenceChip[] | null,
  *   annotation?: { present: boolean, clear?: () => void } | null,
- *   measurements?: { chips: readonly import("./ReferenceChips.jsx").ReferenceChip[] } | null,
  *   prompt?: { views(): { label: string }[], files(views: { label: string }[]): Promise<object> | null,
  *     read(path: string): Promise<Blob>, annotation(): object | null } | null,
  *   nameReference?: ((reference: import("@text-to-cad/core/prompt").PromptReference) => string | import("../../inspector/pickGlyph.jsx").CompactName) | null,
@@ -87,7 +83,7 @@ export function quickEditReferenceIds(selection) {
  *   with a note keeps it, and Escape only hands the keyboard back to the view. `hidden`: out of
  *   sight with all it holds (the view is loading).
  */
-export default function QuickEdit({ resource, references = EMPTY, chips = null, annotation = null, measurements = null, prompt = null, nameReference = null, onCopy, onEscape, onClear, disabled = false,
+export default function QuickEdit({ resource, references = EMPTY, chips = null, annotation = null, prompt = null, nameReference = null, onCopy, onEscape, onClear, disabled = false,
   hidden = false, docked = false, className, style }) {
   const host = useViewerHost();
   const destination = usePromptDestination();
@@ -101,8 +97,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   const selection = useMemo(() => quickEditSelection(references), [references]);
   const referenceIds = useMemo(() => quickEditReferenceIds(selection), [selection]);
   const annotated = Boolean(annotation?.present);
-  const measured = measurements?.chips?.length || 0;
-  const attached = referenceIds.length > 0 || annotated || measured > 0;
+  const attached = referenceIds.length > 0 || annotated;
   const written = Boolean(text.trim());
   const open = written || attached;
   // Docked (a phone's) it is a bottom sheet, opening at a peek of its header and chips; a swipe up,
@@ -153,13 +148,13 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
     setTimeout(focus, 0);
   }, []);
   const referenceKey = referenceIds.join("\n");
-  const seen = useRef({ referenceKey, annotated, measured });
+  const seen = useRef({ referenceKey, annotated });
   useEffect(() => {
     const before = seen.current;
-    seen.current = { referenceKey, annotated, measured };
+    seen.current = { referenceKey, annotated };
     const picked = referenceIds.length > 0 && referenceKey !== before.referenceKey;
-    // Ink and a measurement are only ever the person's; a selection is theirs when it follows their press.
-    const inked = (annotated && !before.annotated) || measured > before.measured;
+    // Ink is only ever the person's; a selection is theirs when it follows their press.
+    const inked = annotated && !before.annotated;
     if (!picked && !inked) return undefined;
     if (!inked && performance.now() - lastPress.current >= PICK_MS) return undefined;
     // An annotation opens it mid-stroke; the keyboard waits for the pen to lift.
@@ -170,7 +165,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
     }
     takeKeyboard();
     return undefined;
-  }, [referenceKey, annotated, measured, takeKeyboard]);
+  }, [referenceKey, annotated, takeKeyboard]);
 
   // Unfolded by its title, the note takes the keyboard.
   const unfold = () => { setUnfolded(current => !current); };
@@ -370,20 +365,19 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
     handle.addEventListener("pointercancel", end);
   };
 
-  // Annotation and measurement chips describe the prompt's data; only selection chips copy references.
+  // The annotation chip describes the prompt's data; only selection chips copy references.
   const referenceCount = chips ? 0 : referenceIds.length;
   const wipe = annotation?.clear;
   const annotationChip = useMemo(() => (annotated ? {
     key: "annotation", label: "Annotation", glyph: "pencil",
     ...(wipe ? { onRemove: wipe } : {})
   } : null), [annotated, wipe]);
-  // A chip for each measurement too, in its colour (`measurements`: the renderer's). They stand in the
-  // order they came — picked, drawn or measured — whatever their kind: each keeps the place it first
-  // took, and one that goes and comes back takes a new one at the end.
+  // The chips stand in the order they came — picked or drawn — whatever their kind: each keeps the
+  // place it first took, and one that goes and comes back takes a new one at the end.
   const order = useRef(new Map());
   const copiedChips = useRef(new Map());
   const shownChips = useMemo(() => {
-    const all = [annotationChip, ...(measurements?.chips || EMPTY), ...(chips || EMPTY)].filter(Boolean);
+    const all = [annotationChip, ...(chips || EMPTY)].filter(Boolean);
     const seen = order.current;
     const keys = new Set(all.map(chip => chip.key));
     for (const key of [...seen.keys()]) if (!keys.has(key)) seen.delete(key);
@@ -394,7 +388,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
       if (value) copiedChips.current.set(String(value).trim(), chip);
       return value;
     } } : chip));
-  }, [annotationChip, measurements?.chips, chips]);
+  }, [annotationChip, chips]);
   const section = open ? <section ref={bindBox} aria-label="Quick Edit" data-quick-edit-box=""
       // The side column caps the box on a narrow view, clear of the toolbar and sidebar.
       // It opens in 150ms, animate-in's own: a `duration-*` class would also ease every width a drag

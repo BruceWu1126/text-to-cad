@@ -33,6 +33,9 @@ export function createSceneHighlight(THREE, look) {
     if (!material?.color || highlighted.has(record)) return;
     highlighted.set(record, { material, color: material.color.clone(), emissive: material.emissive?.clone() ?? null,
       emissiveIntensity: material.emissiveIntensity, transparent: material.transparent, opacity: material.opacity });
+    // Unlit authored materials are not dressed by surfaceLook. Keep their
+    // normal base hue too, before the temporary highlight changes it.
+    record.mesh.userData.cadBaseColor = material.color.clone();
     const color = selected ? selectedColor : hoverColor;
     material.color.copy(partHighlightSurfaceColor(THREE, material.color, color, selected ? PART_SELECTED_HIGHLIGHT_BLEND : PART_HOVER_HIGHLIGHT_BLEND));
     if (material.emissive) {

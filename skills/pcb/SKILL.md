@@ -14,8 +14,8 @@ Use the installed local skill files as the runtime source of truth.
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share one
 installation, and its warm build daemon, with the CAD app's server:
 
-- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.23 cadgen`
-- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.23 python`
+- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.26 cadgen`
+- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.26 python`
 
 KiCad builds the board: `@pcb` starts KiCad's headless API server (`kicad-cli api-server`), which only
 the **KiCad 10.99 nightly** (the KiCad 11 API) has; 10.0 is refused at start. It is installed, never bundled:
@@ -169,8 +169,8 @@ file is the board's absolute path, quoted when it holds a space or `#`. `read_bo
 it from the saved file ([checks](references/checks.md#scripts) has the API); a failing check prints the same
 selectors (`#U1.3`), so the person can click what it names; after a rebuild, resolve against the new board.
 A Quick Edit prompt's views come as a snapshot job (inline JSON or a `.snapshot.json` path; save inline JSON
-to a file first): each view's window as a plan-view camera with the board's Display, the person's ink and
-measurements on the board in millimetres. `cadgen pcb snapshot --job <file>` renders what they saw again;
+to a file first): each view's window as a plan-view camera with the board's Display, the person's ink on the
+board in millimetres. `cadgen pcb snapshot --job <file>` renders what they saw again;
 look at their annotations before editing.
 
 ## Handoff

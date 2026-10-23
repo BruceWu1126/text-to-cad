@@ -260,16 +260,15 @@ class PlotRequestsAreRefusedByName(_Workspace):
             with self.subTest(job=sorted(set(job) - {"input"})):
                 self.refused(job, pattern)
 
-    def test_a_plan_view_frames_a_board_and_ink_and_measurements_are_drawn_over_it(self) -> None:
-        # What a board's Quick Edit carries: its window, as a drawing's, and what was drawn on the sheet.
+    def test_a_plan_view_frames_a_board_and_its_ink_is_drawn_over_it(self) -> None:
+        # What a board's Quick Edit carries: its window, as a drawing's, and the ink drawn on the sheet.
         plan = {"position": [20, -15, 60], "target": [20, -15, 0], "up": [0, 1, 0], "orthographicHalfHeight": 16}
-        annotation = {"units": "mm", "parts": {}, "marks": [
-            {"id": "1", "kind": "stroke", "part": None, "points": [3, 3, 0, 11, 3, 0], "color": "#ff00ff", "width": 2}]}
-        mark = {"start": [5, 15, 0], "end": [35, 15, 0], "label": "30.00 mm", "color": "#00ff00"}
-        _, prepared = snapshot_cli.prepare_render_job_packet(self.job(camera=plan, annotation=annotation, measurements=[mark]), cwd=self.root)
+        annotation = {"units": "mm", "marks": [
+            {"id": "1", "kind": "stroke", "points": [3, 3, 0, 11, 3, 0], "color": "#ff00ff", "width": 2}]}
+        _, prepared = snapshot_cli.prepare_render_job_packet(self.job(camera=plan, annotation=annotation), cwd=self.root)
         self.assertEqual({"position": [20.0, -15.0, 60.0], "target": [20.0, -15.0, 0.0], "up": [0.0, 1.0, 0.0], "orthographicHalfHeight": 16.0},
                          prepared[0].job["outputs"][0]["camera"])
-        self.assertEqual((annotation, [mark]), (prepared[0].job["annotation"], prepared[0].job["measurements"]))
+        self.assertEqual(annotation, prepared[0].job["annotation"])
         tilted = {"position": [10, -10, 10], "target": [0, 0, 0], "up": [0, 0, 1], "orthographicHalfHeight": 5}
         self.refused(self.job(camera=tilted), r"The one camera a job may give a KiCad board is its plan view")
 
@@ -715,8 +714,8 @@ class StepDebugReportsWhatWasResolved(unittest.TestCase):
         self.assertEqual((1, 1, False), (entry["componentCount"], entry["occurrenceCount"], entry["selectorIndex"]))
 
 
-ANNOTATION = {"units": "mm", "parts": {}, "marks": [
-    {"id": "1", "kind": "stroke", "part": None, "points": [0, 0, 0, 1, 1, 1], "color": "#ff2d55", "width": 2}]}
+ANNOTATION = {"units": "mm", "marks": [
+    {"id": "1", "kind": "stroke", "points": [0, 0, 0, 1, 1, 1], "color": "#ff2d55", "width": 2}]}
 
 
 class AnnotationAndTargetTests(_Workspace):
@@ -735,33 +734,29 @@ class AnnotationAndTargetTests(_Workspace):
         return resolve_render_job_packet(load_job_from_options(options, cwd=self.root), cwd=self.root)
 
     def test_packet_defaults_and_per_job_replacements_reach_the_renderer(self) -> None:
-        mark = {"start": [0, 0, 0], "end": [10, 0, 0], "label": "10 mm", "color": "#ff2d55"}
-        empty = {"units": "mm", "parts": {}, "marks": []}
+        empty = {"units": "mm", "marks": []}
         other = self.write("other.stl", STL)
-        packet = {"input": "part.stl", "annotation": "ink.annotation.json", "measurements": [mark], "jobs": [
+        packet = {"input": "part.stl", "annotation": "ink.annotation.json", "jobs": [
             {"outputs": [{"path": "shared.png"}]},
-            {"input": str(other), "annotation": empty, "measurements": [], "outputs": [{"path": "empty.png"}]},
-            {"annotation": ANNOTATION, "measurements": [{**mark, "label": "local"}], "outputs": [{"path": "local.png"}]},
+            {"input": str(other), "annotation": empty, "outputs": [{"path": "empty.png"}]},
+            {"annotation": ANNOTATION, "outputs": [{"path": "local.png"}]},
         ]}
         original = json.dumps(packet)
         jobs = self.resolve(packet)["jobs"]
         self.assertEqual([job["input"] for job in jobs], ["part.stl", str(other), "part.stl"])
         self.assertEqual([job["annotation"] for job in jobs], [ANNOTATION, empty, ANNOTATION])
-        self.assertEqual([job.get("measurements", []) for job in jobs], [[mark], [], [{**mark, "label": "local"}]])
         self.assertEqual(json.dumps(packet), original)
         # CLI overrides still win over both the shared and the per-job values.
         path = self.write("shared.snapshot.json", json.dumps(packet))
         overridden = self.from_options(job=str(path), input=str(other),
-            annotation=ANNOTATION, annotation_specified=True,
-            measurements=[mark], measurements_specified=True)["jobs"]
+            annotation=ANNOTATION, annotation_specified=True)["jobs"]
         self.assertEqual([job["input"] for job in overridden], [str(other)] * 3)
         self.assertEqual([job["annotation"] for job in overridden], [ANNOTATION] * 3)
-        self.assertEqual([job["measurements"] for job in overridden], [[mark]] * 3)
 
     def test_packet_defaults_are_validated_and_unknown_fields_are_refused(self) -> None:
         for fields, error in (
             ({"annotation": ["invalid"]}, "annotation is the path"),
-            ({"measurements": [{"start": []}]}, "measurements"),
+            ({"measurements": []}, "unknown key.*measurements"),
             ({"annotations": {}}, "unknown key.*annotations"),
         ):
             with self.subTest(fields=fields), self.assertRaisesRegex(SnapshotError, error):
@@ -805,33 +800,18 @@ class AnnotationAndTargetTests(_Workspace):
         self.write("list.json", "[]")
         for job, said in (
             (self.stl_job(annotation="missing.json"), "annotation file does not exist: missing.json"),
-            (self.stl_job(annotation="list.json"), "an annotation is a JSON object with units, parts and marks"),
+            (self.stl_job(annotation="list.json"), "an annotation is a JSON object with units and marks"),
             (self.stl_job(annotation=["not", "one"]), "annotation is the path of an annotation JSON file"),
             ({"input": "part.stl", "mode": "list", "outputs": [], "annotation": ANNOTATION}, "only view mode draws it"),
         ):
             with self.subTest(job=job), self.assertRaisesRegex(SnapshotError, re.escape(said)):
                 self.resolve(job)
 
-    def test_measurements_are_a_list_one_measurement_or_a_file_of_either_and_the_flag_draws_over_every_job(self) -> None:
-        mark = {"start": [0, 0, 0], "end": [10, 0, 0], "label": "10.00 mm", "color": "#d59090"}
-        self.write("marks.json", json.dumps([mark]))
-        for value in ([mark], mark, json.dumps(mark), "marks.json"):
-            with self.subTest(value=value):
-                self.assertEqual(self.resolve(self.stl_job(measurements=value))["jobs"][0]["measurements"], [mark])
-        jobs = self.from_options(job=str(self.jobs), measurements=json.dumps(mark), measurements_specified=True)["jobs"]
-        self.assertEqual([job["measurements"] for job in jobs], [[mark]] * 2)
-        for door in (step_door, stl_door, urdf_door, any_door):
-            with self.subTest(door=door.__name__), mock.patch.object(snapshot_cli, "run_snapshot") as run:
-                run.return_value = snapshot_core.snapshot_result({"ok": True, "mode": "view", "outputs": []})
-                code, _ = run_door(door, [self.stl, self.out, "--measurements", "marks.json"])
-                self.assertEqual((code, run.call_args.args[0].measurements), (0, "marks.json"))
-        for job, said in (
-            (self.stl_job(measurements=[{**mark, "color": "red"}]), "measurements[0].color is #rrggbb"),
-            (self.stl_job(measurements="gone.json"), "measurements file does not exist: gone.json"),
-            ({"input": "part.stl", "mode": "list", "outputs": [], "measurements": [mark]}, "only view mode draws them"),
-        ):
-            with self.subTest(job=job), self.assertRaisesRegex(SnapshotError, re.escape(said)):
-                self.resolve(job)
+    def test_measurements_are_refused_as_an_unknown_field_in_a_job_and_in_a_packet(self) -> None:
+        with self.assertRaisesRegex(SnapshotError, "unknown render job key.*measurements"):
+            self.resolve(self.stl_job(measurements=[]))
+        with self.assertRaisesRegex(SnapshotError, "unknown key.*measurements"):
+            self.resolve({"input": "part.stl", "measurements": [], "jobs": [{"outputs": [{"path": "x.png"}]}]})
 
     def test_the_pages_refusal_of_a_mark_names_the_annotation_file(self) -> None:
         async def refused():

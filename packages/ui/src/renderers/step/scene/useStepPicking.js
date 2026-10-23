@@ -6,6 +6,8 @@ import {
   isFinitePoint
 } from "@text-to-cad/core/lib/viewer/measurement.js";
 import { buildEdgeLinePositionsFromProxy } from "@text-to-cad/core/lib/viewer/referenceGeometry.js";
+import { projectWorldPointToClient } from "@text-to-cad/core/lib/viewer/measureRuler.js";
+import { MEASURE_FILTER_DEFAULT, edgeEnds, nearestEnd, restrictMeasurePick } from "../../kit/tools/measure/measureFilter.js";
 import { pointVisibleByClipPlane } from "@text-to-cad/core/lib/viewer/clipPlane.js";
 import { screenLimitedPickThreshold } from "@text-to-cad/core/lib/viewer/pickingThresholds.js";
 import { PERF_MEASURE_NAMES, perfMeasure, perfStart } from "@text-to-cad/core/lib/viewer/perfMarks.js";
@@ -19,6 +21,8 @@ const FRONT_LAYER_DISTANCE_MIN = 0.02;
 const EDGE_OCCLUSION_EPSILON_FACTOR = 0.75;
 const EDGE_OCCLUSION_EPSILON_MIN = 0.08;
 const EDGE_PICK_MAX_SCREEN_DISTANCE_PX = 10;
+// Ink drawn this near an edge on the screen touches it.
+const INK_EDGE_PX = 4;
 const EDGE_PICK_MAX_SCREEN_DISTANCE_WITH_FACE_PX = EDGE_PICK_MAX_SCREEN_DISTANCE_PX;
 const EDGE_HOVER_MAX_SCREEN_DISTANCE_PX = 6;
 const EDGE_HOVER_MAX_SCREEN_DISTANCE_WITH_FACE_PX = EDGE_HOVER_MAX_SCREEN_DISTANCE_PX;
@@ -225,6 +229,8 @@ export function useStepPicking({
   sceneMountRef = null,
   preview,
   pickMode,
+  // What Measure snaps to (`kit/tools/measure/measureFilter.js`): its picks are kept to it.
+  measureSnaps = MEASURE_FILTER_DEFAULT,
   selectorRuntime,
   pickableFaces,
   pickableEdges,
@@ -242,8 +248,17 @@ export function useStepPicking({
   // What is under a point of the screen right now, for the viewport menu: set while the
   // listeners are bound, null otherwise. (clientX, clientY, pointerType) -> reference id or "".
   pickAtRef = null,
+  // What the model is under a point of the screen, for Annotate's ink (what a mark touches): set
+  // while the listeners are bound. (clientX, clientY) -> { part, face, edge } reference ids ("" for
+  // none), the face and the edge whatever Select's filter picks.
+  topologyAtRef = null,
   onMeasurePick,
   onMeasureHoverPoint,
+  // A Measure press on a part whose faces and edges are not loaded (an assembly's): (partId, { clientX,
+  // clientY }) -> true when the host is fetching them and will press again at that point (`measureAtRef`).
+  onMeasureWantsTopology = null,
+  // Measure's press at a point of the screen, for that second press: set while the listeners are bound.
+  measureAtRef = null,
   viewerReadyTick,
   // While a STEP animation is playing, reference hover/selection is suspended
   // so playback frames skip raycasts and pick-state rebuilds entirely.
@@ -254,6 +269,7 @@ export function useStepPicking({
   // them: not a pose tick (a posed selector runtime), not a hover, not a new pickable list.
   const pickModeRef = useRef(pickMode);
   const selectorRuntimeRef = useRef(selectorRuntime);
+  const measureSnapsRef = useRef(measureSnaps);
   const pickableFacesRef = useRef(pickableFaces);
   const pickableEdgesRef = useRef(pickableEdges);
   const onHoverReferenceChangeRef = useRef(onHoverReferenceChange);
@@ -262,9 +278,11 @@ export function useStepPicking({
   const deferActivationRef = useRef(deferActivation);
   const onMeasurePickRef = useRef(onMeasurePick);
   const onMeasureHoverPointRef = useRef(onMeasureHoverPoint);
+  const onMeasureWantsTopologyRef = useRef(onMeasureWantsTopology);
 
   pickModeRef.current = pickMode;
   selectorRuntimeRef.current = selectorRuntime;
+  measureSnapsRef.current = measureSnaps;
   pickableFacesRef.current = pickableFaces;
   pickableEdgesRef.current = pickableEdges;
   onHoverReferenceChangeRef.current = onHoverReferenceChange;
@@ -273,6 +291,7 @@ export function useStepPicking({
   deferActivationRef.current = deferActivation;
   onMeasurePickRef.current = onMeasurePick;
   onMeasureHoverPointRef.current = onMeasureHoverPoint;
+  onMeasureWantsTopologyRef.current = onMeasureWantsTopology;
   // The id sets a pick is checked against, built when their lists change rather than on every
   // render (the layers render per orbit frame) or every pick.
   const pickSetsRef = useRef(null);
@@ -598,7 +617,9 @@ export function useStepPicking({
       }
       return {
         reference,
-        screenDistance: bestScreenDistance
+        screenDistance: bestScreenDistance,
+        // Where the ray comes nearest the edge itself: on the edge, whether or not the model is under the pointer.
+        point: measureHitPointFromWorldIntersection(best)
       };
     }
 
@@ -614,7 +635,11 @@ export function useStepPicking({
       return adjacentSelectors.includes(edgeDisplaySelector) || adjacentSelectors.includes(edgeNormalizedSelector);
     }
 
+    // The edge the last `pickTopologyReference` took, with the point on it the ray came nearest.
+    let topologyEdgeHit = null;
+
     function pickTopologyReference(modelIntersections, clientX, clientY, { hover = false, touch = false } = {}) {
+      topologyEdgeHit = null;
       const pickableFaces = Array.isArray(pickableFacesRef.current) ? pickableFacesRef.current : [];
       const pickableEdges = Array.isArray(pickableEdgesRef.current) ? pickableEdgesRef.current : [];
       if (!pickableFaces.length && !pickableEdges.length) {
@@ -645,11 +670,15 @@ export function useStepPicking({
         const priorityDistancePx = touch ? EDGE_TOUCH_PICK_PRIORITY_WITH_FACE_PX : hover ? EDGE_HOVER_PRIORITY_WITH_FACE_PX : EDGE_PICK_PRIORITY_WITH_FACE_PX;
         if (areFaceAndEdgeAdjacent(faceReference, edgeCandidate.reference)) {
           if (Number(edgeCandidate.screenDistance) <= priorityDistancePx) {
+            topologyEdgeHit = { id: edgeCandidate.reference.id, point: edgeCandidate.point };
             return edgeCandidate.reference.id;
           }
           return faceReference.id;
         }
         return faceReference.id;
+      }
+      if (edgeCandidate) {
+        topologyEdgeHit = { id: edgeCandidate.reference.id, point: edgeCandidate.point };
       }
       return edgeCandidate?.reference?.id || faceReference?.id || null;
     }
@@ -684,30 +713,117 @@ export function useStepPicking({
       return { edgeSegments: measureEdgeCache.segments, edgeGeometry: measureEdgeCache.geometry };
     }
 
-    function measureReferenceFromPosition(clientX, clientY, { hover = false, bypassTopology = false } = {}) {
+    // What a Measure press, or the pointer resting, takes: an ENTITY, whole — the vertex within a few pixels
+    // of the pointer, else the edge, else the face under it (`kit/tools/measure/measureFilter.js` keeps it to
+    // what the person ticked) — and the point on it the reading is drawn from. The hover and the press ask
+    // the SAME question (one tolerance, `hover` is not passed on): what lights before a press is what the press takes.
+    function measureReferenceFromPosition(clientX, clientY, { bypassTopology: shift = false } = {}) {
+      // Shift, or Measure's filter with nothing ticked, takes the point on the model as it is: the one free point.
+      const bypassTopology = shift || !measureSnapsRef.current.length;
       setPointerFromPosition(clientX, clientY);
       const modelIntersections = intersectVisibleModelMeshes();
       const hitIntersection = frontMostModelIntersections(modelIntersections)
         .find((intersection) => measureHitPointFromWorldIntersection(intersection)) || null;
-      const worldHitPoint = measureHitPointFromWorldIntersection(hitIntersection);
+      const surfaceHitPoint = measureHitPointFromWorldIntersection(hitIntersection);
       const modelOffset = measureModelOffsetFromRuntime(runtimeRef.current);
-      const referenceId = bypassTopology ? "" : (pickTopologyReference(modelIntersections, clientX, clientY, { hover }) || "");
+      const referenceId = bypassTopology ? "" : (pickTopologyReference(modelIntersections, clientX, clientY) || "");
       const reference = referenceId ? measureReferenceById(referenceId) : null;
       const { edgeSegments, edgeGeometry } = bypassTopology
         ? { edgeSegments: null, edgeGeometry: null }
         : measureSnapGeometry(reference, referenceId);
-      return {
-        pick: measurePickForPosition({
-          reference,
-          worldHitPoint,
-          referenceId,
-          bypassTopology,
-          edgeSegments,
-          edgeGeometry,
-          modelOffset
-        }),
-        referenceId
-      };
+      // An edge is taken at the point on it nearest the ray, so one at the model's outline, with no surface under the
+      // pointer, is still a pick; a face at the point the ray meets it.
+      const edgeHit = topologyEdgeHit && topologyEdgeHit.id === referenceId ? topologyEdgeHit.point : null;
+      const worldHitPoint = edgeSegments && edgeHit ? edgeHit : surfaceHitPoint;
+      const pick = measurePickForPosition({
+        reference,
+        worldHitPoint,
+        referenceId,
+        bypassTopology,
+        edgeSegments,
+        edgeGeometry,
+        modelOffset
+      });
+      if (bypassTopology || !pick) {
+        return { pick, referenceId };
+      }
+      // Nothing the filter ticks under the pointer, on a part whose faces and edges are loaded: nothing to
+      // take. (A free point is Shift's, or nothing ticked; a part with no topology yet still gives one.)
+      if (!["edge", "face"].includes(pick.snapKind) && partHasTopology(hitIntersection)) {
+        return { pick: null, referenceId: "" };
+      }
+      // What the pair of picks measures is read off the entities (`measureEntities.js`): they carry the edge's
+      // polyline and the offset the viewer re-centred the model by.
+      const entity = (picked) => picked && { ...picked, offset: modelOffset, ...(picked.snapKind === "edge" ? { segments: edgeSegments } : {}) };
+      // Kept to Measure's filter: an edge's end, under the pointer, is its vertex; a kind the filter
+      // leaves out is the face under the pointer, or nothing.
+      const snaps = measureSnapsRef.current;
+      const camera = runtimeRef.current?.camera;
+      const rect = runtimeRef.current?.renderer?.domElement?.getBoundingClientRect?.();
+      const toScreen = point => (camera && rect ? projectWorldPointToClient(point, camera, rect) : null);
+      const vertex = pick.snapKind === "edge" && snaps.includes("vertex")
+        ? nearestEnd(edgeEnds(edgeSegments).map(end => measureModelPointToWorld(end, modelOffset)), toScreen, { x: clientX, y: clientY })
+        : null;
+      const kept = restrictMeasurePick(entity(pick), snaps, {
+        vertex,
+        face: () => {
+          const face = pickFaceReference(modelIntersections);
+          return face ? entity(measurePickForPosition({ reference: measureReferenceById(face.id), worldHitPoint: surfaceHitPoint, referenceId: face.id, modelOffset })) : null;
+        }
+      });
+      // A vertex lights as its marker alone: no edge or face under it is lit for what a press does not take.
+      return { pick: kept, referenceId: kept && kept.snapKind !== "vertex" ? kept.referenceId : "" };
+    }
+
+    // Whether the surface a ray met has its faces resolved to references: a loaded part's, whatever the filter.
+    function partHasTopology(intersection) {
+      const row = Number(intersection?.object?.userData?.faceIds?.[Number(intersection?.faceIndex)]);
+      return Number.isInteger(row) && Boolean(selectorRuntimeRef.current?.faceReferenceByRowIndex?.get?.(row));
+    }
+
+    // A Measure press: what is under the point, or, on a part whose faces and edges are not loaded yet,
+    // nothing until the host has them and presses again (`replay`), so it takes the face, not a free point.
+    function measurePress(clientX, clientY, { shift = false, replay = false } = {}) {
+      const measured = measureReferenceFromPosition(clientX, clientY, { bypassTopology: shift });
+      const entity = ["vertex", "edge", "face"].includes(measured.pick?.snapKind);
+      if (!replay && !shift && !entity && onMeasureWantsTopologyRef.current) {
+        const partId = pickPartReferenceFromIntersections(intersectVisibleModelMeshes());
+        if (partId && onMeasureWantsTopologyRef.current(String(partId), { clientX, clientY })) return;
+      }
+      onMeasurePickRef.current?.(measured.pick);
+    }
+
+    // The part, face and edge under a point, as Select would find them with every kind pickable:
+    // the front face the ray meets, and the edge within a few pixels of the point that nothing hides.
+    function topologyAtPosition(clientX, clientY) {
+      setPointerFromPosition(clientX, clientY);
+      const intersections = intersectVisibleModelMeshes();
+      const selectorRuntime = selectorRuntimeRef.current;
+      const part = pickPartReferenceFromIntersections(intersections) || "";
+      let face = "";
+      for (const intersection of frontMostModelIntersections(intersections)) {
+        const row = Number(intersection?.object?.userData?.faceIds?.[Number(intersection?.faceIndex)]);
+        const reference = Number.isInteger(row) ? selectorRuntime?.faceReferenceByRowIndex?.get?.(row) : null;
+        if (reference?.id) { face = String(reference.id); break; }
+      }
+      let edge = "";
+      if (runtime.edgePickLines && runtime.raycaster?.params?.Line) {
+        const threshold = currentPickThreshold(runtime.edgePickThreshold || 1, 1, INK_EDGE_PX, intersections);
+        runtime.raycaster.params.Line.threshold = threshold;
+        const nearestSurfaceDistance = Number(intersections?.[0]?.distance);
+        const allowance = Math.max(EDGE_OCCLUSION_EPSILON_MIN, threshold * EDGE_OCCLUSION_EPSILON_FACTOR);
+        const hits = filterClippedIntersections(runtime, runtime.raycaster.intersectObject(runtime.edgePickLines, false))
+          .filter(hit => !Number.isFinite(nearestSurfaceDistance) || Number(hit?.distance) <= nearestSurfaceDistance + allowance);
+        const best = chooseBestEdgeIntersection(hits, hit => edgeScreenDistance(hit, clientX, clientY));
+        if (best && edgeScreenDistance(best, clientX, clientY) <= INK_EDGE_PX) {
+          const segment = Math.floor(Number(best.index) / 2);
+          const row = Number(best.object?.userData?.edgeIds?.[segment]);
+          const reference = Number.isInteger(row) ? selectorRuntime?.edgeReferenceByRowIndex?.get?.(row) : null;
+          if (reference?.id) edge = String(reference.id);
+        }
+        runtime.raycaster.params.Line.threshold = runtime.edgePickThreshold || 1;
+      }
+      return { part, face, edge };
     }
 
     function pickReferenceAtPosition(clientX, clientY, { hover = false, touch = false } = {}) {
@@ -816,7 +932,7 @@ export function useStepPicking({
         // The measure pass already raycast the model and resolved the topology
         // reference under the cursor; picking again would double every hover.
         hoverState.measureTickEmitted = true;
-        const measured = measureReferenceFromPosition(hoverState.x, hoverState.y, { hover: true });
+        const measured = measureReferenceFromPosition(hoverState.x, hoverState.y);
         onMeasureHoverPointRef.current?.(measured.pick);
         commitHoverState(measured.referenceId || "");
         return;
@@ -1075,9 +1191,7 @@ export function useStepPicking({
       }
       if (pickModeRef.current === VIEWER_PICK_MODE.MEASURE) {
         activation.miss(clickCount);
-        onMeasurePickRef.current?.(measureReferenceFromPosition(pointerDown.x, pointerDown.y, {
-          bypassTopology: !!event.shiftKey
-        }).pick);
+        measurePress(pointerDown.x, pointerDown.y, { shift: !!event.shiftKey });
         return;
       }
       const referenceId = pointerDownReferenceId || pickActivationReference(event.clientX, event.clientY, event.pointerType || "");
@@ -1122,6 +1236,8 @@ export function useStepPicking({
     }
 
     if (pickAtRef) pickAtRef.current = (clientX, clientY, pointerType = "") => pickActivationReference(clientX, clientY, pointerType) || "";
+    if (topologyAtRef) topologyAtRef.current = topologyAtPosition;
+    if (measureAtRef) measureAtRef.current = (clientX, clientY) => measurePress(clientX, clientY, { replay: true });
     container.addEventListener("pointerdown", handlePointerDownCapture, true);
     container.addEventListener("pointermove", handlePointerMoveCapture, true);
     container.addEventListener("pointerup", handlePointerUpCapture, true);
@@ -1140,6 +1256,8 @@ export function useStepPicking({
 
     return () => {
       if (pickAtRef) pickAtRef.current = null;
+      if (topologyAtRef) topologyAtRef.current = null;
+      if (measureAtRef) measureAtRef.current = null;
       container.removeEventListener("pointerdown", handlePointerDownCapture, true);
       container.removeEventListener("pointermove", handlePointerMoveCapture, true);
       container.removeEventListener("pointerup", handlePointerUpCapture, true);

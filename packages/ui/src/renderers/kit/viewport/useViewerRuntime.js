@@ -10,6 +10,7 @@ import {
   createCadWebGlRenderer
 } from "@text-to-cad/core/common/webglRenderer.js";
 import { fitCameraDepthToBounds } from "@text-to-cad/core/common/renderOptions.js";
+import { keepOrthographicEyeOutside } from "../camera/orthographicEye.js";
 import {
   screenSpaceLineDeviceResolution
 } from "@text-to-cad/core/common/renderEdges.js";
@@ -447,13 +448,20 @@ export function useViewerRuntime({
 
       const fitCameraDepthRange = (runtime) => {
         const activeCamera = runtime?.camera;
-        if (
-          !activeCamera?.isCamera ||
-          renderer.capabilities?.logarithmicDepthBuffer
-        ) {
+        if (!activeCamera?.isCamera) {
           return;
         }
-        fitCameraDepthToBounds(activeCamera, runtime?.modelBounds, {
+        // The model's box, and the ink's where it reaches beyond it (`annotation3d.js`).
+        const ink = runtime?.annotationBounds, model = runtime?.modelBounds;
+        const bounds = ink && model?.min && model?.max
+          ? { min: model.min.map((value, axis) => Math.min(value, ink.min[axis])), max: model.max.map((value, axis) => Math.max(value, ink.max[axis])) }
+          : model;
+        // Picks and the depth range start at the eye: an orthographic one stands outside it all.
+        keepOrthographicEyeOutside(activeCamera, runtime?.controls?.target, bounds);
+        if (renderer.capabilities?.logarithmicDepthBuffer) {
+          return;
+        }
+        fitCameraDepthToBounds(activeCamera, bounds, {
           ...viewerDepthSettings(runtime), pivot: runtime?.controls?.target
         });
       };

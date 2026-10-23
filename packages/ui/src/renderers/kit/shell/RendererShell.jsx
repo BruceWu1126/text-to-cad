@@ -7,6 +7,7 @@ import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { NAVBAR_CONTROL_CLASS } from "../../../lib/navbarRow.js";
 import { cn } from "@text-to-cad/ui/utils";
+import { useI18n } from "@text-to-cad/ui/i18n";
 import PreviewChrome from "../tools/PreviewChrome.jsx";
 import { useViewerMobile } from "../../../file-viewer/responsive.js";
 import ViewerAlertCard, { alertDismissible, useAlertDismissal } from "../status/ViewerAlertCard.jsx";
@@ -19,7 +20,7 @@ import { OrthographicProjectionIcon, PerspectiveProjectionIcon } from "../camera
 import PreviewSettings from "./PreviewSettings.jsx";
 import { withGroups } from "../../../annotation/geometry.js";
 import FloatingToolBar, { StripTouchProvider, useStripButtonClass } from "../tools/FloatingToolBar.js";
-import { AnnotationMenu, AnnotationToolbar } from "../../../annotation/toolbar.jsx";
+import { AnnotationToolbar } from "../../../annotation/toolbar.jsx";
 import ToolStack from "../tools/ToolStack.jsx";
 import AnimationSection from "../tools/playbar/AnimationSection.jsx";
 import PreviewPlaybar from "../tools/playbar/PreviewPlaybar.jsx";
@@ -83,6 +84,9 @@ function ViewControl({ label, disabled = false, tooltipSide = "top", onClick, ch
     {children}
   </ToolbarButton>;
 }
+
+// Two presses on the same ink this close together are one double-click.
+const DOUBLE_PRESS_MS = 600;
 
 /**
  * The frame every file-family renderer draws itself in: the viewport box with the tool strip at
@@ -157,6 +161,9 @@ function ViewControl({ label, disabled = false, tooltipSide = "top", onClick, ch
  *   down): the renderer lights its own overlay under it, and returns true when there is one.
  *   `selectsAnnotations`: whether Select picks the annotation's ink, as the renderer's Select filter says; the
  *   ink is drawn either way.
+ *   `inkTouches`: what the model is under a point of the view, `(clientX, clientY) => [{ part, ref? }]` —
+ *   the part, with the face or edge there as a prompt reference where the renderer can name one: what
+ *   Annotate records a mark as touching. Without it, a mark touches parts alone.
  *   `previewView`: Preview's own, while it is open (`shell.previewing`), for a 3D view: the scene the
  *   renderer built for it (`scene`, its family's builder over the editor's geometry, null until it can be
  *   drawn), what drives that scene from inside Preview's viewport (`overlay(viewport, drawn)`, given
@@ -166,8 +173,11 @@ function ViewControl({ label, disabled = false, tooltipSide = "top", onClick, ch
  */
 export default function RendererShell({ shell, tools, toolPanels = null, subToolbar = null, sidebar = null, references = null, referenceChips = null, nameReference = null, onClearReferences = null, copySelection = null, contextMenuItems = null,
   onContextMenuOpenChange = null, viewportOverlay = null, previewView = null,
-  frameProvider = null, onCanvasPointerDown = null, onSelectPress = null, onSelectHover = null, selectsAnnotations = true }) {
+  frameProvider = null, onCanvasPointerDown = null, onSelectPress = null, onSelectHover = null, selectsAnnotations = true, inkTouches = null }) {
+  const { t } = useI18n();
   const frame = shell.frame;
+  // What a tool's letter takes up (`useRendererShell`'s `onKey`): the strip as drawn now.
+  frame.toolKeys.current = tools;
   const mobile = useViewerMobile();
   const { view, resolvedScene, viewerLoading, scene } = frame;
   // The one presentation state: every gate — the viewport's, the renderer's — reads it.
@@ -267,6 +277,9 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   // drawn with it) or the renderer's overlay, and the part under it is not.
   const [hoveredAnnotation, setHoveredAnnotation] = useState(null);
   const overSelectable = useRef(false);
+  // The ink a press under Select last picked, and the ink picked before it: a double-click on it
+  // puts that back, as it selects nothing.
+  const inkPress = useRef(null);
   // The pointer cursor over them, as a renderer shows over a part.
   const [pointing, setPointing] = useState(false);
   const selectHover = useRef(onSelectHover);
@@ -314,14 +327,13 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   const leavePreview = () => setPreviewing(false);
   // The view's controls (Display and Preview, or Preview's own) are the navbar's where there is one.
   const inNavbar = Boolean(view.navbarSlot);
-  // Annotate's sub-toolbar, one row under the strip while it is the tool: its tools, what the next mark
-  // looks like, and its Undo, Redo and Clear (`annotation/toolbar.jsx`). The annotation itself has no
+  // The drawing tools' sub-toolbar, one row under the strip while Pencil or Shapes is the tool: what it draws with, what the next mark
+  // looks like, and Undo, Redo and Clear (`annotation/toolbar.jsx`). The annotation itself has no
   // panel: it is Quick Edit's chip (its X clears it, a click copies it).
   const colorScheme = view.appearance?.colorScheme === "dark" ? "dark" : "light";
   // Otherwise the renderer supplies its active tool's row.
-  // On a phone Annotate's controls are its chevron's menu on the strip (`AnnotationMenu`), and it has no row.
   const toolRow = frame.annotateToolActive
-    ? mobile ? null : <AnnotationToolbar annotation={frame.annotation} history={frame.history} colorScheme={colorScheme} />
+    ? <AnnotationToolbar annotation={frame.annotation} colorScheme={colorScheme} />
     : subToolbar;
 
   const hasContent = Boolean(scene) && !viewerLoading;
@@ -342,9 +354,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   const toolsHidden = chromeHidden || compact;
   // Reserve the sidebar tile's room; the toolbar is centred on the viewport whenever it fits.
   const besideSidebarTile = mobile && !previewing && Boolean(sidebar || hasAnimation);
-  // On a phone Annotate's controls are its chevron's menu on the strip.
-  const stripTools = mobile ? tools.map(tool => tool.id === "annotate" ? { ...tool, menu: <AnnotationMenu annotation={frame.annotation} history={frame.history}
-    colorScheme={colorScheme} onTakeUp={() => { if (!tool.active) tool.onSelect(); }} /> } : tool) : tools;
+
   // The controls at the top — the strip, a wrapped one, and the tool's row under it — are measured
   // into variables, so a tool change or a resize moves what hangs below them without redrawing the
   // model or touching a saved size: on a desktop, the column's sides, which the sidebar's panel and the
@@ -415,7 +425,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   };
   frame.copyActionRef.current = copyAction;
   // Quick Edit's X: nothing picked and nothing drawn, as the person would clear each.
-  const clearQuickEdit = () => { onClearReferences?.(); if (frame.annotation.hasAnnotation) frame.annotation.forget(); frame.measurements?.clear?.(); };
+  const clearQuickEdit = () => { onClearReferences?.(); if (frame.annotation.hasAnnotation) frame.annotation.forget(); };
   const forgetAnnotation = frame.annotation.forget;
   // Quick Edit's annotation: while Annotate is up or there is ink. The annotation goes with a note whenever
   // there is one (its views and annotation file, `frame.quickEditPrompt`); its Annotation chip's X wipes it.
@@ -439,7 +449,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
       className="rounded-md bg-background/95 px-1 py-0.5 shadow-sm" />
   </div>;
   const quickEdit = references ? <QuickEdit key={frame.modelKey} className="self-stretch" hidden={chromeHidden} docked={mobile}
-    resource={frame.resource} references={references} chips={referenceChips} nameReference={nameReference} annotation={annotation} measurements={frame.measurements} prompt={frame.quickEditPrompt}
+    resource={frame.resource} references={references} chips={referenceChips} nameReference={nameReference} annotation={annotation} prompt={frame.quickEditPrompt}
     onCopy={copyAction} onEscape={frame.escape} onClear={clearQuickEdit} disabled={viewerLoading || !scene} /> : null;
   const body = (
     <div
@@ -466,11 +476,28 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
         if (!id) { if (!event.shiftKey && session.selected.length) session.select([]); return; }
         event.stopPropagation();
         event.preventDefault();
+        // The second press of a double-click keeps what the first found.
+        const again = inkPress.current?.id === id && event.timeStamp - inkPress.current.at < DOUBLE_PRESS_MS;
+        inkPress.current = { id, before: again ? inkPress.current.before : session.selected, at: event.timeStamp };
         const picked = event.shiftKey
           ? (session.selected.includes(id) ? session.selected.filter(other => other !== id) : [...session.selected, id])
           : [id];
         if (!event.shiftKey) onClearReferences?.();
         session.select(withGroups(picked, session.items));
+      }}
+      // Under Select a double-click on ink turns the view square to it (`ShellViewport.jsx`'s
+      // `lookAtAnnotation`), as one on a face or edge does, and selects nothing: the ink picked is as
+      // its first click found it. Never on to the part under it.
+      onDoubleClickCapture={event => {
+        if (!frame.selecting || !selectsAnnotations || !frame.annotation.items.length) return;
+        if (!(event.target instanceof Element) || !event.target.closest("canvas")) return;
+        const id = frame.viewerRef.current?.annotationAt?.(event.clientX, event.clientY, event.nativeEvent?.pointerType || "");
+        if (!id) return;
+        event.stopPropagation();
+        event.preventDefault();
+        if (inkPress.current?.id === id) frame.annotation.select(inkPress.current.before);
+        inkPress.current = null;
+        frame.viewerRef.current?.lookAtAnnotation?.(id);
       }}
       onPointerMoveCapture={hoverSelectable}
       onPointerLeave={() => { if (overSelectable.current || hoveredAnnotation) leaveSelectHover(); }}
@@ -519,6 +546,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                     annotation={frame.annotation}
                     hoveredAnnotation={hoveredAnnotation}
                     annotationView={frame.currentView}
+                    annotationTouches={inkTouches}
                     onPerspectiveChange={frame.handlePerspectiveChange}
                     onPresentationChange={frame.handlePresentationChange}
                     onViewerAlertChange={frame.setRuntimeAlert}
@@ -544,17 +572,17 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                   the panel docked at the view's top-right) and the way out. The strip is hidden in Preview,
                   so they stand there; a host with no navbar has them in Preview's top-right corner. */}
               {inNavbar && shell.previewable && previewing ? createPortal(<>
-                <NavbarControl label="Preview settings" active={previewPanelOpen} disabled={shell.idle}
+                <NavbarControl label={t("preview.settings")} active={previewPanelOpen} disabled={shell.idle}
                   onClick={() => setPreviewPanelOpen(open => !open)} data-preview-settings=""><SlidersHorizontal className="size-3.5" aria-hidden="true" /></NavbarControl>
-                <NavbarControl label="Exit preview" onClick={leavePreview}><X className="size-3.5" aria-hidden="true" /></NavbarControl>
+                <NavbarControl label={t("preview.exit")} onClick={leavePreview}><X className="size-3.5" aria-hidden="true" /></NavbarControl>
               </>, view.navbarSlot) : null}
               <PreviewChrome active={previewing}
                 end={inNavbar ? null : <>
-                  <ToolbarButton label="Preview settings" tooltipSide="bottom" active={previewPanelOpen} aria-pressed={previewPanelOpen}
+                  <ToolbarButton label={t("preview.settings")} tooltipSide="bottom" active={previewPanelOpen} aria-pressed={previewPanelOpen}
                     disabled={shell.idle} className={stripButtonClass} onClick={() => setPreviewPanelOpen(open => !open)} data-preview-settings="">
                     <SlidersHorizontal aria-hidden="true" />
                   </ToolbarButton>
-                  <ViewControl label="Exit preview" tooltipSide="bottom" onClick={leavePreview}><X aria-hidden="true" /></ViewControl>
+                  <ViewControl label={t("preview.exit")} tooltipSide="bottom" onClick={leavePreview}><X aria-hidden="true" /></ViewControl>
                 </>}
                 panel={previewPanelOpen ? <PreviewSettings orbit={orbitPlaying} onOrbitChange={shell.setOrbiting}
                   speed={frame.previewOrbitSpeed || 1} onSpeedChange={frame.setPreviewOrbitSpeed}
@@ -566,20 +594,20 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                 {/* The view's controls end the strip, after a rule: Projection, Display, then Preview (on a
                     phone, always in its More menu). */}
                 <div ref={topControls} className="relative flex max-w-full shrink-0 flex-col items-center gap-2" data-cad-top-controls="">
-                  <FloatingToolBar tools={stripTools} touch={mobile} views={shell.previewable && !previewing ? [
-                    { id: "projection", label: "Projection", icon: <ProjectionIcon value={frame.projection.value} />, disabled: shell.idle,
+                  <FloatingToolBar tools={tools} touch={mobile} views={shell.previewable && !previewing ? [
+                    { id: "projection", label: t("projection.label"), icon: <ProjectionIcon value={frame.projection.value} />, disabled: shell.idle,
                       tile: <ProjectionPopover disabled={shell.idle} boundary={frame.hostElement} projection={frame.projection} />,
                       // In a phone's More, a standard nested submenu of the two choices.
                       submenu: () => <DropdownMenuRadioGroup value={frame.projection.value} onValueChange={frame.projection.onChange}>
-                        <DropdownMenuRadioItem value="orthographic"><OrthographicProjectionIcon className="size-4" />Orthographic</DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="perspective"><PerspectiveProjectionIcon className="size-4" />Perspective</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="orthographic"><OrthographicProjectionIcon className="size-4" />{t("projection.orthographic")}</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="perspective"><PerspectiveProjectionIcon className="size-4" />{t("projection.perspective")}</DropdownMenuRadioItem>
                       </DropdownMenuRadioGroup> },
-                    { id: "display", label: "Display", icon: DisplayIcon ? <DisplayIcon /> : null, disabled: shell.idle,
+                    { id: "display", label: t("display.label"), icon: DisplayIcon ? <DisplayIcon /> : null, disabled: shell.idle,
                       tile: <DisplayPopover disabled={shell.idle} boundary={frame.hostElement} mode={frame.displayMode} grid={frame.grid} />,
                       // In a phone's More, a standard nested submenu of the same list: the modes, then Grid.
                       submenu: () => <DisplayMenuItems mode={frame.displayMode} grid={frame.grid} /> },
-                    { id: "preview", label: "Preview", icon: <Play aria-hidden="true" />, disabled: shell.idle, onSelect: enterPreview,
-                      tile: <ViewControl label="Preview" disabled={shell.idle} onClick={enterPreview}><Play aria-hidden="true" /></ViewControl> }
+                    { id: "preview", label: t("preview.label"), icon: <Play aria-hidden="true" />, disabled: shell.idle, onSelect: enterPreview,
+                      tile: <ViewControl label={t("preview.label")} disabled={shell.idle} onClick={enterPreview}><Play aria-hidden="true" /></ViewControl> }
                   ] : []} />
                   {/* The tool in hand's own row, then the view catching up, under the strip. */}
                   {previewing ? null : toolRow}

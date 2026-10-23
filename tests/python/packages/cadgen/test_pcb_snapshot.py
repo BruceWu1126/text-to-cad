@@ -2,10 +2,10 @@
 
 A Quick Edit on a board writes a job packet (`cadgen.viewer.prompt_files`): each view a plan-view
 camera (the window the board view showed, in the plot's plan frame, y up) and the board's Display,
-the annotation once, its marks on the board in the sheet's millimetres (y down), and Measure's
-results in the same frame. This renders such a packet through the real Python -> browser path and
-reads the PIXELS back: the window frames what the camera names, and the ink lands on the board
-where it was drawn — from below, at its mirrored place, as the view drew it.
+and the annotation once, its marks on the board in the sheet's millimetres (y down). This renders
+such a packet through the real Python -> browser path and reads the PIXELS back: the window frames
+what the camera names, and the ink lands on the board where it was drawn — from below, at its
+mirrored place, as the view drew it.
 
 The board is the test board (`tests/python/support/kicad_board.py`): no KiCad, no corpus model.
 One browser, one packet.
@@ -47,18 +47,17 @@ class BoardJobReplayTest(unittest.TestCase):
         cls._roots = ClassCadRoots(prefix="pcb-snapshot-")
         workspace = cls._roots.cad_root
         board = write_board(workspace)
-        # The ink a person drew across the board's top-left, on the sheet; a dimension along VBUS.
+        # The ink a person drew across the board's top-left, on the sheet.
         annotation = workspace / "board.annotation.json"
-        annotation.write_text(json.dumps({"units": "mm", "parts": {}, "marks": [
-            {"id": "1", "kind": "stroke", "part": None, "points": [3, 3, 0, 11, 3, 0], "color": "#ff00ff", "width": 14}]}), encoding="utf-8")
-        measurement = {"start": [5, 15, 0], "end": [34.175, 15, 0], "label": "29.18 mm", "color": "#00ff00"}
+        annotation.write_text(json.dumps({"units": "mm", "marks": [
+            {"id": "1", "kind": "stroke", "points": [3, 3, 0, 11, 3, 0], "color": "#ff00ff", "width": 14}]}), encoding="utf-8")
 
         def job(name: str, display: dict) -> dict:
             return {"input": str(board), "camera": PLAN, "display": display,
                     "outputs": [{"path": f"{name}.png", "width": SIZE[0], "height": SIZE[1]}]}
 
         packet = workspace / "board.snapshot.json"
-        packet.write_text(json.dumps({"annotation": str(annotation), "measurements": [measurement], "jobs": [
+        packet.write_text(json.dumps({"annotation": str(annotation), "jobs": [
             job("top", {"mode": "board", "side": "top", "poured": True}),
             job("below", {"mode": "copper", "side": "bottom", "poured": False}),
         ]}), encoding="utf-8")
@@ -87,9 +86,7 @@ class BoardJobReplayTest(unittest.TestCase):
         self.assertTrue(near(below.pixel(mirrored, y), MAGENTA), f"from below, at its mirrored place: {below.pixel(mirrored, y)}")
         self.assertFalse(near(below.pixel(x, y), MAGENTA), f"not where the top view had it: {below.pixel(x, y)}")
 
-    def test_the_window_is_the_camera_s_and_the_measurement_is_drawn_over_it(self) -> None:
+    def test_the_window_is_the_camera_s(self) -> None:
         top = self.images["top"]
         # The plan view frames the sheet with a millimetre to spare above and below: the corners are the surround.
         self.assertTrue(near(top.pixel(2, 2), (255, 255, 255), 30), f"the light surround: {top.pixel(2, 2)}")
-        green = sum(1 for yy in range(top.height) for xx in range(top.width) if near(top.pixel(xx, yy), (0, 255, 0), 90))
-        self.assertGreater(green, 40, "the dimension along VBUS")

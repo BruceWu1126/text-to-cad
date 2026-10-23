@@ -83,6 +83,7 @@ class SharedDisplayContractParityTests(unittest.TestCase):
             *({group: {}} for group in DISPLAY_GROUP_KEYS),
             {"camera": {"projection": "perspective", "focalLength": 20}},
             {"camera": {"projection": "orthographic", "focalLength": 200}},
+            {"clip": {"partColors": True}}, {"clip": {"partColors": False}},
             {"clip": {"axis": "z", "at": -12.5, "invert": True}}, {"clip": {"enabled": False, "at": 3}},
             {"exploded": {"enabled": True, "amount": 1}},
         ]
@@ -97,6 +98,7 @@ class SharedDisplayContractParityTests(unittest.TestCase):
             *({group: value} for group in DISPLAY_GROUP_KEYS for value in (None, [], True, "off", {"typo": 1}, {"enabled": 0})),
             *({"camera": {"focalLength": value}} for value in (None, "50", True, 19.9, 200.1)),
             {"camera": {"enabled": True}},
+            *({"clip": {"partColors": value}} for value in (None, 0, "false", [])),
             {"clip": {"axis": "w"}}, {"clip": {"offset": 0.5}}, {"clip": {"offsets": {"x": 0.5}}},
             {"exploded": {"amount": 1.01}},
             *({"clip": {"at": value}} for value in (None, "3", True, [])),

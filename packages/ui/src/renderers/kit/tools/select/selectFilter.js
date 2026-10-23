@@ -1,19 +1,16 @@
-// What Select picks, as the person filters it from the dropdown on its chevron
-// (`SelectFilterMenu.jsx`), as a CAD tool's selection filter is: a checkbox per kind of thing it
-// can pick, each on its own, all ticked when a file opens, and Select all above
-// them. A filter is the list of ticked ids.
+// What a picking tool takes, as the person chooses it from the dropdown on its chevron
+// (`SelectFilterMenu.jsx`): ONE choice of what a click on the model takes, as a CAD tool's selection
+// priority is (Fusion's Select > Face Priority, Blender's vertex, edge and face modes) — All,
+// the default, or one kind alone. Each choice is a mode: its id, its label and the kinds it picks
+// (`kinds`), and the filter the tool reads is the kinds of the mode chosen.
 //
 // Importing this module has no environmental effects.
 
-/** The filter after `id` is ticked (`checked`) or unticked. */
-export function toggleSelectFilter(filter, id, checked) {
-  const rest = filter.filter(item => item !== id);
-  return checked ? [...rest, id] : rest;
-}
+const sameKinds = (left, right) => left.length === right.length && left.every(id => right.includes(id));
 
-/** Select all: every kind ticked; pressed with every kind ticked already, none. */
-export function toggleSelectAll(filter, ids) {
-  return ids.every(id => filter.includes(id)) ? [] : [...ids];
+/** The mode `filter` is (the one whose kinds it picks), else the first: All. */
+export function pickModeOf(filter, modes) {
+  return modes.find(mode => sameKinds(mode.kinds, filter)) || modes[0] || null;
 }
 
 /** Whether `filter` picks `id`'s kind. */

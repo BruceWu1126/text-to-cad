@@ -45,7 +45,7 @@ it('Cross-section turns on at an X centre cut; its body is the axis dropdown and
   const user = userEvent.setup();
   render(<Tools />);
   await user.click(screen.getByRole('button', { name: 'Cross-section' }));
-  expect(resolveViewSettings(current).clip).toEqual({ enabled: true, axis: 'x', invert: false });
+  expect(resolveViewSettings(current).clip).toEqual({ enabled: true, axis: 'x', invert: false, partColors: true });
   // One slider and nothing else: no typed value, no Flip.
   expect(screen.queryByRole('textbox', { name: 'Clip amount value' })).toBeNull();
   expect(screen.queryByRole('checkbox', { name: 'Flip' })).toBeNull();
@@ -75,7 +75,9 @@ it('Cross-section turns on at an X centre cut; its body is the axis dropdown and
   // The same share of Y's -50..50.
   expect(resolveViewSettings(current).clip.at).toBeCloseTo(50 - share, 9);
   expect(Number(amount().getAttribute('aria-valuenow'))).toBeCloseTo(share, 9);
-  // The dropdown hands focus back to its trigger as it closes; take it to the slider after that.
+  // An axis chosen keeps the dropdown open; Escape closes it and hands focus back to its trigger.
+  // Take it to the slider after that.
+  await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
   await act(async () => {});
   amount().focus();
@@ -89,7 +91,7 @@ it('Explode and Clip report their value at their step\'s precision, never float 
   render(<ExplodeControls viewSettings={{ exploded: { enabled: true, amount: 0.28 } }} onViewSettingsPatch={() => {}} />);
   expect(screen.getByRole('slider', { name: 'Explode amount' }).getAttribute('aria-valuenow')).toBe('28');
   cleanup();
-  render(<CrossSectionControls viewSettings={{ clip: { enabled: true, axis: 'x', at: 70, invert: false } }}
+  render(<CrossSectionControls viewSettings={{ clip: { enabled: true, axis: 'x', at: 70, invert: false, partColors: true } }}
     onViewSettingsPatch={() => {}} bounds={{ min: [0, 0, 0], max: [100, 100, 100] }} />);
   expect(screen.getByRole('slider', { name: 'Clip amount' }).getAttribute('aria-valuenow')).toBe('30');
 });

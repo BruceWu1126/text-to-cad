@@ -291,8 +291,11 @@ No snapshot is written while drawing or typing, and no image is rendered.
 The bare URL is the home: the library of models every CAD view shares
 (`@text-to-cad/ui/library`), and Open, the desktop's file chooser (`POST /__cad/pick`),
 where the server's computer has one (`serverInfo.pick`). From a file, Back to files in
-the menu the navbar's C logo opens leads back to it. Under the home's wordmark are GitHub,
-Discord and X. A `?file=` that names nothing there shows "File does not exist",
+the menu the navbar's C logo opens leads back to it. The home has the same navbar, its C
+menu (without Back to files) at the left and the update button at the right while a newer
+text-to-cad is out; under its wordmark are GitHub, Discord and X. The home is a step of
+the browser's history, as a file is: the browser's Back and Forward walk between them (the
+navbar draws no arrows of its own here). A `?file=` that names nothing there shows "File does not exist",
 with Go home.
 
 The home reads the library over `GET /__cad/recents`, pins, unpins and removes over
@@ -352,7 +355,7 @@ left the C logo, which opens the app menu, then the open file's name, which open
 explorer, with its ⋯; at the right only the blue update button, while a newer text-to-cad
 is out. The app menu holds Back to files (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
 GitHub, Discord and, in gray, the version (a link to its release notes) and "Made by @…"
-(X), as in the CAD app; the home shows GitHub, Discord and X under its wordmark instead.
+(X), as in the CAD app, over a file and on the home alike.
 Display and Preview are the view's, at the navbar's right end. This host
 supplies the links (`src/host/viewerLinks.js`): its version (with its build's id,
 `v0.7.15-dev.b80844940`, for any build but the release's own), the GitHub (where new
@@ -363,10 +366,8 @@ starts (`main.tsx`) and again whenever the person comes back to it, and its prom
 the person to paste into their agent's chat; its full install instructions open in a new tab.
 A Viewer the CAD server opens says what the server's channel allows (a store's copy hears nothing);
 one a skill opens names no channel, a skills-only install, which is told. Browser titles use "CAD | <filename>", or "CAD" when no file is selected.
-Appearance (System, Light, Dark) is this app's own: an icon button with its dropdown, last at
-the navbar's right end, the page's top-right corner, and last in the home's links row
-(`ViewerAppearance`, handed to the shared viewer as `colorSchemeControl`). The CAD app has none: it
-takes its host's. The original animated mark remains the shared LoadingIcon
+Appearance (System, Light, Dark) is the app menu's Theme row, the tab's choice (`colorScheme`,
+over a file and on the home); the page has no light/dark button of its own. The original animated mark remains the shared LoadingIcon
 for loading states. The C and CAD marks are the UI package's; the favicons are this
 app's, exported alongside the docs brand assets. See
 [the brand recipe](../../scripts/brand/README.md).

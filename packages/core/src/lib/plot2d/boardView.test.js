@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { projectWorldPointToClient } from "../viewer/measureRuler.js";
-import { boardMirrorX, boardPlanProjection, marksInPlan, measurementsInPlan, planToSheet, sheetToPlan } from "./boardView.js";
+import { boardMirrorX, boardPlanProjection, marksInPlan, planToSheet, sheetToPlan } from "./boardView.js";
 
 const sheet = { x: 0, y: 0, width: 40, height: 30 };
 
@@ -14,7 +14,6 @@ test("a sheet point is the plan's with y up, mirrored about the sheet's middle f
   assert.deepEqual(planToSheet(sheetToPlan([5, 15], 20), 20), [5, 15]);
   const [mark] = marksInPlan([{ id: "a", kind: "stroke", points: [5, 15, 0, 6, 16, 0] }], 20);
   assert.deepEqual([...mark.points], [35, -15, 0, 34, -16, 0]);
-  assert.deepEqual(measurementsInPlan([{ start: [5, 15, 0], end: [6, 15, 0], label: "1 mm", color: "#ff0000" }])[0].end, [6, -15, 0]);
 });
 
 test("the projection puts a sheet point where the view draws it, from either side", () => {

@@ -103,6 +103,28 @@ test('a file that does not exist says so by its path, and any other failure says
   expect(failure(true).queryByRole('button', { name: 'Go home' })).toBeNull();
 });
 
+test('the failure states read in the language the host names, and follow it when it changes', () => {
+  const client = cadClient();
+  const tabStore = createTabStore(memoryTabRecord());
+  const live = createLiveRegistry();
+  const view = (locale?: string) => <CadViewer client={client as never} host={ports(client, { environment: { colorScheme: 'light', locale } })} tabStore={tabStore} live={live}
+    file="/models/gone.step" library={library} onShow={() => {}} />;
+  const { rerender } = render(view());
+  // The host's `environment.locale` is the language: a change re-draws "Go home" and both failure titles.
+  const failure = (missing: boolean) => render(<>{props().presentation!.error!({ message: 'The viewer stopped', missing })}</>);
+  expect(failure(true).getByText('File does not exist')).toBeTruthy();
+  failure(true).unmount();
+  rerender(view('zh-CN'));
+  const zh = failure(true);
+  expect(zh.getByText('文件不存在')).toBeTruthy();
+  expect(zh.getByRole('button', { name: '返回主页' })).toBeTruthy();
+  zh.unmount();
+  rerender(view('fr'));
+  const back = failure(false);
+  expect(back.getByText('Could not open that file')).toBeTruthy();
+  back.unmount();
+});
+
 test('the home pictures a card out of sight, in a viewer of its own, from what is already built, and never builds one', async () => {
   const client = { ...cadClient(), requestArtifactStatus: vi.fn(async (file: string) => ({ state: file === '/models/a.stl' ? 'compiled' : 'not-compiled' })) };
   const host = ports(client);

@@ -25,6 +25,11 @@ cadgen step snapshot part.step review.png --preview
 cadgen step snapshot part.step review.png --display '{"mode":"parts","appearance":"dark"}' --camera front
 ```
 
+`clip.partColors` defaults to true: caps take normal part base colors, excluding
+hover/selection tints, and stay opaque even for transparent parts. False restores
+uniform amber caps. Textures and vertex-color variation are not sampled; a mesh
+with several materials uses its first material color.
+
 A clip keeps the part of a model on the lower side of a plane across
 `axis` (`x`, `y` or `z`), or the upper side with `invert`, and fills the cut
 faces. The plane stands at `at`, its coordinate on the axis in the FILE's unit in
@@ -122,8 +127,7 @@ the sheet, `up` +Y — frames the window it names in place of the fit:
 
 (centred on 50, 30, 30 drawing units above and below the centre). An `annotation`
 whose marks lie on the sheet (on no part, their points `x, y, 0` in drawing
-coordinates) and `measurements` (`start`/`end` in drawing coordinates) are drawn
-over the drawing, as the pane drew them. A Quick Edit prompt on a DXF writes
+coordinates) is drawn over the drawing, as the pane drew it. A Quick Edit prompt on a DXF writes
 exactly this job.
 
 ## KiCad boards
@@ -177,11 +181,10 @@ the window it names in place of the fit:
 ```
 
 (the middle of a 40 x 30 mm board, 16 mm above and below it). An `annotation`
-whose marks lie on the board (on no part, their points `x, y, 0` in the sheet's
-millimetres, y down from its top-left corner) and `measurements` (`start`/`end` in
-the same frame) are drawn over the board where they were put, mirrored with it
-when the display looks from below. A Quick Edit prompt on a board writes exactly
-this job, one per view, with the board's Display.
+whose marks lie on the board (their points `x, y, 0` in the sheet's millimetres,
+y down from its top-left corner) is drawn over the board where it was put,
+mirrored with it when the display looks from below. A Quick Edit prompt on a
+board writes exactly this job, one per view, with the board's Display.
 
 ## Requests and OUT
 
@@ -206,23 +209,22 @@ revision, a sibling). OUT is ignored with `--job`; the jobs' outputs say where
 the files go.
 
 A `.snapshot.json` file can hold one job, a list of jobs, or a `jobs` envelope.
-The envelope accepts shared `input`, `annotation`, and `measurements` defaults:
+The envelope accepts shared `input` and `annotation` defaults:
 
 ```json
 {
   "input": "/path/model.step",
-  "annotation": { "units": "mm", "parts": {}, "marks": [] },
-  "measurements": [],
+  "annotation": { "units": "mm", "marks": [] },
   "jobs": [
     { "camera": "iso", "outputs": [{ "path": "/tmp/iso.png" }] },
-    { "camera": "top", "measurements": [], "outputs": [{ "path": "/tmp/top.png" }] }
+    { "camera": "top", "annotation": { "units": "mm", "marks": [] }, "outputs": [{ "path": "/tmp/top.png" }] }
   ]
 }
 ```
 
 An omitted job field inherits its shared value. A present job field replaces the
-whole value: lists and annotation objects are never merged. Use `measurements: []`
-or an annotation object with `marks: []` to suppress shared marks for a job.
+whole value: lists and annotation objects are never merged. Use an
+annotation object with `marks: []` to suppress shared marks for a job.
 Per-job input paths and annotation file references still work. CLI flags override
 both shared and per-job values. Other envelope fields are refused. The extension
 is descriptive; `--job FILE` still reads existing `.job.json` files.
@@ -248,13 +250,12 @@ its sheet (see [Drawings](#drawings)).
   "parts": { "o1.6.2.7": { "placement": [16 numbers, a 4x4 matrix in column order] } },
   "marks": [ { "id": "1", "kind": "stroke", "part": "o1.6.2.7", "placement": "surface",
                "view": "view 1", "points": [x, y, z, ...], "color": "#ff2d55", "opacity": 1,
-               "width": 2, "widths": [...], "dash": "solid", "closed": false, "group": "g1",
+               "width": 2, "widths": [...], "closed": false, "group": "g1",
                "touches": [{ "part": "o1.6.2.7" }] } ] }
 ```
 
 - `marks[]`: `id` unique; `kind` is `stroke` (a line, `width` screen pixels at
-  any zoom, `widths` the pen's share of it per point, `dash` solid, dashed or
-  dotted, `closed`), `area` (a fill: its outline's `outline` points, then the
+  any zoom, `widths` the pen's share of it per point, `closed`), `area` (a fill: its outline's `outline` points, then the
   points inside it, which `triangles` index three at a time) or `text` (`text`
   at `fontPx` on screen, `points` its label's four corners). `color` is
   `#rrggbb`; `opacity` 0..1.
@@ -273,31 +274,6 @@ its sheet (see [Drawings](#drawings)).
 Every field is checked before the model loads, and a refusal names the annotation
 file and the mark (`ink.annotation.json: annotation: marks[2].color must be a #rrggbb
 colour`). An unknown field is refused, never read as a default.
-
-## Measurements
-
-A job's `measurements` (the `--measurements` flag sets them on every job: the
-list, one measurement alone, or a file of either) are dimensions drawn over the
-picture, as the CAD Viewer's Measure draws them. Measurement chips do not copy
-individual references; a Quick Edit prompt's job carries every
-measurement the person took, so an agent sees and reads the exact distances
-they meant. Each is drawn by the viewer's own code, every one labelled, its
-lines as heavy against the image's height as against a viewer 900 pixels tall.
-`--mode list` takes none; a drawing's are in its own coordinates.
-
-```json
-"measurements": [
-  { "start": [0, 0, 5], "end": [15, 0, 4], "label": "15.03 mm", "color": "#d59090" }
-]
-```
-
-- `start`, `end`: the two ends of the dimension, `[x, y, z]` in model
-  coordinates (a face-to-face reading's ends lie along the faces' normal).
-- `label`: its words as the viewer labels it (`⟂` for a face-to-face distance,
-  `C-C` for hole centres); `color`: `#rrggbb`, the measurement's own.
-
-At most 64. Every field is checked before the model loads, and a refusal names
-the measurement and the field (`measurements[0].start is [x, y, z]`).
 
 ## Sizes
 

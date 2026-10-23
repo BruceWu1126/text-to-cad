@@ -78,7 +78,7 @@ export function createSceneClip(THREE, { stage }) {
       runtime.modelBounds = bounds;
       const extents = [0, 1, 2].map(index => { const { min, max } = clipAxisBounds(bounds, ["x", "y", "z"][index]); return max - min; });
       runtime.modelRadius = Math.max(Math.hypot(...extents) / 2, 1e-6);
-      syncSectionCaps(runtime, plane);
+      syncSectionCaps(runtime, plane, clip);
       return planes;
     },
     dispose: clear

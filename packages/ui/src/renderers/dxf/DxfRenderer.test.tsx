@@ -165,11 +165,11 @@ it("the host's notice shows at the top-right once the drawing is on screen", asy
   dispose();
 });
 
-it("a DXF's strip is Select (in hand), Annotate and Measure: no Display, no Preview, no view controls", async () => {
+it("a DXF's strip is Select (in hand), Pencil, Shapes and Measure: no Display, no Preview, no view controls", async () => {
   const { pane, delivered, dispose } = await openDrawing();
   const inPane = within(pane);
   const strip = inPane.getByRole('group', { name: 'Interaction tools' });
-  expect(within(strip).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Select', 'Annotate', 'Measure']);
+  expect(within(strip).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Select', 'Pencil', 'Shapes', 'Measure']);
   expect(within(strip).getByRole('button', { name: 'Select' }).getAttribute('aria-pressed')).toBe('true');
   expect(strip.querySelector('[data-strip-rule]')).toBeNull();
   for (const name of ['Orbit', 'Position', 'Animation', 'Preview', 'Display', 'Display settings', 'Projection', 'Explode', 'Clip']) {
@@ -183,10 +183,10 @@ it("a DXF's strip is Select (in hand), Annotate and Measure: no Display, no Prev
   expect(inPane.queryByRole('button', { name: 'Take snapshot' })).toBeNull();
   expect(delivered).toHaveLength(0);
 
-  // Measure in hand hangs no row under the strip; Annotate's row has no placement.
+  // Measure in hand hangs no row under the strip; the drawing row has no placement.
   fireEvent.click(within(strip).getByRole('button', { name: 'Measure' }));
   expect(pane.querySelector('[data-cad-sub-toolbar]')).toBeNull();
-  fireEvent.click(within(strip).getByRole('button', { name: 'Annotate' }));
+  fireEvent.click(within(strip).getByRole('button', { name: 'Pencil' }));
   expect(pane.querySelector('[data-annotation-controls]')).not.toBeNull();
   expect(inPane.queryByRole('button', { name: /Placement/ })).toBeNull();
   expect(pane.querySelector('[data-cad-annotation-overlay]')).not.toBeNull();
@@ -327,24 +327,16 @@ it('a rewritten drawing stays on screen while its next revision is read, and aft
 });
 
 
-it('measurement-only Copy exports the live dimension and current view at the press', async () => {
+it('a measurement on a drawing is Measure\'s row\'s chip, and opens no Quick Edit', async () => {
   const promptFiles = { create: vi.fn(async () => ({ snapshot: '/tmp/drawing.snapshot.json' })), read: vi.fn(), save: vi.fn() };
   const { tap, dispose } = await openDrawing('clipboard', null, promptFiles);
   fireEvent.click(screen.getByRole('button', { name: 'Measure', exact: true }));
+  expect(screen.queryByRole('toolbar', { name: 'Measurements' })).toBeNull();
   tap(0, 0);
   tap(100, 0);
-  const box = await screen.findByRole('region', { name: 'Quick Edit' });
-  const note = within(box).getByRole('textbox', { name: 'Describe your changes' });
-  note.textContent = 'Keep this distance.';
-  fireEvent.input(note);
+  const row = await screen.findByRole('toolbar', { name: 'Measurements' });
+  expect(within(row).getByRole('button', { name: 'Measurement 1: 100.00 mm' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: 'Quick Edit' })).toBeNull();
   expect(promptFiles.create).not.toHaveBeenCalled();
-  fireEvent.click(within(box).getByRole('button', { name: 'Copy Prompt' }));
-  await waitFor(() => expect(promptFiles.create).toHaveBeenCalledTimes(1));
-  const request = promptFiles.create.mock.calls[0][0] as any;
-  expect(request.views).toHaveLength(1);
-  expect(request.views[0].label).toBe('current view');
-  expect(request.measurements).toEqual([{ start: [0, 0, 0], end: [100, 0, 0], label: '100.00 mm', color: expect.stringMatching(/^#[0-9a-f]{6}$/i) }]);
-  expect(await copied).toContain('Snapshot (cadgen snapshot --job): /tmp/drawing.snapshot.json');
-  expect(promptFiles.read).not.toHaveBeenCalled();
   dispose();
 });

@@ -118,13 +118,11 @@ class DxfSnapshotRefusalTests(unittest.TestCase):
             prepared[0].job["outputs"][0]["camera"],
         )
 
-    def test_ink_and_measurements_are_drawn_over_a_drawing(self) -> None:
-        annotation = {"units": "mm", "parts": {}, "marks": [
-            {"id": "1", "kind": "stroke", "part": None, "points": [0, 0, 0, 10, 10, 0], "color": "#ff2d55", "width": 2}]}
-        mark = {"start": [0, 0, 0], "end": [100, 0, 0], "label": "100.00 mm", "color": "#d59090"}
-        _, prepared = self.prepare(self.job(camera=PLAN, annotation=annotation, measurements=[mark]))
+    def test_ink_is_drawn_over_a_drawing(self) -> None:
+        annotation = {"units": "mm", "marks": [
+            {"id": "1", "kind": "stroke", "points": [0, 0, 0, 10, 10, 0], "color": "#ff2d55", "width": 2}]}
+        _, prepared = self.prepare(self.job(camera=PLAN, annotation=annotation))
         self.assertEqual(annotation, prepared[0].job["annotation"])
-        self.assertEqual([mark], prepared[0].job["measurements"])
 
     def test_the_job_refusal_is_the_same_sentence_the_retired_flag_speaks(self) -> None:
         # The flag half of this is asserted against the same two functions in

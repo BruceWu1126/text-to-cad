@@ -1,4 +1,3 @@
-import { hitTriangle } from "../viewer/meshMeasure.js";
 import { scheduleRuntimeRaycastBvh } from "../viewer/raycastBvh.js";
 import { createSceneHighlight } from "../viewer/sceneHighlight.js";
 import { ROBOT_SCENE_UNITS } from "../viewer/sceneUnits.js";
@@ -403,8 +402,8 @@ export function createRobotScene(THREE, { description, parts }, { shareFrom = nu
       let owner = hit.object;
       while (owner && !(owner.isGroup && owner.userData.linkName)) owner = owner.parent;
       const linkName = owner?.userData.linkName || "";
-      // The triangle hit, in the scene's coordinates, for Measure (`meshMeasure.js`).
-      return { id: componentId || `link:${linkName}`, kind: componentId ? "component" : "link", linkName, componentId, point: hit.point, triangle: hitTriangle(hit) };
+      // The point hit, in the scene's coordinates, for Measure (`meshMeasure.js`).
+      return { id: componentId || `link:${linkName}`, kind: componentId ? "component" : "link", linkName, componentId, point: hit.point };
     },
     dispose() {
       if (disposed) return;

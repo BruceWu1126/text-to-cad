@@ -4,7 +4,8 @@ import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import { ViewerElementContext, useViewerHost, usePromptDestination } from "../../../host/context.js";
 import { hasOpenPopup } from "../../../lib/popups.js";
 import { useAnnotationSession } from "../../../annotation/session.js";
-import { annotationToolIcon } from "../../../annotation/toolbar.jsx";
+import { DRAWING_TOOLS, annotationToolIcon, drawingToolVariant } from "../../../annotation/toolbar.jsx";
+import { DRAWING_SHORTCUTS, pressToolKey } from "../tools/toolShortcuts.js";
 import { useViewerHistory } from "./useViewerHistory.js";
 import { promptView, promptViews } from "../../../annotation/views.js";
 import { sceneBackdropEdgeColor } from "../look/chromeBackdrop.js";
@@ -68,7 +69,7 @@ export function presentationIsPending(state, { modelKey, key, renderMode }) {
  * The tool ids the shell itself understands. A renderer's own tools use any other id. A renderer
  * that offers one of these declares it in its `toolModes` too, as a mode that toggles.
  */
-export const SHELL_TOOL = Object.freeze({ ANNOTATE: "annotate" });
+export const SHELL_TOOL = Object.freeze({ PENCIL: "pencil", SHAPES: "shapes" });
 
 const SESSION_SAVE_DELAY_MS = 180;
 const EMPTY = Object.freeze({});
@@ -175,9 +176,6 @@ const EMPTY = Object.freeze({});
  *   the document I asked for" before this hook runs — a live preview deciding whether its own result has
  *   landed (`presentationIsPending` with `shellPresentationKey(modelKey, revisionKey)`). Omitted: the shell holds it.
  * @param {string} [options.sceneScaleMode]
- * @param {{ chips: object[], marks(): object[], clear(): void } | null} [options.measurements]  The
- *   renderer's measurements, as Quick Edit shows them (`chips`) and its prompt files draw them over
- *   each view (`marks`, `measureDimension.js`'s `MeasurementMark`s); `clear` when the note goes.
  * @param {boolean} [options.sceneEffects]  The viewport applies the view's model effects to the scene,
  *   through the scene contract (`ShellViewport`'s `sceneEffects`); a renderer whose own layers apply
  *   them leaves this off.
@@ -187,7 +185,7 @@ export function useRendererShell({
   viewSettings = null, viewerRef: providedViewerRef = null,
   animation = null, live = EMPTY, promptReferences = null, promptContext = createViewPromptContext,
   escape = EMPTY, rendererState = null, viewState = null, annotationUnits = "mm", deleteSelection = null,
-  measurements = null, sceneEffects = false,
+  sceneEffects = false,
   onCameraSettled = null, preserveInteractionPixelRatio = false, runtimeLifecycle = null,
   onRuntimeAlert = null, presentationReport = null,
   sceneScaleMode = VIEWER_SCENE_SCALE.CAD
@@ -413,7 +411,9 @@ export function useRendererShell({
 
   // ---- tools ----------------------------------------------------------------
   const idle = viewerLoading || !scene;
-  const annotateToolActive = !previewing && toolMode === SHELL_TOOL.ANNOTATE;
+  // Pencil or Shapes is in hand: the drawing tools, which share one annotation.
+  const drawingFamily = toolMode === SHELL_TOOL.PENCIL || toolMode === SHELL_TOOL.SHAPES ? toolMode : null;
+  const annotateToolActive = !previewing && drawingFamily !== null;
   const selectTool = useCallback((mode) => setToolMode(current => (toolModes ? toolModes.next(current, mode) : mode)), [toolModes, setToolMode]);
   // A tool panel's X: back to the file's default tool (Select, where there is one), from any tool.
   const selectDefaultTool = useCallback(() => setToolMode(toolModes ? toolModes.defaultMode : ""), [toolModes, setToolMode]);
@@ -421,7 +421,7 @@ export function useRendererShell({
   const history = useViewerHistory();
   const historyRef = useRef(history);
   historyRef.current = history;
-  const annotation = useAnnotationSession(annotateToolActive, CAD_ANNOTATION_DEFAULTS, history);
+  const annotation = useAnnotationSession(drawingFamily, CAD_ANNOTATION_DEFAULTS, history);
 
 
   // ---- prompt snapshots, clipboard ------------------------------------------
@@ -488,16 +488,12 @@ export function useRendererShell({
     return shown?.kind === "workspace-file" ? shown.path : null;
   }, []);
   // Quick Edit captures the current view and annotation views; the host prepares JSON at the press.
-  const measurementsRef = useRef(measurements);
-  measurementsRef.current = measurements;
   const quickEditPrompt = useMemo(() => ({
     views: () => (host.promptFiles && promptFile() ? promptViews(currentView(), annotationRef.current.views, annotationRef.current.items) : []),
     files: views => {
       const input = promptFile();
       if (!host.promptFiles || !input || !views.length) return null;
-      const marks = measurementsRef.current?.marks?.() || [];
-      return host.promptFiles.create({ name: input.split("/").pop(), input, views, annotation: annotationNow(),
-        ...(marks.length ? { measurements: marks } : {}) });
+      return host.promptFiles.create({ name: input.split("/").pop(), input, views, annotation: annotationNow() });
     },
     read: path => host.promptFiles.read(path),
   }), [host.promptFiles, currentView, annotationNow, promptFile]);
@@ -521,6 +517,8 @@ export function useRendererShell({
   const escapeView = useCallback(() => escapeRef.current?.() || false, []);
   // What Select has picked of the annotation: Delete deletes it with whatever the renderer's own
   // selection can lose (`deleteSelection`: a measurement), and Escape lets go of it first.
+  // The strip's tools as the frame last drew them (`RendererShell.jsx`): what a tool's letter takes up.
+  const toolKeysRef = useRef([]);
   const deleteSelectionRef = useRef(deleteSelection);
   deleteSelectionRef.current = deleteSelection;
   // Everything Select has picked that can go: the annotation's ink and the renderer's own; true if any went.
@@ -537,6 +535,11 @@ export function useRendererShell({
     // ⌘Z and ⇧⌘Z walk the annotation's history, whatever tool is in hand; never in preview.
     onUndo: () => !previewing && historyRef.current.undo(),
     onRedo: () => !previewing && historyRef.current.redo(),
+    // A tool's letter takes it up, F frames the model (`toolShortcuts.js`), over the strip the frame
+    // has on screen (`toolKeys`, RendererShell's); never in preview.
+    onKey: event => !previewing && !idle && pressToolKey(event, {
+      tools: toolKeysRef.current, selectDrawing: tool => annotationRef.current.selectTool(tool),
+      fit: () => viewerRef.current?.resetZoom?.() }),
     escapeActive: Boolean(escape.active || previewing || annotation.selected.length || (toolModes && toolMode !== toolModes.defaultMode)),
     onEscape(event) {
       // A popup opened in THIS viewer (a menu, a Select, a colour picker, Display) owns Escape before
@@ -649,16 +652,21 @@ export function useRendererShell({
   const stripTool = ({ id, label, icon, ...rest }) => ({
     id, label, icon, active: !previewing && toolMode === id, disabled: idle, onSelect: () => selectTool(id), ...rest
   });
-  const AnnotateIcon = annotationToolIcon(annotation.tool);
+  // Pencil and Shapes: the strip tools that draw, plain buttons. Each shows the tool it draws with (the pen, the line first), kept
+  // when it is put down, and a press takes that one up; choosing another is the one row under the strip
+  // (`RendererShell.jsx`, `annotation/toolbar.jsx`'s `AnnotationToolbar`), up while either is. A second press does nothing.
+  // Its tooltip names what it draws with now, with that tool's key ("Rectangle R").
+  const drawing = DRAWING_TOOLS.map(({ id, label, entries }) => {
+    const variant = drawingToolVariant(id, annotation);
+    const Icon = annotationToolIcon(variant);
+    return stripTool({ id, label, tooltip: entries.find(entry => entry.id === variant)?.label ?? label, shortcut: DRAWING_SHORTCUTS[variant],
+      icon: <Icon className="size-3" strokeWidth={2} aria-hidden="true" /> });
+  });
   const tools = {
     /** A tool of the renderer's own: `{ id, label, icon }` plus anything the strip reads. */
     own: stripTool,
-    // Annotate: its tools, its history and what the next mark looks like are its panel in the tool stack
-    // while it is up (`RendererShell.jsx`, `annotation/toolbar.jsx`); the button is the annotation
-    // tool in hand (the pen, a shape, text or the eraser), which stays in hand when Annotate is put
-    // down. A second press does nothing.
-    annotate: stripTool({ id: SHELL_TOOL.ANNOTATE, label: "Annotate", icon: <AnnotateIcon className="size-3" strokeWidth={2} aria-hidden="true" />,
-      onSelect: () => selectTool(SHELL_TOOL.ANNOTATE) }),
+    /** Pencil, then Shapes: the strip tools that draw, one annotation between them. */
+    drawing,
   };
 
   return {
@@ -693,7 +701,7 @@ export function useRendererShell({
       resource, captureView, escape: escapeView, currentView, quickEditPrompt,
       // Select is the tool in hand (the default one), where a press on ink picks it before a part.
       selecting: !previewing && Boolean(toolModes) && toolMode === toolModes.defaultMode,
-      annotateToolActive, annotation, history, deletePicked, measurements, animation, previewSettings, displayMode, grid, projection, sceneEffects,
+      annotateToolActive, annotation, history, deletePicked, toolKeys: toolKeysRef, animation, previewSettings, displayMode, grid, projection, sceneEffects,
       previewDesiredScene
     }
   };

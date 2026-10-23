@@ -10,19 +10,24 @@ import { useFileDocument } from "./hooks/useFileDocument.js";
 import type { FileNavigationAction, FileViewerProps, JsonValue, FileViewerState } from "./types.js";
 import { ViewerMobileContext, useViewerMobileMeasure } from "./responsive.js";
 import { ViewerElementContext, ViewerHostContext } from '../host/context.js';
+import { I18nProvider, translator } from "../i18n/index.js";
 
-class RenderBoundary extends Component<{ children: ReactNode; onError?: (error: Error) => void }, { error: Error | null }> {
+class RenderBoundary extends Component<{ children: ReactNode; title: string; onError?: (error: Error) => void }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
   componentDidCatch(error: Error, _info: ErrorInfo) { this.props.onError?.(error); }
-  render() { return this.state.error ? <EmptyState icon={FileText} title="Could not display that file" description={this.state.error.message} tone="warn" /> : this.props.children; }
+  render() { return this.state.error ? <EmptyState icon={FileText} title={this.props.title} description={this.state.error.message} tone="warn" /> : this.props.children; }
 }
 
 /**
  * The complete file view: one file, by its absolute path, under the one navbar. Its only knowledge
  * of formats comes from registrations. With no file it shows the host's home.
  */
-export function FileViewer({ file, host, renderers, state, onStateChange, colorScheme, appSettings, update, fullSize, history, notice, onError, presentation }: FileViewerProps) {
+export function FileViewer({ file, host, renderers, state, onStateChange, colorScheme, language, appSettings, update, fullSize, history, notice, onError, presentation }: FileViewerProps) {
+  // The language the host names (`environment.locale`): this frame's own strings, and everything
+  // drawn under it (`I18nProvider`), the nodes the host hands it included.
+  const locale = host.environment.locale;
+  const t = translator(locale);
   const source = host.files;
   const onOpenFile = host.navigation.openFile;
   const appearance = host.environment;
@@ -67,17 +72,17 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
   const rendererBody = useMemo(() => {
     if (!shown) return null;
     const Renderer = shown.prepared.Component;
-    return <RenderBoundary key={key} onError={onError}><Renderer notice={notice} key={key} file={shown.file} source={source}
+    return <RenderBoundary key={key} title={t("file.displayFailed")} onError={onError}><Renderer notice={notice} key={key} file={shown.file} source={source}
       navbarSlot={navbarSlot} onReady={onReady} onNavigationActionsChange={onNavigationActionsChange}
       onOpenFile={onOpenFile} appearance={appearance}
       state={rendererState} onStateChange={setRendererState} reload={reload} /></RenderBoundary>;
   }, [shown, key, onError, notice, source, navbarSlot, onReady,
-    onNavigationActionsChange, onOpenFile, appearance, rendererState, setRendererState, reload]);
+    onNavigationActionsChange, onOpenFile, appearance, rendererState, setRendererState, reload, t]);
 
   let body: ReactNode;
   if (loaded.status === "empty") body = presentation?.home ?? null;
-  else if (loaded.status === "loading") body = presentation?.loading ?? <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground" role="status"><Spinner className="size-3.5" />Opening…</div>;
-  else if (loaded.status === "error") body = presentation?.error?.({ message: loaded.message, missing: loaded.missing }) ?? <EmptyState icon={FileText} title="Could not open that file" description={loaded.message} tone="warn" />;
+  else if (loaded.status === "loading") body = presentation?.loading ?? <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground" role="status"><Spinner className="size-3.5" />{t("file.opening")}</div>;
+  else if (loaded.status === "error") body = presentation?.error?.({ message: loaded.message, missing: loaded.missing }) ?? <EmptyState icon={FileText} title={t("file.openFailed")} description={loaded.message} tone="warn" />;
   else body = rendererBody;
   const shownActions = navActions?.key === key && ready ? navActions.actions : [];
   const trailing = shownActions.length ? <>
@@ -96,15 +101,20 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
   // a pick shows the file here. A view that shows its file alone opens none.
   const explorer = useMemo(() => source.list && source.search && onOpenFile ? { source, onOpen: onOpenFile } : null, [source, onOpenFile]);
   // The logo's app menu: the host's links and the person's settings (Back to files is `onHome`).
-  const menu = useMemo(() => host.links || appSettings?.length || colorScheme ? { links: host.links, appSettings, colorScheme, platform: appearance.platform } : null,
-    [host.links, appSettings, colorScheme, appearance.platform]);
-  // The navbar is drawn over every file, never over the host's home (which holds its menu itself)
-  // or a view drawn small with no chrome (`compact`: an offscreen picture).
-  const navbar = Boolean(path) && !appearance.compact;
-  return <ViewerMobileContext.Provider value={mobile}><ViewerHostContext.Provider value={host}><ViewerElementContext.Provider value={viewerElement}><div className="text-to-cad-file-viewer text-ui font-normal flex h-full min-h-0 min-w-0 flex-col overflow-hidden" ref={bindElement} data-viewer-layout={mobile ? "mobile" : "desktop"} tabIndex={-1}>
-    {navbar ? <ViewerNavbar onHome={host.navigation.home} menu={menu} history={history} file={path} explorer={explorer} fileMenu={fileMenu} trailing={trailing} update={update} fullSize={fullSize} controlsRef={setNavbarSlot} /> : null}
+  const menu = useMemo(() => host.links || appSettings?.length || colorScheme || language ? { links: host.links, appSettings, colorScheme, language, platform: appearance.platform } : null,
+    [host.links, appSettings, colorScheme, language, appearance.platform]);
+  // The navbar is drawn over every file and over the host's home — there only the logo's menu (no
+  // Back to files), Back and Forward where the host keeps the view's history, and the host's update
+  // and Full size, each where it is over a file — never over a view drawn small with no chrome
+  // (`compact`: an offscreen picture).
+  const home = loaded.status === "empty" && Boolean(presentation?.home);
+  const navbar = (Boolean(path) || home) && !appearance.compact;
+  return <I18nProvider locale={locale}><ViewerMobileContext.Provider value={mobile}><ViewerHostContext.Provider value={host}><ViewerElementContext.Provider value={viewerElement}><div className="text-to-cad-file-viewer text-ui font-normal flex h-full min-h-0 min-w-0 flex-col overflow-hidden" ref={bindElement} data-viewer-layout={mobile ? "mobile" : "desktop"} tabIndex={-1}>
+    {navbar ? (path
+      ? <ViewerNavbar onHome={host.navigation.home} menu={menu} history={history} file={path} explorer={explorer} fileMenu={fileMenu} trailing={trailing} update={update} fullSize={fullSize} controlsRef={setNavbarSlot} />
+      : <ViewerNavbar menu={menu} history={history} update={update} fullSize={fullSize} />) : null}
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <div className="min-w-0 flex-1 overflow-hidden">{body}</div>
     </div>
-  </div></ViewerElementContext.Provider></ViewerHostContext.Provider></ViewerMobileContext.Provider>;
+  </div></ViewerElementContext.Provider></ViewerHostContext.Provider></ViewerMobileContext.Provider></I18nProvider>;
 }

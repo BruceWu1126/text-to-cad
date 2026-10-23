@@ -49,15 +49,6 @@ export function marksInPlan(marks, mirrorX = null) {
   });
 }
 
-/** Measure's marks (`{ start, end, label, color }`, their ends on the sheet) in the plan of the view. */
-export function measurementsInPlan(marks, mirrorX = null) {
-  return (marks || []).map((mark) => {
-    const [sx, sy] = sheetToPlan(mark.start, mirrorX);
-    const [ex, ey] = sheetToPlan(mark.end, mirrorX);
-    return { ...mark, start: [sx, sy, mark.start[2] || 0], end: [ex, ey, mark.end[2] || 0] };
-  });
-}
-
 /**
  * The view as a scene camera's matrices (column order, as three.js keeps them), from the SHEET to
  * clip space: what Measure's kit code projects a pick with, its points on the sheet (y down), the

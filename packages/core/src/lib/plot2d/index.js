@@ -20,7 +20,7 @@ export {
   visiblePageRect
 } from "./plot.js";
 export { HOLE_COLORS, VIA_COLORS, itemColor, layerColor } from "./theme.js";
-export { boardMirrorX, boardPlanProjection, marksInPlan, measurementsInPlan, planToSheet, sheetToPlan } from "./boardView.js";
+export { boardMirrorX, boardPlanProjection, marksInPlan, planToSheet, sheetToPlan } from "./boardView.js";
 export {
   BOARD_DISPLAY_DEFAULTS,
   BOARD_DISPLAY_MODES,

@@ -35,7 +35,7 @@ import { DXF_DECLINED_LIVE_COMMANDS, DXF_NO_CAMERA, DXF_NO_DISPLAY, DXF_TOOL, DX
  * entities (by handle: `drawingReferences.js`) and is the view's hand — a drag pans, the wheel or a
  * pinch zooms, a double-click fits; Annotate, which draws on the sheet; and Measure, between points
  * snapped to its ends, centres and lines, in the unit the drawing declares (bare drawing units when
- * it declares none). What is picked, drawn and measured is Quick Edit's, whose views are the window
+ * it declares none). What is picked and drawn is Quick Edit's (what is measured, Measure's row's), whose views are the window
  * on screen as a plan-view camera, which `cadgen dxf snapshot --job` draws again. A drawing with
  * layers and blocks to read has a Layers section in the file sidebar (`layersSectionShown`). The
  * chrome is every flat view's (`kit/shell/FlatViewFrame.jsx`, `useFlatView.js`) — the strip at the
@@ -303,7 +303,7 @@ function DxfSurface({ view, data }) {
   };
   const handover = useFlatHandover({
     view, data, workspace, file, shown, ready, alert, tools, selection, references, chips, nameReference,
-    capture, currentView, annotationDocument, runtime, live: DXF_LIVE, captureFailed: "Couldn’t capture the drawing"
+    capture, currentView, annotationDocument, runtime, live: DXF_LIVE, fit, captureFailed: "Couldn’t capture the drawing"
   });
 
   // ---- the frame ---------------------------------------------------------------
@@ -313,7 +313,7 @@ function DxfSurface({ view, data }) {
   const compact = Boolean(view.appearance?.compact);
   const chromeHidden = payload.loading || failed;
   const layered = layersSectionShown(drawing);
-  const { strip, row } = flatViewTools(tools, { mobile, colorScheme, shown });
+  const { strip, row } = flatViewTools(tools, { colorScheme, shown });
 
   // The 3D views' cursors under Select: the arrow, pressed or dragging too, and the pointing hand
   // over what a press would pick. Measure keeps its crosshair (Annotate's layer has its own).

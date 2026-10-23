@@ -4,6 +4,7 @@ import { Button } from "@text-to-cad/ui/primitives/button";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { cn } from "@text-to-cad/ui/utils";
+import { english, useI18n } from "@text-to-cad/ui/i18n";
 import { useFollow } from "../../../file-viewer/navigation/NavbarLinks.jsx";
 import { useViewerMobile } from "../../../file-viewer/responsive.js";
 import { ViewerHostContext } from "../../../host/context.js";
@@ -20,8 +21,8 @@ export function alertDismissible(alert, hasContent) {
 
 // The same failure raised again is the same alert, even as a new object.
 const alertKey = alert => JSON.stringify([alert.severity, alert.title, alert.message, alert.reason, alert.details]);
-/** What the card is headed, and what its icon in the navbar is called. */
-const alertTitle = alert => alert.title || alert.summary || "Couldn’t display the model";
+/** What the card is headed, and what its icon in the navbar is called, in `t`'s language where the alert names none. */
+const alertTitle = (alert, t = english) => alert.title || alert.summary || t("alert.undisplayable");
 /** The card's icon colour: amber for a warning, the destructive red for an error. */
 const alertTone = alert => alert.severity === "warning" ? "text-amber-500" : "text-destructive";
 
@@ -48,6 +49,7 @@ const NO_ACTIONS = Object.freeze([]);
  * @returns {{ dismissed: boolean, dismiss(): void }}
  */
 export function useAlertDismissal(alert, { hasContent = false, scope = "", onNavigationActionsChange = null } = {}) {
+  const { t } = useI18n();
   const key = alert ? alertKey(alert) : "";
   const [put, setPut] = useState(null);
   // The dismissal of the alert on screen alone: when it is not that alert any more, it is gone.
@@ -56,7 +58,7 @@ export function useAlertDismissal(alert, { hasContent = false, scope = "", onNav
   const dismissed = !stale && put !== null && Boolean(alert) && alertDismissible(alert, hasContent);
   const dismiss = useCallback(() => { if (key) setPut({ key, scope }); }, [key, scope]);
   const reopen = useCallback(() => setPut(null), []);
-  const title = alert ? alertTitle(alert) : "";
+  const title = alert ? alertTitle(alert, t) : "";
   const warning = alert?.severity === "warning";
   const published = useRef(false);
   useEffect(() => {
@@ -85,6 +87,7 @@ export const COPIED_MS = 1600;
  * moment. A copy the clipboard refuses is said under the box, where the text stays to select.
  */
 function AlertDetails({ details, clipboard }) {
+  const { t } = useI18n();
   const [copy, setCopy] = useState("");
   const tick = useRef(0);
   const mounted = useRef(true);
@@ -112,8 +115,8 @@ function AlertDetails({ details, clipboard }) {
         <pre className={cn("whitespace-pre-wrap break-words px-2 py-1.5 font-mono text-xs select-text", canCopy && "pr-8")}>{details}</pre>
       </ScrollArea>
       {canCopy ? (
-        <TooltipHint content={copied ? "Copied" : "Copy"} side="bottom">
-          <Button type="button" variant="ghost" size="icon-xs" aria-label={copied ? "Error details copied" : "Copy error details"}
+        <TooltipHint content={copied ? t("alert.copied") : t("alert.copy")} side="bottom">
+          <Button type="button" variant="ghost" size="icon-xs" aria-label={copied ? t("alert.detailsCopied") : t("alert.copyDetails")}
             className="absolute right-1 top-1 size-6 text-muted-foreground hover:bg-background hover:text-foreground"
             onClick={write} data-alert-details-copy="">
             {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
@@ -121,7 +124,7 @@ function AlertDetails({ details, clipboard }) {
         </TooltipHint>
       ) : null}
     </div>
-    {copy === "failed" ? <p role="status" className="mt-1.5">The details could not be copied. Select them above and copy them.</p> : null}
+    {copy === "failed" ? <p role="status" className="mt-1.5">{t("alert.copyFailed")}</p> : null}
   </>;
 }
 
@@ -138,14 +141,16 @@ function AlertDetails({ details, clipboard }) {
 export default function ViewerAlertCard({ alert: shown, hasContent, onReload, file = "", dismissed = false, onDismiss = null }) {
   const mobile = useViewerMobile();
   const host = useContext(ViewerHostContext);
+  const { t } = useI18n();
   const follow = useFollow(host?.links);
   if (!shown || dismissed) return null;
   const dismissible = Boolean(onDismiss) && alertDismissible(shown, hasContent);
   const reason = String(shown.reason || "");
   const shortReason = reason.split("\n").find((line) => line.trim()) || "";
   const readableReason = shortReason.length > 360 ? `${shortReason.slice(0, 360)}…` : shortReason;
-  const title = alertTitle(shown);
-  const report = alertIssueUrl(host?.links?.issues, { ...shown, title },
+  const title = alertTitle(shown, t);
+  // The issue is the project's, in English: the title it is filed under is the alert's own or English's.
+  const report = alertIssueUrl(host?.links?.issues, { ...shown, title: alertTitle(shown) },
     { file, version: host?.links?.version, platform: host?.environment.platform });
   return (
     <div className={cn("pointer-events-none absolute inset-0 z-30 flex min-w-0 items-center justify-center py-3", mobile ? "px-3" : "px-4")}>
@@ -160,7 +165,7 @@ export default function ViewerAlertCard({ alert: shown, hasContent, onReload, fi
               {title}
             </h2>
             {dismissible ? (
-              <Button type="button" variant="ghost" size="icon-xs" className="-mr-1 -mt-0.5" aria-label="Dismiss" onClick={onDismiss}>
+              <Button type="button" variant="ghost" size="icon-xs" className="-mr-1 -mt-0.5" aria-label={t("alert.dismiss")} onClick={onDismiss}>
                 <X aria-hidden="true" />
               </Button>
             ) : null}
@@ -171,7 +176,7 @@ export default function ViewerAlertCard({ alert: shown, hasContent, onReload, fi
             {shown.recovery ? <p className="break-words">{shown.recovery}</p> : null}
             {shown.details ? (
               <details>
-                <summary className="w-fit cursor-pointer rounded-sm text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">Details</summary>
+                <summary className="w-fit cursor-pointer rounded-sm text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">{t("alert.details")}</summary>
                 {/* New details start afresh: a tick or a refusal belongs to the details it copied. */}
                 <AlertDetails key={shown.details} details={shown.details} clipboard={host?.clipboard} />
               </details>
@@ -180,12 +185,12 @@ export default function ViewerAlertCard({ alert: shown, hasContent, onReload, fi
               <div className="flex flex-wrap gap-2 pt-0.5">
                 {shown.reload ? (
                   <Button type="button" variant="outline" size="xs" onClick={onReload} disabled={!onReload}>
-                    Retry
+                    {t("alert.retry")}
                   </Button>
                 ) : null}
                 {report ? (
                   <Button asChild variant="outline" size="xs">
-                    <a href={report} target="_blank" rel="noreferrer" onClick={follow} data-report-issue="">Report Issue</a>
+                    <a href={report} target="_blank" rel="noreferrer" onClick={follow} data-report-issue="">{t("alert.reportIssue")}</a>
                   </Button>
                 ) : null}
               </div>

@@ -54,7 +54,7 @@ const SWING_SDF = `<?xml version="1.0"?>
 </model></world></sdf>`;
 // A chain long enough that a per-pose cost proportional to the robot would show.
 // The strip with Select in hand: a robot's four tools (`robot/tools.js`).
-const SELECT_IN_HAND = ['Select:true', 'Annotate:false', 'Measure:false', 'Clip:false'];
+const SELECT_IN_HAND = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false', 'Clip:false'];
 const CHAIN_LINKS = 30;
 const CHAIN_URDF = `<?xml version="1.0"?>\n<robot name="chain">\n${Array.from({ length: CHAIN_LINKS }, (_, index) => `  <link name="l${index}">${box('0.1 0.04 0.04', '0.05 0 0', '0.5 0.5 0.55 1')}</link>`).join('\n')}
 ${Array.from({ length: CHAIN_LINKS - 1 }, (_, index) => `  <joint name="j${index}" type="revolute"><parent link="l${index}"/><child link="l${index + 1}"/><origin xyz="0.1 0 0"/><axis xyz="0 ${index % 2} ${1 - (index % 2)}"/>${limit(-1, 1)}</joint>`).join('\n')}\n</robot>\n`;
@@ -137,15 +137,11 @@ async function open(t, file, { panel = true } = {}) {
     toolNames: () => tools.getByRole('button').evaluateAll(buttons => buttons.filter(button => button.hasAttribute('aria-pressed') && !button.closest('[data-view-controls]'))
       .map(button => `${button.getAttribute('aria-label')}:${button.getAttribute('aria-pressed')}`)),
     filter: () => tools.locator('[data-select-filter-trigger]').getAttribute('aria-label'),
-    // Select's selection filter ticked to just `ids` from its chevron's menu, which is then put away.
-    async filterTo(...ids) {
+    // Select's mode chosen from its chevron's menu ("all", "links" or "position"), which puts the menu away.
+    async filterTo(mode) {
       await tools.locator('[data-select-filter-trigger]').click();
       const menu = page.locator('[role=menu][aria-label="Selection filter"]');
-      const kinds = menu.locator('[data-select-filter]:not([data-select-filter="all"])');
-      const read = () => kinds.evaluateAll(nodes => nodes.map(node => [node.getAttribute('data-select-filter'), node.getAttribute('aria-checked') === 'true']));
-      for (const [id, checked] of await read()) if (ids.includes(id) !== checked) await menu.locator(`[data-select-filter="${id}"]`).click();
-      assert.deepEqual((await read()).filter(([, checked]) => checked).map(([id]) => id).sort(), [...ids].sort(), 'the filter as wanted');
-      await page.keyboard.press('Escape');
+      await menu.locator(`[data-select-filter="${mode}"]`).click();
       await menu.waitFor({ state: 'detached' });
     },
     handles: async () => Object.fromEntries((await page.evaluate(() => window.__cadJointHandles())).map(handle => [handle.id, handle])),
@@ -279,7 +275,8 @@ test('a robot\'s knobs are Select\'s while it picks Position, beside the sidebar
   assert.equal(await robot.tool('Explode').count(), 0, 'a robot is posed, never exploded');
   // Projection, Display and Preview are the view's controls, at the strip's end after its rule, for a robot as for any 3D file.
   assert.deepEqual(await robot.viewControls(), ['Projection: Orthographic', 'Display mode: Solid', 'Preview']);
-  assert.equal(await tools.locator('[data-strip-rule] + [data-view-controls]').count(), 1, 'after the strip\'s rule');
+  assert.equal(await tools.locator('[data-strip-rule]').count(), 1, 'one rule, after the tools that pick');
+  assert.equal(await tools.locator('[data-view-controls]').evaluate(element => element.previousElementSibling?.getAttribute('aria-label')), 'Clip', 'the view\'s controls follow Clip, no rule between');
   assert.equal(await pane.locator('[data-viewer-navbar] [data-view-controls] button').count(), 0, 'and nothing of the view in the navbar');
   // Display is the tile beside Preview, shut as the file opens.
   assert.equal(await robot.displayPanel().count(), 0, 'Display is never where a file opens');
@@ -593,7 +590,7 @@ test('Select picks a visual at once; a selection outlives Select; Links shows wh
   assert.deepEqual((await page.evaluate(() => window.cadHarness.a.controller.readState())).selectedPartIds.sort(), ['head:v1/object/0', 'head:v1/object/1']);
   // Links and knobs together, as the robot opens: a press on a knob is the knob's and picks
   // nothing, so the selection stays; a press on a link anywhere else picks it.
-  await robot.filterTo('links', 'position');
+  await robot.filterTo('all');
   await page.waitForFunction(() => window.__cadJointHandles().length > 0);
   const knob = (await robot.handles()).shoulder;
   await page.mouse.click(surface.x + knob.x, surface.y + knob.y);
