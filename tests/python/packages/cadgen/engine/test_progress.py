@@ -55,23 +55,20 @@ class BodiesTest(unittest.TestCase):
         def body(current) -> None:
             for name in ("thumb", "index"):
                 current.entering(name)
-                time.sleep(progress.INTERVAL * 1.5)  # each body its own frames
                 current.leaving(name)
-                time.sleep(progress.INTERVAL * 1.5)
 
+        self.enterContext(mock.patch.object(progress, "INTERVAL", 0))  # every frame sent: none held
         said = [(frame["detail"], frame["done"]) for frame in self.frames(body)]
         self.assertEqual(said, [("", 0), ("thumb", 0), ("", 1), ("index", 1), ("", 2)])
 
     def test_a_body_inside_another_hands_the_detail_back_when_it_ends(self) -> None:
         def body(current) -> None:
             current.entering("finger")
-            time.sleep(progress.INTERVAL * 1.5)
             current.entering("tip")
-            time.sleep(progress.INTERVAL * 1.5)
             current.leaving("tip")
-            time.sleep(progress.INTERVAL * 1.5)
             current.leaving("finger")
 
+        self.enterContext(mock.patch.object(progress, "INTERVAL", 0))
         said = [(frame["detail"], frame["done"], frame["determinate"]) for frame in self.frames(body)]
         self.assertEqual(said, [("", 0, False), ("finger", 0, False), ("tip", 0, False), ("finger", 1, False),
                                 ("", 2, False)])
@@ -117,19 +114,16 @@ class BodiesTest(unittest.TestCase):
 
         folder = Path(tempfile.mkdtemp(prefix="engine-bodies-")).resolve()
         self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
-        (folder / "hand.py").write_text(textwrap.dedent(f"""
-            import time
+        (folder / "hand.py").write_text(textwrap.dedent("""
             import build123d as bd
             from cadgen.engine import memo, model, xbf
 
             @memo
             def finger(at):
-                time.sleep({progress.INTERVAL * 2})
                 return bd.Pos(at * 3, 0, 0) * bd.Box(2, 2, 6)
 
             @model
             def palm():
-                time.sleep({progress.INTERVAL * 2})
                 return bd.Box(12, 8, 2)
 
             @xbf("XBF/hand.xbf")
@@ -140,6 +134,7 @@ class BodiesTest(unittest.TestCase):
         os.chdir(folder)
         self.addCleanup(os.chdir, here)
         frames: list[dict] = []
+        self.enterContext(mock.patch.object(progress, "INTERVAL", 0))  # in this process: every frame sent
         api.build_script(folder / "hand.py", ["hand"], daemon=False, progress=frames.append)
         said = [(frame["detail"], frame["done"]) for frame in frames
                 if frame["phase"] == "body" and frame["model"] == "hand.py::hand"]
