@@ -536,11 +536,46 @@ class InlineServerTest(_Session):
         self.assertLess(time.monotonic() - started, 1.0)
 
 
+    def test_the_app_capability_is_unguessable_ui_only_and_scoped_to_its_session(self) -> None:
+        def agent(method, url, body=b"", headers=None):
+            return self.call("cad_http", {"method": method, "url": url, "headers": headers or {},
+                                          "body": base64.b64encode(body).decode("ascii")})
+        shown = self.call("cad_show", {"path": self.bracket})
+        token = shown["_meta"]["dev.texttocad/httpToken"]
+        self.assertGreaterEqual(len(token), 40)
+        self.assertNotIn(token, json.dumps({k: v for k, v in shown.items() if k != "_meta"}))
+        self.assertNotIn(token, json.dumps(self.server.handle("resources/read", {"uri": self.server.page.uri}, None)))
+        # Without it: one route, two exact requests.
+        for method, url in (("GET", "/__cad/server"), ("GET", "/__cad/recents"), ("GET", "/__cad/analytics?x=1"),
+                            ("POST", "/__cad/analytics/activity"), ("GET", "/__cad/./analytics/../server"),
+                            ("GET", "http://cad.invalid/__cad/catalog?file=" + quote(self.bracket, safe=""))):
+            with self.subTest(url=url):
+                self.assertEqual(agent(method, url)["structuredContent"]["status"], 403)
+        self.assertEqual(agent("HEAD", "/__cad/analytics")["structuredContent"]["status"], 405)
+        self.assertEqual(agent("GET", "/__cad/analytics")["structuredContent"]["status"], 200)
+        # A wrong capability is refused, not served as the agent; another session's is wrong here.
+        self.assertTrue(agent("GET", "/__cad/server", headers={"x-cadgen-app": token[:-1] + "x"})["isError"])
+        other = Server(page=AppPage(self.tmp / "app"), recents=RecentStore(self.tmp / "state-other"))
+        other.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": self.offered,
+                                                     "clientInfo": self.client}), None)
+        self.assertTrue(other.handle("tools/call", {"name": "cad_http", "arguments": {"method": "GET", "url": "/__cad/server",
+                        "headers": {"x-cadgen-app": token}}}, RequestContext(1, {}))["isError"])
+        # With it, the page reaches every viewer route; the header never reaches the route.
+        reply = agent("GET", "/__cad/server", headers={"x-cadgen-app": token})["structuredContent"]
+        self.assertEqual(reply["status"], 200)
+
+
 class TextServerTest(_Session):
     """A client that renders no MCP Apps: cad_show answers with the model's link in the CAD Viewer."""
 
     client = {"name": "some-cli", "version": "1"}
     viewer_url = staticmethod(lambda: "http://127.0.0.1:3245/")
+
+    def test_a_client_with_no_page_has_no_app_capability(self) -> None:
+        self.assertNotIn("_meta", self.call("cad_show", {"path": self.bracket}))
+        refused = self.call("cad_http", {"method": "GET", "url": "/__cad/server",
+                                         "headers": {"x-cadgen-app": self.server._app_token}})
+        self.assertTrue(refused["isError"])
 
     def test_cad_show_links_the_model_in_this_machines_viewer(self) -> None:
         tools = self.server.handle("tools/list", {}, None)["tools"]
