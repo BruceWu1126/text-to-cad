@@ -219,6 +219,16 @@ class ExportJobs(Jobs):
         if job["state"] != "ready":
             self._remove(job)
 
+    def close(self):
+        """The engine is stopping: no artifact outlives the process that manages it."""
+        with self.changed:
+            for job in self.jobs.values():
+                job["cancel"] = job["cancel"] or job["state"] not in TERMINAL
+                self._remove(job)
+                if job["state"] == "ready":
+                    self._change(job, state="expired", stage="Export expired")
+            self.changed.notify_all()
+
     def _remove(self, job):
         if job["directory"]:
             shutil.rmtree(job["directory"], ignore_errors=True)

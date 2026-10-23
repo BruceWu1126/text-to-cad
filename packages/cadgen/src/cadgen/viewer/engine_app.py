@@ -87,6 +87,11 @@ class EngineApp:
         return active or bool(self._mcp and self._mcp.active())
 
     def close(self):
+        with self.lock:
+            apps = [*self.pages.values(), *([self._default] if self._default else [])]
+        for app in apps:
+            if app._exports is not None:
+                app._exports.close()
         if self._mcp is not None:
             self._mcp.close()
         self.analytics.close()

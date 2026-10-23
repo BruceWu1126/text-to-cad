@@ -92,6 +92,26 @@ class ExportsTest(unittest.TestCase):
         self.assertEqual(caught.exception.status, 410)
         self.assertEqual(len(self.calls), 1)
 
+    def test_engine_stop_removes_every_artifact_and_discards_running_work(self):
+        from cadgen.viewer.engine_app import EngineApp
+
+        self.finish.set()
+        ready = self.settled(self.jobs.create(self.request())["id"])
+        self.assertEqual(len(list(Path(self.tmp.name).iterdir())), 1)
+        self.finish.clear(); self.entered.clear()
+        running = self.jobs.create(self.request("two"))
+        self.assertTrue(self.entered.wait(10))
+        engine = SimpleNamespace(lock=threading.RLock(), pages={"page": SimpleNamespace(_exports=self.jobs)},
+                                 _default=SimpleNamespace(_exports=None), _mcp=None, analytics=Mock())
+        EngineApp.close(engine)
+        self.assertEqual(list(Path(self.tmp.name).iterdir()), [])
+        self.finish.set()
+        self.assertEqual(self.settled(running["id"])["state"], "cancelled")
+        self.assertEqual(list(Path(self.tmp.name).iterdir()), [])
+        with self.assertRaises(ExportError):
+            with self.jobs.artifact(ready["id"]):
+                pass
+
     def test_stale_epoch_closed_formats_and_nonfinite_pose_are_refused(self):
         for change in ({"epoch": "old"}, {"format": "cadz"}, {"format": []}, {"output": "/tmp/unasked"}):
             with self.assertRaises(ExportError):
