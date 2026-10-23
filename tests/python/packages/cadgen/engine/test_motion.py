@@ -117,6 +117,32 @@ class AuthoringTest(unittest.TestCase):
         self.assertIs(motion(box, "m", sweep={"j": (0, 1)}, duration=1), box)
 
 
+class SampledKeysTest(unittest.TestCase):
+    """The keys a motion's function may return, checked at each sample: a coupling by its own or
+    kept name, a joint below the assembly by its raw label or ``prefix:raw``; anything else fails
+    by name, listing the assembly's joints and couplings."""
+
+    JOINTS = [("elbow", (0, 0)), ("slide", (0, 1)), ("wrist", (1,))]  # wrist is outside path (0,)
+    CONTROLS = [((0,), "curl", "hand:curl"), ((1,), "spread", "spread")]
+
+    def sample(self, key: str) -> list:
+        convert = lambda values, _at: {"elbow": (float(next(iter(values.values()))),)}  # noqa: E731
+        return mechanism._sampled(lambda t: {key: 10.0}, 1.0, convert, {"elbow": [1.0]}, "motion 'm' of arm",
+                                  (0,), self.JOINTS, self.CONTROLS)
+
+    def test_accepted_key_forms(self) -> None:
+        for key in ("elbow", "slide", "arm:elbow", "a:b:slide", "curl", "hand:curl"):
+            with self.subTest(key=key):
+                self.assertEqual(self.sample(key)[0], (0.0, None, {"elbow": (10.0,)}))
+
+    def test_a_key_naming_no_joint_fails_by_name(self) -> None:
+        for key in ("wrist", "arm:wrist", "elbowx", "spread", "elbow:", ":"):
+            with self.subTest(key=key), self.assertRaises(mechanism.KinematicsError) as caught:
+                self.sample(key)
+            self.assertEqual(str(caught.exception), f"motion 'm' of arm names no joint {key!r}; its joints are "
+                                                    "elbow, slide; its couplings are curl, hand:curl")
+
+
 class DocumentTest(_Folder):
     def test_motions_are_definitions_in_the_document_read_back_whole(self) -> None:
         self.arm()
