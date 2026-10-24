@@ -29,7 +29,14 @@ class ExportsTest(unittest.TestCase):
             return {"files": []}
         self.jobs = ExportJobs(SimpleNamespace(touch=lambda: None), run=run, clock=lambda: self.now, root=self.tmp.name)
         self.jobs._source = lambda spec: ({}, {}, "bracket")
-        self.addCleanup(self.finish.set)
+        self.addCleanup(self._released)
+
+    def _released(self):
+        """A test's running job released and awaited until it is done, before its folder goes: a
+        job still writing its artifact while the folder is removed fails the cleanup."""
+        self.finish.set()
+        with self.jobs.changed:
+            self.assertTrue(self.jobs.changed.wait_for(lambda: not self.jobs.executing, 10))
 
     def request(self, name="one"):
         return {"requestId": "request-" + name * 16, "epoch": self.jobs.epoch,
