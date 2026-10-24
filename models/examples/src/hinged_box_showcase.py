@@ -14,7 +14,7 @@ from cadgen import model
 from cadgen.ap242 import configuration_sequence, mechanism_state
 from cadgen.gltf import animation
 
-HINGE = bd.Axis((-40, 0, 30), (0, -1, 0))  # +angle lifts the lid
+HINGE = ((-40, 0, 30), (0, -1, 0))  # the hinge axis, point and direction: +angle lifts the lid
 
 
 @model
@@ -27,8 +27,9 @@ def hinged_box_showcase():
     body.label, lid.label, latch.label = "body", "lid", "latch"
     for at, foot in enumerate(feet, 1):
         foot.label = f"foot_{at}"
-    bd.RevoluteJoint("hinge", body, axis=HINGE, angular_range=(0, 110))
-    bd.RigidJoint("hinge", lid, bd.Plane(origin=HINGE.position, z_dir=HINGE.direction).location)
+    hinge = bd.Axis(*HINGE)
+    bd.RevoluteJoint("hinge", body, axis=hinge, angular_range=(0, 110))
+    bd.RigidJoint("hinge", lid, bd.Plane(origin=hinge.position, z_dir=hinge.direction).location)
     body.joints["hinge"].connect_to(lid.joints["hinge"], angle=0)  # as built: shut
     box = bd.Compound(children=[body, lid, latch, bd.Compound(children=feet, label="feet")],
                       label="hinged_box_showcase")
