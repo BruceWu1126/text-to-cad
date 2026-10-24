@@ -1316,11 +1316,13 @@ pair cannot take, or moving a pair that closes a loop, is left out and warned.
 A warm build that changes only a sequence rewrites the mechanism's subtree and converts no
 prototype; the file is the cold build's bytes.
 
-Every build whose body ran samples its functions again. The files a function opens while it is
+Every build whose body ran samples its functions again; one that replayed it reuses the samples
+its run's harvest made (**Body retention**). The files a function opens while it is
 sampled are heard as a body's reads are (`kernel/memo.py`, `listened`), held to their bytes, and
 are the model's inputs (**Build closure**): a document is not taken from memory or its file
-once one changed. A function reading what is no regular file, or reading past the engine's
-readers, leaves the model's closure with no key, as a body that does.
+once one changed, and a replayed body's harvest is not reused. A function reading what is no
+regular file, or reading past the engine's readers, leaves the model's closure with no key, as a
+body that does, and is sampled on every build.
 
 ## Animations
 
@@ -1903,6 +1905,21 @@ order. The result is the same live objects, as the body returned them. The trace
 is the one a run leaves, so names, the xbf and the caller's own calls come out as
 if the body had run. A body that ran a call plain, or whose entries are gone, runs.
 
+Beside a model body's run the worker keeps its **harvest** (`kernel/memo.py`, `harvest_of`):
+what the build made of the result's joints, mechanism states, configuration sequences (a
+function's samples) and animations (`document.Harvest`), with the tree it was made of (each
+prototype's TShape, label, colour and placement) and the files the sequences' functions read.
+The harvest is a function of the result as the body returned it and of the code that made it,
+which the body's key covers: a function of time is code the body reaches, wherever it is
+defined. So a build that replays the very run the harvest was made from, to the same tree, and
+whose functions' files hold their bytes, hands it back instead of sampling again; the report
+says `"harvest": "reused"` (`"run"` where it was made), and `cache.reason` ends `the harvest
+reused`. A body that ran makes a record with none, a verifying build harvests afresh, and
+functions that read what cannot be held to its bytes are sampled on every build. It is memory
+only, gone with the body's record, and what it writes -- the xbf's mechanism, animations record
+and closure, the GLB, the served structure -- is a fresh harvest's, byte for byte. On tom, a
+no-op's `collect` went from 1.50 s to 0.03 s, and the run from 2.47 s to 1.01 s.
+
 Retained bodies follow the memo's retention: what the last four builds used. An
 edit to a constant or a function re-runs the bodies that reach it, and the
 bodies that hold their results. A comment, a blank line or a docstring re-runs
@@ -2085,7 +2102,7 @@ report says `cache: {"used": true, "from": "file"}`, every file `written: false`
 (`key`) and the read (`read`). A later build in the same worker takes it from memory without
 reading it (`"from": "memory"`): one taken, or one this worker built, whether or not the memo
 could replay its root, so an unchanged warm build costs what a restart's second build does,
-the key alone (the w16: 59 s replaying, its motions sampled again, against under a second). Its
+the key alone (the w16: 59 s replaying, against under a second). Its
 bodies' memo entries count as used by that build, as a replay's do, so an edit after any number
 of them still replays what it leaves alone. The memo replays the root instead only where a
 file the worker's last build of the model wrote -- the model's own, or a child model's -- moved

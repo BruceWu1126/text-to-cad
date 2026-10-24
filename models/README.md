@@ -174,8 +174,8 @@ resident memory during the cold build.
 | `w16` | 1 | 794 / 2,575 | 927 s (peak 3.9 GB) | 5.9 s |
 | `radial` | 1 | 473 / 2,400 | 3,238 s (peak 6.0 GB) | 2.9 s, its xbf taken (8.3 s without, every body replayed) |
 
-What a no-op still spends, by the engine's own report: `juno`, `lyra`, `w16`, `moonwatch`
-and `tom` sample their motions' functions of time again on every run (`collect`: 1.6 s of
-`juno`'s 1.7 s, 2.1 s of `w16`'s 3.0 s, 1.6 s of `tom`'s 2.6 s). A GLB of a model with long motions or
+A no-op whose body replays reuses its motions' samples, kept beside the body's run in the
+worker (`tom`'s `collect` 1.50 s to 0.03 s, its run 2.47 s to 1.01 s, 2026-10-24; the rows above
+predate it). A GLB of a model with long motions or
 animations is large (`juno` 109 MB, `tom` 99 MB, `w16` 83 MB, `radial` 79 MB): every
 moving part carries keys at its motions' sample times.
