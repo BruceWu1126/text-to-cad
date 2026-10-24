@@ -269,6 +269,46 @@ class WorkerLoopTest(unittest.TestCase):
         return ident
 
 
+class ClientGoneTest(unittest.TestCase):
+    """A build's client gone mid-build (killed, or hung up): the daemon reads the worker on to its
+    answer, so the worker never blocks on a full pipe and the script's next run is not stuck
+    waiting on it."""
+
+    def worker(self, stdout: bytes, stderr: bytes):
+        import io
+        import queue
+        from types import SimpleNamespace
+
+        from cadgen.engine.daemon import Worker
+
+        worker = object.__new__(Worker)  # its pipes stood in for: no process
+        worker.process = SimpleNamespace(stdout=io.BytesIO(stdout), stderr=io.BytesIO(stderr))
+        worker.answers, worker.asked, worker.progress, worker.touched = queue.Queue(), {}, None, set()
+        worker.on_progress = worker.on_patch = lambda *_args: None
+        worker.on_settled = lambda *_args: None
+
+        def gone(_message: dict) -> None:
+            raise BrokenPipeError("the client hung up")
+
+        worker.sink = gone
+        return worker
+
+    def test_the_worker_is_read_to_its_answer_when_its_client_is_gone(self) -> None:
+        lines = [{"log": "a"}, {"progress": {"phase": "names"}}, {"log": "b"}, {"done": {"reports": []}}]
+        worker = self.worker(b"".join((json.dumps(line) + "\n").encode() for line in lines), b"")
+        worker._reader()
+        self.assertEqual(worker.answers.get_nowait(), {"done": {"reports": []}})
+        self.assertIsNone(worker.answers.get_nowait(), "the worker's end, after its answer")
+        self.assertIsNone(worker.sink, "the gone client's sink dropped")
+        self.assertEqual(worker.progress, {"phase": "names"})
+
+    def test_its_stderr_is_read_to_the_end_when_its_client_is_gone(self) -> None:
+        worker = self.worker(b"", b"a line the model printed\nanother\n")
+        worker._stderr()
+        self.assertIsNone(worker.sink)
+        self.assertEqual(worker.process.stderr.read(), b"", "read to its end")
+
+
 class ConnectTest(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "a stale socket file is a Unix daemon's")
     def test_a_connect_to_a_stale_socket_fails_and_leaves_no_socket_open(self) -> None:
