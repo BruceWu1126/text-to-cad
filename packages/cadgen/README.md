@@ -75,7 +75,8 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    once. The code stays the only source of truth: a document whose code changed since says so,
    with the command that builds it again, and nothing reruns. It writes no
    sidecar, record of a build beside a model, index, memo, mesh or parsed document, and no derived file
-   beside an input. A model whose xbf holds the closure the model has now is not run. Explicit viewer exports write only the requested
+   beside an input. A model whose xbf holds the closure the model has now is not run, nor one with no file
+   whose cached document holds it. Explicit viewer exports write only the requested
    artifact to managed temporary storage for delivery; no source or intermediate XBF
    is written (the engine's **Viewer exports**).
 3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself: OCP, build123d (and
@@ -92,7 +93,8 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    runs is keyed by its inputs. A hit hands back the objects the first run made, and a miss
    makes everything downstream of it miss. So an edit costs what it changed, and an element
    keeps the name its feature history gave it across edits. Across a restart, a model's build
-   is cold but for its own xbf, taken whole or not at all; what a restart shows without a build
+   is cold but for its own xbf -- or, for a model with no file, its cached document -- taken whole
+   or not at all; what a restart shows without a build
    is the engine's document cache (law 2): the last built state, never a step of a build.
 6. **One document per model, with one id.** Every called model makes one document, and a call
    returns its handle (`.id`, `.url`, `.name`, `.shape`, `.export`, `.snapshot`), never a bare

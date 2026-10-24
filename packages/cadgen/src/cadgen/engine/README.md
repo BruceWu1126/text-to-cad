@@ -144,7 +144,8 @@ posed(arm().shape, "folded")`.
    so a restart opens every project at once; the code stays the only source of truth. It
    writes no sidecar, record of a build beside a model, index, memo, mesh or parsed document,
    and no derived file beside an input (a STEP converted to an xbf is an export the author asks
-   for). A model whose xbf holds the closure the model has now is not run (**Build closure**). An explicit viewer export names one output in managed
+   for). A model whose xbf holds the closure the model has now is not run, nor one with no file whose
+   cached document holds it (**Build closure**). An explicit viewer export names one output in managed
    temporary storage for delivery to the browser; it never saves source, a registry,
    or an intermediate XBF. See **Viewer exports** below.
 3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself:
@@ -171,7 +172,8 @@ posed(arm().shape, "folded")`.
    edit costs what it changed, and an element keeps the name its feature history
    gave it across edits. Tessellations live in the serving process's memory,
    keyed by a part's geometry, under its one memory budget (**Document lifetime**). Across a restart, a model's
-   build is cold but for its own xbf, taken whole or not at all (**Build closure**); what a restart
+   build is cold but for its own xbf -- or, for a model with no file, its cached document (**The
+   cache**) -- taken whole or not at all (**Build closure**); what a restart
    shows without a build is the document cache (law 2), the last built state.
 6. **One document per model, with one id.** Every called model makes one document, and every id
    is one formula, `uuid5(NAMESPACE, canonical(scope) + "::" + name)` (`ids.derived_id`): a
@@ -575,7 +577,8 @@ no page, against 12 and 3.2 GB when the pool started with the server. The pool's
 a first page about 0.8 s, less the time the page takes to load after the warm.
 
 A retired script's next build is a fresh worker's: a restart, which takes the xbf whole when
-its closure is unchanged (**Build closure**), and else builds the model cold. A render
+its closure is unchanged (**Build closure**) -- a model with no file, its cached document (**The
+cache**) -- and else builds the model cold. A render
 process (**The viewer and the snapshot**) is no worker and does not count toward the cap; it
 is held to the same memory cap after each picture, and retired after the same idle time.
 
@@ -734,6 +737,15 @@ snapshot, inspect, `cad_show` -- by reading its bytes through the documents work
 document does; no worker of its script starts and nothing runs. Loaded, it sits in the memory
 budget's first tier. The record is authoritative: a cache file missing, or not the size its
 record says, is not cached.
+
+A run takes it too. A build is handed the cache's `documents/` folder, and a fresh worker -- after
+a restart, or once the script's worker retired -- asked for a `pointer` model that declares no file
+reads that model's cache file before its body runs, as it reads an xbf (**Build closure**): with the
+key the model has now, the document is taken whole and nothing runs (`cache: {"used": true, "from":
+"cache"}`; the CLI's `took tube.py::tube cold in 0.42s: the engine's cache holds the model's key`),
+its bytes kept as they are, never written again; any other key builds the model, and says why. A
+later unchanged run in that worker takes it from memory. A model that declares a file and no xbf is
+never taken: nothing says the file is the cached revision's.
 
 **Staleness.** `read` is what the build read, with digests: the script and each module its model
 reached (each file's bytes, SHA-256, as the build answered) and each file its bodies read (the
@@ -2214,7 +2226,8 @@ record on the main label, the closure counts none, and an animated document is t
 (**Animations**).
 
 Before a body runs or is replayed, the build makes the closure again -- the script loaded,
-its modules digested, each input hashed again -- and compares its key with the xbf's. The
+its modules digested, each input hashed again -- and compares its key with the xbf's (a model with
+no file: its cached document's, `"from": "cache"`, **The cache**). The
 same key, in an xbf written by this engine that reads whole, and the body is not run: the
 report says `cache: {"used": true, "from": "file"}`, every file `written: false`,
 `memo.bodies_loaded` the bodies the document is, `bodies` the root `loaded`, `timings` the key

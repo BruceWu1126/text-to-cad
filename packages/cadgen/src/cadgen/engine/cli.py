@@ -174,7 +174,10 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
     files = _files(report)
     worker = "" if fresh is None else (" cold" if fresh else " warm")
     if memo.get("bodies_loaded"):
-        line = (f"took {report['model']}{worker} in {wall:.2f}s: its file holds the model's key, "
+        taken = (report.get("cache") or {}).get("from")
+        holder = ("the engine's cache" if taken == "cache" else "its file" if report.get("files")
+                  else "its document in memory")
+        line = (f"took {report['model']}{worker} in {wall:.2f}s: {holder} holds the model's key, "
                 f"{memo.get('bodies_loaded', 0)} bodies loaded, nothing ran")
     else:
         counted = {status: bodies.count(status) for status in ("run", "replayed") if bodies.count(status)}

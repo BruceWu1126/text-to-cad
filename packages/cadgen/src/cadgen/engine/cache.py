@@ -34,7 +34,9 @@ files its bodies read (the closure's own digests), which is what staleness compa
 Read: at start the daemon indexes which records have a cache file (``Cache.ensure_index``: a listing
 and a stat each, no record and no byte read). A document with one answers every verb by loading its
 bytes through the documents worker, as a held document does; loaded, it is in the memory budget's
-first tier (read again from disk: evicted first). Bound, as 0.7's store was: past ``cap()`` bytes
+first tier (read again from disk: evicted first). A run reads it too: a build is handed the folder
+(``folder``), and a fresh worker takes a model with no file from its cache file when the key it holds
+is the model's (``build._previous``), with nothing run. Bound, as 0.7's store was: past ``cap()`` bytes
 (``CADGEN_ENGINE_CACHE_GB``, default ``CACHE_GB``; ``0``: no cache at all), the least recently used
 files go down to ``LOW_WATER`` of it, so a pass does not run on every save; never the file of a
 document a live worker holds or a page watches. A save that fails is
@@ -184,6 +186,15 @@ class Cache:
             return None
         found = self.models.registry()
         return found if found is not None and found.cache is not None else None
+
+    def folder(self) -> str | None:
+        """The folder the documents' cache files are in (``documents/`` of the cache folder), which a
+        build is handed: a fresh worker takes a model with no file of its own from its cache file
+        when it holds the key the model has now (``build._previous``). None with no cache."""
+        from cadgen.engine.registry import DOCUMENTS
+
+        held = self.registry()
+        return None if held is None else str(held.cache.path(DOCUMENTS))
 
     @staticmethod
     def inside(ident: str) -> str:

@@ -359,7 +359,7 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         raise export.ExportRefused(f"no document {source_spec['id']} is held in this process: a document id is "
                                    "the engine's, read through its server")
     if "document" in source_spec:
-        source = _held_source(request.get("payload") or b"", str(source_spec.get("name") or "document"))
+        source = engine_build.held_source(request.get("payload") or b"", str(source_spec.get("name") or "document"))
     elif (request.get("expected") or source_spec.get("held")) and "script" in source_spec:
         source = engine_build.held(Path(source_spec["script"]), source_spec.get("function"))
         if source is None:
@@ -439,41 +439,6 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
     return {"reports": built, "files": files, "drawn": drawn}
 
 
-# The held documents this worker read last, by their bytes' digest and name: an export, a snapshot
-# and an inspection of one document after another read its bytes once, as a file's read is held.
-_HELD_KEPT = 4
-_HELD: "dict[tuple[str, str], Any]" = {}
-
-
-def _held_source(payload: bytes, name: str) -> Any:
-    """A document the daemon holds and no worker does -- the xbf bytes its worker made of it before
-    it retired (``models.Models.drain``), or the engine's cache file of it (``cache``) -- as an
-    ``export.Source``, read in memory as an on-disk xbf is (``document.read_bytes``): its mechanism,
-    its assemblies' placements and its animations' record with it, named as the document is
-    (``name``). The source has no path: it is no file. The last few read are kept (``_HELD``)."""
-    import hashlib
-
-    key = (hashlib.blake2b(payload, digest_size=20).hexdigest(), name)
-    found = _HELD.pop(key, None)
-    if found is None:
-        found = _read_held(payload, name)
-    _HELD[key] = found  # the most recent last
-    while len(_HELD) > _HELD_KEPT:
-        _HELD.pop(next(iter(_HELD)))
-    return found
-
-
-def _read_held(payload: bytes, name: str) -> Any:
-    from cadgen.engine import document, export
-
-    stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in name).strip(".") or "document"
-    loaded = document.Loaded(Path(tempfile.gettempdir()) / f"{stem}.xbf", document.read_bytes(payload))
-    structure = {**loaded.structure(), "path": ""}
-    return export.Source(structure, {p.key: p.shape for p in loaded.prototypes}, live=False,
-                         xcaf=loaded.doc, world=lambda occurrence: loaded.worlds.get(occurrence),
-                         mechanism=loaded.mechanism, foreign=False, path=None, animations=loaded.animations)
-
-
 def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     """A ``result`` request: the document of a model this worker built, as its structure and each
     part's shape bytes (``[key, size]`` in ``shapes``, the bytes after the line in order)."""
@@ -481,7 +446,7 @@ def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
 
     if request.get("document"):
         # The engine's cache file of a document no worker holds: read as a held document's bytes are.
-        source = _held_source(request.get("payload") or b"", str(request.get("name") or "document"))
+        source = engine_build.held_source(request.get("payload") or b"", str(request.get("name") or "document"))
     else:
         source = engine_build.held(Path(request["script"]), request["name"])
     if source is None:
@@ -494,10 +459,12 @@ def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     answer = {"structure": source.structure, "closure": json.loads(closure) if closure else None,
               "shapes": [[key, len(part)] for key, part in zip(keys, data)]}
     if request.get("whole"):
-        # The drain's: the whole document as the xbf bytes ``@xbf`` writes, after the shapes.
+        # The drain's: the whole document as the xbf bytes ``@xbf`` writes, after the shapes -- for
+        # one taken from the engine's cache, the bytes it was taken with (a read is never written).
         from cadgen.engine import document
 
-        whole = document.to_bytes(source.xcaf, source.shapes.values())
+        whole = (None if request.get("document") else engine_build.taken(Path(request["script"]), request["name"])) \
+            or document.to_bytes(source.xcaf, source.shapes.values())
         answer["xbf"] = len(whole)
         data.append(whole)
     return answer, b"".join(data)
@@ -510,6 +477,9 @@ def _save(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     from cadgen.engine import document
 
     header = {"ident": request.get("ident"), "generation": request.get("generation")}
+    taken = engine_build.taken(Path(request["script"]), request["name"])
+    if taken is not None:
+        return header, taken  # taken from the cache: those bytes, never the read document written again
     source = engine_build.held(Path(request["script"]), request["name"])
     if source is None:
         return {**header, "error": f"no model named {request['name']!r} is built in this worker"}, b""
@@ -689,7 +659,7 @@ def main() -> int:
                 reports = build(script, request.get("functions") or None,
                                 log=lambda text: send({"id": ident, "log": text}), cwd=Path(cwd) if cwd else None,
                                 verify=bool(request.get("verify")), profile=bool(request.get("profile")),
-                                run=request.get("run"))
+                                run=request.get("run"), cache=request.get("cache"))
             said.attach(reports)
             patcher.finish(reports)
             resident = resident_after_build()
