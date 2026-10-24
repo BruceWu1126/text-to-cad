@@ -158,8 +158,43 @@ DISCLOSURE = 1
 # What the notice told (``notify``): what is sent by default, without a yes. Raise it when that grows,
 # and the next ``cadgen`` command says it again; nothing is sent by default until it has.
 NOTICE = 1
-NOTICE_TEXT = ("cadgen now sends usage stats and crash reports, tagged with a random ID — never your files, paths or "
-               f"prompts. Turn off: uvx cadgen telemetry off · {PRIVACY_URL}")
+
+
+def notice_text() -> str:
+    """The notice (``notify``), its command to turn telemetry off the one that runs this installation
+    (``off_command``)."""
+    return ("cadgen now sends usage stats and crash reports, tagged with a random ID — never your files, paths or "
+            f"prompts. Turn off: {off_command()} · {PRIVACY_URL}")
+
+
+def off_command() -> str:
+    """``cadgen telemetry off`` as a command that runs this installation when pasted: the pinned ``uvx``
+    line the plugin and its skills run (``launch.launch_command``) for an installation uvx made, which
+    that line reuses; ``cadgen`` where the ``cadgen`` on PATH is the script that runs now; else that
+    script by its path, or this interpreter with ``-m cadgen.cli``."""
+    import shlex
+    import shutil
+
+    from cadgen._internal.launch import launch_command
+
+    quote = _windows_quote if os.name == "nt" else shlex.quote
+    if "archive-v0" in Path(sys.prefix).parts:  # uv's cache: an installation of the exact requirement
+        return f"{launch_command('cadgen')} telemetry off"
+    script = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
+    if script is not None and script.stem == "cadgen" and script.suffix.lower() in ("", ".exe") and script.is_file():
+        found = shutil.which("cadgen")
+        if found and Path(found).resolve() == script:
+            return "cadgen telemetry off"
+        return f"{quote(str(script))} telemetry off"
+    return f"{quote(sys.executable)} -m cadgen.cli telemetry off"
+
+
+def _windows_quote(text: str) -> str:
+    import subprocess
+
+    return subprocess.list2cmdline([text])
+
+
 # ``0``: what this command says reaches nobody -- a CAD app's own launch of one, its output thrown away.
 NOTICE_ENV = "CADGEN_TELEMETRY_NOTICE"
 # A batch is the counts of a window this long: a few events, however busy the window was.
@@ -602,7 +637,7 @@ def forget_pending(*, path: Path | None = None, forget: Callable[[str], bool] | 
 
 
 def notify(stream: Any = None, *, path: Path | None = None) -> bool:
-    """Tell the person, once, what is sent by default: ``NOTICE_TEXT``, a line on ``stream`` (stderr)
+    """Tell the person, once, what is sent by default: ``notice_text()``, a line on ``stream`` (stderr)
     from the first ``cadgen`` command that may say it, kept as said (``notifiedAt``): every process
     sends from then on, never what it noted before. Nothing is said where nothing would be sent by
     default: where the environment or the person decided, in CI or from a development install
@@ -617,7 +652,7 @@ def notify(stream: Any = None, *, path: Path | None = None) -> bool:
         if kept is None or _decide(kept, None)[1] is not None or not _can_keep(path):
             return False
         out = stream if stream is not None else sys.stderr
-        out.write(NOTICE_TEXT + "\n")
+        out.write(notice_text() + "\n")
         out.flush()
 
         def tell(section: dict[str, Any]) -> dict[str, Any]:
