@@ -727,8 +727,9 @@ record says, is not cached.
 
 **Staleness.** `read` is what the build read, with digests: the script and each module its model
 reached (each file's bytes, SHA-256, as the build answered) and each file its bodies read (the
-closure's own digests). On a page's open, a verb's read and `cad_show` of a document no worker
-holds, the engine compares them with the files now (`Models.stale`): unchanged, the page shows the
+closure's own digests). On a page's open, a verb's read, `status` and `cad_show` of a document,
+whether or not a worker holds it, the engine compares them with the files now (`Models.stale`; a
+file's digest is kept by its size and mtime, so an unchanged file is not read again): unchanged, the page shows the
 current model; changed, it shows the last built state, with a badge -- "The code changed since this
 was built" and the rebuild command -- and `inspect` answers `stale`. Nothing reruns. Every verb
 that reads a document by its id (`export`, `snapshot`, `inspect`, with a ref or without) says once

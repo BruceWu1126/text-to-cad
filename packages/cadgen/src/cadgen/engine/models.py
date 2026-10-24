@@ -496,9 +496,9 @@ class Models:
                          "store": row["store"], "state": self.state(ident)}
                 if entry["state"] == "held":
                     entry["held"] = self.where(ident)
-                    stale = self.stale(ident) if every else None  # ``status``'s, never a page's polls
-                    if stale:  # its code changed since: what changed, and the command
-                        entry["stale"] = {"changes": stale["changes"], "rebuild": stale["rebuild"]}
+                stale = self.stale(ident) if every and entry["state"] in ("live", "held") else None  # ``status``'s
+                if stale:  # its code changed since: what changed, and the command
+                    entry["stale"] = {"changes": stale["changes"], "rebuild": stale["rebuild"]}
                 lost = self.rebuild(ident) if entry["state"] in ("evicted", "expired", "detached") else None
                 if lost is not None and lost["rebuild"]:
                     entry["rebuild"] = lost["rebuild"]
@@ -672,12 +672,14 @@ class Models:
         return structure, shapes, data
 
     def stale(self, ident: str) -> dict[str, Any] | None:
-        """For a model document no worker holds: whether the code changed since it was built -- each
-        file its build read compared with the file now (``cache.changes``) -- as ``{"text",
-        "changes", "rebuild"}``; None when it is as built, or a worker holds it. Nothing reruns."""
+        """For a model document, whether the code changed since it was built -- each file its build
+        read compared with the file now (``cache.changes``), whether or not a worker holds it -- as
+        ``{"text", "changes", "rebuild"}``; None when it is as built. Asked by a verb, a page's open
+        or ``status``, never on its own; a file's digest is kept by its size and mtime, so an
+        unchanged file is not read again. Nothing reruns."""
         with self.lock:
             record = self.records.get(ident)
-        if record is None or record["store"] == "memory" or self._working(record["worker"]):
+        if record is None or record["store"] == "memory":
             return None
         from cadgen.engine.cache import changes
 
