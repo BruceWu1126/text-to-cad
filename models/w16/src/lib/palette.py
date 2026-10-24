@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import build123d as bd
 
-from cadgen.engine import Material, materials
+from cadgen import Material, materials
 
 
 CAST = "#7f8288"           # raw cast alloy, warm mid grey (reads matte next to MACHINED)

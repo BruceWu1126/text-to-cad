@@ -4,7 +4,7 @@
     robot: juno | consumers: CAD Viewer, external URDF consumers (RViz/MoveIt/simulators)
     units: meters, kilograms, radians | frames: +X forward, +Y robot-left, +Z up (REP-103)
     root: base_footprint (frame-only) | source of dimensions: juno.step.py / juno_parts/chain.py (mm)
-    meshes: XBF/, the mm 3MF each link model of src/juno.py declares, in that link's part-local frame (scale 0.001); link
+    meshes: 3MF/, the mm 3MF src/exports.py writes of each link model of src/juno.py, in that link's part-local frame (scale 0.001); link
     frames coincide with juno_parts part-local frames, so all visual origins are identity
     inertials: CAD volume properties (OCP BRepGProp on the part solids) at a uniform ASSUMED
     density chosen so the whole robot masses 35 kg; COM and full tensor about the COM in the
@@ -24,7 +24,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/pelvis.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/pelvis.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -43,7 +43,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/torso.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/torso.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -62,7 +62,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/neck_collar.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/neck_collar.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -81,7 +81,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/head.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/head.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -100,7 +100,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/hip_bracket_left.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/hip_bracket_left.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -119,7 +119,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/hip_carrier_left.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/hip_carrier_left.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -138,7 +138,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/thigh_left.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/thigh_left.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -157,7 +157,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/shin_left.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/shin_left.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -176,7 +176,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/ankle_link_left.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/ankle_link_left.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -195,7 +195,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/foot_left.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/foot_left.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -214,7 +214,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/hip_bracket_right.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/hip_bracket_right.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -233,7 +233,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/hip_carrier_right.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/hip_carrier_right.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -252,7 +252,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/thigh_right.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/thigh_right.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -271,7 +271,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/shin_right.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/shin_right.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -290,7 +290,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/ankle_link_right.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/ankle_link_right.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -309,7 +309,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/foot_right.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/foot_right.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -328,7 +328,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/shoulder_pod_left.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/shoulder_pod_left.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -347,7 +347,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/yaw_housing_left.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/yaw_housing_left.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -366,7 +366,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/bicep_left.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/bicep_left.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -385,7 +385,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/forearm_left.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/forearm_left.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -404,7 +404,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/wrist_carrier_left.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/wrist_carrier_left.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -423,7 +423,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/hand_left.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/hand_left.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -442,7 +442,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/shoulder_pod_right.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/shoulder_pod_right.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -461,7 +461,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/yaw_housing_right.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/yaw_housing_right.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -480,7 +480,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/bicep_right.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/bicep_right.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -499,7 +499,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/forearm_right.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/forearm_right.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -518,7 +518,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/wrist_carrier_right.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/wrist_carrier_right.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>
@@ -537,7 +537,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="XBF/hand_right.3mf" scale="0.001 0.001 0.001" />
+        <mesh filename="3MF/hand_right.3mf" scale="0.001 0.001 0.001" />
       </geometry>
     </visual>
     <collision>

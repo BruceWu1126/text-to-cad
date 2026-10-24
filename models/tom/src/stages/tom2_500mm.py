@@ -80,5 +80,3 @@ def build_model(finisher=finish_link):
 
 def tom2_500mm():
     return build_model()
-
-if __name__=='__main__':tom2_500mm()

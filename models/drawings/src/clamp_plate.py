@@ -6,14 +6,14 @@
 
 from __future__ import annotations
 
-from cadgen.engine import dxf
+from cadgen import model
 
 import build123d as bd
 
 from lib import clamp_plate_profile
 
 
-@dxf(out="../DXF/clamp_plate.dxf")
+@model
 def clamp_plate():
     top = clamp_plate_profile.plate().faces().sort_by(bd.Axis.Z)[-1]
     return bd.Pos(0, 0, -clamp_plate_profile.THICKNESS_MM) * top

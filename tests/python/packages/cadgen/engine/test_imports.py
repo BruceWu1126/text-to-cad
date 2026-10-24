@@ -163,6 +163,7 @@ class ImportTest(unittest.TestCase):
             import sys, json
             import build123d, OCP.STEPCAFControl, OCP.BinTools
             from cadgen.engine import reader
+            build123d.Shape  # the kernel loaded before the measure, where cadgen's .pth makes the import lazy
 
             def parse():
                 if sys.argv[2] == "reader":

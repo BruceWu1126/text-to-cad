@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from cadgen.engine import dxf
+from cadgen import model
 
 import build123d as bd
 
@@ -22,7 +22,7 @@ HOLE_DIAMETER_MM = 6.0
 HOLE_CENTRES_MM = ((25.0, 30.0), (88.0, 48.0))
 
 
-@dxf(out="../DXF/angled_tab.dxf")
+@model
 def angled_tab():
     with bd.BuildSketch() as cut:
         with bd.Locations((PLATE_LENGTH_MM / 2.0, PLATE_WIDTH_MM / 2.0)):

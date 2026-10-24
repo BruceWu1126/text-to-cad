@@ -22,7 +22,7 @@ axes (three per digit), for 30 hand axes and 58 total modeled joint frames.
 
 from __future__ import annotations
 
-from cadgen.engine import xbf
+from cadgen import model
 
 from dataclasses import asdict
 
@@ -233,7 +233,7 @@ def design_metrics() -> dict[str, object]:
     }
 
 
-@xbf(out="../../XBF/research_humanoid/research_humanoid.xbf")
+@model
 def research_humanoid() -> object:
     return _build_robot()
 

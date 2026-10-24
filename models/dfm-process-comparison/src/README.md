@@ -1,7 +1,8 @@
 # Model catalog
 
-Run each script with the repository cadgen Python environment. Each writes its xbf
-to `../XBF/` (relative to the script); `cadgen export` translates it to STEP or STL.
+Run each script with the repository cadgen Python environment. Each builds its model in
+the engine and prints its id and page; `cadgen export <id> STEP/<name>.step` (or `.stl`)
+writes a file of it when one is wanted.
 
 - `baseline.py`: thin-wall starting mounting tray.
 - `fdm.py`: thicker walls/floor and four gussets.

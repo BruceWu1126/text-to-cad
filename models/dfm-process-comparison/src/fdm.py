@@ -1,8 +1,8 @@
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 from lib.tray_geometry import tray
 
 
-@xbf(out="../XBF/fdm.xbf")
+@model
 def fdm():
     part = tray("fdm")
     # printed upright: PLA (README)

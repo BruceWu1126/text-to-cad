@@ -22,7 +22,7 @@ the as-built configuration of the document's mechanism.
 """
 
 from __future__ import annotations
-from cadgen.engine import xbf
+from cadgen import model
 
 from dataclasses import dataclass
 from math import cos, pi, sin, sqrt
@@ -1523,7 +1523,7 @@ def _palm_module(side: str, sign: float, wrist: Point) -> tuple[bd.Compound, Poi
     ), palm_center
 
 
-@xbf(out="../../XBF/sculpted_humanoid/sculpted_humanoid.xbf")
+@model
 def sculpted_humanoid():
     """Return the complete labeled humanoid assembly in its athletic pose."""
 

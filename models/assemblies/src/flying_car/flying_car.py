@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import xbf
+from cadgen import model
 
 import math
 from collections.abc import Sequence
@@ -390,7 +390,7 @@ def road_gear() -> bd.Compound:
     )
 
 
-@xbf(out="../../XBF/flying_car/flying_car.xbf")
+@model
 def flying_car():
     return group(
         MODEL_LABEL,

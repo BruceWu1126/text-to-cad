@@ -200,5 +200,3 @@ def make_diagonal_links(lower_floor=LOWER_FLOOR,*,lower_root=-20.775,upper_rise=
 
 def diagonal_lightning_current():
     return b.Compound(children=make_diagonal_links(),label='diagonal_lightning_current')
-
-if __name__=='__main__':diagonal_lightning_current()

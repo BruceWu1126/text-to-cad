@@ -14,7 +14,7 @@ from pathlib import Path
 SRC=Path(__file__).resolve().parents[1]
 if str(SRC) not in sys.path:sys.path.insert(0,str(SRC))
 import build123d as bd
-from cadgen.engine import read_step
+from cadgen import read_step
 from lib.mates import revolute, fastened
 from lib.centered_gripper import with_centered_frame
 from lib.legacy_base_support import INPUTS

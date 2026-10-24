@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
+from cadgen import model
 
 from lib import trim as B
 
 
+@model
 def tail_light():
     built = B.build_tail_light()
     if isinstance(built, list):

@@ -18,7 +18,7 @@ from the sides. No cooler, wiring or plug envelopes are fitted yet.
 """
 from pathlib import Path
 import build123d as b
-from cadgen.engine import read_step
+from cadgen import read_step
 from lib.booleans import as_single_shape as one
 from lib.materials import STANDOFF_COLOR, SCREW_COLOR
 from lib.common_base_plate import BOARD_XY

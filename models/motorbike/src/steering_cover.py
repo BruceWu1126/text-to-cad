@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
+from cadgen import model
 
 from lib import bodywork as B
 
 
+@model
 def steering_cover():
     built = B.build_steering_cover()
     if isinstance(built, list):

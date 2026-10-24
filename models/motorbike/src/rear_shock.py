@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
+from cadgen import model
 
 from lib import drivetrain as B
 
 
+@model
 def rear_shock():
     built = B.build_rear_shock()
     if isinstance(built, list):

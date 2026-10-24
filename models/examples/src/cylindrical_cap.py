@@ -1,11 +1,11 @@
 from __future__ import annotations
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 # Prompt: Cylindrical cap with hollow interior, top boss, and rounded external edges.
 
 from lib.simple_model_library import make_cylindrical_cap
 
 
-@xbf(out="../XBF/cylindrical_cap.xbf")
+@model
 def cylindrical_cap():
     part = make_cylindrical_cap()
     part.material = materials.aluminium_6061.but(color=None)

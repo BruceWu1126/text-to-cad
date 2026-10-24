@@ -1,37 +1,38 @@
 # motorbike models
 
-`motorbike.py` is the one model (`@xbf`, into `../XBF/motorbike.xbf`). Every other
-`.py` directly under `src/` is one part of it: a plain function the assembly
-composes by CALLING it (`frame()`, `seat()`, …). The bike is one body and one xbf; a
-part called twice is one prototype placed twice. No part is a `@memo`: the kernel
-memo already caches their kernel calls and a marker per part saved under 0.1 s of
-an edit (see "When to use `@memo`" in `models/README.md`). Shared code lives in
-`src/lib/`.
+`motorbike.py` is the assembly (`@model`; a run writes nothing). Every other `.py`
+directly under `src/` is one part of it, a `@model` of its own, as the original's parts
+each were: the assembly calls it (`frame()`, `seat()`, …), so it builds in the
+assembly's run as a child, and running its own script (`python seat.py`) shows it alone,
+on a page of its own. A part called twice is one prototype placed twice. No part is a
+`@memo`: the engine replays a part whose code is unchanged, and a marker per part saved
+under 0.1 s of an edit (see "When to use `@memo`" in `models/README.md`). Shared code
+lives in `src/lib/`.
 
 | Script               | What it is                | Description                                              |
 |----------------------|---------------------------|----------------------------------------------------------|
-| motorbike.py         | XBF/motorbike.xbf         | Full assembly: 23 occurrences of 21 parts, build123d joints |
-| frame.py             | part                     | Welded underbone frame + steel floor pan (the fixed root) |
-| center_stand.py      | part                     | Center stand, folded-up pose under the floor pan          |
-| front_fork.py        | part                     | Telescopic fork + chrome axle on the steering axis        |
-| handlebar.py         | part                     | Bar, stem collar, grips and levers; owns `MIRROR_MOUNT_*` |
-| front_fender.py      | part                     | Cream arc band over the front tire                        |
-| front_wheel.py       | part                     | Tire + five-spoke cast rim + brake disc                   |
-| rear_wheel.py        | part                     | Tire + five-spoke cast rim + drum hub                     |
-| engine.py            | part                     | Unit powertrain doubling as the swingarm (CVT + covers)   |
-| exhaust.py           | part                     | Head pipe + oval chrome muffler, rider right              |
-| rear_shock.py        | part                     | Coilover between the frame lug and the engine boss        |
-| leg_shield.py        | part                     | Cream step-through apron                                  |
-| steering_cover.py    | part                     | Head-tube shroud above the apron                          |
-| under_seat_body.py   | part                     | Rear body panel carrying seat and tail                    |
-| rear_fender.py       | part                     | Cream arc over the rear tire                              |
-| seat.py              | part                     | Brown saddle                                              |
-| headlight.py         | part                     | Chrome shell + clear dome lens                            |
-| tail_light.py        | part                     | Housing + red lens                                        |
-| turn_signal_left.py  | part                     | Front-left amber signal; the assembly links it 2x (rear-left is `Pos * turn_signal_left()`) |
-| turn_signal_right.py | part                     | Its mirror image (same `lib/trim.py` factory, right side); linked 2x the same way |
-| mirror_left.py       | part                     | Left bar-end mirror at `handlebar.MIRROR_MOUNT_LEFT` (a constant from another file: tracked by value) |
-| mirror_right.py      | part                     | Its mirror image at `handlebar.MIRROR_MOUNT_RIGHT` — its own part, because a reflection is new geometry |
+| motorbike.py         | the model                 | Full assembly: 23 occurrences of 21 parts, build123d joints |
+| frame.py             | part model               | Welded underbone frame + steel floor pan (the fixed root) |
+| center_stand.py      | part model               | Center stand, folded-up pose under the floor pan          |
+| front_fork.py        | part model               | Telescopic fork + chrome axle on the steering axis        |
+| handlebar.py         | part model               | Bar, stem collar, grips and levers; owns `MIRROR_MOUNT_*` |
+| front_fender.py      | part model               | Cream arc band over the front tire                        |
+| front_wheel.py       | part model               | Tire + five-spoke cast rim + brake disc                   |
+| rear_wheel.py        | part model               | Tire + five-spoke cast rim + drum hub                     |
+| engine.py            | part model               | Unit powertrain doubling as the swingarm (CVT + covers)   |
+| exhaust.py           | part model               | Head pipe + oval chrome muffler, rider right              |
+| rear_shock.py        | part model               | Coilover between the frame lug and the engine boss        |
+| leg_shield.py        | part model               | Cream step-through apron                                  |
+| steering_cover.py    | part model               | Head-tube shroud above the apron                          |
+| under_seat_body.py   | part model               | Rear body panel carrying seat and tail                    |
+| rear_fender.py       | part model               | Cream arc over the rear tire                              |
+| seat.py              | part model               | Brown saddle                                              |
+| headlight.py         | part model               | Chrome shell + clear dome lens                            |
+| tail_light.py        | part model               | Housing + red lens                                        |
+| turn_signal_left.py  | part model               | Front-left amber signal; the assembly links it 2x (rear-left is `Pos * turn_signal_left()`) |
+| turn_signal_right.py | part model               | Its mirror image (same `lib/trim.py` factory, right side); linked 2x the same way |
+| mirror_left.py       | part model               | Left bar-end mirror at `handlebar.MIRROR_MOUNT_LEFT` (a constant from another file: tracked by value) |
+| mirror_right.py      | part model               | Its mirror image at `handlebar.MIRROR_MOUNT_RIGHT` — its own part, because a reflection is new geometry |
 
 Build from `src/`: `python motorbike.py`. A part script
 defines no model and builds nothing on its own. No imported sources — every
@@ -124,5 +125,5 @@ carries each old mate now (`steering` is `head_tube_axis`, `engine_swing`
 
 One motion is in the model's code: `steer`, `head_tube_axis` from -20 to 20 degrees
 over 2 s and back over 2 s, as out-and-back waypoints (a motion has no loop or
-pingpong; a player repeats it). The xbf keeps it as a definition; `cadgen export
-../XBF/motorbike.xbf bike.glb` bakes it into a glTF clip named `steer`.
+pingpong; a player repeats it). The document keeps it as a definition; `cadgen export
+<id> GLB/motorbike.glb` bakes it into a glTF clip named `steer`.

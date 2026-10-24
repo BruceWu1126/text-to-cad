@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 
 from math import sqrt
 
@@ -245,7 +245,7 @@ def _mate(fixed, fixed_frame: str, fixed_at: bd.Location, moving, moving_frame: 
     fixed.joints[fixed_frame].connect_to(moving.joints[moving_frame])
 
 
-@xbf(out="../XBF/basic_shape_mating_test_fixture.xbf")
+@model
 def basic_shape_mating_test_fixture():
     base = _make_base()
     peg = _make_peg()

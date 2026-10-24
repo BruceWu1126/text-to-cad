@@ -34,8 +34,8 @@ OCCURRENCE ORDER IS FROZEN — top to bottom below.
 
 from __future__ import annotations
 
+from cadgen import model
 from cadgen.ap242 import configuration_sequence, mechanism_state
-from cadgen.engine import xbf
 
 import build123d as bd
 
@@ -89,7 +89,7 @@ def _rigid_mate(fixed_part, fixed_name, moving_part, moving_name, location):
     fixed_part.joints[fixed_name].connect_to(moving_part.joints[moving_name])
 
 
-@xbf(out="../XBF/motorbike.xbf")
+@model
 def motorbike():
     fx, fy, fz = S.FRONT_SIGNAL_POS
     rx, ry, rz = S.REAR_SIGNAL_POS

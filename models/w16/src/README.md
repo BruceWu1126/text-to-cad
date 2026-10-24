@@ -1,20 +1,20 @@
 # w16 models
 
-`models/w16` ported to `cadgen.engine`: a quad-turbo 8.0 L W16, a sectioned
-museum cutaway with working kinematics. `w16.py` is the one model:
+`models/w16` on cadgen 0.8: a quad-turbo 8.0 L W16, a sectioned museum cutaway with
+working kinematics. `w16.py` is the one model (`@model`; a run writes nothing):
 
-| Script | Writes | What it is |
+| Script | Model | What it is |
 | --- | --- | --- |
-| `w16.py` | `XBF/w16.xbf` | The engine: the thirteen systems below, its mechanism (180 joints that turn or slide with the crank, 24 the explode moves), the `crank`, `explode` and `running_reveal` motions (clips of its GLB) |
+| `w16.py` | `w16` | The engine: the thirteen systems below, its mechanism (180 joints that turn or slide with the crank), the `crank` motion and the `explode` and `running_reveal` GLB animations (clips of its GLB) |
 | `block.py` ... `ancillaries.py` (13) | nothing | One system each, a `@memo` stage the engine calls in its body |
 
 Build from this folder: `python w16.py`. The GLB is exported on demand
-(`cadgen export XBF/w16.xbf w16.glb`); it is 210 MB with the clips.
+(`cadgen export "$ID" GLB/w16.glb`, the id the run prints), its three clips baked.
 
 ```
 python w16.py
-python -m cadgen.engine snapshot ../XBF/w16.xbf w16.png
-python -m cadgen.engine export ../XBF/w16.xbf w16.step
+cadgen snapshot "$ID" w16.png
+cadgen export "$ID" STEP/w16.step
 ```
 
 ## How it is built
@@ -87,15 +87,14 @@ bolts and shells, each valve's spring, retainer and collets, each follower's
 roller and axle, each cam sprocket's bolt and washer, the turbo rotors' second
 wheel and nut).
 
-Each turning part's joint is held by what the original's clips carried it with,
-so the explode can take it away while it turns (`lib/kinematics.py`):
+Each turning part's joint is held by the part that carries it (`lib/kinematics.py`):
 
 | Joint | Kind | On -> moves | Range |
 | --- | --- | --- | --- |
 | `crank` | revolute about X | the crank system's group -> crankshaft | free |
 | `crank_sprockets` | revolute about X | the cam drive's group -> crank sprocket hub | free |
 | `crank_oil_drive` | revolute about X | the oil system's group -> crank pulley hub | free |
-| `piston_1` ... `piston_16` | prismatic along the bore | block -> piston | the stroke from rest, and 220 mm out of the bore |
+| `piston_1` ... `piston_16` | prismatic along the bore | block -> piston | the stroke from rest |
 | `rod_1` ... `rod_16` | revolute about the wrist pin | piston -> rod | the swing from rest |
 | `cam_1_intake` ... `cam_2_exhaust` | revolute about the cam axis | the cam's first bearing cap -> camshaft | free |
 | `cam_sprocket_1_intake` ... | revolute about the cam axis | the cam drive's group -> cam sprocket | free |
@@ -118,50 +117,35 @@ document keeps it as samples; the GLB carries it as the clip `crank`.
 
 ### The explode and the running cutaway
 
-The original's other two clips are motions again (`lib/explode.py`), each the
-`crank` cycle running throughout with the explode's joints set on top of it: 24
-prismatic joints, each along the old move's direction and at 0 as built.
+The original's other two clips are GLB animations (`lib/explode.py`, `cadgen.gltf`): the
+`crank` cycle posed throughout (every 0.02 s, 2.4 degrees of crank), and the original's
+tables of straight, eased translations played on top of it, each part or system moved
+after the pose, so a part moved clear still carries its own motion. A reference that
+two moves name (a system lifted with the floor and dropped on its own) takes their sum.
 
-| Joint | On -> moves | Along |
-| --- | --- | --- |
-| `floor_lift` | the engine's root (the world) -> the block's group, and so the engine | up, 1,150 mm |
-| `explode_ancillaries`, `explode_oil_system`, `explode_crank` | block -> each system's group | down |
-| `explode_induction` | block -> the induction's group | up |
-| `explode_camdrive` | block -> the cam drive's group | forward (+X) |
-| `explode_heads_B`, `explode_covers_B`, `explode_cam_caps_B`, `explode_cam_bolts_B`, `explode_valvetrain_B` | block -> each bank's set (the head casting, the first cover, cap, bolt, guide leading, the rest fastened to it; the valve train is the guides, spring cups and lash adjusters) | out along the bank's centreline |
-| `explode_exhaust_B` | block -> each bank's exhaust | outboard and down the head's face |
-| `explode_turbos_B` | block -> each bank's turbos and downpipes | outboard and down |
-| `explode_main_shells_lower`, `..._upper`, `explode_main_caps`, `explode_main_bolts` | the crank system's group -> each set | down, below the crank |
-
-- `explode` (12 s, two crank cycles, ending apart as the old clip did): the floor
-  lift and the ancillaries and oil system down (0.02-0.16 of the way), the induction
-  up, the cam drive forward, the covers, exhaust and turbos off (0.14-0.30), bank 1's
-  heads, cam caps and bolts and valve train out along its centreline (0.33-0.50), then
-  bank 2's (0.48-0.66), the pistons and rods 220 mm out of their bores (0.68-0.85), the
-  crank down 420 mm with its bearing shells, caps and bolts falling below it (0.84-1.0).
+- `explode` (12 s, two crank cycles, ending apart as the old clip did): every system
+  lifted 1,150 mm (the floor lift) and the ancillaries and oil system down (0.02-0.16
+  of the way), the induction up, the cam drive forward, the covers, exhaust and turbos
+  off (0.14-0.30), bank 1's heads (420 mm), valve train (750), followers (850), cams
+  (950), cam caps (1,000) and their bolts (1,050) out along its centreline (0.33-0.50),
+  then bank 2's (0.48-0.66), the pistons and rods 220 mm out of their bores
+  (0.68-0.85), the crank down 420 mm with its bearing shells, caps and bolts falling
+  below it (0.84-1.0).
 - `running_reveal` (24 s, four crank cycles, ending where it starts): the bodywork comes
   off over 8 s while the engine runs, stays off to 16 s and goes back on by 24 s: the
-  floor lift, everything outboard clear (0.02-0.30), the heads lifted 560 mm
-  (0.26-0.55). Nothing that moves is displaced: the cams, valves and followers keep
-  running where they stand, as in the original.
+  floor lift, everything outboard clear (0.02-0.30, the turbos to (0, +-160, -420)),
+  the heads lifted 560 mm (0.26-0.55). Nothing that moves is displaced: the cams,
+  valves and followers keep running where they stand, as in the original. The
+  original faded the crankcase casting and its face skins to 8 % as the heads came off;
+  a GLB has no opacity channel, so they are hidden (`.hide`, a scale to 0) from where
+  the fade passed half, 4.82 s in, until it came back past half, 19.18 s.
 
-Deliberate differences from the original's clips, each because one joint carries one
-direction and one part rides one link:
+Deliberate differences from the original's clips:
 
-- The cams go out with their bearing caps (1,000 mm along the bank, as the caps did),
-  not 50 mm short of them (the original's 950 mm): a camshaft's joint is held by its
-  first cap, the nearest part the original moved with it.
-- The roller followers go out with the valve train (750 mm, on their lash adjusters),
-  not 100 mm past it (850 mm): nothing the original moved 850 mm could hold them.
-- In `running_reveal` the turbos leave along the explode's line: 449 mm along
-  (0, +-150, -400), 2 mm off the original's end at (0, +-160, -420).
 - The original's bank rule sent bank 2's head bolts, head face skins and cam-cover bolts
   (labels `<part>:2_<n>`) out along bank 1's centreline, across the engine; they go
   out with their own bank now.
-- The original faded the crankcase casting and its face skins to 8 % in
-  `running_reveal`, so the crank, rods and pistons showed working inside it. A motion
-  cannot hide a part: the block stays as it is, and the section's cut is the window
-  into it.
+- The crankcase is hidden rather than faded (above).
 
 Posed by the engine's forward kinematics at six crank angles, every rod's big end
 lands on its crankpin as the crank carries it, and every wrist pin where its
@@ -187,8 +171,8 @@ keys. A no-op after either replays every body and keeps both files.
 
 ## Not ported
 
-- The crankcase's fade in `running_reveal` (above): a motion moves parts, it does not
-  hide them.
+- The crankcase's fade in `running_reveal` (above): it is hidden while the fade was
+  past half, a GLB having no opacity channel.
 - The timing chains' motion: each link rides its loop in the chain's plane, a
   move no joint between two parts says, so the chains stand still while their
   sprockets turn (they go forward with the cam drive in the clips).

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import xbf
+from cadgen import model
 
 from math import cos, hypot, sin, tau
 
@@ -350,7 +350,7 @@ def _make_hub_shell():
     )
 
 
-@xbf(out="../../XBF/six_blade_open_propeller/six_blade_open_propeller.xbf")
+@model
 def six_blade_open_propeller():
     parts = [_make_hub_shell()]
 

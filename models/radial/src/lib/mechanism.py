@@ -12,11 +12,10 @@ parts, and each motion group is one link:
   valvetrain stands at its theta = 0 lift. A joint's value is its part's motion from
   there, so `kin.py`'s rest-relative poses are its values.
 
-Where a group's joint stands is the exploded clips' business (`lib/explode.py`, which
-`author` follows): on the root (a world-fixed reference), on the group it rides, on its
-system's compound where the compound slides, or on a carrier part (a tappet on its
-guide, a valve on its head's guide, a rocker on its needle bearing, a planet on its
-bearing, a blower gear on its bushing, a pushrod on its tappet's axle).
+A group's joint stands on the group it rides (the master rod on the crank, an
+articulating rod on the master, a tappet's roller and pushrod on the tappet, a planet on
+the propeller shaft), or on the ground, every part no joint moves. The exploded clips
+move no joint: they are GLB animations (`lib/explode.py`).
 
 The gear train is linear in theta -- the crank, cam ring and idler, the tappet rollers,
 the propeller shaft (the carrier, the propeller riding it) and its planets, the
@@ -40,7 +39,7 @@ import re
 import build123d as bd
 from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state
 
-from lib import kin
+from lib import explode, kin
 from lib import spec as S
 
 # prefix regex -> motion kind (the original's `lib/clips.py` contract)
@@ -264,6 +263,11 @@ def _joint_range(table, name: str, joint: str):
     return _travel(table, name, 1.0 if joint == "linear" else 2.0)
 
 
+# The motion groups' kinds, each after the group it stands on.
+ORDER = ("crank", "master", "artrod", "piston", "camring", "camidler", "tappet", "roller", "propshaft", "planet",
+         "impeller", "blowergear", "rocker", "valve", "pushrod")
+
+
 def _identity(location) -> bool:
     found = location.to_tuple()
     return all(abs(v) < 1e-9 for v in (*found[0], *found[1]))
@@ -275,79 +279,66 @@ def _held(holder, joint) -> bd.Location:
     return holder.location * bd.Location(joint.relative_axis.position)
 
 
-def author(root):
+def author(root) -> dict[str, str]:
     """Every joint on the engine `root` (a compound of the systems, each a compound of
-    labelled parts): the running groups' and the two exploded clips' (`lib/explode.py`),
-    each where its link rides. Returns the explode plan, which gives every motion's values."""
-    from lib import explode
-
+    labelled parts): each motion group's first part on its joint, every other part of the
+    group fastened to it. Returns each part's occurrence path, by its label."""
     if not _identity(root.location) or any(not _identity(system.location) for system in root.children):
         raise ValueError("the joints are authored in the world frame: the engine and its systems stand at the origin")
-    shapes = {system.label: system for system in root.children}
-    system_of = {}
+    shapes, path_of = {}, {}
     for system in root.children:
         for part in system.children:
             shapes[part.label] = part
-            system_of[part.label] = system.label
-    order = list(system_of)
-    plan = explode.Plan(order, system_of)
+            path_of[part.label] = f"{root.label}/{system.label}/{part.label}"
+    groups: dict[tuple, list[str]] = {}
+    for label in shapes:
+        found = classify(label)
+        if found is not None and found[0] != "spring":
+            groups.setdefault(found, []).append(label)
     table = [running_values(i * 2.0) for i in range(361)]   # one cycle, every 2 degrees
-
-    def holder_shape(node):
-        return root if node.holder is plan.root else shapes[node.holder.lead]
-
-    for node in plan.nodes:
-        holder, lead = holder_shape(node), shapes[node.lead]
-        if node.kind == "prismatic":
-            axis = bd.Axis((0.0, 0.0, 0.0), tuple(float(c) for c in node.direction))
-            joint = bd.LinearJoint(node.name, holder, axis=axis, linear_range=plan.slide_range(node))
-            seat = _held(holder, joint)
-        elif node.kind == "linear":
-            axis = bd.Axis(node.point, tuple(float(c) for c in node.axis))
-            lo, hi = _joint_range(table, node.name, "linear")
-            if node.amounts or node.x:
-                # the stroke and the teardown's slide, which never add (the teardown stands at 0)
-                slo, shi = plan.slide_range(node)
-                lo, hi = min(lo, slo), max(hi, shi)
-            joint = bd.LinearJoint(node.name, holder, axis=axis, linear_range=(lo, hi))
-            seat = _held(holder, joint)
-        else:
-            axis = bd.Axis(node.point, tuple(float(c) for c in node.axis))
-            turn = _joint_range(table, node.name, "revolute")
-            if node.kind == "cylindrical":
-                joint = bd.CylindricalJoint(node.name, holder, axis=axis, angular_range=turn,
-                                            linear_range=plan.slide_range(node))
+    for kind_ in ORDER:
+        for (kind, args), labels in groups.items():
+            if kind != kind_:
+                continue
+            joint, point, direction = _axis_of(kind, args)
+            name = joint_name(kind, args)
+            parent = _parent_of(kind, args)
+            holder = root if parent is None else shapes[groups[parent][0]]
+            lead = shapes[labels[0]]
+            axis = bd.Axis(point, tuple(float(c) for c in direction))
+            if joint == "linear":
+                found = bd.LinearJoint(name, holder, axis=axis, linear_range=_joint_range(table, name, "linear"))
+                seat = _held(holder, found)
             else:
-                joint = bd.RevoluteJoint(node.name, holder, axis=axis, angular_range=turn)
-            seat = joint.location
-        bd.RigidJoint(node.name, lead, seat)
-        for label in node.members:
-            part = shapes[label]
-            bd.RigidJoint(label, lead, part.location)
-            bd.RigidJoint(label, part, part.location)
-    made = {node.name for node in plan.nodes}
+                found = bd.RevoluteJoint(name, holder, axis=axis, angular_range=_joint_range(table, name, "revolute"))
+                seat = found.location
+            bd.RigidJoint(name, lead, seat)
+            for label in labels[1:]:
+                part = shapes[label]
+                bd.RigidJoint(label, lead, part.location)
+                bd.RigidJoint(label, part, part.location)
+    made = {joint_name(*key) for key in groups}
     expected = set(DRIVE) | set(table[0]) - {"drive"}
     if expected - made:
         raise ValueError(f"no parts carry the motion groups {sorted(expected - made)}: the label contract changed")
-    return plan
+    return path_of
 
 
 def assemble(systems):
     """The engine: the systems under one compound, its joints, the gear train's coupling
-    `drive`, the configurations and the three motions -- `running`, the 720-degree cycle;
-    `explode`, the teardown from the rest pose; `exploded-running`, the cycle with the
-    groups held apart (`lib/explode.py`)."""
+    `drive`, the configurations, the `running` motion (the 720-degree cycle) and two GLB
+    animations -- `explode`, the teardown from the rest pose, and `exploded-running`, the
+    cycle with the groups held apart (`lib/explode.py`)."""
     engine = bd.Compound(label="radial", children=systems)
-    plan = author(engine)
+    path_of = author(engine)
     gear_pair(engine, "drive", **DRIVE)
 
     def turns(t: float) -> dict:
         return running_values(DEG_PER_S * t)
 
     for name, theta in CONFIGURATIONS.items():
-        mechanism_state(engine, name, **plan.values(running_values(theta), {}))
-    configuration_sequence(engine, "running", lambda t: plan.values(turns(t), {}), duration=CYCLE_S)
-    configuration_sequence(engine, "explode", lambda t: plan.values({}, plan.explode_slides(t)), duration=plan.duration)
-    held = plan.running_slides()
-    configuration_sequence(engine, "exploded-running", lambda t: plan.values(turns(t), held), duration=CYCLE_S)
+        mechanism_state(engine, name, **running_values(theta))
+    configuration_sequence(engine, "running", turns, duration=CYCLE_S)
+    explode.explode(engine, path_of)
+    explode.exploded_running(engine, path_of, CYCLE_S, turns)
     return engine

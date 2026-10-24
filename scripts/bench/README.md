@@ -22,7 +22,7 @@ warm, and times every step:
 A model in `corpus.json` is its project folder (`root`, from the repository), the
 folder its builds run from (`cwd`), the folders put on `PYTHONPATH` beside
 cadgen's (`pythonpath`), its `targets` (`script.py`, as `python script.py` builds
-it, or `script.py::model`), its document (`xbf`), one `edit` (`{file, from, to}`,
+it, or `script.py::model`), its document (`xbf`: where the batch saves the model its stem names), one `edit` (`{file, from, to}`,
 `from` found exactly once in `file`), the inputs a build reads that are never
 committed (`needs`: tom's vendor STEP) and a `note`. The models, smallest first:
 `l_bracket`, `planetary_gear`, `qdd`, `motorbike`, `case`, `juno`, `movement`,
@@ -40,9 +40,10 @@ telemetry off), step by step:
 - `noop`: the same build, warm;
 - `edit`: the configured edit, built;
 - `revert`: the file's original bytes, built;
-- `restart`: the daemon stopped and the unchanged model built again, its xbf its
-  only cache;
-- `serve`, `mesh-cold`, `mesh-warm`, `structure`: the document served
+- `restart`: the daemon stopped and the unchanged model built again (cold: a model
+  that declares no xbf has no cache across a restart);
+- `export`, `serve`, `mesh-cold`, `mesh-warm`, `structure`: the document saved to the
+  model's `xbf` path (`cadgen export <id>`, for a model that declares none), served
   (`cadgen serve`), every part meshed on the server's pool (`POST
   /api/doc/<id>/mesh`), again with its meshes dropped, and the structure a page
   reads first;

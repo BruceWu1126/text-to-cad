@@ -9,7 +9,7 @@ from dataclasses import asdict
 from functools import cache
 from pathlib import Path
 import build123d as bd
-from cadgen.engine import read_step
+from cadgen import read_step
 from lib.mates import revolute, fastened
 from stages.tom2_500mm import build_model,moving_sets,kinematics as previous_kinematics
 from lib.reach600_geometry import LINK_EXTENSION,finish_extended_link
@@ -174,5 +174,3 @@ def tom2_600mm_solid():
     print('600 mm: sideways elbow ready',flush=True)
     result=apply_tapered_links(result)
     return result
-
-if __name__=='__main__':tom2_600mm_solid()

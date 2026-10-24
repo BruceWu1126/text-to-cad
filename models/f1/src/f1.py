@@ -28,17 +28,18 @@ order:
   power_unit        steering_rack   <- slides (rack joint)
   drivetrain        details
 
-Every child but the monocoque also slides apart on a prismatic joint of its own
-(`explode_<child>`), and the power unit's twelve systems in it (`eng_*`): the old
-teardown choreography. The car is one xbf (`XBF/f1.xbf`) and one GLB
-(`XBF/f1.glb`), whose `showcase`, `drs`, `steering`, `teardown` and `engine`
-clips are the five motions below.
+Every child but the monocoque also moves apart along its own direction, and the
+power unit's twelve systems in it (`eng_*`): the old teardown choreography, as GLB
+animations (`showcase`, `teardown`, `engine`). The car is one model, `f1`, and its
+GLB, exported on demand, carries those three and the two motions, `drs` and
+`steering`, as clips.
 """
 
 from __future__ import annotations
 
+from cadgen import model
 from cadgen.ap242 import configuration_sequence, mechanism_state
-from cadgen.engine import glb, xbf
+from cadgen.gltf import animation
 
 import math
 
@@ -345,13 +346,11 @@ def _joints(parts):
 # rotating part fight the one thing the viewer is meant to be reading. Distances
 # are sized so parts clear each other in PROJECTION, not just in space.
 #
-# The monocoque never moves: it is the car's ground (it already holds the `rack`
-# joint), and it holds each child's slide, `explode_<child>`. A child that holds a
-# joint for another (rear_wing, suspension_front, steering_rack) or hangs on one
-# (drs_flap, drs_actuator, the front corners, the track rods, steering_rack) keeps
-# its compound where it is -- holding, or held by, its joints -- and slides its
-# CONTENTS instead, on a prismatic joint its compound holds (its first part the
-# rigid half, the rest fastened to it), so no child drags another by its explode.
+# The monocoque never moves. The teardown is a GLB animation (`cadgen.gltf`), never
+# the mechanism's: each child, a sibling of every other in the car's tree, moves by its
+# own translation alone, so a child holding a joint for another (rear_wing,
+# suspension_front, steering_rack) drags nothing by its explode, and one hanging on a
+# joint (drs_flap, the front corners, the track rods) moves by its own vector.
 # ---------------------------------------------------------------------------
 
 _BODYWORK = (
@@ -391,13 +390,9 @@ _INTERNALS = (
     ("power_unit", (0.0, 0.0, 1.0), 1080.0, (0.08, 0.34)),
 )
 _EXPLODE = _BODYWORK + _INTERNALS
-# The children that hold a DRS or steering joint, or hang on one: each slides its
-# contents in its compound, which keeps holding (or hanging on) its joints.
-_SLIDES_CONTENTS = frozenset({"rear_wing", "drs_flap", "drs_actuator", "suspension_front", "corner_fl", "corner_fr",
-                              "track_rod_left", "track_rod_right", "steering_rack"})
 
 # The engine sub-explode: the power unit's 100 leaves collapsed into 12 systems,
-# addressed BY LABEL, each sliding along its own direction by its distance times
+# addressed BY LABEL, each moving along its own direction by its distance times
 # the engine clock, on top of the power unit's own explode. The crankcase, sump,
 # front and gearbox faces, belt ribs and main webs never move in it.
 _SIDES = ("left", "right")
@@ -444,9 +439,8 @@ def _window(a: float, b: float, u: float) -> float:
 
 
 def _teardown_pose(explode: float = 0.0, engine: float = 0.0) -> dict:
-    """Every teardown joint at an explode clock and an engine clock, each 0..1. A function
-    of time sets the same joints at every time: all of them, the DRS and steering left as
-    built."""
+    """Every group's travel along its direction (mm) at an explode clock and an engine clock,
+    each 0..1, by the group's name (`explode_<child>`, `eng_*`)."""
     pose = {f"explode_{child}": distance * _window(a, b, explode)
             for child, _direction, distance, (a, b) in _EXPLODE}
     for group, _labels, _direction, distance in _ENGINE_GROUPS:
@@ -466,52 +460,34 @@ def _showcase_at(u: float) -> dict:
     return _teardown_pose(explode=_clamp(explode, 0.0, 1.0), engine=_clamp(engine, 0.0, 1.0))
 
 
-def _in_parent(part, world: bd.Location) -> bd.Location:
-    """`world` in the frame of `part`'s parent, where build123d takes a joint's location."""
-    return world if part.parent is None else part.parent.global_location.inverse() * world
+# Each group's references in the car's tree, from its root, and its unit direction: a child
+# by its label, an engine system by its leaves' paths in the power unit.
+_CAR = "f1_concept_car"
+_GROUPS = {**{f"explode_{child}": ([f"{_CAR}/{child}"], _unit(direction)) for child, direction, _d, _w in _EXPLODE},
+           **{group: ([f"{_CAR}/power_unit/{label}" for label in labels], _unit(direction))
+              for group, labels, direction, _d in _ENGINE_GROUPS}}
+_KEY_STEP = 0.05  # s between the sampled keys of an explode's channels
 
 
-def _slide(label: str, holder, rider, direction, travel: float) -> None:
-    """A prismatic joint along `direction` (car coordinates) through the origin on `holder`,
-    its rigid half on `rider` where the joint holds it at 0: the holder's axes at the
-    axis's origin, given in the rider's parent frame."""
-    parent_world = bd.Location() if holder.parent is None else holder.parent.global_location
-    axis = bd.Axis((0.0, 0.0, 0.0), _unit(direction)).located(parent_world.inverse())
-    joint = bd.LinearJoint(label, holder, axis=axis, linear_range=(0.0, travel))
-    held = holder.global_location * bd.Location(joint.relative_axis.position)
-    bd.RigidJoint(label, rider, _in_parent(rider, held))
+def _teardown_animation(car, name: str, duration: float, pose_at) -> None:
+    """A GLB animation of the teardown: each group's translation along its direction by
+    ``pose_at(t)``'s travel, sampled every ``_KEY_STEP`` as LINEAR keys (a key whose
+    neighbours hold its value is dropped), so the old clip's eases play as they were."""
+    show = animation(car, name, duration=duration)
+    count = round(duration / _KEY_STEP)
+    times = [duration * i / count for i in range(count + 1)]
+    poses = [pose_at(t) for t in times]
+    for group, (refs, unit) in _GROUPS.items():
+        values = [pose[group] for pose in poses]
+        if not any(values):
+            continue
+        kept = [i for i in range(len(times))
+                if i in (0, len(times) - 1) or not values[i - 1] == values[i] == values[i + 1]]
+        keys = [(times[i], tuple(c * values[i] for c in unit)) for i in kept]
+        show.channel(refs, path="translation", keys=keys, interpolation="LINEAR")
 
 
-def _fasten(label: str, lead, riders) -> None:
-    """Each of `riders` fastened to `lead`: a rigid pair of one label each."""
-    for index, rider in enumerate(riders):
-        bd.RigidJoint(f"{label}_rides_{index}", lead, bd.Location())
-        bd.RigidJoint(f"{label}_rides_{index}", rider, bd.Location())
-
-
-def _teardown_joints(parts) -> None:
-    """The teardown's slides, authored once the car's compound holds every child."""
-    monocoque = parts["monocoque"]
-    for child, direction, distance, _span in _EXPLODE:
-        label = f"explode_{child}"
-        part = parts[child]
-        if child in _SLIDES_CONTENTS:
-            lead, *rest = part.children
-            _slide(label, part, lead, direction, distance)
-            _fasten(label, lead, rest)
-        else:
-            _slide(label, monocoque, part, direction, distance)
-    # The engine's systems slide in the power unit, which carries them on its own explode.
-    power_unit = parts["power_unit"]
-    leaves = {leaf.label: leaf for leaf in power_unit.children}
-    for group, labels, direction, distance in _ENGINE_GROUPS:
-        members = [leaves[label] for label in labels]
-        _slide(group, power_unit, members[0], direction, distance)
-        _fasten(group, members[0], members[1:])
-
-
-@xbf(out="../XBF/f1.xbf")
-@glb(out="../XBF/f1.glb")
+@model
 def f1():
     parts = {**front_end(), **survival_cell(), **sidepods(), **engine_bodywork(), **underbody(),
              "power_unit": power_unit(), "drivetrain": drivetrain(), **rear_aero(), **front_suspension(),
@@ -519,21 +495,21 @@ def f1():
     for name, part in parts.items():
         part.label = name
     _joints(parts)
-    car = bd.Compound(children=[parts[name] for name in CHILDREN], label="f1_concept_car")
-    _teardown_joints(parts)
+    car = bd.Compound(children=[parts[name] for name in CHILDREN], label=_CAR)
     mechanism_state(car, "drs_open", **_drs_pose(1.0))
     mechanism_state(car, "full_lock_left", **_steer_pose(1.0))
     mechanism_state(car, "full_lock_right", **_steer_pose(-1.0))
     # The exploded view and nothing else, one loop-closed timeline: the car opens, then
-    # the engine, and both close again, 22.5 s.
-    configuration_sequence(car, "showcase", lambda t: _showcase_at((t / 22.5) % 1.0), duration=22.5)
+    # the engine, and both close again, 22.5 s: a GLB animation, as the teardowns below.
+    _teardown_animation(car, "showcase", 22.5, lambda t: _showcase_at((t / 22.5) % 1.0))
     # The one mechanism you can show while the car is still whole: open and shut, 4 s.
     configuration_sequence(car, "drs", lambda t: _drs_pose(_pingpong(t / 4.0)), duration=4)
     # Left, through centre, to right and back — the car "looking around", 6 s.
     configuration_sequence(car, "steering", lambda t: _steer_pose(math.sin(math.tau * t / 6.0)), duration=6)
     # The car apart and back together, 12 s; the engine apart and back, 8 s.
-    configuration_sequence(car, "teardown", lambda t: _teardown_pose(explode=_pingpong(t / 12.0)), duration=12)
-    return configuration_sequence(car, "engine", lambda t: _teardown_pose(engine=_pingpong(t / 8.0)), duration=8)
+    _teardown_animation(car, "teardown", 12, lambda t: _teardown_pose(explode=_pingpong(t / 12.0)))
+    _teardown_animation(car, "engine", 8, lambda t: _teardown_pose(engine=_pingpong(t / 8.0)))
+    return car
 
 
 if __name__ == "__main__":

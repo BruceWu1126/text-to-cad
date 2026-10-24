@@ -1,8 +1,8 @@
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 from lib.tray_geometry import tray
 
 
-@xbf(out="../XBF/baseline.xbf")
+@model
 def baseline():
     part = tray("baseline")
     # the thin-wall FDM starting point: PLA (README)

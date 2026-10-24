@@ -26,13 +26,11 @@ joint's own frame, so each stands at 0 as built. Whatever rides a moving part
     turbo_B_P        revolute about each turbo's shaft on its centre housing
     pulley_NAME      revolute about each accessory pulley's axis on the ancillaries' group
 
-Each turning part's joint is held by the part (or the system's group) the old
-clips moved it with, so the `explode` and `running_reveal` motions
-(`lib/explode.py`) can carry it off while it turns: the crank drops with its
-system, the sprockets go forward with the cam drive, the oil-pump drive and the
-pulleys down with their systems, the cams lift on their caps, the valves on
-their guides and the followers on their lash adjusters. As built every one
-stands where it did on the block and the heads.
+Each turning part's joint is held by the part (or the system's group) that carries
+it: the crank on its system, the sprockets on the cam drive, the oil-pump drive and
+the pulleys on their systems, the cams on their caps, the valves on their guides and
+the followers on their lash adjusters. The `explode` and `running_reveal` animations
+(`lib/explode.py`) move each part after the crank cycle poses it.
 
 The slider-crank and the cam train are closed loops, so no coupling can say
 them: the `crank` motion is a function of time that poses every joint as
@@ -92,20 +90,18 @@ _VALVES = kin.all_valves()
 _REST = {c.number: kin.piston(c.number, 0.0) for c in S.CYLINDERS}
 
 
-# How far the explode draws each piston (and its rod) out of its bore, past its stroke
-# (`lib/explode.py`): its joint's range holds it.
+# How far the explode draws each piston (and its rod) out of its bore (`lib/explode.py`).
 PISTON_OUT = 220.0
 
 
 def _travel(cyl: int) -> tuple[tuple[float, float], tuple[float, float]]:
     """Piston `cyl`'s slide and its rod's swing from rest, over a cycle sampled each
-    degree, with a margin past the samples (mm, deg); the slide also reaches PISTON_OUT
-    past the top of its stroke."""
+    degree, with a margin past the samples (mm, deg)."""
     states = [kin.piston(cyl, float(t)) for t in range(720)]
     rest = _REST[cyl]
     slide = [state.s - rest.s for state in states]
     swing = [state.rod_tilt - rest.rod_tilt for state in states]
-    return (min(slide) - 0.5, max(slide) + PISTON_OUT + 0.5), (min(swing) - 1.0, max(swing) + 1.0)
+    return (min(slide) - 0.5, max(slide) + 0.5), (min(swing) - 1.0, max(swing) + 1.0)
 
 
 _STROKE, _SWING = {}, {}

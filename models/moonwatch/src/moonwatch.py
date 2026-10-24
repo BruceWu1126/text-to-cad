@@ -18,30 +18,27 @@ half where its moving joint holds it at 0 (`_held`):
 - its gear trains, the old couplings, as `gear_pair`s: `running` (seconds of time)
   and `chrono` (seconds of chronograph running), each a constraint its wheels and
   hands move only through, and its poses as `mechanism_state`s;
-- the joints its exploded clips move: each part or group the old `ANIMATION`
-  translated slides on a prismatic joint along its own direction, the
-  movement rises on one and flips on a revolute about X, and the movement's
-  tiers fan on prismatic joints in its own frame (the balance's tier slide and
-  swing are one cylindrical joint; the going train, a coupled gear train, takes
-  no slide and stays on the plate).
+and nothing else: the exploded clips move no joint.
 
-The four old clips are motions, functions of time over those joints and the two
-trains, which the declared GLB bakes into clips: `running` (the escapement's 8
-beats), `reveal`, `showcase` and `grand_tour`. A player repeats a clip (a motion
-has no loop): every part ends where it started but the going train and the
-chronograph's recorders, which keep the watch's time, so a repeat steps them back
-to as built (1.6 s of `running` a 6 s clip: the small seconds 9.6 deg, the
-minute hand 0.16 deg). A joint carries one direction, so where the old showcase
-moved the face stack sideways and the reveal lifted it, both lift it now (the
-showcase higher, clear of the rising movement), and the crown and pushers, whose
-joints are their own travel, stay in the case.
+The four old clips keep their names: `running` (the escapement's 8 beats) is a
+motion, a function of time over the escapement and the two trains; `reveal`,
+`showcase` and `grand_tour`, which take the watch apart while the escapement runs,
+are GLB animations (`cadgen.gltf`): the escapement and the trains posed at every
+key, each part or group the old clips moved translated along its own vector, the
+movement's tiers fanned, carried by its flip, and the movement rising out of the case
+and flipping bridge-side-up about its own centre. A GLB of the watch carries all
+four as clips. A player repeats a clip (neither has a loop): every part ends where
+it started but the going train and the chronograph's recorders, which keep the
+watch's time, so a repeat steps them back to as built (1.6 s of `running` a 6 s
+clip: the small seconds 9.6 deg, the minute hand 0.16 deg).
 """
 
 import math
 
 import build123d as bd
+from cadgen import model
 from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state
-from cadgen.engine import glb, xbf
+from cadgen.gltf import animation
 
 import chrono_works
 import keyless_works
@@ -122,12 +119,6 @@ def _held(base, joint) -> bd.Location:
     return joint.location
 
 
-def _group(label: str, parts: list, lead) -> None:
-    """Every part of ``parts`` but ``lead`` fastened to it, one rigid pair each."""
-    for index, part in enumerate(p for p in parts if p is not lead):
-        _rides(f"{label}_{index}", lead, part)
-
-
 # ---------------------------------------------------------------------------
 # The mates: hands, going train, escapement, chronograph, crown and pushers
 # ---------------------------------------------------------------------------
@@ -150,11 +141,9 @@ _HAND_RIDERS = (
 )
 
 # The movement's turning parts, each about its arbor along local -Z. The going train is a
-# gear train, so its wheels move only through the `running` coupling (a revolute each:
-# a coupled joint takes no slide). The pallet fork banks on its arbor (a revolute). The
-# balance swings and fans with its cock: one cylindrical joint, its turn and its tier slide
-# (along local -Z, the dial side: a negative slide is toward the bridges, local +z, which
-# the movement's own flip turns upward). label, part, position, range.
+# gear train, so its wheels move only through the `running` coupling (a revolute each).
+# The pallet fork banks on its arbor and the balance swings on its staff (a revolute
+# each). label, part, position, range.
 _TRAIN = (
     ("center", "#center_wheel", S.CENTER_WHEEL_POS, (-4320.0, 4320.0)),
     ("third", "#third_wheel", S.THIRD_WHEEL_POS, (-3600.0, 3600.0)),
@@ -185,13 +174,6 @@ _CHRONO_RIDERS = (
     ("runner_arbor_rides", "#chrono_runner_wheel", "#chrono_runner_arbor"),
 )
 
-# The balance's tier offset in the fan, its cock's: the old tiers' z, in the CASED watch
-# frame (negative is the bridge side, toward the caseback), as `_TIERS` holds them. (The
-# old fan also lifted the going train and the pallet fork 5 mm; a gear train's wheels
-# move only through their coupling, so they stay on the plate, and the fork with them.)
-_BALANCE_TIER = -24.0
-
-
 def _hands(parts: _Parts, dial) -> None:
     for label, hand, origin, limits in _HANDS:
         axis = bd.Axis(origin, _UP)
@@ -208,7 +190,7 @@ def _train(parts: _Parts, caliber, chrono) -> None:
         bd.RigidJoint(label, parts[wheel], joint.location)
     label, wheel, pos, limits = _BALANCE
     axis = bd.Axis(_local(pos), _DOWN)
-    joint = bd.CylindricalJoint(label, caliber, axis=axis, angular_range=limits, linear_range=(-30.0, 0.0))
+    joint = bd.RevoluteJoint(label, caliber, axis=axis, angular_range=limits)
     bd.RigidJoint(label, parts[wheel], joint.location)
     for label, carrier, rider in _WHEEL_RIDERS:
         _rides(label, parts[carrier], parts[rider])
@@ -234,81 +216,54 @@ def _crown_and_pushers(parts: _Parts) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The exploded clips' joints
+# What the exploded clips move
 # ---------------------------------------------------------------------------
-# Each part or group the old clips translated slides on a prismatic joint from the
-# case middle along its one direction (label, target, direction).
-_LIFTS = (
-    ("lift_caseback_o_ring", "#caseback_o_ring", _DOWN),
-    ("lift_caseback_retaining_ring", "#caseback_retaining_ring", _DOWN),
-    ("lift_caseback", "#caseback", _DOWN),
-    ("lift_caseback_sapphire", "#caseback_sapphire", _DOWN),
-    ("lift_movement_ring", "#movement_ring", _DOWN),
-    ("lift_bezel_ring", "#bezel_ring", _UP),
-    ("lift_bezel_polish", "#case_polish:bezel", _UP),
-    ("lift_bezel_insert", "#bezel_insert", _UP),
-    ("lift_tachymeter_scale", "#tachymeter_scale", _UP),
-    ("lift_crystal", "#crystal", _UP),
-    ("lift_crystal_gasket", "#crystal_gasket", _UP),
-    ("lift_dial", "#dial_and_hands", _UP),
-    ("lift_strap_12", "#strap_12", (0.0, 1.0, 0.0)),
-    ("lift_strap_6", "#strap_6", (0.0, -1.0, 0.0)),
-    ("lift_clasp", "#clasp", (0.0, -1.0, 0.0)),
-    ("lift_spring_bar_12", "#spring_bar:12", (0.0, 1.0, 0.0)),
-    ("lift_spring_bar_6", "#spring_bar:6", (0.0, -1.0, 0.0)),
-)
+# Each part or group the old clips translated, by its label in the watch, and its one
+# direction (in the watch frame).
+_LIFTS = {
+    "caseback_o_ring": _DOWN, "caseback_retaining_ring": _DOWN, "caseback": _DOWN, "caseback_sapphire": _DOWN,
+    "movement_ring": _DOWN, "bezel_ring": _UP, "case_polish:bezel": _UP, "bezel_insert": _UP,
+    "tachymeter_scale": _UP, "crystal": _UP, "crystal_gasket": _UP, "dial_and_hands": _UP,
+    "strap_12": (0.0, 1.0, 0.0), "strap_6": (0.0, -1.0, 0.0), "clasp": (0.0, -1.0, 0.0),
+    "spring_bar:12": (0.0, 1.0, 0.0), "spring_bar:6": (0.0, -1.0, 0.0),
+}
 
 # Movement tiers, as the old showcase fanned them: each group's z offset in the CASED
 # watch frame, where the old clip applied it (negative is the bridge side, toward the
 # caseback, which the movement's flip turns upward; the keyless works, on the dial side,
-# goes the other way). Each group slides on one prismatic joint along the movement's own
-# +z, its first part the lead and the rest fastened to it. The casing flips the movement
-# (watch z = MOVT_Z_OFFSET - local z), so a tier slides by -dz along its joint. The balance
-# fans with its cock on its own joint (`_BALANCE_TIER`); a fastened rider goes with its wheel.
-_PALLET_BRIDGE = ("#pallet_bridge", "#pallet_bridge:stripe_shadow:0", "#pallet_bridge:stripe_shadow:1",
-                  "#pallet_bridge:anglage", "#bridge_jewel:pallet", "#chaton:pallet", "#screw:pallet_bridge")
+# goes the other way). Each is a translation inside the movement, so its flip carries it.
+_PALLET_BRIDGE = ("pallet_bridge", "pallet_bridge:stripe_shadow:0", "pallet_bridge:stripe_shadow:1",
+                  "pallet_bridge:anglage", "bridge_jewel:pallet", "chaton:pallet", "screw:pallet_bridge")
 _TRAIN_BRIDGE = (
-    "#train_bridge", *(f"#train_bridge:stripe_shadow:{i}" for i in range(3)),
-    *(f"#train_bridge:anglage:{i}" for i in range(2)),
-    *(f"#{kind}:{wheel}" for wheel in ("center", "third", "fourth", "escape") for kind in ("bridge_jewel", "chaton")),
-    "#screw:train_bridge:foot", "#screw:train_bridge:fourth", "#screw:train_bridge:center",
+    "train_bridge", *(f"train_bridge:stripe_shadow:{i}" for i in range(3)),
+    *(f"train_bridge:anglage:{i}" for i in range(2)),
+    *(f"{kind}:{wheel}" for wheel in ("center", "third", "fourth", "escape") for kind in ("bridge_jewel", "chaton")),
+    "screw:train_bridge:foot", "screw:train_bridge:fourth", "screw:train_bridge:center",
 )
 _BARREL_BRIDGE = (
-    "#barrel_bridge", *(f"#barrel_bridge:stripe_shadow:{i}" for i in range(6)),
-    *(f"#barrel_bridge:anglage:{i}" for i in range(5)), "#bridge_jewel:barrel",
-    "#screw:barrel_bridge:left", "#screw:barrel_bridge:right", "#screw:barrel_bridge:top",
+    "barrel_bridge", *(f"barrel_bridge:stripe_shadow:{i}" for i in range(6)),
+    *(f"barrel_bridge:anglage:{i}" for i in range(5)), "bridge_jewel:barrel",
+    "screw:barrel_bridge:left", "screw:barrel_bridge:right", "screw:barrel_bridge:top",
 )
+_GOING_TRAIN = ("center_wheel", "center_pinion", "third_wheel", "third_pinion", "fourth_wheel", "fourth_pinion",
+                "escape_pinion", "escape_wheel", "pallet_fork", "pallet_stone:entry", "pallet_stone:exit",
+                "pallet_arbor")
+_BALANCE_TIER = ("balance_cock", "hairspring", "hairspring_stud", "balance_cock:stripe_shadow:0",
+                 "balance_cock:stripe_shadow:1", "screw:balance_cock", "stud_holder", "screw:stud_holder",
+                 "shock_bezel", "shock_chaton", "shock_cap_jewel", "shock_lyre_spring", "balance_wheel",
+                 "balance_staff", "impulse_jewel", *(f"timing_screw:{i}" for i in range(16)))
 _TIERS = (
-    ("tier_keyless", ("#keyless_works",), 7.0),
-    ("tier_barrel", ("#barrel_drum", "#barrel_lid", "#mainspring", "#barrel_arbor"), -8.0),
-    ("tier_pallet_bridge", _PALLET_BRIDGE, -11.5),
-    ("tier_train_bridge", _TRAIN_BRIDGE, -15.5),
-    ("tier_barrel_bridge", _BARREL_BRIDGE, -15.5),
-    ("tier_winding", ("#ratchet_wheel", "#screw:ratchet", "#crown_wheel", "#crown_wheel_core", "#screw:crown_wheel",
-                      "#click", "#screw:click", "#click_spring", "#screw:click_spring"), -19.0),
-    ("tier_balance_cock", ("#balance_cock", "#hairspring", "#hairspring_stud", "#balance_cock:stripe_shadow:0",
-                           "#balance_cock:stripe_shadow:1", "#screw:balance_cock", "#stud_holder",
-                           "#screw:stud_holder", "#shock_bezel", "#shock_chaton", "#shock_cap_jewel",
-                           "#shock_lyre_spring"), -24.0),
-    ("tier_chrono", ("#chronograph_works",), -30.0),
+    (("keyless_works",), 7.0),
+    (_GOING_TRAIN, -5.0),
+    (("barrel_drum", "barrel_lid", "mainspring", "barrel_arbor"), -8.0),
+    (_PALLET_BRIDGE, -11.5),
+    (_TRAIN_BRIDGE, -15.5),
+    (_BARREL_BRIDGE, -15.5),
+    (("ratchet_wheel", "screw:ratchet", "crown_wheel", "crown_wheel_core", "screw:crown_wheel", "click",
+      "screw:click", "click_spring", "screw:click_spring"), -19.0),
+    (_BALANCE_TIER, -24.0),
+    (("chronograph_works",), -30.0),
 )
-
-
-def _lifts(parts: _Parts) -> None:
-    middle = parts["#case_middle"]
-    for label, target, direction in _LIFTS:
-        axis = bd.Axis((0.0, 0.0, 0.0), direction)
-        joint = bd.LinearJoint(label, middle, axis=axis, linear_range=(0.0, 120.0))
-        bd.RigidJoint(label, parts[target], _held(middle, joint))
-
-
-def _tiers(parts: _Parts, caliber) -> None:
-    for label, targets, _dz in _TIERS:
-        group = [parts[target] for target in targets]
-        axis = bd.Axis((0.0, 0.0, 0.0), _UP)
-        joint = bd.LinearJoint(label, caliber, axis=axis, linear_range=(-40.0, 40.0))
-        bd.RigidJoint(label, group[0], _held(caliber, joint))
-        _group(f"{label}_rides", group, group[0])
 
 
 # ---------------------------------------------------------------------------
@@ -346,25 +301,28 @@ def _couplings_and_poses(watch_root) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The clips: motions of time over the joints
+# The clips
 # ---------------------------------------------------------------------------
-#   running    -- the escapement in slow-motion macro pacing: 4 balance oscillations,
-#                 8 beats. The escape wheel advances one half-tooth-pitch step per beat
-#                 (8 x 12 deg = 96 deg = exactly 4 tooth pitches of the 15-tooth wheel),
-#                 the pallet fork snaps between banking positions at each beat, the going
-#                 train steps with the escape wheel through `running` at its ratios (the
-#                 old clip crept the fourth and third wheels 144 deg a loop instead), and
-#                 the chronograph runs (its runner and seconds hand one whole turn).
-#   reveal     -- staged partial explode: the caseback stack fans downward, the movement
-#                 ring drops clear, the crystal and bezel stack lift off, the dial floats
-#                 up, the bracelet straps slide apart, and the movement rises into the
-#                 case mouth and flips bridge-side-up.
-#   showcase   -- full explode: the face stack lifts high, the caseback stack and bracelet
-#                 spread away, the movement rises up the middle, flips, and its tiers fan
-#                 open; the second half mirrors the first, so the loop closes.
-#   grand_tour -- reveal opens and dwells with the escapement running, then the movement's
-#                 tiers fan open while the floating face stack lifts for headroom;
-#                 everything mirrors closed again.
+#   running    -- a motion: the escapement in slow-motion macro pacing, 4 balance
+#                 oscillations, 8 beats. The escape wheel advances one half-tooth-pitch step
+#                 per beat (8 x 12 deg = 96 deg = exactly 4 tooth pitches of the 15-tooth
+#                 wheel), the pallet fork snaps between banking positions at each beat, the
+#                 going train steps with the escape wheel through `running` at its ratios
+#                 (the old clip crept the fourth and third wheels 144 deg a loop instead),
+#                 and the chronograph runs (its runner and seconds hand one whole turn).
+#   reveal     -- an animation: staged partial explode, the caseback stack fans downward,
+#                 the movement ring drops clear, the crystal and bezel stack lift off, the
+#                 dial floats up, the bracelet straps slide apart, and the movement rises
+#                 into the case mouth and flips bridge-side-up.
+#   showcase   -- an animation: full explode, the dial, bezel stack and crystal clear out to
+#                 the SIDES so the movement can rise straight up the middle, the crown and
+#                 pushers draw out, the caseback stack and bracelet spread away, the
+#                 movement rises, flips, and its tiers fan open; the second half mirrors the
+#                 first, so the loop closes.
+#   grand_tour -- an animation: reveal opens and dwells with the escapement running, then
+#                 the movement's tiers fan open while the floating face stack lifts for
+#                 headroom; everything mirrors closed again.
+# The three animations run the escapement as `running` does, posed at every key.
 
 _OSCILLATIONS = 4                                    # balance swings per loop
 _BEATS = _OSCILLATIONS * 2                           # escape steps per loop
@@ -372,6 +330,7 @@ _BALANCE_AMPLITUDE_DEG = 75.0
 _ESCAPE_STEP_DEG = 360.0 / S.ESCAPE_WHEEL_TEETH / 2  # half a tooth pitch: 12 deg
 _PALLET_BANK_DEG = 8.0
 _STEP_FRACTION = 0.25                                # fraction of a beat spent mid-snap
+_KEY_STEP = 0.02                                     # s between an animation's sampled keys
 
 
 def _smooth(t: float) -> float:
@@ -389,47 +348,52 @@ def _snap(fraction: float) -> float:
     return _smooth(fraction / _STEP_FRACTION)
 
 
-# Staged reveal: (joint, distance, start, end). The bezel stack and crystal lift clear
-# first, then the dial floats up so the face (hands running) and the movement (flipped
-# bridge-side-up in the case mouth, escapement beating) are BOTH visible.
+# Staged reveal: (part, distance along its direction, start, end). The bezel stack and
+# crystal lift clear first, then the dial floats up so the face (hands running) and the
+# movement (flipped bridge-side-up in the case mouth, escapement beating) are BOTH visible.
 _REVEAL_MOVES = (
-    ("lift_caseback_o_ring", 9.0, 0.0, 0.35),
-    ("lift_caseback_retaining_ring", 13.0, 0.03, 0.38),
-    ("lift_caseback", 18.0, 0.06, 0.42),
-    ("lift_caseback_sapphire", 24.0, 0.09, 0.45),
-    ("lift_movement_ring", 5.5, 0.0, 0.3),
-    ("lift_bezel_ring", 34.0, 0.05, 0.45),
-    ("lift_bezel_polish", 34.0, 0.05, 0.45),
-    ("lift_bezel_insert", 37.0, 0.05, 0.45),
-    ("lift_tachymeter_scale", 40.0, 0.05, 0.45),
-    ("lift_crystal", 48.0, 0.05, 0.45),
-    ("lift_crystal_gasket", 43.0, 0.05, 0.45),
-    ("lift_dial", 26.0, 0.25, 0.6),
-    ("lift_strap_12", 9.0, 0.1, 0.5),
-    ("lift_strap_6", 9.0, 0.1, 0.5),
-    ("lift_clasp", 9.0, 0.1, 0.5),
+    ("caseback_o_ring", 9.0, 0.0, 0.35),
+    ("caseback_retaining_ring", 13.0, 0.03, 0.38),
+    ("caseback", 18.0, 0.06, 0.42),
+    ("caseback_sapphire", 24.0, 0.09, 0.45),
+    ("movement_ring", 5.5, 0.0, 0.3),
+    ("bezel_ring", 34.0, 0.05, 0.45),
+    ("case_polish:bezel", 34.0, 0.05, 0.45),
+    ("bezel_insert", 37.0, 0.05, 0.45),
+    ("tachymeter_scale", 40.0, 0.05, 0.45),
+    ("crystal", 48.0, 0.05, 0.45),
+    ("crystal_gasket", 43.0, 0.05, 0.45),
+    ("dial_and_hands", 26.0, 0.25, 0.6),
+    ("strap_12", 9.0, 0.1, 0.5),
+    ("strap_6", 9.0, 0.1, 0.5),
+    ("clasp", 9.0, 0.1, 0.5),
 )
 _REVEAL_RISE = 16.0
 
 # Grand tour: extra face-stack lift while the tiers are open.
 _TOUR_HEADROOM = 32.0
-_TOUR_HEADROOM_JOINTS = ("lift_dial", "lift_crystal", "lift_crystal_gasket", "lift_bezel_ring",
-                         "lift_bezel_polish", "lift_bezel_insert", "lift_tachymeter_scale")
+_TOUR_HEADROOM_PARTS = ("dial_and_hands", "crystal", "crystal_gasket", "bezel_ring", "case_polish:bezel",
+                        "bezel_insert", "tachymeter_scale")
 
-# Showcase: the face stack lifts high, clear of the movement rising up the middle (the old
-# clip fanned it sideways), and the caseback stack and bracelet spread away.
-_SHOWCASE_LIFTS = (
-    ("lift_dial", 46.0), ("lift_bezel_ring", 54.0), ("lift_bezel_polish", 54.0), ("lift_bezel_insert", 57.0),
-    ("lift_tachymeter_scale", 60.0), ("lift_crystal", 66.0), ("lift_crystal_gasket", 63.0),
+# Showcase: the face stack clears out to the sides, the crown and pushers draw out along
+# their axes (the pushers sit at 2 and 4 o'clock), each by its offset at full lateral...
+_P2, _P4 = (0.866, 0.5, 0.0), (0.866, -0.5, 0.0)
+_SHOWCASE_LATERALS = (
+    ("dial_and_hands", (-40.0, 0.0, 12.0)), ("bezel_ring", (-48.0, 0.0, 14.0)),
+    ("case_polish:bezel", (-48.0, 0.0, 14.0)), ("bezel_insert", (-52.0, 0.0, 16.0)),
+    ("tachymeter_scale", (-56.0, 0.0, 18.0)), ("crystal", (40.0, 0.0, 12.0)), ("crystal_gasket", (35.0, 0.0, 9.0)),
+    ("crown", (13.0, 0.0, 0.0)), ("crown_tube", (9.0, 0.0, 0.0)), ("crown_o_ring", (6.0, 0.0, 0.0)),
+    *((f"pusher_{kind}:{clock}", tuple(c * reach for c in axis))
+      for clock, axis in (("2oclock", _P2), ("4oclock", _P4))
+      for kind, reach in (("cap", 11.0), ("tube", 8.0), ("spring", 5.5), ("o_ring", 3.5))),
 )
+# ... and the caseback stack and bracelet spread away, each along its direction.
 _SHOWCASE_SPREADS = (
-    ("lift_movement_ring", 7.0), ("lift_caseback_o_ring", 12.0), ("lift_caseback_retaining_ring", 17.0),
-    ("lift_caseback", 23.0), ("lift_caseback_sapphire", 30.0), ("lift_spring_bar_12", 4.0),
-    ("lift_spring_bar_6", 4.0), ("lift_strap_12", 14.0), ("lift_strap_6", 14.0), ("lift_clasp", 21.0),
+    ("movement_ring", 7.0), ("caseback_o_ring", 12.0), ("caseback_retaining_ring", 17.0),
+    ("caseback", 23.0), ("caseback_sapphire", 30.0), ("spring_bar:12", 4.0),
+    ("spring_bar:6", 4.0), ("strap_12", 14.0), ("strap_6", 14.0), ("clasp", 21.0),
 )
 _MOVEMENT_RISE = 30.0
-_CLIP_JOINTS = (*(label for label, _target, _direction in _LIFTS), *(label for label, _targets, _dz in _TIERS),
-                "movement_rise", "movement_flip")
 
 
 def _reveal_stages(r: float) -> tuple[float, float]:
@@ -447,7 +411,7 @@ def _tour_stages(t: float) -> tuple[float, float]:
 
 
 def _showcase_stages(s: float) -> tuple[float, float, float, float, float]:
-    """(lift, spread, rise, flip, fan) at showcase progress s, keyed on min(s, 1 - s) so
+    """(lateral, spread, rise, flip, fan) at showcase progress s, keyed on min(s, 1 - s) so
     the reassembly half mirrors the expansion half and the loop is seamless."""
     u = min(s, 1 - s)
     return (
@@ -459,62 +423,67 @@ def _showcase_stages(s: float) -> tuple[float, float, float, float, float]:
     )
 
 
-def _choreograph(*, run: float = 0.0, reveal: float = 0.0, showcase: float = 0.0, tour: float = 0.0) -> dict:
-    """The watch's joint values on its four timelines: ``reveal``, ``showcase`` and ``tour``
-    run 0..1, and ``run`` counts escapement loops."""
+def _escapement(run: float) -> dict:
+    """The escapement and the two trains, ``run`` escapement loops in: the balance swings
+    sinusoidally and beats on its zero crossings, the pallet fork snaps between banking
+    positions once per beat, and each beat the escape wheel takes one crisp half-tooth step
+    (12 deg, 0.2 s of the watch's time), the whole going train, the hands and the small
+    seconds stepping with it through `running`; the chronograph runs through `chrono`, its
+    runner and seconds hand one turn a loop."""
+    beats = run * _BEATS
+    beat = math.floor(beats)
+    fraction = beats - beat
+    return {
+        "balance": _BALANCE_AMPLITUDE_DEG * math.sin(math.tau * _OSCILLATIONS * run),
+        "pallet": (_PALLET_BANK_DEG if beat % 2 == 0 else -_PALLET_BANK_DEG) * (1 - 2 * _snap(fraction)),
+        "running": _ESCAPE_STEP_DEG * (beat + _snap(fraction)) / _ESCAPE_DEG_PER_S,
+        "chrono": 60.0 * run,
+    }
+
+
+def _choreograph(*, run: float = 0.0, reveal: float = 0.0, showcase: float = 0.0, tour: float = 0.0):
+    """The watch on its four timelines (``reveal``, ``showcase`` and ``tour`` run 0..1, and
+    ``run`` counts escapement loops): the escapement's values, each moved part's offset (mm,
+    watch frame), the movement's rise (mm) and its flip (deg)."""
     s = min(1.0, max(0.0, showcase))
     tour_open, tour_fan = _tour_stages(min(1.0, max(0.0, tour)))
     rv = max(reveal, tour_open)          # the tour reuses the reveal for its open and close
     run = run + 2 * tour                 # three escapement loops per tour, counting on
-    lift, spread, rise, flip, fan = _showcase_stages(s)
+    lateral, spread, rise, flip, fan = _showcase_stages(s)
     fan = max(fan, tour_fan)
 
-    # A function of time sets the same joints at every time: every clip joint, at rest 0.
-    values: dict[str, float] = {joint: 0.0 for joint in _CLIP_JOINTS}
+    offsets: dict[str, list[float]] = {}
 
-    def add(joint: str, amount: float) -> None:
-        values[joint] += amount
+    def move(part: str, vector, amount: float) -> None:
+        offset = offsets.setdefault(part, [0.0, 0.0, 0.0])
+        for axis in range(3):
+            offset[axis] += vector[axis] * amount
 
-    for joint, distance, a, b in _REVEAL_MOVES:
-        add(joint, distance * _stage(rv, a, b))
+    for part, distance, a, b in _REVEAL_MOVES:
+        move(part, _LIFTS[part], distance * _stage(rv, a, b))
     if s > 0:
-        for joint, distance in _SHOWCASE_LIFTS:
-            add(joint, distance * lift)
-        for joint, distance in _SHOWCASE_SPREADS:
-            add(joint, distance * spread)
+        for part, vector in _SHOWCASE_LATERALS:
+            move(part, vector, lateral)
+        for part, distance in _SHOWCASE_SPREADS:
+            move(part, _LIFTS[part], distance * spread)
     if tour_fan > 0:
-        for joint in _TOUR_HEADROOM_JOINTS:
-            add(joint, _TOUR_HEADROOM * tour_fan)
-    for joint, _targets, dz in _TIERS:
-        add(joint, -dz * fan)   # the old watch-frame offset, in the movement's flipped frame
+        for part in _TOUR_HEADROOM_PARTS:
+            move(part, _UP, _TOUR_HEADROOM * tour_fan)
+    for parts, dz in _TIERS:
+        for part in parts:
+            move(part, _UP, dz * fan)
 
     # The movement rises out of the case and flips in place about its own centre.
     reveal_rise, reveal_flip = _reveal_stages(rv)
-    add("movement_rise", _MOVEMENT_RISE * rise + _REVEAL_RISE * reveal_rise)
-    add("movement_flip", 180.0 * min(1.0, flip + reveal_flip))
-
-    # The escapement: the balance swings sinusoidally, beats on its zero crossings, and fans
-    # with its cock (its slide along the joint's local -Z: the watch-frame offset as is).
-    beats = run * _BEATS
-    beat = math.floor(beats)
-    fraction = beats - beat
-    values["balance"] = (_BALANCE_AMPLITUDE_DEG * math.sin(math.tau * _OSCILLATIONS * run), _BALANCE_TIER * fan)
-    # the pallet fork snaps between banking positions once per beat
-    values["pallet"] = (_PALLET_BANK_DEG if beat % 2 == 0 else -_PALLET_BANK_DEG) * (1 - 2 * _snap(fraction))
-    # The going train moves only through `running`: each beat the escape wheel takes one
-    # crisp half-tooth step (12 deg, 0.2 s of the watch's time) as the pallet snaps, and the
-    # whole train, the hands and the small seconds step with it at their ratios.
-    values["running"] = _ESCAPE_STEP_DEG * (beat + _snap(fraction)) / _ESCAPE_DEG_PER_S
-    # The chronograph runs through `chrono`: its runner and seconds hand one turn a loop.
-    values["chrono"] = 60.0 * run
-    return values
+    return (_escapement(run), offsets, _MOVEMENT_RISE * rise + _REVEAL_RISE * reveal_rise,
+            180.0 * min(1.0, flip + reveal_flip))
 
 
 def _running(t: float) -> dict:
-    return _choreograph(run=t / 6)
+    return _escapement(t / 6)
 
 
-def _reveal(t: float) -> dict:
+def _reveal(t: float):
     progress = t / 12
     # A trapezoid: open, hold with the face and escapement both running in view, close.
     if progress < 0.35:
@@ -526,14 +495,42 @@ def _reveal(t: float) -> dict:
     return _choreograph(reveal=r, run=progress)
 
 
-def _showcase(t: float) -> dict:
+def _showcase(t: float):
     progress = t / 12
     return _choreograph(showcase=progress, run=progress)
 
 
-def _grand_tour(t: float) -> dict:
+def _grand_tour(t: float):
     progress = t / 24
     return _choreograph(tour=progress, run=progress)
+
+
+def _held_keys(times: list[float], values: list) -> list[tuple[float, object]]:
+    """``values`` at ``times`` as keys, dropping a key whose neighbours hold its value."""
+    last = len(times) - 1
+    return [(times[i], values[i]) for i in range(len(times))
+            if i in (0, last) or not values[i - 1] == values[i] == values[i + 1]]
+
+
+def _exploded_clip(root, name: str, duration: float, timeline) -> None:
+    """The GLB animation ``name``: ``timeline(t)`` sampled every ``_KEY_STEP`` as LINEAR keys,
+    the escapement posed at each, every moved part translated, and the movement rising and
+    turning about X through its own centre. The tiers' translations are inside the movement,
+    so its flip carries them, as the old clip composed them."""
+    show = animation(root, name, duration=duration)
+    count = round(duration / _KEY_STEP)
+    times = [duration * i / count for i in range(count + 1)]
+    frames = [timeline(t) for t in times]
+    show.pose(at={t: frame[0] for t, frame in zip(times, frames)}, interpolation="LINEAR")
+    for part in sorted({part for frame in frames for part in frame[1]}):
+        offsets = [tuple(frame[1].get(part, (0.0, 0.0, 0.0))) for frame in frames]
+        if any(any(offset) for offset in offsets):
+            show.channel(part, path="translation", keys=_held_keys(times, offsets), interpolation="LINEAR")
+    rises = [(0.0, 0.0, frame[2]) for frame in frames]
+    turns = [(math.sin(math.radians(frame[3]) / 2), 0.0, 0.0, math.cos(math.radians(frame[3]) / 2)) for frame in frames]
+    show.channel("movement", path="translation", keys=_held_keys(times, rises), interpolation="LINEAR")
+    show.channel("movement", path="rotation", keys=_held_keys(times, turns), about=_MOVEMENT_CENTER,
+                 interpolation="LINEAR")
 
 
 # ---------------------------------------------------------------------------
@@ -564,8 +561,7 @@ def _movement_ring():
     return ring
 
 
-@xbf(out="../XBF/moonwatch.xbf")
-@glb(out="../XBF/moonwatch.glb")
+@model
 def moonwatch():
     case = watch.case()
 
@@ -578,29 +574,22 @@ def moonwatch():
     # The movement's own joints, authored in its frame before it is cased.
     caliber_parts = _Parts(caliber)
     _train(caliber_parts, caliber, chrono)
-    _tiers(caliber_parts, caliber)
     # cased: local (x, y, z) -> watch (x, -y, MOVT_Z_OFFSET - z)
     caliber.location = bd.Location((0, 0, S.MOVT_Z_OFFSET), (1, 0, 0), 180)
     movement = bd.Compound(children=[caliber], label="movement")
-    flip = bd.Axis(_MOVEMENT_CENTER, (1.0, 0.0, 0.0))
-    joint = bd.RevoluteJoint("movement_flip", movement, axis=flip, angular_range=(0.0, 180.0))
-    bd.RigidJoint("movement_flip", caliber, joint.location)
 
     root = bd.Compound(children=[case, dial, bracelet, movement, _movement_ring()], label="moonwatch")
     parts = _Parts(root)
     _hands(parts, dial)
     _crown_and_pushers(parts)
-    _lifts(parts)
-    rise = bd.Axis((0.0, 0.0, 0.0), _UP)
-    joint = bd.LinearJoint("movement_rise", parts["#case_middle"], axis=rise, linear_range=(0.0, 60.0))
-    bd.RigidJoint("movement_rise", movement, _held(parts["#case_middle"], joint))
 
     _couplings_and_poses(root)
-    # Each clip ends on the pose it starts from; a player repeats it (a motion has no loop).
+    # Each clip ends on the pose it starts from; a player repeats it (neither a motion nor
+    # an animation has a loop).
     configuration_sequence(root, "running", _running, duration=6)
-    configuration_sequence(root, "reveal", _reveal, duration=12)
-    configuration_sequence(root, "showcase", _showcase, duration=12)
-    configuration_sequence(root, "grand_tour", _grand_tour, duration=24)
+    _exploded_clip(root, "reveal", 12, _reveal)
+    _exploded_clip(root, "showcase", 12, _showcase)
+    _exploded_clip(root, "grand_tour", 24, _grand_tour)
     return root
 
 

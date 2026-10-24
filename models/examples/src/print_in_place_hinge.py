@@ -17,7 +17,7 @@ Clearances target a tuned 0.4 mm-nozzle FDM printer:
 - 0.2 mm radial scallop between each knuckle and the opposite plate
 """
 from __future__ import annotations
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 
 import build123d as bd
 
@@ -137,7 +137,7 @@ def _make_leaf_b():
     return leaf
 
 
-@xbf(out="../XBF/print_in_place_hinge.xbf")
+@model
 def print_in_place_hinge():
     """Return the print-in-place hinge as a labeled two-leaf assembly compound."""
     leaf_a = _make_leaf_a()

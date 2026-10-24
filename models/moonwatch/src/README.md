@@ -1,22 +1,23 @@
 # moonwatch models
 
-Every document of `models/moonwatch`, ported to `cadgen.engine`:
+Every model of `models/moonwatch`, on cadgen 0.8 (each a `@model`; a run writes nothing):
 
 | Script               | What it is                                | Description                                                     |
 |----------------------|-------------------------------------------|-----------------------------------------------------------------|
-| case.py              | model -> XBF/case.xbf                     | Case cluster: middle, bezel stack, crystal, caseback, crown, pushers, lugs |
-| dial.py              | model -> XBF/dial.xbf                     | Three-register step dial, applied indices, printed tracks, full hand stack at 10:09:38 |
-| bracelet.py          | model -> XBF/bracelet.xbf                 | Flat three-link bracelet, end links, fold-over clasp            |
-| finishing_sampler.py | model -> XBF/finishing_sampler.xbf        | Standing coupon exercising the shared finishing vocabulary      |
-| movement.py          | model -> XBF/movement.xbf                 | Complete movement = movement_base + keyless_works + chrono_works (sub-assemblies) |
+| case.py              | model                                     | Case cluster: middle, bezel stack, crystal, caseback, crown, pushers, lugs |
+| dial.py              | model                                     | Three-register step dial, applied indices, printed tracks, full hand stack at 10:09:38 |
+| bracelet.py          | model                                     | Flat three-link bracelet, end links, fold-over clasp            |
+| finishing_sampler.py | model                                     | Standing coupon exercising the shared finishing vocabulary      |
+| movement.py          | model                                     | Complete movement = movement_base + keyless_works + chrono_works (sub-assemblies) |
 | movement_base.py     | `@memo` layer of the movement             | Main plate, barrel, going train, bridges, escapement, balance  |
 | keyless_works.py     | `@memo` layer of the movement             | Stem, winding/sliding pinions, setting lever, yoke, motion works |
 | chrono_works.py      | `@memo` layer of the movement             | Column wheel, levers, lateral clutch, runners, hammers          |
-| moonwatch.py         | model -> XBF/moonwatch.xbf, XBF/moonwatch.glb | The full watch: case + dial/hands + movement + bracelet, its mechanism, and its four clips |
+| moonwatch.py         | model                                     | The full watch: case + dial/hands + movement + bracelet, its mechanism, and its four clips |
 
 Build from this folder: `python case.py`, `python dial.py`, `python bracelet.py`,
-`python finishing_sampler.py`, `python movement.py`, `python moonwatch.py`. The models'
-files are the only files the builds write.
+`python finishing_sampler.py`, `python movement.py`, `python moonwatch.py`. A build
+writes nothing; `cadgen export <id> GLB/moonwatch.glb` writes the watch's GLB, its four
+clips baked, on request.
 
 The case, dial and bracelet are plain functions in `lib/watch.py` (each with its
 finishes set), which their models return and the full watch composes; `moonwatch.py`
@@ -75,34 +76,31 @@ build123d joints, placed where the parts stand and paired by label:
 
 - **Mates.** The six hands turn on the dial (revolute; lume, hubs and the chrono cap
   fastened to theirs), the going train and the pallet fork in the movement (revolute),
-  the balance (cylindrical: its swing, and the tier slide the fan carries it by with its
-  cock; pinions, pallet stones, arbor, staff, impulse jewel and the 16 timing screws
-  fastened), the chronograph runner and coupling wheel in the chronograph works
+  the balance (revolute; pinions, pallet stones, arbor, staff, impulse jewel and the 16
+  timing screws fastened), the chronograph runner and coupling wheel in the chronograph works
   (revolute), the crown on the case middle (cylindrical: winding turn and setting
-  travel) and the two pushers (prismatic, inward along their axes). The stem is no
-  longer fastened to the crown: it stays with the movement, which the clips lift out of
-  the case.
+  travel) and the two pushers (prismatic, inward along their axes). The stem is not
+  fastened to the crown: it stays with the movement, which the clips lift out of the
+  case.
 - **Couplings and poses.** The gear trains are two couplings, `running` (seconds of
   time) and `chrono` (seconds of chronograph running), each a constraint: its wheels
   and hands move only through it, and its range is what their limits allow (an hour of
   `running`, half an hour of `chrono`, either way). The old poses are configurations
   (`one_minute`, `half_hour`, `chrono_at_10min`, `start_pressed`, `reset_pressed`,
   `winding`, `setting`; `rest` is the watch as built).
-- **The clips' joints.** Each part or group the old clips translated slides on a
-  prismatic joint from the case middle along its own direction (`lift_*`); the
-  movement rises on one (`movement_rise`) and flips on a revolute about X through its
-  centre (`movement_flip`, on an inner `caliber` compound); its tiers fan on prismatic
-  joints in its own frame (`tier_*`, each group's first part the lead, the rest
-  fastened to it).
-- **Clips.** `running`, `reveal`, `showcase` and `grand_tour` are motions, functions of
-  time over those joints and the two couplings, which the declared `@glb` bakes into
-  clips (animation is a GLB export's alone; the xbf keeps the definitions). A motion
-  has no loop: a player repeats it, and every part ends a clip where it started but the
-  going train and the chronograph's recorders, which keep the watch's time. A joint
-  carries one direction: where the old showcase moved the face stack sideways and the
-  reveal lifted it, both lift it now (the showcase higher, clear of the rising
-  movement), and the crown and pushers, whose joints are their own travel, stay in the
-  case.
+- **Clips.** `running` is a motion, a function of time over the escapement and the two
+  couplings. `reveal`, `showcase` and `grand_tour` are GLB animations (`cadgen.gltf`):
+  the escapement and the trains posed at every key, each part or group the old clips
+  translated moved along its own vector, the movement's tiers fanned (translations inside
+  the movement, so its flip carries them, as the old clip composed them), and the
+  movement rising out of the case and turning 180 degrees about X through its centre.
+  Nothing but the mechanism is a joint. A GLB of the watch carries all four as clips.
+  Neither a motion nor an animation has a loop: a player repeats it, and every part ends
+  a clip where it started but the going train and the chronograph's recorders, which
+  keep the watch's time. The animations play the old clips' tables: the reveal's lifts,
+  the showcase's sideways clearing of the dial, bezel stack and crystal, its crown, crown
+  tube and o-ring and the two pushers' parts drawn out along their axes, the caseback
+  stack and bracelet spread, and the tour's headroom lift.
 - **The escapement** (every clip runs it): the balance swings, the pallet fork snaps
   between its banks each beat, and each beat the escape wheel takes one half-tooth step
   (12 deg). The old clip then crept the fourth and third wheels 144 deg a loop and the
@@ -111,22 +109,11 @@ build123d joints, placed where the parts stand and paired by label:
   watch's time a beat, 1.6 s a 6 s clip (the small seconds 9.6 deg, the minute hand
   0.16 deg). The chronograph runs through `chrono`, 60 s a clip: its runner and seconds
   hand one turn, as before, and now its minute (12 deg) and hour recorders with them.
-- **The tier fan** (`showcase`, `grand_tour`) runs as the old clips meant it. Their tier
-  offsets are in the cased watch frame, negative toward the caseback (the bridge side),
-  which the movement's flip turns upward; the tier and balance joints slide in the
-  movement's own frame, which the casing flips (watch z = MOVT_Z_OFFSET - local z), so
-  each slides by the offset's negative. Fixed 2026-10-22: the first port slid them by
-  the offset itself, so after the flip the bridge-side tiers fell through the main plate
-  into the case and the keyless works rose into it. Now, open, the barrel, the pallet,
-  train and barrel bridges, the winding, the balance cock and the chronograph works stand
-  above the plate in that order (the chronograph works' top about 48 mm up, the plate's
-  13-17 mm), the keyless works about 7 mm below it, and no tier meets another; the face
-  stack's extra 32 mm in `grand_tour` clears the chronograph works. The old fan also
-  lifted the going train and the pallet fork 5 mm: the train's wheels move only through
-  `running`, so they take no slide and stay on the plate, and the fork with them, while
-  the bridges lift off them. As in the old clip, the chronograph works fan as one tier:
-  the hour recorder they carry on the dial side passes up through the plate and the
-  winding tier while the fan opens and closes.
+- **The tier fan** (`showcase`, `grand_tour`) runs as the old clips had it: each tier's
+  offset in the cased watch frame, negative toward the caseback (the bridge side), which
+  the movement's flip turns upward, so open, the going train and pallet fork, the barrel,
+  the pallet, train and barrel bridges, the winding, the balance with its cock and the
+  chronograph works stand above the plate in that order, and the keyless works below it.
 
 New finishes for the dial, hands and bracelet follow the same rules as the case's:
 `black_lacquer` and `lume_plot` are own materials (coatings, no density),

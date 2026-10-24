@@ -5,7 +5,7 @@ calls in its body. A `@memo` function: an edit that does not reach its code
 replays it from the worker's memory instead of running it.
 """
 
-from cadgen.engine import memo
+from cadgen import memo
 
 from lib import brakes as brakes_lib
 

@@ -244,7 +244,7 @@ def _zero_deg() -> dict[str, float]:
 
 
 def _relaxed_deg() -> dict[str, float]:
-    """Gentle natural curl: the pose lyra.xbf is built in (its as-built configuration)."""
+    """Gentle natural curl: the pose the lyra model is built in (its as-built configuration)."""
     pose = _zero_deg()
     curl = {
         "index": (10.0, 14.0, 8.0),

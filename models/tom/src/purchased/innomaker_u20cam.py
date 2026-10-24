@@ -10,7 +10,7 @@ Origin: PCB front mounting face, optical axis +Z, cable exits toward -Y.
 Pinned STEP input; see STEP/imported/README.md for provenance.
 """
 from pathlib import Path
-from cadgen.engine import read_step
+from cadgen import read_step
 INPUT=Path(__file__).resolve().parents[2]/"STEP/imported/electronics/innomaker_u20cam.step"
 
 def innomaker_u20cam():

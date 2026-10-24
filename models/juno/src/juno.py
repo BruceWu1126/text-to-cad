@@ -24,7 +24,7 @@ Chain offsets, travel and pose angles live in lib/chain.py, which
 
 The models of this script:
 
-- `juno` (XBF/juno.xbf): the robot. Its 28 links are placed by their joints,
+- `juno`: the robot. Its 28 links are placed by their joints,
   connected at the athletic ready stance: that stance is the as-built
   configuration, every joint's value its absolute angle, every range the
   URDF's travel (the ankle pitch's widened for the run and the jump), and
@@ -32,7 +32,8 @@ The models of this script:
   motions (functions of time over the joints, lib/gaits.py), the pelvis
   riding `pelvis_lift`, a vertical slide between the world and the pelvis.
 - one model per URDF link (`pelvis` ... `hand_right`): the link alone in its
-  part-local frame, whose 3MF ../juno.urdf references (XBF/<link>.3mf).
+  part-local frame, whose 3MF ../juno.urdf references (3MF/<link>.3mf, which
+  exports.py writes).
 
 Every link is made once a build. `links()` is the one `@memo` stage: all 28
 links, ~17 s of kernel work, which the robot and each link model call. The
@@ -42,8 +43,8 @@ and every other call is a new placement of its result.
 
 from __future__ import annotations
 
+from cadgen import memo, model
 from cadgen.ap242 import configuration_sequence, mechanism_state
-from cadgen.engine import memo, threemf, xbf
 
 import build123d as bd
 
@@ -145,7 +146,7 @@ def _attach(parent, child, name, origin, axis, xref, angle):
     revolute_attach(parent, child, name, origin, axis, xref, (0, 0, 0), axis, xref, angle, RANGES[name])
 
 
-@xbf(out="../XBF/juno.xbf")
+@model
 def juno():
     link = links()
     for name, shape in link.items():
@@ -207,170 +208,142 @@ def juno():
 # --- the URDF's link meshes: each link alone, in its part-local frame -------------------------
 
 
-@xbf(out="../XBF/pelvis.xbf")
-@threemf(out="../XBF/pelvis.3mf")
+@model
 def pelvis():
     return links()["pelvis"]
 
 
-@xbf(out="../XBF/torso.xbf")
-@threemf(out="../XBF/torso.3mf")
+@model
 def torso():
     return links()["torso"]
 
 
-@xbf(out="../XBF/neck_collar.xbf")
-@threemf(out="../XBF/neck_collar.3mf")
+@model
 def neck_collar():
     return links()["neck_collar"]
 
 
-@xbf(out="../XBF/head.xbf")
-@threemf(out="../XBF/head.3mf")
+@model
 def head():
     return links()["head"]
 
 
-@xbf(out="../XBF/hip_bracket_left.xbf")
-@threemf(out="../XBF/hip_bracket_left.3mf")
+@model
 def hip_bracket_left():
     return links()["hip_bracket_left"]
 
 
-@xbf(out="../XBF/hip_carrier_left.xbf")
-@threemf(out="../XBF/hip_carrier_left.3mf")
+@model
 def hip_carrier_left():
     return links()["hip_carrier_left"]
 
 
-@xbf(out="../XBF/thigh_left.xbf")
-@threemf(out="../XBF/thigh_left.3mf")
+@model
 def thigh_left():
     return links()["thigh_left"]
 
 
-@xbf(out="../XBF/shin_left.xbf")
-@threemf(out="../XBF/shin_left.3mf")
+@model
 def shin_left():
     return links()["shin_left"]
 
 
-@xbf(out="../XBF/ankle_link_left.xbf")
-@threemf(out="../XBF/ankle_link_left.3mf")
+@model
 def ankle_link_left():
     return links()["ankle_link_left"]
 
 
-@xbf(out="../XBF/foot_left.xbf")
-@threemf(out="../XBF/foot_left.3mf")
+@model
 def foot_left():
     return links()["foot_left"]
 
 
-@xbf(out="../XBF/shoulder_pod_left.xbf")
-@threemf(out="../XBF/shoulder_pod_left.3mf")
+@model
 def shoulder_pod_left():
     return links()["shoulder_pod_left"]
 
 
-@xbf(out="../XBF/yaw_housing_left.xbf")
-@threemf(out="../XBF/yaw_housing_left.3mf")
+@model
 def yaw_housing_left():
     return links()["yaw_housing_left"]
 
 
-@xbf(out="../XBF/bicep_left.xbf")
-@threemf(out="../XBF/bicep_left.3mf")
+@model
 def bicep_left():
     return links()["bicep_left"]
 
 
-@xbf(out="../XBF/forearm_left.xbf")
-@threemf(out="../XBF/forearm_left.3mf")
+@model
 def forearm_left():
     return links()["forearm_left"]
 
 
-@xbf(out="../XBF/wrist_carrier_left.xbf")
-@threemf(out="../XBF/wrist_carrier_left.3mf")
+@model
 def wrist_carrier_left():
     return links()["wrist_carrier_left"]
 
 
-@xbf(out="../XBF/hand_left.xbf")
-@threemf(out="../XBF/hand_left.3mf")
+@model
 def hand_left():
     return links()["hand_left"]
 
 
-@xbf(out="../XBF/hip_bracket_right.xbf")
-@threemf(out="../XBF/hip_bracket_right.3mf")
+@model
 def hip_bracket_right():
     return links()["hip_bracket_right"]
 
 
-@xbf(out="../XBF/hip_carrier_right.xbf")
-@threemf(out="../XBF/hip_carrier_right.3mf")
+@model
 def hip_carrier_right():
     return links()["hip_carrier_right"]
 
 
-@xbf(out="../XBF/thigh_right.xbf")
-@threemf(out="../XBF/thigh_right.3mf")
+@model
 def thigh_right():
     return links()["thigh_right"]
 
 
-@xbf(out="../XBF/shin_right.xbf")
-@threemf(out="../XBF/shin_right.3mf")
+@model
 def shin_right():
     return links()["shin_right"]
 
 
-@xbf(out="../XBF/ankle_link_right.xbf")
-@threemf(out="../XBF/ankle_link_right.3mf")
+@model
 def ankle_link_right():
     return links()["ankle_link_right"]
 
 
-@xbf(out="../XBF/foot_right.xbf")
-@threemf(out="../XBF/foot_right.3mf")
+@model
 def foot_right():
     return links()["foot_right"]
 
 
-@xbf(out="../XBF/shoulder_pod_right.xbf")
-@threemf(out="../XBF/shoulder_pod_right.3mf")
+@model
 def shoulder_pod_right():
     return links()["shoulder_pod_right"]
 
 
-@xbf(out="../XBF/yaw_housing_right.xbf")
-@threemf(out="../XBF/yaw_housing_right.3mf")
+@model
 def yaw_housing_right():
     return links()["yaw_housing_right"]
 
 
-@xbf(out="../XBF/bicep_right.xbf")
-@threemf(out="../XBF/bicep_right.3mf")
+@model
 def bicep_right():
     return links()["bicep_right"]
 
 
-@xbf(out="../XBF/forearm_right.xbf")
-@threemf(out="../XBF/forearm_right.3mf")
+@model
 def forearm_right():
     return links()["forearm_right"]
 
 
-@xbf(out="../XBF/wrist_carrier_right.xbf")
-@threemf(out="../XBF/wrist_carrier_right.3mf")
+@model
 def wrist_carrier_right():
     return links()["wrist_carrier_right"]
 
 
-@xbf(out="../XBF/hand_right.xbf")
-@threemf(out="../XBF/hand_right.3mf")
+@model
 def hand_right():
     return links()["hand_right"]
 

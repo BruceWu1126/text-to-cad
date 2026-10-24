@@ -1,10 +1,11 @@
 # drawings
 
-The eight scripts of `models/drawings/src`, ported to `cadgen.engine`: a drawing is
-a model whose body returns 2D build123d geometry, and `@dxf` declares its DXF,
-written by build123d's own DXF exporter from the model's planar document.
+The eight scripts of `models/drawings/src`, on cadgen 0.8: a drawing is a `@model`
+whose body returns 2D build123d geometry, and `exports.py` writes the DXF of each, by
+build123d's own DXF exporter from the model's planar document: this corpus's example of
+DXF deliverables (flat patterns among them) kept current by an `exports.py`.
 
-| Script | Artifact | What it is |
+| Script | DXF (`exports.py`) | What it is |
 | --- | --- | --- |
 | `angled_tab.py` | `DXF/angled_tab.dxf` | Plate with a corner gusset tab on a **45° bend line** (`BEND`) |
 | `cabinet_panel_drawing.py` | `DXF/cabinet_panel_drawing.dxf` | Workshop **drawing**: three views on `CUT`, engraved dimension callouts and title block on `ENGRAVE` |
@@ -15,12 +16,13 @@ written by build123d's own DXF exporter from the model's planar document.
 | `multi_bend_test_panel.py` | `DXF/multi_bend_test_panel.dxf` | **Four bends in three orientations** on one blank |
 | `u_channel_bracket.py` | `DXF/u_channel_bracket.dxf` | U-channel flat pattern with **two parallel** bend lines |
 
-Build from this folder, any one:
+Build from this folder, any one, then write every DXF (`../DXF/`, gitignored):
 
 ```
 python gasket_plate.py
 python cabinet_panel_drawing.py
-python -m cadgen.engine snapshot ../DXF/cabinet_panel_drawing.dxf cabinet.png
+python exports.py
+cadgen snapshot ../DXF/cabinet_panel_drawing.dxf cabinet.png
 ```
 
 Each bend fixture is there for a case:
@@ -42,9 +44,8 @@ geometry, which an engrave layer allows.
 
 The port:
 
-- `from cadgen import dxf` -> `from cadgen.engine import dxf`; cadgen's build123d proxy
-  -> `import build123d as bd`. `@dxf(out=...)` is unchanged; the `__main__` call goes
-  (running the script builds its models).
+- `@dxf(out=...)` -> `@model`, the DXF written by `exports.py`; cadgen's build123d proxy
+  -> `import build123d as bd`. Each script's `__main__` calls its model.
 - Layers: the `{"CUT": ..., "BEND": ...}` dict becomes a compound of labelled children,
   a part per layer (`plate.label, bend.label = "CUT", "BEND"`); a layer of several
   shapes is one part of them all (`bd.Compound([line, line])`: the bends of

@@ -6,16 +6,16 @@ manufacture, propulsion, testing, or operational engineering.
 The models of this script, each built from lib/falcon_common.py's vehicle
 (`build_vehicle`) and the vendored Merlin 1D library (lib/merlin_common.py):
 
-- `falcon_heavy` (XBF/falcon_heavy.xbf): the full-stack exterior. Three cores
+- `falcon_heavy`: the full-stack exterior. Three cores
   with 27 linked Merlin 1D instances (octaweb 8+1 per core, reduced decorative
   detail), MVac-derivative second stage, interstage, fairing, grid fins,
   landing legs, raceways, attach hardware.
-- `falcon_heavy_cutaway` (XBF/falcon_heavy_cutaway.xbf): center core, second
+- `falcon_heavy_cutaway`: center core, second
   stage and fairing sectioned 270 deg (opening +Y) with schematic interiors:
   LOX/RP-1 tank volumes, transfer tube, domes, COPV-like placeholders, octaweb
   frames, avionics/separation placeholders, payload adapter + payload
   placeholder. All internals schematic and non-functional.
-- `falcon_heavy_exploded` (XBF/falcon_heavy_exploded.xbf): boosters translated
+- `falcon_heavy_exploded`: boosters translated
   outboard, second stage and fairing lifted, with translucent guide rods.
   Offsets presentational only.
 
@@ -25,7 +25,7 @@ project's RESEARCH.md, PROVENANCE.md and DIMENSIONS.md (models/falcon_heavy).
 
 from __future__ import annotations
 
-from cadgen.engine import xbf
+from cadgen import model
 
 import build123d as bd
 
@@ -39,21 +39,21 @@ OFFSETS = {
 }
 
 
-@xbf(out="../XBF/falcon_heavy.xbf")
+@model
 def falcon_heavy():
     groups = fc.build_vehicle()
     return bd.Compound(obj=groups, children=groups,
                        label="falcon_heavy__educational_public_source_reconstruction")
 
 
-@xbf(out="../XBF/falcon_heavy_cutaway.xbf")
+@model
 def falcon_heavy_cutaway():
     groups = fc.build_vehicle(cutaway=True)
     return bd.Compound(obj=groups, children=groups,
                        label="falcon_heavy_cutaway__educational_nonfunctional")
 
 
-@xbf(out="../XBF/falcon_heavy_exploded.xbf")
+@model
 def falcon_heavy_exploded():
     groups = []
     for g in fc.build_vehicle():

@@ -6,7 +6,7 @@ plate's bridge-side surface.
 """
 
 import build123d as bd
-from cadgen.engine import memo
+from cadgen import memo
 
 from lib import materials
 from lib import mvt_base as M
@@ -17,7 +17,3 @@ def movement_base():
     parts = materials.apply_materials(M.build_base(), "movement_base")
     compound = bd.Compound(children=parts, label="movement_base")
     return compound
-
-
-if __name__ == "__main__":
-    movement_base()

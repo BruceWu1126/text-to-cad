@@ -380,13 +380,14 @@ For manual skill prompts and model review, work inside this repository and keep
 samples and CAD/robot-description artifacts under `models/`. Create a scratch
 project in the fixture bucket it belongs in: a standalone part
 goes in the `models/examples/` cad-project, an assembly gets its own group in
-`models/assemblies/` (`src/<assembly>/`, documents in `XBF/<assembly>/`), a
-drawing goes in `models/drawings/` — script in `src/`, files declared into a
-format folder. For example:
+`models/assemblies/` (`src/<assembly>/`), a drawing goes in `models/drawings/` —
+each a `@model` script in `src/`; a run writes nothing, and files are exported on
+request into the project's gitignored `STEP/`, `STL/`, `GLB/`, `3MF/` or `DXF/`.
+For example:
 
 ```bash
-$EDITOR models/examples/src/my_test.py     # @xbf(out="../XBF/my_test.xbf")
-python models/examples/src/my_test.py
+$EDITOR models/examples/src/my_test.py     # @model def my_test(): ...
+python models/examples/src/my_test.py      # prints its id: and view:
 ```
 
 Then start your agent with `/path/to/text-to-cad` as the working directory and

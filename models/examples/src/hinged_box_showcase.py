@@ -3,22 +3,21 @@
 The lid's hinge is the mechanism (a revolute joint, two configurations, one motion): the xbf
 keeps it, and every GLB of the box carries the motion `open_close` as a clip. The showcase is the
 GLB's own (`animation`): the lid opens through the mechanism's forward kinematics, the feet drop
-out one after the other, the latch spins off and is hidden. The xbf never holds it; the GLB this
-function declares bakes it when it is written. `cadgen export ../XBF/hinged_box_showcase.xbf
-box.glb` writes a GLB with the motion alone.
+out one after the other, the latch spins off and is hidden. The document never holds it; a GLB
+exported while the model is live bakes it (`cadgen export <id> GLB/hinged_box_showcase.glb`, the
+id its run prints); one exported from a saved xbf carries the motion alone.
 """
 
 import build123d as bd
 
-from cadgen import glb, xbf
+from cadgen import model
 from cadgen.ap242 import configuration_sequence, mechanism_state
 from cadgen.gltf import animation
 
-HINGE = bd.Axis((-40, 0, 30), (0, -1, 0))  # +angle lifts the lid
+HINGE = ((-40, 0, 30), (0, -1, 0))  # the hinge axis, point and direction: +angle lifts the lid
 
 
-@xbf(out="../XBF/hinged_box_showcase.xbf")
-@glb(out="../XBF/hinged_box_showcase.glb")
+@model
 def hinged_box_showcase():
     body = bd.Box(80, 50, 30, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
     lid = bd.Pos(0, 0, 30) * bd.Box(80, 50, 6, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
@@ -28,8 +27,9 @@ def hinged_box_showcase():
     body.label, lid.label, latch.label = "body", "lid", "latch"
     for at, foot in enumerate(feet, 1):
         foot.label = f"foot_{at}"
-    bd.RevoluteJoint("hinge", body, axis=HINGE, angular_range=(0, 110))
-    bd.RigidJoint("hinge", lid, bd.Plane(origin=HINGE.position, z_dir=HINGE.direction).location)
+    hinge = bd.Axis(*HINGE)
+    bd.RevoluteJoint("hinge", body, axis=hinge, angular_range=(0, 110))
+    bd.RigidJoint("hinge", lid, bd.Plane(origin=hinge.position, z_dir=hinge.direction).location)
     body.joints["hinge"].connect_to(lid.joints["hinge"], angle=0)  # as built: shut
     box = bd.Compound(children=[body, lid, latch, bd.Compound(children=feet, label="feet")],
                       label="hinged_box_showcase")

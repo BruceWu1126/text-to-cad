@@ -9,7 +9,7 @@ Its mates become build123d joints on the parts (lib.joints), their presets
 configurations, the control showcase's three clips motions (lib.tom_showcase), and
 its finishes materials (lib.materials).
 """
-from cadgen.engine import xbf
+from cadgen import model
 
 import sys
 
@@ -35,7 +35,7 @@ KINEMATICS=kinematics()
 # The occurrence ids the old showcase clips addressed are still pinned and checked below;
 # the clips play control/ik/showcase.py's validated performances on the joints
 # (lib/tom_showcase.py).
-@xbf(out='../XBF/tom.xbf')
+@model
 def tom():
     # Imported stock is read once. The stock recipe retains vendor BREP and
     # combines layout transforms without building intermediate native arms.

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 from math import asin, cos, hypot, radians, sin, tau
 
 import build123d as bd
@@ -178,7 +178,7 @@ def _blade_root_edges(part):
     return edges
 
 
-@xbf(out="../XBF/centrifugal_impeller.xbf")
+@model
 def centrifugal_impeller():
     """Return a single solid centrifugal impeller in millimeters."""
     total_height = BACKPLATE_THICKNESS + HUB_HEIGHT_ABOVE_BACKPLATE

@@ -18,7 +18,7 @@ This is checked fit geometry, not a qualified clamp load rating.
 """
 from pathlib import Path
 import build123d as b
-from cadgen.engine import read_step
+from cadgen import read_step
 from lib.booleans import as_single_shape as one
 from lib.materials import ALUMINUM_5052_COLOR, SCREW_COLOR
 from base.common_base_plate import common_base_plate

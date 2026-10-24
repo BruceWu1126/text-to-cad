@@ -12,7 +12,7 @@ import numpy as np
 from dataclasses import asdict
 from lib.link_assembly import location_from_transform
 import build123d as bd
-from cadgen.engine import memo, read_xbf
+from cadgen import memo, read_xbf
 from lib.mates import revolute, fastened
 from lib.booleans import as_single_shape as one
 from lib import horn_cap, sheet_rule_scs as sheet
@@ -24,7 +24,7 @@ from lib.lower_link_base import ARM_Z_SHIFT, SERVO_PAD_Z
 
 # Tom rev3's production arm (recovered/tom_rev3/tom.step): its kinematics sidecar, and the
 # occurrences this stage uses, each extracted once to parts/<occurrence>.xbf at its place in the
-# arm (parts/README.md has the commands). The rest of the 354 MB file is never read.
+# arm (src/rev3_parts.py: a model per occurrence, and the export). The rest of the 354 MB file is never read.
 BASELINE=Path(__file__).resolve().parents[2]/'STEP/imported/recovered/tom_rev3/tom.step'
 REV3_PARTS=Path(__file__).resolve().parents[2]/'STEP/imported/parts'
 REV3_OCCURRENCES=('shoulder_yaw_servo','m8_thumbscrew','shoulder_yaw_assembly',
@@ -547,5 +547,3 @@ def tom2():
     connector=[p.moved(bd.Pos(0,0,-LINK_HEIGHT_REDUCTION_MM)) for p in make_connector()]
     result=integrate(parts+connector,original_kinematics())
     return bd.Compound(children=result,label='tom2')
-
-if __name__=='__main__':tom2()

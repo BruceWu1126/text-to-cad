@@ -296,12 +296,24 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
             raise WorkerGone(f"the worker for {script} did not start")
         self.pid = ready["ready"]
 
+    def _tell(self, message: dict[str, Any]) -> None:
+        """``message`` to the client the running build answers, while it is there. A client gone
+        (killed, or hung up) drops its sink, and the worker's output is read on all the same: a
+        worker writing to a pipe nobody reads blocks, its build never ends, and the script's next
+        run waits on it for ever."""
+        sink = self.sink
+        if sink is None:
+            return
+        try:
+            sink(message)
+        except (OSError, ValueError):
+            if self.sink is sink:
+                self.sink = None
+
     def _stderr(self) -> None:
         assert self.process.stderr is not None
         for line in iter(self.process.stderr.readline, b""):
-            sink = self.sink
-            if sink is not None:
-                sink({"log": line.decode("utf-8", "replace").rstrip("\n"), "stream": "model"})
+            self._tell({"log": line.decode("utf-8", "replace").rstrip("\n"), "stream": "model"})
 
     def _reader(self) -> None:
         stream = self.process.stdout
@@ -316,15 +328,11 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
                 size = int(message.get("bytes") or 0)
                 payload = _read_exactly(stream, size) if size else b""
                 if "log" in message:
-                    sink = self.sink
-                    if sink is not None:
-                        sink({"log": message["log"]})
+                    self._tell({"log": message["log"]})
                 elif "progress" in message:
                     frame = self.progress = message["progress"]
                     self.touched.update(frame.get("outputs") or ())
-                    sink = self.sink
-                    if sink is not None:
-                        sink({"progress": frame})
+                    self._tell({"progress": frame})
                     try:
                         self.on_progress(self, frame)
                     except Exception:  # noqa: BLE001 - where a build is never fails it

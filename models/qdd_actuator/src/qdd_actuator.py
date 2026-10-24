@@ -21,16 +21,18 @@ The same parameterized builder produces the assembled model (explode=0) and an
 exploded technical layout (explode=1) used by qdd_actuator_exploded.py. The
 exploded translations are documented per-part static Locations along +/-Z.
 
-The assembled model carries the mechanism: every mount a slide along the drive
-axis, every turning member a revolute joint geared by the `drive` coupling, its
-two configurations, and the old clips as motions -- `drive`, `inspect` and
-`teardown`, which set `drive` and slide the modules to their stations.
+The assembled model carries the mechanism: every mount a rigid fastening, every
+turning member a revolute joint geared by the `drive` coupling, its two
+configurations, and the old `drive` clip as a motion. The old `inspect` and
+`teardown` clips, which run the drive while the stack opens to its stations, are
+GLB animations (`cadgen.gltf`).
 """
 
 from __future__ import annotations
 
+from cadgen import Material, materials, model
 from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state
-from cadgen.engine import Material, materials, xbf
+from cadgen.gltf import animation
 
 import math
 
@@ -803,104 +805,60 @@ def _turns(deg_per_turn: float) -> tuple[float, float]:
 
 
 # ---------------------------------------------------------------------------
-# The clips' explode: the old ANIMATION_JS stations, as joint travel
+# The clips' explode: the old ANIMATION_JS stations, as a GLB animation
 # ---------------------------------------------------------------------------
-# The old clips moved every module along Z to its EXPLODE_OFFSETS station
-# times `explode`, rebased by FLOOR_LIFT so the lowest station (the connectors)
-# stays at 0: the connectors are the one world-fixed thing and the housing
-# rises 82 mm. `inspect` lifted the ring, sun and planets as one meshed cluster
-# so the tooth engagement stays watchable; `teardown` gave each its own station.
-#
-# Every station is along the drive axis, so each module slides on one prismatic
-# joint along Z: the housing on the ROOT (`floor_lift`, the world-fixed
-# reference), every other module on its seat's own side. A joint's travel is
-# its rider's station less its holder's. The turning members are coupled, so
-# none slides on its own revolute joint:
-# - the rotor is a compound: it turns on `rotor_spin` at the housing's station
-#   and its contents rise on `rotor_lift` (the riders it carries -- the sun, the
-#   encoder ring, the inner races -- slide on the turning compound, from the
-#   housing's station);
-# - each ball cage turns on its bearing module, which slides on the housing, as
-#   the roller cage turns on the cross-roller bearing;
-# - the carrier, a single solid, turns on the cross-roller bearing's outer ring,
-#   so it and the bearing share one station, the carrier's (250; the bearing's
-#   was 280), and the planets, turning on the carrier, stand there too (theirs
-#   was 222): in `inspect` the meshed cluster meets them there (it was 210).
+# The old clips moved every module along Z to its EXPLODE_OFFSETS station times
+# `explode`, rebased by FLOOR_LIFT so the lowest station (the connectors) stays at
+# 0: the connectors are the one world-fixed thing and the housing rises 82 mm.
+# `inspect` lifted the ring, sun and planets as one meshed cluster at GEAR_CLUSTER
+# so the tooth engagement stays watchable, while the drive ran; `teardown` gave each
+# its own station and spread the planets PLANET_EXPLODE_RADIAL out, the drive still.
+# Each module is a reference of its own in the actuator's tree, so each takes its own
+# translation, after the drive's pose.
 FLOOR_LIFT = -min(EXPLODE_OFFSETS.values())  # 82: the connectors' station rebased to 0
-OUTPUT_STATION = EXPLODE_OFFSETS["planet_carrier"]  # the carrier, its bearing and the planets
-GEAR_CLUSTER = OUTPUT_STATION  # inspect's meshed ring, sun and planets (the old clip's was 210)
-DRIVE_CYCLE_DEG = REDUCTION_RATIO * 360.0  # the input turn of one closed drive cycle
-_WORLD = "world"
-
-# The sliding seats: label -> (the station its holder stands at, the module that rides it).
-_SLIDES = {
-    "floor_lift": (_WORLD, "housing"),
-    "cover_seat": ("housing", "rear_cover"),
-    "power_pad": ("rear_cover", "connector_power"),
-    "signal_pad": ("rear_cover", "connector_signal"),
-    "tube_bore": ("rear_cover", "cable_tube"),
-    "driver_pcb_seat": ("housing", "driver_pcb"),
-    "encoder_pcb_seat": ("housing", "encoder_pcb"),
-    "stator_seat": ("housing", "stator"),
-    "ring_gear_seat": ("housing", "ring_gear"),
-    "retainer_seat": ("housing", "front_retainer"),
-    "screw_seats": ("front_retainer", "retainer_screws"),
-    "bearing_seat": ("housing", "cross_roller_bearing"),          # the outer ring
-    "rear_bearing_seat": ("housing", "rotor_bearing_rear"),       # the outer race
-    "front_bearing_seat": ("housing", "rotor_bearing_front"),
-    # held by the rotor compound, which turns at the housing's station
-    "rotor_lift": ("housing", "rotor"),                           # the bell and magnets
-    "sun_coupling": ("housing", "sun_gear"),
-    "encoder_magnet_seat": ("housing", "encoder_magnet_ring"),
-    "rear_race": ("housing", "rotor_bearing_rear"),
-    "front_race": ("housing", "rotor_bearing_front"),
-    # held by the carrier
-    "sensor_seat": ("planet_carrier", "torque_sensor"),
-    "flange_mount": ("planet_carrier", "output_flange"),
+GEAR_CLUSTER = 210.0  # inspect's meshed ring, sun and planets
+_GEARS = ("ring_gear", "sun_gear", "planet_gear")
+# Each module's reference in the actuator and the station it takes.
+_STATIONS = {
+    "housing": "housing", "front_retainer": "front_retainer", "retainer_screws": "retainer_screws",
+    "rear_cover": "rear_cover", "connector:power": "connector_power", "connector:signal": "connector_signal",
+    "driver_pcb": "driver_pcb", "encoder_pcb": "encoder_pcb", "encoder_magnet_ring": "encoder_magnet_ring",
+    "stator": "stator", "rotor": "rotor", "rotor_bearing:rear": "rotor_bearing_rear",
+    "rotor_bearing:front": "rotor_bearing_front", "sun_gear": "sun_gear", "ring_gear": "ring_gear",
+    **{f"planet_gear:p{i}": "planet_gear" for i in range(1, len(PLANET_ANGLES_DEG) + 1)},
+    "planet_carrier": "planet_carrier", "cross_roller_bearing": "cross_roller_bearing",
+    "torque_sensor": "torque_sensor", "output_flange": "output_flange", "cable_tube": "cable_tube",
 }
+_KEY_STEP = 0.1  # s between the sampled keys of an explode's channels
 
 
-def _station(module: str, keep_mesh: bool) -> float:
-    """A module's exploded station along Z (mm at explode 1), the world's being the
-    connectors' level, below the housing's by FLOOR_LIFT."""
-    if module == _WORLD:
-        return -FLOOR_LIFT
-    if module in ("cross_roller_bearing", "planet_gear"):
-        return OUTPUT_STATION
-    if keep_mesh and module in ("ring_gear", "sun_gear"):
-        return GEAR_CLUSTER
-    return EXPLODE_OFFSETS[module]
+def _offset(ref: str, explode: float, keep_mesh: bool) -> tuple[float, float, float]:
+    """A module's offset (mm) at ``explode`` (0..1): its station, rebased, along Z, and a
+    planet's radial spread when the gears do not stay meshed."""
+    station = _STATIONS[ref]
+    lift = (GEAR_CLUSTER if keep_mesh and station in _GEARS else EXPLODE_OFFSETS[station]) + FLOOR_LIFT
+    x = y = 0.0
+    if station == "planet_gear" and not keep_mesh:
+        psi = math.radians(PLANET_ANGLES_DEG[int(ref.rsplit("p", 1)[1]) - 1])
+        x, y = PLANET_EXPLODE_RADIAL * math.cos(psi), PLANET_EXPLODE_RADIAL * math.sin(psi)
+    return (x * explode, y * explode, lift * explode)
 
 
-def _rise(holder: str, rider: str, keep_mesh: bool) -> float:
-    return _station(rider, keep_mesh) - _station(holder, keep_mesh)
-
-
-def _travel(holder: str, rider: str) -> tuple[float, float]:
-    """Slide limits holding the rider's travel in both explodes (meshed and torn down)."""
-    ends = [_rise(holder, rider, keep_mesh) for keep_mesh in (True, False)]
-    return (min(0.0, *ends), max(0.0, *ends))
-
-
-def _explode(explode: float, keep_mesh: bool) -> dict:
-    """The old clips' ``frame()`` stations as slide values: every module ``explode`` (0..1)
-    of the way to its station."""
-    return {label: _rise(holder, rider, keep_mesh) * explode for label, (holder, rider) in _SLIDES.items()}
-
-
-def _inspect(t: float) -> dict:
-    """`inspect`: one drive cycle (`drive` by name) while the stack opens and closes, the
-    gears meshed."""
-    phase = t / 12.0
-    return {"drive": DRIVE_CYCLE_DEG * phase / 360.0, **_explode(math.sin(math.pi * phase), keep_mesh=True)}
-
-
-def _teardown(t: float) -> dict:
-    """`teardown`: no drive (the train stays as built); every module to its own station
-    and back."""
-    phase = t / 10.0
-    return _explode(math.sin(math.pi * phase), keep_mesh=False)
-
+def _explode_animation(actuator: bd.Compound, name: str, duration: float, keep_mesh: bool, drive: bool) -> None:
+    """The old clip ``name``: the stack opens on ``sin(pi * phase)`` and closes, each module
+    sampled every ``_KEY_STEP`` as LINEAR keys, while ``drive`` runs one closed cycle (or the
+    train stays as built)."""
+    show = animation(actuator, name, duration=duration)
+    if drive:
+        show.pose(at={0: {"drive": 0.0}, duration: {"drive": _INPUT_TURNS}}, interpolation="LINEAR")
+    count = round(duration / _KEY_STEP)
+    times = [duration * i / count for i in range(count + 1)]
+    explodes = [math.sin(math.pi * t / duration) for t in times]
+    for ref in _STATIONS:
+        if not any(_offset(ref, 1.0, keep_mesh)):
+            continue  # the connectors: the world-fixed station
+        keys = [(t, _offset(ref, e, keep_mesh)) for t, e in zip(times, explodes)]
+        show.channel(ref, path="translation", keys=keys, interpolation="LINEAR")
 
 
 # ---------------------------------------------------------------------------
@@ -927,21 +885,10 @@ def _module(name: str, children: list, *details: object) -> bd.Compound:
     return bd.Compound(children=children, label=":".join(str(token) for token in (name, *details)))
 
 
-def _seat(fixed, fixed_frame: str, moving, moving_frame: str, location: bd.Location) -> None:
-    """A mount (the old ``rigid_frame`` pair + ``face_to_face``, and the old
-    ``cadgen.fastened`` mate) that the exploded clips open: a LinearJoint along +Z on the
-    fixed side through the world datum ``location``, with the travel the clips give it
-    (``_SLIDES``), and a RigidJoint on the moving side at the datum, a pure translation at
-    the axis's origin; the moving side placed by ``connect_to`` at 0 -- its as-built pose."""
-    holder, rider = _SLIDES[fixed_frame]
-    bd.LinearJoint(fixed_frame, fixed, axis=bd.Axis(location.position, _Z), linear_range=_travel(holder, rider))
-    bd.RigidJoint(moving_frame, moving, location)
-    fixed.joints[fixed_frame].connect_to(moving.joints[moving_frame], position=0.0)
-
-
 def _fasten(fixed, fixed_frame: str, moving, moving_frame: str, location: bd.Location) -> None:
-    """A rigid mount no clip opens (the old ``cadgen.fastened`` mate): a RigidJoint on each
-    side at one world datum; the moving side placed by ``connect_to``."""
+    """A mount (the old ``rigid_frame`` pair + ``face_to_face``, and the old
+    ``cadgen.fastened`` mate): a RigidJoint on each side at one world datum; the moving side
+    placed by ``connect_to``."""
     bd.RigidJoint(fixed_frame, fixed, location)
     bd.RigidJoint(moving_frame, moving, location)
     fixed.joints[fixed_frame].connect_to(moving.joints[moving_frame])
@@ -954,20 +901,6 @@ def _spin(name: str, parent, child, origin, limits: tuple[float, float]) -> None
     bd.RevoluteJoint(name, parent, axis=bd.Axis(origin, _Z), angular_range=limits)
     bd.RigidJoint(name, child, bd.Plane(origin=origin, z_dir=_Z).location)
     parent.joints[name].connect_to(child.joints[name], angle=0.0)
-
-
-def _contents_slide(label: str, group: bd.Compound) -> None:
-    """The group-compound slide: ``group`` keeps the joints it already has (it turns on
-    them), and its contents rise along +Z on ``label``, a LinearJoint held by the compound,
-    its rigid half on the first child, every other child fastened to that one. Authored where
-    the parts stand, paired by label."""
-    lead, *rest = group.children
-    holder, rider = _SLIDES[label]
-    bd.LinearJoint(label, group, axis=bd.Axis((0.0, 0.0, 0.0), _Z), linear_range=_travel(holder, rider))
-    bd.RigidJoint(label, lead, bd.Location((0.0, 0.0, 0.0)))
-    for index, part in enumerate(rest):
-        bd.RigidJoint(f"{label}_rides_{index}", lead, bd.Location())
-        bd.RigidJoint(f"{label}_rides_{index}", part, bd.Location())
 
 
 def build_actuator(explode: float = 0.0) -> bd.Compound:
@@ -1119,7 +1052,6 @@ def build_actuator(explode: float = 0.0) -> bd.Compound:
 
     actuator = bd.Compound(children=children, label="qdd_actuator")
     if not explode:
-        _floor(actuator, housing)
         _drive(actuator)
         _clips(actuator)
     return actuator
@@ -1129,14 +1061,13 @@ def _connect(housing, retainer, cover, retainer_screws, connectors, driver_pcb, 
              stator, rotor, sun, ring, enc_magnet, carrier, torque_sensor, flange, xroller,
              tube, races, bearings, balls_by_side, rollers, inner_ring, planets) -> None:
     """Every joint of the assembled actuator. All identity by construction: each
-    ``connect_to`` re-derives a placement from named datums. Every mount the exploded clips
-    open slides along the drive axis, a prismatic seat (``_seat``)."""
+    ``connect_to`` re-derives a placement from named datums."""
     # --- mounts (the original source mate frames) ------------------------------
-    _seat(housing, "stator_seat", stator, "stack_rear", bd.Location((0, 0, STATOR_STACK_Z[0])))
-    _seat(housing, "ring_gear_seat", ring, "rim_rear", bd.Location((0, 0, GEAR_Z[0])))
-    _seat(housing, "cover_seat", cover, "lip_face", bd.Location((0, 0, BARREL_Z[0])))
-    _seat(housing, "retainer_seat", retainer, "ring_rear", bd.Location((0, 0, RETAINER_Z[0])))
-    _seat(retainer, "screw_seats", retainer_screws, "head_seats", bd.Location((0, 0, RETAINER_Z[1])))
+    _fasten(housing, "stator_seat", stator, "stack_rear", bd.Location((0, 0, STATOR_STACK_Z[0])))
+    _fasten(housing, "ring_gear_seat", ring, "rim_rear", bd.Location((0, 0, GEAR_Z[0])))
+    _fasten(housing, "cover_seat", cover, "lip_face", bd.Location((0, 0, BARREL_Z[0])))
+    _fasten(housing, "retainer_seat", retainer, "ring_rear", bd.Location((0, 0, RETAINER_Z[0])))
+    _fasten(retainer, "screw_seats", retainer_screws, "head_seats", bd.Location((0, 0, RETAINER_Z[1])))
 
     for kind, module in connectors.items():
         az = math.radians(CONNECTOR_ANGLES[kind])
@@ -1147,45 +1078,42 @@ def _connect(housing, retainer, cover, retainer_screws, connectors, driver_pcb, 
                 COVER_PLATE_Z[0],
             )
         )
-        _seat(cover, f"{kind}_pad", module, "mount_face", mount)
+        _fasten(cover, f"{kind}_pad", module, "mount_face", mount)
 
     for name, module, z_seat in (
         ("driver_pcb", driver_pcb, DRV_STANDOFF_Z[0]),
         ("encoder_pcb", encoder_pcb, ENC_STANDOFF_Z[0]),
     ):
-        _seat(housing, f"{name}_seat", module, "mount_plane", bd.Location((0, 0, z_seat)))
+        _fasten(housing, f"{name}_seat", module, "mount_plane", bd.Location((0, 0, z_seat)))
 
-    _seat(rotor, "sun_coupling", sun, "flange_rear", bd.Location((0, 0, ROTOR_FLANGE_Z[1])))
-    _seat(rotor, "encoder_magnet_seat", enc_magnet, "ring_rear", bd.Location((0, 0, ENC_MAGNET_Z[0])))
-    _seat(carrier, "sensor_seat", torque_sensor, "hub_rear", bd.Location((0, 0, FLEXURE_HUB_Z[0])))
+    _fasten(rotor, "sun_coupling", sun, "flange_rear", bd.Location((0, 0, ROTOR_FLANGE_Z[1])))
+    _fasten(rotor, "encoder_magnet_seat", enc_magnet, "ring_rear", bd.Location((0, 0, ENC_MAGNET_Z[0])))
+    _fasten(carrier, "sensor_seat", torque_sensor, "hub_rear", bd.Location((0, 0, FLEXURE_HUB_Z[0])))
     # The flange's face on the flexure rim, a datum pair left unconnected: the flange
     # rides the carrier on `flange_mount` (the old fastened mate), and a second seat on
-    # the torque sensor would close a loop that no explode could open.
+    # the torque sensor would close a loop.
     bd.RigidJoint("rim_face", torque_sensor, bd.Location((0, 0, FLEXURE_RIM_Z[1])))
     bd.RigidJoint("mount_rear", flange, bd.Location((0, 0, FLEXURE_RIM_Z[1])))
-    _seat(housing, "bearing_seat", xroller, "outer_ring_rear", bd.Location((0, 0, XROLLER_Z[0])))
-    # The rotor bearings' outer races stay in the sleeve bore: each bearing module slides
-    # on the housing (its inner race and ball ring ride their own joints).
-    _seat(housing, "rear_bearing_seat", bearings["rear"], "outer_race_face", bd.Location((0, 0, ROTOR_BRG_REAR_Z[0])))
-    _seat(housing, "front_bearing_seat", bearings["front"], "outer_race_face",
+    _fasten(housing, "bearing_seat", xroller, "outer_ring_rear", bd.Location((0, 0, XROLLER_Z[0])))
+    # The rotor bearings' outer races stay in the sleeve bore: each bearing module is
+    # fastened to the housing (its inner race and ball ring ride their own joints).
+    _fasten(housing, "rear_bearing_seat", bearings["rear"], "outer_race_face", bd.Location((0, 0, ROTOR_BRG_REAR_Z[0])))
+    _fasten(housing, "front_bearing_seat", bearings["front"], "outer_race_face",
           bd.Location((0, 0, ROTOR_BRG_FRONT_Z[0])))
-    _seat(cover, "tube_bore", tube, "rear_end", bd.Location((0, 0, COVER_PLATE_Z[0])))
+    _fasten(cover, "tube_bore", tube, "rear_end", bd.Location((0, 0, COVER_PLATE_Z[0])))
 
     # --- the old KINEMATICS mates as joints ------------------------------------
     # Fastened mates the mounts above do not already state (sun_coupling,
     # encoder_target and sensor_mount are the seats above): each rider turns with
-    # the member it rides and slides off it in the explode. The cross-roller inner
-    # ring stays fastened: the carrier stands at its bearing's station.
-    _seat(rotor, "rear_race", races["rear"], "rear_race", bd.Location())
-    _seat(rotor, "front_race", races["front"], "front_race", bd.Location())
-    _seat(carrier, "flange_mount", flange, "flange_mount", bd.Location())
+    # the member it rides.
+    _fasten(rotor, "rear_race", races["rear"], "rear_race", bd.Location())
+    _fasten(rotor, "front_race", races["front"], "front_race", bd.Location())
+    _fasten(carrier, "flange_mount", flange, "flange_mount", bd.Location())
     _fasten(carrier, "xroller_inner", inner_ring, "xroller_inner", bd.Location())
-    # The rotor's bell and magnets rise inside the turning rotor compound.
-    _contents_slide("rotor_lift", rotor)
     # Revolute mates, their limits the closed drive cycle at each member's rate. Each
     # spin hub connects while its carrier is still pristine (planets before the
     # carrier's own joint). Every cage turns on the module that carries its outer race,
-    # and the carrier on the cross-roller bearing's outer ring: each slides with them.
+    # and the carrier on the cross-roller bearing's outer ring.
     for i, (psi, planet) in enumerate(zip(PLANET_ANGLES_DEG, planets), start=1):
         _spin(f"planet{i}_spin", carrier, planet, _planet_center(psi), _turns(_PLANET_DEG))
     _spin("rotor_spin", housing, rotor, (0, 0, 0), _turns(_ROTOR_DEG))
@@ -1194,15 +1122,6 @@ def _connect(housing, retainer, cover, retainer_screws, connectors, driver_pcb, 
     _spin("output", xroller, carrier, (0, 0, 0), _turns(_CARRIER_DEG))
     _spin("roller_cage", xroller, rollers, (0, 0, 0), _turns(_ROLLER_CAGE_DEG))
     # The old motion datums rotor_axis/output_axis are the rotor_spin/output joints.
-
-
-def _floor(actuator: bd.Compound, housing) -> None:
-    """The housing lifts on the ROOT (the world-fixed reference), so the connectors,
-    which the explode leaves where they stand, are the one part fixed in the world: the
-    old clips' FLOOR_LIFT rebase. Authored once the root exists, paired by label."""
-    axis = bd.Axis((0.0, 0.0, 0.0), _Z)
-    bd.LinearJoint("floor_lift", actuator, axis=axis, linear_range=_travel(*_SLIDES["floor_lift"]))
-    bd.RigidJoint("floor_lift", housing, bd.Location(axis.position))
 
 
 def _drive(actuator: bd.Compound) -> None:
@@ -1217,15 +1136,16 @@ def _drive(actuator: bd.Compound) -> None:
 
 def _clips(actuator: bd.Compound) -> None:
     """The old ANIMATION_JS clips, by name (each looped there; a player repeats them):
-    `drive` (12 s) sweeps the coupling over one closed cycle; `inspect` (12 s) runs the
-    same cycle while the stack explodes with sin(pi * phase), the gears meshed at
-    GEAR_CLUSTER; `teardown` (10 s) explodes every module to its own station, no drive."""
+    `drive` (12 s), a motion, sweeps the coupling over one closed cycle; `inspect` (12 s),
+    an animation, runs the same cycle while the stack explodes with sin(pi * phase), the
+    gears meshed at GEAR_CLUSTER; `teardown` (10 s), an animation, explodes every module to
+    its own station and spreads the planets, no drive."""
     configuration_sequence(actuator, "drive", sweep={"drive": (0.0, _INPUT_TURNS)}, duration=12, ease="linear")
-    configuration_sequence(actuator, "inspect", _inspect, duration=12)
-    configuration_sequence(actuator, "teardown", _teardown, duration=10)
+    _explode_animation(actuator, "inspect", 12, keep_mesh=True, drive=True)
+    _explode_animation(actuator, "teardown", 10, keep_mesh=False, drive=False)
 
 
-@xbf(out="../XBF/qdd_actuator.xbf")
+@model
 def qdd_actuator():
     return build_actuator(explode=0.0)
 
