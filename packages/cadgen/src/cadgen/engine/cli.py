@@ -317,6 +317,9 @@ def _inspect(args: argparse.Namespace, prog: str) -> int:
     except api.EngineError as error:
         raise Failed(str(error)) from None
     print(json.dumps(found, indent=2))
+    stale = found.get("stale") or ((found.get("live") or {}).get("stale")) if isinstance(found, dict) else None
+    if stale:  # the last built state, said beside the answer: nothing reran
+        print(stale["text"], file=sys.stderr)
     return 0
 
 

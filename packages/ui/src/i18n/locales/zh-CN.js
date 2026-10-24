@@ -149,6 +149,8 @@ export default {
   "alert.copyFailed": "无法复制详情。请选中上方内容并手动复制。",
   "alert.retry": "重试",
   "alert.reportIssue": "报告问题",
+  "alert.stale.title": "自上次构建以来代码已更改",
+  "alert.stale.message": "你正在查看上次的构建结果，没有重新运行。要重新构建，请运行：",
 
   "loading.lastStep": "上一步：{label}",
   "loading.openingModel": "正在打开模型",

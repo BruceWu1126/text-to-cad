@@ -127,18 +127,20 @@ ICON = {
 }
 
 
-def _say_not_held(named: Any) -> None:
+def _say_not_held(named: Any) -> str | None:
     """A document id the engine knows but holds no more (evicted, expired): refused with the command
-    that builds it again, which nothing here runs."""
+    that builds it again, which nothing here runs. One held as last built though its code changed
+    since (the engine's cache, after a restart): those words, to say beside it."""
     from cadgen.engine.ids import is_id
 
     if not is_id(named):
-        return
+        return None
     from cadgen.engine.client import request
 
     answer = request({"op": "state", "id": named}, start=False) or {}
     if answer.get("error"):
         raise ToolFailed(f"{answer['error']}. Nothing runs it for you; once it is run, show {named} again.", "no_file")
+    return (answer.get("stale") or {}).get("text")
 
 
 class ToolFailed(Exception):
@@ -627,7 +629,14 @@ class Server:
         return views
 
     def _tool_cad_show(self, arguments, context):
-        _say_not_held(arguments.get("path"))
+        stale = _say_not_held(arguments.get("path"))
+        shown = self._show(arguments, context)
+        if stale and shown.get("content"):
+            # The view shows the last built state, with its badge; the agent reads the same words.
+            shown["content"][0]["text"] += f" It shows the last build: {stale}."
+        return shown
+
+    def _show(self, arguments, context):
         if self.text:
             return self._show_in_browser(self._model_path(arguments.get("path")))
         if not self.tabs:

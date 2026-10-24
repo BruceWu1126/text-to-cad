@@ -148,6 +148,8 @@ export default {
   "alert.copyFailed": "세부 정보를 복사할 수 없습니다. 위의 내용을 선택해 복사하세요.",
   "alert.retry": "다시 시도",
   "alert.reportIssue": "문제 신고",
+  "alert.stale.title": "빌드 이후 코드가 변경되었습니다",
+  "alert.stale.message": "마지막 빌드를 보고 있습니다. 다시 실행되지 않았습니다. 다시 빌드하려면 다음을 실행하세요:",
 
   "loading.lastStep": "마지막 단계: {label}",
   "loading.openingModel": "모델 여는 중",

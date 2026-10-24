@@ -1429,7 +1429,9 @@ class Server:
                 doc = self.document(ident)
                 if len(parts) == 3:
                     self.prefetch(doc)  # a page is about to ask for every part
-                    return self.json(handler, self.posed(doc, pose))
+                    found = self.posed(doc, pose)
+                    stale = self.stale(ident) if ident in self.model_loaders else None
+                    return self.json(handler, {**found, "stale": stale} if stale else found)
                 if len(parts) == 4 and parts[3] == "pose" and method == "POST":
                     return self.pose(handler, doc)
                 if len(parts) >= 5 and parts[3] == "part":

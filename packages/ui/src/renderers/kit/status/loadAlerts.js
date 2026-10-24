@@ -94,6 +94,24 @@ export function buildFailedAlert(fileRef, failed, hasModel) {
   };
 }
 
+/**
+ * A model the engine answers from its last build -- its cache, or the hold of a worker gone -- though
+ * the code it was built from changed since (`stale`: the engine's words, what changed and the
+ * command that builds it again). A warning beside the model on screen, put away like a failed
+ * update; nothing reran, and nothing here runs the command. In the page's language (`t`).
+ * @param {{ text?: string, changes?: string[], rebuild?: string | null }} stale
+ * @param {(key: string) => string} t
+ */
+export function staleBuildAlert(stale, t) {
+  return {
+    severity: "warning", kind: "stale", blocking: false, report: false,
+    title: t("alert.stale.title"),
+    message: t("alert.stale.message"),
+    recovery: stale?.rebuild || "",
+    details: [...(stale?.changes || []), stale?.text].filter(Boolean).join("\n")
+  };
+}
+
 /** The file is listed, loading raised nothing, and nothing came out of it. */
 export function noGeometryAlert(fileRef) {
   return {

@@ -531,7 +531,7 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
     path = _document(source, "inspect", named)
     if query == "build":
         if not isinstance(path, Path):
-            found = _ask({"op": "document", "id": path})["document"]
+            found = _ask({"op": "document", "id": path})["document"]  # a model's live record says stale
             if "path" not in found:
                 return {"file": None, "live": _ask({"op": "model_info", "id": path})["model"]}
             path = Path(found["path"])
@@ -571,7 +571,8 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
     if ref is None:
         if not structure.get("closure"):
             raise EngineError(f"{source} holds no build closure")
-        return structure["closure"]
+        # A model held with no worker whose code changed since it was built says so (``stale``).
+        return {**structure["closure"], "stale": structure["stale"]} if structure.get("stale") else structure["closure"]
     found: list[Facts] = []
     volumes: dict[str, float] = {}
     for hit in refs.resolve_structure(structure, ref, path):

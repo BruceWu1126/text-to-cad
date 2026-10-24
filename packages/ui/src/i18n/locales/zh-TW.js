@@ -149,6 +149,8 @@ export default {
   "alert.copyFailed": "無法複製詳細資料。請選取上方內容後自行複製。",
   "alert.retry": "重試",
   "alert.reportIssue": "回報問題",
+  "alert.stale.title": "自上次建置以來程式碼已變更",
+  "alert.stale.message": "你正在檢視上次的建置結果，沒有重新執行。若要重新建置，請執行：",
 
   "loading.lastStep": "上一個步驟：{label}",
   "loading.openingModel": "正在開啟模型",

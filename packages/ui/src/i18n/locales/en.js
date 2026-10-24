@@ -163,6 +163,8 @@ export default {
   "alert.copyFailed": "The details could not be copied. Select them above and copy them.",
   "alert.retry": "Retry",
   "alert.reportIssue": "Report Issue",
+  "alert.stale.title": "The code changed since this was built",
+  "alert.stale.message": "You’re viewing the last build: nothing reran. To build it again, run:",
 
   // The loading indicator under the loading mark.
   "loading.lastStep": "Last step: {label}",
