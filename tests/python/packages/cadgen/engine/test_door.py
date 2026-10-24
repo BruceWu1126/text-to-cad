@@ -134,7 +134,7 @@ class DoorTest(unittest.TestCase):
         for ident in (old, young, held):
             for path in door.pair(self.clients, ident):
                 os.mkfifo(path, 0o600)
-        (self.clients / "notes.txt").write_text("not a pair")
+        (self.clients / "notes.txt").write_text("not a pair", encoding="utf-8")
         past = time.time() - door.STALE_SECONDS - 1
         for ident in (old, held):
             for path in door.pair(self.clients, ident):

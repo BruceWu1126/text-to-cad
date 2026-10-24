@@ -625,7 +625,7 @@ for room and the last save that failed. `--json` lists the documents as `models`
 
 A client reaches the daemon on POSIX through named pipes in the engine's folder, never a socket
 ([door.py](door.py)): agents run commands in sandboxes that refuse every socket, local ones too
-(Codex's Seatbelt, deny by default, answers `EPERM` to a Unix socket's connect and to a loopback
+(macOS Seatbelt, deny by default, answers `EPERM` to a Unix socket's connect and to a loopback
 port's bind), while they let a command make and open files in its temporary folder, where the
 engine's folder is, FIFOs among them. Windows keeps its loopback port and port file, the token
 shown first (`daemon._admitted`).
@@ -662,8 +662,8 @@ shown first (`daemon._admitted`).
 
 **Starting the engine.** Outside a sandbox a client starts the daemon as before and waits for its
 door. Inside one, a daemon could make its door but never bind its HTTP port, and every build
-serves its document: so it starts none. A shell that says it is sandboxed without network
-(`CODEX_SANDBOX_NETWORK_DISABLED=1`, Codex's) and finds no door is refused at once, in one line:
+serves its document: so it starts none. A shell that says it is sandboxed without network (a
+variable the distribution names, `client.SANDBOXES`) and finds no door is refused at once, in one line:
 no engine runs and this shell's sandbox cannot start one; open a CAD card (the plugin's server
 starts the engine) or run `cadgen server` outside the sandbox (`client.SANDBOXED`). A daemon
 started where it may not bind a loopback port (`daemon._can_listen`, before it makes its door) or
@@ -674,8 +674,8 @@ the client that started it says that reason at once, never after a timeout.
 (starting it when none runs) and holds it (`client.hold`, `{"op": "hold"}`: a connection the
 daemon answers and keeps until its client goes) for as long as the host runs it. While any hold
 is open the engine does not stop for idleness; once the last goes, the idle time counts from
-then, so the engine leaves on its timeout after the host has quit. So a sandboxed shell under
-Codex, Claude Desktop or Cursor finds an engine whenever the host runs. An engine that goes while
+then, so the engine leaves on its timeout after the host has quit. So a sandboxed shell an agent
+host runs finds an engine whenever the host runs. An engine that goes while
 held (`cadgen stop`, a crash) is held again at the host's next request, never at once: a stop is
 obeyed. `cadgen status` says how many hold it (`holders`).
 

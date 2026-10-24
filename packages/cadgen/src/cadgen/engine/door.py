@@ -1,6 +1,6 @@
 """The engine's door: how a client reaches the daemon on POSIX, through named pipes (FIFOs) in the
 engine's folder and never a socket, so every command works in a sandbox that refuses sockets but
-lets a process make and open files in a folder it may write (Codex's Seatbelt, deny by default).
+lets a process make and open files in a folder it may write (macOS Seatbelt, deny by default).
 
 The daemon makes one FIFO, the door (``<tag>.door``, beside its lock), and holds it open for
 reading and for writing (its own writer, so the door never reads as closed). A client:

@@ -1392,7 +1392,7 @@ def _bind() -> socket.socket:
 
 def _can_listen() -> None:
     """Raise when this process may not listen on a loopback port, as the engine's HTTP server
-    must: a sandbox that refuses sockets (Codex's Seatbelt answers EPERM) would let a daemon make
+    must: a sandbox that refuses sockets (macOS Seatbelt answers EPERM) would let a daemon make
     its door and then fail every build, so none starts there. The port is bound and let go."""
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:

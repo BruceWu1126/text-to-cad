@@ -351,6 +351,7 @@ class SandboxTest(unittest.TestCase):
 
         from cadgen.engine import client
 
+        self.assertIn(("CODEX_SANDBOX_NETWORK_DISABLED", "1"), client.SANDBOXES, "cadgen's host adapter names it")
         with mock.patch.dict(os.environ, {"CODEX_SANDBOX": "seatbelt", "CODEX_SANDBOX_NETWORK_DISABLED": "1"}), \
                 mock.patch.object(client, "_start", side_effect=AssertionError("a daemon was started")):
             with self.assertRaises(ConnectionError) as said:

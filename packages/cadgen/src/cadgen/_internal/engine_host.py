@@ -40,9 +40,15 @@ def registry():
 _MODULES = {"cadgen.engine.client", "cadgen.engine.daemon", "cadgen.engine.registry"}
 
 
+# The agent hosts whose shells run in a sandbox that refuses the loopback port the engine's HTTP
+# server needs, by the variable each sets there: Codex's Seatbelt, in its default workspace-write mode.
+SANDBOXES = (("CODEX_SANDBOX_NETWORK_DISABLED", "1"),)
+
+
 def _attach(module):
     if module.__name__ == "cadgen.engine.client":
         module.DAEMON_MODULE = "cadgen._internal.engine_daemon"
+        module.SANDBOXES = SANDBOXES
     elif module.__name__ == "cadgen.engine.registry":
         module.FACTORY = registry
     else:

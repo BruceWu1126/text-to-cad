@@ -19,9 +19,11 @@ __all__ = ["hold", "request", "sweep"]
 
 DAEMON_MODULE = "cadgen.engine.daemon"  # the enclosing distribution may supply an application host
 
-# The sandboxes known to refuse the loopback port the engine's HTTP server needs, by the variable
-# each sets in the shells it runs: a daemon started there could never serve a build.
-_SANDBOXES = {"CODEX_SANDBOX_NETWORK_DISABLED": "1"}
+# The sandboxes known to refuse the loopback port the engine's HTTP server needs, each by a variable
+# and the value it sets in the shells it runs: a daemon started there could never serve a build. The
+# enclosing distribution names them (its host adapter); a sandbox none names is found by the daemon
+# that cannot listen (``daemon.failure_path``), as fast.
+SANDBOXES: tuple[tuple[str, str], ...] = ()
 SANDBOXED = ("no engine server is running, and this shell's sandbox cannot start one: open a CAD card "
              "(the CAD plugin's server starts the engine) or run `cadgen server` outside the sandbox")
 
@@ -60,17 +62,14 @@ def _answering(address: Path) -> bool:
 
 
 def _sandboxed() -> bool:
-    return any(os.environ.get(name) == value for name, value in _SANDBOXES.items())
+    return any(os.environ.get(name) == value for name, value in SANDBOXES)
 
 
 def _denied(cause: str) -> ConnectionError:
-    """The engine refused by the system, said to the agent or person who runs the command: Codex
-    names its sandbox in ``CODEX_SANDBOX`` (``seatbelt`` on macOS)."""
-    if os.environ.get("CODEX_SANDBOX"):
-        return ConnectionError(f"Codex's sandbox denies cadgen's local engine ({cause}); "
-                               "rerun this command with escalated permissions")
-    return ConnectionError(f"the system denies cadgen's local engine ({cause}); "
-                           "a sandbox that forbids it does: run this command outside it")
+    """The engine refused by the system (a sandbox that forbids writing in the engine's folder),
+    said to the agent or person who runs the command."""
+    return ConnectionError(f"the system denies cadgen's local engine ({cause}); a sandbox that forbids "
+                           "it does: run this command outside it, or with the sandbox's permission")
 
 
 def _not_started(code: int) -> ConnectionError:
