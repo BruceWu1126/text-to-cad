@@ -250,9 +250,9 @@ class Models:
     @staticmethod
     def shown(program: str | None) -> str:
         """What a shape's record says of where it came from: the program, which the engine did not run."""
-        return (f"handed over by {program}, a program the engine did not run: no command builds it again"
-                if program else "handed over from a Python session the engine did not run: no command builds it "
-                                "again")
+        return (f"a shape handed over by {program}, a program the engine did not run: no script to rerun, and no "
+                "command builds it again" if program else "a shape handed over from a Python session the engine did "
+                "not run: no script to rerun, and no command builds it again")
 
     @staticmethod
     def url(server: Any, ident: str) -> str:
@@ -315,7 +315,7 @@ class Models:
         command = self.command(ident)
         name = found["source"]["name"]
         if found.get("store") == "shape":
-            return {"error": f"{name} ({ident}) is no longer held: it was {self.shown(found.get('program'))}; run "
+            return {"error": f"{name} ({ident}) is no longer held: it is {self.shown(found.get('program'))}; run "
                              "that program again to hand it over again", "state": "evicted", "rebuild": None}
         if gone is None and not Path(found["source"]["script"]).is_file():
             return {"error": f"{name} ({ident}) is detached: {found['source']['script']} is gone, and nothing "
@@ -352,7 +352,7 @@ class Models:
             return None
         name = found.get("label") or found.get("entry") or ident
         if found.get("store") == "shape":
-            return {"error": f"{name} ({ident}) is no longer held: it was {found.get('shown') or self.shown(None)}; "
+            return {"error": f"{name} ({ident}) is no longer held: it is {found.get('shown') or self.shown(None)}; "
                              "run that program again to hand it over again", "state": "evicted", "rebuild": None}
         if registering.detached(held, found):
             return {"error": f"{name} ({ident}) is detached: {registering.home(held, found)} is gone, and nothing "

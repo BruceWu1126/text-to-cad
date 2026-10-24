@@ -165,7 +165,7 @@ class HandleTest(unittest.TestCase):
         self.assertTrue((project / "crate.step").is_file())
         record = Registry(self.state).get(ident)
         self.assertEqual((record["store"], record["run"], record["entry"]), ("shape", [], "crate"))
-        self.assertIn("a program the engine did not run: no command builds it again", record["shown"])
+        self.assertIn("a program the engine did not run: no script to rerun", record["shown"])
         # From a REPL: the working folder is its scope.
         repl = self.run_python("-", cwd=project, input="import json, build123d as bd\nfrom cadgen import model\n"
                                "h = model(bd.Box(2, 2, 2), name='scratch')\nprint('RESULT ' + json.dumps(h.id))\n")
@@ -179,7 +179,7 @@ class HandleTest(unittest.TestCase):
         shutil.rmtree(self.cache / "documents" / ident)
         refused = self.cli("export", ident, str(project / "gone.stl"))
         self.assertEqual(refused.returncode, 2, refused.stderr)
-        self.assertIn("a program the engine did not run: no command builds it again", refused.stderr)
+        self.assertIn("a program the engine did not run: no script to rerun", refused.stderr)
         answer = self.ask({"op": "state", "id": ident})
         self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", None))
 
