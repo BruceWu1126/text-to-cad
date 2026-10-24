@@ -103,7 +103,11 @@ focused test, so the file builds on an engine daemon of its own:
 ### Development dependencies
 
 `requirements-dev.txt` installs the source packages from `packages/` and the
-small set of Python extras mirrored from skill runtime requirements. This is
+small set of Python extras mirrored from skill runtime requirements. Its editable
+cadgen installs `cadgen-lazy-kernel.pth` into the venv's site-packages as the wheel
+does (`packages/cadgen/setup.py`), so `import build123d` defers the kernel and a
+`python model.py` from a checkout costs what a user's does; a venv installed before
+that has no such file until `requirements-dev.txt` is installed again. This is
 the default Python environment for broad repo checks and source-checkout
 development. After pulling, reinstall `requirements-dev.txt` to refresh the
 editable-install metadata: `cadgen.__version__` reports the installed
