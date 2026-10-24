@@ -125,18 +125,16 @@ class BudgetTest(unittest.TestCase):
         self.assertIn(ident, self.server.served)
 
 
-    def test_a_held_documents_animations_count_against_the_budget_and_go_with_it(self) -> None:
+    def test_a_held_documents_xbf_bytes_count_against_the_budget_and_go_with_it(self) -> None:
         ident = model_id(self.folder / "lid.py", "lid")
-        animations = [{"name": "open", "duration": 1.0,
-                       "tracks": [["translation", "LINEAR", [[0.0, [0, 0, 0]], [1.0, [0, 0, 9]]], [[[0]]], None,
-                                   "animation 'open': translation", 0]]}]
         self.server.keep(ident, _document("lid"), {"lid-key": b"m" * MIB}, 1, b"x" * 1000)
         bare = self.server.served[ident].size
-        self.server.keep(ident, _document("lid"), {"lid-key": b"m" * MIB}, 2, b"x" * 1000, animations)
-        self.assertEqual(self.server.served[ident].size, bare + len(json.dumps(animations, separators=(",", ":"))))
+        # Its animations' record is in the xbf bytes: a longer document is counted whole, again.
+        self.server.keep(ident, _document("lid"), {"lid-key": b"m" * MIB}, 2, b"x" * 1500)
+        self.assertEqual(self.server.served[ident].size, bare + 500)
         self.assertEqual(self.server.holding(), self.server.served[ident].size)
         self.assertEqual(self.server.trim(0), [ident])
-        self.assertEqual(self.server.holding(), 0, "evicted, its animations go with its xbf bytes")
+        self.assertEqual(self.server.holding(), 0, "evicted, its xbf bytes go with it")
 
 
 class NotHeldRefusalTest(unittest.TestCase):
@@ -199,8 +197,8 @@ def {name}():
     return root
 """
 
-# The hinge with a configuration sequence (the document's) and an animation (the GLB's alone), its
-# GLB declared: the build writes it live, the export of its hold writes it again.
+# The hinge with a configuration sequence (the document's) and an animation (the GLB's, recorded in
+# the xbf), its GLB declared: the build writes it live, the export of its hold writes it again.
 ANIMATED = HINGE.replace("from cadgen.engine import model", """from cadgen.ap242 import configuration_sequence
 from cadgen.engine import glb
 from cadgen.gltf import animation""").replace("@model", '@glb("live.glb")').replace("    return root", """\
@@ -373,14 +371,19 @@ class LifetimeDaemonTest(unittest.TestCase):
         self.assertEqual([Path(w["script"]).name for w in self.ask({"op": "status"})["workers"]], ["documents"])
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
 
-    def test_a_held_glb_carries_the_builds_animations_as_the_live_one_does(self) -> None:
+    def test_a_glb_from_the_hold_and_from_its_xbf_file_is_the_live_one(self) -> None:
         from cadgen.engine import document
         from tests.python.packages.cadgen.engine.test_kinematics import _arm_tip, _has_point, _vertices
 
         ident = self.built("hinge", script=ANIMATED)
         self.row(ident, "held")
         live, held, step = self.folder / "live.glb", self.folder / "held.glb", self.folder / "held.step"
-        answer = self.ask({"op": "export", "source": {"id": ident}, "destinations": [str(held), str(step)],
+        saved, from_file = self.folder / "held.xbf", self.folder / "file.glb"
+        answer = self.ask({"op": "export", "source": {"id": ident}, "destinations": [str(held), str(step), str(saved)],
+                           "cwd": str(self.folder), "env": dict(os.environ)})
+        self.assertIn("done", answer, answer)
+        # The hold's xbf bytes are its Save As: a GLB of that file, read as any xbf is, bakes the record.
+        answer = self.ask({"op": "export", "source": {"path": str(saved)}, "destinations": [str(from_file)],
                            "cwd": str(self.folder), "env": dict(os.environ)})
         self.assertIn("done", answer, answer)
 
@@ -391,6 +394,9 @@ class LifetimeDaemonTest(unittest.TestCase):
 
         self.assertEqual(clips(held), ["lift", "show"], "the sequence and the animation, from the hold")
         self.assertEqual(held.read_bytes(), live.read_bytes(), "the GLB the build's worker wrote, byte for byte")
+        self.assertEqual(from_file.read_bytes(), live.read_bytes(), "and the GLB of its xbf file, byte for byte")
+        self.assertEqual(sorted(document.Loaded(saved).animations), ["show"], "the xbf records the animation")
+        self.assertNotIn(b'"tracks"', step.read_bytes(), "a STEP is AP242 alone: no record of ours")
         self.assertTrue(_has_point(_vertices(document.Loaded(step), "arm"), _arm_tip(30)),
                         "a STEP of the same hold, as built: it never carried an animation")
         self.assertEqual([Path(w["script"]).name for w in self.ask({"op": "status"})["workers"]], ["documents"])

@@ -1,7 +1,8 @@
 """What glTF says that the document does not: a GLB's own animations.
 
 ``animation(assembly, name, duration=)`` names a GLB's choreography (the engine's
-**Animations**): never in the document, baked into each GLB the model declares::
+**Animations**): baked into each GLB the model declares, and kept in its xbf as a build record that
+only a GLB of the document reads::
 
     from cadgen.gltf import animation
 

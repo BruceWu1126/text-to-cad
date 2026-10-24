@@ -3,9 +3,11 @@
 A **configuration sequence** (``mechanism.configuration_sequence``; a motion, as the structure and
 the viewer say) is the mechanism's: pair values over time, AP242's interpolated configuration
 sequence, kept in the document. An **animation** is the GLB's: glTF
-channels on the nodes a GLB places. It is never written into the document: the harvest keeps it on
-the build's tree (``harvest``), the GLB writer bakes it (``export/animation.py``), and a GLB
-exported later from the xbf alone carries the configuration sequences only.
+channels on the nodes a GLB places. The harvest keeps it on the build's tree (``harvest``) and the
+GLB writer bakes it (``export/animation.py``). The xbf carries the compiled tracks as a build record
+on its main label beside the closure (``record``, ``document.ANIMATIONS_GUID``), which only a GLB
+of the document reads: a GLB exported later from the xbf is the build's own, and every other
+reader (``read_xbf``, the viewer, STEP) ignores it.
 
 ``animation(assembly, name, duration=...)`` returns a builder. Its one primitive is glTF's own:
 ``.channel(parts, path=, keys=[(t, value), ...], interpolation=)``, ``path`` one of
@@ -56,7 +58,7 @@ from dataclasses import dataclass
 from typing import Any
 
 __all__ = ["ANIMATIONS", "Animation", "AnimationError", "INTERPOLATIONS", "Resolved", "Track", "animation",
-           "from_json", "harvest", "to_json"]
+           "from_json", "from_record", "harvest", "record", "to_json"]
 
 # The attribute an assembly's animations live in, by name: plain values (the memo keys them).
 ANIMATIONS = "xbf_animations"
@@ -349,8 +351,8 @@ class Animation:
 def animation(assembly: Any, name: str, *, duration: Any) -> Animation:
     """An animation of ``assembly`` named ``name``, ``duration`` seconds long (the length its GLB
     animation's ``extras`` say, as a configuration sequence's): the builder its channels are added
-    to (see the module). Baked into a GLB the model declares, never kept in the document; naming
-    one again starts it afresh."""
+    to (see the module). Baked into a GLB the model declares, and kept in its xbf as a build record
+    a GLB of the document bakes again; naming one again starts it afresh."""
     import build123d as bd
 
     if not isinstance(assembly, bd.Shape):
@@ -402,9 +404,8 @@ class Resolved:
 
 def to_json(resolved: dict[str, Resolved] | None) -> list[dict[str, Any]] | None:
     """A build's animations (``harvest``) as plain JSON, every track's fields as they are, its
-    tuples as lists: what a document held after its worker went keeps beside its xbf bytes
-    (``models.Models.drain``), since the document holds none. ``from_json`` gives back the same
-    values, so a GLB baked from them is the GLB the build's tree bakes. None for none."""
+    tuples as lists: the build record the xbf carries (``record``). ``from_json`` gives back the
+    same values, so a GLB baked from them is the GLB the build's tree bakes. None for none."""
     if not resolved:
         return None
     return [{"name": item.name, "duration": item.duration,
@@ -418,6 +419,8 @@ def from_json(rows: list[dict[str, Any]] | None) -> dict[str, Resolved] | None:
         return None
 
     def tupled(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {name: tupled(item) for name, item in value.items()}
         return tuple(tupled(item) for item in value) if isinstance(value, list) else value
 
     return {row["name"]: Resolved(row["name"], float(row["duration"]),
@@ -425,6 +428,22 @@ def from_json(rows: list[dict[str, Any]] | None) -> dict[str, Resolved] | None:
                                               order)
                                         for path, interpolation, keys, groups, extra, label, order in row["tracks"]))
             for row in rows}
+
+
+def record(resolved: dict[str, Resolved] | None) -> str | None:
+    """A build's animations as the xbf's main label holds them: ``to_json``'s rows as ASCII JSON
+    text, in the build's order, with no spaces. None for none, and the document holds no record."""
+    import json
+
+    rows = to_json(resolved)
+    return None if rows is None else json.dumps(rows, separators=(",", ":"), allow_nan=False)
+
+
+def from_record(text: str | None) -> dict[str, Resolved] | None:
+    """The animations a document's record holds (``record``), by name; None for none."""
+    import json
+
+    return from_json(json.loads(text)) if text else None
 
 
 def _occurrence_tree(tree: Any) -> tuple[Any, dict[tuple[int, ...], Any]]:

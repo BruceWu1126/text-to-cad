@@ -610,7 +610,7 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
         modules, unkeyable = context.modules(model)
         folder = Path(xbf).parent if xbf is not None else model.script.parent
         made = previous.manifest(run.keys, f"{model.script}::{model.name}", folder, model, modules, unkeyable,
-                                 context.named(model), len(getattr(tree, "animations", None) or {}))
+                                 context.named(model))
         tree.closure = previous.text(made)
         report["closure"] = previous.located(made, folder)
     timings["collect"] = round(time.perf_counter() - clock, 4)
@@ -844,10 +844,6 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
         if text is None:
             return {"used": False, "reason": "the file holds no key"}, None
     found = json.loads(text)
-    if where == "file" and found.get("animations"):
-        # Its animations are the GLB's, made by its body: the file holds none, so a document taken
-        # from it would export a GLB without them. Its body runs (law 17).
-        return {"used": False, "reason": "its animations live in no file"}, None
     if found.get("key") is None:
         return {"used": False, "reason": "the file holds no key"}, None
     modules, _unkeyable = context.modules(model)

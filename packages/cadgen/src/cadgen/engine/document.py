@@ -69,6 +69,9 @@ WRITER = "cadgen.engine {format} (cadgen {release})"
 # The model's build closure, on its main label beside the writer (``previous``): its engine,
 # libraries, source, modules and inputs as pointers and digests, and the key over them.
 CLOSURE_GUID = "2f6c9d1e-8a43-4b7e-b5d0-7e1a3c9f4b62"
+# The build's animations, a build record on its main label after the closure (``animations.record``):
+# the compiled tracks a GLB of the document bakes; every other reader ignores them.
+ANIMATIONS_GUID = "196117b9-7763-467d-8c37-7f838602e8a5"
 _XCAF_LOCK = threading.RLock()
 # The last document ``to_xcaf`` made and its tree; per path, the tree last saved there.
 _MADE: list = []
@@ -129,7 +132,8 @@ class Tree:
     parts: list[Part]
     signature: tuple
     mechanism: Any = None
-    # Its animations (``animations.harvest``), by name, or None: the GLB writer's, never the document's.
+    # Its animations (``animations.harvest``), by name, or None: baked into its GLB, and kept on the
+    # document's main label as a build record (``ANIMATIONS_GUID``).
     animations: Any = None
     # The model's build closure (``previous.manifest``, as text), written on the main label;
     # None for none.
@@ -308,7 +312,7 @@ def collect(result: Any, name: str) -> Tree:
     tree = Tree(root, order, parts, (signature, _location_key(location), root_name))
     # The result's joints, harvested: the result is the holder's one component where it has one.
     tree.mechanism = mechanism.harvest(result, tree, (0,) if held else ())
-    # And its animations, which only a GLB holds: a change of one rewrites the GLB, never the document's tree.
+    # And its animations, a GLB's: a change of one rewrites the GLB and the document's record, never its tree.
     from cadgen.engine.animations import harvest
 
     tree.animations = harvest(result, tree, (0,) if held else (), tree.mechanism)
@@ -678,8 +682,9 @@ class Kept:
         # The last conversion: how many prototypes it converted, and whether it patched.
         self.converted = 0
         self.patched = False
-        # The build closure the document holds (``Tree.closure``).
+        # The build closure the document holds (``Tree.closure``), and its animations' record.
         self.closure: str | None = None
+        self.animations: str | None = None
 
 
 def to_xcaf(tree: Tree, kept: Kept | None = None) -> Any:
@@ -853,6 +858,10 @@ def _convert(tree: Tree, records: list[_Record], kept: Kept) -> Any:
     if tree.closure is not None:
         TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(CLOSURE_GUID), TCollection_AsciiString(tree.closure))
     kept.closure = tree.closure
+    animated = _animations_record(tree)
+    if animated is not None:
+        TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(ANIMATIONS_GUID), TCollection_AsciiString(animated))
+    kept.animations = animated
     labels: list = []
     for at, (prototype, record) in enumerate(zip(tree.order, records)):
         if isinstance(prototype, Part):
@@ -867,6 +876,13 @@ def _convert(tree: Tree, records: list[_Record], kept: Kept) -> Any:
     kept.tools = {tag for tag in _held_children(doc.Main()) if tag != mechanism.TAG}
     kept.converted, kept.patched = len(records), False
     return doc
+
+
+def _animations_record(tree: Tree) -> str | None:
+    """The record of a tree's animations its document holds (``animations.record``), or None."""
+    from cadgen.engine.animations import record
+
+    return record(tree.animations)
 
 
 def _patch(kept: Kept, tree: Tree, records: list[_Record]) -> Any:
@@ -895,15 +911,20 @@ def _patch(kept: Kept, tree: Tree, records: list[_Record]) -> Any:
     converter = _Converter(doc, kept, patching=True)
     labels = [converter.label(at) for at in range(min(len(records), len(old)))] + [None] * (len(records) - len(old))
     kept.converted, kept.patched = len(dirty), True
-    if (tree.closure is None) != (kept.closure is None):
+    animated = _animations_record(tree)
+    if (tree.closure is None) != (kept.closure is None) or (animated is None) != (kept.animations is None):
         return None  # the main label's attributes in a cold conversion's order: made whole
-    if tree.closure != kept.closure:
+    if tree.closure != kept.closure or animated != kept.animations:
         from OCP.Standard import Standard_GUID
         from OCP.TCollection import TCollection_AsciiString
         from OCP.TDataStd import TDataStd_AsciiString
 
-        TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(CLOSURE_GUID), TCollection_AsciiString(tree.closure))
-        kept.closure = tree.closure
+        if tree.closure != kept.closure:
+            TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(CLOSURE_GUID), TCollection_AsciiString(tree.closure))
+            kept.closure = tree.closure
+        if animated != kept.animations:
+            TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(ANIMATIONS_GUID), TCollection_AsciiString(animated))
+            kept.animations = animated
     if not dirty and not gone and tables == kept.tables and converter.mechanism(tree, labels) == kept.mechanism:
         return doc
     # The references a label makes, ordered by their labels' places: each colour's,
@@ -1295,6 +1316,14 @@ class Loaded:
         found = _label_text(self.doc.Main(), CLOSURE_GUID)
         return json.loads(found) if found else None
 
+    @property
+    def animations(self) -> Any:
+        """The build's animations the document records (``animations.record``), by name, as the
+        harvest made them: what a GLB of it bakes. None for a document with none."""
+        from cadgen.engine.animations import from_record
+
+        return from_record(_label_text(self.doc.Main(), ANIMATIONS_GUID))
+
     def structure(self) -> dict[str, Any]:
         """The document as the page reads it (``serve``): its prototypes, its instances
         and its tree, with every name and colour, and its mechanism (``kinematics``,
@@ -1527,7 +1556,7 @@ def _writer() -> str:
 
 
 def written_format(writer: str | None) -> str | None:
-    """The xbf format a document's writer names (``xbf/6``), or None for another program's."""
+    """The xbf format a document's writer names (``xbf/7``), or None for another program's."""
     import re
 
     found = re.match(r"cadgen\.engine (xbf/[0-9]+) \(cadgen ", writer or "")

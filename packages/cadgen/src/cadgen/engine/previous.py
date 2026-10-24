@@ -22,9 +22,6 @@ When a build writes a model's xbf, the document's main label carries its closure
   relative to the document's folder (``null`` digest: a file it found missing), and a text's
   font (``font``);
 - ``bodies``: how many bodies the model is;
-- ``animations``: how many ``animation()``s the build made, information only, never their
-  channels: those are the GLB's and no file holds them, so a document whose build made any is
-  never taken from its file (``build._previous``) -- its GLB would have none of them;
 - ``key``: one digest over the format, the libraries, the source, the modules and the
   inputs; ``null`` where the closure cannot say all the model is made of (a body read a
   pipe, or reaches what cannot be keyed). Neither the release nor the engine's code digest
@@ -70,7 +67,8 @@ SCHEMA = "cadgen.engine closure/1"
 # xbf/4: a function motion's samples are checked at every eighth of a step and held to half the tolerance there.
 # xbf/5: files read by motion functions join the closure.
 # xbf/6: the closure counts the build's animations, and a document with any is not taken.
-FORMAT = "xbf/6"
+# xbf/7: the build's animations are a record on the main label (``animations.record``); the closure counts none.
+FORMAT = "xbf/7"
 # The libraries a key covers: what decides the geometry.
 KEYED_LIBRARIES = ("build123d", "OCP")
 # The start of a closure's text: the schema first, so a head scan finds it.
@@ -191,12 +189,10 @@ def _recipe(row: list, folder: Path) -> tuple:
 
 
 def manifest(keys: dict[str, tuple], name: str, folder: Path, model: Any, modules: dict[str, str],
-             unkeyable: bool, symbols: dict[str, dict[str, str]] | None = None,
-             animations: int = 0) -> dict[str, Any]:
+             unkeyable: bool, symbols: dict[str, dict[str, str]] | None = None) -> dict[str, Any]:
     """The closure a model's document carries (see the module), its paths relative to
     ``folder``, the document's: ``keys`` the run's bodies (``memo``), ``name`` the model's
-    body, ``modules`` and ``unkeyable`` its closure by file (``sources.Symbols.modules``),
-    ``animations`` how many the build made."""
+    body, ``modules`` and ``unkeyable`` its closure by file (``sources.Symbols.modules``)."""
     from cadgen.engine.kernel import memo
 
     found = keys.get(name)
@@ -216,8 +212,7 @@ def manifest(keys: dict[str, tuple], name: str, folder: Path, model: Any, module
         "schema": SCHEMA, "engine": _engine(), "libs": _libraries(), "source": _source(model, folder),
         "modules": sorted([_relative(path, folder), digest] for path, digest in modules.items()),
         "symbols": _named(symbols or {}, folder),
-        "inputs": inputs, "bodies": len(closure(keys, name)) if found is not None else None,
-        "animations": animations}
+        "inputs": inputs, "bodies": len(closure(keys, name)) if found is not None else None}
     record["key"] = key(record) if keyed else None
     return record
 

@@ -265,7 +265,8 @@ src/cadgen/
   ap242.py               # the mechanism's AP242 names: mechanism_state,
                          #   configuration_sequence, gear_pair, rack_and_pinion_pair,
                          #   screw_pair (product and manufacturing information to join them)
-  gltf.py                # what glTF says and the document does not: animation
+  gltf.py                # animation: the document records its compiled tracks, and only a
+                         #   GLB reads them (an exported GLB's clips)
   engine/                # the engine: models, the server and its workers, documents,
                          #   exports, the mesh, references, the OCCT stills (its README)
   cli/                   # the `cadgen` command: a module per command, each a shell over

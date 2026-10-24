@@ -5,7 +5,8 @@ Every prototype the view places is a part with the document's name, colour, face
 materials and element names; every assembly node of the view's tree is an assembly of its
 own here, each component placed in its parent's frame. A part read from a STEP this engine
 did not write takes the geometry key a build would give it, so an xbf of it caches like any.
-The mechanism is the document's, whole.
+The mechanism is the document's, whole, and so are its animations (``animations.record``): the
+tree's occurrences are the view's, so their paths are the ones the tracks name.
 """
 
 from __future__ import annotations
@@ -108,6 +109,7 @@ def tree_of(view: Any) -> Any:
             order.append(root)
     tree = document.Tree(root, order, list(parts.values()), ("exported", view.name))
     tree.mechanism = source.mechanism
+    tree.animations = source.animations
     return tree
 
 

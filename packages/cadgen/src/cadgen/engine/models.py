@@ -287,10 +287,9 @@ class Models:
     def drain(self, worker: Any) -> None:
         """Before ``worker`` is retired: every ``pointer`` and ``copy`` document of it the server does not hold
         whole at its version is taken from it -- its ``result``, never meshed, with the whole
-        document as xbf bytes (``document.to_bytes``) and the build's animations, which the document
-        holds none of (``animations.to_json``) -- so it outlives the worker and answers every verb as
-        an on-disk xbf does, and a GLB of it as the build's GLB. A worker that is gone (a crash) drains nothing: its documents
-        the server lacks are evicted."""
+        document as xbf bytes (``document.to_bytes``, its animations' record with it) -- so it outlives
+        the worker and answers every verb as an on-disk xbf does, and a GLB of it as the build's GLB. A
+        worker that is gone (a crash) drains nothing: its documents the server lacks are evicted."""
         server = self.daemon.server
         if server is None or not worker.alive():
             return
@@ -303,7 +302,7 @@ class Models:
             if server.has(ident, version, whole=True):
                 continue
             try:
-                structure, shapes, whole, animations = self.load(ident, worker, whole=True)
+                structure, shapes, whole = self.load(ident, worker, whole=True)
             except WorkerGone:
                 return
             except (OSError, ValueError, KeyError):
@@ -312,7 +311,7 @@ class Models:
                 record = self.records.get(ident)
                 current = record is not None and record["version"] == version
             if current:  # a build of it since, by another worker, is newer
-                server.keep(ident, structure, shapes, version, whole, animations)
+                server.keep(ident, structure, shapes, version, whole)
 
     def serve(self, ident: str) -> tuple[Any, str]:
         """The server and the id of the model document ``ident`` the engine holds; refused
@@ -325,8 +324,7 @@ class Models:
     def load(self, ident: str, leaving: Any = None, whole: bool = False) -> tuple:
         """A model document's structure and shape bytes, asked of the worker that holds it -- through
         the pool, or of ``leaving``, a worker being retired (``drain``), directly, and then
-        (``whole``) with the whole document's xbf bytes third and its animations fourth, as JSON
-        (``animations.to_json``; None for none). ``serve.NotHeld`` when no worker holds
+        (``whole``) with the whole document's xbf bytes third. ``serve.NotHeld`` when no worker holds
         it: nothing is built to bring it back."""
         with self.lock:
             record = self.records.get(ident)
@@ -359,7 +357,7 @@ class Models:
         structure = {**done["structure"], "exportRevision": fingerprint(done["structure"]), "path": ident,
                      "id": ident, "closure": done.get("closure"), "version": version}
         if whole:
-            return structure, shapes, payload[at:at + int(done.get("xbf") or 0)], done.get("animations")
+            return structure, shapes, payload[at:at + int(done.get("xbf") or 0)]
         return structure, shapes
 
     def prune(self) -> None:

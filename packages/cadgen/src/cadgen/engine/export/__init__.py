@@ -15,9 +15,9 @@ two mesh kinds, holding what its format carries (``README``, **Translation forma
 nothing else: there is no B-rep in it, so no xbf, STEP or DXF; nor is a mesh file written from one
 of its own kind. An xbf is written from a STEP (read into a document first); an xbf is
 never written from another, which already is the document. A GLB carries every configuration sequence the document defines as a glTF
-animation of the same name, baked by forward kinematics (``export/motion.py``), and, from a build's source, every
-``animation()`` its code made (``export/animation.py``): the document holds none, so a GLB
-exported from the xbf alone carries the configuration sequences only. STEP, STL and 3MF ignore both. A
+animation of the same name, baked by forward kinematics (``export/motion.py``), and every
+``animation()`` its code made (``export/animation.py``), from a build's tree or from the record of
+them the xbf carries, so a GLB exported from the xbf is the build's own. STEP, STL and 3MF ignore both. A
 DXF is drawn from a planar document alone (``export/dxf.py``): a 3D one is refused.
 
 Every file is written to a temporary file beside its target and moved over it; a DXF only
@@ -131,9 +131,9 @@ class Source:
         self.xcaf = xcaf
         self._world = world
         self.mechanism = mechanism
-        # The animations the build's code made (``animations.harvest``): a built source's, or a held
-        # one's its worker handed over (``animations.from_json``), never a file's, since the document
-        # holds none. A GLB bakes them (``export/animation.py``).
+        # The animations the build's code made (``animations.harvest``): a built source's from its
+        # tree, a read one's from the document's record of them (``document.Loaded.animations``). A
+        # GLB bakes them (``export/animation.py``); no other export reads them.
         self.animations = animations
         # A document this engine did not write (a foreign STEP): its keys are its reader's,
         # made again from the geometry before an xbf holds them.
@@ -169,7 +169,7 @@ class Source:
         loaded = document.load(path)
         return cls(loaded.structure(), {p.key: p.shape for p in loaded.prototypes}, live=False, xcaf=loaded.doc,
                    world=lambda occurrence: loaded.worlds.get(occurrence), mechanism=loaded.mechanism,
-                   foreign=loaded.writer is None, path=loaded.path)
+                   foreign=loaded.writer is None, path=loaded.path, animations=loaded.animations)
 
     @classmethod
     def built(cls, doc: Any, tree: Any, path: Path | None) -> "Source":
