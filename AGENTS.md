@@ -66,15 +66,20 @@ the pipeline.
 The standalone `Deploy Docs` workflow redeploys the docs site from a ref
 (default `main`, or a release tag) without running a release.
 
-cadgen runs as ONE launch command everywhere, `uvx --no-config --managed-python
---python 3.13 --from cadgen==<VERSION> <tool>` (`cadgen._internal.launch`): the
-plugin server configs and every cadgen skill's SKILL.md carry it, the release
-stamps every pin (`sync-version.mjs`), and `scripts/release/check-version.sh`
-and the tests assert they all equal `VERSION`. uv keeps one installation per
-requirement and cadgen names its warm daemon after that installation, so the
-server, every thread and every skill command share one daemon. In a checkout,
-install `requirements-dev.txt` (the editable cadgen) and test in agent apps with
-`scripts/install/dev_install.py`, which points both at the checkout.
+cadgen installs as ONE uvx command, `uvx --no-config --managed-python --python
+3.13 --from cadgen==<VERSION> <tool>` (`cadgen._internal.launch`): the plugin
+server configs run it, outside any sandbox. That installation publishes its
+launchers, `~/.local/bin/cadgen-<VERSION>` and `cadgen-python-<VERSION>`
+(`cadgen._internal.launchers`), and every cadgen skill's SKILL.md runs them
+(uvx cannot start in an agent's sandbox; a launcher can), naming the uvx command
+once, as the `cadgen doctor` that installs and publishes when they are missing.
+The release stamps every pin and launcher name (`sync-version.mjs`), and
+`scripts/release/check-version.sh` and the tests assert they all equal
+`VERSION`. uv keeps one installation per requirement and cadgen names its warm
+daemon after that installation, so the server, every thread and every skill
+command share one daemon. In a checkout, install `requirements-dev.txt` (the
+editable cadgen) and test in agent apps with `scripts/install/dev_install.py`,
+which points both at the checkout.
 `models/` stays on `main` as plain files; nothing installs it.
 `scripts/github-workflows/check-builds.sh` enforces the shipping contract on
 every push: no tracked symlink, no `.gitattributes` rule that rewrites files at
@@ -141,8 +146,8 @@ path, the rehearsal, and local/manual fallbacks.
   sibling skill directory to `sys.path`, `PYTHONPATH`, `NODE_PATH`, or any other
   runtime lookup path. Skills are independent of each other, not of everything.
 - Shared runtime comes from the **`cadgen` distribution**. A skill that uses it
-  defines `cadgen` and `python` in its SKILL.md as the launch command above,
-  pinned to `VERSION` (the release stamps every pin); no skill installs cadgen
+  defines `cadgen` and `python` in its SKILL.md as the launchers above,
+  named by `VERSION` (the release stamps every pin); no skill installs cadgen
   any other way (no `requirements.txt` naming it), because a second installation
   is a second daemon. Skills do not vendor it: a skill script is a thin entrypoint whose
   parser and behaviour live in `cadgen.cli`. The engine draws every snapshot with
