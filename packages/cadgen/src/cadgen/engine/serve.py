@@ -544,9 +544,6 @@ class Served:
     # A model's whole document, as the xbf bytes its worker made of it before it retired (the
     # drain): what an export, a snapshot or an inspection of it reads once no worker holds it.
     xbf: bytes | None = None
-    # And the build's animations beside them (``animations.to_json``), which the xbf holds none of: a
-    # GLB exported from the hold bakes them as the worker's own GLB would.
-    animations: list[dict[str, Any]] | None = None
     _size: int | None = field(default=None, repr=False, compare=False)
 
     @property
@@ -556,13 +553,12 @@ class Served:
     @property
     def size(self) -> int:
         """The bytes it holds, as the memory budget counts them: its structure as JSON, its shape
-        bytes, the bytes made from its live shapes (a live shape itself is not counted), its
-        whole document's xbf bytes and its animations as JSON."""
+        bytes, the bytes made from its live shapes (a live shape itself is not counted) and its
+        whole document's xbf bytes (its animations' record among them)."""
         if self._size is None:
             self._size = (len(json.dumps(self.structure, separators=(",", ":"), default=str))
                           + sum(len(shape) for shape in self.shapes.values() if isinstance(shape, (bytes, bytearray)))
-                          + sum(len(made) for made in self.data.values()) + len(self.xbf or b"")
-                          + (len(json.dumps(self.animations, separators=(",", ":"))) if self.animations else 0))
+                          + sum(len(made) for made in self.data.values()) + len(self.xbf or b""))
         return self._size
 
     def shape_data(self, key: str) -> bytes | None:
@@ -784,16 +780,15 @@ class Server:
         return ident
 
     def keep(self, ident: str, structure: dict[str, Any], shapes: dict[str, Any], version: int,
-             xbf: bytes, animations: list[dict[str, Any]] | None = None) -> None:
+             xbf: bytes) -> None:
         """A model's document, version ``version``, held from now on whatever becomes of its worker
-        (the daemon's drain: ``models.Models.drain``): its served structure and shapes, the whole
-        document as ``xbf`` bytes, and the build's ``animations`` (``animations.to_json``), which the
-        xbf holds none of. Evicted, all of it goes."""
+        (the daemon's drain: ``models.Models.drain``): its served structure and shapes, and the whole
+        document as ``xbf`` bytes, its animations' record with it. Evicted, all of it goes."""
         lock = self.model_locks.setdefault(ident, threading.Lock())
         with lock:
             with self.load_lock:
                 doc = self.served[self.put(ident, structure, shapes, grow=False)]
-                doc.xbf, doc.animations, doc._size = xbf, animations, None
+                doc.xbf, doc._size = xbf, None  # counted again, its xbf bytes with it
                 self.model_versions[ident] = version
         self._grown()
 
