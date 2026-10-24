@@ -396,7 +396,9 @@ cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
 cadgen serve DOC [--port N] [--three DIR]
 cadgen inspect DOC [REF] [--json]              what the document holds, then its build closure; with REF (**References**): an element's facts and
                                              what made it, or a part's or an assembly's volume, mass and
-                                             world bounds (a part's placement too)
+                                             world bounds (a part's placement too); of a GLB, its nodes,
+                                             meshes and animations (an STL or a 3MF, and a ref into any
+                                             mesh, is refused, saying what shows it)
 cadgen status [--json] | stop [--json] | server
 ```
 

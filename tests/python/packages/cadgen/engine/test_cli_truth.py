@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import struct
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -169,6 +171,43 @@ class VerbsTest(Engine):
         self.assertEqual(found["placement"], {"origin": [30.0, 5.0, 0.0], "x": [0.0, 1.0, 0.0], "y": [-1.0, 0.0, 0.0],
                                               "z": [0.0, 0.0, 1.0]})
         self.assertEqual(found["bounds"], {"min": [26.0, 3.0, -1.0], "max": [34.0, 7.0, 1.0], "size": [8.0, 4.0, 2.0]})
+
+
+class MeshTest(unittest.TestCase):
+    """``inspect`` of a mesh file, which needs no engine: a GLB's own facts, read from its JSON; an
+    STL's, and a ref into any mesh, refused in words that say what to do."""
+
+    def test_a_glb_tells_its_nodes_meshes_and_animations_and_an_stl_what_to_do(self) -> None:
+        folder = Path(tempfile.mkdtemp(prefix="cli-truth-mesh-"))
+        self.addCleanup(shutil.rmtree, folder, True)
+        document = json.dumps({"asset": {"version": "2.0"}, "nodes": [{"mesh": 0}, {"children": [0]}],
+                               "meshes": [{"primitives": []}],
+                               "accessors": [{"count": 2, "componentType": 5126, "type": "SCALAR", "min": [0.0],
+                                              "max": [2.5]}],
+                               "animations": [{"name": "spin", "samplers": [{"input": 0, "output": 0}],
+                                               "channels": []}]}).encode()
+        document += b" " * (-len(document) % 4)
+        (folder / "rotor.glb").write_bytes(struct.pack("<III", 0x46546C67, 2, 20 + len(document))
+                                           + struct.pack("<II", len(document), 0x4E4F534A) + document)
+        (folder / "rotor.stl").write_text("solid rotor\nendsolid rotor\n", encoding="utf-8")
+        env = {**os.environ, "PYTHONPATH": str(SRC)}
+
+        def inspect(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run([sys.executable, "-m", "cadgen.engine", "inspect", *args], cwd=folder, env=env,
+                                  capture_output=True, text=True, timeout=120)
+
+        shown = inspect("rotor.glb")
+        self.assertEqual((shown.returncode, shown.stdout.splitlines()), (0, [
+            "rotor.glb  a mesh (GLB)", "nodes       2", "meshes      1", "animations", "  spin  2.5 s",
+            "closure     none: a mesh carries none, only an .xbf does"]))
+        refused = inspect("rotor.stl")
+        self.assertEqual(refused.returncode, 2)
+        self.assertEqual(refused.stderr, "python -m cadgen.engine inspect: rotor.stl is a mesh: it has no B-rep for a "
+                                         "ref to name and no build closure (only an .xbf carries one); inspect reads "
+                                         "nothing more of it: `cadgen viewer rotor.stl` shows it, and the document it "
+                                         "was exported from, inspected, tells the rest\n")
+        self.assertIn("`cadgen inspect rotor.glb` alone tells its nodes, meshes and animations",
+                      inspect("rotor.glb", "rotor").stderr)
 
 
 if __name__ == "__main__":

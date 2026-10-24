@@ -605,7 +605,8 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
     outputs. ``query="build"`` returns file metadata/closure or live build metadata;
     ``query="geometry"`` requires a ref, and ``query="closure"`` accepts none.
     ``query="summary"`` (``cadgen inspect DOC`` with no ref) is ``{"summary", "closure"}``:
-    what the document holds at a glance (``_summary``), and its closure, as the engine holds it."""
+    what the document holds at a glance (``_summary``), and its closure, as the engine holds it; of
+    a GLB, ``{"mesh"}``: its nodes, meshes and animations, from its JSON alone (``_mesh``)."""
     import urllib.error
     import urllib.request
 
@@ -624,6 +625,9 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
         raise EngineError("query is closure, geometry, build or summary")
     if (query == "geometry") != (ref is not None):
         raise EngineError("only a geometry query requires a reference")
+    mesh = key(os.fspath(source))
+    if isinstance(mesh, Path) and mesh.suffix.lower() in (".glb", ".stl", ".3mf"):
+        return _mesh(mesh, named, query)
     path = _document(source, "inspect", named)
     if query == "build":
         if not isinstance(path, Path):
@@ -697,6 +701,34 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
                       "key": prototype["key"], "kind": hit.kind, "ordinal": hit.ordinal, "name": hit.name,
                       **refs.placed_facts(facts, matrix)})
     return found[0] if len(found) == 1 else found
+
+
+def _mesh(path: Path, named: str, query: str) -> Facts:
+    """``inspect`` of a mesh file: a GLB's nodes, meshes and animations, each with its duration, read
+    from its JSON alone (``{"mesh": ...}``, without a ref); an STL's or a 3MF's, and any ref or
+    closure of a mesh, refused in words. A mesh has no B-rep, so no ref names a face of it, and no
+    build closure: only an .xbf carries one."""
+    if not path.is_file():
+        raise ValueError(f"no document {named}")
+    if query != "summary" or path.suffix.lower() != ".glb":
+        said = (f"`cadgen inspect {path.name}` alone tells its nodes, meshes and animations, and "
+                f"`cadgen viewer {path.name}` shows it" if path.suffix.lower() == ".glb" else
+                f"inspect reads nothing more of it: `cadgen viewer {path.name}` shows it, and the document it was "
+                "exported from, inspected, tells the rest")
+        raise ValueError(f"{path.name} is a mesh: it has no B-rep for a ref to name and no build closure (only an "
+                         f".xbf carries one); {said}")
+    from cadgen.engine.formats.gltf import _chunks
+
+    gltf, _binary = _chunks(path)
+    accessors = gltf.get("accessors") or []
+    animations = []
+    for at, animation in enumerate(gltf.get("animations") or []):
+        ends = [(accessors[sampler["input"]].get("max") or [0.0])[0] for sampler in animation.get("samplers") or []
+                if isinstance(sampler, dict) and isinstance(sampler.get("input"), int) and sampler["input"] < len(accessors)]
+        animations.append({"name": animation.get("name") or f"animation {at + 1}",
+                           "duration": float(max(ends, default=0.0))})
+    return {"mesh": {"name": path.name, "path": str(path), "nodes": len(gltf.get("nodes") or []),
+                     "meshes": len(gltf.get("meshes") or []), "animations": animations}}
 
 
 def _placed(structure: dict[str, Any], hit: Any, boxes: dict[str, Any]) -> dict[str, Any]:

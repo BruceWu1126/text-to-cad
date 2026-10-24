@@ -67,7 +67,8 @@ def _inspect_arguments(parser: argparse.ArgumentParser) -> None:
                              "geometry (requires REF), or build metadata; never builds a model")
     parser.add_argument("--json", action="store_true",
                         help="without REF, the summary and the closure as one JSON object (a REF's answer is JSON)")
-    parser.add_argument("document", help="an .xbf, a STEP, or a document id")
+    parser.add_argument("document", help="an .xbf, a STEP, or a document id; a GLB says its nodes, meshes and "
+                                          "animations")
     parser.add_argument("ref", nargs="?", help="[FILE#][OWNER/]ELEMENT or [FILE#]OWNER (cadgen.engine.refs): OWNER a "
                                                "part's or an assembly's label, or its occurrence path (hand/finger.2); "
                                                "ELEMENT an element name (f:..., e:..., v:...) or face N (edge, vertex). "
@@ -371,7 +372,15 @@ def _inspect(args: argparse.Namespace, prog: str) -> int:
     except api.EngineError as error:
         raise Failed(str(error)) from None
     told_state(args.document, "inspecting")
-    if query == "summary" and not args.json:
+    if "mesh" in found and not args.json:
+        mesh = found["mesh"]
+        print(f"{mesh['name']}  a mesh (GLB)")
+        print(f"nodes       {mesh['nodes']}")
+        print(f"meshes      {mesh['meshes']}")
+        rows = [f"{row['name']}  {_number(row['duration'])} s" for row in mesh["animations"]]
+        print("animations" + "".join(f"\n  {row}" for row in rows) if rows else "animations  none")
+        print("closure     none: a mesh carries none, only an .xbf does")
+    elif query == "summary" and not args.json:
         print(summary_text(found["summary"]))
         path = Path(str(found["summary"]["state"].get("path") or ""))
         if found["closure"] is None and path.suffix.lower() in (".step", ".stp"):
