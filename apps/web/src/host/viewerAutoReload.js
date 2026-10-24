@@ -14,11 +14,11 @@
  * cadence, and says what to do and when to ask again.
  *
  * Only a dev server is followed to another identity (`follow`). A page the engine
- * serves never is: the engine's token is new with every engine, so the page's own
- * credential is refused by any later engine on its port, and an answer from a new
- * identity there is a process the page cannot authenticate -- whatever binds the
- * port once the engine is gone. The page stops asking and says its engine is gone
- * (`foreign`), and never loads that process into the tab.
+ * serves is not reloaded here: it stops asking and says its engine is gone
+ * (`foreign`). It then asks for its engine as any page that lost one does
+ * (`useEngineReconnect`), which reloads it only once an engine that holds its
+ * token answers -- the installation's own, whose token outlives its restarts --
+ * and never loads another process on its port into the tab.
  */
 
 /** Steady-state poll while the server is the one this page loaded against. */

@@ -35,8 +35,8 @@ export default {
   "export.exportAgain": "もう一度エクスポート",
 
   "app.start.notAnswering": "CAD ビューアーが応答しません",
-  "app.engine.notRunning": "エンジンが動いていません。",
-  "app.engine.runAgain": "cadgen viewer をもう一度実行してください。",
+  "app.engine.notRunning": "エンジンが動いていません。戻るとページは自動で再接続します。",
+  "app.engine.startIt": "python <model>.py か cadgen viewer を実行して起動してください。",
 
   "file.opening": "開いています…",
   "file.missing": "ファイルが存在しません",

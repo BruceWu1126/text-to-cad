@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-web-app-'));
 const output = join(temporary, 'app.mjs');
 await build({
-  stdin: { contents: `export {default as App} from './App.tsx'; export {createWebCadClient} from './host/cadClient.js'; export {act,createElement} from 'react'; export {createRoot} from 'react-dom/client'; export {snapshot} from '@text-to-cad/ui/cad-viewer'; export {autoReloadOptions} from './host/useViewerAutoReload.js'; export {createTabStore} from '@text-to-cad/ui/tab-store'; export {sessionTabRecord, TAB_RECORD_KEY} from './persistence/tabRecord.ts';`, resolveDir: fileURLToPath(new URL('.', import.meta.url)) },
+  stdin: { contents: `export {default as App} from './App.tsx'; export {EngineStopped} from './EngineStopped.tsx'; export {createWebCadClient} from './host/cadClient.js'; export {act,createElement} from 'react'; export {createRoot} from 'react-dom/client'; export {snapshot} from '@text-to-cad/ui/cad-viewer'; export {autoReloadOptions} from './host/useViewerAutoReload.js'; export {createTabStore} from '@text-to-cad/ui/tab-store'; export {sessionTabRecord, TAB_RECORD_KEY} from './persistence/tabRecord.ts';`, resolveDir: fileURLToPath(new URL('.', import.meta.url)) },
   bundle: true, platform: 'node', format: 'esm', jsx: 'automatic', outfile: output, loader: { '.css': 'empty', '.svg': 'dataurl' },
   banner: { js: `import {createRequire} from 'node:module'; const require=createRequire(import.meta.url);` },
   plugins: [{ name: 'host-boundaries', setup(plugin) {
@@ -31,7 +31,7 @@ await build({
     });
   } }],
 });
-const { App, createWebCadClient, act, createElement, createRoot, snapshot, autoReloadOptions, createTabStore, sessionTabRecord, TAB_RECORD_KEY } = await import(pathToFileURL(output).href);
+const { App, EngineStopped, createWebCadClient, act, createElement, createRoot, snapshot, autoReloadOptions, createTabStore, sessionTabRecord, TAB_RECORD_KEY } = await import(pathToFileURL(output).href);
 after(() => rm(temporary, { recursive: true, force: true }));
 
 // Each file's document id, as the server derives it from the file's canonical path.
@@ -237,8 +237,8 @@ test('a page whose engine is gone says so in its language, over the page, until 
     assert.equal(alert() === null, true, 'nothing is said while the engine answers');
     catalog = 'stopped';
     await act(() => client.refresh({ file: ONE }).catch(() => {}));
-    assert.match(alert()?.textContent ?? '', /エンジンが動いていません。/);
-    assert.match(alert()?.textContent ?? '', /cadgen viewer をもう一度実行してください。/);
+    assert.match(alert()?.textContent ?? '', /エンジンが動いていません。戻るとページは自動で再接続します。/);
+    assert.match(alert()?.textContent ?? '', /python <model>\.py か cadgen viewer を実行して起動してください。/);
     assert.doesNotMatch(alert()?.textContent ?? '', /Failed to fetch|\{/, 'never the failure itself');
     assert.equal(snapshot() !== undefined, true, 'the page stays under it');
     catalog = 'restarted';
@@ -252,6 +252,20 @@ test('a page whose engine is gone says so in its language, over the page, until 
     globalThis.fetch = fetchBefore;
     await act(() => root.unmount());
     client.dispose();
+    dom.window.close();
+  }
+});
+
+test('the notice says the page reconnects, and how to start the engine', async () => {
+  const dom = new JSDOM('<div id="root"></div>');
+  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true })) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  const root = createRoot(dom.window.document.getElementById('root'));
+  try {
+    await act(() => root.render(createElement(EngineStopped, { locale: 'en' })));
+    assert.equal(dom.window.document.querySelector('[role="alert"]')?.textContent,
+      'The engine is not running; the page reconnects when it is back.Run python <model>.py or cadgen viewer to start it.');
+  } finally {
+    await act(() => root.unmount());
     dom.window.close();
   }
 });
