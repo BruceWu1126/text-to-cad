@@ -637,6 +637,15 @@ class Server:
         self.stopping = threading.Event()
         # What the engine knows of a document it no longer holds (``NotHeld.payload``), else None.
         self.lost: Callable[[str], dict[str, Any] | None] = lambda _ident: None
+        # A document id this server does not hold yet, taken up from the engine's cache where it has
+        # it (``models.Models.adopt``): registered, and read when it is asked for.
+        self.revive: Callable[[str], None] = lambda _ident: None
+        # Whether a model document no worker holds was built from code that changed since
+        # (``models.Models.stale``): ``{"text", "changes", "rebuild"}``, said in its structure, or None.
+        self.stale: Callable[[str], dict[str, Any] | None] = lambda _ident: None
+        # Each model document whose cache file is at the version held (``cache``): read again from
+        # disk when evicted, it is in the budget's first tier with the files.
+        self.on_disk: dict[str, Any] = {}
         if budget is not None:
             self.cache.cap = None
             self.cache.grown = self._grown
@@ -854,6 +863,7 @@ class Server:
             self.model_loaders.pop(ident, None)
             self.model_versions.pop(ident, None)
             self.used.pop(ident, None)
+            self.on_disk.pop(ident, None)
         self._changed()
 
     def listing(self, every: bool = False) -> list[dict[str, Any]]:
@@ -890,9 +900,13 @@ class Server:
             self.trim(int(self.budget * TRIM), spare)
 
     def _tier(self, ident: str) -> int:
-        """A document's eviction tier: 0 a file the engine reads again itself, 1 everything else."""
+        """A document's eviction tier: 0 one the engine reads again itself -- a file, or a model
+        document whose cache file is at the version held (``on_disk``) -- 1 everything else."""
         doc = self.served.get(ident)
-        return 0 if doc is not None and isinstance(doc.path, Path) and ident not in self.model_loaders else 1
+        if doc is not None and isinstance(doc.path, Path) and ident not in self.model_loaders:
+            return 0
+        version = self.on_disk.get(ident)
+        return 0 if version is not None and version == self.model_versions.get(ident) else 1
 
     def trim(self, target: int, spare: str | None = None) -> list[str]:
         """Evict until what is held is ``target`` bytes or less (the engine's **Document
@@ -1044,9 +1058,13 @@ class Server:
                     if doc is not None:
                         self.used[ident] = next(self.uses)
                 if doc is None:
-                    structure, shapes = load()
+                    # Its structure and shapes; and, read from the engine's cache, its xbf bytes third.
+                    loaded = load()
+                    structure, shapes = loaded[0], loaded[1]
                     with self.load_lock:  # held at its version before it can be evicted
                         doc = self.served[self.put(ident, structure, shapes, grow=False)]
+                        if len(loaded) > 2:
+                            doc.xbf, doc._size = loaded[2], None
                         self.model_versions[ident] = version
                     self._grown(ident)
             return doc
@@ -1391,6 +1409,8 @@ class Server:
             if parts == ["api", "look", "environment"]:
                 return self.send(handler, 200, LOOK.environment_path.read_bytes(), "image/vnd.radiance")
             ident, pose = self.poses.get(parts[2], (parts[2], None)) if len(parts) >= 3 else ("", None)
+            if parts[:2] == ["api", "doc"] and ident and not self.holds(ident) and is_id(ident):
+                self.revive(ident)  # a document the engine's cache holds, after a restart
             if parts[:2] == ["api", "doc"] and ident and not self.holds(ident):
                 lost = self.lost(ident)  # a document the engine knows but holds no more: what rebuilds it
                 if lost is not None:

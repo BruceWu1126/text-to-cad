@@ -17,6 +17,14 @@ document's generation (``version``, what a page shows and the viewer's export co
 of its build's own, never a counter that starts again, so an id and a generation never name two
 documents across a restart; its record's ``revision`` is its build closure's key (``revision``), the
 same for the same code, so a build that changed nothing rewrites no record.
+
+What a restart opens at once is the cache's (``cache``): each ``pointer`` and ``copy`` document's
+bytes, saved in its registry folder once it has been idle (and at its drain, and at shutdown). A
+document with a cache file is ``held`` -- the engine answers it without a worker -- in memory, on
+disk, or both (``where``): after a restart its id is taken up (``adopt``) from its record the first
+time anything names it, and its bytes are read through the documents worker when a verb needs them
+(``load``). It is the last built state, never a rerun: when a file its build read has changed since,
+it says so (``stale``), with the command that builds it again.
 """
 from __future__ import annotations
 
@@ -205,17 +213,17 @@ class Models:
 
     def held(self, ident: str) -> dict[str, Any] | None:
         """The record of the model document ``ident`` while the engine holds it -- a live worker
-        does, or the server holds its bytes -- else None."""
+        does, the server holds its bytes, or its cache file is at its revision (``where``) -- else None."""
+        self.adopt(ident)
         with self.lock:
             record = self.records.get(ident)
         if record is None:
             return None
-        worker, server = record["worker"], self.daemon.server
-        if self._working(worker):
+        if self._working(record["worker"]):
             return record
         if record["store"] == "memory":
             return None  # out of the pool, its worker is going: the document goes with it
-        return record if server is not None and server.has(ident, record["version"]) else None
+        return record if self.where(ident) else None
 
     def _working(self, worker: Any) -> bool:
         """Whether ``worker`` holds its documents still: live in the pool, or out of it and alive --
@@ -227,6 +235,7 @@ class Models:
         ``expired``), the command that builds it again -- the program that built it, run with
         ``python`` -- and why, in words (the page's ``error``). None for a document it holds or
         never built. The engine never runs the command."""
+        self.adopt(ident)
         with self.lock:
             record = self.records.get(ident)
             gone = self.expired.get(ident)
@@ -336,7 +345,8 @@ class Models:
         """A model document's structure and shape bytes, asked of the worker that holds it -- through
         the pool, or of ``leaving``, a worker being retired (``drain``), directly, and then
         (``whole``) with the whole document's xbf bytes third. ``serve.NotHeld`` when no worker holds
-        it: nothing is built to bring it back."""
+        it: nothing is built to bring it back. One no worker holds whose cache file is at its revision
+        is read from it, through the documents worker (``from_disk``), its xbf bytes third."""
         with self.lock:
             record = self.records.get(ident)
             if record is None:
@@ -344,7 +354,11 @@ class Models:
             source, version = record["source"], record["version"]
             worker = leaving or record["worker"]
         if worker is None or not worker.alive():
+            if leaving is None and self.cache.current(ident, record["revision"]):
+                return self.from_disk(ident)
             raise self.not_held(ident)
+        if leaving is None:
+            self.cache.touch(ident)  # a read: its idle timer starts again
         order = {"op": "result", "script": source["script"], "name": source["name"]}
         if leaving is None and not whole and self.daemon.pool.holds(worker):
             replies = []
@@ -394,6 +408,8 @@ class Models:
         """The model documents (``every``: those with declared files too, and the expired), each with
         its ``state`` (``STATES``) and, for one not held, the command that builds it again."""
         self.prune()
+        for ident in self.cache.documents():  # what the cache holds, listed after a restart too
+            self.adopt(ident)
         with self.lock:
             rows = [row for row in self.records.values() if every or not row["files"]]
             rows += list(self.expired.values()) if every else []
@@ -403,6 +419,8 @@ class Models:
                 entry = {"id": ident, "script": row["source"]["script"],
                          "name": row["source"]["name"], "builtAt": row["builtAt"], "version": row["version"],
                          "store": row["store"], "state": self.state(ident)}
+                if entry["state"] == "held":
+                    entry["held"] = self.where(ident)
                 lost = self.rebuild(ident) if entry["state"] in ("evicted", "expired", "detached") else None
                 if lost is not None and lost["rebuild"]:
                     entry["rebuild"] = lost["rebuild"]
@@ -413,7 +431,9 @@ class Models:
         """``live`` (a live worker holds it), ``held`` (the server holds its bytes; no worker),
         ``building``, ``failed`` (its last build), ``evicted`` (neither: memory evicted its bytes,
         its worker crashed, or the engine restarted since: the registry knows it), ``expired`` (a
-        ``memory`` document whose worker went), or ``detached`` (not held, and its script is gone)."""
+        ``memory`` document whose worker went), or ``detached`` (not held, and its script is gone).
+        ``held`` is in memory, on disk -- the cache's -- or both (``where``)."""
+        self.adopt(ident)
         with self.lock:
             if ident in self.expired:
                 return "expired"

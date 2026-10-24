@@ -837,6 +837,7 @@ class Daemon:
         """The daemon's server, started on the first request that needs one."""
         from cadgen.engine.serve import MESHES, Server, memory_budget
 
+        started = False
         with self.serving:
             if self.server is None:
                 port, host = int(request.get("port") or 0), request.get("host") or "127.0.0.1"
@@ -848,11 +849,17 @@ class Daemon:
                     raise ValueError(f"cannot listen on {host}:{port}: {error.strerror or error}"
                                      + ("; pass another --port" if port else "")) from None
                 self.server.lost = self.models.rebuild
+                self.server.revive = self.models.adopt
+                self.server.stale = self.models.stale
                 self.server.start()
+                started = True
             elif ((request.get("port") and int(request["port"]) != self.server.port)
                   or (request.get("host") and request["host"] != self.server.http.server_address[0])):
                 raise ValueError("the installation's engine already serves another host/port; stop it before changing its bind")
-            return self.server
+            server = self.server
+        if started:
+            self.models.attach(server)  # the documents taken up from the cache before it ran: registered with it
+        return server
 
     def settled(self, worker: Worker, every: bool = False) -> None:
         """A worker is done with a build's documents (``every``: it is gone): their files
@@ -871,11 +878,13 @@ class Daemon:
         holds (``{"document", "name"}``, its xbf bytes after it: the documents worker reads them as
         an on-disk xbf, and no worker of its script starts); a file this engine serves or served
         (``{"path"}``). Refused (``Models.not_held``), naming its state and the command that
-        builds it again, for any other id: the engine runs nothing."""
+        builds it again, for any other id: the engine runs nothing. A model document held on disk
+        alone (the engine's cache) is its cache file's bytes, read as a held document's."""
         self.models.prune()
         record = self.models.held(ident)
         server = self.server
         if record is not None:
+            self.models.cache.touch(ident)  # a read: its idle timer starts again
             worker = record["worker"]
             if worker is not None and self.pool.holds(worker):
                 # Asked of the worker that built it (``via``: a child model's is its parent's script's).
@@ -893,13 +902,20 @@ class Daemon:
 
     def held_document(self, ident: str) -> tuple[dict[str, Any], bytes] | None:
         """A model document the server holds whole and no worker does, as an export reads it: its
-        source and its xbf bytes. ``ValueError`` for one held for viewing alone (its worker exited
-        before it was drained), naming the command that builds it again. None when it is not held."""
+        source and its xbf bytes -- in memory, else its cache file's. ``ValueError`` for one held for
+        viewing alone (its worker exited before it was drained, and no cache file has it), naming the
+        command that builds it again. None when it is not held."""
         server = self.server
-        if server is None:
-            return None
-        with server.load_lock:
-            doc = server.served.get(ident)
+        doc = None
+        if server is not None:
+            with server.load_lock:
+                doc = server.served.get(ident)
+        if doc is None or doc.xbf is None:
+            data = self.models.disk_bytes(ident)
+            if data is not None:
+                with self.models.lock:
+                    record = self.models.records.get(ident)
+                return {"document": ident, "name": record["source"]["name"] if record else ident}, data
         if doc is None:
             return None
         if doc.xbf is None:
@@ -1003,11 +1019,20 @@ class Daemon:
             with self.models.lock:
                 record = self.models.records.get(ident) or self.models.expired.get(ident)
             if record is None:
+                self.models.adopt(ident)  # held on disk (the engine's cache), after a restart
+                with self.models.lock:
+                    record = self.models.records.get(ident)
+            if record is None:
                 send(refused(self.models.not_held(ident)))
             else:
                 model = {key: record.get(key) for key in ("id", "source", "program", "builtAt", "version", "files",
                                                           "store")}
                 model["state"] = self.models.state(ident)
+                if model["state"] == "held":
+                    model["held"] = self.models.where(ident)
+                    stale = self.models.stale(ident)
+                    if stale:
+                        model["stale"] = stale
                 lost = self.models.rebuild(ident)
                 if lost is not None:
                     model["rebuild"] = lost["rebuild"]
@@ -1025,7 +1050,10 @@ class Daemon:
             ident = str(request.get("id"))
             self.models.prune()
             lost = self.models.rebuild(ident)
-            send({"ok": True, "state": self.models.state(ident) if lost is None else lost["state"],
+            state = self.models.state(ident) if lost is None else lost["state"]
+            held = {"held": self.models.where(ident)} if state == "held" else {}
+            stale = self.models.stale(ident) if state == "held" else None
+            send({"ok": True, "state": state, **held, **({"stale": stale} if stale else {}),
                   **({"rebuild": lost["rebuild"], "error": lost["error"]} if lost else {})})
             return
         payload = b""
@@ -1043,6 +1071,8 @@ class Daemon:
                 with self.models.lock:
                     record = self.models.records.get(ident)
                 served = self.server.served.get(ident) if self.server is not None else None
+                if served is None and self.server is not None and self.server.holds(ident):
+                    served = self.server.document(ident)  # held on disk: read again to check its revision
                 if (record is None or served is None or record["version"] != expected["modelRevision"]
                         or served.structure.get("exportRevision") != expected.get("digest")):
                     send({"failed": "The source changed. Open Export again to use the displayed revision."})

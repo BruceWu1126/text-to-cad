@@ -450,6 +450,8 @@ def status_text(answer: dict[str, Any]) -> str:
         lines.append("documents:")
         for row in models:
             line = f"  {row.get('state', ''):<8}  {str(row.get('name')):<{width}}  {row.get('id')}"
+            if row.get("held"):
+                line += f"  {row['held']}"  # where: memory, disk (the cache), or both
             if row.get("rebuild"):
                 line += f"  run `{row['rebuild']}`" + (" (kept in memory only)" if row.get("store") == "memory" else "")
             lines.append(line)

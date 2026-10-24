@@ -407,11 +407,31 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
     return {"reports": built, "files": files, "drawn": drawn}
 
 
+# The held documents this worker read last, by their bytes' digest and name: an export, a snapshot
+# and an inspection of one document after another read its bytes once, as a file's read is held.
+_HELD_KEPT = 4
+_HELD: "dict[tuple[str, str], Any]" = {}
+
+
 def _held_source(payload: bytes, name: str) -> Any:
     """A document the daemon holds and no worker does -- the xbf bytes its worker made of it before
-    it retired (``models.Models.drain``) -- as an ``export.Source``, read in memory as an on-disk xbf
-    is (``document.read_bytes``): its mechanism, its assemblies' placements and its animations'
-    record with it, named as the document is (``name``). The source has no path: it is no file."""
+    it retired (``models.Models.drain``), or the engine's cache file of it (``cache``) -- as an
+    ``export.Source``, read in memory as an on-disk xbf is (``document.read_bytes``): its mechanism,
+    its assemblies' placements and its animations' record with it, named as the document is
+    (``name``). The source has no path: it is no file. The last few read are kept (``_HELD``)."""
+    import hashlib
+
+    key = (hashlib.blake2b(payload, digest_size=20).hexdigest(), name)
+    found = _HELD.pop(key, None)
+    if found is None:
+        found = _read_held(payload, name)
+    _HELD[key] = found  # the most recent last
+    while len(_HELD) > _HELD_KEPT:
+        _HELD.pop(next(iter(_HELD)))
+    return found
+
+
+def _read_held(payload: bytes, name: str) -> Any:
     from cadgen.engine import document, export
 
     stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in name).strip(".") or "document"
@@ -427,7 +447,11 @@ def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     part's shape bytes (``[key, size]`` in ``shapes``, the bytes after the line in order)."""
     from cadgen.engine import build as engine_build
 
-    source = engine_build.held(Path(request["script"]), request["name"])
+    if request.get("document"):
+        # The engine's cache file of a document no worker holds: read as a held document's bytes are.
+        source = _held_source(request.get("payload") or b"", str(request.get("name") or "document"))
+    else:
+        source = engine_build.held(Path(request["script"]), request["name"])
     if source is None:
         raise engine_build.BuildError(f"no model named {request['name']!r} is built in this worker")
     keys = [prototype["key"] for prototype in source.structure["prototypes"]]
