@@ -220,7 +220,7 @@ re-runs the body that read it:
 - **`read_step(path)` and `read_xbf(path)`** copy a document's geometry into the model as
   a build123d compound tree: each assembly a `Compound`, each part named, coloured and
   given its material as the file has them, each element keeping the name the file gives
-  it. An xbf's joints, mechanism states and sequences are not imported: a part is a
+  it. An xbf's joints, mechanism states, sequences and animations are not imported: a part is a
   part.
 - **A vendor STEP is converted once**: `cadgen export vendor.step vendor.xbf` writes an
   xbf of it, which `read_xbf` reads many times faster than `read_step` parses the STEP

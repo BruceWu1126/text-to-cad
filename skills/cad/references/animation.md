@@ -24,18 +24,20 @@ Two layers, each true to its format:
   belong here.
 - **An animation** (`cadgen.gltf`'s `animation`) is the GLB's: glTF channels
   (translation, rotation, scale) on the parts a GLB places, and the mechanism's forward
-  kinematics at given times. It is never written into the document; it is baked into
-  every GLB exported from the model. An explode, a reveal, a showcase or a hidden cover
-  belongs here.
+  kinematics at given times. It is no part of the mechanism: the viewer's page and a
+  STEP show nothing of it, and an exported `.xbf` only records its compiled tracks for a
+  GLB. It is baked into every GLB exported from the model. An explode, a reveal, a
+  showcase or a hidden cover belongs here.
 
 The rules:
 
 - **Prefer a motion where the mechanism says it**, and waypoints in it.
 - **No helper joints to fake an explode.** A joint per part only to slide it out is an
   animation's job, and the Position panel would show a slider for each.
-- **Animations are GLB-only.** `cadgen export "$ID" model.glb` and
-  `export(model, "model.glb")` bake them; a GLB exported from a saved `.xbf` carries the
-  motions alone.
+- **Animations are GLB-only.** `cadgen export "$ID" model.glb`,
+  `export(model, "model.glb")` and `cadgen export model.xbf model.glb` from an xbf the
+  model exported all bake them, the same bytes. `read_xbf` imports a part's geometry
+  without them.
 - **`.hide` is a scale trick.** glTF has no visibility channel, so a hidden part is
   scaled to 0. Use `.scale(parts, to=1, start=t, end=t, interpolation="STEP")` to bring
   it back.

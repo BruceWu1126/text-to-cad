@@ -106,7 +106,8 @@ part where it should sit, which the assembly calls and places; export that model
 ## The xbf is Save As
 
 The `.xbf` is cadgen's own document: the parts and placements, names, colours,
-materials, element names and mechanism, read back losslessly. Export one only:
+materials, element names and mechanism, read back losslessly, and the compiled tracks of
+the model's animations, which only a GLB exported from it reads. Export one only:
 
 - to share a model without its code;
 - to compose it in another project, where `read_xbf` reads it as an input;
@@ -131,9 +132,9 @@ geometry, names, colours and materials. Keep the xbf beside the STEP, and read t
   transmission, clear coat, anisotropy and emission where a material has them), each of
   the model's configuration sequences as an animation of its name
   ([kinematics](kinematics.md#configuration-sequences)), and each of its `animation()`s
-  ([animation](animation.md)). A GLB exported from the model (by its id, or by
-  `export(model, path)`) carries its sequences and its animations, the file the run would
-  write; one exported from a saved `.xbf` carries the sequences alone.
+  ([animation](animation.md)). A GLB exported from the model, by its id, by
+  `export(model, path)` or from an xbf the model exported, carries its sequences and its
+  animations, byte for byte the same file.
 - **3MF**: an object per part, a build item per placement, in millimetres, with colours
   and materials through the materials extension.
 - **STL**: binary, every placed triangle, in millimetres.

@@ -339,9 +339,9 @@ moving occurrences directly. 0.8 has two layers, each true to its format:
   show.hide("latch", at=3)
   ```
 
-  It is baked into a GLB exported from the model (`cadgen export <id> box.glb`, or
-  `export(box, "box.glb")`); a GLB exported from a saved `.xbf` carries the sequences
-  only. The viewer's Animation section plays a GLB's animations.
+  It is baked into every GLB exported from the model: `cadgen export <id> box.glb`,
+  `export(box, "box.glb")`, or `cadgen export box.xbf box.glb` from an xbf the model
+  exported, which records the compiled tracks. The page and a STEP show nothing of it. The viewer's Animation section plays a GLB's animations.
 
 Remove helper joints that existed only to slide parts apart for an explode: that is an
 animation now. A clip's `loop` has no counterpart (a player repeats a clip), nor do
