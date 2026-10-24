@@ -860,5 +860,39 @@ class AuthoringNamesTest(_Folder):
             self.assertEqual(word(new_head, at) - word(old_head, at), delta, f"the header's word at {at}")
 
 
+class ReaderTest(unittest.TestCase):
+    """The mechanism reader never iterates a bound label list from Python: the iterator ends in
+    a C++ exception, about 3 ms a list, which over a large mechanism's thousands of reference
+    lists was ten seconds of every read. Round-trips a mechanism with every reference list kind
+    (ground, pair links, states, a motion's configuration and values, a coupling) unchanged."""
+
+    def test_read_copies_reference_lists_without_iterating(self) -> None:
+        from OCP.TDF import TDF_LabelList
+
+        pairs = [mechanism.Pair("a", "revolute", (0, 1), None, ((0.0, 90.0),)),
+                 mechanism.Pair("b", "revolute", (1, 2), None, ((None, None),))]
+        written = mechanism.Mechanism(
+            "arm", [mechanism.Link("base", []), mechanism.Link("upper", []), mechanism.Link("lower", [])], 0, pairs,
+            {"a": (10.0,), "b": (0.0,)}, {"up": {"a": (45.0,), "b": (30.0,)}},
+            motions={"wave": mechanism.Motion("wave", [(0.0, "up", {}), (1.0, None, {"a": (5.0,), "b": (6.0,)})], "linear")},
+            couplings={"pair": mechanism.Coupling("pair", {"a": (1.0,), "b": (-2.0,)})})
+        doc = document._new_document()
+        mechanism.write(doc, written, lambda path: [])
+        iterate = TDF_LabelList.__iter__
+
+        def refused(_self: Any) -> Any:
+            raise AssertionError("a reference list iterated from Python")
+
+        TDF_LabelList.__iter__ = refused
+        try:
+            read = mechanism.read(doc, {})
+        finally:
+            TDF_LabelList.__iter__ = iterate
+        self.assertEqual(read.signature(), written.signature())
+        self.assertEqual((read.as_built, read.configurations), (written.as_built, written.configurations))
+        self.assertEqual(read.motions, written.motions)
+        self.assertEqual(read.couplings, written.couplings)
+
+
 if __name__ == "__main__":
     unittest.main()

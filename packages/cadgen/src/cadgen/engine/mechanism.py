@@ -1746,22 +1746,34 @@ def _array(data: Any, key: str) -> tuple[float, ...] | None:
 
 
 def _references(label: Any) -> list[str]:
+    """The label's reference list as entries, in order. Read off a copy with ``First``/
+    ``RemoveFirst``: the bound list's Python iterator ends in a C++ exception, about 3 ms a
+    list, which over a large mechanism's thousands of lists was most of a read."""
     from OCP.TDataStd import TDataStd_ReferenceList
+    from OCP.TDF import TDF_LabelList
 
     from cadgen.engine.document import _entry, _find
 
     found = TDataStd_ReferenceList()
     if not _find(label, found, TDataStd_ReferenceList.GetID_s()):
         return []
-    return [_entry(item) for item in found.List()]
+    rest = TDF_LabelList()
+    rest.Assign(found.List())
+    entries = []
+    while not rest.IsEmpty():
+        entries.append(_entry(rest.First()))
+        rest.RemoveFirst()
+    return entries
 
 
-def _read_state(label: Any, pair_at: dict[str, int], pairs: list[Pair]) -> dict[str, tuple[float, ...]]:
+def _read_state(label: Any, references: list[str], pair_at: dict[str, int],
+                pairs: list[Pair]) -> dict[str, tuple[float, ...]]:
+    """A state held on ``label``: its values, one row per entry of ``references`` (its own
+    reference list, read once by the caller)."""
     from OCP.TDataStd import TDataStd_IntegerArray, TDataStd_RealArray
 
     from cadgen.engine.document import _find
 
-    references = _references(label)
     reals, dofs = TDataStd_RealArray(), TDataStd_IntegerArray()
     if not references or not _find(label, reals, TDataStd_RealArray.GetID_s()) \
             or not _find(label, dofs, TDataStd_IntegerArray.GetID_s()):
@@ -1813,9 +1825,11 @@ def read(doc: Any, occurrences: dict[str, tuple[int, ...]]) -> Mechanism | None:
         pairs.append(Pair(_label_name(label), kind, (ends[0], ends[1]),
                           (first, second) if first is not None and second is not None else None, limits))
     ground = link_at.get(next(iter(_references(top)), ""), 0)
-    as_built = _read_state(top.FindChild(3, False), pair_at, pairs)
+    held_state = top.FindChild(3, False)
+    as_built = _read_state(held_state, _references(held_state), pair_at, pairs)
     configuration_labels = _children_of(top.FindChild(4, False))
-    configurations = {_label_name(label): _read_state(label, pair_at, pairs) for label in configuration_labels}
+    configurations = {_label_name(label): _read_state(label, _references(label), pair_at, pairs)
+                      for label in configuration_labels}
     named = {_entry(label): _label_name(label) for label in configuration_labels}
     motions = {}
     held_motions = top.FindChild(5, False)
@@ -1830,7 +1844,7 @@ def read(doc: Any, occurrences: dict[str, tuple[int, ...]]) -> Mechanism | None:
             if references and references[0] in named:
                 keys.append((t, named[references[0]], {}))
             else:
-                keys.append((t, None, _read_state(segment, pair_at, pairs)))
+                keys.append((t, None, _read_state(segment, references, pair_at, pairs)))
         motions[_label_name(label)] = Motion(_label_name(label), keys, ease)
     couplings = {}
     held_couplings = top.FindChild(6, False)
