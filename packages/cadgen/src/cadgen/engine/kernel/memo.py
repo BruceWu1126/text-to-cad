@@ -46,7 +46,8 @@ afresh from a compound -- what iterating one hands back, as build123d's intersec
 and ``unwrap`` do -- has no ancestor to name it by; when a root holds its TShape
 (``_SUBS``) it is keyed as that root's sub-shape, by its kind and its ordinal among the
 root's sub-shapes of that kind (``_held``). A shape no operation of this process made
-has no key, and a call given one runs uncached. The n-th call with one key in a
+has no key, and a call given one runs uncached. An empty shape (``bd.Sketch()``, what
+build123d's ``+`` sums onto) holds no geometry: it is keyed by its class, and is no input. The n-th call with one key in a
 model's body is its own entry (``scope``), so two identical constructions in one body
 are two objects, as in plain Python; and the body's ordinals are its own, the same
 whether it runs as a build's root or as a child and whatever the build ran before it
@@ -2769,6 +2770,10 @@ def _normalize(value: Any, state: _Run) -> Any:
     if isinstance(value, dict):
         return ("map", tuple(sorted((str(key), _normalize(item, state)) for key, item in value.items())))
     if isinstance(value, _build123d().Shape):
+        if _wrapped(value) is None:
+            # An empty shape -- ``bd.Sketch()``, ``bd.Part()``, what ``+`` starts from -- holds no
+            # geometry: it is keyed by its class, and is no input of the call (``_shape_args``).
+            return ("empty", type(value).__module__, type(value).__qualname__)
         return ("shape", _shape_key(value, state))
     type_name = type(value).__name__
     if type_name.startswith("BRepAlgoAPI"):
@@ -2834,7 +2839,8 @@ def _build123d() -> Any:
 
 
 def _shape_args(args: tuple, kwargs: dict) -> list:
-    """The shapes a call was given, in call order, lists and tuples opened."""
+    """The shapes a call was given, in call order, lists and tuples opened; an empty shape
+    holds no geometry and is none of them (``_normalize`` keys it by its class)."""
     shape = _build123d().Shape
     found: list = []
     pending = [value for _name, value in sorted(kwargs.items(), reverse=True)] if kwargs else []
@@ -2842,7 +2848,8 @@ def _shape_args(args: tuple, kwargs: dict) -> list:
     while pending:
         value = pending.pop()
         if isinstance(value, shape):
-            found.append(value)
+            if _wrapped(value) is not None:
+                found.append(value)
         elif isinstance(value, (list, tuple)):
             pending.extend(reversed(value))
     return found

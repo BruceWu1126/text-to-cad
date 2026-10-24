@@ -443,6 +443,32 @@ class UncachedTest(BodiesCase):
                             and "make that shape with build123d's operation" in reason for reason in reasons), reasons)
 
 
+# build123d's sum of sketches starts from an empty one: ``bd.Sketch() + [a, b]`` fuses with an
+# empty shape as the boolean's own operand.
+SUMMED = """
+import build123d as bd
+from cadgen.engine import model
+
+
+@model
+def summed():
+    teeth = bd.Sketch() + [bd.Rot(0, 0, a) * bd.Rectangle(20, 2) for a in (0, 60, 120)]
+    return bd.extrude(teeth, amount=3)
+"""
+
+
+class EmptyShapeTest(BodiesCase):
+    def test_a_sum_that_starts_from_an_empty_sketch_is_keyed_and_replays(self) -> None:
+        self.write("summed.py", SUMMED)
+        statuses = []
+        for _ in range(2):
+            report = engine_build.build(self.folder / "summed.py", ["summed"], cwd=self.folder)[-1]
+            self.assertTrue(report["ok"], report)
+            self.assertEqual((report["memo"]["uncached"], report["retention"]["fallbacks"]), (0, {}))
+            statuses.append(report["bodies"]["summed.py::summed"])
+        self.assertEqual(statuses, ["run", "replayed"])
+
+
 class ReadTracingTest(unittest.TestCase):
     """A file a body reads itself is one of its inputs, by its bytes (``_audited``,
     ``_ReadInput``): the body is replayed while they stay and runs when they change or the
