@@ -356,6 +356,18 @@ class ReadsTest(unittest.TestCase):
         low, high = box.CornerMin(), box.CornerMax()
         return tuple(round(b - a, 3) for a, b in ((low.X(), high.X()), (low.Y(), high.Y()), (low.Z(), high.Z())))
 
+    def test_read_mesh_parses_with_the_one_stl_reader_and_names_an_ascii_solid(self) -> None:
+        from cadgen.engine.reader import _read_mesh
+
+        ascii_stl = self.folder / "tile.stl"
+        ascii_stl.write_text("solid tile plate\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\n"
+                             "vertex 0 1 0\nendloop\nendfacet\nendsolid tile plate\n", encoding="ascii")
+        mesh = _read_mesh(str(ascii_stl))
+        self.assertEqual((mesh.name, mesh.vertices.shape, mesh.triangles.tolist()), ("tile plate", (3, 3), [[0, 1, 2]]))
+        ascii_stl.write_text("solid broken\nvertex 0 0 0\nvertex 1 0 0\n", encoding="ascii")
+        with self.assertRaisesRegex(ValueError, "come three to a facet"):  # formats/stl.read_stl's words
+            _read_mesh(str(ascii_stl))
+
     def test_read_mesh_is_data_keyed_by_the_file_s_bytes(self) -> None:
         from cadgen.engine import previous, read_mesh
 
