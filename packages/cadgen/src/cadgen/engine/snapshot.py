@@ -83,6 +83,9 @@ PACKETS = "*.snapshot.json"
 # The viewer's annotation file (``@text-to-cad/core`` ``common/annotation.js``) and Measure's marks.
 ANNOTATION_KEYS = frozenset({"units", "parts", "marks"})
 MARK_KINDS = ("stroke", "area", "text")
+MARK_MAX = 8192  # a still's annotation holds at most this many marks
+TEXT_MAX_CHARS, TEXT_MAX_LINES = 10000, 256  # a text mark's words
+FONT_PX_MAX, STROKE_WIDTH_MAX = 512.0, 256.0  # a mark sizes a raster from these; bound them
 MEASUREMENT_KEYS = frozenset({"start", "end", "label", "color"})
 MAX_MEASUREMENTS = 64
 # The snapshot contract's size profiles; a request names one or a width and a height.
@@ -339,6 +342,8 @@ def parse_annotation(value: Any) -> dict[str, Any] | None:
     unknown = sorted(set(found) - ANNOTATION_KEYS)
     if unknown:
         raise SnapshotRefused(f"--annotation has no {', '.join(unknown)}; an annotation has {', '.join(sorted(ANNOTATION_KEYS))}")
+    if len(found["marks"]) > MARK_MAX:
+        raise SnapshotRefused(f"--annotation has at most {MARK_MAX} marks")
     for name, part in (found.get("parts") or {}).items():
         if not isinstance(part, dict) or not _numbers(part.get("placement"), 16):
             raise SnapshotRefused(f"--annotation: parts.{name}.placement is a 4x4 matrix of 16 numbers")
@@ -357,6 +362,15 @@ def parse_annotation(value: Any) -> dict[str, Any] | None:
             raise SnapshotRefused(f"{at}: a text mark's points are its four corners")
         if mark.get("view") is not None and not isinstance(mark["view"], str):
             raise SnapshotRefused(f"{at}.view is the label of the view it was drawn in")
+        text = mark.get("text")
+        if text is not None and (not isinstance(text, str) or len(text) > TEXT_MAX_CHARS
+                                 or text.count("\n") + 1 > TEXT_MAX_LINES):
+            raise SnapshotRefused(f"{at}.text is at most {TEXT_MAX_CHARS} characters on {TEXT_MAX_LINES} lines")
+        for key, high in (("fontPx", FONT_PX_MAX), ("width", STROKE_WIDTH_MAX)):
+            value = mark.get(key)
+            if value is not None and not (isinstance(value, (int, float)) and not isinstance(value, bool)
+                                          and math.isfinite(value) and 0 <= value <= high):
+                raise SnapshotRefused(f"{at}.{key} is a number from 0 to {high:g}")
     return found
 
 

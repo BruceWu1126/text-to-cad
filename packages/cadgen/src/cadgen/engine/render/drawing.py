@@ -323,6 +323,12 @@ def paint_ink(frame: np.ndarray, marks: list[dict[str, Any]], place: Any, line_s
             continue
         left, top = (int(math.floor(value - reach)) for value in screen.min(0))
         right, bottom = (int(math.ceil(value + reach)) for value in screen.max(0))
+        height, width = frame.shape[:2]  # ink beyond the frame is never seen; clip before allocating
+        margin = int(math.ceil(reach)) + 1
+        left, top = max(left, -margin), max(top, -margin)
+        right, bottom = min(right, width + margin), min(bottom, height + margin)
+        if right <= left or bottom <= top:
+            continue
         mask = Image.new("L", ((right - left) * ss, (bottom - top) * ss), 0)
         draw = ImageDraw.Draw(mask)
         local = [((x - left) * ss, (y - top) * ss) for x, y in screen]

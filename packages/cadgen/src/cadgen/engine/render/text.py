@@ -47,6 +47,7 @@ import numpy as np
 TEXT_SCALE = 2  # the viewer's text canvas is twice the words' size (annotation.js textCanvas)
 LINE_HEIGHT = 1.25
 SUPERSAMPLE = 10
+MAX_TEXT_RASTER = 256_000_000  # a text mark's supersampled canvas (px); any real label is far smaller
 MAC_FACE = Path("/System/Library/Fonts/SFNS.ttf")
 # How far FreeType's ink sits from CoreText's for the same baseline, fitted on macOS: up a fifth
 # of a pixel.
@@ -515,6 +516,8 @@ def text_canvas(text: str, font_px: float, color: str) -> np.ndarray:
     face_ = face(500, font_px * TEXT_SCALE)
     width = max(1.0, *(face_.width(line) for line in lines))
     size = (int(math.ceil(width)) + 2, int(math.ceil(len(lines) * font_px * LINE_HEIGHT * TEXT_SCALE)) + 2)
+    if size[0] * size[1] * SUPERSAMPLE * SUPERSAMPLE > MAX_TEXT_RASTER:
+        raise ValueError(f"a text mark's canvas is {size[0]}x{size[1]} at {SUPERSAMPLE}x; over {MAX_TEXT_RASTER} px")
     alpha = coverage(lines, face_, size, (1.0, 1.0), font_px * LINE_HEIGHT * TEXT_SCALE)
     rgb = np.array([int(color.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)], np.uint8)
     out = np.zeros((size[1], size[0], 4), np.uint8)
