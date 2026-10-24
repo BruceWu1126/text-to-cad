@@ -1567,6 +1567,13 @@ bytes its document holds of it. A build's live part is written and read once to
 get them, as saving its document does. A part read from a document (the served
 document, `cadgen export`) is written as it was read. So a worker, the
 server and an export all mesh one geometry key from the same bytes.
+The geometry key is the digest of those bytes (`document.geometry_key`), so a
+reader makes a part's key again from the part it read, and takes the key the file
+names for it only when the two agree (`document.Loaded`). Where one part naming a
+key does not make it, the parts naming it are keyed apart, by the key and their
+own keys together (a placement's look kept apart is such a copy, and keeps one key
+with its first). The daemon's caches are shared by every document it serves, so a
+file never lends its part another document's key, and never its mesh or facts.
 
 Every edge has a class read from the B-rep: 1 feature (two faces at an angle),
 2 tangent (two faces meeting at least G1), 3 seam (a face closing on itself),

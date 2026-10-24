@@ -459,7 +459,7 @@ def _read_document(path: str) -> tuple:
 
     loaded = Loaded(Path(path))
     return (loaded.structure(), loaded.version,
-            {p.key: shape_bytes(p.shape) for p in loaded.prototypes},
+            {p.key: shape_bytes(p.shape, read=True) for p in loaded.prototypes},
             {p.key: p.name for p in loaded.prototypes})
 
 

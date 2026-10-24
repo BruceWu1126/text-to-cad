@@ -22,7 +22,8 @@ colour per part and per painted face; a material per part and per face given one
 base colour the part's colour too so a reader of colours alone agrees; on each part's face and edge sub-shape labels
 the element names the memo's history gave them (``kernel.trace``), so a face's name
 survives into the file and into a STEP; and on each part the key of its geometry
-(``KEY_GUID``), what a reader caches the part's tessellation by. Saved with the
+(``KEY_GUID``), which a reader caches the part's tessellation by only once the part it
+read makes that key again (``Loaded``). Saved with the
 BinXCAF driver as ``.xbf``, atomically, and only when its bytes changed -- every
 sub-shape's ``Checked`` flag written cleared (``unchecked``), so a cold build and a
 warm one of the same sources write the same bytes.
@@ -417,18 +418,39 @@ def direct(shape: Any) -> Any:
     return shape if found is None or found.IsNull() else found
 
 
-def geometry_key(shape: Any) -> str:
-    """A key of a part's geometry: a digest of its binary BRep as the document writes
-    it (``unchecked``), no triangulation. Two parts with the same key tessellate
-    alike, in any process."""
-    import io
+def geometry_key(shape: Any, *, read: bool = False) -> str:
+    """A key of a part's geometry: a digest of the bytes it is meshed from
+    (``mesh.shape_bytes``: its binary BRep written and read once, no triangulation). Two
+    parts with the same key tessellate alike, in any process. A part a document read
+    (``read``) makes the key its build gave it, so a reader checks the key a file names
+    for each part against the part itself (``Loaded``)."""
+    from cadgen.engine.mesh import shape_bytes
 
-    from OCP.BinTools import BinTools, BinTools_FormatVersion_VERSION_4
+    return hashlib.blake2b(shape_bytes(shape, read=read), digest_size=16).hexdigest()
 
-    stream = io.BytesIO()
-    with unchecked([shape]):
-        BinTools.Write_s(shape, stream, False, False, BinTools_FormatVersion_VERSION_4)
-    return hashlib.blake2b(stream.getvalue(), digest_size=16).hexdigest()
+
+def _checked_keys(prototypes: list, claims: dict[int, str]) -> None:
+    """Each prototype keyed by what its file names (``claims``, by index) only where the
+    file's word holds: a key every part naming it makes again from its own geometry
+    (``geometry_key``) is kept, and is shared with every document of that geometry. Where
+    one part naming a key does not make it, the parts naming it are keyed apart, by the
+    key and their own geometry's keys together: a file never lends its part the key of
+    another document's, so the daemon's caches -- meshes, facts, shapes -- never answer
+    one document's part with another's geometry. A part's look kept apart from another
+    of its geometry is a copy of its topology (``_apart``), whose bytes are not the
+    first's: the two keep one key all the same, the one made of both. A part the file
+    names no key for keeps its own geometry's."""
+    named: dict[str, list] = {}
+    for prototype in prototypes:
+        claim = claims.get(prototype.index)
+        if claim:
+            named.setdefault(claim, []).append(prototype)
+    for claim, group in named.items():
+        if any(prototype.key != claim for prototype in group):
+            made = "\0".join(["named", claim, *sorted(prototype.key for prototype in group)])
+            claim = hashlib.blake2b(made.encode(), digest_size=16).hexdigest()
+        for prototype in group:
+            prototype.key = claim
 
 
 # --- the XCAF document --------------------------------------------------------------------
@@ -1265,6 +1287,7 @@ class Loaded:
             return text.ToCString()
 
         counted = 0
+        claims: dict[int, str] = {}
 
         def visit(label: Any, location: Any, path: list[str], inherited: tuple | None, name: str,
                   occurrence: tuple[int, ...], entries: list[str], ancestors: frozenset = frozenset()) -> dict[str, Any]:
@@ -1303,6 +1326,9 @@ class Loaded:
             if index is None:
                 index = by_entry[entry] = len(self.prototypes)
                 self.prototypes.append(_prototype(index, label, shape, entry, self))
+                claim = _label_text(label, KEY_GUID)
+                if claim is not None:
+                    claims[index] = claim
             placed = location.Multiplied(shape.Location())
             prototype = self.prototypes[index]
             self.instances.append(Instance(index, path, _matrix(placed),
@@ -1323,6 +1349,7 @@ class Loaded:
             self.name = roots[0]["name"]
         else:
             self.tree = {"name": self.path.stem, "children": roots}
+        _checked_keys(self.prototypes, claims)
 
     @property
     def closure(self) -> dict[str, Any] | None:
@@ -1766,8 +1793,6 @@ def _label_material(label: Any) -> Any:
 
 
 def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -> Prototype:
-    from OCP.Standard import Standard_GUID
-    from OCP.TDataStd import TDataStd_AsciiString
     from OCP.TDF import TDF_LabelSequence
     from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
     from OCP.TopExp import TopExp
@@ -1775,12 +1800,7 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
     from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
     local = shape.Located(_identity())
-    key = TDataStd_AsciiString()
-    guid = Standard_GUID(KEY_GUID)
-    if _find(label, key, guid):
-        found_key = key.Get().ToCString()
-    else:
-        found_key = f"{loaded.version[0]}-{loaded.version[1]}-{entry}"
+    found_key = geometry_key(local, read=True)  # the file's key is checked against it (``_checked_keys``)
     face_names: dict[int, str] = {}
     edge_names: dict[int, str] = {}
     vertex_names: dict[int, str] = {}

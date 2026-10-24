@@ -816,7 +816,8 @@ def mechanism():
     return configuration_sequence(assembly, "spin", sweep={"lead": (0, 300)}, duration=2, ease="linear")
 """
 # NAMED's document as cadgen 0.8.0 wrote it when its functions were ``couple``, ``configuration``
-# and ``motion`` (the same source with those three names), before the AP242 names replaced them.
+# and ``motion`` (the same source with those three names), before the AP242 names replaced them;
+# its parts' keys since rewritten as the engine makes them now (``document.geometry_key``).
 NAMED_GOLDEN = Path(__file__).resolve().parent / "kinematics_golden" / "mechanism.xbf"
 _RECORD = b'{"schema":"cadgen.engine closure/1",'
 

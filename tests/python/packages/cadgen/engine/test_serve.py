@@ -299,6 +299,63 @@ class ServerUrlTest(unittest.TestCase):
         self.assertEqual(binds, ["0.0.0.0", "127.0.0.1", "::", "::1"], "the bind is the address asked for")
 
 
+class NamedKeyTest(unittest.TestCase):
+    """A part's key is what its geometry makes, wherever the part was read: an xbf that names
+    another part's key for its own geometry is not served under that key, so a document served
+    beside it keeps its own mesh and volume; a document's own keys survive its file."""
+
+    def setUp(self) -> None:
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-named-key-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+
+    def save(self, name: str, result, key: str | None = None) -> tuple[Path, list[str]]:
+        """``result`` saved as ``name``.xbf, its parts keyed as a build keys them, or all
+        named ``key``; with the keys its parts' geometry makes."""
+        from cadgen.engine import document
+
+        tree = document.collect(result, name)
+        made = []
+        for part in tree.parts:
+            part.shape = document.direct(part.shape)
+            made.append(document.geometry_key(part.shape))
+            part.key = key or made[-1]
+        path = self.folder / f"{name}.xbf"
+        document.save(document.to_xcaf(tree), path, compare=False)
+        return path, made
+
+    def test_a_file_cannot_lend_its_part_another_parts_key(self) -> None:
+        import build123d as bd
+
+        from cadgen.engine import document
+
+        own = bd.Box(10, 10, 10)
+        spokes = bd.Compound([bd.Pos(7 * at, 0, 0) * bd.Rot(0, 0, 13 * at) * bd.Cylinder(2, 6) for at in range(4)])
+        drilled = bd.Box(5, 5, 5) - bd.Rot(30, 20, 10) * bd.Cylinder(1.5, 20)
+        own.label, spokes.label, drilled.label = "own", "spokes", "drilled"
+        users, keys = self.save("user", bd.Compound(children=[own, spokes, drilled], label="user"))
+        named, _ = self.save("named", bd.Box(40, 40, 2), key=keys[0])
+        self.assertEqual([p.key for p in document.Loaded(users).prototypes], keys,
+                         "a document's keys, parts placed inside them too, survive its file")
+        [stranger] = document.Loaded(named).prototypes
+        self.assertNotEqual(stranger.key, keys[0], "the key a file names is not taken on its word")
+
+        server = Server(port=0, mesh_mode="inline")
+        server.start()
+        self.addCleanup(server.stop)
+
+        def get(path: str) -> bytes:
+            with urllib.request.urlopen(server.url + path, timeout=120) as answer:
+                return answer.read()
+
+        other = server.add(named)
+        for prototype in json.loads(get(f"/api/doc/{other}"))["prototypes"]:
+            get(f"/api/doc/{other}/part/{prototype['key']}")  # the stranger's meshes and facts held first
+            get(f"/api/doc/{other}/part/{prototype['key']}/volume")
+        mine = server.add(users)
+        self.assertEqual(get(f"/api/doc/{mine}/part/{keys[0]}"), mesh.mesh_shape(mesh.shape_bytes(own.wrapped)).to_bytes())
+        self.assertAlmostEqual(json.loads(get(f"/api/doc/{mine}/part/{keys[0]}/volume"))["volume"], 1000.0, places=6)
+
+
 class MeshCacheTest(unittest.TestCase):
     def test_the_least_recently_used_buffer_goes_past_the_cap(self) -> None:
         from cadgen.engine.serve import MeshCache

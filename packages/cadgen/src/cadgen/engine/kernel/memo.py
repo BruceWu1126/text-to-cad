@@ -1475,7 +1475,7 @@ def _shape_geometry(kind: str, attrs: dict, wrapped: Any, children: list) -> tup
 
 class _Leaf:
     """A leaf shape a verification compares: the same TShape is the same geometry; another
-    the same binary BRep (``document.geometry_key``), else the same geometry in another order
+    the same binary BRep (``_brep``), else the same geometry in another order
     of the BRep's entries (``_measured``): OCCT's parallel booleans and a replayed body can
     write one shape's sub-shapes in another order, the faces, edges and vertices alike."""
 
@@ -1487,9 +1487,22 @@ class _Leaf:
     def same(self, other: "_Leaf") -> bool:
         if self.shape.TShape() == other.shape.TShape():
             return True
-        from cadgen.engine.document import geometry_key
+        return _brep(self.shape) == _brep(other.shape) or _measured(self.shape) == _measured(other.shape)
 
-        return geometry_key(self.shape) == geometry_key(other.shape) or _measured(self.shape) == _measured(other.shape)
+
+def _brep(shape: Any) -> bytes:
+    """A shape's binary BRep as a document writes it (``document.unchecked``): one shape's
+    bytes, compared with another's in this process, never a key."""
+    import io
+
+    from OCP.BinTools import BinTools, BinTools_FormatVersion_VERSION_4
+
+    from cadgen.engine.document import unchecked
+
+    stream = io.BytesIO()
+    with unchecked([shape]):
+        BinTools.Write_s(shape, stream, False, False, BinTools_FormatVersion_VERSION_4)
+    return stream.getvalue()
 
 
 def _measured(shape: Any) -> tuple:
