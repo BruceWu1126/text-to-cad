@@ -26,6 +26,12 @@ each of ``OBSERVERS`` is told (a mirror uploads in the background: nothing waits
 The cache folder is a second ``Folder``, written the same way; forgetting a document
 (``delete``) forgets its cache file too.
 
+Beside the documents, ``<state>/engines/<installation>.json`` is each installation's engine record
+(``Registry.engine``, ``put_engine``): the HTTP port its engine took when its default was held
+(``port``), and the page token every start serves with (``token``), written this user's alone
+(0600). Links stay valid across restarts because of it; ``cadgen server --rotate-token`` replaces
+the token.
+
 The engine imports nothing outside itself (law 3): where the state folder is is the
 distribution's to say, through ``FACTORY`` (``cadgen._internal.engine_host``). With none, the
 engine records nothing and caches nothing (``current`` is None).
@@ -44,12 +50,13 @@ from typing import Any, Callable
 from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.ids import is_id
 
-__all__ = ["DOCUMENTS", "FACTORY", "Folder", "OBSERVERS", "RECORD", "Registry", "SCHEMA", "command", "current",
+__all__ = ["DOCUMENTS", "ENGINES", "FACTORY", "Folder", "OBSERVERS", "RECORD", "Registry", "SCHEMA", "command", "current",
            "detached", "home", "program", "relative"]
 
 SCHEMA = 1
 DOCUMENTS = "documents"
 RECORD = "document.json"
+ENGINES = "engines"
 
 # Told of every record written (one that changed), after it is on disk; never waited on for more.
 OBSERVERS: list[Callable[[dict[str, Any]], None]] = []
@@ -77,9 +84,18 @@ class Folder:
             raise ValueError(f"{inside} is not a path inside the state folder")
         return self.root / inside
 
-    def write(self, inside: str, data: bytes) -> Path:
-        """``data`` at ``inside``, landed whole."""
-        return self._land(inside, lambda temporary: temporary.write_bytes(data))
+    def write(self, inside: str, data: bytes, mode: int | None = None) -> Path:
+        """``data`` at ``inside``, landed whole; with ``mode`` (``0o600``), made with that mode from
+        its first byte, so no other user ever reads it."""
+        if mode is None:
+            return self._land(inside, lambda temporary: temporary.write_bytes(data))
+
+        def fill(temporary: Path) -> None:
+            handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), mode)
+            with os.fdopen(handle, "wb") as out:
+                out.write(data)
+
+        return self._land(inside, fill)
 
     def copy_in(self, inside: str, source: Path | str) -> Path:
         """``source``'s bytes at ``inside``, landed whole."""
@@ -199,6 +215,32 @@ class Registry:
             if self.cache is not None:
                 self.cache.remove(f"{DOCUMENTS}/{ident}")
         return there
+
+    # --- the installation's engine -------------------------------------------------------------
+
+    def engine(self, installation: str) -> dict[str, Any]:
+        """The engine record of ``installation`` (``daemon._tag``): ``port`` (int) and ``token``
+        (str) where it has them; ``{}`` with none, or one this schema does not read."""
+        data = self.state.read(f"{ENGINES}/{installation}.json")
+        try:
+            record = json.loads(data) if data is not None else {}
+        except ValueError:
+            return {}
+        if not isinstance(record, dict) or record.get("schema") != SCHEMA:
+            return {}
+        found: dict[str, Any] = {}
+        if isinstance(record.get("port"), int) and 0 < record["port"] < 65536:
+            found["port"] = record["port"]
+        if isinstance(record.get("token"), str) and len(record["token"]) >= 32:
+            found["token"] = record["token"]
+        return found
+
+    def put_engine(self, installation: str, record: dict[str, Any]) -> None:
+        """Write the engine record of ``installation`` (``port``, ``token``), this user's alone."""
+        if not installation.isalnum():
+            raise ValueError(f"{installation!r} is not an installation")
+        text = json.dumps({**record, "schema": SCHEMA}, indent=1, sort_keys=True) + "\n"
+        self.state.write(f"{ENGINES}/{installation}.json", text.encode("utf-8"), mode=0o600)
 
     def root(self, record: dict[str, Any]) -> Path:
         """The folder a record's paths are relative to: its ``root``."""

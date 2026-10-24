@@ -14,6 +14,10 @@ if [ -z "${PYTHON_BIN:-}" ]; then
 fi
 export PYTHON_BIN
 
+# A test's engine takes any free HTTP port, never the default (3245) that the person's own engine
+# keeps: one that found it held would move off it for good. A test of the default clears this.
+export CADGEN_ENGINE_PORT=0
+
 # The paths a run is narrowed to: test-python.sh and test-global.sh take them as arguments,
 # and only the test files at or under one of them run. Empty, the default, runs every file.
 # CI passes what scripts/github-workflows/select_checks.py selected for a change.

@@ -56,12 +56,17 @@ from typing import Any, Callable
 from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.ids import canonical, file_id, is_id
 
-__all__ = ["IDLE_SECONDS", "Endpoint", "Pool", "address", "door_path", "endpoints", "failure_path", "lock", "lock_path",
+__all__ = ["DEFAULT_PORT", "IDLE_SECONDS", "Endpoint", "Pool", "address", "door_path", "endpoints", "failure_path", "lock", "lock_path",
            "main", "state_dir", "worker_cap", "worker_idle"]
 
 HTTP_FACTORY = None  # optional application supplied by the enclosing distribution
 
 IDLE_SECONDS = 3600.0
+# The engine's HTTP port when nothing names one (0xCAD): ``--port`` on ``cadgen server`` (or a
+# request's own), ``CADGEN_ENGINE_PORT``, the installation's remembered port, then this (``bind``).
+DEFAULT_PORT = 3245
+# How many ports past a held default (or remembered) one the engine tries before any free one.
+PORTS_TRIED = 64
 PROTOCOL = 3  # 3: the door (named pipes) in place of the Unix socket
 WINDOWS = os.name == "nt"
 # The retirements ``status`` lists, the latest first.
@@ -834,9 +839,105 @@ class Pool:
 # --- the daemon ---------------------------------------------------------------------------
 
 
+def environment_port() -> int | None:
+    """``CADGEN_ENGINE_PORT`` as a port (0: any free one), or None when it names none."""
+    given = os.environ.get("CADGEN_ENGINE_PORT", "").strip()
+    if not given:
+        return None
+    try:
+        port = int(given)
+    except ValueError:
+        raise ValueError(f"CADGEN_ENGINE_PORT={given!r} is not a port") from None
+    if not 0 <= port <= 65535:
+        raise ValueError(f"CADGEN_ENGINE_PORT={given!r} is not a port")
+    return port
+
+
+def _held(error: OSError) -> bool:
+    """Whether a bind failed because the port is someone else's (in use, or reserved on Windows)."""
+    import errno
+
+    return error.errno in (errno.EADDRINUSE, errno.EACCES) or getattr(error, "winerror", None) in (10048, 10013)
+
+
+def _answers(host: str, port: int) -> bool:
+    """Whether something already listens at ``port`` where a client of ``host`` reaches it: a
+    listener on every interface lets a loopback bind through on macOS, and would take its traffic."""
+    from cadgen.engine.serve import reachable_host
+
+    try:
+        socket.create_connection((reachable_host(host).strip("[]"), port), timeout=0.5).close()
+    except OSError:
+        return False
+    return True
+
+
+def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tuple[Any, str]:
+    """The engine's HTTP server, listening, and where its port came from. ``listen(port, token)``
+    makes it. A port named -- ``asked`` (``--port``), else ``CADGEN_ENGINE_PORT`` -- is taken or
+    refused; else the installation's remembered port, else ``DEFAULT_PORT``, and when that one is
+    held by another process the next free one, remembered from then on, so this installation's links
+    stay what they were. The page token is the installation's (its record), made on its first start."""
+    import secrets
+
+    from cadgen.engine import registry
+
+    held = registry.current()
+    installation = _tag()
+    record = held.engine(installation) if held is not None else {}
+    token = record.get("token") or secrets.token_urlsafe(32)
+    named, source = (asked, "--port") if asked is not None else (environment_port(), "CADGEN_ENGINE_PORT")
+    if named is not None:
+        candidates = [named]
+    else:
+        first = record.get("port") or DEFAULT_PORT
+        candidates = [port for port in range(first, first + PORTS_TRIED) if port < 65536] + [0]
+    server = None
+    for port in candidates:
+        try:
+            if named is None and port and _answers(host, port):
+                continue
+            server = listen(port, token)
+            break
+        except OSError as error:
+            if named is not None or not _held(error):
+                raise ValueError(f"cannot listen on {host}:{port}: {error.strerror or error}"
+                                 + ("; pass another --port" if named else "")) from None
+    if server is None:
+        raise ValueError(f"cannot listen on {host}: no free port")
+    if named is None:
+        source = "default" if server.port == DEFAULT_PORT else "remembered"
+    if held is not None:
+        kept = {**record, "token": token, **({"port": server.port} if named is None else {})}
+        if kept != record:
+            try:
+                held.put_engine(installation, kept)
+            except OSError:
+                pass  # a state folder it cannot write: this start's links work, the next start's are new
+    return server, source
+
+
+def rotate_token() -> str | None:
+    """Replace this installation's page token (``cadgen server --rotate-token``): every link shared
+    before stops working. The new token; None where there is no state folder to keep it in."""
+    import secrets
+
+    from cadgen.engine import registry
+
+    held = registry.current()
+    if held is None:
+        return None
+    token = secrets.token_urlsafe(32)
+    held.put_engine(_tag(), {**held.engine(_tag()), "token": token})
+    return token
+
+
 class Daemon:
-    def __init__(self, idle: float, cap: int | None = None, retire_after: float | None = None) -> None:
+    def __init__(self, idle: float, cap: int | None = None, retire_after: float | None = None,
+                 port: int | None = None) -> None:
         self.idle = idle
+        self.port = port  # ``cadgen server --port``: the HTTP port this engine must take, or None
+        self.port_source = ""  # where the HTTP port the server took came from (``bind``)
         self.pool = Pool(cap or worker_cap(), retire_after if retire_after is not None else worker_idle(idle),
                          self._start, self.connected, lambda worker: self.models.drain(worker))
         self.workers_lock = threading.Lock()  # each worker's ``held``
@@ -996,14 +1097,12 @@ class Daemon:
         started = False
         with self.serving:
             if self.server is None:
-                port, host = int(request.get("port") or 0), request.get("host") or "127.0.0.1"
-                try:
-                    self.server = Server(port=port, three=request.get("three"), touch=self.touch,
-                                         provenance=self.provenance, cache=MESHES, isolated=True,
-                                         host=host, http_factory=HTTP_FACTORY, budget=memory_budget())
-                except OSError as error:
-                    raise ValueError(f"cannot listen on {host}:{port}: {error.strerror or error}"
-                                     + ("; pass another --port" if port else "")) from None
+                host = request.get("host") or "127.0.0.1"
+                self.server, self.port_source = bind(
+                    host, int(request["port"]) if request.get("port") else self.port,
+                    lambda port, token: Server(port=port, three=request.get("three"), touch=self.touch,
+                                               provenance=self.provenance, cache=MESHES, isolated=True, host=host,
+                                               http_factory=HTTP_FACTORY, budget=memory_budget(), token=token))
                 self.server.lost = self.models.rebuild
                 self.server.revive = self.models.adopt
                 self.server.stale = self.models.stale
@@ -1440,7 +1539,9 @@ class Daemon:
                 "cap": self.pool.cap, "waiting": self.pool.waiting(), "idleTimeout": self.pool.idle,
                 "rssCapMb": rss_cap_mb(), "retired": list(self.pool.retired),
                 "idle": round(now - self.last, 1), "holders": self.holders,
-                "serving": None if self.server is None else {"url": self.server.url,
+                "serving": None if self.server is None else {"url": self.server.url, "port": self.server.port,
+                                                             "portSource": self.port_source,
+                                                             "defaultPort": DEFAULT_PORT,
                                                              "documents": self.server.listing(every=True),
                                                              "memory": self.server.memory()},
                 "models": self.models.listing(every=True),
@@ -1597,7 +1698,9 @@ def lock(path: Path | None = None) -> Any:
     return handle
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool = False) -> int:
+    """Run the engine here. ``port``: the HTTP port it must take (``cadgen server --port``);
+    ``rotate``: a new page token first (``--rotate-token``), refused while another engine runs."""
     bytecode(os.environ)  # its own (``client._start`` set it), or made here: a daemon run in the foreground
     sys.pycache_prefix = os.environ.get("PYTHONPYCACHEPREFIX") or None
     sys.dont_write_bytecode = sys.pycache_prefix is None
@@ -1608,7 +1711,20 @@ def main(argv: list[str] | None = None) -> int:
         _note_failure(f"the engine server cannot take its lock in {state_dir()}", error)
         return 1
     if held is None:
+        if rotate:
+            print("cadgen: an engine server is running; run cadgen stop first, then cadgen server --rotate-token",
+                  file=sys.stderr)
+            return 1
         return 0  # another daemon is up
+    if rotate:
+        try:
+            if rotate_token() is None:
+                raise OSError("no state folder")
+        except OSError as error:
+            print(f"cadgen: cannot replace the page token: {error.strerror or error}", file=sys.stderr)
+            held.close()
+            return 1
+        print("cadgen: a new page token: every link shared before no longer works", file=sys.stderr)
     try:
         listener = _bind() if WINDOWS else None
         if listener is not None:
@@ -1619,7 +1735,7 @@ def main(argv: list[str] | None = None) -> int:
         _note_failure("the engine server cannot listen on a local port", error)
         held.close()
         return 1
-    daemon = Daemon(idle)
+    daemon = Daemon(idle, port=port)
     if not WINDOWS:
         import signal
 

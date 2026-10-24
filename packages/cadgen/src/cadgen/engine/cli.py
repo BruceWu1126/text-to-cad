@@ -7,7 +7,7 @@ ordinary Python scripts call decorated models explicitly.
         [--preview] [--pose NAME|JSON] [--annotation FILE] [--measurements FILE] [--width N] [--height N]
         [--size-profile P] [--json]
     cadgen serve DOC [--port N] [--three DIR]
-    cadgen status [--json] | stop [--json] | server
+    cadgen status [--json] | stop [--json] | server [--port N] [--rotate-token]
     cadgen inspect DOC [REF]                           what a document holds and its build closure, or what a ref names (``refs``)
 
 SRC and DOC are an on-disk CAD file's path or a document's id (``ids``): a model's id is what
@@ -57,8 +57,12 @@ def _stop_arguments(stop: argparse.ArgumentParser) -> None:
     stop.add_argument("--json", action="store_true", help="what was stopped as JSON")
 
 
-def _no_arguments(_parser: argparse.ArgumentParser) -> None:
-    return None
+def _server_arguments(server: argparse.ArgumentParser) -> None:
+    server.add_argument("--port", type=int, default=None,
+                        help="the HTTP port the engine takes (else CADGEN_ENGINE_PORT, else the one it "
+                             "remembers, else 3245); 0 takes any free port")
+    server.add_argument("--rotate-token", action="store_true",
+                        help="replace this installation's page token first: every link shared before stops working")
 
 
 def _inspect_arguments(parser: argparse.ArgumentParser) -> None:
@@ -483,10 +487,12 @@ def summary_text(summary: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _server(_args: argparse.Namespace, _prog: str) -> int:
+def _server(args: argparse.Namespace, prog: str) -> int:
     from cadgen.engine.daemon import main as daemon
 
-    return daemon([])
+    if args.port is not None and not 0 <= args.port <= 65535:
+        raise Failed(f"{prog}: --port must be between 0 and 65535", 2)
+    return daemon([], port=args.port, rotate=args.rotate_token)
 
 
 def _status(args: argparse.Namespace, _prog: str) -> int:
@@ -569,6 +575,16 @@ def _gb(megabytes: Any) -> str:
     return "-" if megabytes is None else f"{float(megabytes) / 1024:.1f} GB"
 
 
+def _port(serving: dict[str, Any]) -> str:
+    """Where the served port came from, in words: the default, or why it is another."""
+    port, default = serving.get("port"), serving.get("defaultPort")
+    if port == default:
+        return "the default port"
+    return {"--port": "the port --port named", "CADGEN_ENGINE_PORT": "the port CADGEN_ENGINE_PORT names",
+            "remembered": f"not the default {default}: the port this installation took when it was held, kept"
+            }.get(serving.get("portSource") or "", f"not the default {default}")
+
+
 def status_text(answer: dict[str, Any]) -> str:
     """``cadgen status``: the server and its pool's rules, a line per worker -- busy or idle,
     its script, process, builds and memory after its last build, where a busy one's build is
@@ -614,7 +630,7 @@ def status_text(answer: dict[str, Any]) -> str:
         renders = len(answer.get("renders") or [])
         memory = serving.get("memory") or {}
         held = (memory.get("documents") or 0) + (memory.get("meshes") or 0)
-        lines.append(f"serving {serving['url']}: {opened} document{'' if opened == 1 else 's'} opened by a page or a command"
+        lines.append(f"serving {serving['url']} ({_port(serving)}): {opened} document{'' if opened == 1 else 's'} opened by a page or a command"
                      + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else "")
                      + (f" · {_gb(held / 2**20)} of {_gb(memory['budget'] / 2**20)} held" if memory.get("budget") else ""))
     cache = answer.get("cache") or {}
@@ -660,7 +676,7 @@ VERBS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[
     "status": ("the engine server's workers, what each is building, and its served documents", _status_arguments,
                _status),
     "stop": ("stop the engine server", _stop_arguments, _stop),
-    "server": ("run the engine server in this process", _no_arguments, _server),
+    "server": ("run the engine server in this process", _server_arguments, _server),
 }
 
 

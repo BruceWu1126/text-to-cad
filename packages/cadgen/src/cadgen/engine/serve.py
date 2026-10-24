@@ -613,7 +613,10 @@ class Server:
                  host: str = "127.0.0.1", mesh_mode: str | None = None,
                  provenance: Callable[[str, str, str, int], dict[str, Any] | None] | None = None,
                  cache: MeshCache | None = None, isolated: bool = False, http_factory=None,
-                 budget: int | None = None) -> None:
+                 budget: int | None = None, token: str | None = None) -> None:
+        # The page token its HTTP application admits (``daemon.bind``: the installation's, kept
+        # across restarts), or None: the application makes one of its own.
+        self.token = token
         # Every document by its id (``ids``): a file's ``file_id``, a model's ``model_id``. A model
         # registered but not opened yet is a loader (its name, its load and its version) until
         # a page asks for it.
