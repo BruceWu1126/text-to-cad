@@ -12,14 +12,17 @@ import { createTunnelFetch, decodeBase64, TUNNEL_ORIGIN, TUNNEL_REPLY_MAX_BYTES 
 function fakeHost(respond: (message: any) => unknown) {
   const listeners = new Set<(event: MessageEvent) => void>();
   const posted: any[] = [];
-  const deliver = (data: unknown) => { for (const listener of [...listeners]) listener({ data } as MessageEvent); };
-  const host = {
+  const host: { postMessage(message: any): void } = {
     postMessage(message: any) {
       posted.push(message);
       if (message.id === undefined || message.method === undefined) return;
       const result = respond(message);
       if (result !== undefined) queueMicrotask(() => deliver({ jsonrpc: '2.0', id: message.id, result }));
     },
+  };
+  // What the host posts arrives from the host's window; `source` lets a test speak as another frame.
+  const deliver = (data: unknown, source: unknown = host) => {
+    for (const listener of [...listeners]) listener({ data, source } as MessageEvent);
   };
   const self = {
     addEventListener: (_type: string, listener: any) => listeners.add(listener),
@@ -42,6 +45,39 @@ describe('the MCP Apps bridge', () => {
     expect(seen[0]._meta?.['dev.texttocad/httpToken']).toBe('session-capability');
     frame.deliver({ jsonrpc: '2.0', method: 'ui/notifications/host-context-changed', params: { theme: 'light' } });
     expect(bridge.hostContext.theme).toBe('light');
+  });
+
+  it('hears only the host: another frame can neither answer a request nor speak as the host', async () => {
+    const frame = fakeHost(() => undefined);
+    const bridge = createBridge(frame.host, frame.self as any);
+    const other = { postMessage() {} };
+    const seen: ToolResult[] = [];
+    bridge.onToolResult(result => seen.push(result));
+    frame.deliver({ jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: { structuredContent: { launch: { page: 'forged' } } } }, other);
+    frame.deliver({ jsonrpc: '2.0', method: 'ui/notifications/host-context-changed', params: { theme: 'dark' } }, null);
+    expect(seen).toEqual([]);
+    expect(bridge.hostContext.theme).toBeUndefined();
+
+    const pending = bridge.callTool('cad_sync', { view: 'v' });
+    const call = frame.posted.find(message => message.method === 'tools/call');
+    frame.deliver({ jsonrpc: '2.0', id: call.id, result: { structuredContent: { from: 'other' } } }, other);
+    frame.deliver({ jsonrpc: '2.0', id: call.id, result: { structuredContent: { from: 'host' } } });
+    await expect(pending).resolves.toEqual({ structuredContent: { from: 'host' } });
+  });
+
+  it('numbers its requests from a random start, one apart', async () => {
+    const starts = new Set<number>();
+    for (let at = 0; at < 4; at += 1) {
+      const frame = fakeHost(() => ({}));
+      const bridge = createBridge(frame.host, frame.self as any);
+      await bridge.callTool('cad_sync', { view: 'v' });
+      await bridge.callTool('cad_sync', { view: 'v' });
+      const [first, second] = frame.posted.filter(message => message.method === 'tools/call').map(message => message.id);
+      expect(Number.isSafeInteger(first)).toBe(true);
+      expect(second).toBe(first + 1);
+      starts.add(first);
+    }
+    expect(starts.size).toBeGreaterThan(1);
   });
 
   it('cancels an aborted request with the host and rejects it', async () => {
