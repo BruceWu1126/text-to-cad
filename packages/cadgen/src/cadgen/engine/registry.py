@@ -1,25 +1,24 @@
 """The registry: one self-describing record per document the engine knows, in the user's state folder.
 
 ``<state>/documents/<id>/document.json`` is a document's record: a model built from a script
-(``kind: "model"``, ``store: "pointer"`` -- the script and the function it points at -- or
-``"copy"`` -- its own sources and the files its build read, in the record's folder: a bundle), or
-an on-disk CAD file the person opened (``kind: "file"``). The registry POINTS: no geometry, no
+(``kind: "model"``, ``store: "pointer"``: the script and the function it points at), a shape a
+program handed over (``kind: "model"``, ``store: "shape"``: the script that handed it over, or the
+folder it was handed over in, its name, and no command that builds it again -- ``run`` empty, and
+``shown`` says so in words), or an on-disk CAD file the person opened (``kind: "file"``). The registry POINTS: no geometry, no
 mesh, no xbf and no memo is ever written here. A model's record may say that the engine's cache
 holds its document (``cache``: ``{revision, bytes, written_at, read}``), whose bytes live in the
 cache folder, not here (``Registry.cache``: ``<cache>/documents/<id>/document.xbf``, the engine's
 ``cache`` module): regenerable, wiped at no loss, never the source of anything; the record is
 authoritative, and a cache file missing or unreadable is simply not cached. A ``memory`` document
 has no record. Ids are the
-documents' own (``ids``: derived from the canonical path and the function, or given with
-``@model(id=...)`` for a copy); the registry is their reverse map, never their authority.
+documents' own (``ids``: one formula of the canonical path and the name, or a ``key=``'s); the
+registry is their reverse map, never their authority.
 
-A record is relocatable: ``root`` is the one absolute folder in it (``"."`` for a bundle: the
-record's own folder), and ``home`` (the script, or the file), ``run`` (the command that builds it
-again, ``["python", program]``) and every copied file are relative to it.
+A record is relocatable: ``root`` is the one absolute folder in it, and ``home`` (the script, or
+the file) and ``run`` (the command that builds it again, ``["python", program]``) are relative to it.
 
 The interface is the ``Registry``'s: ``get``, ``put``, ``list``, ``delete`` (records in, records
-out), ``update`` (a read and a write under one lock), and a bundle's files (``write_bundle``,
-``add_input``, ``folder``). The filesystem implementation here is the only one; it is the seam a
+out) and ``update`` (a read and a write under one lock). The filesystem implementation here is the only one; it is the seam a
 hosted store would implement. Every byte written under the state folder by this module goes
 through ``Folder``, and every write commits through ``atomic_replace.replace_atomic``. A record is
 written synchronously, and only when a field but ``changed`` differs from the one on disk; then
@@ -29,7 +28,7 @@ The cache folder is a second ``Folder``, written the same way; forgetting a docu
 
 The engine imports nothing outside itself (law 3): where the state folder is is the
 distribution's to say, through ``FACTORY`` (``cadgen._internal.engine_host``). With none, the
-engine records nothing, copies nothing and caches nothing (``current`` is None).
+engine records nothing and caches nothing (``current`` is None).
 """
 from __future__ import annotations
 
@@ -43,7 +42,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from cadgen.engine.atomic_replace import replace_atomic
-from cadgen.engine.ids import canonical, is_id
+from cadgen.engine.ids import is_id
 
 __all__ = ["DOCUMENTS", "FACTORY", "Folder", "OBSERVERS", "RECORD", "Registry", "SCHEMA", "command", "current",
            "detached", "home", "program", "relative"]
@@ -51,10 +50,6 @@ __all__ = ["DOCUMENTS", "FACTORY", "Folder", "OBSERVERS", "RECORD", "Registry", 
 SCHEMA = 1
 DOCUMENTS = "documents"
 RECORD = "document.json"
-# A bundle's own sources, which ``write_bundle`` replaces; ``inputs/<digest>/<name>`` holds what its
-# build read (``add_input``).
-SOURCES = ("model.py", "modules")
-INPUTS = "inputs"
 
 # Told of every record written (one that changed), after it is on disk; never waited on for more.
 OBSERVERS: list[Callable[[dict[str, Any]], None]] = []
@@ -195,8 +190,7 @@ class Registry:
         return [record for record in (self.get(name) for name in self.state.names(DOCUMENTS)) if record is not None]
 
     def delete(self, ident: str) -> bool:
-        """Forget document ``ident``: its folder, whole (a copy's sources and inputs with it), and
-        its cache file in the cache folder."""
+        """Forget document ``ident``: its folder, whole, and its cache file in the cache folder."""
         if not is_id(ident):
             return False
         with self._lock(ident):
@@ -206,54 +200,9 @@ class Registry:
                 self.cache.remove(f"{DOCUMENTS}/{ident}")
         return there
 
-    # --- a document's folder: a copy's bundle ------------------------------------------------
-
-    def folder(self, ident: str) -> Path:
-        """Where document ``ident``'s record is on this machine: a copy's bundle."""
-        if not is_id(ident):
-            raise ValueError(f"{ident!r} is not a document id")
-        return self.state.path(f"{DOCUMENTS}/{ident}")
-
-    def write_bundle(self, ident: str, files: dict[str, bytes]) -> Path:
-        """A copy's sources (``model.py``, ``modules/...``) in place of the ones it had. Its inputs
-        stay until the registration after its build names the ones it read (``prune_inputs``)."""
-        with self._lock(ident):
-            for name in SOURCES:
-                self.state.remove(f"{DOCUMENTS}/{ident}/{name}")
-            for inside, data in files.items():
-                if Path(inside).parts[0] not in SOURCES:
-                    raise ValueError(f"{inside} is not a bundle's source")
-                self.state.write(f"{DOCUMENTS}/{ident}/{inside}", data)
-        return self.folder(ident)
-
-    def add_input(self, ident: str, source: Path | str, digest: str) -> str:
-        """``source`` copied into the bundle at ``inputs/<digest>/<its name>``, once (the digest is
-        its content's); that path, relative to the bundle."""
-        inside = f"{INPUTS}/{digest}/{Path(source).name}"
-        if not self.state.path(f"{DOCUMENTS}/{ident}/{inside}").is_file():
-            self.state.copy_in(f"{DOCUMENTS}/{ident}/{inside}", source)
-        return inside
-
-    def prune_inputs(self, ident: str, kept: set[str]) -> None:
-        """Every input folder of the bundle not in ``kept`` (by digest) goes."""
-        for digest in self.state.names(f"{DOCUMENTS}/{ident}/{INPUTS}"):
-            if digest not in kept:
-                self.state.remove(f"{DOCUMENTS}/{ident}/{INPUTS}/{digest}")
-
-    def bundle_of(self, path: Path | str) -> str | None:
-        """The id of the document whose folder holds ``path`` (a copy's ``model.py``, a module or an
-        input of it), else None: a fact about the folder, never a detection."""
-        documents = canonical(self.state.path(DOCUMENTS))
-        found = canonical(path)
-        if not found.startswith(documents + os.sep):
-            return None
-        ident = found[len(documents) + 1:].split(os.sep, 1)[0]
-        return ident if is_id(ident) else None
-
     def root(self, record: dict[str, Any]) -> Path:
-        """The folder a record's paths are relative to: its ``root``, or its own folder (``"."``)."""
-        root = record.get("root") or "."
-        return self.folder(record["id"]) if root == "." else Path(root)
+        """The folder a record's paths are relative to: its ``root``."""
+        return Path(record["root"])
 
     def _lock(self, ident: str) -> threading.RLock:
         with _LOCKS_LOCK:
@@ -293,5 +242,6 @@ def command(registry: Registry, record: dict[str, Any]) -> str | None:
 
 
 def detached(registry: Registry, record: dict[str, Any]) -> bool:
-    """Whether the script or the file a record points at is gone (moved, deleted)."""
-    return not home(registry, record).is_file()
+    """Whether the script or the file a record points at is gone (moved, deleted). A shape handed
+    over points at nothing that builds it: never detached."""
+    return record.get("store") != "shape" and not home(registry, record).is_file()

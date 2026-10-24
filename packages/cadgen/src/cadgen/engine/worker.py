@@ -649,10 +649,7 @@ def main() -> int:
             script = Path(request["script"])
             # Where the build is, frame by frame; each report holds its model's last.
             said = progress(ident, script=script, cwd=cwd)
-            from cadgen.engine.copies import serving
-
-            # A copied document's rerun reads each file its first build read from its copy (``copies``).
-            with building(said), serving(request.get("copied"), request.get("origin")):
+            with building(said):
                 said.load()
                 reports = build(script, request.get("functions") or None,
                                 log=lambda text: send({"id": ident, "log": text}), cwd=Path(cwd) if cwd else None,

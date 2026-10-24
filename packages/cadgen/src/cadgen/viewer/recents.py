@@ -163,7 +163,7 @@ class RecentStore:
         self._change(path, lambda record: {**record, "pinned": bool(pinned)})
 
     def remove(self, path: str) -> None:
-        """Forget an entry: its record, and a copied model's bundle with it."""
+        """Forget an entry: its record."""
         self.registry.delete(self._ident(path))
 
     def thumbnail(self, path: str, png: bytes) -> str:
