@@ -187,6 +187,21 @@ def _mcp_change(path: str) -> Select:
 # reaches whatever cadgen reaches.
 ENGINE_CODE = (f"{CADGEN_SRC}/engine/**",)
 
+# The docs hero is the planetary gear's exported GLB, and the docs job's hero check
+# (apps/docs/scripts/check-hero-glb.mjs) holds it to the motion the model's script declares and
+# plays its clip through core. What can break that: the model (it imports no other model), the names its script calls
+# (cadgen.ap242's mechanism and configuration_sequence, cadgen.gltf's animation), and the engine
+# code that turns a declared motion into the GLB's clip -- its animation, mechanism and document
+# modules, the colours and materials the export writes, and the export itself. The rest of the
+# engine (builds, kernel, snapshots, the page) changes no clip.
+HERO_INPUTS = (
+    "models/assemblies/src/planetary_gear_assembly/**",
+    f"{CADGEN_SRC}/ap242.py", f"{CADGEN_SRC}/gltf.py",
+    f"{CADGEN_SRC}/engine/animations.py", f"{CADGEN_SRC}/engine/mechanism.py",
+    f"{CADGEN_SRC}/engine/document.py", f"{CADGEN_SRC}/engine/colors.py",
+    f"{CADGEN_SRC}/engine/materials.py", f"{CADGEN_SRC}/engine/export/**",
+)
+
 
 _MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
@@ -235,6 +250,10 @@ RULES: tuple[Rule, ...] = (
         "scripts/build/**",              # core's and ui's library build
     ), EVERYTHING),
 
+    # The docs hero's inputs reach the docs job, besides whatever else reads them (so not final,
+    # and ahead of the engine's final rule).
+    Rule(HERO_INPUTS, select(flags=["docs"])),
+
     # cadgen, and the runtime bundle it executes. The viewer's backend and the CAD app's
     # server reach only what names them (above).
     Rule(VIEWER_SHARED, CADGEN_CONSUMERS, final=True),
@@ -250,8 +269,6 @@ RULES: tuple[Rule, ...] = (
     Rule(("apps/mcp/**",), select(flags=["mcp", "packaging"])),
     Rule(("apps/api/**",), select(flags=["api"])),
     Rule(("apps/docs/**",), select(flags=["docs"])),
-    # The hero's GLB check holds the GLB to the motion its model's script declares.
-    Rule(("models/assemblies/src/planetary_gear_assembly/planetary_gear_assembly.py",), select(flags=["docs"])),
     # check-dependencies.mjs walks every app's source and runs in core-js, the cheapest job
     # that has it.
     Rule(("apps/docs/src/**",), select(flags=["core_js"])),

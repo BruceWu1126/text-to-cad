@@ -54,8 +54,10 @@ if __name__ == "__main__":
   `build123d` (and `OCP`) lazy: the module binds at once and the kernel loads on the
   first attribute anything reads from it, in the worker that builds the model. `from
   build123d import Box` reads the name, so it loads the kernel at that line; so does a
-  kernel value made at module level (a `bd.Color` palette, a `bd.Align.CENTER`
-  default). Write build123d attribute-style.
+  kernel object made at module level (an `Axis`, a `Location`, a shape, a `bd.Color`
+  palette, a `bd.Align.CENTER` default), on every run of the script, a run that rebuilds
+  nothing included. Keep numbers (tuples) at module level and make kernel objects inside
+  bodies. Write build123d attribute-style.
 - **A body that raises fails its model**: the run prints the model's frames, exits 1,
   and the page says the run failed.
 - **Called from a plain script** (a check, a drawing), a model is built in the engine
