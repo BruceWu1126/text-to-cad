@@ -463,7 +463,8 @@ host's Full size where it shows the view small
 renderer draws its own controls into (over a file only), and last the host's way to open
 what is shown in a page of its own outside the host (`openInBrowser`, `CadViewerProps.openInBrowser`:
 the CAD app's Open in browser, the web viewer's page of the document on screen or of the
-home, over the home too; the web app, itself that page, hands none). The navbar holds no settings.
+home, over the home too, which the CAD app's server opens on the person's computer and the host
+only where the server can open no browser; the web app, itself that page, hands none). The navbar holds no settings.
 
 The app menu is FileViewer's, built from the host's `navigation.home`, `links` and
 `environment.platform` and the person's `FileViewerProps.appSettings` (which `CadViewer`

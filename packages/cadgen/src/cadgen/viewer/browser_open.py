@@ -12,6 +12,7 @@ import html
 import json
 import os
 import secrets
+import sys
 import threading
 import time
 import webbrowser
@@ -55,10 +56,30 @@ def _remove_later(path: Path) -> None:
     threading.Thread(target=remove, name='cadgen-browser-open', daemon=True).start()
 
 
+def display_refusal(environ=None) -> str | None:
+    """Why no browser can be shown to the person from this process, or None: a remote shell with no
+    forwarded display, or a POSIX desktop-less session (no X11 or Wayland display), where Python's
+    ``webbrowser`` would fall back to a console browser nobody sees."""
+    environ = os.environ if environ is None else environ
+    if os.name == 'nt':
+        return None
+    shown = environ.get('DISPLAY') or environ.get('WAYLAND_DISPLAY')
+    if (environ.get('SSH_CONNECTION') or environ.get('SSH_TTY')) and not shown:
+        return 'this is a remote session with no display to open a browser on'
+    if sys.platform != 'darwin' and not shown:
+        return 'there is no display to open a browser on'
+    return None
+
+
 def open_page(url: str, *, opener: Callable[[str], bool] = webbrowser.open) -> Path:
     """Open ``url`` in the browser through an owner-only redirect file; the file's path, or
-    ``CannotOpen`` when no browser opened (the file is removed at once then)."""
+    ``CannotOpen`` when no browser can be opened here (the file is removed at once when one did
+    not)."""
     from cadgen.engine import daemon
+
+    refusal = display_refusal()
+    if refusal is not None:
+        raise CannotOpen(refusal)
 
     folder = daemon.state_dir()
     try:

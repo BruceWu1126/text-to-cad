@@ -549,6 +549,51 @@ class InlineServerTest(_Session):
         self.server._viewer_url = refuse
         self.assertEqual(self.http("GET", route), (503, {"error": "CAD Viewer client is not built"}))
 
+    def test_the_cards_open_in_browser_opens_the_page_from_this_process_through_a_redirect_file(self) -> None:
+        from cadgen.mcp.browser import ViewerUnavailable
+        from cadgen.viewer import browser_open
+
+        engine = self.tmp / "engine"
+        engine.mkdir(mode=0o700)
+        opened: list[tuple[str, str]] = []
+
+        def opener(target: str) -> bool:
+            path = Path(local_path(target))
+            opened.append((target, path.read_text(encoding="utf-8")))
+            if os.name != "nt":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            return True
+
+        self.server._viewer_url = lambda model=None: "http://127.0.0.1:3245/" + ("doc" if model else "") + "?token=t"
+        self.server._browser_opener = opener
+        route = "http://cad.invalid/__cad/browser/open"
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(engine)}), \
+                mock.patch.object(browser_open, "display_refusal", return_value=None):
+            self.assertEqual(self.http("POST", route, {"model": self.bracket}), (200, {"opened": True}))
+            self.assertEqual(self.http("POST", route, {"model": None}), (200, {"opened": True}))
+            self.assertEqual(len(opened), 2)
+            for (target, page), url in zip(opened, ("http://127.0.0.1:3245/doc?token=t", "http://127.0.0.1:3245/?token=t")):
+                self.assertTrue(target.startswith("file:") and "token" not in target, target)
+                self.assertIn(f"url={url}", page)
+            # A read is refused, the body names a document and never a URL, and an agent never reaches it.
+            self.assertEqual(self.http("GET", route)[0], 405)
+            self.assertEqual(self.http("POST", route, {"model": 7})[0], 400)
+            agent = self.call("cad_http", {"method": "POST", "url": route, "body": base64.b64encode(b"{}").decode()})
+            self.assertEqual(agent["structuredContent"]["status"], 403)
+            self.assertEqual(len(opened), 2)
+            # No browser here, or no page: 503 in words, when the card asks its host instead.
+            self.server._browser_opener = lambda _target: False
+            status, answer = self.http("POST", route, {})
+            self.assertEqual((status, "no browser" in answer["error"]), (503, True))
+
+            def refuse(_model=None) -> str:
+                raise ViewerUnavailable("CAD Viewer client is not built")
+
+            self.server._viewer_url = refuse
+            self.assertEqual(self.http("POST", route, {}), (503, {"error": "CAD Viewer client is not built"}))
+        with mock.patch.object(browser_open, "display_refusal", return_value="there is no display to open a browser on"):
+            self.assertEqual(self.http("POST", route, {}), (503, {"error": "there is no display to open a browser on"}))
+
     def test_a_mounted_view_warms_the_engine_s_meshing_pool(self) -> None:
         # The engine starts its pool with the first view, never with a build (law 19).
         warmed = []

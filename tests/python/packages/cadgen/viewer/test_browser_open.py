@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlsplit
 from cadgen.viewer import browser_open, main as viewer_main
 
 URL = 'http://127.0.0.1:4321/abc?token=secret-token'
+DISPLAY_REFUSAL = browser_open.display_refusal  # the module's own, which the tests below patch out
 
 
 class BrowserOpenTest(unittest.TestCase):
@@ -23,9 +24,10 @@ class BrowserOpenTest(unittest.TestCase):
         self.engine = Path(tempfile.mkdtemp(prefix='eng-')).resolve()
         os.chmod(self.engine, 0o700)
         self.addCleanup(shutil.rmtree, self.engine, True)
-        patch = mock.patch.dict(os.environ, {'CADGEN_ENGINE_DIR': str(self.engine)})
-        patch.start()
-        self.addCleanup(patch.stop)
+        for patch in (mock.patch.dict(os.environ, {'CADGEN_ENGINE_DIR': str(self.engine)}),
+                      mock.patch.object(browser_open, 'display_refusal', return_value=None)):  # CI has no display
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def await_gone(self, path, within=5.0):
         deadline = time.monotonic() + within
@@ -65,6 +67,23 @@ class BrowserOpenTest(unittest.TestCase):
         os.chmod(self.engine, 0o777)
         with self.assertRaisesRegex(browser_open.CannotOpen, 'can be written by others'):
             browser_open.open_page(URL, opener=lambda _target: self.fail('opened'))
+
+    def test_no_display_is_said_before_anything_is_written(self):
+        refusal = mock.patch.object(browser_open, 'display_refusal', return_value='there is no display to open a browser on')
+        with refusal, self.assertRaisesRegex(browser_open.CannotOpen, 'no display'):
+            browser_open.open_page(URL, opener=lambda _target: self.fail('opened'))
+        self.assertEqual(list(self.engine.iterdir()), [])
+
+    @unittest.skipIf(os.name == 'nt', 'Windows always has its desktop')
+    def test_a_remote_shell_or_a_session_with_no_display_has_no_browser(self):
+        real = DISPLAY_REFUSAL
+        self.assertIn('remote session', real({'SSH_CONNECTION': '10.0.0.1 1 10.0.0.2 22'}))
+        self.assertIsNone(real({'SSH_CONNECTION': '10.0.0.1 1 10.0.0.2 22', 'DISPLAY': 'localhost:10.0'}))
+        self.assertIsNone(real({'WAYLAND_DISPLAY': 'wayland-0'}))
+        with mock.patch.object(browser_open.sys, 'platform', 'linux'):
+            self.assertIn('no display', real({}))
+        with mock.patch.object(browser_open.sys, 'platform', 'darwin'):
+            self.assertIsNone(real({}))
 
     def test_the_launcher_opens_the_file_not_the_url(self):
         given = []
