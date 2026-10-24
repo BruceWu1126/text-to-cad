@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
+from cadgen import model
 
 from lib import bodywork as B
 
 
+@model
 def under_seat_body():
     built = B.build_under_seat_body()
     if isinstance(built, list):

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
+from cadgen import model
 
 from lib import chassis as B
 
 
+@model
 def frame():
     built = B.build_frame()
     if isinstance(built, list):

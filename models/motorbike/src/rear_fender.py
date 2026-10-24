@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
+from cadgen import model
 
 from lib import bodywork as B
 
 
+@model
 def rear_fender():
     built = B.build_rear_fender()
     if isinstance(built, list):
