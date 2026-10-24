@@ -294,6 +294,50 @@ class ConnectTest(unittest.TestCase):
         self.assertEqual([w for w in caught if issubclass(w.category, ResourceWarning)], [])
 
 
+class EngineFolderTest(unittest.TestCase):
+    """The engine's folder holds its socket, lock and port file. One another user owns, or that
+    others can write to, would let them take the socket's place: client and daemon refuse it."""
+
+    def setUp(self) -> None:
+        self.engine = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None))
+        self.addCleanup(shutil.rmtree, self.engine, True)
+
+    @unittest.skipIf(os.name == "nt", "a folder's owner and mode are POSIX's")
+    def test_a_folder_others_can_write_or_another_user_owns_is_refused_by_client_and_daemon(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine import client, daemon
+
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.engine)}):
+            self.assertIsNone(daemon.folder_refusal(daemon.state_dir()))
+            self.assertTrue(daemon.socket_folder_ok(daemon.socket_path()))
+            os.chmod(self.engine, 0o777)
+            refusal = daemon.folder_refusal(daemon.state_dir())
+            self.assertIn("can be written by others", refusal)
+            self.assertFalse(daemon.socket_folder_ok(daemon.socket_path()))
+            with mock.patch.object(client, "_start", side_effect=AssertionError("a daemon was started")):
+                with self.assertRaisesRegex(ConnectionError, "can be written by others"):
+                    client.connect()
+            with self.assertRaisesRegex(PermissionError, "can be written by others"):
+                daemon.lock()
+            self.assertEqual(sorted(self.engine.iterdir()), [], "nothing was made in the refused folder")
+            os.chmod(self.engine, 0o700)
+            real, folder = os.lstat, os.fspath(daemon.state_dir())
+
+            def foreign(path, *args, **kwargs):
+                found = real(path, *args, **kwargs)
+                if os.fspath(path) == folder:
+                    return os.stat_result((found.st_mode, found.st_ino, found.st_dev, found.st_nlink,
+                                           os.getuid() + 1, found.st_gid, found.st_size, 0, 0, 0))
+                return found
+
+            with mock.patch.object(os, "lstat", side_effect=foreign):
+                self.assertIn("belongs to another user", daemon.folder_refusal(daemon.state_dir()))
+                self.assertFalse(daemon.socket_folder_ok(daemon.socket_path()))
+                with self.assertRaisesRegex(PermissionError, "belongs to another user"):
+                    daemon.lock()
+
+
 class DaemonEnvironmentTest(unittest.TestCase):
     """The daemon serves every later client, so the client that starts it does not hand it a
     per-process telemetry switch: those are the person's saved choice's to decide."""

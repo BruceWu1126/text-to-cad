@@ -124,9 +124,37 @@ def socket_path(protocol: int | None = None) -> Path:
 
 
 def socket_folder_ok(path: Path) -> bool:
-    """Whether a socket at ``path`` may be bound or connected: one beside the lock is; one in the
-    shared ``/tmp`` only in a folder that is this user's alone (``private_folder``)."""
-    return path.parent == state_dir() or private_folder(path.parent)
+    """Whether a socket at ``path`` may be bound or connected: one beside the lock is, in an engine
+    folder no one else can change (``folder_refusal``); one in the shared ``/tmp`` only in a folder
+    that is this user's alone (``private_folder``)."""
+    if path.parent == state_dir():
+        return folder_refusal(path.parent) is None
+    return private_folder(path.parent)
+
+
+def folder_refusal(folder: Path) -> str | None:
+    """Why ``folder`` may not hold the engine's socket, lock and port file, or None when it may. On
+    POSIX it must be a folder of this user's that no one else can write to: whoever owns the folder,
+    or can write to it, can take the socket's place, and every request carries its client's
+    environment. (The default folder's name is shared by every user of a machine: another user who
+    made it first owns it.)"""
+    if WINDOWS:
+        return None
+    import stat
+
+    try:
+        found = os.lstat(folder)
+    except OSError as error:
+        return f"the engine's folder {folder} cannot be read: {error.strerror or error}"
+    if not stat.S_ISDIR(found.st_mode):
+        return f"the engine's folder {folder} is not a folder"
+    if found.st_uid != os.getuid():
+        return (f"the engine's folder {folder} belongs to another user (uid {found.st_uid}): "
+                "set CADGEN_ENGINE_DIR to a folder of your own")
+    if found.st_mode & 0o022:
+        return (f"the engine's folder {folder} can be written by others (mode {stat.S_IMODE(found.st_mode):o}): "
+                "run chmod go-w on it, or set CADGEN_ENGINE_DIR to a folder of your own")
+    return None
 
 
 def private_folder(folder: Path) -> bool:
@@ -1189,6 +1217,9 @@ def lock(path: Path | None = None) -> Any:
     """The daemon's lock (or another protocol's, at ``path``), held for its life; None when
     another daemon holds it."""
     state_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
+    refusal = folder_refusal(state_dir())
+    if refusal is not None:
+        raise PermissionError(refusal)
     handle = open(path or lock_path(), "a+")
     try:
         if WINDOWS:

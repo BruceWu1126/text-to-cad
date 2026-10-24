@@ -65,6 +65,9 @@ def connect(*, start: bool = True, timeout: float = 60.0) -> socket.socket | Non
     if found is not None or not start:
         return found
     _daemon.state_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
+    refusal = _daemon.folder_refusal(_daemon.state_dir())
+    if refusal is not None:  # said now, not after waiting out a daemon that cannot start there
+        raise ConnectionError(refusal)
     _start()
     started = time.monotonic()
     deadline = started + timeout
@@ -159,8 +162,8 @@ def _remove_dead(endpoint: _daemon.Endpoint) -> list[str]:
     """The files of ``endpoint`` removed when its daemon is dead: its lock free (taken here while
     they go, so no daemon starts between) and nothing answering at its address."""
     present = [path for path in (endpoint.address, endpoint.lock) if path.exists() or path.is_symlink()]
-    if not present:
-        return []
+    if not present or _daemon.folder_refusal(endpoint.lock.parent) is not None:
+        return []  # nothing, or a folder another can change: none of it this user's daemon's to remove
     held = _daemon.lock(endpoint.lock)
     if held is None:
         return []  # a daemon holds it: starting, stopping or running
