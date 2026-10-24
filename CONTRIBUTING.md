@@ -138,12 +138,13 @@ npm run build:packages
 Every build, export and snapshot runs in cadgen's engine server, a daemon: one per
 installation (the interpreter and the engine folder it runs), started by the first
 command that needs it and gone after an idle hour, so a worktree's checkout gets a
-daemon of its own. Its socket (on Windows, a port file) and lock live in `cadgen-engine`
+daemon of its own. Its door, a named pipe (on Windows, a port file), and lock live in `cadgen-engine`
 in `$XDG_RUNTIME_DIR`, else in a per-user `$TMPDIR` (macOS's), else in `/tmp/cadgen-<uid>`
 (Windows: the temporary folder); `CADGEN_ENGINE_DIR` moves them, which gives a
 test, a benchmark or an experiment a daemon to itself. `cadgen status` lists its
 workers, one per model script, each with its memo, and what each is building;
-`cadgen stop` stops it (`cadgen server` runs one in the foreground). A running daemon keeps the engine code it started with:
+`cadgen stop` stops it (`cadgen server` runs one in the foreground); a running `cadgen mcp` holds it
+up, so it does not idle out while an agent app runs. A running daemon keeps the engine code it started with:
 after editing `packages/cadgen/src/cadgen`, stop the daemon you started so the next
 build runs the new code. Never stop one you did not start.
 

@@ -50,7 +50,7 @@ the two disagree, the engine's README is right.
 
 | Document | What it is for | Go there when |
 |---|---|---|
-| [`src/cadgen/engine/README.md`](src/cadgen/engine/README.md) | The engine: models and decorators, the engine server and its workers, progress, the viewer and the snapshot, exports, kinematics, couplings and configuration sequences, materials, imports, placements, the mesh and its wire format, element names, references, body retention, memo functions and the build closure | changing anything a build, an export, a snapshot or a served document does |
+| [`src/cadgen/engine/README.md`](src/cadgen/engine/README.md) | The engine: models and decorators, the engine server and its workers, the door, progress, the viewer and the snapshot, exports, kinematics, couplings and configuration sequences, materials, imports, placements, the mesh and its wire format, element names, references, body retention, memo functions and the build closure | changing anything a build, an export, a snapshot or a served document does |
 
 ## The design laws
 
@@ -63,9 +63,9 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    **Build closure**).
 2. **Only requested files to disk.** The engine writes the files a model declares -- the xbf and the exports
    its decorators name, nothing beside them -- and the operating system's coordination for its
-   warm process: a socket and a lock in a folder only the user can make: `cadgen-engine` in
-   `$XDG_RUNTIME_DIR`, else in a `$TMPDIR` that is the user's own, else `/tmp/cadgen-<uid>` (a
-   socket path past the Unix limit lives in the user's own `/tmp/cadgen-<uid>` instead) -- and cadgen's own
+   warm process: a door (a named pipe; on Windows a port file), a lock and its connections' pipes, in
+   a folder only the user can make: `cadgen-engine` in `$XDG_RUNTIME_DIR`, else in a `$TMPDIR` that
+   is the user's own, else `/tmp/cadgen-<uid>` -- and cadgen's own
    state in the user's state folder: settings, Recents' small previews, and the registry of the
    documents it has built, been handed or opened, one record each that points at its script or
    file; never geometry and never source. In the

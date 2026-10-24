@@ -327,7 +327,7 @@ it again.
   `CADGEN_ENGINE_WORKERS` workers live (default: the machine's cores); a worker idle for
   `CADGEN_ENGINE_WORKER_IDLE` seconds, or over `CADGEN_ENGINE_WORKER_RSS_MB` after a run,
   is retired, and its script's next run starts cold. `CADGEN_ENGINE_DIR` moves the
-  engine's socket and lock (one engine per folder).
+  engine's door and lock (one engine per folder).
 
 ## Progress and the report
 
