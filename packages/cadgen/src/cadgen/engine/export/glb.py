@@ -18,11 +18,11 @@ root node shows them in glTF's frame, Y up and metres, as cadgen's other GLBs do
 Every configuration sequence of the document is an animation of the same name (``export/motion.py``):
 CUBICSPLINE translation and rotation channels for each placement it moves, over one shared
 key time accessor, its duration in the animation's ``extras`` (``{"cadgen": {"duration":
-seconds}}``). A clip is the sequence once; a player repeats it. After them, a built source's
+seconds}}``). A clip is the sequence once; a player repeats it. After them, the source's
 animations (``animation()``, ``export/animation.py``), each one glTF animation of its name: STEP,
 LINEAR or CUBICSPLINE translation, rotation and scale channels on the nodes its references
-place, their duration in ``extras`` as a configuration sequence's. A GLB written from an xbf alone has none of
-them: the document holds no animation. A placement anything moves stands by translation and
+place, their duration in ``extras`` as a configuration sequence's: a build's, or the record of them an
+xbf carries (``animations.record``). A placement anything moves stands by translation and
 rotation, as glTF asks of an animated node; every other one by its matrix.
 """
 
