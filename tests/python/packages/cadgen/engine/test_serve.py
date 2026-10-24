@@ -13,13 +13,14 @@ import textwrap
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 import numpy as np
 
 from cadgen.engine import build as engine_build
-from cadgen.engine import mesh
+from cadgen.engine import mesh, serve
 from cadgen.engine.serve import Server
 
 MODEL = """
@@ -86,6 +87,17 @@ class ServeTest(unittest.TestCase):
         self.assertEqual({str(o) for o in part.faces[:, 0]}, set(post["faceNames"]))
         self.assertEqual(int(part.edges[:, 2].sum()), len(part.edge_points))
         self.assertTrue(len(part.edges))
+
+    def test_a_version_wait_that_is_no_number_is_refused_and_a_negative_one_waits_not_at_all(self) -> None:
+        version = self.structure()["version"]
+        for wait in ("nan", "inf", "-inf"):
+            with self.subTest(wait=wait), self.assertRaises(urllib.error.HTTPError) as refused:
+                self.get(f"/api/doc/{self.ident}/version?after={version}&wait={wait}")
+            self.assertEqual(refused.exception.code, 400)
+        started = time.monotonic()
+        answer = json.loads(self.get(f"/api/doc/{self.ident}/version?after={version}&wait=-5"))
+        self.assertEqual(answer["version"], version)
+        self.assertLess(time.monotonic() - started, serve.WAIT_LIMIT)
 
     def test_inline_and_processes_mesh_the_same_buffers(self) -> None:
         keys = [p["key"] for p in self.structure()["prototypes"]]
