@@ -461,7 +461,10 @@ Nor does the day: the creation date the BinXCAF driver writes in the file's
 header is always `01/01/2000` (`document.WRITTEN_DATE`, put over the driver's in
 place), so two cold builds of the same code are the same bytes on any day.
 If a body raises, the error is reported with the model's frames and the
-previous files stay. Builds run in the daemon's warm workers, at most one per core alive
+previous files stay: the program's own call prints those frames once on stderr, then `failed
+<script>::<model>`, and nothing else; the call still raises (`EngineError`), so a caller may catch
+it, and left uncaught it ends the program with status 1 without its traceback again
+(`model._told`). Builds run in the daemon's warm workers, at most one per core alive
 (**The engine server and its workers**). `CADGEN_ENGINE_DIR` moves its socket and lock; the client and the server resolve it alike (`daemon.state_dir`: a `..`, a symlink or a trailing slash names the same folder). On POSIX the folder must be the user's own and closed to writing by anyone else (`daemon.folder_refusal`): whoever owns or can write the folder could take the socket's place, so a client refuses to connect or start there and the daemon refuses to lock there, saying why.
 `CADGEN_ENGINE_MEMORY_MB` sets the server's memory budget, and `CADGEN_ENGINE_CACHE_GB` the
 document cache's size (`0`: no cache; `CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, is the tests'

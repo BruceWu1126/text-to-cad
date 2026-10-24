@@ -92,6 +92,23 @@ def check_output(kind: str, out: Any, where: str) -> None:
         raise ValueError(f"{where}: the file must end in {' or '.join(_ACCEPTED[kind])}, not {os.fspath(out)!r}")
 
 
+def _told(error: BaseException) -> None:
+    """A failed build the program's own call reported (its model's frames and the ``failed`` line,
+    ``cli._reported``): raised as ever, so a caller may catch it, and, left uncaught, ending the
+    program with status 1 and nothing more said -- not the same traceback again inside this one."""
+    error._told = True  # type: ignore[attr-defined]
+    hook = sys.excepthook
+    if getattr(hook, "_cadgen_told", False):
+        return
+
+    def quiet(kind: type[BaseException], value: BaseException, trace: Any) -> None:
+        if not getattr(value, "_told", False):
+            hook(kind, value, trace)
+
+    quiet._cadgen_told = True  # type: ignore[attr-defined]
+    sys.excepthook = quiet
+
+
 class Model:
     """A decorated function: the body, the script it lives in, the outputs it declares."""
 
@@ -184,7 +201,10 @@ class Model:
         if program:
             _reported(built.models, built.wall, built.fresh, False)
         if not built.ok:
-            raise api.EngineError(next(row.get("error", "model failed") for row in built.models if not row.get("ok")))
+            error = api.EngineError(next(row.get("error", "model failed") for row in built.models if not row.get("ok")))
+            if program:
+                _told(error)
+            raise error
         return api.Document(self.name, self.script, built.models[0], Path.cwd())
 
     def stored(self, store: str | None) -> "Model":

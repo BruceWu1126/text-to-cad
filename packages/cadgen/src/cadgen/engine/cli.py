@@ -202,11 +202,19 @@ def _verified(found: dict[str, Any] | None) -> str:
 
 
 def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as_json: bool) -> int:
-    """Each report on stdout, described or as JSON, a failed one's error on stderr; 1 if any failed."""
+    """Each report on stdout, described or as JSON; a failed one's error and the line naming it on
+    stderr, and nothing more of it; 1 if any failed."""
     failed = False
     for report in reports:
         if as_json:
             print(json.dumps({**report, "wall": round(wall, 4)}))
+        elif not report.get("ok"):
+            # The model's frames, once, then the line that names what failed: nothing else.
+            failed = True
+            sys.stdout.flush()
+            print(report.get("error", ""), file=sys.stderr)
+            print(_describe(report, wall, fresh), file=sys.stderr)
+            continue
         else:
             print(_describe(report, wall, fresh))
             if report.get("profile"):

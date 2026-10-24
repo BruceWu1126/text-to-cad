@@ -107,7 +107,7 @@ class StaleTest(Engine):
         self.assertIn(f"stale: run `{command}`", self.status_line(ident))
 
 
-class FailedTest(Engine):
+class VerbsTest(Engine):
     def test_a_document_whose_last_run_failed_is_said_to_be_its_previous_good_build(self) -> None:
         ident = self.built("rotor")
         self.assertEqual(self.cli("inspect", ident).returncode, 0)  # served: the engine follows its builds
@@ -119,6 +119,15 @@ class FailedTest(Engine):
             self.assertEqual(said.count(f"the last run of rotor failed; {doing} its previous good build; "
                                         f"fix it and run `{command}` to update it\n"), 1, f"{verb}: {said}")
         self.assertTrue(self.status_line(ident).endswith("serving its previous good build"))
+
+    def test_a_failed_run_prints_the_models_frames_once_then_the_line_naming_it(self) -> None:
+        self.write("stator", fail=True)
+        done = self.run_("stator.py")
+        self.assertEqual((done.returncode, done.stdout), (1, ""))
+        lines = done.stderr.splitlines()
+        self.assertEqual(lines[0], "Traceback (the model's frames):")
+        self.assertEqual(lines[-2:], ["AssertionError: blade count must be positive", "failed stator.py::stator"])
+        self.assertEqual(done.stderr.count("Traceback"), 1, done.stderr)
 
 
 if __name__ == "__main__":
