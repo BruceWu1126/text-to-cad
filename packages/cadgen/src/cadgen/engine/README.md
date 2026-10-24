@@ -942,7 +942,13 @@ the daemon:
   phase finished a line with its time, the one in flight repainted in place -- and nothing when
   it is not (`progress.Bar`; `api.build_script(progress=)` takes the frames instead, `False` none);
 - keeps a busy worker's last, which `cadgen status` shows (**The engine server and its workers**);
-- wakes the pages waiting on a served document among the frame's `outputs` (below).
+- wakes the pages waiting on a served document among the frame's `outputs` (below);
+- sends it on to a build request queued behind it, one of the same script (`Daemon.behind`): a
+  rerun after its client was killed (a shell's time limit) waits for the build that client left
+  running, nothing cancelled. Its client says so on stderr at once ("waiting for the build of
+  turbine.py started 21 s ago"), the frames follow as its own build's would, and its report's
+  `waited` (`{"script", "ago", "seconds"}`) ends its line: "replayed the build of turbine.py it
+  waited 206s for".
 
 Each model's report holds its last frame (`progress`), so a failed build
 says where it was; a worker that dies during a build fails it with where it was in the words.

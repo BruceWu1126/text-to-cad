@@ -378,7 +378,15 @@ def _built(script: Path, functions: list[str] | None, *, verify: bool = False, p
             said.attach(reports)
             fresh = None
         else:
+            def told(text: str) -> None:
+                print(text, file=sys.stderr)
+
+            waiting = bar.around(told) if bar is not None else told
+
             def relay(message: dict[str, Any]) -> None:
+                if message.get("stream") == "waiting":  # behind a build of this script: said whoever logs
+                    waiting(message["log"])
+                    return
                 shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")
 
             order = {"op": "build", "script": str(script), "functions": functions,

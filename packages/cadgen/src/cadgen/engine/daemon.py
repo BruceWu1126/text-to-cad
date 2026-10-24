@@ -315,6 +315,10 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
         self.saves = itertools.count(1)
         # The running request's last progress frame, and every file its frames named.
         self.progress: dict[str, Any] | None = None
+        # When the running build began (``time.time()``), None while no build runs; and the requests
+        # queued behind it, each sent its progress frames as its own build would be (``Daemon.behind``).
+        self.building: float | None = None
+        self.followers: list[Callable[[dict[str, Any]], None]] = []
         self.touched: set[str] = set()
         self.document_read = False
         self.answers: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
@@ -374,6 +378,11 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
                     frame = self.progress = message["progress"]
                     self.touched.update(frame.get("outputs") or ())
                     self._tell({"progress": frame})
+                    for follow in list(self.followers):
+                        try:
+                            follow({"progress": frame})
+                        except (OSError, ValueError):
+                            pass  # a waiting client gone: its request leaves on its own
                     try:
                         self.on_progress(self, frame)
                     except Exception:  # noqa: BLE001 - where a build is never fails it
@@ -454,6 +463,7 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
             self.sink = send
             self.document_read = bool(request.get("expected"))
             self.progress, self.touched = None, set()
+            self.building = time.time() if request.get("op") == "build" else None
             try:
                 self._write(request, payload)
                 message = self.answers.get()
@@ -475,6 +485,7 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
             finally:
                 self.sink = None
                 self.document_read = False
+                self.building = None
 
     def stop(self) -> None:
         try:
@@ -835,6 +846,25 @@ class Daemon:
     def release(self, worker: Worker) -> None:
         self.pool.release(worker)
 
+    def behind(self, key: str, send: Callable[[dict[str, Any]], None]) -> tuple[Worker, float] | None:
+        """A build request that will wait for the build of its script already running (a rerun
+        after a client its shell's time limit killed: that build goes on): said to its client at
+        once, on stderr, and the running build's progress frames sent on to it until its own turn
+        (``Worker.followers``). The worker and how long its build had run; None when none runs.
+        Nothing is cancelled."""
+        with self.pool.lock:
+            worker = self.pool.live.get(os.path.normcase(key))
+            began = worker.building if worker is not None and worker.leased else None
+            if worker is None or began is None:
+                return None
+            worker.followers.append(send)
+        ago = max(0.0, time.time() - began)
+        send({"log": f"waiting for the build of {Path(worker.script).name} started {ago:.0f} s ago",
+              "stream": "waiting"})
+        if worker.progress:
+            send({"progress": worker.progress})  # where it is now: the next frame may be a while
+        return worker, ago
+
     def provenance(self, ident: str, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
         """What made one element of a served document (by its id), asked of the worker that built
         it (``Worker.where``): None for a document no live worker built -- one served cold."""
@@ -1146,8 +1176,14 @@ class Daemon:
                 key, cwd = self._routed(request)
                 for attempt in (1, 2):
                     worker = None
+                    ahead = self.behind(key, send) if attempt == 1 else None
+                    waited = time.monotonic()
                     try:
-                        worker = self.lease(key, request.get("env") or {}, cwd)
+                        try:
+                            worker = self.lease(key, request.get("env") or {}, cwd)
+                        finally:
+                            if ahead is not None and send in ahead[0].followers:
+                                ahead[0].followers.remove(send)
                         fresh = worker.builds == 0
                         order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
                                  "cwd": request.get("cwd"), "verify": bool(request.get("verify")),
@@ -1170,6 +1206,12 @@ class Daemon:
                                 if path.endswith(".xbf"):
                                     self.builders[file_id(path)] = worker
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
+                        if ahead is not None:
+                            # The build it waited for, the one its own replays: began how long before it asked.
+                            for report in answer.get("done") or []:
+                                if isinstance(report, dict):
+                                    report["waited"] = {"script": Path(ahead[0].script).name, "ago": round(ahead[1]),
+                                                        "seconds": round(time.monotonic() - waited, 1)}
                         # The program that asked: what a document it built names to build it again.
                         answer["program"] = request.get("program")
                         self._built(worker, answer)
