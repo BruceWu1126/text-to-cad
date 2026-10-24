@@ -691,6 +691,12 @@ class Daemon:
             for path in [*(frame.get("outputs") or ()), *(report.get("files") or {}),
                          *self.models.paths(worker, report.get("model"))]:
                 outcomes[path] = failed
+            # Each child model the run built is a document of its own, built as its own row says: its
+            # body's progress marked it building, and only this marks it built (or failed).
+            for identity, child in (report.get("child_models") or {}).items():
+                if child.get("id"):
+                    outcomes[child["id"]] = None if child.get("ok") else {
+                        "model": identity, "error": child.get("error"), "progress": frame}
         if "failed" in answer:
             frame = worker.progress or {}
             outcomes = {path: {"model": frame.get("model"), "error": answer["failed"], "progress": frame}
@@ -777,7 +783,9 @@ class Daemon:
         if record is not None:
             worker = record["worker"]
             if worker is not None and self.pool.holds(worker):
-                return {"script": record["source"]["script"], "function": record["source"]["name"], "held": ident}, b""
+                # Asked of the worker that built it (``via``: a child model's is its parent's script's).
+                return {"script": record["source"]["script"], "function": record["source"]["name"], "held": ident,
+                        "via": worker.script}, b""
             held = self.held_document(ident)
             if held is not None:
                 return held
@@ -817,8 +825,9 @@ class Daemon:
             if builder is not None and self.pool.holds(builder):
                 return builder.script, None
             return "documents", request.get("cwd")
-        # A script's worker is keyed by its canonical path: a process key, not a document's id.
-        return canonical(request.get("script") or source["script"]), None
+        # A script's worker is keyed by its canonical path: a process key, not a document's id. A held
+        # document is asked of the worker that built it (``via``), whatever script defines its model.
+        return canonical(source.get("via") or request.get("via") or request.get("script") or source["script"]), None
 
     def _call(self, request: dict[str, Any], order: dict[str, Any], send: Callable[[dict[str, Any]], None],
               payload: bytes = b"") -> None:

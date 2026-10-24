@@ -195,7 +195,8 @@ class Models:
         order = {"op": "result", "script": source["script"], "name": source["name"]}
         if leaving is None and not whole and self.daemon.pool.holds(worker):
             replies = []
-            self.daemon.handle({**order, "env": worker.environment}, replies.append)
+            # Asked of the worker that built it (``via``): a child model's is its parent's script's.
+            self.daemon.handle({**order, "env": worker.environment, "via": worker.script}, replies.append)
             answer = next((row for row in reversed(replies) if "done" in row or "failed" in row), {})
             payload = base64.b64decode(answer.get("payload", ""))
         else:

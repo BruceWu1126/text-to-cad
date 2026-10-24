@@ -191,6 +191,31 @@ import {name}
 {name}.{name}()
 """
 
+PART = """
+import build123d as bd
+from cadgen.engine import model
+
+
+@model
+def plate():
+    return bd.Box(4, 3, 1)
+"""
+
+ASSEMBLY = """
+import build123d as bd
+from cadgen.engine import model
+from part import plate
+
+
+@model
+def assembly():
+    return bd.Compound(children=[plate(), plate().moved(bd.Pos(10, 0, 0))], label="assembly")
+
+
+if __name__ == "__main__":
+    assembly()
+"""
+
 
 def get(url: str, token: str) -> tuple[int, dict]:
     request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
@@ -269,6 +294,27 @@ class LifetimeDaemonTest(unittest.TestCase):
         again = engine_daemon.run([sys.executable, "caller_bracket.py"], cwd=self.folder, env=self.env)
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertEqual((self.row(ident)["version"], self.row(ident)["id"]), (2, ident))
+
+    def test_a_child_model_is_live_and_answers_by_its_id_from_the_worker_that_built_it(self) -> None:
+        (self.folder / "part.py").write_text(textwrap.dedent(PART), encoding="utf-8")
+        (self.folder / "assembly.py").write_text(textwrap.dedent(ASSEMBLY), encoding="utf-8")
+        env = {**self.env, "CADGEN_ENGINE_WORKER_IDLE": "120"}  # the assembly's worker holds both
+        for _ in range(2):  # the second run: the child's body marks it building, and the run's end built
+            done = engine_daemon.run([sys.executable, "assembly.py"], cwd=self.folder, env=env)
+            self.assertEqual(done.returncode, 0, done.stderr)
+        plate, assembly = model_id(self.folder / "part.py", "plate"), model_id(self.folder / "assembly.py", "assembly")
+        self.assertEqual((self.row(plate).get("state"), self.row(assembly).get("state")), ("live", "live"))
+        out = self.folder / "plate.step"
+        exported = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "export", plate, str(out)],
+                                     cwd=self.folder, env=env)
+        self.assertEqual(exported.returncode, 0, exported.stderr)
+        self.assertGreater(out.stat().st_size, 0)
+        inspected = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "inspect", plate], cwd=self.folder, env=env)
+        self.assertEqual(inspected.returncode, 0, inspected.stderr)
+        self.assertEqual(json.loads(inspected.stdout)["source"]["function"], "plate")
+        programs = {ident: self.ask({"op": "model_info", "id": ident})["model"]["program"] for ident in (plate, assembly)}
+        self.assertEqual(programs, {plate: str(self.folder / "assembly.py"), assembly: str(self.folder / "assembly.py")},
+                         "the parent's program builds both again")
 
     def test_a_held_mechanism_exports_whole_from_the_hold(self) -> None:
         from cadgen.engine import document
