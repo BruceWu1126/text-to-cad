@@ -451,6 +451,24 @@ class EngineFolderTest(unittest.TestCase):
                 with self.assertRaisesRegex(PermissionError, "belongs to another user"):
                     daemon.lock()
 
+    @unittest.skipIf(os.name == "nt" or os.geteuid() == 0, "a folder's mode binds a POSIX user who is not root")
+    def test_a_folder_the_system_denies_is_one_line_from_status_and_stop(self) -> None:
+        import io
+        from unittest import mock
+
+        from cadgen.engine import cli, daemon
+
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.engine)}):
+            os.mkfifo(daemon.door_path(), 0o600)  # a dead daemon's door: status sweeps it, taking the lock
+            os.chmod(self.engine, 0o500)
+            self.addCleanup(os.chmod, self.engine, 0o700)
+            for verb in ("status", "stop"):
+                with mock.patch("sys.stderr", new_callable=io.StringIO) as said, mock.patch("sys.stdout"):
+                    self.assertEqual(cli.run(verb, []), 1)
+                self.assertRegex(said.getvalue(), rf"^cadgen {verb}: the system denies cadgen's local engine "
+                                 r"\(taking the lock in the engine's folder .+: Permission denied\); .+ "
+                                 r"run this command outside it, or with the sandbox's permission\n$")
+
 
 @unittest.skipIf(os.name == "nt", "the per-user folders are POSIX's")
 class DefaultEngineFolderTest(unittest.TestCase):

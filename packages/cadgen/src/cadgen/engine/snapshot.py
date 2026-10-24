@@ -1095,6 +1095,8 @@ def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
                               measurements=args.measurements).report
     except SnapshotRefused as error:
         raise Failed(str(error), 2) from None
+    except ConnectionError:
+        raise  # the engine not reached: its one line, as every verb says it (``cli.answered``)
     except Exception as error:  # noqa: BLE001 - a failed render is the command's answer
         raise Failed(f"{type(error).__name__}: {error}") from None
     if args.json:
