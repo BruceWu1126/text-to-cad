@@ -24,7 +24,10 @@ animations (``animation()``, ``export/animation.py``), each one glTF animation o
 LINEAR or CUBICSPLINE translation, rotation and scale channels on the nodes its references
 place, their duration in ``extras`` as a configuration sequence's: a build's, or the record of them an
 xbf carries (``animations.record``). A placement anything moves stands by translation and
-rotation, as glTF asks of an animated node; every other one by its matrix.
+rotation, as glTF asks of an animated node; every other one by its matrix. Channels whose keys
+are the same bytes (the parts of one link, or of one reference, that stand where their motion
+puts them) point at one sampler, and samplers with the same keys at one accessor: each motion is
+written once however many parts it carries, and every part keeps its own node and name.
 """
 
 from __future__ import annotations
@@ -260,43 +263,52 @@ def _animations(view: Any, held: dict[int, Any], shown: list[Any], node_of: dict
         node.pop("matrix")
         node["translation"] = [float(value) for value in matrix[:3, 3]]
         node["rotation"] = [float(value) for value in quaternion(matrix)]
-    inputs: dict[bytes, int] = {}
+    # A part's motion is every part's that moves with it: the parts of one link, or of one reference, each
+    # its own node, stand where their motion puts them, so their channels' keys are the same bytes. Those
+    # channels share one sampler, and every sampler with the same keys one key accessor, so each motion is
+    # written once however many parts it carries.
+    data: dict[tuple, int] = {}
 
-    def times_of(times: np.ndarray) -> int:
-        data = np.ascontiguousarray(times, "<f4")
-        found = inputs.get(data.tobytes())
+    def accessor(rows: np.ndarray, kind: str) -> int:
+        array = np.ascontiguousarray(rows, "<f4")
+        key = (kind, array.tobytes())
+        found = data.get(key)
         if found is None:
-            found = inputs[data.tobytes()] = add(data, None, "SCALAR", 5126)
-            accessors[found]["min"] = [float(data[0])]
-            accessors[found]["max"] = [float(data[-1])]
+            found = data[key] = add(array, None, kind, 5126)
+            if kind == "SCALAR":
+                accessors[found]["min"] = [float(array[0])]
+                accessors[found]["max"] = [float(array[-1])]
         return found
 
     found = []
+
+    def animation(name: str, duration: float, tracks: list[tuple[int, str, str, np.ndarray, np.ndarray]]) -> None:
+        samplers: list[dict] = []
+        channels: list[dict] = []
+        held: dict[tuple, int] = {}
+        for index, path, interpolation, times, rows in tracks:
+            kind = "VEC4" if path == "rotation" else "VEC3"
+            entry = {"input": accessor(times, "SCALAR"), "interpolation": interpolation,
+                     "output": accessor(rows.reshape(-1, rows.shape[-1]), kind)}
+            key = (entry["input"], interpolation, entry["output"])
+            if key not in held:
+                held[key] = len(samplers)
+                samplers.append(entry)
+            channels.append({"sampler": held[key], "target": {"node": node_of[index], "path": path}})
+        found.append({"name": name, "channels": channels, "samplers": samplers,
+                      "extras": {"cadgen": {"duration": duration}}})
+
     for clip in baked:
-        if not clip.instances:
-            continue
-        times = times_of(clip.times)
-        samplers, channels = [], []
-        for index, translations, rotations in zip(clip.instances, clip.translations, clip.rotations):
-            for path, rows, kind in (("translation", translations, "VEC3"), ("rotation", rotations, "VEC4")):
-                values = add(np.ascontiguousarray(rows.reshape(-1, rows.shape[-1]), "<f4"), None, kind, 5126)
-                samplers.append({"input": times, "interpolation": "CUBICSPLINE", "output": values})
-                channels.append({"sampler": len(samplers) - 1, "target": {"node": node_of[index], "path": path}})
-        found.append({"name": clip.name, "channels": channels, "samplers": samplers,
-                      "extras": {"cadgen": {"duration": clip.duration}}})
-    for animation in animations:
-        if not animation.channels:
-            continue
-        samplers, channels = [], []
-        for channel in animation.channels:
-            rows = channel.values
-            values = add(np.ascontiguousarray(rows.reshape(-1, rows.shape[-1]), "<f4"), None,
-                         "VEC4" if channel.path == "rotation" else "VEC3", 5126)
-            samplers.append({"input": times_of(channel.times), "interpolation": channel.interpolation, "output": values})
-            channels.append({"sampler": len(samplers) - 1, "target": {"node": node_of[channel.instance],
-                                                                      "path": channel.path}})
-        found.append({"name": animation.name, "channels": channels, "samplers": samplers,
-                      "extras": {"cadgen": {"duration": animation.duration}}})
+        if clip.instances:
+            animation(clip.name, clip.duration, [
+                (index, path, "CUBICSPLINE", clip.times, rows)
+                for index, translations, rotations in zip(clip.instances, clip.translations, clip.rotations)
+                for path, rows in (("translation", translations), ("rotation", rotations))])
+    for baked_animation in animations:
+        if baked_animation.channels:
+            animation(baked_animation.name, baked_animation.duration, [
+                (channel.instance, channel.path, channel.interpolation, channel.times, channel.values)
+                for channel in baked_animation.channels])
     return found
 
 

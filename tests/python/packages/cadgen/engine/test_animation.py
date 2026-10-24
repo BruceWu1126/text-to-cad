@@ -380,6 +380,45 @@ class GlbTest(_Folder):
         nodes = {node["name"]: node for node in gltf["nodes"][1:]}
         self.assertNotIn("matrix", nodes["knob"], "an animated node stands by translation and rotation")
 
+    def test_parts_that_move_as_one_share_one_sampler(self) -> None:
+        """Two parts of one reference stand where its motion puts them, the same keys: their channels
+        point at one sampler, written once, and each still plays its part's motion."""
+        self.build("""
+            import build123d as bd
+            from cadgen import glb
+            from cadgen.gltf import animation
+
+
+            @glb("arm.glb")
+            def arm():
+                upper = bd.Box(10, 10, 40, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+                lower = bd.Box(6, 6, 20, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX))
+                base = bd.Box(30, 30, 5, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX))
+                upper.label, lower.label, base.label = "upper", "lower", "base"
+                arm = bd.Compound(children=[upper, lower], label="arm")
+                model = bd.Compound(children=[base, arm], label="model")
+                show = animation(model, "lift", duration=2)
+                show.translation("arm", by=(0, 0, 25), interpolation="LINEAR")
+                show.rotation("arm", axis=(0, 0, 1), by=90, start=1, end=2)
+                return model
+        """, "arm")
+        gltf, read = _glb(self.folder / "arm.glb")
+        names = [node["name"] for node in gltf["nodes"]]
+        [lift] = gltf["animations"]
+        sampler = {(names[channel["target"]["node"]], channel["target"]["path"]): channel["sampler"]
+                   for channel in lift["channels"]}
+        self.assertEqual(sorted(sampler), [("arm/lower", "rotation"), ("arm/lower", "translation"),
+                                           ("arm/upper", "rotation"), ("arm/upper", "translation")])
+        for path in ("translation", "rotation"):
+            self.assertEqual(sampler[("arm/upper", path)], sampler[("arm/lower", path)], path)
+        self.assertEqual(len(lift["samplers"]), 2, "one sampler per motion, not per part")
+        outputs = [entry["output"] for entry in lift["samplers"]]
+        self.assertEqual(len(set(outputs)), 2)
+        at = {path: lift["samplers"][sampler[("arm/upper", path)]] for path in ("translation", "rotation")}
+        moved = _sample(read(at["translation"]["input"])[:, 0], read(at["translation"]["output"]),
+                        at["translation"]["interpolation"], 2.0, False)
+        np.testing.assert_allclose(moved, [0, 0, 25], atol=1e-3)
+
     def test_cubicspline_tangents_reproduce_the_curve_under_scipy(self) -> None:
         """The baked in- and out-tangents, read by scipy's ``CubicHermiteSpline`` over each step (a
         glTF key has a tangent on each side, scipy one per knot), stay within the tolerance of the

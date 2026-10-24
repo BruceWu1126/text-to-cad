@@ -1045,7 +1045,9 @@ its in- and out-tangents the one-sided derivatives there, so a step's speed may 
 waypoint. A step is halved while at any eighth of it the Hermite strays from the true forward
 kinematics by more than 1e-3 of the model's size (the diagonal of what the GLB places) in a
 placement's origin or 1e-3 radian in its rotation, at most 4,097 keys. A moved placement's node
-stands by translation and rotation, every other by its matrix; the animation's
+stands by translation and rotation, every other by its matrix; placements whose keys are the
+same bytes (the parts of one link, each its own node) share one sampler, so a link's motion is
+written once however many parts it carries; the animation's
 `extras.cadgen` holds the duration. A clip is the motion once, and a player repeats it. STEP,
 STL and 3MF ignore motions, and neither `export` nor `@glb` takes an argument for them. On the
 corpus's motorbike (2,053 mm across, so a 2.05 mm tolerance), `steer` (a ±20° sweep of the head
@@ -1382,7 +1384,8 @@ true curve's one-sided derivatives there, as a motion's are and as the 0.7 clip 
 differences were in the limit. Against that baker, on a hinge eased through 100 degrees, a slide
 eased 60 mm and a constant spin (a 127 mm model), the two curves agree within 0.1 mm at every
 corner of each part, each within its own tolerance of the motion, the new one in 5 to 7 keys a
-path where the old one wrote 6 to 11.
+path where the old one wrote 6 to 11. The parts of one reference move as one body, so their
+channels' keys are the same bytes and share one sampler, as a motion's do.
 
 ## Materials
 
