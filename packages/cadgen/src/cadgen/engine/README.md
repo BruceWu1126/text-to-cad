@@ -103,7 +103,10 @@ posed(arm(), "folded")`.
    and the exports its decorators name, nothing beside them -- and the operating
    system's coordination for its warm process: a socket and a lock in
    `tempfile.gettempdir()/cadgen-engine` (a socket path past the Unix limit lives in the
-   user's own `/tmp/cadgen-<uid>` instead). It writes no sidecar, record of a build,
+   user's own `/tmp/cadgen-<uid>` instead) -- and, in the user's state folder its host names,
+   the registry: one record per document it has built or a page opened, pointing at its
+   script or file, with a source copy only for a `copy` document (**Document lifetime**);
+   never geometry, never a cache. It writes no sidecar, record of a build beside a model,
    cache, index, memo, mesh or parsed document, and no derived file beside an input
    (a STEP converted to an xbf is an export the author asks for). A restart is cold,
    but for the xbf itself: a model whose xbf holds the closure the model has now is
@@ -138,7 +141,10 @@ posed(arm(), "folded")`.
    id derived from its script and function (`ids.model_id`): the same in every process, worked
    out without asking the engine. A file the engine serves is known inside it by the id of its
    canonical path (`ids.file_id`); its public name stays its path. Its store is `pointer` (a
-   model in a saved file, the default) or `memory` (asked for with `store="memory"`). File
+   model in a saved file, the default: the registry points at its script), `copy` (a model
+   whose source only Python holds: its source and the files its build read are copied into its
+   registry folder, its id new each run unless `@model(id=...)` names one) or `memory` (asked
+   for with `store="memory"`: nothing is recorded). File
    decorators imply a model and write only their named outputs. No xbf, mesh, memo,
    provenance or derived file is written for a document beyond what it declares. A document
    lives until the engine exits or memory evicts it; its worker retiring does not end it,
@@ -327,6 +333,8 @@ only, and a file's id is derived again from its path after a restart.
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, at most one per core alive (`Pool`), connect-or-start; a worker's memory cap |
 | `progress.py` | where a build is: the engine's stages heard where they begin, each body a model's body runs by name, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
+| `registry.py` | the registry of documents in the user's state folder (`Registry`: `get`, `put`, `list`, `delete`; a copy's bundle), and the one owner of every write under that folder (`Folder`); where the folder is, the distribution's (`FACTORY`) |
+| `copies.py` | copy mode: a copied model's bundle (`model.py`, its modules), its inputs copied after the build against the closure's digests, and a rerun's reads served from the copies |
 | `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `server` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
 
@@ -580,15 +588,58 @@ evicts it ([models.py](models.py), [serve.py](serve.py)). Its state (`models.STA
 - `evicted`: the daemon holds it no more -- memory evicted its bytes, or its worker crashed
   before it was drained.
 - `expired`: a `store="memory"` document whose worker went.
+- `detached`: not held, and the script it points at is gone (moved, deleted): listed in Recents,
+  saying so, until the person removes it. Nothing removes it on its own.
 
-**Store.** `@model(store="memory")`, `@xbf("XBF/a.xbf", store="memory")` (any file decorator)
-keeps a document in its worker's memory only: it is forgotten when the worker goes, and its id
-answers `expired` from then on. The default is `pointer`: the engine holds the document and knows
-the program that builds it again. Any other value is refused, naming the two.
+**Store.** Where a document is kept follows where its model's source is (`Model`, no provider
+is asked): its function's file on disk, `pointer`, the default; else the source Python still
+holds (`inspect.getsource`: a notebook cell, an interactive definition), `copy`; else (stdin,
+`python -c`) the definition is refused: "save this as a file". `store=` overrides it: `pointer`
+and `memory` need a saved file, `copy` either. `@model(store="memory")`, `@xbf("XBF/a.xbf",
+store="memory")` (any file decorator) keeps a document in its worker's memory only: no record, it
+is forgotten when the worker goes, and its id answers `expired` from then on. Any other value is
+refused, naming the three.
+
+**The registry.** One record per document the engine built, and per CAD file a page opened,
+`documents/<id>/document.json` in the user's state folder ([registry.py](registry.py); the
+distribution names the folder, `cadgen.viewer.recents.state_dir`): it points and never caches.
+A model's record holds its store, its script and function (`home`, `entry`), the command that
+builds it again (`run`, `["python", program]`), its revision and when it was built, its closure
+(modules and inputs, with their digests) and the versions it was built on; a file's its path,
+its format, when it was opened and whether it is pinned; either's Recents picture (`preview`, UI
+state: the PNG under `recents/thumbnails`). Every path in it is relative to its one `root`
+(`"."` for a copy: its own folder), so a record moves by one field. It is written synchronously
+as a build registers, and only when a field but `changed` differs: an unchanged build rewrites
+nothing; each write is then told to `registry.OBSERVERS`, never waited on. It is read on demand,
+never at start: an id the engine does not hold (after a restart) is answered from its record,
+`evicted` with its command, or `detached`, and nothing runs. The registry is the ids' reverse map,
+never their authority: a file's and a script model's ids are derived from the canonical path
+(`ids`). A record's `revision` is its closure's key (the same code, the same revision, after a
+restart too), or a token of the build's own where the closure has none. A served document's
+generation (its structure's `version`, which a page waits on and the viewer's export compares)
+is a token of its build's own: a rebuild is a new generation, and no generation is a counter that
+a restart starts again. Recents is the registry's view (`cadgen.viewer.recents`): pinned
+first, then the most recently opened or built.
+
+**Copy.** A copied document's registry folder is a self-contained bundle ([copies.py](copies.py)):
+`model.py`, which `python model.py` runs alone from that folder -- cadgen, the imports of every
+module its code reaches, the source of every function and class of the cell's own it reaches,
+each literal value it reaches as an assignment, and the model under `@model(id="<id>")` with its
+files at absolute paths; `modules/`, each first-party module its code reaches and what those
+import; and `inputs/<digest>/<name>`, every file the build read (data, files read through the
+engine's readers, by motion functions, fonts), copied after the build and checked against the
+digests the closure holds. The first build already runs from the copy, in a worker, so what is
+copied is what is proven to build; a value it reaches that is none of these is left out, and the
+build fails with Python's `NameError`: a cell must be self-contained. A copy's id is new each run
+unless `@model(id=...)` gives one (a UUID; a later run's replaces it, an upsert); a model in a
+saved file takes no `id=`. A rerun of `model.py` is that document's: each file the first build
+read is read from its copy, through `open` and the engine's readers, a relative path against the
+folder the first build ran in. A read through a C extension of an original's absolute path is not
+redirected: when that file is no longer what was copied, the build fails loudly.
 
 **Drain.** Before the pool stops a worker -- idle past `CADGEN_ENGINE_WORKER_IDLE`, the count cap's
 least recently used, replaced for another environment, over its memory cap -- the daemon asks it
-(the `result` request with `whole`, nothing meshed) for every `pointer` document of it the server
+(the `result` request with `whole`, nothing meshed) for every `pointer` and `copy` document of it the server
 does not hold whole at its version (`Models.drain`), out of the pool, then closes its stdin. The
 worker serializes the document in memory (`document.to_bytes`: `TDocStd_Application.SaveAs` to a
 stream, the bytes `@xbf` writes), and the documents worker reads them in memory too
@@ -633,7 +684,8 @@ Where none can be read, the budget alone applies. `Pressure.simulate` is the tes
 
 **The rebuild command.** A document that is not held -- `evicted`, `expired` -- names the exact
 command that builds it again: `python` and the program whose call built it (its `__main__`
-file, else the model's script), from the daemon's record of it, process memory only. The page
+file, else the model's script; a copy's own `model.py`), from the daemon's record of it, or after a
+restart the registry's. A child model's is its parent's program, whose run builds it. The page
 reads it from its document's 404 (`GET /api/doc/<id>`: `{"error", "state", "rebuild"}`),
 `cadgen inspect` and `cad_show` of its id refuse with it, and `cadgen status` lists it. A `memory`
 document's words add that it is kept in memory only. The engine never runs it: no access, no start

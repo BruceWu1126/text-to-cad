@@ -552,9 +552,11 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual((self.folder / "XBF/block.xbf").read_bytes(), saved)
         self.assertFalse(marker.exists())
         self._stop_daemon()
+        # After a restart the registry knows it: refused with the command that builds it again, run by no one.
         missing = self.cli("inspect", ident, "face 1")
-        self.assertNotEqual(missing.returncode, 0)
-        self.assertIn(f"no document {ident} is held", missing.stderr)
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn(f"block ({ident}) is no longer held: run `python ", missing.stderr)
+        self.assertFalse(marker.exists())
         inspected = self.cli("inspect", str(self.folder / "XBF/block.xbf"), "--query", "build")
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
         self.assertIsNone(json.loads(inspected.stdout)["live"])
@@ -567,7 +569,7 @@ class DaemonTest(unittest.TestCase):
         script.write_text(textwrap.dedent(BARE.format(size=1)), encoding="utf-8")
         return model_id(script, "bracket")
 
-    def test_named_memory_model_updates_one_address_and_is_gone_after_restart(self) -> None:
+    def test_a_named_model_updates_one_address_and_after_a_restart_names_its_command(self) -> None:
         from urllib.parse import urlparse, parse_qs
 
         address = self._bare()
@@ -599,9 +601,10 @@ class DaemonTest(unittest.TestCase):
                          "no cache, document, or thumbnail on disk")
         self._stop_daemon()
         missing = self.cli("inspect", f"{address}#face 1")
-        self.assertNotEqual(missing.returncode, 0)
-        self.assertIn(f"no document {address} is held", missing.stderr)
-        self.assertEqual(json.loads(self.cli("status", "--json").stdout)["models"], [])
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn(f"bracket ({address}) is no longer held: run `python ", missing.stderr)
+        self.assertEqual(json.loads(self.cli("status", "--json").stdout)["models"], [],
+                         "a restart holds nothing: status lists what this server built")
 
     def test_a_snapshot_of_a_job_draws_a_memory_model_without_an_intermediate_document(self) -> None:
         from tests.python.packages.cadgen.engine.test_snapshot import gl

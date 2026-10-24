@@ -273,6 +273,72 @@ class ThroughTheDaemonTest(unittest.TestCase):
                          ("script", "crashed", {"crashes": 1}, [analytics.died(3)]))
         self.assertEqual({build["kind"] for counts in (first, third) for build in counts["builds"]}, {"xbf"})
 
+    def test_a_telemetry_batch_holds_no_id_and_no_path(self) -> None:
+        """Verbs by document id -- a pointer model's and a copy's, one refused, one whose body raised -- count
+        kinds, outcomes and times: no id, script, state folder or copy bundle reaches the spool or the batch."""
+        from cadgen.engine.ids import canonical, model_id
+
+        (self.folder / "part.py").write_text(textwrap.dedent("""
+            import build123d as bd
+            from cadgen.engine import model
+
+
+            @model
+            def part():
+                return bd.Box(3, 2, 1)
+
+
+            @model(store="copy")
+            def copied():
+                return bd.Box(1, 2, 3)
+
+
+            @model
+            def broken():
+                raise ValueError(f"broken in {__file__}")
+        """), encoding="utf-8")
+        run = self.run_in("-c", "import part\npart.part()\npart.copied()\nprint('COPY', part.copied.id)\n"
+                                "try:\n    part.broken()\nexcept Exception:\n    pass\n")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        pointer, copy = model_id(self.folder / "part.py", "part"), run.stdout.split("COPY ", 1)[1].split()[0]
+        bundle = self.state / "documents" / copy
+        self.assertTrue((bundle / "model.py").is_file())
+        refused = model_id(self.folder / "part.py", "nowhere")
+        for ident in (pointer, copy):
+            done = self.run_in("-m", "cadgen.cli", "export", ident, str(self.folder / f"{ident}.stl"))
+            self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotEqual(self.run_in("-m", "cadgen.cli", "export", refused, str(self.folder / "x.stl")).returncode, 0)
+        from tests.python.packages.cadgen.engine.test_snapshot import gl
+
+        try:
+            gl()
+            drawn = True
+        except unittest.SkipTest:
+            drawn = False
+        if drawn:
+            done = self.run_in("-m", "cadgen.cli", "snapshot", pointer, str(self.folder / "part.png"))
+            self.assertEqual(done.returncode, 0, done.stderr)
+        spool = self.state / analytics.SPOOL
+        spooled = spool.read_text(encoding="utf-8")
+        counted = [json.loads(line)["counts"] for line in spooled.splitlines()]
+        outcomes = [(build["kind"], build["outcome"]) for counts in counted for build in counts.get("builds", [])]
+        self.assertIn(("xbf", "failed"), outcomes, "the body that raised was counted")
+        self.assertEqual(outcomes.count(("stl", "ok")), 2, "both exports by id were counted")
+        if drawn:
+            self.assertTrue(any(counts.get("snapshots") for counts in counted), "the snapshot by id was counted")
+        # What the sender sends: the spool taken into a batch, kept beside the settings when nothing answers.
+        env = {**self.env, "CADGEN_API_URL": "http://127.0.0.1:9"}
+        sent = subprocess.run([sys.executable, "-P", "-m", "cadgen._internal.telemetry_send"], env=env,
+                              capture_output=True, text=True, timeout=120)
+        self.assertEqual(sent.returncode, 0, sent.stderr)
+        batch = (self.state / analytics.KEPT).read_text(encoding="utf-8")
+        self.assertIn('"events"', batch)
+        for text, where in ((spooled, "spool"), (batch, "batch")):
+            for secret in (pointer, copy, refused, canonical(self.folder / "part.py"), str(self.folder),
+                           canonical(self.folder), str(self.state), canonical(self.state), str(bundle),
+                           canonical(bundle), "part.py"):
+                self.assertNotIn(secret, text, f"the {where} holds {secret}")
+
     def test_cadgen_observes_the_engine_once_its_verbs_are_imported_and_never_sooner(self) -> None:
         done = self.run_in("-c", "import sys, cadgen; print(any(name.startswith('cadgen.engine') for name in sys.modules)); "
                                  "from cadgen.engine import api; print([o.__module__ for o in api.observers])")

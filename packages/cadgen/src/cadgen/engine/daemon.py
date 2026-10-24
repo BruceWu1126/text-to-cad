@@ -10,7 +10,7 @@ new one starts past the cap; with every worker busy, the build waits, first come
 for the first to come free. Nothing is refused, and nothing is predicted: no admission. A
 worker idle ``CADGEN_ENGINE_WORKER_IDLE`` seconds (by default the daemon's own idle time, an
 hour) is retired, and so is one over its memory cap after a build (``worker.retirement``).
-Before a worker is stopped, every ``pointer`` document of it the server does not hold is taken
+Before a worker is stopped, every ``pointer`` and ``copy`` document of it the server does not hold is taken
 from it (``models.Models.drain``): a document outlives its worker. A retired script's next build
 is a fresh worker's, a restart.
 
@@ -694,6 +694,12 @@ class Daemon:
             for path in [*(frame.get("outputs") or ()), *(report.get("files") or {}),
                          *self.models.paths(worker, report.get("model"))]:
                 outcomes[path] = failed
+            # Each child model the run built is a document of its own, built as its own row says: its
+            # body's progress marked it building, and only this marks it built (or failed).
+            for identity, child in (report.get("child_models") or {}).items():
+                if child.get("id"):
+                    outcomes[child["id"]] = None if child.get("ok") else {
+                        "model": identity, "error": child.get("error"), "progress": frame}
         if "failed" in answer:
             frame = worker.progress or {}
             outcomes = {path: {"model": frame.get("model"), "error": answer["failed"], "progress": frame}
@@ -780,7 +786,9 @@ class Daemon:
         if record is not None:
             worker = record["worker"]
             if worker is not None and self.pool.holds(worker):
-                return {"script": record["source"]["script"], "function": record["source"]["name"], "held": ident}, b""
+                # Asked of the worker that built it (``via``: a child model's is its parent's script's).
+                return {"script": record["source"]["script"], "function": record["source"]["name"], "held": ident,
+                        "via": worker.script}, b""
             held = self.held_document(ident)
             if held is not None:
                 return held
@@ -823,8 +831,9 @@ class Daemon:
             if builder is not None and self.pool.holds(builder):
                 return builder.script, None
             return "documents", request.get("cwd")
-        # A script's worker is keyed by its canonical path: a process key, not a document's id.
-        return canonical(request.get("script") or source["script"]), None
+        # A script's worker is keyed by its canonical path: a process key, not a document's id. A held
+        # document is asked of the worker that built it (``via``), whatever script defines its model.
+        return canonical(source.get("via") or request.get("via") or request.get("script") or source["script"]), None
 
     def _call(self, request: dict[str, Any], order: dict[str, Any], send: Callable[[dict[str, Any]], None],
               payload: bytes = b"") -> None:
@@ -858,7 +867,7 @@ class Daemon:
                         with self.models.lock:
                             model = self.models.records.get(expected.get("id") or "")
                             matches = (model is not None and model["worker"] is worker
-                                       and f"{model['version']}-0" == expected["modelRevision"])
+                                       and model["version"] == expected["modelRevision"])
                         if not matches:
                             send({"failed": "The source changed. Open Export again to use the displayed revision."})
                             return
@@ -945,7 +954,7 @@ class Daemon:
                 with self.models.lock:
                     record = self.models.records.get(ident)
                 served = self.server.served.get(ident) if self.server is not None else None
-                if (record is None or served is None or f"{record['version']}-0" != expected["modelRevision"]
+                if (record is None or served is None or record["version"] != expected["modelRevision"]
                         or served.structure.get("exportRevision") != expected.get("digest")):
                     send({"failed": "The source changed. Open Export again to use the displayed revision."})
                     return
@@ -964,6 +973,16 @@ class Daemon:
             with self.busy_lock:
                 self.busy += 1
             try:
+                copying = request.get("copy")
+                if copying:
+                    # A copied model: its bundle written in its registry folder first, and built
+                    # there, as ``python model.py`` builds it (``copies``).
+                    try:
+                        script = self.models.bundle(copying)
+                    except (OSError, ValueError) as error:
+                        send(refused(error) if isinstance(error, ValueError) else {"failed": str(error)})
+                        return
+                    request = {**request, "script": script, "program": script}
                 script = request["script"]
                 key, cwd = self._routed(request)
                 for attempt in (1, 2):
@@ -974,7 +993,7 @@ class Daemon:
                         order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
                                  "cwd": request.get("cwd"), "verify": bool(request.get("verify")),
                                  "profile": bool(request.get("profile")), "acknowledged": True,
-                                 "run": request.get("run")}
+                                 "run": request.get("run"), **self.models.serving(script)}
                         server = self.server
                         if server is not None:
                             # The worker sends each served document it builds back as a patch,
@@ -992,6 +1011,8 @@ class Daemon:
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
                         # The program that asked: what a document it built names to build it again.
                         answer["program"] = request.get("program")
+                        if copying:
+                            answer["copy"] = {key: copying.get(key) for key in ("id", "source", "origin")}
                         self._built(worker, answer)
                         send(answer)
                         return

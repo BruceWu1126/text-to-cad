@@ -608,9 +608,11 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
         from cadgen.engine import previous
 
         modules, unkeyable = context.modules(model)
-        tree.closure = previous.text(previous.manifest(run.keys, f"{model.script}::{model.name}", Path(xbf).parent if xbf is not None else model.script.parent,
-                                                       model, modules, unkeyable, context.named(model),
-                                                       len(getattr(tree, "animations", None) or {})))
+        folder = Path(xbf).parent if xbf is not None else model.script.parent
+        made = previous.manifest(run.keys, f"{model.script}::{model.name}", folder, model, modules, unkeyable,
+                                 context.named(model), len(getattr(tree, "animations", None) or {}))
+        tree.closure = previous.text(made)
+        report["closure"] = previous.located(made, folder)
     timings["collect"] = round(time.perf_counter() - clock, 4)
     # What the joints' harvest found inconsistent: said, and the document written all the same.
     if tree.mechanism is not None and tree.mechanism.warnings:
@@ -886,6 +888,7 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
               # document (an export, a snapshot) finds the taken xbf by it and reads that file.
               "files": {str(path): {"kind": kind, "written": False, "seconds": 0.0, "bytes": stats[str(path)][1]}
                         for kind, path in targets}}
+    report["closure"] = previous.located(found, xbf.parent)
     return report["cache"], report
 
 

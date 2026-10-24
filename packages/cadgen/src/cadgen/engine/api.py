@@ -222,9 +222,9 @@ def _run() -> str:
     return _RUN[0]
 
 
-def _built(script: Path, functions: list[str] | None, *, verify: bool = False, profile: bool = False,
+def _built(script: Path | None, functions: list[str] | None, *, verify: bool = False, profile: bool = False,
            log: Callable[[str], None] | None = None, daemon: bool = True,
-           progress: Any = None) -> tuple[list[dict[str, Any]], Any, float]:
+           progress: Any = None, copy: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], Any, float]:
     """One build of a script's models in the warm worker that holds it, or in this process: its reports, whether the worker was started for it, and its wall time. Where
     the build is goes, frame by frame, to ``progress`` (``progress.py``): by default a bar on
     stderr when it is a terminal and nowhere when it is not; ``False`` nowhere; a callable takes
@@ -257,8 +257,11 @@ def _built(script: Path, functions: list[str] | None, *, verify: bool = False, p
             def relay(message: dict[str, Any]) -> None:
                 shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")
 
-            answer = _ask({"op": "build", "script": str(script), "functions": functions, "cwd": str(cwd),
-                           "verify": verify, "profile": profile, "run": _run(), "program": _program()}, relay, frames)
+            order = {"op": "build", "script": None if script is None else str(script), "functions": functions,
+                     "cwd": str(cwd), "verify": verify, "profile": profile, "run": _run(), "program": _program()}
+            if copy is not None:
+                order["copy"] = copy  # the daemon writes the bundle, and builds its model.py
+            answer = _ask(order, relay, frames)
             reports, fresh = answer["done"], answer.get("worker", {}).get("fresh")
     finally:
         if bar is not None:
@@ -278,6 +281,26 @@ def build_script(script: Path, functions: list[str] | None = None, *, verify: bo
     return Report(reports, round(wall, 4), fresh)
 
 
+def build_copy(model: Any, *, verify: bool = False, profile: bool = False, log: Callable[[str], None] | None = None,
+               daemon: bool = True, progress: Any = None) -> Report:
+    """A copied model (``store="copy"``) built: its bundle -- ``model.py`` and the modules its code
+    reaches (``copies.bundle_sources``) -- sent to the daemon, which writes it in the model's registry
+    folder and builds it there, in a worker, as ``python model.py`` would; after the build it copies
+    every file the build read (``copies.copy_inputs``). Only through the engine: ``daemon=False`` is
+    refused, as a copy has no folder of its own without it."""
+    from cadgen.engine.copies import bundle_sources
+
+    if not daemon:
+        raise ValueError(f"model {model.name!r} is a copy (store='copy'): it builds in the engine, not with daemon=False")
+    cwd = Path.cwd()
+    files = bundle_sources(model, model.id, cwd)
+    copy = {"id": model.id, "name": model.name, "source": model.function.__code__.co_filename, "origin": str(cwd),
+            "files": {name: base64.b64encode(data).decode("ascii") for name, data in files.items()}}
+    reports, fresh, wall = _built(None, [model.name], verify=verify, log=log, daemon=True, progress=progress,
+                                  profile=profile, copy=copy)
+    return Report(reports, round(wall, 4), fresh)
+
+
 def _source(source: Any) -> dict[str, Any]:
     """What an export or a snapshot reads: a ``Model`` this Python program names (or the
     ``Built`` handle of one), a document's id (``{"id"}``: the document the engine holds, read
@@ -287,6 +310,11 @@ def _source(source: Any) -> dict[str, Any]:
     from cadgen.engine.model import Model
 
     if isinstance(source, Model):
+        if source.store == "copy":
+            built = source.build()  # built from its bundle, then read by its id, as the engine holds it
+            if not built.ok:
+                raise EngineError(next(row.get("error", "model failed") for row in built.models if not row.get("ok")))
+            return {"id": source.id}
         return {"script": str(source.script), "function": source.name}
     if isinstance(source, Built):
         return {"function": source.name, "script": str(source.script)}

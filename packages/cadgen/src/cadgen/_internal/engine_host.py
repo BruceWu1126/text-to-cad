@@ -2,6 +2,8 @@
 
 The engine imports only itself. The distribution supplies the HTTP application and its
 launcher when the engine's client/daemon modules are imported; model workers load neither app.
+It also says where the user's state folder is, which the engine's registry of documents lives
+in (``cadgen.engine.registry.FACTORY``: the state directory, ``cadgen.viewer.recents.state_dir``).
 """
 from __future__ import annotations
 
@@ -24,9 +26,23 @@ def http_factory(server, host, port):
         raise
 
 
+def registry():
+    """The registry of documents in the user's state folder, where it is now (``CADGEN_STATE_DIR``
+    is read each time)."""
+    from cadgen.engine.registry import Registry
+    from cadgen.viewer.recents import state_dir
+
+    return Registry(state_dir())
+
+
+_MODULES = {"cadgen.engine.client", "cadgen.engine.daemon", "cadgen.engine.registry"}
+
+
 def _attach(module):
     if module.__name__ == "cadgen.engine.client":
         module.DAEMON_MODULE = "cadgen._internal.engine_daemon"
+    elif module.__name__ == "cadgen.engine.registry":
+        module.FACTORY = registry
     else:
         module.HTTP_FACTORY = http_factory
 
@@ -48,7 +64,7 @@ class _Loader:
 
 class _Attach:
     def find_spec(self, fullname, path=None, target=None):
-        if fullname not in {"cadgen.engine.client", "cadgen.engine.daemon"}:
+        if fullname not in _MODULES:
             return None
         from importlib.machinery import PathFinder
 
@@ -59,7 +75,7 @@ class _Attach:
 
 
 def install():
-    for name in ("cadgen.engine.client", "cadgen.engine.daemon"):
+    for name in sorted(_MODULES):
         if name in sys.modules:
             _attach(sys.modules[name])
     if not any(isinstance(finder, _Attach) for finder in sys.meta_path):

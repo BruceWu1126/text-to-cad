@@ -64,8 +64,12 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
 2. **Only requested files to disk.** The engine writes the files a model declares -- the xbf and the exports
    its decorators name, nothing beside them -- and the operating system's coordination for its
    warm process: a socket and a lock in `tempfile.gettempdir()/cadgen-engine` (a socket path past
-   the Unix limit lives in the user's own `/tmp/cadgen-<uid>` instead). It writes no
-   sidecar, record of a build, cache, index, memo, mesh or parsed document, and no derived file
+   the Unix limit lives in the user's own `/tmp/cadgen-<uid>` instead) -- and cadgen's own
+   state in the user's state folder: settings, Recents' small previews, and the registry of the
+   documents it has built or opened, one record each that points at its script or file, with a
+   source copy only where the author had no saved file (`store="copy"`); never geometry, never a
+   cache of derived data. It writes no
+   sidecar, record of a build beside a model, cache, index, memo, mesh or parsed document, and no derived file
    beside an input. A restart is cold, but for the xbf itself: a model whose xbf holds the
    closure the model has now is not run. Explicit viewer exports write only the requested
    artifact to managed temporary storage for delivery; no source or intermediate XBF
@@ -89,7 +93,10 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    id derived from its script and function (`ids.model_id`): the same in every process, worked
    out without asking the engine. A file the engine serves is known inside it by the id of its
    canonical path (`ids.file_id`); its public name stays its path. Its store is `pointer` (a
-   model in a saved file, the default) or `memory` (asked for with `store="memory"`). File
+   model in a saved file, the default: the registry points at its script), `copy` (a model
+   whose source only Python holds, a notebook cell: its source and the files its build read are
+   copied into its registry folder, and its id is new each run unless `@model(id=...)` names
+   one) or `memory` (asked for with `store="memory"`: nothing is recorded). File
    decorators imply a model and write only their named outputs. No xbf, mesh, memo,
    provenance or derived file is written for a document beyond what it declares. A document
    lives until the engine exits or memory evicts it; its worker retiring does not end it,

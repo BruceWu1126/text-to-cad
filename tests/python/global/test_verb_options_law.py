@@ -54,5 +54,21 @@ class ExportTakesADocumentAndDestinations(unittest.TestCase):
         ], f"Model.export is (*destinations); {LAW}")
 
 
+class SnapshotTakesThePictureAlone(unittest.TestCase):
+    PICTURE = ("display", "camera", "grid", "preview", "pose", "width", "height", "size_profile", "daemon",
+               "annotation", "measurements")
+
+    def test_a_model_s_snapshot_takes_the_verb_s_picture_options_by_name(self) -> None:
+        verb = inspect.signature(cadgen.snapshot).parameters
+        parameters = list(inspect.signature(Model.snapshot).parameters.values())
+        self.assertEqual([(p.name, p.kind) for p in parameters[:2]], [
+            ("self", inspect.Parameter.POSITIONAL_OR_KEYWORD), ("out", inspect.Parameter.POSITIONAL_OR_KEYWORD)])
+        self.assertEqual([(p.name, p.kind, p.default) for p in parameters[2:]],
+                         [(name, inspect.Parameter.KEYWORD_ONLY, verb[name].default) for name in self.PICTURE],
+                         f"Model.snapshot(out, ...) spells out the snapshot verb's options, each about the picture; {LAW}")
+        self.assertEqual(set(verb) - {"source", "out", "job"}, set(self.PICTURE),
+                         "the verb takes no option Model.snapshot leaves out but its job")
+
+
 if __name__ == "__main__":
     unittest.main()

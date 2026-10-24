@@ -293,11 +293,13 @@ class CadApp:
         if found is not None:
             return found
         try:
-            for recent in self.recents.list():
-                if file_id(recent.path) == ident:
-                    return self.file_of(self.remember(recent.path))
+            record = self.recents.registry.get(ident)
         except OSError:
-            pass
+            record = None
+        if record is not None and record.get("kind") == "file":
+            from cadgen.engine.registry import home
+
+            return self.file_of(self.remember(home(self.recents.registry, record)))
         return None
 
     def read_catalog(self, file=None, ident=None) -> dict:
@@ -606,20 +608,32 @@ class CadApp:
         return self._picker
 
     def _recents_payload(self) -> dict:
-        # A CAD file the viewer opens: a script an earlier release kept here is no document.
-        return {"recents": [entry.public() for entry in self.recents.list() if extension_of(entry.path) in VIEWER_EXTENSIONS]}
+        # Recents, the registry's view (``recents.py``): the CAD files the viewer opens, and the models.
+        return {"recents": [entry.public() for entry in self.recents.list()
+                            if entry.kind == "model" or extension_of(entry.path) in VIEWER_EXTENSIONS]}
 
     def _change_recents(self, payload) -> dict:
-        """A change to the library -- ``{action, path, png?}``, the model by its absolute path --
-        answered with the library as it now is. A model opened is also counted for analytics."""
+        """A change to the library -- ``{action, path, png?}``, a file by its absolute path, a model by
+        its id (its entry's ``path``) -- answered with the library as it now is. A file opened is
+        also counted for analytics; a model's entry is the engine's, written when it builds, so only
+        pinning, its picture and its removal change it."""
         from .recents import thumbnail_png
 
         if type(payload) is not dict:
             raise ValueError("a recents change is {action, path}")
-        # A document known by its id alone (a model's) and its pictures never enter the library.
+        action = payload.get("action")
         if is_id(payload.get("path")):
+            ident = payload["path"]
+            if action in ("pin", "unpin"):
+                self.recents.pin(ident, action == "pin")
+            elif action == "remove":
+                self.recents.remove(ident)
+            elif action == "thumbnail":
+                self.recents.thumbnail(ident, thumbnail_png(payload.get("png")))
+            elif action != "open":
+                raise ValueError(f"unknown recents action {action!r}")
             return self._recents_payload()
-        action, path = payload.get("action"), absolute_path(payload.get("path"))
+        path = absolute_path(payload.get("path"))
         # The library keys a model by its canonical path, the engine's (``ids.canonical``): a
         # symlink, its target and a case variant of one file are one entry.
         key = canonical(path)

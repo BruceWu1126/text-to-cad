@@ -215,7 +215,10 @@ def run_files(files: list[str], top: str, jobs: int, verbose: bool, print_weight
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
             futures = []
             for index, path in enumerate(files):
+                # A state folder of its own too: the engine's registry of documents (and Recents)
+                # never reaches the person's.
                 env = {**os.environ, "CADGEN_ENGINE_DIR": os.path.join(engines, f"e{index}"),
+                       "CADGEN_STATE_DIR": os.path.join(engines, f"s{index}"),
                        "CADGEN_CACHE_DIR": os.path.join(engines, f"c{index}"),
                        "CADGEN_ENGINE_IDLE": str(ENGINE_IDLE_SECONDS)}
                 futures.append(pool.submit(_run_one_file, path, top, verbose, env))

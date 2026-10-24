@@ -287,6 +287,20 @@ def again(record: dict[str, Any], model: Any, folder: Path, modules: dict[str, s
     return key(now), changes
 
 
+def located(record: dict[str, Any], folder: Path) -> dict[str, Any]:
+    """What a build's report says of its closure (``record``, its paths relative to ``folder``):
+    its key, and its modules and inputs by absolute path -- what the engine's registry records and
+    a copied document's bundle copies."""
+    inputs = []
+    for row in record.get("inputs") or []:
+        row = list(row)
+        at = 1 if row[0] in ("file", "read") else 2
+        row[at] = absolute(row[at], folder)
+        inputs.append(row)
+    return {"key": record.get("key"), "modules": [[absolute(path, folder), digest] for path, digest in record.get("modules") or []],
+            "inputs": inputs}
+
+
 def scan(path: Path) -> tuple[str | None, str | None]:
     """What wrote the document at ``path`` and the closure its main label holds, read from
     its head, where the main label's attributes are: ``(writer, closure text)``, each None

@@ -275,11 +275,16 @@ it again.
 - **The engine never reruns code.** A document it no longer holds (the engine restarted,
   or it dropped the document under its memory budget) is refused with the command that
   brings it back, `python <the program that built it>`, by the page, `cadgen inspect`
-  and `cad_show` alike. Running it updates the same document and its open pages.
+  and `cad_show` alike (`cadgen status`: `evicted`, `expired`, or `detached` once its
+  script is gone). Running it updates the same document and its open pages.
 - **`@model(store="memory")`** keeps a document in its worker's memory alone: no record,
   no Recents entry, gone when its worker retires or the engine exits. It suits a
   throwaway probe. The default, for a script on disk, records the script, so the
   document is listed in Recents and comes back by its printed command.
+- **Nothing else is written beside your files**: no cache folder, and no record of a build
+  beside the `.xbf`. cadgen's state folder keeps the record per document that points at its
+  script; a model defined where no file holds it (a notebook cell) is copied there, its
+  source and the files its build read, and must be self-contained.
 - **A shape made elsewhere** (a probe in a REPL, a shape from another library) is shown
   the same way: wrap it in a `@model` function in a `.py` file and call it.
 - `cadgen status` lists the workers and the documents the engine holds (`--json` as
