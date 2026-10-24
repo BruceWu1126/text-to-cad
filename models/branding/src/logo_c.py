@@ -1,10 +1,9 @@
-from cadgen.engine import step, xbf
+from cadgen import model
 
 from lib.logo_shape import make_logo
 
 
-@xbf(out="../XBF/logo_c.xbf")
-@step(out="../XBF/logo_c.step")
+@model
 def logo_c():
     return make_logo("C")
 

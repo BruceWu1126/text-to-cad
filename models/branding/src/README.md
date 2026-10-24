@@ -1,20 +1,22 @@
 # Logo CAD sources
 
-`models/branding` ported to `cadgen.engine`: the brand's block-letter logos as
-solids, each a plain model with the STEP it delivers.
+`models/branding` on cadgen 0.8: the brand's block-letter logos as solids, each a
+plain `@model`, and `exports.py`, which writes the STEP each delivers: this corpus's
+example of a STEP deliverable kept current by an `exports.py`.
 
-| Model | Writes | Solids |
+| Model | Delivers (`exports.py`) | Solids |
 | --- | --- | --- |
-| `logo_c.py` | `XBF/logo_c.xbf`, `XBF/logo_c.step` | 1 |
-| `logo_cad.py` | `XBF/logo_cad.xbf`, `XBF/logo_cad.step` | 3 |
-| `logo_texttocad.py` | `XBF/logo_texttocad.xbf`, `XBF/logo_texttocad.step` | 9 |
+| `logo_c.py` | `STEP/logo_c.step` | 1 |
+| `logo_cad.py` | `STEP/logo_cad.step` | 3 |
+| `logo_texttocad.py` | `STEP/logo_texttocad.step` | 9 |
 
-Build from this folder, in any order:
+Build from this folder, in any order, and write the deliverables (`../STEP/`, gitignored):
 
 ```
 python logo_c.py
 python logo_cad.py
 python logo_texttocad.py
+python exports.py
 ```
 
 Each block is 10 mm. Every letter is 30 mm wide, 40 mm tall and extruded 20 mm in
@@ -27,7 +29,6 @@ geometry.
 `scripts/brand/generate-logos.mjs` writes here. The models read it through
 `lib/logo_shape.py`, so a change to it rebuilds the logos.
 
-The port: `from cadgen import step` -> `from cadgen.engine import step, xbf`, each
-model declaring its xbf and the STEP it delivers, both in `XBF/`; cadgen's
+The port: `@step(out=...)` -> `@model`, the STEP written by `exports.py`; cadgen's
 build123d proxy -> `import build123d as bd`; `cadgen.srgb("#…")` -> the hex itself, which
-a shape takes as it is. The `__main__` calls go: running a script builds its model.
+a shape takes as it is. Each script's `__main__` calls its model.
