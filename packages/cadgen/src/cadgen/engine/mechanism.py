@@ -887,6 +887,7 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
     connected joint. ``root_path`` is the result's own occurrence in ``tree`` (``()``, or
     ``(0,)`` where the document holds it in a component of its own)."""
     objects = _objects(result, root_path)
+    by_path = {path: obj for obj, path in objects}
     holders: dict[int, list[tuple[int, ...]]] = {}
     jointed: list[tuple[tuple[int, ...], Any]] = []
     configured: list[tuple[tuple[int, ...], Any, dict]] = []
@@ -1068,6 +1069,12 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         as_built[label] = value
         pairs.append(pair)
         joint_labels.append((moving.label, held_by))
+        off = _axis_off(by_path[held_by], moving) if kind != "spherical" else None
+        if off is not None:
+            warnings.append(f"joint {label!r}'s axis passes {off:.0f} mm from {name_of(held_by)}, which holds it, "
+                            "farther than the part's own size: an Axis is in world coordinates, so a local one lands "
+                            "near the origin and connect_to moves the other part there; give the world axis, "
+                            "axis.located(part.location)")
 
     couplings, controls = _couplings(coupled, pairs, joint_labels, name_of, warnings, as_built)
     found = Mechanism(tree.root.name, links, 0, pairs, as_built, {}, warnings, couplings=couplings)
@@ -1324,6 +1331,29 @@ def _convert(values: dict[str, Any], where: str, mechanism: Mechanism, naming: d
         except KinematicsError as error:  # each alone within the limits, together past them
             problems.append(str(error))
     return {pair.label: found[pair.label] for pair in mechanism.pairs if pair.label in found}, problems
+
+
+def _axis_off(part: Any, joint: Any) -> float | None:
+    """How far a moving joint's axis passes from the part that holds it, in the part's own frame,
+    when that is more than the part's own size (its bounding box's diagonal) beyond its box: a
+    local axis given where build123d reads a world one. None for an axis that passes near."""
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+
+    from cadgen.engine.document import _identity
+
+    box = Bnd_Box()
+    BRepBndLib.Add_s(part.wrapped.Located(_identity()), box, False)
+    if box.IsVoid():
+        return None
+    low, high = (np.array([corner.X(), corner.Y(), corner.Z()]) for corner in (box.CornerMin(), box.CornerMax()))
+    centre, radius = (low + high) / 2, float(np.linalg.norm(high - low)) / 2
+    axis = joint.relative_axis
+    point = np.array([axis.position.X, axis.position.Y, axis.position.Z])
+    direction = np.array([axis.direction.X, axis.direction.Y, axis.direction.Z])
+    offset = centre - point
+    distance = float(np.linalg.norm(offset - offset.dot(direction) * direction))
+    return distance if distance - radius > 2 * radius else None
 
 
 def _size(result: Any) -> float:

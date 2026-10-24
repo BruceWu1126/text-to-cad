@@ -84,6 +84,25 @@ def lift():
 """
 
 
+# A base built 300 mm out and a rotor on its joint's axis, given in world coordinates ({axis}).
+ROTOR = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf("XBF/rotor.xbf")
+def rotor():
+    base = bd.Pos(300, 0, 0) * bd.Box(40, 40, 10)
+    base.label = "base"
+    disc = bd.Pos(300, 0, 10) * bd.Cylinder(15, 4)
+    disc.label = "disc"
+    bd.RevoluteJoint("spin", base, axis={axis})
+    bd.RigidJoint("hub", disc, bd.Location(disc.location.position))
+    base.joints["spin"].connect_to(disc.joints["hub"], angle=0)
+    return bd.Compound(children=[base, disc], label="rotor")
+"""
+
+
 def _arm_tip(q: float) -> np.ndarray:
     """The arm's corner (120, 10, 10) of its own frame, at elbow ``q``, in closed form: the joint
     frame sits at (40, 0, 20) with X along +Z, Y along +X and Z (the axis) along +Y, and the arm's
@@ -583,6 +602,16 @@ class RefusalTest(_Folder):
         self.assertIn("joint 'pivot' cannot be kept: bike/engine is not where it can put it", report["error"])
         self.assertIn("not one revolute motion apart within its range", report["error"])
         self.assertFalse((self.folder / "XBF/bike.xbf").exists(), "a refused document is not written")
+
+    def test_a_joint_axis_far_from_the_part_holding_it_is_warned_as_a_local_axis(self) -> None:
+        # The base's own frame's Z, as if Axis were local: connect_to moves the disc to the origin.
+        report = self.build("rotor", ROTOR.format(axis="bd.Axis((0, 0, 5), (0, 0, 1))"))
+        self.assertEqual(report["kinematics"]["warnings"], [
+            "joint 'spin''s axis passes 300 mm from rotor/base, which holds it, farther than the part's own size: an "
+            "Axis is in world coordinates, so a local one lands near the origin and connect_to moves the other part "
+            "there; give the world axis, axis.located(part.location)"])
+        report = self.build("rotor", ROTOR.format(axis="bd.Axis((0, 0, 5), (0, 0, 1)).located(base.location)"))
+        self.assertNotIn("kinematics", report)
 
     def test_two_unmoved_parts_with_a_revolute_between_them_are_two_links(self) -> None:
         report = self.build("bike", PIVOT.format(at=ON_AXIS, extra="pass"))
