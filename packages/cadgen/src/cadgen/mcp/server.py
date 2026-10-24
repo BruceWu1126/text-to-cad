@@ -116,11 +116,15 @@ INLINE_INSTRUCTIONS = (
     "what they see; both take the view that cad_show returned."
 )
 
+# What a text client's page does after it opens, true of a document and of a file alike.
+FOLLOWS = ("The page follows the model: rebuilds for a document, saves for a file, so show a model once, "
+           "not after every rebuild.")
+
 TEXT_INSTRUCTIONS = (
-    f"CAD opens local CAD models ({FORMATS}) in the CAD Viewer in the user's browser: "
-    "this app cannot show CAD views itself. Call cad_show with a model's absolute path: it opens the model's page "
-    "in the user's browser, or says it is open already, and answers with its URL; give the user that URL. "
-    "The page follows the model, so show a model once, not after every rebuild."
+    f"CAD opens models and local CAD files ({FORMATS}) in the CAD Viewer in the user's browser: "
+    "this app cannot show CAD views itself. Call cad_show with path set to a model's document id (running its "
+    "script prints it) or a file's absolute path: it opens the page in the user's browser, or says it is open "
+    "already, and answers with its URL; give the user that URL. " + FOLLOWS
 )
 
 _ICON_SVG = (
@@ -476,10 +480,10 @@ class Server:
         """No page to open or read: cad_show hands over a link to the model in the CAD Viewer."""
         return [
             {"name": "cad_show", "title": "Show in CAD", "icons": [ICON], "annotations": _READ_ONLY,
-             "description": (f"Open a local CAD model ({FORMATS}) in the CAD Viewer in the user's browser, "
-                             "unless its page is open there already; this app cannot show CAD views itself. Answers "
-                             "with the page's URL: give it to the user. The page refreshes when the model changes, "
-                             "so show a model once, not after every rebuild."),
+             "description": ("Open a model in the CAD Viewer in the user's browser, unless its page is open there "
+                             "already; this app cannot show CAD views itself. path is a model's document id (running "
+                             f"its script prints it) or a local CAD file's absolute path ({FORMATS}). Answers with the "
+                             "page's URL: give it to the user. " + FOLLOWS),
              "inputSchema": _object({"path": _PATH}, ["path"])},
             _HTTP_TOOL,
         ]
@@ -578,7 +582,8 @@ class Server:
         """An existing CAD file, from the absolute path a caller named; or a document the engine holds,
         from its id: a model's id stays itself, a file's is its path. Nothing is built."""
         if not isinstance(value, str) or not value.strip():
-            raise ToolFailed("Name a CAD file by its absolute path.", "no_path")
+            raise ToolFailed('Name the model in "path": a document id (running a model\'s script prints it) or a '
+                             "CAD file's absolute path.", "no_path")
         from cadgen.engine.ids import is_id
 
         if is_id(value):
@@ -790,11 +795,10 @@ class Server:
                 said = f"No browser can be opened from here ({failure}); {name}'s page is {link}."
             else:
                 self._browser_opened(model)
-                said = f"{name} opened in your browser at {link}; the page follows the model."
+                said = f"{name} opened in your browser at {link}."
         # Text alone: an app that shows a result's structured content shows it in place of the text
         # (Claude Code does), and the agent would get neither this guidance nor the update line.
-        return self._told(_text(f"{said}\nThis app shows no CAD view itself: give the user this URL. The page refreshes "
-                                "when the model changes, so show a model once, not after every rebuild."))
+        return self._told(_text(f"{said}\nThis app shows no CAD view itself: give the user this URL. {FOLLOWS}"))
 
     def _told(self, result: dict[str, Any]) -> dict[str, Any]:
         """A text-only app has no card for the update notice (``cadgen/updates.py``): this process's

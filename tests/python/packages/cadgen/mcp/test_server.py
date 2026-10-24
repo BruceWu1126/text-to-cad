@@ -725,15 +725,26 @@ class TextServerTest(_Session):
         # Text alone: Claude Code shows a result's structured content in place of its text.
         self.assertNotIn("structuredContent", shown)
         self.assertEqual(shown["content"][0]["text"],
-                         "bracket.stl opened in your browser at http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab; "
-                         "the page follows the model.\nThis app shows no CAD view itself: give the user this URL. The page "
-                         "refreshes when the model changes, so show a model once, not after every rebuild.")
+                         "bracket.stl opened in your browser at http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab.\n"
+                         "This app shows no CAD view itself: give the user this URL. The page follows the model: "
+                         "rebuilds for a document, saves for a file, so show a model once, not after every rebuild.")
         # Opened once, through a redirect file (the page's token is on no command line), and the engine told.
         (target,) = self.opened
         self.assertTrue(target.startswith("file:"), target)
         self.assertEqual(told, [self.bracket])
         # The Viewer adds the model to the library once it shows it; a link alone adds nothing.
         self.assertEqual(self.server.recents.list(), [])
+
+    def test_cad_show_takes_a_path_or_a_document_id_and_says_so(self) -> None:
+        cad_show = {tool["name"]: tool for tool in self.server.handle("tools/list", {}, None)["tools"]}["cad_show"]
+        for said in (cad_show["description"], cad_show["inputSchema"]["properties"]["path"]["description"],
+                     self.initialized["instructions"]):
+            self.assertIn("document id", said)
+            self.assertIn("absolute path", said)
+        refused = self.call("cad_show", {"id": "6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"})
+        self.assertTrue(refused["isError"])
+        self.assertEqual(refused["content"][0]["text"], 'Name the model in "path": a document id (running a model\'s '
+                                                        "script prints it) or a CAD file's absolute path.")
 
     def test_a_model_a_browser_page_shows_already_is_not_opened_again(self) -> None:
         self.server._in_browser = lambda model: model == self.bracket
