@@ -100,6 +100,10 @@ class ExportJobs(Jobs):
     def _source(self, spec):
         if self.server is None:
             raise ExportError("This host does not serve exportable documents.")
+        from cadgen.engine.export import MESHES
+
+        if Path(spec["doc"]).suffix.lower() in MESHES:
+            return self._mesh_source(spec)
         with self.server.load_lock:
             doc = self.server.served.get(spec["doc"])
             if doc is None or doc.version != spec["revision"]:
@@ -116,6 +120,20 @@ class ExportJobs(Jobs):
             source, expected = {"id": path}, {"digest": digest, "id": path, "modelRevision": spec["revision"]}
             return source, expected, label or "export"
         return {"path": path}, {"version": spec["revision"]}, Path(path).stem
+
+    @staticmethod
+    def _mesh_source(spec):
+        """A mesh file the page shows (``doc`` its absolute path, ``revision`` the catalog's hash of
+        the bytes on screen), exported to the other mesh kinds from the file as it is now: refused
+        when its bytes are not the ones shown, and by the worker when it changes after this check
+        (``{"version": "<mtime_ns>-<size>"}``, ``export/viewer.check``)."""
+        from cadgen.viewer.scanner import _file_stats, _sha256_file, is_served_cad_asset
+
+        path = Path(spec["doc"])
+        stat = _file_stats(str(path)) if path.is_absolute() and is_served_cad_asset(str(path)) else None
+        if stat is None or _sha256_file(str(path), stat) != spec["revision"]:
+            raise ExportError("The source changed. Open Export again to use the displayed revision.", 409)
+        return {"path": str(path)}, {"version": f"{stat.st_mtime_ns}-{stat.st_size}"}, path.stem
 
     def _worker(self, spec, target, progress):
         from cadgen.engine.client import request

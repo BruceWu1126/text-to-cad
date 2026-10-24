@@ -292,7 +292,8 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
     """An ``export`` request: the document -- one this worker holds (``held``: a document named
     by its id, read as it is and never built), a ``Model`` this program built first (its own
     explicit call), or a file (the document this worker last built of it while the file is as
-    the build left it, else read) -- written to each destination, and drawn into ``draw``'s
+    the build left it, else read; a mesh file read as its triangles, no kernel loaded) -- written
+    to each destination, and drawn into ``draw``'s
     PNG where the request has one (``{"out", option: value}``, the snapshot verb's: a
     model's picture is drawn from the document in this worker's memory). Answers what was
     written."""
@@ -340,6 +341,11 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
             clock = time.perf_counter()
             source = export.Source.read(path)
             log(f"read {path.name} in {time.perf_counter() - clock:.2f}s")
+    if source.mesh and source.path is not None:
+        for destination in request["destinations"]:  # every one, before anything is written
+            why = export.refused(source.path, destination)
+            if why:
+                raise export.ExportRefused(why)
     if request.get("expected"):
         from cadgen.engine.export.viewer import check, options
         if "document" not in source_spec:  # a held document's revision the daemon checked

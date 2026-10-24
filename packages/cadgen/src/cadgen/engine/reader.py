@@ -539,31 +539,19 @@ class Mesh:
 
 
 def _stl(path: Any) -> tuple[Any, str]:
-    """An STL's corners, (M, 3, 3) float64, and its name. Binary or ASCII is told as three's
-    ``STLLoader`` tells it: binary when the size is the header, the count and that many 50-byte
-    facets; else ASCII when ``solid`` opens it (within its first five bytes); else binary. A
-    facet's own normal is not read."""
+    """An STL's corners, (M, 3, 3) float64, read by the engine's one STL parser
+    (``formats/stl.read_stl``: binary or ASCII told as three's ``STLLoader`` tells them), and its
+    name: an ASCII STL's solid's, else the file's stem."""
     import re
 
-    import numpy as np
+    from cadgen.engine.formats.stl import read_stl
 
-    data = path.read_bytes()
-    count = int.from_bytes(data[80:84], "little") if len(data) >= 84 else -1
-    if 84 + 50 * count == len(data) or not any(data[at:at + 5] == b"solid" for at in range(5)):
-        if len(data) < 84:
-            raise ValueError(f"{path.name} is too short to be an STL")
-        facet = np.dtype([("normal", "<f4", 3), ("corners", "<f4", (3, 3)), ("attribute", "<u2")])
-        facets = np.frombuffer(data, facet, min(count, (len(data) - 84) // 50), 84)
-        return facets["corners"].astype(np.float64), path.stem
-    found = re.findall(rb"vertex\s+(\S+)\s+(\S+)\s+(\S+)", data)
-    if len(found) % 3:
-        raise ValueError(f"{path.name}: an ASCII STL's vertices come three to a facet, and it has {len(found)}")
-    try:
-        corners = np.array(found, dtype=np.float64).reshape(-1, 3, 3)
-    except ValueError:
-        raise ValueError(f"{path.name}: a vertex of it is not three numbers") from None
-    named = re.match(rb"[^s]{0,4}solid[ \t]*([^\r\n]*)", data)
-    name = named[1].strip().decode("utf-8", "replace") if named else ""
+    corners = read_stl(path)
+    with open(path, "rb") as handle:
+        head = handle.read(4096)
+    named = re.match(rb"[^s]{0,4}solid[ \t]*([^\r\n]*)", head)
+    binary = len(head) >= 84 and 84 + 50 * int.from_bytes(head[80:84], "little") == path.stat().st_size
+    name = named[1].strip().decode("utf-8", "replace") if named and not binary else ""
     return corners, name or path.stem
 
 

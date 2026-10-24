@@ -12,7 +12,7 @@ import numpy as np
 from cadgen.engine.formats import Foreign, FormatError, Part, Placed, assemble, files_of
 from cadgen.engine.formats.buffer import buffer
 
-__all__ = ["mesh_part", "stl_file", "threemf_file"]
+__all__ = ["build_of", "mesh_part", "painted", "stl_file", "threemf_file"]
 
 
 def mesh_part(name: str, points: np.ndarray, triangles: np.ndarray, *, scale: float = 1.0, paints: np.ndarray | None = None,
@@ -23,11 +23,22 @@ def mesh_part(name: str, points: np.ndarray, triangles: np.ndarray, *, scale: fl
     drawn as, which sets three's rounding steps."""
     points = np.asarray(points, np.float64) * scale
     triangles = np.asarray(triangles, np.int64).reshape(-1, 3)
+    faces, color, face_colors, material, face_materials = painted(len(triangles), paints, palette)
+    step = scale * unit
+    mesh, _uv = buffer(points, triangles, faces=faces, weld=1e-4 * step, hashed=1e-2 * step)
+    return Part(name, mesh, color, face_colors, material, face_materials)
+
+
+def painted(count: int, paints: np.ndarray | None, palette: list[tuple[tuple, dict | None]] | None
+            ) -> tuple[np.ndarray | None, tuple | None, dict[int, tuple], dict | None, dict[int, dict]]:
+    """A mesh object's paints as a part's look: each triangle's face ordinal (None: one face), the
+    part's colour and material (the one paint every triangle wears), and each face's colour and
+    material (a face per paint, from 1, where the triangles wear several)."""
     faces = None
     color = material = None
     face_colors: dict[int, tuple] = {}
     face_materials: dict[int, dict] = {}
-    if paints is not None and palette and len(triangles):
+    if paints is not None and palette and count:
         used = sorted(set(int(value) for value in np.unique(paints)))
         if used == [-1]:
             pass
@@ -43,9 +54,7 @@ def mesh_part(name: str, points: np.ndarray, triangles: np.ndarray, *, scale: fl
                     face_colors[at] = palette[paint][0]
                     if palette[paint][1]:
                         face_materials[at] = _material(palette[paint][0], palette[paint][1])
-    step = scale * unit
-    mesh, _uv = buffer(points, triangles, faces=faces, weld=1e-4 * step, hashed=1e-2 * step)
-    return Part(name, mesh, color, face_colors, material, face_materials)
+    return faces, color, face_colors, material, face_materials
 
 
 def _material(rgba: tuple, finish: dict | None) -> dict[str, Any] | None:
@@ -82,6 +91,13 @@ def threemf_file(path: Path) -> Foreign:
                        palette=model.paints) for part in model.parts]
     if not any(part.mesh.triangles for part in parts):
         raise FormatError(f"{path.name} holds no triangles to draw")
+    placed, tree = build_of(path, model)
+    return assemble("3mf", path, path.stem, parts, placed, tree, files_of([path]))
+
+
+def build_of(path: Path, model: Any) -> tuple[list[Placed], dict[str, Any]]:
+    """A 3MF's build (``threemf.Model``) as placements, in millimetres as its parts' points are
+    (``model.unit`` times its numbers), and the tree of them (``_tree``)."""
     placed, leaves = [], []
     for index, (part, matrix, at) in enumerate(model.placed):
         matrix = np.asarray(matrix, float).copy()
@@ -89,7 +105,7 @@ def threemf_file(path: Path) -> Foreign:
         name = model.parts[part].name
         placed.append(Placed(part, matrix, f"{path.stem}/{name}", palette=index))
         leaves.append((at, {"name": name, "prototype": part, "instance": index}))
-    return assemble("3mf", path, path.stem, parts, placed, _tree(path.stem, leaves), files_of([path]))
+    return placed, _tree(path.stem, leaves)
 
 
 def _tree(name: str, leaves: list[tuple[tuple[int, ...], dict[str, Any]]]) -> dict[str, Any]:

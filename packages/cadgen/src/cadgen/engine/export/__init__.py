@@ -3,14 +3,17 @@
 ``translate(document, kind, path)`` writes one
 file of ``kind`` (``KINDS``: ``xbf``, ``step``, ``glb``, ``stl``, ``threemf``, ``dxf``) from a
 document: a ``Source`` -- the document a build made, held in the worker's memory
-(``Source.built``), or one read from an ``.xbf`` or a ``.step`` (``Source.read``). A
+(``Source.built``), or one read from an ``.xbf`` or a ``.step`` (``Source.read``), or a mesh
+file's triangles (``.glb``, ``.stl``, ``.3mf``: ``export/mesh_file.py``). A
 derived file a decorator declares and a file ``cadgen export`` asks for are the same
 call, so the same document writes the same bytes.
 
 The file holds the document as its code built it: every part, placed where the document
 places it, in its colours, with its motion. No translation selects a part or a state: a
-posed or partial file is a function in the model's code. Meshes are never sources: there is
-no B-rep in them. An xbf is written from a STEP (read into a document first); an xbf is
+posed or partial file is a function in the model's code. A mesh file is a source of the other
+two mesh kinds, holding what its format carries (``README``, **Translation formats**), and of
+nothing else: there is no B-rep in it, so no xbf, STEP or DXF; nor is a mesh file written from one
+of its own kind. An xbf is written from a STEP (read into a document first); an xbf is
 never written from another, which already is the document. A GLB carries every configuration sequence the document defines as a glTF
 animation of the same name, baked by forward kinematics (``export/motion.py``), and, from a build's source, every
 ``animation()`` its code made (``export/animation.py``): the document holds none, so a GLB
@@ -34,7 +37,7 @@ from typing import Any, Callable
 
 from cadgen.engine.atomic_replace import replace_atomic
 
-__all__ = ["KINDS", "ExportRefused", "Kind", "Source", "View", "kind_of", "translate"]
+__all__ = ["KINDS", "ExportRefused", "Kind", "Source", "View", "kind_of", "refused", "translate"]
 
 
 class ExportRefused(ValueError):
@@ -70,12 +73,29 @@ KINDS: dict[str, Kind] = {
     # A drawing replaces its file itself, and only when its bytes change.
     "dxf": Kind("dxf", (".dxf",), "cadgen.engine.export.dxf:write", atomic=False),
 }
-# What a source file is read as: documents only.
+# What a source file is read as: a document, or a mesh file's triangles.
 SOURCES = (".xbf", ".step", ".stp")
 MESHES = (".glb", ".stl", ".3mf")
+# A kind's name in a sentence.
+LABELS = {"xbf": "xbf", "step": "STEP", "glb": "GLB", "stl": "STL", "threemf": "3MF", "dxf": "DXF"}
 # The date of every entry of a zip the package writes (a 3MF): a file is a function of
 # what it holds, never of the clock it was written by (zipfile stamps each entry with the time).
 ZIP_DATE = (1980, 1, 1, 0, 0, 0)
+
+
+def refused(source: Any, destination: Any) -> str | None:
+    """Why the file at ``source`` (a path) is never translated to ``destination``, by their
+    suffixes alone, or None: a mesh holds no B-rep, so no xbf, STEP or DXF is made from one, and
+    a mesh file is not written from one of its own kind."""
+    source, kind = Path(source), kind_of(destination)
+    if source.suffix.lower() not in MESHES:
+        return None
+    if kind in ("xbf", "step", "dxf"):
+        return f"{source.name} is a mesh: it has no B-rep, and no {LABELS[kind]} export is made from one"
+    if kind == kind_of(source):
+        article = "an" if kind == "stl" else "a"
+        return f"{article} {LABELS[kind]} is not written from another {LABELS[kind]}: the file already is one"
+    return None
 
 
 def kind_of(path: Any) -> str:
@@ -98,11 +118,13 @@ class Source:
     XCAF document when one is held, each assembly occurrence's placement, and the
     mechanism itself. ``live`` shapes are a build's (written and read once to be meshed,
     as saving their document does: ``mesh.shape_bytes``); the others were read from a file
-    and are meshed from their bytes as read."""
+    and are meshed from their bytes as read. A mesh file's source (``mesh``: its kind) has no
+    shapes: each part's mesh is held as the file has it (``meshes``, by key)."""
 
     def __init__(self, structure: dict[str, Any], shapes: dict[str, Any], *, live: bool, xcaf: Any = None,
                  world: Callable[[tuple[int, ...]], Any] | None = None, mechanism: Any = None,
-                 foreign: bool = False, path: Path | None = None, animations: Any = None) -> None:
+                 foreign: bool = False, path: Path | None = None, animations: Any = None,
+                 meshes: dict[str, Any] | None = None, mesh: str | None = None) -> None:
         self.structure = structure
         self.shapes = shapes
         self.live = live
@@ -117,6 +139,8 @@ class Source:
         # made again from the geometry before an xbf holds them.
         self.foreign = foreign
         self.path = path
+        self.meshes = meshes
+        self.mesh = mesh
         self._bytes: dict[str, bytes] = {}
         self._lock = threading.Lock()
 
@@ -127,15 +151,19 @@ class Source:
     @classmethod
     def read(cls, path: Any) -> "Source":
         """A document read from its file (``document.load``: held while the file stays as it
-        was): an ``.xbf``, or a ``.step``/``.stp`` read into a document first."""
-        from cadgen.engine import document
-
+        was): an ``.xbf``, or a ``.step``/``.stp`` read into a document first; or a mesh file's
+        triangles (``mesh_file.read``: no kernel)."""
         path = Path(path)
         suffix = path.suffix.lower()
         if suffix in MESHES:
-            raise ExportRefused(f"{path.name} is a mesh: it has no B-rep, and no export is made from one")
+            from cadgen.engine.export.mesh_file import read
+
+            return read(path)
         if suffix not in SOURCES:
-            raise ExportRefused(f"{path.name} is no document: an export reads an .xbf or a .step")
+            raise ExportRefused(f"{path.name} is no document: an export reads an .xbf, a .step or a mesh "
+                                f"({', '.join(MESHES)})")
+        from cadgen.engine import document
+
         if not path.is_file():
             raise ExportRefused(f"no document {path}")
         loaded = document.load(path)
@@ -306,7 +334,7 @@ def _instances(node: dict[str, Any]) -> list[int]:
 
 
 def translate(document: Any, kind: str | None, path: Any) -> int:
-    """Write ``document`` (a ``Source``, or the path of an ``.xbf``/``.step``) to ``path``
+    """Write ``document`` (a ``Source``, or the path of an ``.xbf``/``.step`` or a mesh file) to ``path``
     as ``kind`` (from the suffix when None); returns the file's size."""
     path = Path(path)
     kind = kind or kind_of(path)
@@ -314,7 +342,14 @@ def translate(document: Any, kind: str | None, path: Any) -> int:
         raise ExportRefused(f"no export {kind!r}; the kinds are {', '.join(KINDS)}")
     if path.suffix.lower() not in KINDS[kind].suffixes:
         raise ExportRefused(f"{path.name}: a {kind} export ends in {' or '.join(KINDS[kind].suffixes)}")
+    if not isinstance(document, Source):
+        why = refused(document, path)
+        if why:
+            raise ExportRefused(why)
     source = document if isinstance(document, Source) else Source.read(document)
+    why = refused(source.path, path) if source.mesh and source.path is not None else None
+    if why:
+        raise ExportRefused(why)
     if kind == "xbf" and not source.foreign and source.path is not None and source.path.suffix.lower() == ".xbf":
         raise ExportRefused("an xbf is not written from another xbf: the document already is one")
     view = source.view()

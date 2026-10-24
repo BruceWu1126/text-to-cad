@@ -13,6 +13,9 @@ drawn by ``render/drawing.py``.
 | ``.urdf``, ``.sdf``, ``.srdf`` | ``robot.py`` (XML) | the link meshes placed by forward kinematics |
 | ``.dxf`` | ``dxf.py`` (text) | lines, arcs, circles, polylines, splines, ellipses, solids |
 
+A conversion reads a mesh file with these readers' numpy halves and no kernel
+(``export/mesh_file.py``): a GLB through ``gltf.py``, not OCCT's reader.
+
 Nothing is written, nothing is cached on disk: a reader's answer lives in the process that drew
 it (the daemon's render process for the file keeps it, warm, until a file it read changes:
 ``Foreign.files``)."""
@@ -28,7 +31,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import numpy as np
 
 if TYPE_CHECKING:  # a reader's module loads no kernel until it reads (the viewer resolves a robot's meshes here)
-    from cadgen.engine.mesh import Mesh
+    from cadgen.engine.mesh_format import Mesh
 
 __all__ = ["DRAWING", "Foreign", "FormatError", "KINDS", "MESHES", "Part", "Placed", "ROBOTS", "assemble", "files_of",
            "read", "stale"]

@@ -276,6 +276,23 @@ function inspectGlbPrimitive(
   };
 }
 
+/** The triangle whose corners start at `at` in `output.vertices`: its unit normal on all three corners. */
+function writeFlatNormal(output, at, mirrored) {
+  const v = output.vertices;
+  const ux = v[at + 3] - v[at], uy = v[at + 4] - v[at + 1], uz = v[at + 5] - v[at + 2];
+  const wx = v[at + 6] - v[at], wy = v[at + 7] - v[at + 1], wz = v[at + 8] - v[at + 2];
+  let nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+  const length = Math.hypot(nx, ny, nz);
+  if (!(length > 0)) return; // a triangle of no area has no direction: its normal stays zero
+  const scale = (mirrored ? -1 : 1) / length;
+  nx *= scale; ny *= scale; nz *= scale;
+  for (let corner = 0; corner < 9; corner += 3) {
+    output.normals[at + corner] = nx;
+    output.normals[at + corner + 1] = ny;
+    output.normals[at + corner + 2] = nz;
+  }
+}
+
 function writeGlbPrimitive(descriptor, output, offsets) {
   const partBounds = createBoundsAccumulator();
   const positionVector = new Vector3();
@@ -283,6 +300,11 @@ function writeGlbPrimitive(descriptor, output, offsets) {
   const vertexOffset = offsets.vertexOffset;
   const triangleOffset = Math.floor(offsets.indexOffset / 3);
   let localVertexCount = 0;
+  // A primitive with no normals is shaded flat, as glTF asks of a client: each triangle its own
+  // normal, from its corners as placed. A mirroring placement reverses the winding (the spec's
+  // rule for a negative determinant), so its cross product is turned back.
+  const flat = descriptor.normals?.itemSize !== 3;
+  const mirrored = flat && Boolean(descriptor.matrixWorld) && descriptor.matrixWorld.determinant() < 0;
 
   for (let localIndex = 0; localIndex < descriptor.triangleVertexCount; localIndex += 3) {
     if (!isValidTriangleSource(
@@ -341,6 +363,9 @@ function writeGlbPrimitive(descriptor, output, offsets) {
       }
       output.indices[offsets.indexOffset + localVertexCount] = outputVertexIndex;
       localVertexCount += 1;
+    }
+    if (flat) {
+      writeFlatNormal(output, (vertexOffset + localVertexCount - 3) * 3, mirrored);
     }
   }
 
