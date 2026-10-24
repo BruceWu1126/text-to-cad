@@ -56,7 +56,7 @@ from dataclasses import dataclass
 from typing import Any
 
 __all__ = ["ANIMATIONS", "Animation", "AnimationError", "INTERPOLATIONS", "Resolved", "Track", "animation",
-           "harvest"]
+           "from_json", "harvest", "to_json"]
 
 # The attribute an assembly's animations live in, by name: plain values (the memo keys them).
 ANIMATIONS = "xbf_animations"
@@ -398,6 +398,33 @@ class Resolved:
     name: str
     duration: float
     tracks: tuple[Track, ...]
+
+
+def to_json(resolved: dict[str, Resolved] | None) -> list[dict[str, Any]] | None:
+    """A build's animations (``harvest``) as plain JSON, every track's fields as they are, its
+    tuples as lists: what a document held after its worker went keeps beside its xbf bytes
+    (``models.Models.drain``), since the document holds none. ``from_json`` gives back the same
+    values, so a GLB baked from them is the GLB the build's tree bakes. None for none."""
+    if not resolved:
+        return None
+    return [{"name": item.name, "duration": item.duration,
+             "tracks": [[track.path, track.interpolation, track.keys, track.groups, track.extra, track.label,
+                         track.order] for track in item.tracks]} for item in resolved.values()]
+
+
+def from_json(rows: list[dict[str, Any]] | None) -> dict[str, Resolved] | None:
+    """``to_json``'s animations again, by name, every list a tuple as the harvest made it."""
+    if not rows:
+        return None
+
+    def tupled(value: Any) -> Any:
+        return tuple(tupled(item) for item in value) if isinstance(value, list) else value
+
+    return {row["name"]: Resolved(row["name"], float(row["duration"]),
+                                  tuple(Track(path, interpolation, tupled(keys), tupled(groups), tupled(extra), label,
+                                              order)
+                                        for path, interpolation, keys, groups, extra, label, order in row["tracks"]))
+            for row in rows}
 
 
 def _occurrence_tree(tree: Any) -> tuple[Any, dict[tuple[int, ...], Any]]:

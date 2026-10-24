@@ -125,6 +125,20 @@ class BudgetTest(unittest.TestCase):
         self.assertIn(ident, self.server.served)
 
 
+    def test_a_held_documents_animations_count_against_the_budget_and_go_with_it(self) -> None:
+        ident = model_id(self.folder / "lid.py", "lid")
+        animations = [{"name": "open", "duration": 1.0,
+                       "tracks": [["translation", "LINEAR", [[0.0, [0, 0, 0]], [1.0, [0, 0, 9]]], [[[0]]], None,
+                                   "animation 'open': translation", 0]]}]
+        self.server.keep(ident, _document("lid"), {"lid-key": b"m" * MIB}, 1, b"x" * 1000)
+        bare = self.server.served[ident].size
+        self.server.keep(ident, _document("lid"), {"lid-key": b"m" * MIB}, 2, b"x" * 1000, animations)
+        self.assertEqual(self.server.served[ident].size, bare + len(json.dumps(animations, separators=(",", ":"))))
+        self.assertEqual(self.server.holding(), self.server.served[ident].size)
+        self.assertEqual(self.server.trim(0), [ident])
+        self.assertEqual(self.server.holding(), 0, "evicted, its animations go with its xbf bytes")
+
+
 class NotHeldRefusalTest(unittest.TestCase):
     """An id the daemon does not hold is refused as ``NotHeld``, its state and rebuild with it."""
 
@@ -184,6 +198,17 @@ def {name}():
     mechanism_state(root, "raised", elbow=90)
     return root
 """
+
+# The hinge with a configuration sequence (the document's) and an animation (the GLB's alone), its
+# GLB declared: the build writes it live, the export of its hold writes it again.
+ANIMATED = HINGE.replace("from cadgen.engine import model", """from cadgen.ap242 import configuration_sequence
+from cadgen.engine import glb
+from cadgen.gltf import animation""").replace("@model", '@glb("live.glb")').replace("    return root", """\
+    configuration_sequence(root, "lift", [(0, {{"elbow": 30}}), (1, "raised")])
+    show = animation(root, "show", duration=2)
+    show.pose(at={{0: {{}}, 1: "raised", 2: {{}}}})
+    show.translation("base", by=(0, 0, -15)).hide("arm", at=2)
+    return root""")
 
 CALLER = """
 import {name}
@@ -297,6 +322,29 @@ class LifetimeDaemonTest(unittest.TestCase):
                                         "modelRevision": shown["version"]}, "destinations": [str(viewed)]})
         self.assertIn("done", answer, answer)
         self.assertIsNotNone(document.Loaded(viewed).mechanism)
+        self.assertEqual([Path(w["script"]).name for w in self.ask({"op": "status"})["workers"]], ["documents"])
+        self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
+
+    def test_a_held_glb_carries_the_builds_animations_as_the_live_one_does(self) -> None:
+        from cadgen.engine import document
+        from tests.python.packages.cadgen.engine.test_kinematics import _arm_tip, _has_point, _vertices
+
+        ident = self.built("hinge", script=ANIMATED)
+        self.row(ident, "held")
+        live, held, step = self.folder / "live.glb", self.folder / "held.glb", self.folder / "held.step"
+        answer = self.ask({"op": "export", "source": {"id": ident}, "destinations": [str(held), str(step)],
+                           "cwd": str(self.folder), "env": dict(os.environ)})
+        self.assertIn("done", answer, answer)
+
+        def clips(path: Path) -> list[str]:
+            data = path.read_bytes()
+            gltf = json.loads(data[20:20 + int.from_bytes(data[12:16], "little")])
+            return [clip["name"] for clip in gltf.get("animations") or []]
+
+        self.assertEqual(clips(held), ["lift", "show"], "the sequence and the animation, from the hold")
+        self.assertEqual(held.read_bytes(), live.read_bytes(), "the GLB the build's worker wrote, byte for byte")
+        self.assertTrue(_has_point(_vertices(document.Loaded(step), "arm"), _arm_tip(30)),
+                        "a STEP of the same hold, as built: it never carried an animation")
         self.assertEqual([Path(w["script"]).name for w in self.ask({"op": "status"})["workers"]], ["documents"])
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
 

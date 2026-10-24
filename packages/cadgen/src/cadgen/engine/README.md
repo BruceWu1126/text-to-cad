@@ -568,7 +568,9 @@ evicts it ([models.py](models.py), [serve.py](serve.py)). Its state (`models.STA
 - `live`: a live worker holds it, with its memo and its trace.
 - `held`: its worker is gone and the daemon holds it whole: its served structure and shape bytes,
   and the document as the xbf bytes `@xbf` would write of it, mechanism and every assembly's
-  placement included. A page and `cadgen inspect` read the served structure; an export or a
+  placement included, and beside them the build's animations as JSON (`animations.to_json`: each
+  track's path, interpolation, keys and parts), which the xbf holds none of. A page and `cadgen
+  inspect` read the served structure; an export or a
   snapshot by its id, and the viewer's export, go to the documents worker with the xbf bytes
   (`Daemon.document`), which reads them as it reads an xbf on disk, so no worker of its script
   starts. What made an element is null (law 7: provenance is the worker's). A document its worker
@@ -597,7 +599,7 @@ drains nothing: its documents the server lacked are `evicted`.
 
 **One budget.** Everything the daemon holds is counted against one budget: each served
 document's structure (as JSON), its shape bytes, the bytes made from live shapes and a held
-document's xbf bytes (`Served.size`), and every tessellation (`MeshCache`, which has no cap of its
+document's xbf bytes and animations (`Served.size`), and every tessellation (`MeshCache`, which has no cap of its
 own in the daemon). Evicting a document drops all of it.
 Bytes are counted as they are put, never sampled. Workers and render processes are processes of
 their own, held to their own memory cap. The budget is `CADGEN_ENGINE_MEMORY_MB`, else a quarter
@@ -1217,7 +1219,9 @@ nodes a GLB places, in glTF's own terms -- translation, rotation and scale chann
 mechanism's forward kinematics at given times -- for what a mechanism does not say: an explode, a
 reveal, a showcase, a part hidden. It is never written into the document (law 13 stands: the xbf
 holds standard data alone). It is baked into every GLB the model declares, when that GLB is
-written (law 10), from the build's tree in memory. A GLB exported later from the xbf alone
+written (law 10), from the build's tree in memory. A GLB exported by id from a held document
+(**Document lifetime**) bakes the animations its worker handed over with it, byte for byte the GLB
+that worker would have written. A GLB exported later from the xbf alone
 (`cadgen export model.xbf model.glb`) carries the document's sequences only. For now a model with
 an animation declares its GLB beside its xbf, the two decorators stacked on one function: the xbf
 ignores the animation, the GLB bakes it.

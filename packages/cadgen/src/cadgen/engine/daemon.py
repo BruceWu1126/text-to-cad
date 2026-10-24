@@ -808,7 +808,10 @@ class Daemon:
             name = record["source"]["name"] if record else ident
             raise ValueError(f"{name} ({ident}) is held for viewing only: its worker exited before the engine "
                              f"took it whole; run `{self.models.command(ident)}` to build it again")
-        return {"document": ident, "name": doc.structure.get("name") or ident}, doc.xbf
+        source = {"document": ident, "name": doc.structure.get("name") or ident}
+        if doc.animations:
+            source["animations"] = doc.animations  # the build's, which a GLB of it bakes
+        return source, doc.xbf
 
     def _routed(self, request: dict[str, Any]) -> tuple[str, str | None]:
         """The worker a request goes to (its key) and the folder that worker starts in."""
