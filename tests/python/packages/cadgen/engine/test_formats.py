@@ -518,6 +518,23 @@ class BufferTest(unittest.TestCase):
         self.assertTrue(np.allclose(flat[:, 0], flat[:, 1]) and np.allclose(flat[:, 0], flat[:, 2]))
 
 
+class GlbWholeFromItselfTest(unittest.TestCase):
+    """The OCCT GLB reader refuses a file that names a buffer or image outside itself."""
+
+    def test_an_embedded_buffer_passes_and_an_external_uri_is_refused(self) -> None:
+        from cadgen.engine.formats import FormatError
+        from cadgen.engine.formats.glb import _whole_from_itself
+
+        _whole_from_itself(Path("m.glb"), {"buffers": [{"byteLength": 36}]})  # embedded BIN chunk: no uri
+        _whole_from_itself(Path("m.glb"), {"buffers": [{"uri": "data:application/octet-stream;base64,AAAA"}]})
+        for item in ({"buffers": [{"uri": "../outside.bin"}]},
+                     {"buffers": [{"uri": "side.bin"}]},
+                     {"images": [{"uri": "/etc/hosts"}]},
+                     {"buffers": [{"uri": "data:text/plain,not-base64"}]}):
+            with self.assertRaisesRegex(FormatError, "outside the GLB"):
+                _whole_from_itself(Path("m.glb"), item)
+
+
 class MeshFileTest(FixtureTest):
     def test_an_stl_reads_alike_binary_or_ascii_as_one_part_in_the_fill(self) -> None:
         triangles = np.concatenate([box_soup((20, 10, 4)), cylinder_soup(3, 12, at=(0, 0, 2))])

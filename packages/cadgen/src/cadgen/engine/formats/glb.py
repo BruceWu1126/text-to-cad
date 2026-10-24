@@ -77,6 +77,18 @@ def _loud(kept: Any) -> None:
         printer.SetTraceLevel(level)
 
 
+def _whole_from_itself(path: Path, gltf: dict[str, Any]) -> None:
+    """Refuse a GLB that names a buffer or image outside itself. OCCT's reader would resolve
+    such a ``uri`` against the file's folder and read that file as the model's bytes; a GLB is
+    read whole from itself, as the numpy reader (``gltf._buffers``) already requires."""
+    for kind in ("buffers", "images"):
+        for index, item in enumerate(gltf.get(kind) or []):
+            uri = (item or {}).get("uri") if isinstance(item, dict) else None
+            if uri is not None and not (isinstance(uri, str) and uri.startswith("data:") and ";base64," in uri):
+                raise FormatError(f"{path.name}: {kind[:-1]} {index} is a file outside the GLB ({uri}); "
+                                  "a GLB is read whole from itself")
+
+
 def _document(path: Path, z_up: bool) -> Any:
     from OCP.Message import Message_ProgressRange
     from OCP.RWGltf import RWGltf_CafReader
@@ -252,6 +264,7 @@ def read_glb(path: Path) -> tuple[list[Part], list[Placed], dict[str, Any], list
 
     path = Path(path)
     gltf = _json(path)
+    _whole_from_itself(path, gltf)
     z_up = any(str(((node or {}).get("extras") or {}).get("cadUpAxis") or "").lower() == "z"
                for node in gltf.get("nodes") or [] if isinstance(node, dict))
     document = _document(path, z_up)
