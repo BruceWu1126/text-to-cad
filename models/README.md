@@ -167,7 +167,7 @@ resident memory during the cold build.
 | `moonwatch` case, dial, bracelet, finishing sampler | 4 | 8-54 | 5.7-49 s | 0.14-0.36 s |
 | `moonwatch` movement | 1 | | 178 s | 0.45 s |
 | `moonwatch` (the full watch) | 1 | 258 / 301 | 255 s | 4.3 s |
-| `tom` | 1 | 221 / 628 | 103 s (peak 2.9 GB) | 6.6 s |
+| `tom` | 1 | 221 / 628 | 103 s (peak 2.9 GB) | 3.9 s |
 | `tom` `rev3_parts.py` | 8 | | 460 s, the eight exports | |
 | `hypercar` | 1 | 706 / 1,450 | 183 s | 1.5 s |
 | `f1` | 1 | 833 / 853 | 492 s (2.3 GB after) | 1.2 s |
@@ -175,10 +175,8 @@ resident memory during the cold build.
 | `w16` | 1 | 794 / 2,575 | 927 s (peak 3.9 GB) | 5.9 s |
 | `radial` | 1 | 473 / 2,400 | 3,238 s (peak 6.0 GB) | 2.8 s, its xbf taken (34 s without) |
 
-What a no-op still spends, by the engine's own report: `juno`, `lyra`, `w16` and `moonwatch`
-sample their motions' functions of time again on every run (`collect`: 1.6 s of `juno`'s
-1.7 s, 2.1 s of `w16`'s 3.0 s), and `tom`'s root body runs on every run (2.8 s), its
-`retention.fallbacks` naming why: computed `getattr`s, imports inside functions and two
-`.brep` reads through build123d's `import_brep`. A GLB of a model with long motions or
+What a no-op still spends, by the engine's own report: `juno`, `lyra`, `w16`, `moonwatch`
+and `tom` sample their motions' functions of time again on every run (`collect`: 1.6 s of
+`juno`'s 1.7 s, 2.1 s of `w16`'s 3.0 s, 1.6 s of `tom`'s 2.6 s). A GLB of a model with long motions or
 animations is large (`juno` 109 MB, `tom` 99 MB, `w16` 83 MB, `radial` 79 MB): every
 moving part carries keys at its motions' sample times.
