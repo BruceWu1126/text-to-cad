@@ -327,6 +327,8 @@ class MotionReadsTest(unittest.TestCase):
         self.table(45)
         report = self.hinge()
         self.assertEqual(report["cache"]["reason"], "../table.json changed")
+        self.assertEqual((report["bodies"], report["harvest"]), ({"hinge.py::hinge": "replayed"}, "run"),
+                         "the body replayed, and its harvest is not reused: a file its function read changed")
         self.assertEqual(self.first(), 45.0, "sampled again, from the file as it is")
         self.restart()
         self.assertEqual(self.hinge()["cache"], {"used": True, "from": "file"})
@@ -341,6 +343,131 @@ class MotionReadsTest(unittest.TestCase):
         self.assertNotIn("motions", report["verify"])
         self.assertNotIn("motions", report)
         self.assertEqual(self.first(), 40.0)
+
+
+KEPT_MOVES = """
+import math
+
+
+def nod(t):
+    return {{"elbow": 45 + {amplitude} * math.sin(t)}}
+
+
+def unused():
+    return {unused}
+"""
+
+KEPT = """
+import build123d as bd
+from cadgen import glb, xbf
+from cadgen.ap242 import configuration_sequence
+from cadgen.gltf import animation
+import moves
+
+
+@xbf("XBF/hinge.xbf")
+@glb("GLB/hinge.glb")
+def hinge():
+    base = bd.Box(100, 60, 20)
+    arm = bd.Pos(40, 0, 25) * bd.Box(120, 20, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.CENTER))
+    cap = bd.Pos(-40, 0, 10 + {height} / 2) * bd.Box(10, 10, {height})
+    base.label, arm.label, cap.label = "base", "arm", "{cap}"
+    elbow = bd.Axis((40, 0, 20), (0, 1, 0))
+    bd.RevoluteJoint("elbow", base, axis=elbow, angular_range=(-10, 120))
+    bd.RigidJoint("mount", arm, bd.Plane(origin=elbow.position, z_dir=elbow.direction).location)
+    base.joints["elbow"].connect_to(arm.joints["mount"], angle=0)
+    hinge = bd.Compound(children=[base, arm{cap_child}], label="hinge")
+    configuration_sequence(hinge, "nod", moves.nod, duration=2)
+    animation(hinge, "lift", duration=2).translation("{target}", by=(0, 0, 30))
+    return hinge
+"""
+
+
+class HarvestKeptTest(unittest.TestCase):
+    """A replayed model body's harvest -- its mechanism, its sequences' samples, its animations --
+    is the one kept beside the body's run, not sampled again (``memo.harvest_of``), and what it
+    writes is what a fresh harvest writes; an edit the body sees, or a file its functions read,
+    harvests again."""
+
+    def setUp(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine.kernel import memo
+
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-harvest-kept-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.xbf, self.glb = self.folder / "XBF/hinge.xbf", self.folder / "GLB/hinge.glb"
+        memo.install()
+        for clear in (memo.clear, engine_build._WRITTEN.clear, engine_build._PARTS.clear):
+            clear()
+            self.addCleanup(clear)
+        patch = mock.patch.dict(os.environ)
+        patch.start()
+        self.addCleanup(patch.stop)
+        for name in ("CADGEN_ENGINE_BODIES", "CADGEN_ENGINE_MEMO"):
+            os.environ.pop(name, None)
+
+    def write(self, *, amplitude: int = 20, unused: int = 0, height: int = 10, cap: str = "cap",
+              target: str = "cap", placed: bool = True) -> None:
+        for name, text in (("moves.py", KEPT_MOVES.format(amplitude=amplitude, unused=unused)),
+                           ("hinge.py", KEPT.format(height=height, cap=cap, target=target,
+                                                    cap_child=", cap" if placed else ""))):
+            path = self.folder / name
+            path.write_text(textwrap.dedent(text), encoding="utf-8")
+            os.utime(path, ns=(time.time_ns(), time.time_ns()))
+
+    def build(self, ok: bool = True, **values: Any) -> dict:
+        """The hinge built with its files gone, so a body the memo holds is replayed and they are
+        written again (a model with no xbf replays every build: tom)."""
+        self.write(**values)
+        for path in (self.xbf, self.glb):
+            path.unlink(missing_ok=True)
+        [report] = engine_build.build(self.folder / "hinge.py", ["hinge"], cwd=self.folder)
+        self.assertEqual(report["ok"], ok, report)
+        return report
+
+    def written(self) -> tuple[bytes, bytes, dict]:
+        structure = engine_build.held(self.folder / "hinge.py", "hinge").structure
+        return self.xbf.read_bytes(), self.glb.read_bytes(), {name: value for name, value in structure.items()
+                                                                if name != "version"}
+
+    def test_a_replay_reuses_the_harvest_and_writes_the_cold_builds_bytes(self) -> None:
+        report = self.build()
+        self.assertEqual((report["bodies"], report["harvest"]), ({"hinge.py::hinge": "run"}, "run"))
+        cold = self.written()
+        report = self.build()
+        self.assertEqual((report["bodies"], report["harvest"], report["cache"]["reason"]),
+                         ({"hinge.py::hinge": "replayed"}, "reused", "replayed from memory; the harvest reused"))
+        self.assertEqual(self.written(), cold, "the xbf, the GLB and the served structure are the fresh harvest's")
+        nod = document.Loaded(self.xbf).mechanism.motions["nod"].keys
+
+        # An edit the body does not reach: replayed, and the harvest is reused.
+        self.assertEqual(self.build(unused=1)["harvest"], "reused")
+        self.assertEqual(self.written(), cold)
+        # An edit of the sequence's function, in the module it is defined in: sampled again.
+        report = self.build(amplitude=30)
+        self.assertEqual((report["bodies"], report["harvest"]), ({"hinge.py::hinge": "run"}, "run"))
+        self.assertNotEqual(document.Loaded(self.xbf).mechanism.motions["nod"].keys, nod, "the new function's samples")
+        self.assertEqual(self.build(amplitude=30)["harvest"], "reused")
+
+    def test_an_edit_of_a_part_an_animation_moves_harvests_again(self) -> None:
+        self.build()
+        lift = document.Loaded(self.xbf).animations["lift"]
+        _xbf, glb, _structure = self.written()
+        # Its geometry, its path the same: the body runs and harvests again; the track is the
+        # same, and the GLB its new geometry's.
+        report = self.build(height=14)
+        self.assertEqual((report["bodies"], report["harvest"]), ({"hinge.py::hinge": "run"}, "run"))
+        self.assertEqual(document.Loaded(self.xbf).animations["lift"], lift)
+        self.assertNotEqual(self.glb.read_bytes(), glb)
+        # Renamed, the animation following it: harvested again, the track named anew.
+        self.assertEqual(self.build(height=14, cap="lid", target="lid")["harvest"], "run")
+        renamed = document.Loaded(self.xbf).animations["lift"]
+        self.assertEqual([track.groups for track in renamed.tracks], [track.groups for track in lift.tracks])
+        self.assertIn("'lid'", renamed.tracks[0].label)
+        # Removed, the animation still naming it: harvested again, and refused by name.
+        report = self.build(False, height=14, placed=False)
+        self.assertIn("has no part or assembly cap", report["error"])
 
 
 def _glb(path: Path) -> tuple[dict, Any]:

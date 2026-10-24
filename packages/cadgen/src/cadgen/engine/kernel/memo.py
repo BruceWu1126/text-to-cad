@@ -1196,7 +1196,7 @@ class _Body:
     of it may be replayed (``direct``: false for a ``@memo`` function that returned no
     geometry, whose log is kept only for the bodies that called it)."""
 
-    __slots__ = ("name", "source", "log", "snapshot", "generation", "inputs", "direct", "serial")
+    __slots__ = ("name", "source", "log", "snapshot", "generation", "inputs", "direct", "serial", "harvest")
 
     def __init__(self, name: str, source: str, log: _BodyLog, snapshot: Any, generation: int,
                  inputs: tuple = ()) -> None:
@@ -1205,6 +1205,10 @@ class _Body:
         # Which run of the body this is, process-wide: a replay keeps it, a run makes another
         # (``adopt``: what the shapes its run made past the engine are keyed by).
         self.serial = next(_SERIALS)
+        # A model body's harvest (``harvest_of``): what the build made of its result's joints,
+        # sequences and animations, with the tree it was made of and the files the sequences'
+        # functions read. A run of the body makes a record without one.
+        self.harvest: tuple | None = None
 
 
 # Per model body, by its caller's name for it: the body's last run, kept while one of the
@@ -1362,6 +1366,52 @@ def adopt(name: str, result: Any) -> Any:
 def always() -> dict[str, str]:
     """The functions a verification found impure, each with why: they run on every call."""
     return dict(_ALWAYS)
+
+
+# --- a model body's harvest -----------------------------------------------------------------
+
+
+def harvest_of(state: _Run, name: str, tree: Any) -> tuple[Any, list] | None:
+    """What the build made of model body ``name``'s result the last time (``keep_harvest``):
+    the harvest and the checks of the files its sequences' functions read. Only when this run
+    replayed the very run the harvest was made from (``_Body.serial``: a run makes another
+    record), ``tree`` (the result's structure, as ``document.collect`` keys it) is the one it
+    was made of, and every file those functions read has its bytes still. Else None: a run,
+    a verifying run, a run with retention off, a file changed. ``state`` is the build's run,
+    asked as its files are written, after it."""
+    if (state.verify or not enabled() or state.statuses.get(name) != "replayed"
+            or os.environ.get("CADGEN_ENGINE_BODIES", "1").strip() == "0"):
+        return None
+    record = _BODIES.get(name)
+    if record is None or record.harvest is None or state.records.get(name) is not record:
+        return None
+    held_tree, harvest, checks = record.harvest
+    if held_tree != tree:
+        return None
+    state.depth += 1
+    try:
+        for check, expected in checks:
+            try:
+                if check() != expected:
+                    return None
+            except _Unkeyable:
+                return None
+    finally:
+        state.depth -= 1
+    return harvest, checks
+
+
+def keep_harvest(state: _Run, name: str, tree: Any, harvest: Any, checks: list, keyed: bool) -> None:
+    """Keep the harvest of body ``name``'s result beside the body's run in this process
+    (``harvest_of``), in memory only: gone with the record. Not kept where the sampled
+    functions read what cannot be held to its bytes (``keyed``), or where this run's record of
+    the body is not the one in the memo (a body not retained)."""
+    if state.verify or not keyed or not enabled():
+        return
+    record = _BODIES.get(name)
+    if record is None or state.records.get(name) is not record:
+        return
+    record.harvest = (tree, harvest, list(checks))
 
 
 # --- the files a motion's function reads ---------------------------------------------------

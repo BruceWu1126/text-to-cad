@@ -54,7 +54,7 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Callable, Iterable, Iterator
 
 from cadgen.engine.atomic_replace import replace_atomic, staging
 
@@ -138,6 +138,22 @@ class Tree:
     # The model's build closure (``previous.manifest``, as text), written on the main label;
     # None for none.
     closure: str | None = None
+    # What ``collect`` made of the result's joints, sequences and animations (``Harvest``), and
+    # whether it was handed back rather than made (``collect``'s ``harvested``).
+    harvest: "Harvest | None" = None
+    reused: bool = False
+
+
+@dataclass(frozen=True)
+class Harvest:
+    """A result's harvest: its mechanism (``mechanism.harvest``: the pairs, the states and the
+    configuration sequences, a function's sampled), its animations (``animations.harvest``) and
+    what of the tree's signature they are. Plain values, read and never changed by what writes
+    the document or bakes the GLB, so one harvest serves every build of the same result."""
+
+    mechanism: Any
+    animations: Any
+    signature: tuple
 
 
 def _identity() -> Any:
@@ -231,10 +247,13 @@ def _mesh_refused(path: str, ordinals: tuple[int, ...]) -> str:
             "and bounding_box() -- and build B-rep from those")
 
 
-def collect(result: Any, name: str) -> Tree:
+def collect(result: Any, name: str, harvested: Callable[[tuple], "Harvest | None"] | None = None) -> Tree:
     """The prototypes and instances of a model's result (see the module docstring). A part
     holding a face with no surface -- a mesh's triangles -- is refused by its occurrence's path
-    (``mesh_faces``), before anything is made of it."""
+    (``mesh_faces``), before anything is made of it. ``harvested``, given the tree's signature
+    (its structure: every prototype's TShape, label, colour and placement), answers the harvest
+    made of this very result before, or None, and the joints, sequences and animations are
+    harvested again (``build``: kept beside the model body's run)."""
     from OCP.TopAbs import TopAbs_COMPOUND
 
     from cadgen.engine.kernel.memo import FACE_COLORS, FACE_MATERIALS
@@ -316,14 +335,20 @@ def collect(result: Any, name: str) -> Tree:
         order.append(holder)
         root = holder
     tree = Tree(root, order, parts, (signature, _location_key(location), root_name))
-    # The result's joints, harvested: the result is the holder's one component where it has one.
-    tree.mechanism = mechanism.harvest(result, tree, (0,) if held else ())
-    # And its animations, a GLB's: a change of one rewrites the GLB and the document's record, never its tree.
-    from cadgen.engine.animations import harvest
+    found = harvested(tree.signature) if harvested is not None else None
+    if found is None:
+        # The result's joints, harvested: the result is the holder's one component where it has one.
+        kinematics = mechanism.harvest(result, tree, (0,) if held else ())
+        # And its animations, a GLB's: a change of one rewrites the GLB and the document's record, never its tree.
+        from cadgen.engine.animations import harvest
 
-    tree.animations = harvest(result, tree, (0,) if held else (), tree.mechanism)
-    tree.signature = (*tree.signature, tree.mechanism.signature() if tree.mechanism else None,
-                      tuple(sorted(tree.animations.items())) if tree.animations else None)
+        animated = harvest(result, tree, (0,) if held else (), kinematics)
+        found = Harvest(kinematics, animated, (kinematics.signature() if kinematics else None,
+                                               tuple(sorted(animated.items())) if animated else None))
+    else:
+        tree.reused = True
+    tree.harvest, tree.mechanism, tree.animations = found, found.mechanism, found.animations
+    tree.signature = (*tree.signature, *found.signature)
     return tree
 
 

@@ -598,13 +598,33 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     # The files the motions' functions open while they are sampled (``memo.listened``) are the
     # model's inputs, as its bodies' are: its closure holds them, so an edit of one is a change
     # the document's key sees.
+    name = f"{model.script}::{model.name}"
+    made_of: list = []
+
+    def harvested(signature: tuple) -> Any:
+        # The harvest made of this very result before (a replay of the body's run whose harvest
+        # was kept, and the files its functions read unchanged): not sampled again.
+        made_of.append(signature)
+        found = memo.harvest_of(run, name, signature)
+        if found is None:
+            return None
+        made_of.append(found[1])
+        return found[0]
+
     with memo.motion_reads() as reads:
-        tree = document.collect(result, model.name)
-    if reads.checks or not reads.keyed:
-        found = run.keys.get(f"{model.script}::{model.name}")
+        tree = document.collect(result, model.name, harvested)
+    checks, keyed = (made_of[1], True) if tree.reused else (reads.checks, reads.keyed)
+    if not tree.reused and made_of:
+        memo.keep_harvest(run, name, made_of[0], tree.harvest, checks, keyed)
+    if tree.mechanism is not None or tree.animations is not None:
+        report["harvest"] = "reused" if tree.reused else "run"
+        cache = report.get("cache")
+        if tree.reused and isinstance(cache, dict) and cache.get("reason"):
+            cache["reason"] += "; the harvest reused"
+    if checks or not keyed:
+        found = run.keys.get(name)
         if found is not None:
-            run.keys[f"{model.script}::{model.name}"] = (found[0], [*found[1], *reads.checks],
-                                                         found[2] and reads.keyed, found[3])
+            run.keys[name] = (found[0], [*found[1], *checks], found[2] and keyed, found[3])
     xbf = next((path for kind, path in targets if kind == "xbf"), None)
     if context is not None:
         from cadgen.engine import previous
