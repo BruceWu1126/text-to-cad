@@ -1,8 +1,8 @@
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 from lib.tray_geometry import tray
 
 
-@xbf(out="../XBF/cnc.xbf")
+@model
 def cnc():
     part = tray("cnc")
     # 6061-T6 billet (README): the catalogue's generic aluminium

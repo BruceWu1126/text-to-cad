@@ -1,8 +1,8 @@
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 from lib.tray_geometry import tray
 
 
-@xbf(out="../XBF/sheet.xbf")
+@model
 def sheet():
     part = tray("sheet")
     # 5052-H32 sheet (README): the catalogue's generic aluminium
