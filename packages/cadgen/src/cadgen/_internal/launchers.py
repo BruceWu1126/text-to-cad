@@ -49,6 +49,9 @@ DANGLING = "dangling"  # its environment is gone
 OTHER = "other"  # another installation of this version
 FOREIGN = "foreign"  # a file of that name that cadgen did not write: left alone
 REPAIRABLE = (MISSING, DANGLING, OTHER)
+# What this process's startup did, ``(version, folder, results)``, for ``cadgen doctor`` to report
+# rather than find it done.
+last: tuple[str, str, list[tuple[str, str, str | None]]] | None = None
 
 
 def folder() -> str:
@@ -273,9 +276,10 @@ def own_version() -> str | None:
 
 def startup() -> None:
     """At a command's start: publish this installation's launchers if they need it, silently."""
+    global last
     try:
         version = own_version()
         if version:
-            publish(version)
+            last = (version, folder(), publish(version))
     except Exception:  # noqa: BLE001 - a launcher never fails the command it rides on
         pass
