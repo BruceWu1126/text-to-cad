@@ -1,48 +1,50 @@
 # assemblies models
 
-`models/assemblies` ported to `cadgen.engine`: the repo's demo assemblies, one
-group per assembly. `src/<group>/` holds the group's scripts and its own `lib/`,
-and every model writes into `XBF/<group>/`. A group imports its siblings and its
+`models/assemblies` on cadgen 0.8: the repo's demo assemblies, one group per
+assembly, each model a `@model` that writes nothing. `src/<group>/` holds the group's
+scripts and its own `lib/`. A group imports its siblings and its
 own `lib/`, and nothing across groups. There are 23 models. The old project had
 27 decorated files: `link_robot` and `research_humanoid` were three each, and
 each is one model now.
 
-Build a group from its folder; each script builds every model it defines:
+Build a group from its folder; each script builds the models its `__main__` calls and
+prints each one's id and page:
 
 ```
 cd planetary_gear_assembly && python planetary_gear_assembly.py
-python -m cadgen.engine snapshot ../../XBF/planetary_gear_assembly/planetary_gear_assembly.xbf gear.png --pose half_cycle
+cadgen snapshot "$ID" gear.png --pose half_cycle      # ID: the id: line the run printed
 ```
 
-| Script | Writes (in `XBF/<group>/`) | What it is |
+| Script | Model | What it is |
 | --- | --- | --- |
-| `compact_humanoid/compact_humanoid.py` | `compact_humanoid.xbf` | 28-DOF compact humanoid concept; each actuator axis is an unconnected joint on its cartridge, so there is no mechanism (none before either) |
-| `cutaway_turbofan_engine/cutaway_turbofan_engine.py` | `cutaway_turbofan_engine.xbf` | Labeled multi-body cutaway turbofan |
-| `flying_car/flying_car.py` | `flying_car.xbf` | Four-rotor flying car concept |
-| `link_robot/link_robot.py` | `link_robot.xbf` | A base, two placements of `link_arm()` and a spare `link_pin()`: one pin B-rep placed five times, two levels deep |
-| `lunar_rover_corner_assembly/lunar_rover_corner_assembly.py` | `lunar_rover_corner_assembly.xbf` | Lunar rover corner: wheel, hub motor, suspension |
-| `mars_rover_concept/mars_rover_concept.py` | `mars_rover_concept.xbf` | Mars rover on terrain: 69 joints, 1 coupling, 4 configurations, 4 motions |
-| `mechanical_iris_aperture/mechanical_iris_aperture.py` | `mechanical_iris_aperture.xbf` | Labeled mechanical iris aperture |
-| `miniature_spiral_staircase/miniature_spiral_staircase.py` | `miniature_spiral_staircase.xbf` | Labeled miniature spiral staircase |
-| `motorcycle_fidgets/motorcycle_{helmet,seat,shock,wheel}_fidget.py` | `motorcycle_*_fidget.xbf` | Four Cherry MX switch fidgets; the group shares `lib/mx_switch_socket.py` and `lib/color.py` |
-| `motorcycle_shock_absorber/motorcycle_shock_absorber.py` | `motorcycle_shock_absorber.xbf` | Coilover damper; the rod rides a linear joint, `damper_stroke` |
-| `pelican_riding_bicycle/pelican_riding_bicycle.py` | `pelican_riding_bicycle.xbf` | Pelican riding a bicycle |
-| `photo_coffee_cup/photo_coffee_cup.py` | `photo_coffee_cup.xbf` | Photo-inspired takeaway coffee cup |
-| `planetary_gear_assembly/planetary_gear_assembly.py` | `planetary_gear_assembly.xbf`, `.glb` | The docs site's hero: a gear train driven by one coupling, `drive`, and the `meshCycle` and `inspectExplode` motions its GLB carries as clips |
-| `planetary_gear_stage/planetary_gear_stage.py` | `planetary_gear_stage.xbf` | Simplified planetary gear stage (`lib/gear_teeth.py`) |
-| `research_humanoid/research_humanoid.py` | `research_humanoid.xbf` | Adult-scale humanoid: 28 body joints, and 15 per hand from `lib.build_hand(side)` |
-| `robotic_hand_end_effector/robotic_hand_end_effector.py` | `robotic_hand_end_effector.xbf` | Cybernetic robotic hand end-effector |
-| `sculpted_humanoid/sculpted_humanoid.py` | `sculpted_humanoid.xbf` | Sculpted humanoid: 58 revolute joints in an athletic pose |
-| `six_axis_industrial_robot_arm/six_axis_industrial_robot_arm.py` | `six_axis_industrial_robot_arm.xbf` | Six-axis industrial robot arm display assembly |
-| `six_blade_open_propeller/six_blade_open_propeller.py` | `six_blade_open_propeller.xbf` | Six-blade open propeller |
-| `spiral_staircase/spiral_staircase.py` | `spiral_staircase.xbf` | Miniature spiral staircase |
+| `compact_humanoid/compact_humanoid.py` | `compact_humanoid` | 28-DOF compact humanoid concept; each actuator axis is an unconnected joint on its cartridge, so there is no mechanism (none before either) |
+| `cutaway_turbofan_engine/cutaway_turbofan_engine.py` | `cutaway_turbofan_engine` | Labeled multi-body cutaway turbofan |
+| `flying_car/flying_car.py` | `flying_car` | Four-rotor flying car concept |
+| `link_robot/link_robot.py` | `link_robot` | A base, two placements of `link_arm()` and a spare `link_pin()`: one pin B-rep placed five times, two levels deep |
+| `lunar_rover_corner_assembly/lunar_rover_corner_assembly.py` | `lunar_rover_corner_assembly` | Lunar rover corner: wheel, hub motor, suspension |
+| `mars_rover_concept/mars_rover_concept.py` | `mars_rover_concept` | Mars rover on terrain: 28 joints, 1 coupling, 4 configurations, 3 motions and an animation |
+| `mechanical_iris_aperture/mechanical_iris_aperture.py` | `mechanical_iris_aperture` | Labeled mechanical iris aperture |
+| `miniature_spiral_staircase/miniature_spiral_staircase.py` | `miniature_spiral_staircase` | Labeled miniature spiral staircase |
+| `motorcycle_fidgets/motorcycle_{helmet,seat,shock,wheel}_fidget.py` | `motorcycle_*_fidget` | Four Cherry MX switch fidgets; the group shares `lib/mx_switch_socket.py` and `lib/color.py` |
+| `motorcycle_shock_absorber/motorcycle_shock_absorber.py` | `motorcycle_shock_absorber` | Coilover damper; the rod rides a linear joint, `damper_stroke` |
+| `pelican_riding_bicycle/pelican_riding_bicycle.py` | `pelican_riding_bicycle` | Pelican riding a bicycle |
+| `photo_coffee_cup/photo_coffee_cup.py` | `photo_coffee_cup` | Photo-inspired takeaway coffee cup |
+| `planetary_gear_assembly/planetary_gear_assembly.py` | `planetary_gear_assembly` | The docs site's hero: a gear train driven by one coupling, `drive`, its `meshCycle` motion and its `inspectExplode` animation, which its GLB carries as clips (`apps/docs/scripts/sync-hero-glb.mjs` exports it) |
+| `planetary_gear_stage/planetary_gear_stage.py` | `planetary_gear_stage` | Simplified planetary gear stage (`lib/gear_teeth.py`) |
+| `research_humanoid/research_humanoid.py` | `research_humanoid` | Adult-scale humanoid: 28 body joints, and 15 per hand from `lib.build_hand(side)` |
+| `robotic_hand_end_effector/robotic_hand_end_effector.py` | `robotic_hand_end_effector` | Cybernetic robotic hand end-effector |
+| `sculpted_humanoid/sculpted_humanoid.py` | `sculpted_humanoid` | Sculpted humanoid: 58 revolute joints in an athletic pose |
+| `six_axis_industrial_robot_arm/six_axis_industrial_robot_arm.py` | `six_axis_industrial_robot_arm` | Six-axis industrial robot arm display assembly |
+| `six_blade_open_propeller/six_blade_open_propeller.py` | `six_blade_open_propeller` | Six-blade open propeller |
+| `spiral_staircase/spiral_staircase.py` | `spiral_staircase` | Miniature spiral staircase |
 
 ## The port
 
-- `@step(out="../../STEP/<group>/<name>.step")` became
-  `@xbf(out="../../XBF/<group>/<name>.xbf")`, imported first. `build123d` is
+- `@step(out="../../STEP/<group>/<name>.step")` became `@model`. `build123d` is
   imported directly. Nothing else reads these models' STEP, so no model declares
-  one; `cadgen export` writes one on demand.
+  one; `cadgen export <id> STEP/<name>.step` writes one on demand. The docs hero's GLB
+  is the planetary gear's, written by the docs site's `sync-hero-glb.mjs` with
+  `cadgen.export(model, path)`.
 - No model calls another. `link_robot`'s arm and pin and `research_humanoid`'s
   hands are plain functions called in the one body (the hand models' two scripts
   are gone). The engine places a part used twice as one prototype.
@@ -73,25 +75,19 @@ python -m cadgen.engine snapshot ../../XBF/planetary_gear_assembly/planetary_gea
 ## Kinematics, motions and what was dropped
 
 - `planetary_gear_assembly`: the typed mates are build123d joints. `sun` and
-  `carrier` turn on the ring (the ground), `pin1..3` slide radially out of the
-  carrier (prismatic, held by the carrier) and `planet1..3` turn on their pins:
-  the pins carry the planets, as the old explode moved each planet with its
-  pin. `drive` is a coupling over the exact fixed-ring ratios (sun 1, carrier
+  `carrier` turn on the ring (the ground), `pin1..3` are fastened to the
+  carrier and `planet1..3` turn on their pins. `drive` is a coupling over the exact fixed-ring ratios (sun 1, carrier
   24/84, planets -(24/18)(60/84)); a coupling is a constraint, so the sun,
   carrier and planets turn only through it, and its range is the sun's limits,
   0..1260 (the old control's range; the old sun mate allowed -1260..1260).
   `quarter_cycle` and `half_cycle` are configurations. `meshCycle` is `drive`
   swept 0 -> 1260 over 6 s, linear, a seamless cycle a player repeats.
-  `inspectExplode` is back: a function of time over 5 s setting `drive` (the
-  same sweep) and each pin's slide, `16 * sine(progress)`. `@glb` bakes both
-  into clips of their names; the STL and 3MF exports are dropped. What the
-  coupling's constraint costs `inspectExplode`: the sun and carrier, coupled
-  leaves with no part to carry a slide, no longer lift 7 mm and drop 4 mm; they
-  and the pins stay in the gear plane, and only the planets and pins open
-  radially. Each pin slides along the carrier's radial, so a planet moves
-  outward from the sun at every point of its orbit; the old clip shifted each
-  planet and pin along its rest radial in the world while it orbited, so half a
-  carrier turn on, a planet moved toward the sun.
+  `inspectExplode` is a GLB animation (`cadgen.gltf`): over 5 s it drives `drive`
+  through the same sweep (`.pose`) while each planet and its pin move 16 mm out along
+  the planet's rest radial and back, the sun lifts 7 mm and the carrier and pins drop
+  4 mm, as the old clip did, the translations eased out to 2.5 s and back. A GLB
+  exported from the model carries both as clips of their names; the STL and 3MF exports
+  are dropped.
 - `mars_rover_concept`: its 27 typed mates are build123d joints on its
   top-level groups (26 revolute, one linear: `lid_lift`). Of its 7 couplings
   one is a real linkage and stays: `rocker_split`, the differential bar making
@@ -111,29 +107,26 @@ python -m cadgen.engine snapshot ../../XBF/planetary_gear_assembly/planetary_gea
 
   Its 4 poses are configurations: `stowed`, `deployed`, `arm_reach`,
   `cutaway_open`. Limits are offsets from the display pose, as before. Its four
-  clips are motions, functions of time with the old clips' numbers:
-  `driveAround` (18 s), `armCycle` (12 s), `deploySequence` (20 s) and
-  `explodedAssembly` (12 s), none looped, as before. For them the rover gains
-  42 prismatic joints:
-  - `heave`: the chassis rides the terrain, which is the ground now and stays
-    put while the body heaves over it; every group the chassis carries heaves
-    with it, through its joints or its explode slide.
-  - `explode_<group>`, one per group but the terrain and the chassis, each along
-    the old clip's vector, at that vector's length times `sine(t/12) * 520`. A
-    static group slides whole on a joint of the chassis. A jointed group (and the
-    HGA mast, which holds the dish's joint) slides off its joint without dragging
-    the groups hung on it: the group compound holds the slide, its parts ride it
-    (the first the rigid half, the rest fastened), and the compound stays posed
-    by its own joint and holds its children's. Every part reaches the old
-    clip's place.
+  clips keep the old clips' numbers: `driveAround` (18 s), `armCycle` (12 s) and
+  `deploySequence` (20 s) are motions, functions of time over the joints, and
+  `explodedAssembly` (12 s) is a GLB animation (`cadgen.gltf`), none looped, as
+  before:
+  - `heave`, a prismatic joint: the chassis rides the terrain, which is the ground
+    and stays put while the body heaves over it in `driveAround`; every group the
+    chassis carries heaves with it, through its joints or fastened to it.
+  - `explodedAssembly`: each group but the terrain and the chassis moves along the
+    old clip's vector, 520 mm times its length at the peak, eased out over 6 s and
+    back. The groups are siblings in the rover's tree, so each moves by its own
+    vector alone, as the old clip moved them, without dragging the groups hung on
+    its joints.
   - Deliberate differences: `driveAround` rolls the wheels four turns
     unwrapped, where the old clip wrapped the angle at 360 (a jump a joint's
     curve cannot take), so the six wheel joints range over +-1440 deg, four
     turns each way (+-360 before); the mast pitches about
     its head pivot as it heaves with the body, where the old clip pitched it
     about the unheaved pivot (at most 2.5 mm apart). `deploySequence` also
-    thinned the dust layer's opacity as the deck opened, which no joint does:
-    the dust layer stays as built.
+    thinned the dust layer's opacity as the deck opened; 0.8 has no opacity
+    channel, so the dust layer stays as built.
 - `miniature_spiral_staircase`: the `_highres` STL, 3MF and GLB at
   `mesh_tolerance=4e-4` are dropped. The engine meshes at one tolerance
   (FreeCAD's), configurable nowhere.

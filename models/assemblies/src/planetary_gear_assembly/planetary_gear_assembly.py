@@ -1,7 +1,8 @@
 from __future__ import annotations
+from cadgen import model
 from cadgen.ap242 import configuration_sequence, gear_pair, mechanism_state
-from cadgen.engine import glb, xbf
-from math import cos, pi, sin, tau
+from cadgen.gltf import animation
+from math import cos, sin, tau
 
 import build123d as bd
 
@@ -207,9 +208,8 @@ def _planet_center(index: int) -> tuple[float, float]:
 
 # ---------------------------------------------------------------------------
 # Kinematics: build123d joints, connected at 0 where the parts stand. The ring
-# is the ground; the sun and the carrier turn on it, each pin slides radially
-# out of the carrier (prismatic, along the carrier's own radial), and each
-# planet turns on its pin. The gear train is one coupling, `drive` (the sun's
+# is the ground; the sun and the carrier turn on it, each pin is fastened to
+# the carrier, and each planet turns on its pin. The gear train is one coupling, `drive` (the sun's
 # angle), over the exact fixed-ring planetary ratios: 3.5 sun revolutions
 # (1260 deg) return the carrier to 360 deg and every gear to an equivalent
 # tooth phase, so `meshCycle`, the drive swept once over 6 s, repeats without a
@@ -221,11 +221,13 @@ _CARRIER_RATIO = SUN_TEETH / (SUN_TEETH + RING_TEETH)          # 24/84
 _PLANET_RATIO = -(SUN_TEETH / PLANET_TEETH) * (1 - _CARRIER_RATIO)
 _FULL_MESH_CYCLE_DEG = 1260
 
-# The inspection explode, mm at its peak: each pin (and the planet on it) slides
-# out along its radial. The old clip also lifted the sun 7/16 of it and dropped
-# the carrier and pins 4/16 of it; the sun and the carrier are coupled leaves
-# with no part to carry them, so they stay in the gear plane.
+# The inspection explode, a GLB animation over the turning stage: each planet and its
+# pin move out along the planet's rest radial, 16 mm at the peak, the sun lifts 7 mm
+# and the carrier and pins drop 4 mm, out and back in 5 s.
 _EXPLODE_MM = 16.0
+_SUN_LIFT_MM = 7.0
+_CARRIER_DROP_MM = 4.0
+_INSPECT_S = 5.0
 _UP = (0.0, 0.0, 1.0)
 
 
@@ -237,30 +239,41 @@ def _revolute(fixed, moving, label: str, center: tuple[float, float], limits: tu
     fixed.joints[label].connect_to(moving.joints[label], angle=0.0)
 
 
-def _slides_out(fixed, moving, label: str, center: tuple[float, float], travel: tuple[float, float]) -> None:
-    """``moving`` slides along the radial through ``center`` on ``fixed``: the rigid half a pure
-    translation at the axis origin, where the linear joint holds it at 0."""
-    point = (center[0], center[1], 0.0)
-    length = (center[0] ** 2 + center[1] ** 2) ** 0.5
-    radial = (center[0] / length, center[1] / length, 0.0)
-    bd.LinearJoint(label, fixed, axis=bd.Axis(point, radial), linear_range=travel)
-    bd.RigidJoint(label, moving, bd.Location(point))
-    fixed.joints[label].connect_to(moving.joints[label], position=0.0)
+def _fasten(fixed, moving, label: str, center: tuple[float, float]) -> None:
+    """``moving`` fastened to ``fixed`` where it stands: a rigid pair of one label."""
+    point = bd.Location((center[0], center[1], 0.0))
+    bd.RigidJoint(label, fixed, point)
+    bd.RigidJoint(label, moving, point)
+    fixed.joints[label].connect_to(moving.joints[label])
 
 
-def _inspect_explode(t: float) -> dict:
+def _inspect_explode(assembly) -> None:
     """The old `inspectExplode`: the drive swept 0..1260 over 5 s while the stage opens and
-    closes, ``16 * sine(progress)``: `drive` by name, and each pin's slide. Each pin slides
-    along the carrier's radial, outward at every point of the orbit; the old clip shifted it
-    along its rest radial in the world (deliberate: a joint carries one direction in its
-    holder's frame)."""
-    progress = t / 5.0
-    explode = _EXPLODE_MM * (0.5 - 0.5 * cos(2.0 * pi * progress))
-    return {"drive": progress * _FULL_MESH_CYCLE_DEG, **{f"pin{index + 1}": explode for index in range(PLANET_COUNT)}}
+    closes, as a GLB animation. The translations act after the pose, in the assembly's frame,
+    so each planet and pin moves along its rest radial wherever the carrier has turned it."""
+    half = _INSPECT_S / 2
+    show = animation(assembly, "inspectExplode", duration=_INSPECT_S)
+    show.pose(at={0: {"drive": 0}, _INSPECT_S: {"drive": _FULL_MESH_CYCLE_DEG}}, interpolation="LINEAR")
+    for index in range(PLANET_COUNT):
+        x, y = _planet_center(index)
+        radial = (x / PLANET_CENTER_RADIUS * _EXPLODE_MM, y / PLANET_CENTER_RADIUS * _EXPLODE_MM, 0.0)
+        out = (radial[0], radial[1], -_CARRIER_DROP_MM)
+        pin = f"planet_pin_{index + 1}"
+        gear = f"planet_gear_{index + 1}_18_teeth"
+        show.translation(gear, by=radial, start=0, end=half).translation(gear, by=_neg(radial), start=half)
+        show.translation(pin, by=out, start=0, end=half).translation(pin, by=_neg(out), start=half)
+    sun, carrier = (0.0, 0.0, _SUN_LIFT_MM), (0.0, 0.0, -_CARRIER_DROP_MM)
+    show.translation("sun_gear_24_teeth", by=sun, start=0, end=half)
+    show.translation("sun_gear_24_teeth", by=_neg(sun), start=half)
+    show.translation("carrier_plate", by=carrier, start=0, end=half)
+    show.translation("carrier_plate", by=_neg(carrier), start=half)
 
 
-@xbf(out="../../XBF/planetary_gear_assembly/planetary_gear_assembly.xbf")
-@glb(out="../../XBF/planetary_gear_assembly/planetary_gear_assembly.glb")
+def _neg(vector):
+    return tuple(-v for v in vector)
+
+
+@model
 def planetary_gear_assembly():
     """Return a labeled simplified planetary gear assembly in millimeters."""
     sun_pitch_angle = tau / SUN_TEETH
@@ -307,7 +320,7 @@ def planetary_gear_assembly():
         planet, pin = parts[3 + 2 * index], parts[4 + 2 * index]
         center = _planet_center(index)
         limits = (-4 * _FULL_MESH_CYCLE_DEG, 4 * _FULL_MESH_CYCLE_DEG)
-        _slides_out(carrier, pin, f"pin{index + 1}", center, (0.0, _EXPLODE_MM))
+        _fasten(carrier, pin, f"pin{index + 1}", center)
         _revolute(pin, planet, f"planet{index + 1}", center, limits)
     # The sun's limits are the drive's range: one closed mesh cycle.
     _revolute(ring, sun, "sun", (0.0, 0.0), (0.0, _FULL_MESH_CYCLE_DEG))
@@ -323,7 +336,8 @@ def planetary_gear_assembly():
     mechanism_state(assembly, "quarter_cycle", drive=_FULL_MESH_CYCLE_DEG / 4)
     mechanism_state(assembly, "half_cycle", drive=_FULL_MESH_CYCLE_DEG / 2)
     configuration_sequence(assembly, "meshCycle", sweep={"drive": (0, _FULL_MESH_CYCLE_DEG)}, duration=6, ease="linear")
-    return configuration_sequence(assembly, "inspectExplode", _inspect_explode, duration=5)
+    _inspect_explode(assembly)
+    return assembly
 
 
 if __name__ == "__main__":

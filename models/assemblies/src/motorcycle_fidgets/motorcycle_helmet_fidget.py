@@ -24,7 +24,7 @@ Parts
 """
 
 from __future__ import annotations
-from cadgen.engine import xbf
+from cadgen import model
 
 from math import cos, radians, sin
 
@@ -157,7 +157,7 @@ def _make_parts():
     return parts
 
 
-@xbf(out="../../XBF/motorcycle_fidgets/motorcycle_helmet_fidget.xbf")
+@model
 def motorcycle_helmet_fidget():
     compound = bd.Compound(children=_make_parts())
     compound.label = "motorcycle_helmet_fidget"

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import xbf
+from cadgen import model
 
 from math import degrees, cos, sin, sqrt
 
@@ -505,7 +505,7 @@ def _make_surface_decal_box(
     return _set_metadata(box, label, color)
 
 
-@xbf(out="../../XBF/photo_coffee_cup/photo_coffee_cup.xbf")
+@model
 def photo_coffee_cup():
     """Return a photo-inspired takeaway coffee cup model in millimeters."""
     parts: list[object] = [

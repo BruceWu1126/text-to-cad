@@ -21,7 +21,7 @@ Parts (z map)
 """
 
 from __future__ import annotations
-from cadgen.engine import xbf
+from cadgen import model
 
 from math import cos, sin, tau
 
@@ -192,7 +192,7 @@ def _make_parts():
     return parts
 
 
-@xbf(out="../../XBF/motorcycle_fidgets/motorcycle_shock_fidget.xbf")
+@model
 def motorcycle_shock_fidget():
     compound = bd.Compound(children=_make_parts())
     compound.label = "motorcycle_shock_fidget"
