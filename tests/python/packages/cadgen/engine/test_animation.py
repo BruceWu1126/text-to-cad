@@ -259,6 +259,38 @@ class HarvestTest(_Folder):
 
 
 class GlbTest(_Folder):
+    def test_a_restart_runs_an_animated_model_rather_than_taking_its_xbf(self) -> None:
+        from cadgen.engine import export
+        from cadgen.engine.kernel import memo
+
+        source = """
+            import build123d as bd
+            from cadgen import glb, xbf
+            from cadgen.gltf import animation
+
+
+            @xbf("XBF/pair.xbf")
+            @glb("pair.glb")
+            def pair():
+                base, arm = bd.Box(10, 10, 10), bd.Pos(20, 0, 0) * bd.Box(5, 5, 5)
+                base.label, arm.label = "base", "arm"
+                assembly = bd.Compound(children=[base, arm], label="pair")
+                animation(assembly, "slide", duration=1).translation("arm", by=(30, 0, 0))
+                return assembly
+        """
+        self.build(source, "pair")
+        self.assertEqual(document.Loaded(self.folder / "XBF/pair.xbf").closure["animations"], 1)
+        memo.clear()  # a fresh worker: no memo, no document in memory
+        engine_build._WRITTEN.clear()
+        engine_build._PARTS.clear()
+        again = self.build(source, "pair")
+        self.assertEqual((again["cache"]["used"], again["cache"]["reason"]), (False, "its animations live in no file"),
+                         "a document taken from its file would export a GLB without them")
+        out = self.folder / "again.glb"
+        export.translate(engine_build.held(self.folder / "model.py", "pair"), None, out)
+        self.assertEqual([clip["name"] for clip in _glb(out)[0]["animations"]], ["slide"])
+        self.assertEqual(out.read_bytes(), (self.folder / "pair.glb").read_bytes())
+
     def test_a_declared_glb_bakes_every_path_and_interpolation_within_the_tolerance(self) -> None:
         self.channels()
         out = self.folder / "channels.glb"

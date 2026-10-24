@@ -810,6 +810,10 @@ class AuthoringNamesTest(_Folder):
         self.build("mechanism", NAMED)
         new_head, new_length, new_body = _cut_record((self.folder / "XBF/mechanism.xbf").read_bytes())
         old_head, old_length, old_body = _cut_record(NAMED_GOLDEN.read_bytes())
+        # The golden's writer names the format it was written in; a format bump since moves that name alone.
+        from cadgen.engine.previous import FORMAT
+
+        old_head = old_head.replace(b"cadgen.engine xbf/5 ", f"cadgen.engine {FORMAT} ".encode())
         self.assertEqual(new_body, old_body)
         self.assertEqual(len(new_head), len(old_head))
         # The header's words end where the record starts (its length is the last of them).
