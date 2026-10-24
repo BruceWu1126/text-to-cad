@@ -48,8 +48,10 @@ the model's business: a different file is a different model.
 
 A project whose files are delivered again after each change (a print set, a STEP for a
 supplier) keeps one script beside its models that imports them and exports each. From
-Python, `export(model, path, ...)` takes the model function itself (not its call): it
-runs the model, a replay when nothing changed, and writes from its document.
+Python the one spelling is `export(x, path, ...)`, where `x` is what a model call returns
+(the document's handle), a document id, or a file. The model function itself is taken
+too: it is run first, a replay when nothing changed, and the file written from its
+document.
 
 ```python
 # src/exports.py
@@ -63,9 +65,9 @@ from standoff import standoff_m3, standoff_m4
 ROOT = Path(__file__).resolve().parent.parent      # the project's folder
 
 if __name__ == "__main__":
-    export(assembly, ROOT / "STEP/assembly.step", ROOT / "GLB/assembly.glb")
-    export(standoff_m3, ROOT / "STL/standoff_m3.stl", ROOT / "3MF/standoff_m3.3mf")
-    export(standoff_m4, ROOT / "STL/standoff_m4.stl")
+    export(assembly(), ROOT / "STEP/assembly.step", ROOT / "GLB/assembly.glb")
+    export(standoff_m3(), ROOT / "STL/standoff_m3.stl", ROOT / "3MF/standoff_m3.3mf")
+    export(standoff_m4(), ROOT / "STL/standoff_m4.stl")
 ```
 
 ```bash
@@ -90,7 +92,7 @@ from arm import arm                              # an assembly with a mechanism 
 
 @model
 def arm_folded():
-    return posed(arm(), "folded")
+    return posed(arm().shape, "folded")
 ```
 
 ```bash
@@ -136,7 +138,7 @@ geometry, names, colours and materials. Keep the xbf beside the STEP, and read t
   the model's configuration sequences as an animation of its name
   ([kinematics](kinematics.md#configuration-sequences)), and each of its `animation()`s
   ([animation](animation.md)). A GLB exported from the model, by its id, by
-  `export(model, path)` or from an xbf the model exported, carries its sequences and its
+  `export(x, path)` or from an xbf the model exported, carries its sequences and its
   animations, byte for byte the same file.
 - **3MF**: an object per part, a build item per placement, in millimetres, with colours
   and materials through the materials extension.

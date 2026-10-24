@@ -137,7 +137,7 @@ Copy the full template for the applicable workflow from
 
    @model
    def bracket_drawing():
-       return flatten.flat_pattern(bracket(), coordinate=3.0, kerf=KERF)   # the top face's height
+       return flatten.flat_pattern(bracket().shape, coordinate=3.0, kerf=KERF)   # the top face's height
 
 
    if __name__ == "__main__":

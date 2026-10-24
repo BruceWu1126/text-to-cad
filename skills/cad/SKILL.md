@@ -55,9 +55,11 @@ them on `__file__` in code that must run from any folder.
 
 ## Write a model and run it
 
-A part or an assembly is a function with no parameters, decorated `@model`, that returns
-a build123d shape. Its dimensions are the arguments of a plain helper function, and each
-configuration is a `@model` of its own. For example, `src/bracket.py`:
+A part or an assembly is a function with no parameters, decorated `@model` (or with its
+file decorators, never both), that returns a build123d shape. Its dimensions are the
+arguments of a plain helper function, and each configuration is a `@model` of its own. A
+call builds it and returns its document: a handle with `.id`, `.url`, `.shape` (the built
+shape) and `.export(...)`. For example, `src/bracket.py`:
 
 ```python
 import build123d as bd
@@ -102,9 +104,10 @@ built src/bracket.py::bracket_wide warm in 0.01s: bodies 1 run; 6 misses, 0 hits
 ```
 
 Each call the script's `__main__` makes prints its document's `id:` and its page,
-`view:`. Give the user the page once ([Show the model](#show-the-model)) and use the id
-for every command after it. The id comes from the script's path and the function's name,
-so it is the same run after run, and the open page follows every run.
+`view:` (the handle's `.id` and `.url`). Give the user the page once ([Show the
+model](#show-the-model)) and use the id for every command after it. The id comes from the
+script's path and the function's name (or `@model(key="...")`), so it is the same run after
+run, and the open page follows every run.
 
 - **Running the script is the rebuild.** It writes no file. The engine's warm worker for
   the script replays every operation an edit did not reach, so a comment re-runs nothing
@@ -117,9 +120,9 @@ so it is the same run after run, and the open page follows every run.
   mark only a function holding seconds of kernel work that an edit elsewhere leaves
   alone, such as a whole sub-assembly stage; never a part, never a helper called many
   times ([`@memo`](references/model-contract.md#memo-marks-stages)).
-- **An assembly calls its parts.** Its body calls each part model (`plate()`), places and
-  labels what they return, and returns a `Compound`. Each child builds in the same run and
-  keeps its own document and id. Running a child's script alone leaves the assemblies that
+- **An assembly calls its parts.** Its body calls each part model and composes its shape
+  (`plate().shape`), places and labels it, and returns a `Compound`. Each child builds in
+  the same run and keeps its own document and id. Running a child's script alone leaves the assemblies that
   use it as they were: run the assembly.
 - **`import build123d as bd`, and use it attribute-style** (`bd.Box`). The import is lazy:
   the kernel loads on first use, in the worker. `from build123d import Box`, or a
@@ -134,6 +137,8 @@ so it is the same run after run, and the open page follows every run.
 - **References** to faces, edges and parts come from `cadgen inspect <id> [ref]`, and the
   body picks the same element with build123d's selectors; verify with a snapshot when in
   doubt ([references](references/inspection-and-validation.md#references)).
+- **A shape with no function** (a notebook cell, a REPL) is handed over:
+  `model(shape, name="plate")` returns the same handle, and no command builds it again.
 - **The engine never reruns code.** When it no longer holds a document (it restarted, or
   dropped the document to free memory), the page, `cadgen inspect <id>` and `cad_show`
   print the command that brings it back (`python src/bracket.py`). Run it.
@@ -153,10 +158,10 @@ cadgen export "$ID" STEP/bracket.step STL/bracket.stl GLB/bracket.glb 3MF/bracke
 ```
 
 A project with standing deliverables gets an `exports.py` that imports its models and
-calls `export(model, path, ...)` on each; running it rewrites every deliverable
+calls `export(x, path, ...)` on each (`x` a model call's handle); running it rewrites every deliverable
 ([exports](references/exports.md)). An export takes a document and its destinations,
 and nothing else: a posed file is a model that returns the posed assembly
-(`posed(arm(), "folded")`), and a part on its own is the part's own model.
+(`posed(arm().shape, "folded")`), and a part on its own is the part's own model.
 
 The xbf, cadgen's own document, is Save As: export one only to share a model without its
 code, or to compose it in another project with `read_xbf`. A restart needs none: the
@@ -235,7 +240,7 @@ from cadgen.geometry import closest_points
 
 from assembly import assembly
 
-kit = assembly()                                    # rebuilt (replayed), returned as a tree
+kit = assembly().shape                              # rebuilt (replayed), returned as a tree
 parts = {part.label: part for part in kit.leaves}   # every placed part, world coordinates
 plate, post = parts["plate"], parts["standoff_left"]
 print(plate.bounding_box().size)              # the envelope: not a hole's diameter or a wall's thickness

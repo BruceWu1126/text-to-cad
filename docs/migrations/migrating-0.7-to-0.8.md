@@ -174,10 +174,16 @@ Mechanically:
    its own document, id and page.
 4. **Keep the `__main__` calls.** Decoration only declares; a call builds. Each call your
    `__main__` makes prints its model's id and page.
-5. **Composition is unchanged.** An assembly's body calls its part models, places what
-   they return and labels the placements. A child builds in the same run and keeps its
-   own document, id and page.
-6. **Mark only big stages `@memo`.** `@memo` (new in 0.8) marks a function the engine
+5. **A model call returns its document, not its shape.** The call returns a handle:
+   `.id`, `.url` (its page), `.name`, `.shape` and `.export(...)`. An assembly's body calls
+   its part models and composes their shapes -- `plate().shape` where 0.7 had `plate()` --
+   places them and labels the placements. A child builds in the same run and keeps its own
+   document, id and page. A check reads `kit().shape`; the shape comes into the calling
+   process when it is first read.
+6. **One declaration per function.** Bare `@model` is a document with no file; the file
+   decorators (`@xbf`, `@step`, ...) are a document with those files. Stacking `@model` on a
+   file decorator is refused: drop `@model`.
+7. **Mark only big stages `@memo`.** `@memo` (new in 0.8) marks a function the engine
    may replay whole instead of running, keyed by its code and its arguments. Since every
    kernel call is replayed anyway, a memo hit saves only Python time (0.1 to 0.4 ms per
    kernel call): mark a whole sub-assembly stage of a thousand kernel calls or more
@@ -288,7 +294,7 @@ def arm():
 
 @model
 def arm_bent():                                  # a posed file is a model of its own
-    return posed(arm(), "bent")
+    return posed(arm().shape, "bent")
 ```
 
 | 0.7 | 0.8 |
@@ -300,7 +306,7 @@ def arm_bent():                                  # a posed file is a model of it
 | `"poses": {"bent": {...}}` | `mechanism_state(assembly, "bent", **values)` |
 | `cadgen.couple(name, {dof: ratio}, limits=)` | `gear_pair` (revolute joints), `rack_and_pinion_pair` (a revolute joint and prismatic ones) or `screw_pair` (one cylindrical joint's pitch); the range comes from the joints' limits |
 | a mate `axis` given as a ref (`"#lever.f2"`) | a `bd.Axis` computed in the body from the live shape |
-| `cadgen export ... --pose NAME` (an 0.8 preview), `snapshot --kinematics` | a posed model `posed(arm(), NAME)`, exported; `cadgen snapshot <id> out.png --pose NAME` to draw one |
+| `cadgen export ... --pose NAME` (an 0.8 preview), `snapshot --kinematics` | a posed model `posed(arm().shape, NAME)`, exported; `cadgen snapshot <id> out.png --pose NAME` to draw one |
 
 The as-built state is now the value each joint is connected at, so connecting at 0 with
 both frames on the axis keeps the parts where they were built. A coupling of one joint
@@ -388,9 +394,11 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
 `cadgen viewer` starts it.
 
 - **Every document has an id**, a UUID: a model's comes from its script's path and its
-  function's name, so it is the same every run (`bracket.id` in Python). Its page is
-  `/<uuid>` on the engine's address, and the run prints it as `view:`. An open page
-  follows every later run; share the link once.
+  function's name, so it is the same every run (`bracket.id` in Python, and the handle's
+  `.id`). `@model(key="bracket")` (or `key=` on a file decorator) gives it an id of the key's
+  instead, the same wherever the script moves; two declarations claiming one key are
+  refused. Its page is `/<uuid>` on the engine's address, and the run prints it as `view:`
+  (the handle's `.url`). An open page follows every later run; share the link once.
 - **The commands take an id or a file.** `cadgen export`, `cadgen snapshot` and
   `cadgen inspect` read the document as the engine holds it, and never run a script.
 - **The engine never reruns code.** A document it no longer holds (the engine restarted,
@@ -404,11 +412,15 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   read: they start empty after the upgrade.
 - **Documents reopen after a restart** from the engine's cache, as last built; the code
   stays the source, and a document whose code changed since says so.
-- **`store=` says where a document's source lives.** The default, `pointer`, is the
-  script on disk. A model defined in a notebook cell is a `copy`: its sources and the
-  files it read are copied beside its record, and `@model(id="<uuid>")` keeps one id
-  across runs of the cell. `@model(store="memory")` keeps a document in its worker's
-  memory alone, unrecorded and out of Recents: for throwaway probes.
+- **A model lives in a `.py` file.** Its record points at the script (`pointer`).
+  `@model(store="memory")` keeps a document in its worker's memory alone, unrecorded and
+  out of Recents: for throwaway probes.
+- **A notebook hands its shape over.** In a notebook cell or a REPL, build the shape and
+  call `model(shape, name="bracket")`: the engine holds, caches and serves a document of
+  it, exports it like any other, and returns the same handle (`.shape` is your shape).
+  Joints, mechanism states and sequences on the shape go with it; a GLB's animations are
+  passed as `animations=[...]`. Its id comes from the notebook's working folder and the
+  name, or from `key=`. Nothing builds it again: run the cell again.
 - **No page sessions.** `/s/<session>/...`, `?file=` and `?doc=` links open the home.
   The home shows Recents and the folder of the most recent `cadgen viewer` launch.
 - **The CAD app** shows a model by its id or a file by its path (`cad_show`), and its
@@ -426,13 +438,13 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
 | `cadgen step snapshot`, `cadgen stl\|3mf\|glb snapshot` | `cadgen snapshot SRC OUT.png`, for every kind |
 | snapshot `--kinematics` | `--pose` |
 | snapshot `--focus`, `--hide` | `--display '{"isolated": [...]}'`, `--display '{"hidden": [...]}'` |
-| snapshot `--mode list` | the model's tree: `[part.label for part in assembly().leaves]` |
+| snapshot `--mode list` | the model's tree: `[part.label for part in assembly().shape.leaves]` |
 | `cadgen store why\|where\|forget\|gc\|info` | nothing: no store. `cadgen inspect <id>` prints what a document was built from |
 
 `--no-daemon` is gone from every command, and `cadgen build` and `cadgen.build()`, which
 0.8 previews had, are gone too: the only way to build is a decorated function called
-from Python, in a script or a notebook cell. A shape made elsewhere is wrapped in a
-`@model` function and called.
+from Python, in a script. A shape made elsewhere -- a notebook cell, a REPL -- is handed
+over with `model(shape, name=...)`.
 
 ### 8. Replace `read_scene` refs and checks
 
@@ -465,7 +477,7 @@ from cadgen import read_scene                 from cadgen.geometry import closes
 scene = read_scene("STEP/kit.step")
 ...                                           from kit import kit
 
-                                              parts = {p.label: p for p in kit().leaves}
+                                              parts = {p.label: p for p in kit().shape.leaves}
                                               print(closest_points(parts["plate"], parts["post"]).distance)
 ```
 

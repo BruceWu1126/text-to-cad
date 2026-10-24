@@ -41,6 +41,15 @@ if __name__ == "__main__":
   and prints its `id:` and `view:`; a call another model's body makes builds it as a
   child, in the same run. Python decides which calls run; cadgen reads no script
   arguments.
+- **A call returns the document, not the shape**: a handle with `.id`, `.url` (its
+  page), `.name`, `.shape` and `.export(...)`. `.shape` is the built shape, brought into
+  the calling process when it is first read (a check, a drawing) and never before, so a
+  script that only builds pays nothing for it. Inside another model's body, `.shape` is
+  the child's result itself: compose `plate().shape`.
+- **One declaration per function**: bare `@model` (a document with no file) or its file
+  decorators (`@xbf`, `@step`, ...: a document with those files), never both; stacking
+  `@model` on a file decorator is refused. The function's name is the model's name:
+  rename the function to rename it.
 - **A model takes no parameters and returns a build123d shape**: a part, or a
   `Compound` of labelled children (an assembly). A 2D drawing returns 2D geometry and
   belongs to `$dxf`.
@@ -61,8 +70,9 @@ if __name__ == "__main__":
 - **A body that raises fails its model**: the run prints the model's frames, exits 1,
   and the page says the run failed.
 - **Called from a plain script** (a check, a drawing), a model is built in the engine
-  and its call returns the result as a build123d tree: every assembly a `Compound`,
-  every part placed, named, coloured and given its material.
+  and its call's `.shape` is the result as a build123d tree: every assembly a `Compound`,
+  every part placed, named, coloured and given its material (its joints stay in the
+  document: measure a pose by its posed model).
 
 ## Parameters and configurations
 
@@ -154,8 +164,8 @@ PITCH = 30.0
 
 @model
 def assembly():
-    base = plate()
-    post = standoff_m3()
+    base = plate().shape
+    post = standoff_m3().shape
     z = (THICKNESS + post.bounding_box().size.Z) / 2
     left = bd.Pos(-PITCH / 2, 0, z) * post
     right = bd.Pos(PITCH / 2, 0, z) * post
@@ -167,8 +177,9 @@ if __name__ == "__main__":
     assembly()
 ```
 
-- **A child builds in the same run**, in the caller's worker, and returns what its body
-  returned, before the caller placed or labelled it. It keeps its own document and id,
+- **A child builds in the same run**, in the caller's worker, and its call returns its
+  document's handle, whose `.shape` is what its body returned, before the caller placed or
+  labelled it. A child called only for its own files is a bare call. It keeps its own document and id,
   which every command answers; its rebuild command is the parent's script. A child called
   twice is one model, built once.
 - **Running a child's script alone builds the child** and leaves the assemblies that use
@@ -271,7 +282,10 @@ def rig():
 
 Every model a run builds is one document in the engine, with one id: a UUID derived
 from the script's path and the function's name, the same in every process
-(`bracket.id` in Python). Two scripts may use the same function name. The page is
+(`bracket.id` in Python, and the handle's `.id`). Two scripts may use the same function
+name. `@model(key="bracket")` (or `key=` on a file decorator) gives the document an id of
+its key's instead, the same wherever the script moves; two declarations claiming one key
+are refused, naming the other. The page is
 `/<id>` on the engine's address; `cadgen export`, `snapshot` and `inspect`, and the
 CAD app's tools, take the id and read the document as the engine holds it. No command
 imports, runs or builds a script: editing the script changes nothing until Python runs
@@ -300,13 +314,14 @@ it again.
 - **`@model(store="memory")`** keeps a document in its worker's memory alone: no record,
   no Recents entry, gone when its worker retires or the engine exits. It suits a
   throwaway probe, and needs a saved script.
-- **When the source is not a file** (a notebook cell, a function defined interactively),
-  the store is `copy`: the record's folder keeps a copy of the sources the run reached and
-  every file it read, so the document is rebuilt and traced without the original; the
-  cell must be self-contained. A copy gets a new id each time the cell runs, unless
-  `@model(id="<uuid>")` names one, which each run then replaces. Code piped to Python
-  (`python -c`, stdin) is refused: save it as a file. `id=` is refused on a script on
-  disk.
+- **A shape with no script** (a notebook cell, a REPL, a script that only holds a
+  shape) is handed over: `model(shape, name="plate")` makes a document of it, held,
+  cached, served on its page and exported like any other, and returns the same handle,
+  whose `.shape` is the shape passed. Its id comes from the calling script (or the working
+  folder) and the name, or from `key=`. Joints, mechanism states and sequences on the
+  shape go with it; a GLB's animations are passed as `animations=[...]`. Nothing builds
+  it again: its record says a program the engine did not run showed it, so run that
+  program again. A decorated function in no saved file is refused, with these words.
 - `cadgen status` lists the workers and the documents the engine holds (`--json` as
   data); `cadgen stop` stops the engine and any older one still running. At most
   `CADGEN_ENGINE_WORKERS` workers live (default: the machine's cores); a worker idle for

@@ -35,7 +35,7 @@ The rules:
 - **No helper joints to fake an explode.** A joint per part only to slide it out is an
   animation's job, and the Position panel would show a slider for each.
 - **Animations are GLB-only.** `cadgen export "$ID" model.glb`,
-  `export(model, "model.glb")` and `cadgen export model.xbf model.glb` from an xbf the
+  `export(model(), "model.glb")` and `cadgen export model.xbf model.glb` from an xbf the
   model exported all bake them, the same bytes. `read_xbf` imports a part's geometry
   without them.
 - **`.hide` is a scale trick.** glTF has no visibility channel, so a hidden part is

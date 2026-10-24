@@ -67,8 +67,8 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    `$XDG_RUNTIME_DIR`, else in a `$TMPDIR` that is the user's own, else `/tmp/cadgen-<uid>` (a
    socket path past the Unix limit lives in the user's own `/tmp/cadgen-<uid>` instead) -- and cadgen's own
    state in the user's state folder: settings, Recents' small previews, and the registry of the
-   documents it has built or opened, one record each that points at its script or file, with a
-   source copy only where the author had no saved file (`store="copy"`); never geometry. In the
+   documents it has built, been handed or opened, one record each that points at its script or
+   file; never geometry and never source. In the
    platform's cache folder (`~/.cache/cadgen`, by 0.7's rule) it keeps, under `documents/` and
    nowhere else there, each model document's bytes as it last built them: its own file, never a
    declared or exported xbf, regenerable and wiped at no loss, so a restart opens every project at
@@ -94,15 +94,19 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    keeps the name its feature history gave it across edits. Across a restart, a model's build
    is cold but for its own xbf, taken whole or not at all; what a restart shows without a build
    is the engine's document cache (law 2): the last built state, never a step of a build.
-6. **One document per model, with one id.** Every called model makes one document, with an
-   id derived from its script and function (`ids.model_id`): the same in every process, worked
-   out without asking the engine. A file the engine serves is known inside it by the id of its
-   canonical path (`ids.file_id`); its public name stays its path. Its store is `pointer` (a
-   model in a saved file, the default: the registry points at its script), `copy` (a model
-   whose source only Python holds, a notebook cell: its source and the files its build read are
-   copied into its registry folder, and its id is new each run unless `@model(id=...)` names
-   one) or `memory` (asked for with `store="memory"`: nothing is recorded). File
-   decorators imply a model and write only their named outputs. No xbf, mesh, memo,
+6. **One document per model, with one id.** Every called model makes one document, and a call
+   returns its handle (`.id`, `.url`, `.name`, `.shape`, `.export`, `.snapshot`), never a bare
+   shape. Every id is one formula, `uuid5(NAMESPACE, canonical(scope) + "::" + name)`
+   (`ids.derived_id`): a model's script and function (`ids.model_id`), an opened file's path and
+   no name (`ids.file_id`, inside the engine only: its public name stays its path), a shape handed
+   over its calling script, or the working folder, and its name -- the same in every process,
+   worked out without asking the engine. `key="..."` replaces it with `uuid5(NAMESPACE, "key::" +
+   key)`, global, and refused, naming the other, when another declaration claims the key. The
+   store rule: a function in a file is a `pointer` (the registry points at its script),
+   `store="memory"` a throwaway (nothing is recorded), and a shape is handed over
+   (`model(shape, name=...)`: held and cached, never rebuilt). A function is declared by `@model`
+   (no file) or by its file decorators (those files), never both; file decorators write only
+   their named outputs. No xbf, mesh, memo,
    provenance or derived file is written for a document beyond what it declares. A document
    lives until the engine exits or memory evicts it; its worker retiring does not end it,
    except a `memory` document's. A document that is not held names the command that builds it

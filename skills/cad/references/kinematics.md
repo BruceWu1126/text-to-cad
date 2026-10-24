@@ -124,7 +124,7 @@ from hinge import hinge
 
 @model
 def hinge_open():
-    return posed(hinge(), "open")
+    return posed(hinge().shape, "open")
 
 
 if __name__ == "__main__":
@@ -260,7 +260,7 @@ from cadgen.geometry import overlap_volume
 
 from hinge_poses import hinge_open
 
-posed = hinge_open()
+posed = hinge_open().shape
 parts = {part.label: part for part in posed.leaves}
 print(overlap_volume(parts["arm"].solids()[0], parts["base"].solids()[0]))   # 0: the open arm clears the base
 ```
