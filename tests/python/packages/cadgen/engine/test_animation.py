@@ -267,6 +267,28 @@ class HarvestTest(_Folder):
         self.assertEqual(loaded[1].animations, trees[1].animations, "the compiled tracks, as the harvest made them")
 
 
+class RefinementLoopTest(unittest.TestCase):
+    """A record read from a file whose key times are one ulp apart with a value jump between them
+    must not spin the baker's refinement loop forever: a pass that adds no new key is refused."""
+
+    def test_a_channel_that_cannot_settle_is_refused_not_looped(self) -> None:
+        from cadgen.engine.export import ExportRefused
+        from cadgen.engine.export.animation import _channel
+
+        edge = 0.5
+        nxt = math.nextafter(edge, 1.0)  # one ulp above 0.5; its midpoint with 0.5 rounds back to 0.5
+
+        class StubMotion:
+            duration = 1.0
+            def value(self, index, path, t):  # a step jump across the edge, larger than any tolerance
+                return np.array([0.0, 0.0, 0.0]) if t <= edge else np.array([30.0, 0.0, 0.0])
+
+        start = time.monotonic()
+        with self.assertRaises(ExportRefused):
+            _channel(StubMotion(), 0, 'translation', {'LINEAR'}, {edge, nxt}, {'translation': 0.03})
+        self.assertLess(time.monotonic() - start, 10.0, 'the loop must end quickly, not spin')
+
+
 class GlbTest(_Folder):
     def test_a_restart_takes_an_animated_model_from_its_xbf_and_its_glb_is_the_cold_builds(self) -> None:
         from cadgen.engine import export

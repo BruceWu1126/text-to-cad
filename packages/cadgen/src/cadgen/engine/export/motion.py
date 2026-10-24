@@ -202,10 +202,13 @@ def clips(view: Any, candidates: list[int], size: float) -> list[Clip]:
                         split.append((a + b) / 2)
                 if not split:
                     break
-                times = sorted(set(times) | set(split))
-                if len(times) > mechanism.MOST_KEYS:
+                grown = sorted(set(times) | set(split))
+                # A split that rounds onto existing keys adds no time, so the key count never reaches
+                # MOST_KEYS and the loop would not end: refuse a pass that does not grow the keys.
+                if len(grown) == len(times) or len(grown) > mechanism.MOST_KEYS:
                     raise ExportRefused(f"motion {name!r}: its clip does not settle within the tolerance in "
                                         f"{mechanism.MOST_KEYS} keys")
+                times = grown
         clip = Clip(name, motion.timeline.duration, np.array(times), motion.instances,
                     deviation=worst)
         rows = [keys.key(t) for t in times] if motion.instances else []
