@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
 import { handle } from './handler.mjs';
+import { rateLimiter } from './limit.mjs';
 
 const INSTALL = '8c347ec3-1342-4db5-a19a-491cbc8c59be';
 const SESSION = '0b1e6f1a-6a52-4c39-9d43-2f5e0f0b9d11';
@@ -409,6 +410,36 @@ test('an install id forgets everything sent under it; retention is the service\'
   assert.deepEqual(store.rows, []);
   assert.equal((await send(store, 'GET', '/v1/prune')).status, 404);
   assert.equal((await send(store, 'GET', '/v1/events')).status, 404);
+});
+
+test('forgetting is limited per address and per install id: past five in ten minutes, 429 with Retry-After and no deletion', async () => {
+  const warn = mock.method(console, 'warn', () => {});
+  try {
+    let at = 0;
+    const limiter = rateLimiter({ now: () => at });
+    const forgotten = [];
+    const store = { ...memory(), async forget(id) { forgotten.push(id); } };
+    const forget = (install, client) => handle(new Request('https://api.texttocad.dev/v1/forget', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ install }),
+    }), store, { limiter, client });
+    for (let i = 0; i < 5; i += 1) assert.equal((await forget(INSTALL, '203.0.113.7')).status, 204);
+    const refused = await forget(INSTALL, '203.0.113.7');
+    assert.deepEqual([refused.status, refused.headers.get('retry-after'), await refused.json()], [429, '600', { error: 'too many requests' }]);
+    assert.equal(forgotten.length, 5);
+    // The same id from anywhere else is still limited; another id from another address is not.
+    assert.equal((await forget(INSTALL, '198.51.100.1')).status, 429);
+    const other = '6f0c6a52-3a1e-4f43-9a7e-1d2b3c4d5e6f';
+    assert.equal((await forget(other, '198.51.100.2')).status, 204);
+    // One address cannot spend the key on many ids.
+    for (let i = 0; i < 4; i += 1) await forget(other.replace(/.$/, String(i)), '192.0.2.9');
+    assert.equal((await forget(other.replace(/.$/, '9'), '192.0.2.9')).status, 204);
+    assert.equal((await forget(other.replace(/.$/, '8'), '192.0.2.9')).status, 429);
+    assert.equal(warn.mock.calls.at(-1).arguments[0], 'telemetry /v1/forget refused 429: too many requests');
+    at += 600_000;
+    assert.equal((await forget(INSTALL, '203.0.113.7')).status, 204);
+  } finally {
+    warn.mock.restore();
+  }
 });
 
 test('health fails without a setting, or with keys the service refuses, naming no more than a code', async () => {
