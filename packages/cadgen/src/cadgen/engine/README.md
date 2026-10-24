@@ -122,9 +122,10 @@ posed(arm(), "folded")`.
    `TDataStd_NamedData` beside it for the rest; `XCAFDoc_VisMaterial`: PBR), element names
    on face, edge and vertex sub-shape
    labels, and an assembly's mechanism (links, pairs, ground, configurations: see
-   Kinematics); its main label names what wrote it (`cadgen.engine xbf/6 (cadgen
-   <release>)`, `document.Loaded.writer`) and holds the model's build closure
-   (**Build closure**). No code location is on an element. STEP, GLB, STL, 3MF and,
+   Kinematics); its main label names what wrote it (`cadgen.engine xbf/7 (cadgen
+   <release>)`, `document.Loaded.writer`) and holds the model's build records: its build
+   closure (**Build closure**) and its compiled animations (**Animations**). No code location
+   is on an element. STEP, GLB, STL, 3MF and,
    of a planar document, DXF are translations of it (**Exports**).
    `cadgen export` writes any of them from the xbf alone.
 5. **The memo is the only cache, and it lives in the worker.** Every kernel
@@ -568,9 +569,9 @@ evicts it ([models.py](models.py), [serve.py](serve.py)). Its state (`models.STA
 - `live`: a live worker holds it, with its memo and its trace.
 - `held`: its worker is gone and the daemon holds it whole: its served structure and shape bytes,
   and the document as the xbf bytes `@xbf` would write of it, mechanism and every assembly's
-  placement included, and beside them the build's animations as JSON (`animations.to_json`: each
-  track's path, interpolation, keys and parts), which the xbf holds none of. A page and `cadgen
-  inspect` read the served structure; an export or a
+  placement included, and its build records with it -- the closure and the compiled animations
+  (**Animations**) -- so a GLB of it is the build's own. A page and `cadgen inspect` read the
+  served structure; an export or a
   snapshot by its id, and the viewer's export, go to the documents worker with the xbf bytes
   (`Daemon.document`), which reads them as it reads an xbf on disk, so no worker of its script
   starts. What made an element is null (law 7: provenance is the worker's). A document its worker
@@ -599,7 +600,7 @@ drains nothing: its documents the server lacked are `evicted`.
 
 **One budget.** Everything the daemon holds is counted against one budget: each served
 document's structure (as JSON), its shape bytes, the bytes made from live shapes and a held
-document's xbf bytes and animations (`Served.size`), and every tessellation (`MeshCache`, which has no cap of its
+document's xbf bytes, its records among them (`Served.size`), and every tessellation (`MeshCache`, which has no cap of its
 own in the daemon). Evicting a document drops all of it.
 Bytes are counted as they are put, never sampled. Workers and render processes are processes of
 their own, held to their own memory cap. The budget is `CADGEN_ENGINE_MEMORY_MB`, else a quarter
@@ -920,8 +921,8 @@ target and moved over it; a DXF only when its bytes change.
   look (a paint is a primitive of its own) with an extension for each part of the look past
   metallic-roughness (`KHR_materials_ior`, `_transmission`, `_volume`, `_clearcoat`,
   `_anisotropy`, `_emissive_strength`; **Materials**), every motion of the document an
-  animation of the same name (below), and, from a build, every `animation()` of its code
-  (**Animations**); **3MF**: an object per prototype, a build item per
+  animation of the same name (below), and every `animation()` of its code, from a build or from
+  the record an xbf carries (**Animations**); **3MF**: an object per prototype, a build item per
   placement, looks through the materials extension (base materials, `pbmetallic` display
   properties, painted triangles naming their own); **STL**: binary, every placed triangle.
   Their meshes are the process's one mesh cache's (`serve.MESHES`), the viewer's: a part the
@@ -1217,16 +1218,24 @@ sequence moves pair values over time (**Configuration sequences**): the document
 GLB of the document bakes it, and STEP, STL and 3MF carry nothing of it. An animation moves the
 nodes a GLB places, in glTF's own terms -- translation, rotation and scale channels, and the
 mechanism's forward kinematics at given times -- for what a mechanism does not say: an explode, a
-reveal, a showcase, a part hidden. It is never written into the document (law 13 stands: the xbf
-holds standard data alone). It is baked into every GLB the model declares, when that GLB is
-written (law 10), from the build's tree in memory. A GLB exported by id from a held document
-(**Document lifetime**) bakes the animations its worker handed over with it, byte for byte the GLB
-that worker would have written. Nor is a model whose build made an animation taken from its xbf
-after a restart (**Build closure**): the file holds no animation, so its body runs and its GLB has
-them. A GLB exported later from the xbf alone
-(`cadgen export model.xbf model.glb`) carries the document's sequences only. For now a model with
-an animation declares its GLB beside its xbf, the two decorators stacked on one function: the xbf
-ignores the animation, the GLB bakes it.
+reveal, a showcase, a part hidden. It is baked into every GLB the model declares, when that GLB is
+written (law 10), from the build's tree in memory.
+
+The xbf is the model's Save As and holds what its build declared, so it carries the compiled
+tracks too: a **build record** on its main label after the closure, as the closure is kept (a
+`TDataStd_AsciiString`, `document.ANIMATIONS_GUID`), holding `animations.record` -- each
+animation's name, duration and tracks (path, interpolation, keys, the occurrence paths of its
+parts, what it says beyond its keys, its label and its order), the build's JSON
+(`animations.to_json`), no code. A document with no animation holds no record. It is no part of the
+mechanism subtree, which stays AP242's alone (law 13), and only a GLB reads it:
+`document.Loaded.animations`, and so `Source.read`, give the tracks back as the harvest made them,
+so a GLB exported from the xbf (`cadgen export model.xbf model.glb`), from a held document by its
+id (**Document lifetime**) and by the build's own worker are byte for byte one GLB, and a model
+taken from its xbf after a restart (**Build closure**) writes that GLB too. Every other reader
+ignores it: `read_xbf` imports a part, never a child's record (a parent's GLB bakes its own
+animations alone), the viewer's page shows the document's structure, and STEP is AP242 with nothing
+of ours. For now a model with an animation declares its GLB beside its xbf, the two decorators
+stacked on one function: the xbf records the animation, the GLB bakes it.
 
 ```python
 import build123d as bd
@@ -1885,17 +1894,20 @@ closure/1`), pointers and digests only:
 
 ```
 schema   "cadgen.engine closure/1"
-engine   {"release": "cadgen 0.8.0", "format": "xbf/6", "digest": ...}   the format (keyed); the release and
+engine   {"release": "cadgen 0.8.0", "format": "xbf/7", "digest": ...}   the format (keyed); the release and
                                                                     the engine's code digest (information only)
 libs     {"build123d": ..., "OCP": ...}                             what decides the geometry
 source   {"kind": "script", "path": "../src/tom.py", "function": "tom"}
 modules  [["../src/lib/arm_parts.py", "9f3c..."], ...]
 inputs   [["file", "../STEP/gripper.step", "c0de..."], ["read", "../src/lib/ids.json", "77ab..."], ...]
 bodies   how many bodies the model is
-animations  how many animation()s the build made (information only; their channels are in no file)
 key      one digest over the format, libs, source, modules and inputs; null where the
          closure cannot say all the model is made of
 ```
+
+Beside it on the main label, a document whose build made an `animation()` holds the compiled
+tracks as a second build record (**Animations**); the closure neither counts nor keys them: they
+are what the code the key covers made.
 
 Every path is relative to the xbf's folder. `modules` lists each first-party module the
 script's load imported or the model reaches, with a digest of what the model reaches in it: its
@@ -1912,15 +1924,17 @@ null (**Body retention**). `cadgen inspect DOC` prints the closure, `cadgen.insp
 **When the format moves.** The key takes the engine's `format` alone (`previous.FORMAT`),
 not the release that wrote a document nor a digest of the engine's code: a cadgen release,
 or an engine edit, that leaves the written document alone keeps every xbf current. `FORMAT`
-is bumped by hand (`xbf/5` to `xbf/6`) when what
+is bumped by hand (`xbf/6` to `xbf/7`) when what
 an engine writes changes -- the document's structure, the attributes on its labels, the
 closure's fields, or what the key covers -- and then every xbf builds once, cleanly: a
 document of another format is "written by" another engine (`cache.reason`). The bumps so far:
 `xbf/2`, the key left the release, the engine digest and numpy, and the closure its commit;
 `xbf/3`, the mechanism subtree took AP242's form (**Kinematics**); `xbf/4`, a function
 motion's samples are made for linear interpolation (**Configuration sequences**); `xbf/5`, files read by motion
-functions join the closure (**Configuration sequences**); `xbf/6`, the closure counts the build's
-animations (**Animations**).
+functions join the closure (**Configuration sequences**); `xbf/6`, the closure counted the build's
+animations, and a document with any was not taken; `xbf/7`, the compiled animations are a build
+record on the main label, the closure counts none, and an animated document is taken like any
+(**Animations**).
 
 Before a body runs or is replayed, the build makes the closure again -- the script loaded,
 its modules digested, each input hashed again -- and compares its key with the xbf's. The
@@ -1936,9 +1950,8 @@ of them still replays what it leaves alone. The memo replays the root instead on
 file the worker's last build of the model wrote -- the model's own, or a child model's -- moved
 or is gone, which the replay writes again (`cache.reason`: replayed from memory). Anything
 else builds as before, and `cache.reason` says why: no file yet, a declared export missing,
-written by another engine or program, a file that does not read, no key in it, a build that made
-animations (`its animations live in no file`: they are the GLB's, so a taken document's GLB would
-lack them), replayed from memory, or what changed, by name (`cache.changed`, each change; the CLI prints
+written by another engine or program, a file that does not read, no key in it, replayed from
+memory, or what changed, by name (`cache.changed`, each change; the CLI prints
 `rebuilt: ../src/lib/arm_parts.py changed`): a module changed, is new or is no longer imported,
 an input changed or is missing, the format, a library or the source moved.
 `CADGEN_ENGINE_MEMO=0` and `CADGEN_ENGINE_BODIES=0` turn it off with the rest of retention.
