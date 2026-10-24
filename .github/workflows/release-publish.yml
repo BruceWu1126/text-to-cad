@@ -9,7 +9,7 @@ name: Publish Release
 #
 # The publish job builds what ships from that commit -- the plugin ZIP, the runtime bundle,
 # the wheel and sdist -- and installs and exercises the wheel. The pypi job alone uploads it, in
-# the `pypi` environment, which deploys from main only and is the one PyPI's trusted publisher
+# the `release` environment, which deploys from main only and is the one PyPI's trusted publisher
 # names, and waits until PyPI's index lists the version. Only then does anything that installers
 # follow name it: the
 # `latest` branch and claude.ai's `claude-plugin` get the plugin alone
