@@ -203,11 +203,20 @@ class EngineApp:
                 saved = value.strip().strip('"')
         # Any one credential suffices: a cookie left by an engine that held this port before
         # must not outrank the token of the URL a launch just printed.
-        supplied = (bearer, saved, request.query.get('token', ''))
         expected = self.token.encode()
-        if not any(secrets.compare_digest(str(value).encode('utf-8', 'surrogateescape'), expected)
-                   for value in supplied if value):
+
+        def matches(value):
+            return bool(value) and secrets.compare_digest(str(value).encode('utf-8', 'surrogateescape'), expected)
+
+        named = matches(bearer) or matches(request.query.get('token', ''))
+        if not named and not matches(saved):
             return self._refused(request, response)
+        if not named and request.header('sec-fetch-site') not in ('', 'same-origin', 'none'):
+            # The cookie is sent to every port of this host, so a request it alone admits must come
+            # from this engine's own pages (or be typed or opened by the person): the browser says
+            # so in Sec-Fetch-Site, which a page cannot set. One without the header is a client's
+            # that is not a browser, and is admitted as before.
+            return response.send_json(403, {'error': 'cross-origin request refused'})
         with self.lock:
             self.active_requests += 1
         self.server.touch()
@@ -247,7 +256,8 @@ class EngineApp:
         if navigation:
             return response.send_bytes(403, LINK_GONE_PAGE, 'text/html; charset=utf-8',
                                        [('referrer-policy', 'no-referrer'),
-                                        ('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'")])
+                                        ('content-security-policy',
+                                         "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'")])
         return response.send_json(403, {'error': 'engine token required'})
 
     def mcp(self):
