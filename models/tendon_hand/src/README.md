@@ -4,8 +4,7 @@
 project (24 joint degrees of freedom, 48 antagonistic tendon actuators; millimetres,
 fingers along +Y, palm side +Z, thumb on -X). The old project was 112 one-model
 scripts. The 56 that build from the project's code are models here, folded into five
-scripts by subsystem, each model keeping its name, a `@model` that writes nothing but the
-two R5 models below, which declare their xbf (`XBF/<name>.xbf`). The
+scripts by subsystem, each model keeping its name, a `@model` that writes nothing. The
 other 56 were reviews and clearance studies on frozen STEP snapshots and generated
 validation output, not the hand itself, and are not kept.
 
@@ -31,7 +30,7 @@ cadgen snapshot "$ID" fist.png --pose fist          # ID: anatomy_layout's id: l
 Measured on 2026-10-23 (one machine, its load 15-35 from other work; the five scripts
 built one after another, each in a fresh worker): cold `components` 106 s, `routing` 20 s,
 `phalanges` 257 s, `guide_mounts` 210 s, `forearm` 97 s. A no-op takes 1.0-2.5 s per
-script: every model replays, and the two R5 models take their xbf.
+script: every model replays.
 
 ## The port
 
@@ -53,11 +52,13 @@ script: every model replays, and the two R5 models take their xbf.
 - The R5 supports clip against `phalanx_continuous_r5` as STEP gives it back ("native
   STEP reconstruction is required for reliable clipping"): the original read that
   model's STEP output with build123d's `import_step`. `lib/phalanx_r5_host.py` writes
-  the same phalanx to STEP and reads it back in memory now. Its shape and the raw
-  `BRepAlgoAPI` booleans of `lib/phalanx_r5_boolean.py` are no operations the memo
-  keys, so the two R5 models never replay from the worker's memory. They declare their
-  xbf (`@xbf`), so a no-op takes it (their key holds) instead of running them whole
-  (17 s each, measured 2026-10-23), and any edit their code reaches runs them.
+  the same phalanx to STEP and reads it back in memory now, in `warm_host()`, a `@memo`
+  function returning the shape as OCCT's reader made it, so the call keys it (the
+  phalanx as built clips the +X rail to nothing; its STEP reconstruction clips it whole).
+  The clipping booleans of `lib/phalanx_r5_boolean.py` are build123d's, never cleaned, as
+  the raw `BRepAlgoAPI` ones they replace were (the same parts: volumes, faces and
+  bounds). Both R5 models replay on a no-op (0.2 s for the two, against 17 s each when
+  they ran whole, measured 2026-10-23/24).
 - Materials: `capstan_index_overlay` declared `materials=` (the palette's aluminium
   bucket); each of its parts carries `lib/palette.py`'s `MATERIALS` entry for its bucket
   now (`lib.assembly.compound`), a catalogue material in the old finish's look with
