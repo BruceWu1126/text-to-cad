@@ -1,7 +1,8 @@
 """GLB: a glTF 2.0 binary of the document.
 
 One mesh per prototype -- its positions and normals one accessor pair, its triangles a
-primitive per look (a painted face's colour or material is a primitive of its own) -- and
+primitive per look (a painted face's colour or material is a primitive of its own), indexed in
+16 bits where the mesh has at most 65,535 vertices and in 32 where it has more -- and
 a node per placement, named by the placement's path, under one root node named by the
 document. A material per look: PBR metallic-roughness, its base colour the part's (or
 the paint's), metallic, roughness and emissive from the part's material, ``BLEND`` where
@@ -120,12 +121,16 @@ def write(view: Any, path: Path) -> None:
                 spans["tangents"] = add(np.ascontiguousarray(tangents(mesh.normals), "<f4"), 34962, "VEC4", 5126)
             attributes["TANGENT"] = spans["tangents"]
         thickness = _thickness(mesh)
+        # A mesh of at most 65,535 vertices is indexed in 16 bits (core glTF: no extension, and its
+        # largest index, 65,534, is short of the primitive restart value), a larger one in 32.
+        narrow = accessors[positions]["count"] <= 65535
         primitives = []
         for look, indices in looks:
             span = indices.tobytes()
             accessor = spans.get(span)
             if accessor is None:
-                accessor = spans[span] = add(np.ascontiguousarray(indices, "<u4"), 34963, "SCALAR", 5125)
+                accessor = spans[span] = add(np.ascontiguousarray(indices, "<u2" if narrow else "<u4"), 34963,
+                                             "SCALAR", 5123 if narrow else 5125)
             primitives.append({"attributes": dict(attributes), "indices": accessor,
                                "material": material(look, thickness)})
         gltf_meshes.append({"name": prototype["name"], "primitives": primitives})

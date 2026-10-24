@@ -1006,7 +1006,8 @@ target and moved over it; a DXF only when its bytes change.
   before it writes: the header's time stamp is `step.WRITTEN_STAMP` (the xbf's date), and the
   colour presentations, which it keeps in a map keyed by shape, are put in the order of the
   shapes they style, so the same document is the same STEP in any process on any day.
-- **GLB**: one mesh per prototype, a node per placement named by its path, a PBR material per
+- **GLB**: one mesh per prototype (indexed in 16 bits up to 65,535 vertices, in 32 past them), a
+  node per placement named by its path, a PBR material per
   look (a paint is a primitive of its own) with an extension for each part of the look past
   metallic-roughness (`KHR_materials_ior`, `_transmission`, `_volume`, `_clearcoat`,
   `_anisotropy`, `_emissive_strength`; **Materials**), every motion of the document an

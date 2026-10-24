@@ -254,6 +254,8 @@ class ExportTest(unittest.TestCase):
         self.assertIn([1.0, 0.0, 0.0, 1.0], [look["pbrMetallicRoughness"]["baseColorFactor"] for look in looks])
         rack = next(node for node in placed if node["name"] == "rack/peg0")
         self.assertEqual(rack["matrix"][12:15], [-10.0, 0.0, 6.0])
+        self.assertEqual({gltf["accessors"][primitive["indices"]]["componentType"] for entry in gltf["meshes"]
+                          for primitive in entry["primitives"]}, {5123}, "a small mesh is indexed in 16 bits")
         # The root shows the document's Z-up millimetres in glTF's Y-up metres.
         root = gltf["nodes"][gltf["scenes"][0]["nodes"][0]]
         self.assertEqual(root["scale"], [0.001, 0.001, 0.001])
