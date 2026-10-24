@@ -141,7 +141,7 @@ def connect(*, start: bool = True, timeout: float = 60.0) -> Connection | None:
     except PermissionError as error:
         raise _denied(f"writing in the engine's folder: {error.strerror or error}") from None
     process = _start()
-    mine = {process.pid}
+    mine = [process]
     started = time.monotonic()
     deadline = started + timeout
     while time.monotonic() < deadline:
@@ -156,12 +156,12 @@ def connect(*, start: bool = True, timeout: float = 60.0) -> Connection | None:
             # A daemon that is stopping still holds the lock, and the one just started
             # left at once: start another once the lock is free.
             process = _start()
-            mine.add(process.pid)
+            mine.append(process)
             started = time.monotonic()
     raise ConnectionError("the engine server did not start")
 
 
-def _told_started(mine: set[int]) -> None:
+def _told_started(mine: list[subprocess.Popen]) -> None:
     """``on_started``, when the daemon that answers is one of ``mine`` (the daemons this process
     started): a command racing this one may have started the one that won the lock."""
     if on_started is None:
@@ -171,7 +171,7 @@ def _told_started(mine: set[int]) -> None:
         answer = _exchange(connection, {"op": "pid"}) if connection is not None else {}
     except (OSError, ValueError):
         return
-    if answer.get("pid") in mine:
+    if answer.get("pid") in {process.pid for process in mine}:
         on_started()
 
 
