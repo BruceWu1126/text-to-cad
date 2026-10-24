@@ -149,11 +149,18 @@ class RegistryDaemonTest(unittest.TestCase):
         answer = self.ask({"op": "state", "id": cube})
         self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", f"python {project / 'caller.py'}"))
         self.assertEqual(self.ask({"op": "state", "id": scratch})["state"], "evicted", "a memory id is unknown")
-        # The script moved: detached, until its record is removed.
+        from cadgen.viewer.recents import RecentStore
+
+        listed = {entry.path: entry.public() for entry in RecentStore(self.state).list()}
+        self.assertEqual((listed[cube]["name"], listed[cube]["missing"]), ("cube", False))
+        self.assertNotIn(scratch, listed)
+        # The script moved: detached, listed and saying so, until it is removed.
         (project / "parts.py").rename(project / "moved.py")
         self.assertEqual(self.ask({"op": "state", "id": cube})["state"], "detached")
-        self.assertTrue(Registry(self.state).delete(cube))
+        self.assertTrue({entry.path: entry.public() for entry in RecentStore(self.state).list()}[cube]["missing"])
+        RecentStore(self.state).remove(cube)
         self.assertFalse((self.state / "documents" / cube).exists())
+
 
 if __name__ == "__main__":
     unittest.main()

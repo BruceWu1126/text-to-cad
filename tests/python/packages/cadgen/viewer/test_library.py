@@ -92,6 +92,24 @@ class LibraryTest(unittest.TestCase):
                 self.assertEqual(self.change(action, path, **extra)[0], 400)
         self.assertEqual(RecentStore().list(), [])
 
+    def test_a_built_model_is_listed_by_its_id_pinned_and_removed_by_it(self) -> None:
+        from cadgen.engine.ids import model_id
+        from cadgen.engine.registry import Registry
+
+        script = self.tmp / "parts.py"
+        script.write_text("", encoding="utf-8")
+        ident = model_id(script, "cube")
+        Registry(self.tmp / "state").put({"id": ident, "kind": "model", "store": "pointer", "root": str(self.tmp),
+                                          "home": "parts.py", "entry": "cube", "label": "cube",
+                                          "run": ["python", "parts.py"], "built": 1.0})
+        status, body = self.request("GET", "/__cad/recents")
+        [entry] = json.loads(body)["recents"]
+        self.assertEqual((status, entry["path"], entry["kind"], entry["name"]), (200, ident, "model", "cube"),
+                         "the home opens it by its id: /<id>")
+        self.assertTrue(self.change("pin", ident)[1]["recents"][0]["pinned"])
+        self.assertEqual(self.change("remove", ident), (200, {"recents": []}))
+        self.assertIsNone(Registry(self.tmp / "state").get(ident))
+
     def test_only_a_thumbnail_name_reads_a_thumbnail(self) -> None:
         for name in ("", "x.png", "../recents.jsonl", "0" * 32 + ".png"):
             with self.subTest(name=name):
