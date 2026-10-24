@@ -416,7 +416,8 @@ class LifetimeDaemonTest(unittest.TestCase):
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
 
     def test_an_evicted_and_an_expired_document_name_their_rebuild_and_nothing_runs_it(self) -> None:
-        tiny = {**self.env, "CADGEN_ENGINE_MEMORY_MB": "0.001"}  # every document is evicted once drained
+        # Every document is evicted once drained, and no cache holds it on disk (``test_cache``'s).
+        tiny = {**self.env, "CADGEN_ENGINE_MEMORY_MB": "0.001", "CADGEN_ENGINE_CACHE_GB": "0"}
         evicted = self.built("arm", env=tiny)
         expired = self.built("cell", store='(store="memory")', env=tiny)
         command = f"python {self.folder / 'caller_arm.py'}"

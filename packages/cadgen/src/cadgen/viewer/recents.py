@@ -65,6 +65,31 @@ def state_dir() -> Path:
     return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "cadgen"
 
 
+def cache_dir() -> Path:
+    """Where the engine caches documents' bytes (``documents/<id>/document.xbf``): the platform's
+    cache location, which the system and the person treat as disposable -- wiping it loses no
+    state, the records stay in ``state_dir``. ``CADGEN_CACHE_DIR`` when set (a relative one made
+    absolute once, and written back, so a worker after a ``chdir`` names the same folder), else
+    ``$XDG_CACHE_HOME/cadgen`` on POSIX or ``%LOCALAPPDATA%\\cadgen`` on Windows when set, else
+    ``~/.cache/cadgen``: the folder cadgen 0.7 kept its store in, by the same rule."""
+    override = os.environ.get("CADGEN_CACHE_DIR", "").strip()
+    if override:
+        root = Path(override).expanduser()
+        if not root.is_absolute():
+            root = (Path.cwd() / root).resolve()
+            os.environ["CADGEN_CACHE_DIR"] = str(root)
+        return root
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA", "").strip()
+        if local:
+            return Path(local) / "cadgen"
+    else:
+        xdg = os.environ.get("XDG_CACHE_HOME", "").strip()
+        if xdg:
+            return Path(xdg) / "cadgen"
+    return Path.home() / ".cache" / "cadgen"
+
+
 @dataclass
 class Recent:
     """One entry of Recents: a file's (``path`` its canonical path) or a model's (``path`` its id)."""
@@ -113,7 +138,7 @@ class RecentStore:
         from cadgen.engine.registry import Folder, Registry
 
         self.state = Folder(root or state_dir())
-        self.registry = Registry(self.state)
+        self.registry = Registry(self.state, cache=cache_dir())
         self.root = self.state.root / "recents"
         self.thumbnails = self.state.path(THUMBNAILS)
 

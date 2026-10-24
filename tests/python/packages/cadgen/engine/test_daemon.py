@@ -775,6 +775,10 @@ class DaemonTest(unittest.TestCase):
     def test_inspection_never_builds_missing_or_stale_script_models(self):
         from cadgen.engine.ids import model_id
 
+        # The registry alone, no document cache: a restart is refused with the command
+        # (what the cache reopens is ``test_cache``'s).
+        self.env = {**self.env, "CADGEN_ENGINE_CACHE_GB": "0"}
+
         marker = self.folder / "executed.txt"
         main = self.folder / "main.txt"
         self.script.write_text(textwrap.dedent(MODEL.format(size=3)).replace(
@@ -820,6 +824,8 @@ class DaemonTest(unittest.TestCase):
 
     def test_a_named_model_updates_one_address_and_after_a_restart_names_its_command(self) -> None:
         from urllib.parse import urlparse, parse_qs
+
+        self.env = {**self.env, "CADGEN_ENGINE_CACHE_GB": "0"}  # no document cache: ``test_cache``'s
 
         address = self._bare()
         first = self.built("bracket")

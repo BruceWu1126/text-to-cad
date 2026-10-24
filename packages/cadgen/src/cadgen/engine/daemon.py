@@ -12,7 +12,8 @@ worker idle ``CADGEN_ENGINE_WORKER_IDLE`` seconds (by default the daemon's own i
 hour) is retired, and so is one over its memory cap after a build (``worker.retirement``).
 Before a worker is stopped, every ``pointer`` and ``copy`` document of it the server does not hold is taken
 from it (``models.Models.drain``): a document outlives its worker. A retired script's next build
-is a fresh worker's, a restart.
+is a fresh worker's, a restart. Each such document is also kept in the engine's cache once it is
+idle, at its drain and at shutdown (``cache``), so a restart of the daemon opens it at once.
 
 It also serves documents over HTTP (``serve``), holding each loaded document and its
 parts' tessellations in its memory under one budget (``serve.memory_budget``,
@@ -290,7 +291,9 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
     def __init__(self, script: str, environment: dict[str, str],
                  on_patch: Callable[[dict[str, Any], bytes, float], None] = lambda *_args: None,
                  on_settled: Callable[..., None] = lambda _worker, _every=False: None, cwd: str | None = None,
-                 on_progress: Callable[["Worker", dict[str, Any]], None] = lambda _worker, _frame: None) -> None:
+                 on_progress: Callable[["Worker", dict[str, Any]], None] = lambda _worker, _frame: None,
+                 on_saved: Callable[["Worker", dict[str, Any], bytes], None] = lambda _worker, _header, _payload: None
+                 ) -> None:
         self.script = script
         self.environment = environment
         env = dict(environment)
@@ -311,6 +314,8 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
         self.on_patch = on_patch
         self.on_settled = on_settled
         self.on_progress = on_progress
+        self.on_saved = on_saved
+        self.saves = itertools.count(1)
         # The running request's last progress frame, and every file its frames named.
         self.progress: dict[str, Any] | None = None
         self.touched: set[str] = set()
@@ -391,6 +396,11 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
                         self.on_settled(self)
                 elif "collected" in message:
                     pass  # the worker collected while idle (``worker.py``): nothing waits on it
+                elif "saved" in message:
+                    try:
+                        self.on_saved(self, message["saved"], payload)  # the cache's (``save``)
+                    except Exception:  # noqa: BLE001 - a save never fails the worker's pipe
+                        pass
                 elif "where" in message:
                     waiting = self.asked.pop(str(message.get("id")), None)
                     if waiting is not None:
@@ -434,6 +444,12 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
             return None
         finally:
             self.asked.pop(ident, None)
+
+    def save(self, ident: str, script: str, name: str, generation: str) -> None:
+        """Ask for document ``ident`` (model ``name`` of ``script``, generation ``generation``) as the
+        engine's cache keeps it: the worker answers when no other request waits, to ``on_saved``."""
+        self._write({"id": f"save{next(self.saves)}", "op": "save", "ident": ident, "script": script, "name": name,
+                     "generation": generation})
 
     def build(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None],
               payload: bytes = b"") -> dict[str, Any]:
@@ -741,7 +757,8 @@ class Daemon:
         return server is not None and any(self.builders.get(ident) is worker for ident in server.watched())
 
     def _start(self, script: str, environment: dict[str, str], cwd: str | None) -> Worker:
-        return Worker(script, environment, self.patched, self.settled, cwd=cwd, on_progress=self.progressed)
+        return Worker(script, environment, self.patched, self.settled, cwd=cwd, on_progress=self.progressed,
+                      on_saved=self.models.cache.saved)
 
     def progressed(self, _worker: Worker, frame: dict[str, Any]) -> None:
         """A build's progress frame: the pages waiting on a served document it writes are woken
@@ -1208,6 +1225,8 @@ class Daemon:
                 self.stopping.set()
 
     def shutdown(self) -> None:
+        # The documents built or read in the last idle window, saved first, best effort (``cache``).
+        self.models.cache.final()
         self.pool.stop()
         if self.renders is not None:
             self.renders.stop()

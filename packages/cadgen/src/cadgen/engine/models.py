@@ -30,6 +30,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from cadgen.engine.cache import reads as cache_reads
+
 # A document's states, as ``cadgen status`` lists them (``state``).
 STATES = ("live", "held", "building", "failed", "evicted", "expired", "detached")
 
@@ -55,6 +57,9 @@ class Models:
         # Each ``memory`` document whose worker went: what its id answers from then on (``expired``).
         self.expired: dict[str, dict[str, Any]] = {}
         self.lock = threading.RLock()
+        from cadgen.engine.cache import Cache
+
+        self.cache = Cache(self)
 
     def register(self, worker: Any, answer: dict) -> None:
         done = answer.get("done")
@@ -68,8 +73,9 @@ class Models:
                 if not report.get("ok") or not ident or not source:
                     continue
                 version = secrets.token_hex(8)  # this build's generation: a rebuild is a new one
+                recorded = revision(report)
                 try:
-                    copied = self.record(report, program, answer.get("copy"), revision(report))
+                    copied = self.record(report, program, answer.get("copy"), recorded)
                 except Exception as error:  # noqa: BLE001 - a copy's inputs that moved: the build fails, loudly
                     report["ok"], report["error"] = False, f"{source['name']}: {error}"
                     root["ok"] = False
@@ -81,10 +87,13 @@ class Models:
                                            "program": program or (old or {}).get("program") or source["script"],
                                            "store": "copy" if copied else report.get("store") or "pointer",
                                            "builtAt": time.time(), "version": version,
-                                           "files": list(report.get("files") or {})}
+                                           "files": list(report.get("files") or {}), "revision": recorded,
+                                           "read": [] if report.get("store") == "memory" else
+                                           cache_reads(report.get("closure"))}
                 self.daemon.builders[ident] = worker
                 server = self.register_page(ident)
                 report["url"] = self.url(server, ident)
+                self.cache.touch(ident)
 
     # --- the registry ------------------------------------------------------------------------
 
@@ -165,7 +174,7 @@ class Models:
             found["copied"] = inputs
             found["origin"] = old.get("origin") or ({"file": copying.get("source"), "cwd": copying.get("origin")}
                                                     if copying else None)
-        for key in ("opened", "pinned", "preview"):  # the home's, kept across builds
+        for key in ("opened", "pinned", "preview", "cache"):  # the home's and the cache's, kept across builds
             if key in old:
                 found[key] = old[key]
         held.put(found)
@@ -296,10 +305,11 @@ class Models:
         from cadgen.engine.daemon import WorkerGone
 
         with self.lock:
-            owed = [(ident, row["version"]) for ident, row in self.records.items()
+            owed = [(ident, row["version"], row["revision"]) for ident, row in self.records.items()
                     if row["worker"] is worker and row["store"] != "memory"]
-        for ident, version in owed:
+        for ident, version, recorded in owed:
             if server.has(ident, version, whole=True):
+                self.cache.keep(ident, recorded, self.held_bytes(ident, version) or b"")
                 continue
             try:
                 structure, shapes, whole = self.load(ident, worker, whole=True)
@@ -312,6 +322,7 @@ class Models:
                 current = record is not None and record["version"] == version
             if current:  # a build of it since, by another worker, is newer
                 server.keep(ident, structure, shapes, version, whole)
+                self.cache.keep(ident, recorded, whole)  # the cache's, at retirement (``cache``)
 
     def serve(self, ident: str) -> tuple[Any, str]:
         """The server and the id of the model document ``ident`` the engine holds; refused
@@ -420,6 +431,161 @@ class Models:
             return "live"
         if record["store"] == "memory":
             return "expired"
-        if server is not None and server.has(ident, record["version"]):
+        if self.where(ident):
             return "held"
         return "evicted" if Path(record["source"]["script"]).is_file() else "detached"
+
+    # --- the cache (``cache``) ----------------------------------------------------------------
+
+    def row(self, ident: str) -> dict[str, Any] | None:
+        """This process's book's row of document ``ident`` (a copy of it), else None."""
+        with self.lock:
+            found = self.records.get(ident)
+            return dict(found) if found is not None else None
+
+    def where(self, ident: str) -> str | None:
+        """Where the engine holds a model document no worker does: ``memory`` (the server holds its
+        bytes at its generation), ``disk`` (its cache file is at its revision), ``memory and disk``,
+        or None (neither)."""
+        with self.lock:
+            record = self.records.get(ident)
+        if record is None or record["store"] == "memory":
+            return None
+        server = self.daemon.server
+        memory = server is not None and server.has(ident, record["version"])
+        disk = self.cache.current(ident, record.get("revision"))
+        return "memory and disk" if memory and disk else "memory" if memory else "disk" if disk else None
+
+    def on_disk(self, ident: str, revision: str | None) -> None:
+        """The cache file of document ``ident`` is at ``revision`` now (None: gone): held in memory at
+        that revision, it is read again from disk once evicted, in the budget's first tier."""
+        server = self.daemon.server
+        if server is None:
+            return
+        with self.lock:
+            record = self.records.get(ident)
+            version = record["version"] if record is not None and revision and record.get("revision") == revision else None
+        if version is None:
+            server.on_disk.pop(ident, None)
+        else:
+            server.on_disk[ident] = version
+
+    def adopt(self, ident: str) -> None:
+        """A model document this process never built whose cache file is there (after a restart),
+        taken into the book from its record: held on disk, no worker, a generation of its own, its
+        page registered where the server runs. Nothing is read but its record, nothing is run."""
+        from cadgen.engine.ids import is_id
+
+        if not is_id(ident):
+            return
+        with self.lock:
+            if ident in self.records or ident in self.expired:
+                return
+        found = self.cache.found(ident)
+        if found is None:
+            return
+        from cadgen.engine import registry as registering
+
+        record, meta = found
+        held = self.registry()
+        root = held.root(record)
+        program = registering.program(held, record)
+        row = {"id": ident, "source": {"script": str(registering.home(held, record)), "name": record["entry"]},
+               "worker": None, "program": str(program) if program else None, "store": record.get("store") or "pointer",
+               "builtAt": record.get("built") or meta.get("written_at"), "version": secrets.token_hex(8),
+               "files": [], "revision": meta["revision"],
+               "read": [[kind, os.path.normpath(root / path), digest] for kind, path, digest in meta.get("read") or []]}
+        with self.lock:
+            if ident in self.records or ident in self.expired:
+                return
+            self.records[ident] = row
+        if self.daemon.server is not None:
+            self.register_page(ident)
+            self.on_disk(ident, row["revision"])
+
+    def attach(self, server: Any) -> None:
+        """The daemon's server, started after documents were taken up from the cache: each is
+        registered with it."""
+        with self.lock:
+            idle = [ident for ident, row in self.records.items() if row["worker"] is None and row["store"] != "memory"]
+        for ident in idle:
+            row = self.row(ident)
+            if row is not None and self.cache.current(ident, row.get("revision")):
+                server.register_model(ident, row["source"]["name"], lambda ident=ident: self.load(ident), row["version"])
+                self.on_disk(ident, row["revision"])
+
+    def in_use(self) -> set[str]:
+        """The documents whose cache file the cache's bound never evicts: those a live worker holds,
+        and those a page watches."""
+        server = self.daemon.server
+        with self.lock:
+            live = {ident for ident, row in self.records.items() if self._working(row["worker"])}
+        return live | (server.watched() if server is not None else set())
+
+    def held_bytes(self, ident: str, version: str) -> bytes | None:
+        """The whole document's xbf bytes the server holds of document ``ident`` at ``version``, else None."""
+        server = self.daemon.server
+        if server is None:
+            return None
+        with server.load_lock:
+            doc = server.served.get(ident)
+            return doc.xbf if doc is not None and server.model_versions.get(ident) == version else None
+
+    def disk_bytes(self, ident: str) -> bytes | None:
+        """The bytes of document ``ident``'s cache file when it is at the revision the book holds, its
+        read noted (its idle timer and its recency); else None."""
+        with self.lock:
+            record = self.records.get(ident)
+        if record is None or not self.cache.current(ident, record.get("revision")):
+            return None
+        data = self.cache.read(ident)
+        if data is not None:
+            self.cache.touch(ident)
+        return data
+
+    def from_disk(self, ident: str) -> tuple:
+        """Document ``ident`` read from its cache file through the documents worker, as a held
+        document's bytes are (``worker._result``): its structure, its shape bytes and its xbf bytes.
+        ``serve.NotHeld`` when the file is gone."""
+        data = self.disk_bytes(ident)
+        with self.lock:
+            record = self.records.get(ident)
+        if data is None or record is None:
+            raise self.not_held(ident)
+        replies: list[dict[str, Any]] = []
+        name = record["source"]["name"]
+        self.daemon._call({"source": {"document": ident, "held": ident}},
+                          {"id": 1, "op": "result", "document": True, "name": name}, replies.append, data)
+        answer = next((row for row in reversed(replies) if "done" in row or "failed" in row), {})
+        if "done" not in answer:
+            raise ValueError(answer.get("failed") or f"{name} ({ident}): its cache file could not be read")
+        payload = base64.b64decode(answer.get("payload", ""))
+        done = answer["done"]
+        shapes, at = {}, 0
+        for key, size in done["shapes"]:
+            shapes[key] = payload[at:at + size]
+            at += size
+        from cadgen.engine.export.viewer import fingerprint
+
+        structure = {**done["structure"], "exportRevision": fingerprint(done["structure"]), "path": ident,
+                     "id": ident, "closure": done.get("closure"), "version": record["version"]}
+        return structure, shapes, data
+
+    def stale(self, ident: str) -> dict[str, Any] | None:
+        """For a model document no worker holds: whether the code changed since it was built -- each
+        file its build read compared with the file now (``cache.changes``) -- as ``{"text",
+        "changes", "rebuild"}``; None when it is as built, or a worker holds it. Nothing reruns."""
+        with self.lock:
+            record = self.records.get(ident)
+        if record is None or record["store"] == "memory" or self._working(record["worker"]):
+            return None
+        from cadgen.engine.cache import changes
+
+        script = Path(record["source"]["script"])
+        changed = changes(record.get("read") or [], script.parent)
+        if not changed:
+            return None
+        command = self.command(ident)
+        name = record["source"]["name"]
+        return {"text": f"{name} ({ident}): the code changed since this was built ({', '.join(changed)}); "
+                        f"run `{command}` to build it again", "changes": changed, "rebuild": command}

@@ -49,6 +49,15 @@ bytes, which its worker made of it before it retired: a ``result`` request with 
 them as an on-disk xbf, so the documents worker exports, inspects and draws it, kinematics and
 all, with no worker of its script started.
 
+A ``{"id", "op": "save", "ident", "script", "name", "generation"}`` request asks for a document
+this worker built as the engine's cache keeps it (``cache``): the whole document's xbf bytes
+(``document.to_bytes``), answered ``{"id", "saved": {"ident", "generation"}, "bytes"}`` and the
+bytes, or ``{"id", "saved": {"ident", "generation", "error"}}``. It is never on the run path: the
+worker does it only when no other request waits (a request that comes meanwhile waits for the one
+serialisation), and it answers no ``done`` or ``settled``. A ``result`` request with ``document``
+reads the bytes after its line (the cache's file) as ``export`` does a held document's: its
+structure and shape bytes, as a built document's.
+
 A build runs with the cyclic collector off, and the worker collects once it is idle: the memo
 keeps every live result of the last builds, millions of objects, and a full collection walks
 all of them -- a second on a large model, paid inside whichever call allocates when it falls
@@ -438,6 +447,19 @@ def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     return answer, b"".join(data)
 
 
+def _save(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
+    """A ``save`` request: the document of a model this worker built, as the xbf bytes the engine's
+    cache keeps (``document.to_bytes``, the drain's bytes)."""
+    from cadgen.engine import build as engine_build
+    from cadgen.engine import document
+
+    header = {"ident": request.get("ident"), "generation": request.get("generation")}
+    source = engine_build.held(Path(request["script"]), request["name"])
+    if source is None:
+        return {**header, "error": f"no model named {request['name']!r} is built in this worker"}, b""
+    return header, document.to_bytes(source.xcaf, source.shapes.values())
+
+
 def refusal(error: BaseException) -> dict[str, str]:
     """A refusal's type, carried beside its words: a ``ValueError`` (an ``ExportRefused``, a
     ``SnapshotRefused``, a ``KinematicsError``, ...) answered as ``kind``, ``module:name``, so the
@@ -529,8 +551,11 @@ def main() -> int:
     gc.disable()
     threading.Thread(target=read, daemon=True).start()
     owed = False  # a collection, since the last request answered
+    deferred: list[dict[str, Any]] = []  # saves, done when no other request waits
     while True:
-        if owed:
+        if deferred and requests.empty():
+            request = deferred.pop(0)
+        elif owed:
             try:
                 request = requests.get(timeout=COLLECT_IDLE)
             except queue.Empty:
@@ -545,6 +570,18 @@ def main() -> int:
             break
         ident = request.get("id")
         op = request.get("op")
+        if op == "save":
+            if not requests.empty():
+                deferred.append(request)  # never on the run path: after what waits
+                continue
+            try:
+                header, payload = _save(request)
+            except BaseException as error:  # noqa: BLE001 - a save never fails the worker
+                header, payload = {"ident": request.get("ident"), "generation": request.get("generation"),
+                                   "error": f"{type(error).__name__}: {error}"}, b""
+            send({"id": ident, "saved": header}, payload)
+            owed = True
+            continue
         if op in ("export", "result"):
             try:
                 cwd = request.get("cwd")

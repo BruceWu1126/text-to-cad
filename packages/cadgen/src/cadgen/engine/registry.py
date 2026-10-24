@@ -4,7 +4,12 @@
 (``kind: "model"``, ``store: "pointer"`` -- the script and the function it points at -- or
 ``"copy"`` -- its own sources and the files its build read, in the record's folder: a bundle), or
 an on-disk CAD file the person opened (``kind: "file"``). The registry POINTS: no geometry, no
-mesh, no xbf, no memo is ever written here. A ``memory`` document has no record. Ids are the
+mesh, no xbf and no memo is ever written here. A model's record may say that the engine's cache
+holds its document (``cache``: ``{revision, bytes, written_at, read}``), whose bytes live in the
+cache folder, not here (``Registry.cache``: ``<cache>/documents/<id>/document.xbf``, the engine's
+``cache`` module): regenerable, wiped at no loss, never the source of anything; the record is
+authoritative, and a cache file missing or unreadable is simply not cached. A ``memory`` document
+has no record. Ids are the
 documents' own (``ids``: derived from the canonical path and the function, or given with
 ``@model(id=...)`` for a copy); the registry is their reverse map, never their authority.
 
@@ -19,10 +24,12 @@ hosted store would implement. Every byte written under the state folder by this 
 through ``Folder``, and every write commits through ``atomic_replace.replace_atomic``. A record is
 written synchronously, and only when a field but ``changed`` differs from the one on disk; then
 each of ``OBSERVERS`` is told (a mirror uploads in the background: nothing waits on the network).
+The cache folder is a second ``Folder``, written the same way; forgetting a document
+(``delete``) forgets its cache file too.
 
 The engine imports nothing outside itself (law 3): where the state folder is is the
 distribution's to say, through ``FACTORY`` (``cadgen._internal.engine_host``). With none, the
-engine records nothing and copies nothing (``current`` is None).
+engine records nothing, copies nothing and caches nothing (``current`` is None).
 """
 from __future__ import annotations
 
@@ -103,6 +110,10 @@ class Folder:
         except OSError:
             return None
 
+    def touch(self, inside: str) -> None:
+        """A file's modification time, now: when it was last used (the cache's least recently used)."""
+        os.utime(self.path(inside))
+
     def remove(self, inside: str) -> None:
         """A file or a folder, whole; nothing when it is not there."""
         target = self.path(inside)
@@ -124,8 +135,10 @@ class Folder:
 class Registry:
     """The documents' records under ``<state>/documents`` (see the module)."""
 
-    def __init__(self, state: Folder | Path | str) -> None:
+    def __init__(self, state: Folder | Path | str, cache: Folder | Path | str | None = None) -> None:
         self.state = state if isinstance(state, Folder) else Folder(state)
+        # Where the engine's cache keeps documents' bytes (``cache``), or None: nothing is cached.
+        self.cache = cache if isinstance(cache, Folder) or cache is None else Folder(cache)
 
     # --- records ----------------------------------------------------------------------------
 
@@ -182,12 +195,15 @@ class Registry:
         return [record for record in (self.get(name) for name in self.state.names(DOCUMENTS)) if record is not None]
 
     def delete(self, ident: str) -> bool:
-        """Forget document ``ident``: its folder, whole (a copy's sources and inputs with it)."""
+        """Forget document ``ident``: its folder, whole (a copy's sources and inputs with it), and
+        its cache file in the cache folder."""
         if not is_id(ident):
             return False
         with self._lock(ident):
             there = self.state.path(f"{DOCUMENTS}/{ident}").exists()
             self.state.remove(f"{DOCUMENTS}/{ident}")
+            if self.cache is not None:
+                self.cache.remove(f"{DOCUMENTS}/{ident}")
         return there
 
     # --- a document's folder: a copy's bundle ------------------------------------------------
