@@ -30,6 +30,7 @@ from __future__ import annotations
 import posixpath
 import re
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,14 @@ __all__ = ["Model", "ThreeMfError", "read_3mf"]
 
 UNITS = {"micron": 0.001, "millimeter": 1.0, "centimeter": 10.0, "inch": 25.4, "foot": 304.8, "meter": 1000.0}
 GENERATED = ({"default"}, {"#fafafb", "#b6c4ce"})
+# A package is a zip: what a read takes out of it is bounded, so a small file cannot unpack into
+# more than the reader can hold. At most this many entries; at most this many bytes of model parts
+# in all; and a part past ``RATIO_FROM`` bytes at most ``MAX_RATIO`` times the bytes it is stored
+# in (a mesh's XML packs some ten to one; padding packs a thousand to one).
+MAX_ENTRIES = 10_000
+MAX_UNPACKED = 1 << 30
+MAX_RATIO = 100
+RATIO_FROM = 1 << 20
 
 
 # A triangle element whole; an attribute; an attribute's name; an attribute's value.
@@ -176,10 +185,38 @@ def _linear(text: str) -> tuple[float, float, float, float] | None:
     return (round(rgb[0], 6), round(rgb[1], 6), round(rgb[2], 6), round(channels[3] if len(channels) > 3 else 1.0, 6))
 
 
-def _start(package: zipfile.ZipFile) -> str:
+class _Unpacked:
+    """The bytes a read has taken out of its package, refused past the bounds above."""
+
+    def __init__(self, path: Path) -> None:
+        self.path, self.total = path, 0
+
+    def read(self, package: zipfile.ZipFile, name: str) -> bytes:
+        info = package.getinfo(name)  # KeyError: no such part
+        allowed = MAX_UNPACKED - self.total
+        if info.file_size > RATIO_FROM:
+            allowed = min(allowed, max(info.compress_size, 1) * MAX_RATIO)
+        if info.file_size > allowed:
+            raise ThreeMfError(self.refusal(name))
+        try:
+            with package.open(info) as stream:  # the declared size is the file's word: read no more than allowed
+                data = stream.read(allowed + 1)
+        except (zipfile.BadZipFile, zlib.error, NotImplementedError, EOFError, OSError) as error:
+            raise ThreeMfError(f"{self.path.name}: {name} does not unpack ({error})") from None
+        if len(data) > allowed:
+            raise ThreeMfError(self.refusal(name))
+        self.total += len(data)
+        return data
+
+    def refusal(self, name: str) -> str:
+        return (f"{self.path.name}: {name} unpacks to more than a 3MF reader holds "
+                f"({MAX_UNPACKED >> 20} MB in all, {MAX_RATIO} times its packed size)")
+
+
+def _start(package: zipfile.ZipFile, unpacked: _Unpacked) -> str:
     """The model part the package's relationships name (``3D/3dmodel.model`` when none do)."""
     try:
-        root = ET.fromstring(package.read("_rels/.rels"))
+        root = ET.fromstring(unpacked.read(package, "_rels/.rels"))
     except (KeyError, ET.ParseError):
         return "3D/3dmodel.model"
     for relationship in root:
@@ -196,7 +233,10 @@ def read_3mf(path: Path) -> Model:
     except (OSError, zipfile.BadZipFile) as error:
         raise ThreeMfError(f"{path.name} is not a 3MF package: {error}") from None
     with package:
+        if len(package.infolist()) > MAX_ENTRIES:
+            raise ThreeMfError(f"{path.name} lists more than {MAX_ENTRIES} entries: more than a 3MF reader opens")
         names = set(package.namelist())
+        unpacked = _Unpacked(path)
         documents: dict[str, ET.Element] = {}
         blocks: dict[str, list[bytes]] = {}  # each part's mesh bodies, by the index its mesh element names
 
@@ -205,15 +245,16 @@ def read_3mf(path: Path) -> Model:
             if name not in documents:
                 if name not in names:
                     raise ThreeMfError(f"{path.name} names a model part {name!r} it does not hold")
+                data = unpacked.read(package, name)
                 try:
-                    stripped, found = _cut(package.read(name))
+                    stripped, found = _cut(data)
                     documents[name] = ET.fromstring(stripped)
                 except (ET.ParseError, ValueError) as error:
                     raise ThreeMfError(f"{path.name}: {name} is not XML ({error})") from None
                 blocks[name] = found
             return documents[name]
 
-        start = _start(package)
+        start = _start(package, unpacked)
         root = document(start)
         declared = str(root.get("unit") or "millimeter")
         if declared.strip().lower() not in UNITS:

@@ -3,7 +3,9 @@ A DXF block is drawn once for every insert of it and every cell of a MINSERT's g
 node or a 3MF object is placed once for every parent that lists it, so a few hundred bytes can
 name an exponential drawing or build; each reader counts what it expands and refuses a file past
 its bound before it holds what it would draw. The mesh readers share the bounds of a document's
-assembly (``document.MAX_OCCURRENCES``, ``document.MAX_ASSEMBLY_DEPTH``)."""
+assembly (``document.MAX_OCCURRENCES``, ``document.MAX_ASSEMBLY_DEPTH``). A 3MF is a zip, so what
+a read unpacks from it is bounded too: its entries, its parts' bytes in all, and how far a large
+part unpacks past the bytes it is stored in."""
 
 from __future__ import annotations
 
@@ -152,6 +154,47 @@ class MeshPlacementTest(FolderTest):
             with self.subTest(name), mock.patch.object(document, "MAX_ASSEMBLY_DEPTH", 4):
                 with self.assertRaisesRegex(error, "deeper than 4 levels"):
                     read()
+
+
+MODEL = ('<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" '
+         'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="1" type="model">'
+         '<mesh><vertices><vertex x="0" y="0" z="0"/><vertex x="1" y="0" z="0"/><vertex x="0" y="1" z="0"/>'
+         '</vertices><triangles><triangle v1="0" v2="1" v3="2"/></triangles></mesh></object></resources>'
+         '<build><item objectid="1"/></build></model>')
+
+
+def package(path: Path, padding: int = 0, extra: int = 0) -> Path:
+    """A one-triangle 3MF whose model part ends in ``padding`` spaces, with ``extra`` more entries."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as found:
+        found.writestr("3D/3dmodel.model", MODEL + " " * padding)
+        for at in range(extra):
+            found.writestr(f"Metadata/note{at}.txt", "")
+    return path
+
+
+class ThreeMfUnpackTest(FolderTest):
+    def test_a_package_within_the_bounds_reads(self) -> None:
+        model = threemf.read_3mf(package(self.folder / "plain.3mf", padding=4096, extra=3))
+        self.assertEqual(len(model.placed), 1)
+
+    def test_a_part_past_the_unpacked_bound_is_refused(self) -> None:
+        path = package(self.folder / "padded.3mf", padding=200_000)
+        with mock.patch.object(threemf, "MAX_UNPACKED", 100_000):
+            with self.assertRaisesRegex(threemf.ThreeMfError, "unpacks to more than"):
+                threemf.read_3mf(path)
+
+    def test_a_large_part_packed_far_past_the_ratio_is_refused(self) -> None:
+        path = package(self.folder / "dense.3mf", padding=400_000)  # spaces pack about a thousand to one
+        with mock.patch.object(threemf, "RATIO_FROM", 100_000):
+            with self.assertRaisesRegex(threemf.ThreeMfError, "unpacks to more than"):
+                threemf.read_3mf(path)
+        self.assertEqual(len(threemf.read_3mf(path).placed), 1)  # under the default threshold it reads
+
+    def test_a_package_of_too_many_entries_is_refused(self) -> None:
+        path = package(self.folder / "many.3mf", extra=20)
+        with mock.patch.object(threemf, "MAX_ENTRIES", 10):
+            with self.assertRaisesRegex(threemf.ThreeMfError, "more than 10 entries"):
+                threemf.read_3mf(path)
 
 
 if __name__ == "__main__":
