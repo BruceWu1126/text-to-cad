@@ -53,13 +53,26 @@ function resolveDirectoryRoot() {
 // Vite obtains the API endpoint of this installation's engine (its one page's), then
 // proxies /__cad with its token. Closing Vite leaves the engine and its other clients alive.
 // VIEWER_PYTHON names the editable installation's interpreter. An explicit
-// VIEWER_BACKEND_URL (the launcher's apiUrl) also needs VIEWER_ENGINE_TOKEN.
+// VIEWER_BACKEND_URL (the launcher's apiUrl) also needs CAD_ENGINE_TOKEN: the token is
+// named outside the client's envPrefix (VIEWER_), which Vite hands to the page.
+const ENV_PREFIX = "VIEWER_";
+const TOKEN_VARIABLE = "CAD_ENGINE_TOKEN";
+
+// A secret the page would be handed: the engine's token under the client's prefix.
+function refuseClientTokens(env = process.env) {
+  const exposed = Object.keys(env).filter((name) => name.startsWith(ENV_PREFIX) && /TOKEN|SECRET|KEY/u.test(name));
+  if (exposed.length) {
+    throw new Error(`${exposed.join(", ")}: Vite hands every ${ENV_PREFIX} variable to the page. `
+      + `Name the engine token ${TOKEN_VARIABLE} instead.`);
+  }
+}
+
 async function startDevBackend() {
   const external = String(process.env.VIEWER_BACKEND_URL || "").trim();
   if (external) {
     const target = external.replace(/\/+$/u, "");
     console.info(`CAD Viewer backend: ${target} (VIEWER_BACKEND_URL)`);
-    return { target, token: process.env.VIEWER_ENGINE_TOKEN };
+    return { target, token: process.env[TOKEN_VARIABLE] };
   }
 
   const python = process.env.VIEWER_PYTHON || "python3";
@@ -174,10 +187,10 @@ function chunkIdsPlugin() {
   };
 }
 
-export default defineConfig(async ({ command }) => ({
+export default defineConfig(async ({ command }) => (refuseClientTokens(), {
   root: viewerAppRoot,
   base: "./",
-  envPrefix: "VIEWER_",
+  envPrefix: ENV_PREFIX,
   // Which build this is, for the version the app menu shows (src/host/viewerLinks.js): none for
   // the release's own, this checkout's commit for any other (@text-to-cad/ui/build-id).
   define: { __TEXT_TO_CAD_BUILD__: JSON.stringify(buildId({ version: viewerVersion(), cwd: viewerAppRoot })) },
@@ -210,6 +223,10 @@ export default defineConfig(async ({ command }) => ({
     // reuses or replaces; dev stays out of that.)
     strictPort: true,
     allowedHosts: viewerAllowedHosts,
+    // No CORS: the client is this origin's own, and the /__cad proxy below adds the engine's
+    // token to what it forwards, so no other origin (another localhost port among them) may
+    // read what it answers. Vite's default lets every localhost origin.
+    cors: false,
     // The two API prefixes go to the Python backend; everything else is the
     // client, served by Vite with HMR. Neither prefix collides with Vite's own
     // reserved /@vite/, /@fs/ or /@id/.

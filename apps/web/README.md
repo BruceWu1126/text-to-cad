@@ -88,8 +88,10 @@ Dev announces itself to the same engine with
 `python -m cadgen.viewer --api-only --json` (a launch: its folder becomes the home's), then
 proxies `/__cad` with the engine token. Vite owns the client and closing it leaves the engine
 running. `VIEWER_PYTHON` names the interpreter with cadgen installed (default `python3`).
-`VIEWER_BACKEND_URL` and `VIEWER_ENGINE_TOKEN` attach to an existing engine
-using its `apiUrl` and `token`. Build shared packages first; Vite needs no web
+`VIEWER_BACKEND_URL` and `CAD_ENGINE_TOKEN` attach to an existing engine
+using its `apiUrl` and `token`. The token is named outside `VIEWER_`, the prefix Vite hands
+to the page (dev refuses a `VIEWER_` variable named like a token), and the dev server sends
+no CORS headers, so no other origin reads what its token-bearing proxy answers. Build shared packages first; Vite needs no web
 production build.
 
 Prod is `cadgen viewer`, run from anywhere. It serves the client bundled by
