@@ -92,7 +92,7 @@ from arm import arm                              # an assembly with a mechanism 
 
 @model
 def arm_folded():
-    return posed(arm().shape, "folded")
+    return posed(arm(), "folded")
 ```
 
 ```bash

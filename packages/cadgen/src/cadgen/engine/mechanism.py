@@ -534,14 +534,20 @@ def configuration_sequence(assembly: Any, name: str, waypoints_or_fn: Any = None
 
 
 def posed(assembly: Any, state: Any) -> Any:
-    """A copy of ``assembly`` with every part where ``state`` puts it: a mechanism state's name, or
+    """``assembly`` with every part where ``state`` puts it: a mechanism state's name, or
     ``{joint label or coupling name: value}`` (the values ``mechanism_state`` takes, the rest as
     built). The parts move by the forward kinematics the viewer and the snapshot use
     (``link_worlds``): each link's placement at the asked values over its placement as built,
-    applied to that link's parts. The copy shares the geometry, and keeps the joints, couplings,
-    mechanism states and configuration sequences, the asked values its as-built state. An unknown
-    state, joint or coupling, or a value out of range, is refused by name (``resolve``). A posed
-    file is this, a function in the model's code: ``return posed(arm().shape, "folded")``."""
+    applied to that link's parts. An unknown state, joint or coupling, or a value out of range, is
+    refused by name (``resolve``).
+
+    ``assembly`` is what the model call returned, its document's handle, or a shape. Inside a body
+    (``return posed(arm(), "folded")``: a posed file is this) the result is a copy of the shape that
+    shares its geometry and keeps the joints, couplings, mechanism states and configuration
+    sequences, the asked values its as-built state. From a plain script (a check) the handle's
+    document is posed where the engine holds its mechanism (``posed_structure``), and the answer is
+    the tree ``.shape`` is, at that pose: placed parts, no joints. A shape a plain script read
+    through ``.shape`` has no joints left to pose, and is refused with what to pass instead."""
     from collections.abc import Mapping
 
     import build123d as bd
@@ -551,11 +557,9 @@ def posed(assembly: Any, state: Any) -> Any:
     from OCP.TopLoc import TopLoc_Location
 
     from cadgen.engine import document
+    from cadgen.engine.api import Document
     from cadgen.engine.model import instance
 
-    if not isinstance(assembly, bd.Shape):
-        hint = ": a model call returns its document, whose .shape is the assembly" if hasattr(assembly, "shape") else ""
-        raise TypeError(f"posed() takes the assembly whose joints it sets, not {type(assembly).__name__}{hint}")
     if isinstance(state, Mapping):
         pose: Any = dict(state)
     elif isinstance(state, str):
@@ -563,6 +567,13 @@ def posed(assembly: Any, state: Any) -> Any:
     else:
         raise TypeError("posed() takes a mechanism state's name or a mapping of joint labels to values, "
                         f"not {type(state).__name__}")
+    if isinstance(assembly, Document):
+        if not assembly._inside:
+            return _posed_document(assembly, pose)
+        assembly = assembly.shape
+    if not isinstance(assembly, bd.Shape):
+        raise TypeError(f"posed() takes a model call's handle or the assembly whose joints it sets, "
+                        f"not {type(assembly).__name__}")
     made = instance(assembly)
     tree = document.collect(made, made.__dict__.get("label") or "posed")
     children = made.__dict__.get("_NodeMixin__children") or ()
@@ -571,6 +582,11 @@ def posed(assembly: Any, state: Any) -> Any:
     root_path = () if whole and made.wrapped.Location().IsIdentity() else (0,)
     kinematics = None if tree.mechanism is None else block(
         tree.mechanism, [], lambda at: _column(_numpy(_occurrence(tree, at)[0])))
+    if kinematics is None:
+        transferred = assembly.__dict__.get(TRANSFERRED)
+        if transferred is not None:
+            raise KinematicsError(f"posed() was given {transferred}'s .shape, which carries its parts and not its "
+                                  f"joints: pass the handle the model call returns, posed({transferred}(), {pose!r})")
     values, _named = resolve(kinematics, pose)
     if kinematics is None:
         return made
@@ -628,6 +644,25 @@ def posed(assembly: Any, state: Any) -> Any:
             else:
                 joint.angle, joint.position = value
     return made
+
+
+# Set on the tree a plain script's ``.shape`` brings out of the engine (``api.Document.shape``): the
+# model's name, for ``posed`` to say what to pass in place of a shape with no joints.
+TRANSFERRED = "_cadgen_transferred"
+
+
+def _posed_document(handle: Any, pose: Any) -> Any:
+    """``posed(handle, pose)`` outside the body that builds it: the document's structure as the
+    engine holds it, mechanism included, placed at ``pose`` (``posed_structure``), as the
+    build123d tree ``.shape`` makes of it."""
+    from cadgen.engine.export import Source
+
+    source = handle._transferred()
+    if source.structure.get("kinematics") is None:
+        raise KinematicsError(f"{handle.name} has no joints to pose")
+    shape = Source(posed_structure(source.structure, pose), source.shapes, live=False).shape()
+    shape.__dict__[TRANSFERRED] = handle.name
+    return shape
 
 
 def _objects(result: Any, root_path: tuple[int, ...]) -> list[tuple[Any, tuple[int, ...]]]:
@@ -852,6 +887,7 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
     connected joint. ``root_path`` is the result's own occurrence in ``tree`` (``()``, or
     ``(0,)`` where the document holds it in a component of its own)."""
     objects = _objects(result, root_path)
+    by_path = {path: obj for obj, path in objects}
     holders: dict[int, list[tuple[int, ...]]] = {}
     jointed: list[tuple[tuple[int, ...], Any]] = []
     configured: list[tuple[tuple[int, ...], Any, dict]] = []
@@ -1033,6 +1069,12 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         as_built[label] = value
         pairs.append(pair)
         joint_labels.append((moving.label, held_by))
+        off = _axis_off(by_path[held_by], moving) if kind != "spherical" else None
+        if off is not None:
+            warnings.append(f"joint {label!r}'s axis passes {off:.0f} mm from {name_of(held_by)}, which holds it, "
+                            "farther than the part's own size: an Axis is in world coordinates, so a local one lands "
+                            "near the origin and connect_to moves the other part there; give the world axis, "
+                            "axis.located(part.location)")
 
     couplings, controls = _couplings(coupled, pairs, joint_labels, name_of, warnings, as_built)
     found = Mechanism(tree.root.name, links, 0, pairs, as_built, {}, warnings, couplings=couplings)
@@ -1289,6 +1331,29 @@ def _convert(values: dict[str, Any], where: str, mechanism: Mechanism, naming: d
         except KinematicsError as error:  # each alone within the limits, together past them
             problems.append(str(error))
     return {pair.label: found[pair.label] for pair in mechanism.pairs if pair.label in found}, problems
+
+
+def _axis_off(part: Any, joint: Any) -> float | None:
+    """How far a moving joint's axis passes from the part that holds it, in the part's own frame,
+    when that is more than the part's own size (its bounding box's diagonal) beyond its box: a
+    local axis given where build123d reads a world one. None for an axis that passes near."""
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+
+    from cadgen.engine.document import _identity
+
+    box = Bnd_Box()
+    BRepBndLib.Add_s(part.wrapped.Located(_identity()), box, False)
+    if box.IsVoid():
+        return None
+    low, high = (np.array([corner.X(), corner.Y(), corner.Z()]) for corner in (box.CornerMin(), box.CornerMax()))
+    centre, radius = (low + high) / 2, float(np.linalg.norm(high - low)) / 2
+    axis = joint.relative_axis
+    point = np.array([axis.position.X, axis.position.Y, axis.position.Z])
+    direction = np.array([axis.direction.X, axis.direction.Y, axis.direction.Z])
+    offset = centre - point
+    distance = float(np.linalg.norm(offset - offset.dot(direction) * direction))
+    return distance if distance - radius > 2 * radius else None
 
 
 def _size(result: Any) -> float:
