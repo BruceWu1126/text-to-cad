@@ -67,12 +67,10 @@ models/**/*.mov
 models/**/*.webm
 models/**/*.mkv
 
-# models/ holds sources only. Every build writes into an XBF/ folder beside a model's src
-# (the xbf, its exports), a drawing into DXF/, an engineering drawing (@eng_drawing) its PDF
-# into PDF/.
+# models/ holds sources only. A run writes nothing; each project's own .gitignore keeps out
+# the files written on request (STEP/ STL/ GLB/ 3MF/ DXF/, and the PDF/ of an @eng_drawing).
+# An xbf saved by hand lands where it was asked to.
 models/**/XBF/
-models/**/DXF/
-models/**/PDF/
 # tom's vendor STEP inputs (536 MB, tom-cad's read-only data): a local copy, never committed.
 models/tom/STEP/
 # The unported models' frozen inputs and generated validation output (tendon_hand's
