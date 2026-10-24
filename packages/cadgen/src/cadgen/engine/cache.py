@@ -427,22 +427,24 @@ class Cache:
                 entry = self.index.get(ident)
             if entry is None:
                 continue
+            with self.lock:
+                self.evictions += 1  # counted before its file goes: a file gone is an eviction counted
             self.remove(ident)
             total -= entry["bytes"]
-            with self.lock:
-                self.evictions += 1
 
     def remove(self, ident: str) -> None:
-        """Document ``ident``'s cache file, gone; its record kept, saying so (no ``cache``)."""
+        """Document ``ident``'s cache file, gone; its record kept, saying so (no ``cache``). The record
+        stops naming the file before the file goes, so no record ever names a file that is not there
+        (``_write`` writes the file before its record names it)."""
         held = self.registry()
         with self.lock:
             self.index.pop(ident, None)
         if held is None:
             return
-        held.cache.remove(f"{self.inside(ident).rsplit('/', 1)[0]}")  # documents/<id>, nothing outside it
+        self.models.on_disk(ident, None)
         held.update(ident, lambda found: {key: value for key, value in found.items() if key != "cache"}
                     if found is not None and "cache" in found else None)
-        self.models.on_disk(ident, None)
+        held.cache.remove(f"{self.inside(ident).rsplit('/', 1)[0]}")  # documents/<id>, nothing outside it
 
     def failed(self, ident: str, error: str) -> None:
         """A save that failed: logged, and listed by ``status``; never raised."""
