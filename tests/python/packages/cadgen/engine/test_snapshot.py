@@ -510,7 +510,8 @@ class SnapshotTest(unittest.TestCase):
                              height=150, daemon=False)
         self.assertEqual((drawn.width, drawn.height), (200, 150))
         self.drawn(folder / "stand.png", (200, 150))
-        self.assertEqual(sorted(path.name for path in folder.rglob("*") if path.is_file()),
+        # The importing program's own bytecode of stand.py (``_model``: Python's import) is not cadgen's.
+        self.assertEqual(sorted(path.name for path in folder.rglob("*") if path.is_file() and "__pycache__" not in path.parts),
                          ["stand.glb", "stand.png", "stand.py"])
 
     def test_a_model_taken_from_its_file_is_drawn_from_that_file(self) -> None:

@@ -41,8 +41,11 @@ def parse_args(argv=None, *, prog=DEFAULT_PROG):
 
 
 def main(argv=None, *, prog=DEFAULT_PROG):
+    from cadgen.engine import client
     from cadgen.engine.client import request
     options = parse_args(argv, prog=prog)
+    # The engine started for this page says so, as every verb's does (``cadgen.engine.cli.answered``).
+    client.on_started = lambda: print('engine started', file=sys.stderr, flush=True)
     options['start'] = os.getcwd()
     if not options['api_only']:
         options['dist'] = resolve_dist_dir(options['dist'])

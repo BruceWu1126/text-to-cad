@@ -792,7 +792,7 @@ class EngineClientFollowsARestartedEngine(unittest.TestCase):
         self.addCleanup(server.shutdown)
         url = f"http://127.0.0.1:{server.server_address[1]}"
         answers = [{"url": url, "token": "old"}, {"url": url, "token": "new"}]
-        with mock.patch.object(engine_client, "request", side_effect=lambda _message: answers.pop(0)):
+        with mock.patch.object(engine_client, "request", side_effect=lambda _message, start=True: answers.pop(0)):
             client = engine_client.EngineClient()
             self.assertEqual(client.call("GET", "/__cad/server")[0], 200)
             self.assertEqual(client.endpoint["token"], "new")

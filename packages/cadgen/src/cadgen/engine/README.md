@@ -144,10 +144,14 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
    its script or file (**Document lifetime**); never geometry and never source. In the cache folder its host names (the platform's: `~/.cache/cadgen`) it
    keeps, under `documents/` alone, each model document's bytes as it last built them (**The
    cache**): its own file, never a declared or exported xbf, regenerable and wiped at no loss,
-   so a restart opens every project at once; the code stays the only source of truth. It
+   so a restart opens every project at once; and under `pycache/` the bytecode its own processes
+   compile of the libraries they load (`daemon.bytecode`: `PYTHONPYCACHEPREFIX`, a folder per
+   installation), so nothing is written beside a library or a model; the code stays the only
+   source of truth. It
    writes no sidecar, record of a build beside a model, index, memo, mesh or parsed document,
    and no derived file beside an input (a STEP converted to an xbf is an export the author asks
-   for). A model whose xbf holds the closure the model has now is not run (**Build closure**). An explicit viewer export names one output in managed
+   for). A model whose xbf holds the closure the model has now is not run, nor one with no file whose
+   cached document holds it (**Build closure**). An explicit viewer export names one output in managed
    temporary storage for delivery to the browser; it never saves source, a registry,
    or an intermediate XBF. See **Viewer exports** below.
 3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself:
@@ -174,7 +178,8 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
    edit costs what it changed, and an element keeps the name its feature history
    gave it across edits. Tessellations live in the serving process's memory,
    keyed by a part's geometry, under its one memory budget (**Document lifetime**). Across a restart, a model's
-   build is cold but for its own xbf, taken whole or not at all (**Build closure**); what a restart
+   build is cold but for its own xbf -- or, for a model with no file, its cached document (**The
+   cache**) -- taken whole or not at all (**Build closure**); what a restart
    shows without a build is the document cache (law 2), the last built state.
 6. **One document per model, with one id.** Every called model makes one document, and every id
    is one formula, `uuid5(NAMESPACE, canonical(scope) + "::" + name)` (`ids.derived_id`): a
@@ -416,7 +421,10 @@ id is read as the engine holds it, never built: one it does not hold is refused 
 that builds it again, `python <the program that built it>`. A script is never a source: `x.py`
 and `x.py::fn` are refused as any other file that is no document is.
 
-Every build and every verb goes through the engine: no command runs one in its own process.
+Every build and every verb goes through the engine: no command runs one in its own process. A
+verb that starts the engine to answer says so, `engine started` on stderr, once, and only when the
+engine that answers is the one it started (`client.on_started`); `status` and `stop` never start
+one, nor does an MCP host closing its session.
 `daemon=False` on the Python functions (`Model.build`, `export`, `snapshot`) is a seam for tests
 and debugging only: it runs in this process, cold, and no document is served: no page, and
 nothing for `inspect` to read by its id.
@@ -454,9 +462,21 @@ import fails as Python's own does. A script in a folder with no `__init__.py` is
 its stem names. An edit to any module the script imports is read on the next build, which
 re-runs the bodies that reach it (**Body retention**). The script and every first-party module
 it imports are compiled from their bytes on disk, never from a `__pycache__` `.pyc`, and a
-build writes no bytecode: CPython takes a `.pyc` as current by the source's whole-second mtime
-and its size, so a same-length edit inside the second another tool compiled the file would
-otherwise run that tool's code.
+build writes no bytecode of them: CPython takes a `.pyc` as current by the source's whole-second
+mtime and its size, so a same-length edit inside the second another tool compiled the file would
+otherwise run that tool's code. The libraries a worker loads are another matter: the daemon and
+its workers cache their bytecode under `pycache/<installation>` in the cache folder
+(`daemon.bytecode`, `PYTHONPYCACHEPREFIX`; one given is honoured, a caller's
+`PYTHONDONTWRITEBYTECODE` is not, as the daemon serves every later client), never beside a
+library or a model. A uvx installation compiles nothing on install, so without it every worker's
+start compiled build123d and the pure-Python libraries it loads: measured on a fresh uvx
+environment of the wheel, a fresh daemon's first build of a one-body model took 5.2-6.2 s with
+none cached and 2.4-2.9 s cached. A folder no daemon started in 30 days goes
+(`PYCACHE_UNUSED_DAYS`). With no cache folder that is this user's alone, nothing is written.
+The first request of a host (`http`: an MCP server's first call; `warm`: the viewer's launch)
+warms the kernel once per installation, in a process of its own (`daemon.warm`): the first load
+of a fresh installation on macOS also waits on the system's first look at each native library,
+43 s measured, which the host's first build then does not pay.
 A warm build does not make the document again: the worker holds the XCAF
 document it last wrote and patches it (`document.Kept`). A prototype whose label
 holds what a cold build would make of it keeps that label untouched; one that
@@ -586,7 +606,8 @@ no page, against 12 and 3.2 GB when the pool started with the server. The pool's
 a first page about 0.8 s, less the time the page takes to load after the warm.
 
 A retired script's next build is a fresh worker's: a restart, which takes the xbf whole when
-its closure is unchanged (**Build closure**), and else builds the model cold. A render
+its closure is unchanged (**Build closure**) -- a model with no file, its cached document (**The
+cache**) -- and else builds the model cold. A render
 process (**The viewer and the snapshot**) is no worker and does not count toward the cap; it
 is held to the same memory cap after each picture, and retired after the same idle time.
 
@@ -609,7 +630,7 @@ import system (`daemon.RESTARTS`): `PYTHONPATH`, `PYTHONHOME`, `PYTHONSAFEPATH`,
 them replaces the worker (retired `environment`), and its memo goes with it. Everything else the
 run adopts (`worker.adopt`): before the body runs, the caller's environment replaces the worker's
 `os.environ`, keeping only those variables and what the worker set for itself
-(`CADGEN_ENGINE_WORKER`, `PYTHONDONTWRITEBYTECODE`). `PATH` and `VIRTUAL_ENV` are adopted, not
+(`CADGEN_ENGINE_WORKER`, and the daemon's bytecode setting, `daemon.BYTECODE`). `PATH` and `VIRTUAL_ENV` are adopted, not
 restarts: neither changes a running interpreter's `sys.path` (the worker is the daemon's
 interpreter, started with `-P`, and `site` finds a virtual environment by the interpreter's own
 `pyvenv.cfg`, never by `VIRTUAL_ENV`, which only activation scripts and installers read), and
@@ -783,8 +804,8 @@ used), written through a `registry.Folder` with `replace_atomic`, its record sta
 folder. The bytes are the hold's (`document.to_bytes`: the document, its closure record and its
 compiled animations), the engine's own file always: a declared `@xbf` or an exported xbf is the
 author's, never used as the cache nor pointed at by it. The folder is shared with any 0.7 install's
-store: the engine reads, writes, sizes and evicts only under `documents/`, and lists, counts and
-removes nothing else there. It is written never on the run path:
+store: the engine's cache reads, writes, sizes and evicts only under `documents/` (its processes'
+bytecode is under `pycache/`), and lists, counts and removes nothing else there. It is written never on the run path:
 
 - after `CACHE_IDLE_SECONDS` (10 s) with no build and no read of the document: the daemon asks the
   worker that holds it to save it (`Worker.save`), which the worker does only when no request waits
@@ -803,6 +824,15 @@ snapshot, inspect, `cad_show` -- by reading its bytes through the documents work
 document does; no worker of its script starts and nothing runs. Loaded, it sits in the memory
 budget's first tier. The record is authoritative: a cache file missing, or not the size its
 record says, is not cached.
+
+A run takes it too. A build is handed the cache's `documents/` folder, and a fresh worker -- after
+a restart, or once the script's worker retired -- asked for a `pointer` model that declares no file
+reads that model's cache file before its body runs, as it reads an xbf (**Build closure**): with the
+key the model has now, the document is taken whole and nothing runs (`cache: {"used": true, "from":
+"cache"}`; the CLI's `took tube.py::tube cold in 0.42s: the engine's cache holds the model's key`),
+its bytes kept as they are, never written again; any other key builds the model, and says why. A
+later unchanged run in that worker takes it from memory. A model that declares a file and no xbf is
+never taken: nothing says the file is the cached revision's.
 
 **Staleness.** `read` is what the build read, with digests: the script and each module its model
 reached (each file's bytes, SHA-256, as the build answered) and each file its bodies read (the
@@ -2294,7 +2324,8 @@ record on the main label, the closure counts none, and an animated document is t
 (**Animations**).
 
 Before a body runs or is replayed, the build makes the closure again -- the script loaded,
-its modules digested, each input hashed again -- and compares its key with the xbf's. The
+its modules digested, each input hashed again -- and compares its key with the xbf's (a model with
+no file: its cached document's, `"from": "cache"`, **The cache**). The
 same key, in an xbf written by this engine that reads whole, and the body is not run: the
 report says `cache: {"used": true, "from": "file"}`, every file `written: false`,
 `memo.bodies_loaded` the bodies the document is, `bodies` the root `loaded`, `timings` the key

@@ -50,6 +50,25 @@ if __name__ == "__main__":
     {name}()
 """
 
+# A model whose body says on stderr that it ran: the worker's output reaches the run's stderr.
+SAID = """
+import sys
+import build123d as bd
+from cadgen.engine import model
+
+WIDTH = {width}
+
+
+@model
+def {name}():
+{body}
+
+
+if __name__ == "__main__":
+    {name}()
+"""
+GOOD = '    print("the body ran", file=sys.stderr)\n    return bd.Box(WIDTH, 2, 1)'
+
 DECLARED = """
 import build123d as bd
 from cadgen.engine import xbf
@@ -157,6 +176,9 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(sorted(row[1] for row in meta["read"]), ["cube.py"], "what the build read, by digest")
         self.assertEqual(sorted(os.listdir(self.state / "documents" / ident)), ["document.json"],
                          "the bytes are the cache folder's, never the state folder's")
+        compiled = list((self.cache / "pycache").glob("*/**/build123d/__init__.*.pyc"))  # the prefix mirrors its path
+        self.assertEqual(len(compiled), 1, "the worker's libraries' bytecode, in the engine's folder")
+        self.assertEqual(list(self.project.rglob("*.pyc")), [], "none beside the model")
         stamps = (self.file(ident).stat().st_mtime_ns, (self.state / "documents" / ident / "document.json").stat().st_mtime_ns)
         self.run_script("cube")
         time.sleep(IDLE * 4)  # its idle window passed again
@@ -224,6 +246,46 @@ class CacheTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.engine)}):
             self.assertIn("the code changed since this was built", _say_not_held(ident))
         self.assertFalse(self.ran("cube"), "nothing reran it")
+
+    def said(self, body: str = GOOD, width: float = 3.0) -> str:
+        """``cube.py``, its model's body ``body``: the model's id."""
+        (self.project / "cube.py").write_text(SAID.format(name="cube", width=width, body=body), encoding="utf-8")
+        return model_id(self.project / "cube.py", "cube")
+
+    def assert_taken(self) -> None:
+        """A run of ``cube.py`` that took its document from the engine's cache: no body ran."""
+        done = self.run_script("cube")
+        self.assertIn("took cube.py::cube cold in", done.stdout)
+        self.assertIn("the engine's cache holds the model's key, 1 bodies loaded, nothing ran", done.stdout)
+        self.assertNotIn("the body ran", done.stderr)
+
+    def test_after_a_restart_an_unchanged_run_is_taken_from_the_cache_and_an_edit_rebuilds(self) -> None:
+        ident = self.said()
+        self.assertIn("the body ran", self.run_script("cube").stderr)
+        self.cached(ident)
+        self.assertEqual(self.cli("stop").returncode, 0)
+        self.assert_taken()
+        exported = self.cli("export", ident, str(self.folder / "taken.step"))
+        self.assertEqual(exported.returncode, 0, exported.stderr)
+        self.said(width=5.0)
+        rebuilt = self.run_script("cube")
+        self.assertIn("built cube.py::cube warm", rebuilt.stdout)
+        self.assertIn("the body ran", rebuilt.stderr)
+
+    def test_failed_revisions_before_a_restart_leave_the_cache_to_take(self) -> None:
+        self.use(self.state, self.cache, CADGEN_ENGINE_CACHE_IDLE="600")  # saved at the stop, as a person's is
+        self.said()
+        self.run_script("cube")
+        self.run_script("cube")
+        for broken in ("    return bd.Box(WIDTH, 2, 1", "    assert WIDTH < 0, 'too wide'\n    return bd.Box(WIDTH, 2, 1)",
+                       "    return bd.fillet(bd.Box(WIDTH, 2, 1).edges(), radius=50)"):
+            self.said(broken)
+            failed = engine_daemon.run([sys.executable, "cube.py"], cwd=self.project, env=self.env)
+            self.assertNotEqual(failed.returncode, 0, broken)
+        self.said()
+        self.run_script("cube")
+        self.assertEqual(self.cli("stop").returncode, 0)
+        self.assert_taken()
 
     def test_a_rebuild_replaces_the_cache_at_its_new_revision(self) -> None:
         ident = self.write("cube")

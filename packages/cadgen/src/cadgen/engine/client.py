@@ -18,6 +18,9 @@ from cadgen.engine.door import Connection, answering, dial
 __all__ = ["hold", "request", "sweep"]
 
 DAEMON_MODULE = "cadgen.engine.daemon"  # the enclosing distribution may supply an application host
+# Called once a connection reaches a daemon this process started (``connect``): a command that
+# starts the engine says so (``cli.answered``); None, the default, says nothing.
+on_started: Callable[[], None] | None = None
 
 # The sandboxes known to refuse the loopback port the engine's HTTP server needs, each by a variable
 # and the value it sets in the shells it runs: a daemon started there could never serve a build. The
@@ -93,12 +96,14 @@ _PER_PROCESS_TELEMETRY = ("DO_NOT_TRACK", "CADGEN_TELEMETRY")
 
 
 def _start() -> subprocess.Popen:
+    """A daemon started, detached: its process, whose ``pid`` says whether the daemon that answers
+    is the one this process started (``_told_started``)."""
     env = {name: value for name, value in os.environ.items() if name not in _PER_PROCESS_TELEMETRY}
     root = _daemon.engine_root()
     path = env.get("PYTHONPATH", "")
     if root not in path.split(os.pathsep):
         env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    _daemon.bytecode(env)
     return subprocess.Popen([sys.executable, "-P", "-m", DAEMON_MODULE], stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=_working_folder(),
                             **_daemon.detached())
@@ -136,11 +141,13 @@ def connect(*, start: bool = True, timeout: float = 60.0) -> Connection | None:
     except PermissionError as error:
         raise _denied(f"writing in the engine's folder: {error.strerror or error}") from None
     process = _start()
+    mine = {process.pid}
     started = time.monotonic()
     deadline = started + timeout
     while time.monotonic() < deadline:
         found = _connect()
         if found is not None:
+            _told_started(mine)
             return found
         time.sleep(0.02)
         if process.poll():  # it could not take its lock or listen: said now, not after the timeout
@@ -149,8 +156,23 @@ def connect(*, start: bool = True, timeout: float = 60.0) -> Connection | None:
             # A daemon that is stopping still holds the lock, and the one just started
             # left at once: start another once the lock is free.
             process = _start()
+            mine.add(process.pid)
             started = time.monotonic()
     raise ConnectionError("the engine server did not start")
+
+
+def _told_started(mine: set[int]) -> None:
+    """``on_started``, when the daemon that answers is one of ``mine`` (the daemons this process
+    started): a command racing this one may have started the one that won the lock."""
+    if on_started is None:
+        return
+    connection = _connect()
+    try:
+        answer = _exchange(connection, {"op": "pid"}) if connection is not None else {}
+    except (OSError, ValueError):
+        return
+    if answer.get("pid") in mine:
+        on_started()
 
 
 def wait_gone(timeout: float = 60.0, endpoint: _daemon.Endpoint | None = None) -> bool:

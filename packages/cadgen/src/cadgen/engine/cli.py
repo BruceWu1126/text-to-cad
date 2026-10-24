@@ -131,6 +131,11 @@ def answered(runner: Callable[[argparse.Namespace, str], int], args: argparse.Na
     status 1; else its words on stderr and its own status. A failure no verb expected is said in
     JSON too, then raised as ever (its traceback the person's, and a crash the command reports)."""
     as_json = bool(getattr(args, "json", False))
+    from cadgen.engine import client
+
+    # A verb that starts the engine says so, once, on stderr: a person can tell a fresh engine (its
+    # first build cold, every document read again) from the one they had.
+    client.on_started = lambda: print("engine started", file=sys.stderr, flush=True)
     try:
         return runner(args, prog)
     except (Failed, ConnectionError) as failure:
@@ -177,7 +182,10 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
     files = _files(report)
     worker = "" if fresh is None else (" cold" if fresh else " warm")
     if memo.get("bodies_loaded"):
-        line = (f"took {report['model']}{worker} in {wall:.2f}s: its file holds the model's key, "
+        taken = (report.get("cache") or {}).get("from")
+        holder = ("the engine's cache" if taken == "cache" else "its file" if report.get("files")
+                  else "its document in memory")
+        line = (f"took {report['model']}{worker} in {wall:.2f}s: {holder} holds the model's key, "
                 f"{memo.get('bodies_loaded', 0)} bodies loaded, nothing ran")
     else:
         counted = {status: bodies.count(status) for status in ("run", "replayed") if bodies.count(status)}

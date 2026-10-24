@@ -24,7 +24,8 @@ Before a model's body runs or is replayed, its xbf is asked (``previous``): an x
 the key the model has now is what the body would make, and the body is not run, nor any
 file written. A warm worker asks its own record of the document it built and left as it
 stands; a body the memo could replay is replayed only when a file of the model's last
-build here moved or is gone.
+build here moved or is gone. A model with no file has the engine's cache of its document in
+its xbf's place, which a fresh worker takes as it takes an xbf.
 """
 
 from __future__ import annotations
@@ -66,6 +67,8 @@ class _Written:
     files: dict[str, tuple] | None = None
     # The tree the kept document was made from: what a derived file is translated from.
     tree: Any = None
+    # The document's bytes as taken from the engine's cache (``_previous``): what it answers with.
+    data: bytes | None = None
 
 
 @dataclass
@@ -167,9 +170,9 @@ class _FirstPartyFromSource(importlib.abc.MetaPathFinder):
 
 
 def _from_source() -> None:
-    """The model's code runs from its source: no bytecode written for anything a build
-    imports, none read for a first-party module. Once per process, first on the meta path."""
-    sys.dont_write_bytecode = True
+    """The model's code runs from its source: no bytecode read or written for a first-party
+    module (a library's is the interpreter's to cache: a worker's under the engine's own folder,
+    ``daemon.bytecode``). Once per process, first on the meta path."""
     if not any(isinstance(finder, _FirstPartyFromSource) for finder in sys.meta_path):
         sys.meta_path.insert(0, _FirstPartyFromSource())
 
@@ -333,20 +336,22 @@ def _model_traceback(error: BaseException) -> str:
 
 def build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
           cwd: Path | None = None, verify: bool = False, profile: bool = False,
-          run: str | None = None) -> list[dict[str, Any]]:
+          run: str | None = None, cache: str | None = None) -> list[dict[str, Any]]:
     """Run a build, optionally profiling this execution in its worker (or explicit cold caller).
 
     The profile covers the whole request, including child models and output processing.
     Each top-level report carries that same request-wide profile, never a cached profile.
     ``run`` names the calling process's run: its later calls may be served from this one's load
-    (``_Load``); None loads the script afresh.
+    (``_Load``); None loads the script afresh. ``cache`` is the engine's cache of documents (the
+    daemon's ``documents`` folder there), which a model with no file of its own is taken from when
+    it holds the key the model has now (``_previous``).
     """
     if not profile:
-        return _build(script, functions, log=log, cwd=cwd, verify=verify, run_token=run)
+        return _build(script, functions, log=log, cwd=cwd, verify=verify, run_token=run, cache=cache)
     from cadgen.engine.profiling import Profile
 
     with Profile(project=Path(script).parent) as measured:
-        reports = _build(script, functions, log=log, cwd=cwd, verify=verify, run_token=run)
+        reports = _build(script, functions, log=log, cwd=cwd, verify=verify, run_token=run, cache=cache)
     summary = measured.report()
     for report in reports:
         report["profile"] = summary
@@ -354,7 +359,8 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
 
 
 def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
-          cwd: Path | None = None, verify: bool = False, run_token: str | None = None) -> list[dict[str, Any]]:
+          cwd: Path | None = None, verify: bool = False, run_token: str | None = None,
+          cache: str | None = None) -> list[dict[str, Any]]:
     """Build the script's models (``functions``, or every model it defines); one report
     per model, holding those of the child models its run ran, each of which wrote its own
     files (``child_models``). Raises BuildError for a script or function that is not there;
@@ -465,7 +471,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
                 if verify:
                     verdict, previous_report = {"used": False, "reason": "verifying"}, None
                 else:
-                    verdict, previous_report = _previous(model, context, shown, log)
+                    verdict, previous_report = _previous(model, context, shown, log, cache)
             except Exception as error:  # noqa: BLE001 - the cache never fails a build: the body runs
                 verdict, previous_report = {"used": False, "reason": f"the cache failed: {error}"}, None
             if previous_report is not None:
@@ -779,14 +785,62 @@ def held(script: Path | None = None, name: str | None = None, *, path: Path | No
                 continue
         elif script is not None and (model_script != canonical(script) or (name is not None and function != name)):
             continue
-        if written.kept is not None and written.tree is not None or (xbf is not None and _stat(xbf) == written.stats.get(str(xbf))):
-            found.append((written, xbf))
+        if (written.kept is not None and written.tree is not None or written.data is not None
+                or (xbf is not None and _stat(xbf) == written.stats.get(str(xbf)))):
+            found.append((written, xbf, function))
     if len(found) != 1:
         return None
-    written, xbf = found[0]
+    written, xbf, function = found[0]
+    if written.data is not None:
+        return held_source(written.data, function)
     if written.kept is None or written.tree is None:
         return export.Source.read(xbf)
     return export.Source.built(written.kept.doc, written.tree, xbf)
+
+
+def taken(script: Path, name: str) -> bytes | None:
+    """The bytes model ``name`` of ``script`` was taken from the engine's cache with, while this
+    process holds it as taken (``_previous``); None for one it built, or holds none of. A document
+    read is never written again (**Build closure**): what is asked of it whole is these bytes."""
+    written = _WRITTEN.get(f"{canonical(script)}::{name}")
+    return written.data if written is not None else None
+
+
+# The held documents this process read last, by their bytes' digest and name: an export, a snapshot
+# and an inspection of one document after another read its bytes once, as a file's read is held.
+_HELD_KEPT = 4
+_HELD: "dict[tuple[str, str], Any]" = {}
+
+
+def held_source(payload: bytes, name: str) -> Any:
+    """A document's xbf bytes -- the ones its worker made of it before it retired
+    (``models.Models.drain``), or the engine's cache file of it (``cache``) -- as an
+    ``export.Source``, read in memory as an on-disk xbf is (``document.read_bytes``): its mechanism,
+    its assemblies' placements and its animations' record with it, named as the document is
+    (``name``). The source has no path: it is no file. The last few read are kept (``_HELD``)."""
+    import hashlib
+
+    key = (hashlib.blake2b(payload, digest_size=20).hexdigest(), name)
+    found = _HELD.pop(key, None)
+    if found is None:
+        found = _read_held(payload, name)
+    _HELD[key] = found  # the most recent last
+    while len(_HELD) > _HELD_KEPT:
+        _HELD.pop(next(iter(_HELD)))
+    return found
+
+
+def _read_held(payload: bytes, name: str) -> Any:
+    import tempfile
+
+    from cadgen.engine import document, export
+
+    stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in name).strip(".") or "document"
+    loaded = document.Loaded(Path(tempfile.gettempdir()) / f"{stem}.xbf", document.read_bytes(payload))
+    structure = {**loaded.structure(), "path": ""}
+    return export.Source(structure, {p.key: p.shape for p in loaded.prototypes}, live=False,
+                         xcaf=loaded.doc, world=lambda occurrence: loaded.worlds.get(occurrence),
+                         mechanism=loaded.mechanism, foreign=False, path=None, animations=loaded.animations)
 
 
 def _statuses(run: Any, name: str) -> dict[str, str]:
@@ -821,24 +875,40 @@ def _identity(name: str) -> str:
     return f"{Path(script).name}::{function}"
 
 
-def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) -> tuple[dict, dict | None]:
+def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None],
+              cache: str | None = None) -> tuple[dict, dict | None]:
     """The model's previous document asked before its body runs (``previous``): the
     verdict, and the model's report where the document is what the body would make -- the
     key the model has now is the one the document holds -- so the body is not run and the
     files are left as they are. A warm worker asks its own record of the document it built,
     as a fresh one asks the file: a body the memo could replay is not replayed when the key
     is unchanged and every file the model's last build here wrote -- its own and its child
-    models' -- is as that build left it; a file moved or gone, and it is replayed, as ever."""
+    models' -- is as that build left it; a file moved or gone, and it is replayed, as ever.
+
+    A model with no file at all, a ``pointer`` one, has the engine's cache of its document
+    (``cache``: ``<id>/document.xbf`` there) in its xbf's place: a fresh worker -- after a restart,
+    or once the script's worker retired -- takes it when its key is the model's (``"from":
+    "cache"``), and from then on asks its record in memory, as it does of a file it took. One
+    this worker built is replayed by the memo, as ever. A model that declares a file and no xbf
+    is never taken: nothing says its file is the cached revision's."""
     from cadgen.engine import document, previous
     from cadgen.engine.kernel import memo
 
     targets = model.targets()
     xbf = next((Path(path) for kind, path in targets if kind == "xbf"), None)
+    name = f"{model.script}::{model.name}"
+    remembered = _WRITTEN.get(name)
+    cached = None
     if xbf is None:
-        return {"used": False, "reason": "the model declares no xbf"}, None
+        if (targets or cache is None or getattr(model, "store", "pointer") != "pointer"
+                or (remembered is not None and remembered.data is None)):
+            return {"used": False, "reason": "the model declares no xbf"}, None
+        from cadgen.engine.cache import FILE
+
+        cached = Path(cache) / model.id / FILE
     if not memo.enabled() or os.environ.get("CADGEN_ENGINE_BODIES", "1").strip() == "0":
         return {"used": False, "reason": "retention is off"}, None
-    name = f"{model.script}::{model.name}"
+    folder = xbf.parent if xbf is not None else model.script.parent  # what the closure's paths are relative to
     clock = time.perf_counter()
     source = context.source(model)
     always = memo.always()
@@ -846,7 +916,6 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
     if impure:
         return {"used": False, "reason": f"it calls {', '.join(impure)}, which a verification found impure"}, None
     stats = {str(path): _stat(path) for _kind, path in targets}
-    remembered = _WRITTEN.get(name)
     if memo.replayable(name, source) and not _as_built(name, remembered, stats):
         return {"used": False, "reason": "replayed from memory"}, None
     where = "memory"
@@ -855,6 +924,15 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
         text = remembered.record
         if text is None:
             return {"used": False, "reason": "its last build wrote no key"}, None
+    elif cached is not None:
+        where = "cache"
+        if not cached.is_file():
+            return {"used": False, "reason": "the engine's cache holds none of it"}, None
+        writer, text = previous.scan(cached)
+        if document.written_format(writer) != previous.FORMAT:
+            return {"used": False, "reason": f"its cache was written by {writer or 'another program'}"}, None
+        if text is None:
+            return {"used": False, "reason": "its cache holds no key"}, None
     else:
         where = "file"
         if stats[str(xbf)] is None:
@@ -872,7 +950,7 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
     if found.get("key") is None:
         return {"used": False, "reason": "the file holds no key"}, None
     modules, _unkeyable = context.modules(model)
-    now, changes = previous.again(found, model, xbf.parent, modules, context.named(model))
+    now, changes = previous.again(found, model, folder, modules, context.named(model))
     keyed = time.perf_counter()
     if now != found["key"]:
         changes = changes or ["its closure changed"]
@@ -891,11 +969,27 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
             return {"used": False, "reason": "the file does not hold the closure its head shows"}, None
         timings["read"] = round(time.perf_counter() - keyed, 4)
         _WRITTEN[name] = _Written(("loaded", found["key"]), stats, None, text)
+    elif where == "cache":
+        # Taken as a file is, read whole, and kept as its bytes: a document read is never written
+        # again (the class's note), so what is asked of it is answered from them (``held``).
+        try:
+            data = cached.read_bytes()
+            doc = document.read_bytes(data)
+            held = previous.read_record(doc)
+        except Exception as error:  # noqa: BLE001 - a cache that does not read is built again
+            return {"used": False, "reason": f"its cache does not read: {error}"}, None
+        del doc
+        if document.written_format(held[0]) != previous.FORMAT or held[1] != text:
+            return {"used": False, "reason": "its cache does not hold the closure its head shows"}, None
+        timings["read"] = round(time.perf_counter() - keyed, 4)
+        _WRITTEN[name] = _Written(("loaded", found["key"]), stats, None, text, data=data)
     else:
         # What the bodies made stays the memo's, as a replay would keep it: an edit after
         # any number of these builds replays all it leaves alone.
         memo.keep(name)
-    log(f"took {_shown(xbf, None)}: its key is the model's ({found['bodies']} bodies), nothing ran")
+    taken_from = ("the engine's cache of it" if where == "cache" else _shown(xbf, None) if xbf is not None
+                  else "its document in memory")
+    log(f"took {taken_from}: its key is the model's ({found['bodies']} bodies), nothing ran")
     report = {"ok": True, "model": f"{shown}::{model.name}",
               "memo": {"hits": 0, "misses": 0, "uncached": 0, "bodies_run": 0, "bodies_skipped": 0,
                        "bodies_loaded": found["bodies"]},
@@ -909,7 +1003,7 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
               # document (an export, a snapshot) finds the taken xbf by it and reads that file.
               "files": {str(path): {"kind": kind, "written": False, "seconds": 0.0, "bytes": stats[str(path)][1]}
                         for kind, path in targets}}
-    report["closure"] = previous.located(found, xbf.parent)
+    report["closure"] = previous.located(found, folder)
     return report["cache"], report
 
 

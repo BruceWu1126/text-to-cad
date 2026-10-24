@@ -70,10 +70,12 @@ class ShimEndpointTest(unittest.TestCase):
         self.first = Listener("first")
         self.names = self.first.endpoint()  # what the engine's door says now
         self.reads = 0
+        self.starts: list[bool] = []  # each read's ``start``: whether it could start an engine
 
-        def read(_message):
+        def read(_message, start=True):
             self.reads += 1
-            return self.names
+            self.starts.append(start)
+            return self.names if self.names is not None or start else None
 
         patch = mock.patch.object(engine_client, "request", side_effect=read)
         patch.start()
@@ -119,6 +121,12 @@ class ShimEndpointTest(unittest.TestCase):
                          "one request it refused, and no initialize")
         self.assertNotIn("Bearer second", [token for _method, token in squatter.seen])
         self.assertEqual([method for method, _token in second.seen][:2], ["initialize", "notifications/initialized"])
+
+    def test_a_host_closing_after_the_engine_stopped_starts_none(self) -> None:
+        self.first.close()  # `cadgen stop`: nothing listens, and the socket names no engine
+        self.names, self.starts = None, []
+        self.proxy.close()
+        self.assertEqual(self.starts, [False], "the session's end is told to an engine, never one started to hear it")
 
     def test_an_initialize_reads_the_endpoint_from_the_socket_even_with_one_held(self) -> None:
         before = self.reads

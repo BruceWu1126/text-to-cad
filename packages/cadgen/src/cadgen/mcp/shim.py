@@ -187,8 +187,10 @@ class Proxy:
         with self.lock:
             ident = self.session
         if ident:
+            # The session's end, told to the engine that holds it: never an engine started to hear it
+            # (a host closing after `cadgen stop` would start one up for nothing).
             try:
-                self.client.call('DELETE', '/mcp', headers={'Mcp-Session-Id': ident})
+                self.client.call('DELETE', '/mcp', headers={'Mcp-Session-Id': ident}, start=False)
             except OSError:
                 pass
 
