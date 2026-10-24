@@ -69,7 +69,8 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    `$TMPDIR`), else `/tmp/cadgen-<uid>` -- and cadgen's own
    state in the user's state folder: settings, Recents' small previews, and the registry of the
    documents it has built, been handed or opened, one record each that points at its script or
-   file; never geometry and never source. In the
+   file, and each installation's engine record (its HTTP port and page token, this user's alone);
+   never geometry and never source. In the
    platform's cache folder (`~/.cache/cadgen`, by 0.7's rule) it keeps, under `documents/` and
    nowhere else there, each model document's bytes as it last built them: its own file, never a
    declared or exported xbf, regenerable and wiped at no loss, so a restart opens every project at

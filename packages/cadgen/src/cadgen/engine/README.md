@@ -143,7 +143,8 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
    `$TMPDIR`), else `/tmp/cadgen-<uid>`; on Windows in the
    temporary folder -- and, in the user's state folder its host names,
    the registry: one record per document it has built, been handed or a page opened, pointing at
-   its script or file (**Document lifetime**); never geometry and never source. In the cache folder its host names (the platform's: `~/.cache/cadgen`) it
+   its script or file (**Document lifetime**), and the installation's engine record, its port and
+   page token (**Architecture**); never geometry and never source. In the cache folder its host names (the platform's: `~/.cache/cadgen`) it
    keeps, under `documents/` alone, each model document's bytes as it last built them (**The
    cache**): its own file, never a declared or exported xbf, regenerable and wiped at no loss,
    so a restart opens every project at once; and under `pycache/` the bytecode its own processes
@@ -327,6 +328,23 @@ retain the application's Host and cross-site mutation checks. Explicit host/port
 requests must match an existing listener. A second installed version has a different
 installation identity and therefore a different engine.
 
+**A link outlives its engine.** The port and the page token are the installation's, not one
+engine's (`daemon.bind`). The listener takes the port named -- `--port` (`cadgen server --port`,
+or a `serve`/`viewer` request's), else `CADGEN_ENGINE_PORT` (0: any free port), read from the
+engine's own environment -- and refuses to start without it; else the port the installation
+remembers, else 3245 (`daemon.DEFAULT_PORT`, 0xCAD). When that one is another process's, the
+engine takes the next free port and remembers it, so the installation's links keep that port from
+then on. The token is made at the installation's first start and every start serves with it. Both
+live in the installation's record, `engines/<installation>.json` in the state folder (`port`,
+`token`; this user's alone, 0600; `registry.Registry.engine`): a named port is never remembered.
+So a page link -- the `cadgen viewer` output, a model's `view:` line, the CAD app's card -- works
+across `cadgen stop`, an idle stop, a crash and a reboot, and a page that lost its engine keeps
+asking the same address and reloads itself when the engine answers again. A stable token means a
+shared link keeps working on this machine until it is rotated: whoever holds it reaches the user's
+folders whenever the engine runs. `cadgen server --rotate-token` replaces it, with no engine running
+(it refuses while one runs), and every link shared before stops working. `cadgen status` says the
+port, and whether it is the default.
+
 The injected application also serves `/mcp`, the Streamable HTTP MCP transport
 (2025-11-25 and the previously supported protocol revisions). Initialization returns
 an opaque `Mcp-Session-Id`. Every subsequent request identifies that session;
@@ -390,7 +408,7 @@ only, and a file's id is derived again from its path after a restart.
 | `progress.py` | where a build is: the engine's stages heard where they begin, each body a model's body runs by name, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
 | `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads, staleness (`changes`) and the LRU bound (`Cache`) |
-| `registry.py` | the registry of documents in the user's state folder (`Registry`: `get`, `put`, `list`, `delete`), and the one owner of every write under that folder (`Folder`); where the folder is, the distribution's (`FACTORY`) |
+| `registry.py` | the registry of documents in the user's state folder (`Registry`: `get`, `put`, `list`, `delete`), each installation's engine record (`engine`, `put_engine`: its remembered port and page token), and the one owner of every write under that folder (`Folder`); where the folder is, the distribution's (`FACTORY`) |
 | `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `server` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
 
@@ -412,7 +430,7 @@ cadgen inspect DOC [REF] [--json]              what the document holds, then its
                                              world bounds (a part's placement too); of a GLB, its nodes,
                                              meshes and animations (an STL or a 3MF, and a ref into any
                                              mesh, is refused, saying what shows it)
-cadgen status [--json] | stop [--json] | server
+cadgen status [--json] | stop [--json] | server [--port N] [--rotate-token]
 ```
 
 `python -m cadgen.engine VERB ...` takes the same verbs, the engine's own entry.
