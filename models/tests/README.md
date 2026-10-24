@@ -1,12 +1,12 @@
 # Manual validation models
 
-`models/tests` ported to `cadgen.engine`: the three cases its README listed. **CI
+`models/tests` on cadgen 0.8: the three cases its README listed. **CI
 tests must never read, import, build, or depend on anything here**: automated tests
 make their own small fixtures in fresh temporary directories.
 
 Agents may use these models for manual browser reviews, reproducing edge cases,
 checking exports and debugging new features. They are small and quick to rebuild.
-Each case builds into an `XBF/` beside its script (gitignored).
+Each case is a `@model`; a run writes nothing, and prints the document's id and page.
 
 ## Cases
 
@@ -25,14 +25,13 @@ From each case's folder, with the engine's environment (`cadgen` on the path):
 export CADGEN_ENGINE_DIR="$(mktemp -d /tmp/cadgen-manual-engine.XXXXXX)"
 python source.py                     # render_floor/, viewer_concurrency/
 python annotation_fixture.py         # unified_annotations/
-python -m cadgen.engine snapshot XBF/annotation_fixture.xbf /tmp/open.png --pose open
-python -m cadgen.engine export XBF/annotation_fixture.xbf /tmp/annotations.glb   # demo, baked as a clip
+cadgen snapshot "$ID" /tmp/open.png --pose open     # ID: the id: line the run printed
+cadgen export "$ID" /tmp/annotations.glb            # demo, baked as a clip
 ```
 
 ## The port
 
-- `from cadgen import step` -> `from cadgen.engine import xbf`; each case writes its xbf
-  where its STEP was written, in `XBF/` beside the script.
+- `@step(out=...)` -> `@model`: a case writes nothing; export a file of it on request.
 - `unified_annotations`: the sidecar's `materials=` are `Material` values on the parts
   (steel the catalogue's, in the old finish, `color=None`; the paint its own, with its
   colour); the `swing` mate is a build123d revolute joint and the `open` pose a
@@ -44,4 +43,4 @@ python -m cadgen.engine export XBF/annotation_fixture.xbf /tmp/annotations.glb  
 
 - `joint_playground/joint_playground.urdf`: an authored URDF of primitives, no model,
   and no doc names it. It is kept in `unported/`, and the engine's snapshot draws it as
-  it is (`python -m cadgen.engine snapshot models/tests/unported/joint_playground/joint_playground.urdf out.png`).
+  it is (`cadgen urdf snapshot models/tests/unported/joint_playground/joint_playground.urdf out.png`).

@@ -1,5 +1,5 @@
+from cadgen import Material, materials, model
 from cadgen.ap242 import configuration_sequence, mechanism_state
-from cadgen.engine import Material, materials, xbf
 
 import math
 
@@ -16,7 +16,7 @@ def _lift(t):
     return {"lift": 8 * math.sin(math.pi * t / 2)}
 
 
-@xbf(out="XBF/annotation_fixture.xbf")
+@model
 def annotation_fixture():
     base = bd.Pos(0, 0, 3) * bd.Box(72, 52, 6)
     shaft = bd.Pos(0, 0, 18) * bd.Cylinder(5, 24)

@@ -1,9 +1,9 @@
-from cadgen.engine import xbf
+from cadgen import model
 
 import build123d as bd
 
 
-@xbf(out="XBF/floor_positions.xbf")
+@model
 def floor_positions():
     parts = []
     for label, x, z, color in [

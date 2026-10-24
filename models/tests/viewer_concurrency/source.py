@@ -1,11 +1,11 @@
-from cadgen.engine import xbf
+from cadgen import model
 
 import build123d as bd
 
 REVISION = 4
 
 
-@xbf(out="XBF/assembly.xbf")
+@model
 def assembly():
     parts = []
     for i in range(32):
