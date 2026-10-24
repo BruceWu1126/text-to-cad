@@ -67,11 +67,11 @@ class HttpSessionsTest(unittest.TestCase):
         info = request({'op': 'status'})
         sessions = {item['id'] for item in info['sessions'] if item['kind'] == 'mcp'}
         self.assertTrue({first.session, second.session} <= sessions)
+        token = self.tool(first, 'cad_tab')['_meta']['dev.texttocad/httpToken']
         self.tool(first, 'cad_sync', {'view': 'one', 'surface': 'agent', 'model': str(self.model),
-                  'state': {'selection': ['part#f1']}, 'focused': True})
+                  'state': {'selection': ['part#f1']}, 'focused': True, 'app': token})
         self.assertEqual(self.tool(first, 'cad_view')['structuredContent']['views'][0]['selection'], ['part#f1'])
         self.assertEqual(self.tool(second, 'cad_view')['structuredContent']['views'], [])
-        token = self.tool(first, 'cad_tab')['_meta']['dev.texttocad/httpToken']
         reply = self.tool(first, 'cad_http', {'method': 'GET', 'url': '/__cad/server', 'headers': {'x-cadgen-app': token}})['structuredContent']
         self.assertEqual(reply['status'], 200)
         self.assertEqual(json.loads(base64.b64decode(reply['body']))['pid'], info['pid'])

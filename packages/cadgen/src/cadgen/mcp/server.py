@@ -69,7 +69,7 @@ TITLE = "CAD"
 # path (`page: viewer`) or the home (`page: home`, its recents with it), and carries what the page
 # needs to start on it alone (the server's version and platform); a view makes one call a second
 # (`cad_sync`) and reaches the viewer's routes through `cad_http`, by absolute path.
-PROTOCOL = 8
+PROTOCOL = 9
 _PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 _RESOURCE_NOT_FOUND = -32002
 EXTENSIONS = sorted(VIEWER_EXTENSIONS)
@@ -166,6 +166,10 @@ _READ_ONLY = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": F
 # Shared with agents, but the viewer routes require the capability delivered only to the UI.
 _APP_TOKEN_META = "dev.texttocad/httpToken"
 _APP_TOKEN_HEADER = "x-cadgen-app"
+# The page's own tools (``cad_sync``, ``cad_capture_reply``) take the same capability as an argument:
+# a host is asked to keep app-only tools from the model, and the server does not rely on it.
+_APP_TOKEN_ARGUMENT = "app"
+_APP_TOKEN_SCHEMA = {"type": "string", "description": "The view's capability, from its launch's metadata."}
 # The card's Open in browser: the web viewer's page of what it shows (``_browser_page``), a route of
 # the app's alone -- an agent's or a text client's request never reaches it.
 _BROWSER_ROUTE = "/__cad/browser"
@@ -463,9 +467,10 @@ class Server:
             app("cad_sync", "CAD sync", "This view's one call each second: what it shows and watches, and what is waiting for it.",
                 _object({"view": {"type": "string"}, "surface": {"type": "string"}, "model": {"type": ["string", "null"]},
                          "focused": {"type": "boolean"}, "closed": {"type": "boolean"}, "state": {"type": "object"},
-                         "watch": _WATCH}, ["view", "surface"])),
+                         "watch": _WATCH, _APP_TOKEN_ARGUMENT: _APP_TOKEN_SCHEMA}, ["view", "surface", _APP_TOKEN_ARGUMENT])),
             app("cad_capture_reply", "Answer CAD", "Answer the server's request for a capture.",
-                _object({"requestId": {"type": "string"}, "png": {"type": "string"}, "error": {"type": "string"}}, ["requestId"])),
+                _object({"requestId": {"type": "string"}, "png": {"type": "string"}, "error": {"type": "string"},
+                         _APP_TOKEN_ARGUMENT: _APP_TOKEN_SCHEMA}, ["requestId", _APP_TOKEN_ARGUMENT])),
         ]
 
     # -- calls -----------------------------------------------------------------
@@ -777,7 +782,16 @@ class Server:
 
     # the page's tools -----------------------------------------------------------
 
+    def _app_only(self, arguments: dict[str, Any]) -> None:
+        """Refuse a page tool's call that does not carry this session's app capability: only the
+        page, which the launch's metadata delivered it to, reports a view or answers a capture."""
+        token = arguments.get(_APP_TOKEN_ARGUMENT)
+        if not isinstance(token, str) or not secrets.compare_digest(token.encode("utf-8"), self._app_token.encode("utf-8")):
+            raise ToolFailed("This CAD view was opened before CAD restarted: close it and open CAD again."
+                             if isinstance(token, str) and token else "Only a CAD view calls this tool.", "bad_request")
+
     def _register(self, arguments: dict[str, Any], context: RequestContext) -> str:
+        self._app_only(arguments)
         view_id, surface = arguments.get("view"), arguments.get("surface")
         if not isinstance(view_id, str) or not view_id or not isinstance(surface, str):
             raise RpcError(INVALID_PARAMS, "view and surface are required")
@@ -838,6 +852,7 @@ class Server:
         return _data(answer)
 
     def _tool_cad_capture_reply(self, arguments, context):
+        self._app_only(arguments)
         reply: dict[str, Any] = {key: arguments[key] for key in ("png", "error") if isinstance(arguments.get(key), str)}
         request_id = str(arguments.get("requestId"))
         # A capture another thread's agent asked of this process's sidebar view goes back to it.

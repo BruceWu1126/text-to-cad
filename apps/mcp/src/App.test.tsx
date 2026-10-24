@@ -71,7 +71,7 @@ function host(initial: HostContext, hostCapabilities: Record<string, unknown> = 
   return { bridge, server };
 }
 // The home, as the server launches it: the library, with Open on a computer that has a chooser.
-const home: Launch = { protocol: 8, page: 'home', model: null, pick: true };
+const home: Launch = { protocol: 9, page: 'home', model: null, pick: true };
 const sized = (notify: ReturnType<typeof vi.fn>) => notify.mock.calls.filter(([method]) => method === 'ui/notifications/size-changed');
 
 it('a tab host gets the page it always had, down to its bottom: the home, with no card to size and no full-size button', () => {
@@ -264,7 +264,7 @@ it("Open in browser, the navbar's last control, opens the web viewer's page of w
   const replies: ((reply: { events: unknown[] }) => void)[] = [];
   server.sync = vi.fn(() => new Promise(resolve => { replies.push(resolve); }));
   const agentShows = (model: string, seq: number) => act(async () => {
-    replies.shift()!({ events: [{ seq, type: 'show', launch: { protocol: 8, page: 'viewer', model } }] });
+    replies.shift()!({ events: [{ seq, type: 'show', launch: { protocol: 9, page: 'viewer', model } }] });
   });
   // The engine's page of each document (`/<id>`, its viewer token in the URL) and its home; none for one it cannot give.
   const ids: Record<string, string> = { '/work/a b.step': 'id-a', '/work/b.step': 'id-b' };
@@ -277,7 +277,7 @@ it("Open in browser, the navbar's last control, opens the web viewer's page of w
     act(() => screen.getByRole('button', { name: 'Open in browser' }).click());
     await waitFor(() => expect(bridge.request).toHaveBeenCalledWith('ui/open-link', { url }));
   };
-  render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 8, page: 'viewer', model: '/work/a b.step' }} />);
+  render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 9, page: 'viewer', model: '/work/a b.step' }} />);
   await screen.findByRole('button', { name: 'Open in browser' });
   await opened('http://127.0.0.1:3245/id-a?token=t');
   // The home the person goes to, and the model the agent shows next: each its own page.

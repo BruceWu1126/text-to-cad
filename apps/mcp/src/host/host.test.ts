@@ -222,6 +222,19 @@ describe('a view\'s one call each second', () => {
   });
 });
 
+describe('the page\'s own calls', () => {
+  it('carry the app capability: cad_sync and cad_capture_reply as `app`', async () => {
+    const calls: any[] = [];
+    const server = createServer({ callTool: async (name, args) => { calls.push({ name, args }); return { structuredContent: { events: [] } }; } }, 'app-capability');
+    await server.sync({ view: 'v', surface: 'tab', model: null });
+    await server.reply('r1', { png: 'iVBORw0KGgo=' });
+    expect(calls).toEqual([
+      { name: 'cad_sync', args: { view: 'v', surface: 'tab', model: null, app: 'app-capability' } },
+      { name: 'cad_capture_reply', args: { requestId: 'r1', png: 'iVBORw0KGgo=', app: 'app-capability' } },
+    ]);
+  });
+});
+
 describe('the fetch tunnel', () => {
   it('sends the request as cad_http and returns the reply as a Response', async () => {
     const calls: any[] = [];
