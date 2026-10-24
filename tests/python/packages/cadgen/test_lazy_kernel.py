@@ -62,9 +62,21 @@ class FinderTest(unittest.TestCase):
     def test_import_binds_a_module_whose_body_has_not_run(self) -> None:
         import standin_kernel  # noqa: F401
 
-        self.assertIs(type(sys.modules["standin_kernel"]), importlib.util._LazyModule)  # noqa: SLF001
+        self.assertIs(type(sys.modules["standin_kernel"]), lazy_kernel.KernelModule)
         self.assertEqual(self.runs(), 0)
         self.assertFalse(lazy_kernel.loaded("standin_kernel"))
+
+    def test_importing_it_again_loads_nothing(self) -> None:
+        # A project's helper module imports it as its script did: the import system reads the
+        # bound module's __spec__, which the standard library's lazy module would load on.
+        import standin_kernel  # noqa: F401
+        importlib.import_module("standin_kernel")
+        exec("import standin_kernel as again", {})
+        self.assertEqual(self.runs(), 0)
+        self.assertFalse(lazy_kernel.loaded("standin_kernel"))
+        self.assertEqual(sys.modules["standin_kernel"].Box, "a box")
+        self.assertEqual(self.runs(), 1)
+        self.assertIs(type(sys.modules["standin_kernel"]), type(sys))
 
     def test_the_first_attribute_loads_it_once(self) -> None:
         import standin_kernel
@@ -118,6 +130,10 @@ class PthTest(unittest.TestCase):
 
     def test_import_build123d_leaves_the_kernel_untouched(self) -> None:
         self.assertEqual(self.run_python("import build123d as bd; import sys; print('OCP' in sys.modules)"), "False")
+
+    def test_a_second_import_build123d_leaves_the_kernel_untouched(self) -> None:
+        self.assertEqual(self.run_python("import build123d as bd; import build123d; import sys; "
+                                         "print('OCP' in sys.modules)"), "False")
 
     def test_the_first_attribute_loads_the_kernel(self) -> None:
         self.assertEqual(self.run_python("import build123d as bd; import sys; bd.Box(1, 1, 1); "
