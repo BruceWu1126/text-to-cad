@@ -117,7 +117,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-__all__ = ["CONFIGURATIONS", "COUPLINGS", "GUID", "MOTIONS", "Coupling", "KinematicsError", "Link", "Mechanism",
+__all__ = ["CONFIGURATIONS", "COUPLINGS", "GUID", "MOTIONS", "Coupling", "KinematicsError", "Link", "LinkWorlds", "Mechanism",
            "Motion", "Pair", "Timeline", "block", "configuration_sequence", "gear_pair", "harvest", "mechanism_state",
            "posed", "posed_structure", "rack_and_pinion_pair", "read", "resolve", "screw_pair", "write"]
 
@@ -2093,34 +2093,76 @@ def link_worlds(kinematics: dict[str, Any], values: dict[str, tuple[float, ...]]
     """Each link's placement at ``values``: the ground where it is, every other link by its
     pairs from the ground down (a pair that closes a loop is not followed; a pair with no value
     holds its links as built)."""
-    links = kinematics["links"]
-    if not links:
-        return []
-    found: list[np.ndarray | None] = [None] * len(links)
-    found[kinematics["ground"]] = _from_column(links[kinematics["ground"]]["matrix"])
-    pending = [pair for pair in kinematics["pairs"] if pair.get("frames")]
-    progress = True
-    while pending and progress:
-        progress = False
-        for pair in list(pending):
+    return LinkWorlds(kinematics)(values)
+
+
+class LinkWorlds:
+    """``link_worlds`` of one kinematics, asked again and again (a motion's every sample): its
+    frames, their inverses and the order its pairs are followed in are worked out once, so a call
+    is each pair's motion and the products along the chain, the same arithmetic in the same order."""
+
+    def __init__(self, kinematics: dict[str, Any]) -> None:
+        links = kinematics["links"]
+        self.count = len(links)
+        self.ground = kinematics.get("ground")
+        self.built = [_from_column(link["matrix"]) for link in links]
+        self.pairs = [pair for pair in kinematics["pairs"] if pair.get("frames")]
+        self.eye = np.eye(4)
+        # Per pair: its frames (item_1, item_2) and their inverses, with a value and without one
+        # (the two links as they stand: the second's placement as built over the first's).
+        self.posed: list[tuple[np.ndarray, ...]] = []
+        self.held: list[tuple[np.ndarray, ...]] = []
+        for pair in self.pairs:
             first, second = pair["links"]
-            if pair["label"] not in values:
-                # The two links as they stand: the second's placement as built over the first's.
-                item_1 = np.linalg.inv(_from_column(links[first]["matrix"]))
-                item_2 = np.linalg.inv(_from_column(links[second]["matrix"]))
-                moved = np.eye(4)
+            item_1, item_2 = (_from_column(frame) for frame in pair["frames"])
+            self.posed.append((item_1, np.linalg.inv(item_2), item_2, np.linalg.inv(item_1)))
+            item_1, item_2 = np.linalg.inv(self.built[first]), np.linalg.inv(self.built[second])
+            self.held.append((item_1, np.linalg.inv(item_2), item_2, np.linalg.inv(item_1)))
+        self.orders: dict[frozenset, list[tuple[int, bool, bool]]] = {}
+
+    def _order(self, valued: frozenset) -> list[tuple[int, bool, bool]]:
+        """The pairs in the order ``link_worlds`` follows them, given which carry a value: each
+        ``(pair, forward, valued)``, forward from its first link to its second."""
+        found = [False] * self.count
+        found[self.ground] = True
+        pending = list(range(len(self.pairs)))
+        steps: list[tuple[int, bool, bool]] = []
+        progress = True
+        while pending and progress:
+            progress = False
+            for at in list(pending):
+                first, second = self.pairs[at]["links"]
+                if found[first] and not found[second]:
+                    steps.append((at, True, self.pairs[at]["label"] in valued))
+                    found[second] = True
+                elif found[second] and not found[first]:
+                    steps.append((at, False, self.pairs[at]["label"] in valued))
+                    found[first] = True
+                elif not found[first]:
+                    continue
+                pending.remove(at)
+                progress = True
+        return steps
+
+    def __call__(self, values: dict[str, tuple[float, ...]]) -> list[np.ndarray]:
+        if not self.count:
+            return []
+        valued = frozenset(pair["label"] for pair in self.pairs if pair["label"] in values)
+        steps = self.orders.get(valued)
+        if steps is None:
+            steps = self.orders[valued] = self._order(valued)
+        found: list[np.ndarray | None] = [None] * self.count
+        found[self.ground] = self.built[self.ground].copy()
+        for at, forward, posed in steps:
+            pair = self.pairs[at]
+            first, second = pair["links"]
+            item_1, unitem_2, item_2, unitem_1 = (self.posed if posed else self.held)[at]
+            moved = pair_motion(pair["type"], values[pair["label"]]) if posed else self.eye
+            if forward:
+                found[second] = found[first] @ item_1 @ moved @ unitem_2
             else:
-                item_1, item_2 = (_from_column(frame) for frame in pair["frames"])
-                moved = pair_motion(pair["type"], values[pair["label"]])
-            if found[first] is not None and found[second] is None:
-                found[second] = found[first] @ item_1 @ moved @ np.linalg.inv(item_2)
-            elif found[second] is not None and found[first] is None:
-                found[first] = found[second] @ item_2 @ np.linalg.inv(moved) @ np.linalg.inv(item_1)
-            elif found[first] is None:
-                continue
-            pending.remove(pair)
-            progress = True
-    return [matrix if matrix is not None else _from_column(links[at]["matrix"]) for at, matrix in enumerate(found)]
+                found[first] = found[second] @ item_2 @ np.linalg.inv(moved) @ unitem_1
+        return [matrix if matrix is not None else self.built[at].copy() for at, matrix in enumerate(found)]
 
 
 def posed_instances(structure: dict[str, Any], values: dict[str, tuple[float, ...]]) -> list[list[float]]:

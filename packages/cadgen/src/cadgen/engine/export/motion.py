@@ -16,13 +16,12 @@ of a degree of this bake (``keys.py``).
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
-__all__ = ["Clip", "clips", "quaternion"]
+__all__ = ["Clip", "clips", "quaternion", "quaternions"]
 
 # The checked fractions of a step between two keys.
 CHECKS = tuple(step / 8 for step in range(1, 8))
@@ -45,22 +44,37 @@ class Clip:
 
 def quaternion(matrix: np.ndarray) -> np.ndarray:
     """A rotation matrix's unit quaternion, glTF's order (x, y, z, w), w >= 0."""
-    m = matrix[:3, :3]
-    trace = m[0, 0] + m[1, 1] + m[2, 2]
-    if trace > 0:
-        s = math.sqrt(trace + 1.0) * 2
-        q = np.array([(m[2, 1] - m[1, 2]) / s, (m[0, 2] - m[2, 0]) / s, (m[1, 0] - m[0, 1]) / s, 0.25 * s])
-    elif m[0, 0] > m[1, 1] and m[0, 0] > m[2, 2]:
-        s = math.sqrt(1.0 + m[0, 0] - m[1, 1] - m[2, 2]) * 2
-        q = np.array([0.25 * s, (m[0, 1] + m[1, 0]) / s, (m[0, 2] + m[2, 0]) / s, (m[2, 1] - m[1, 2]) / s])
-    elif m[1, 1] > m[2, 2]:
-        s = math.sqrt(1.0 + m[1, 1] - m[0, 0] - m[2, 2]) * 2
-        q = np.array([(m[0, 1] + m[1, 0]) / s, 0.25 * s, (m[1, 2] + m[2, 1]) / s, (m[0, 2] - m[2, 0]) / s])
-    else:
-        s = math.sqrt(1.0 + m[2, 2] - m[0, 0] - m[1, 1]) * 2
-        q = np.array([(m[0, 2] + m[2, 0]) / s, (m[1, 2] + m[2, 1]) / s, 0.25 * s, (m[1, 0] - m[0, 1]) / s])
-    q /= np.linalg.norm(q)
-    return -q if q[3] < 0 else q
+    return quaternions(np.asarray(matrix, dtype=float)[None])[0]
+
+
+def quaternions(matrices: np.ndarray) -> np.ndarray:
+    """Each of a stack of rotation matrices (n x 4 x 4 or n x 3 x 3) as its unit quaternion, glTF's
+    order (x, y, z, w), w >= 0: Shepperd's method, the branch of the largest of the trace and the
+    diagonal, every row at once. A motion's keys take one per moving placement at every sample, so
+    this is the export's inner loop."""
+    m = np.asarray(matrices, dtype=float)[:, :3, :3]
+    d0, d1, d2 = m[:, 0, 0], m[:, 1, 1], m[:, 2, 2]
+    trace = d0 + d1 + d2
+    first = trace > 0
+    second = ~first & (d0 > d1) & (d0 > d2)
+    third = ~first & ~second & (d1 > d2)
+    with np.errstate(invalid="ignore", divide="ignore"):  # the branches not taken are discarded
+        s = np.sqrt(trace + 1.0) * 2
+        q0 = np.stack([(m[:, 2, 1] - m[:, 1, 2]) / s, (m[:, 0, 2] - m[:, 2, 0]) / s, (m[:, 1, 0] - m[:, 0, 1]) / s,
+                       0.25 * s], axis=1)
+        s = np.sqrt(1.0 + d0 - d1 - d2) * 2
+        q1 = np.stack([0.25 * s, (m[:, 0, 1] + m[:, 1, 0]) / s, (m[:, 0, 2] + m[:, 2, 0]) / s,
+                       (m[:, 2, 1] - m[:, 1, 2]) / s], axis=1)
+        s = np.sqrt(1.0 + d1 - d0 - d2) * 2
+        q2 = np.stack([(m[:, 0, 1] + m[:, 1, 0]) / s, 0.25 * s, (m[:, 1, 2] + m[:, 2, 1]) / s,
+                       (m[:, 0, 2] - m[:, 2, 0]) / s], axis=1)
+        s = np.sqrt(1.0 + d2 - d0 - d1) * 2
+        q3 = np.stack([(m[:, 0, 2] + m[:, 2, 0]) / s, (m[:, 1, 2] + m[:, 2, 1]) / s, 0.25 * s,
+                       (m[:, 1, 0] - m[:, 0, 1]) / s], axis=1)
+    q = np.where(first[:, None], q0, np.where(second[:, None], q1, np.where(third[:, None], q2, q3)))
+    # Each row's length as a dot product, as ``np.linalg.norm`` takes a vector's.
+    q = q / np.sqrt(q[:, None, :] @ q[:, :, None])[:, 0]
+    return np.where(q[:, 3:] < 0, -q, q)
 
 
 def hermite(first: np.ndarray, second: np.ndarray, span: float, s: float) -> np.ndarray:
@@ -79,6 +93,7 @@ class _Motion:
         structure = view.source.structure
         self.kinematics = kinematics = structure["kinematics"]
         self.timeline = mechanism.Timeline(kinematics, name)
+        self.worlds = mechanism.LinkWorlds(kinematics)
         rest = mechanism.link_worlds(kinematics, {label: mechanism._as_tuple(value)
                                                   for label, value in kinematics["asBuilt"].items()})
         self.unrest = [np.linalg.inv(matrix) for matrix in rest]
@@ -96,22 +111,21 @@ class _Motion:
                 if link not in moved_links and not np.allclose(now @ unrest, np.eye(4), rtol=0, atol=1e-9):
                     moved_links.add(link)
         self.instances = [index for index in candidates if self.owner.get(index) in moved_links]
+        self._links = sorted({owner[index] for index in self.instances})
+        self._bases = np.array([self.base[index] for index in self.instances]).reshape(-1, 4, 4)
 
     def links(self, t: float) -> list[np.ndarray]:
-        from cadgen.engine import mechanism
-
-        return mechanism.link_worlds(self.kinematics, self.timeline.values(t))
+        return self.worlds(self.timeline.values(t))
 
     def at(self, t: float) -> tuple[np.ndarray, np.ndarray]:
-        """Every moving instance's translation (n x 3) and rotation (n x 4) at ``t``."""
+        """Every moving instance's translation (n x 3) and rotation (n x 4) at ``t``: each link's
+        motion from as built once, then every instance's world matrix and quaternion as one stack."""
+        if not self.instances:
+            return np.zeros((0, 3)), np.zeros((0, 4))
         worlds = self.links(t)
-        translations, rotations = [], []
-        for index in self.instances:
-            link = self.owner[index]
-            matrix = worlds[link] @ self.unrest[link] @ self.base[index]
-            translations.append(matrix[:3, 3])
-            rotations.append(quaternion(matrix))
-        return np.array(translations).reshape(-1, 3), np.array(rotations).reshape(-1, 4)
+        moved = {link: worlds[link] @ self.unrest[link] for link in self._links}
+        matrices = np.matmul(np.array([moved[self.owner[index]] for index in self.instances]), self._bases)
+        return matrices[:, :3, 3].copy(), quaternions(matrices)
 
 
 def _aligned(rotations: np.ndarray, to: np.ndarray) -> np.ndarray:
