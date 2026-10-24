@@ -73,6 +73,7 @@ import concurrent.futures
 import hashlib
 import itertools
 import json
+import math
 import mimetypes
 import os
 import sys
@@ -102,6 +103,10 @@ PAGE = Path(__file__).resolve().parent / "page"
 PARALLEL_BYTES = 500_000
 # How long a version request waits for a new version at most, in seconds.
 WAIT_LIMIT = 60.0
+# A pose request's body at most, in bytes, and how many posed ids the engine keeps (the most
+# recently made; an older one's page asks again): a pose is a name or a few joint values.
+POSE_BODY_LIMIT = 64 << 10
+POSES_HELD = 1024
 # A page remains connected between successive version reads, including a suspended poll.
 LIVE = 90.0
 # A file this engine did not write, read by a reader process (the module docstring).
@@ -408,6 +413,9 @@ class Mesher:
         """The pool, started on its first use: a build serves its document with no page open,
         and a pool started then would hold ``workers`` kernels nobody asked for."""
         with self.lock:
+            if self._processes is not None and getattr(self._processes, "_broken", False):
+                self._processes.shutdown(wait=False, cancel_futures=True)  # a child died; rebuild on next use
+                self._processes = None
             if self._processes is None:
                 import multiprocessing
 
@@ -451,7 +459,7 @@ def _read_document(path: str) -> tuple:
 
     loaded = Loaded(Path(path))
     return (loaded.structure(), loaded.version,
-            {p.key: shape_bytes(p.shape) for p in loaded.prototypes},
+            {p.key: shape_bytes(p.shape, read=True) for p in loaded.prototypes},
             {p.key: p.name for p in loaded.prototypes})
 
 
@@ -650,7 +658,7 @@ class Server:
         self.topologies: "OrderedDict[str, Any]" = OrderedDict()
         self.topology_lock = threading.Lock()
         # A document served at a pose (``POST /api/doc/<id>/pose``): its id, the document's and the pose.
-        self.poses: dict[str, tuple[str, Any]] = {}
+        self.poses: OrderedDict[str, tuple[str, Any]] = OrderedDict()  # at most POSES_HELD
         # STEP reads (the module docstring): held by the file's bytes, each read once however
         # many ask for it at a time, by a reader process started on the first.
         self.foreign: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
@@ -945,7 +953,12 @@ class Server:
         if path.suffix.lower() in FOREIGN:
             return self._read_step(ident, path)
         if self.isolated:
-            structure, version, shapes, names = self._readers().submit(_read_document, str(path)).result()
+            try:
+                structure, version, shapes, names = self._readers().submit(_read_document, str(path)).result()
+            except concurrent.futures.BrokenExecutor:  # the reader died mid-read
+                with self.foreign_lock:
+                    self.reader = None  # the next read starts a reader afresh
+                raise ValueError(f"the reader exited reading {path.name}") from None
             return Served(ident, path, structure, version, shapes, names)
         from cadgen.engine.document import Loaded
 
@@ -968,6 +981,9 @@ class Server:
         """The reader processes: one at a time, each gone after its read (with what the parse
         left in its memory), the next started and warm meanwhile."""
         with self.foreign_lock:
+            if self.reader is not None and getattr(self.reader, "_broken", False):
+                self.reader.shutdown(wait=False, cancel_futures=True)  # a child died; it serves no one now
+                self.reader = None
             if self.reader is None:
                 import multiprocessing
 
@@ -1382,7 +1398,10 @@ class Server:
             if parts[:2] == ["api", "doc"] and self.holds(ident):
                 if len(parts) == 4 and parts[3] == "version":
                     after = (query.get("after") or [None])[0]
-                    seconds = min(float((query.get("wait") or ["0"])[0] or 0), WAIT_LIMIT)
+                    seconds = float((query.get("wait") or ["0"])[0] or 0)
+                    if not math.isfinite(seconds):  # a NaN would never time out, an infinity never end
+                        raise ValueError("wait is a number of seconds")
+                    seconds = min(max(seconds, 0.0), WAIT_LIMIT)
                     given = (query.get("progress") or [""])[0]
                     doc = self.wait(ident, after, seconds, int(given) if given.isdigit() else None)
                     build = self.build_of(ident)
@@ -1437,7 +1456,12 @@ class Server:
         document served at that pose under an id of its own, its parts the document's. An unknown
         configuration, joint or coupling, a value out of range and a mechanism that is not a tree
         are refused by name (400) before the id exists."""
-        length = int(handler.headers.get("Content-Length") or 0)
+        try:
+            length = int(handler.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise ValueError("a pose request's Content-Length is a number") from None
+        if not 0 <= length <= POSE_BODY_LIMIT:
+            raise ValueError(f"a pose request is at most {POSE_BODY_LIMIT} bytes")
         try:
             pose = json.loads(handler.rfile.read(length) or b"{}").get("pose")
         except (json.JSONDecodeError, AttributeError):
@@ -1450,6 +1474,9 @@ class Server:
         digest = hashlib.blake2b(json.dumps(pose, sort_keys=True).encode(), digest_size=6).hexdigest()
         ident = f"{doc.ident}~{digest}"
         self.poses[ident] = (doc.ident, pose)
+        self.poses.move_to_end(ident)
+        while len(self.poses) > POSES_HELD:
+            self.poses.popitem(last=False)
         self.json(handler, {"id": ident, "url": f"{self.url}/api/doc/{ident}", **posed["kinematics"]["pose"]})
 
     def part(self, handler: BaseHTTPRequestHandler, doc: Served, key: str) -> None:

@@ -57,6 +57,18 @@ def offer_an_update(test: unittest.TestCase) -> None:
     (state / "versions.json").write_text(json.dumps({"checked": time.time(), "feed": {"latest": "99.0.0"}}), encoding="utf-8")
 
 
+PAGE_TOOLS = ("cad_sync", "cad_capture_reply")
+
+
+def as_page(server: Server, name: str, arguments: dict | None) -> dict:
+    """A page tool's arguments as the page sends them: with its session's app capability, which
+    its launch's metadata delivered (``createServer`` in apps/mcp)."""
+    arguments = dict(arguments or {})
+    if name in PAGE_TOOLS:
+        arguments.setdefault("app", server._app_token)
+    return arguments
+
+
 class _Session(unittest.TestCase):
     """A server, a bracket in a project folder and a model elsewhere, greeted by ``client``."""
 
@@ -83,7 +95,7 @@ class _Session(unittest.TestCase):
 
     def call(self, name: str, arguments: dict | None = None, meta: dict | None = None) -> dict:
         context = RequestContext(1, {"threadId": "t", **(meta or {})})
-        return self.server.handle("tools/call", {"name": name, "arguments": arguments or {}}, context)
+        return self.server.handle("tools/call", {"name": name, "arguments": as_page(self.server, name, arguments)}, context)
 
     def launch(self, name: str, arguments: dict | None = None, meta: dict | None = None) -> dict:
         return self.call(name, arguments, meta)["structuredContent"]["launch"]
@@ -168,6 +180,23 @@ class TabServerTest(_Session):
             for method, expected in (("GET", 404), ("POST", 404)):
                 self.assertEqual(request("/__cad/features", {"x-cadgen-app": token, **GUARDED}, method=method)["structuredContent"]["status"], expected)
 
+    def test_the_page_tools_answer_only_the_page_that_holds_the_session_s_capability(self) -> None:
+        # The host is asked to keep app-only tools from the model; the server does not rely on it.
+        other = Server(page=self.server.page)
+        other.handle("initialize", initialize_params({"clientInfo": CODEX}), None)
+        context = RequestContext(1, {"threadId": "t"})
+        calls = (("cad_sync", {"view": "v9", "surface": "tab", "state": {"selection": ["forged"]}}),
+                 ("cad_capture_reply", {"requestId": "r1", "png": "iVBORw0KGgo="}))
+        for name, arguments in calls:
+            for token in (None, "", "guessed", other._app_token):
+                with self.subTest(name=name, token=token):
+                    sent = arguments if token is None else {**arguments, "app": token}
+                    refused = self.server.handle("tools/call", {"name": name, "arguments": sent}, context)
+                    self.assertTrue(refused["isError"])
+        self.assertNotIn("v9", self.server.views)
+        self.assertEqual(self.call("cad_sync", {"view": "v9", "surface": "tab"})["structuredContent"], {"events": []})
+        self.assertIn("v9", self.server.views)
+
     def test_the_catalog_names_every_surface_and_keeps_page_tools_from_the_agent(self) -> None:
         tools = {tool["name"]: tool for tool in self.server.handle("tools/list", {}, None)["tools"]}
         meta = {name: tool.get("_meta", {}) for name, tool in tools.items()}
@@ -198,7 +227,7 @@ class TabServerTest(_Session):
     def test_an_agent_names_a_model_by_its_absolute_path_and_a_tab_reopens_on_it(self) -> None:
         opened = self.launch("cad_open", {"path": self.bracket})
         self.assertEqual({key: opened[key] for key in ("protocol", "page", "model", "surface")},
-                         {"protocol": 8, "page": "viewer", "model": self.bracket, "surface": "agent"})
+                         {"protocol": 9, "page": "viewer", "model": self.bracket, "surface": "agent"})
         # No tolerance: the page reads each part's one display mesh by its key.
         self.assertEqual(sorted(opened), ["model", "notice", "page", "pick", "platform", "protocol", "surface",
                                           "version"])
@@ -384,7 +413,8 @@ class SidebarAcrossThreadsTest(_Session):
 
     def on_sidebar(self, name: str, arguments: dict) -> dict:
         context = RequestContext(1, {"threadId": "sidebar-thread"})
-        return self.sidebar.handle("tools/call", {"name": name, "arguments": arguments}, context)["structuredContent"]
+        return self.sidebar.handle("tools/call", {"name": name, "arguments": as_page(self.sidebar, name, arguments)},
+                                   context)["structuredContent"]
 
     def sync_sidebar(self, **extra) -> dict:
         return self.on_sidebar("cad_sync", {"view": "s1", "surface": "sidebar", "model": self.model, **extra})

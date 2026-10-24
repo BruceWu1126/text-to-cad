@@ -113,12 +113,20 @@ def _view(gltf: dict[str, Any], buffers: list[bytes], view_index: int, offset: i
           width: int) -> np.ndarray:
     view = gltf["bufferViews"][view_index]
     data = buffers[view.get("buffer", 0)]
-    start = int(view.get("byteOffset", 0)) + offset
+    begin = int(view.get("byteOffset", 0))
+    length = int(view.get("byteLength", len(data) - begin))
+    start = begin + offset
     element = dtype.itemsize * width
     stride = int(view.get("byteStride") or element)
+    # Every byte the elements span must lie inside the buffer view, which must lie inside its
+    # buffer: glTF's own bounds. np.lib.stride_tricks.as_strided checks nothing, so without
+    # this a view could read bytes past the buffer the file holds.
+    if (min(begin, length, offset, count) < 0 or stride < element or begin + length > len(data)
+            or (count and start + (count - 1) * stride + element > begin + length)):
+        raise GltfError(f"buffer view {view_index} does not hold the {count} elements an accessor reads")
     if stride == element:
         return np.frombuffer(data, dtype, count * width, start).reshape(count, width)
-    rows = np.lib.stride_tricks.as_strided(np.frombuffer(data, np.uint8, len(data) - start, start),
+    rows = np.lib.stride_tricks.as_strided(np.frombuffer(data, np.uint8, begin + length - start, start),
                                            (count, element), (stride, 1))
     return np.ascontiguousarray(rows).view(dtype).reshape(count, width)
 
@@ -133,10 +141,15 @@ def _accessor(gltf: dict[str, Any], buffers: list[bytes], index: int) -> np.ndar
     if "bufferView" in accessor:
         raw = _view(gltf, buffers, accessor["bufferView"], int(accessor.get("byteOffset", 0)), dtype, count, width)
     else:
+        # Zeros, backed by no bytes: never more elements than the file as a whole could hold.
+        if not 0 <= count <= sum(len(data) for data in buffers):
+            raise GltfError(f"accessor {index} names {count} elements its file has no room for")
         raw = np.zeros((count, width), dtype)
     sparse = accessor.get("sparse")
     if sparse:
         indices, values = sparse["indices"], sparse["values"]
+        if not 0 <= int(sparse["count"]) <= count:
+            raise GltfError(f"accessor {index} replaces {sparse['count']} of its {count} elements")
         at = _view(gltf, buffers, indices["bufferView"], int(indices.get("byteOffset", 0)),
                    _dtype(indices["componentType"]), int(sparse["count"]), 1).reshape(-1).astype(np.int64)
         raw = raw.copy()
@@ -280,9 +293,21 @@ def _read(path: Path, gltf: dict[str, Any], buffers: list[bytes]) -> Read:
         part_of[index] = len(parts) - 1
         return part_of[index]
 
+    # A node listed by several parents (or one parent several times) is placed once for each, so
+    # a small file can name an exponential tree: bounded as a document's assembly is.
+    from cadgen.engine.document import MAX_ASSEMBLY_DEPTH, MAX_OCCURRENCES
+
+    visited = 0
+
     def visit(index: int, parent: np.ndarray, trail: tuple[int, ...]) -> None:
+        nonlocal visited
         if index in trail:
             raise GltfError(f"{path.name}: node {index} holds itself")
+        if len(trail) >= MAX_ASSEMBLY_DEPTH:
+            raise GltfError(f"{path.name}: its node tree is deeper than {MAX_ASSEMBLY_DEPTH} levels")
+        visited += 1
+        if visited > MAX_OCCURRENCES:
+            raise GltfError(f"{path.name}: its node tree names more than {MAX_OCCURRENCES} occurrences")
         node = nodes[index] or {}
         world = parent @ _local(node)
         if "mesh" in node:

@@ -182,7 +182,7 @@ class SnapshotTest(unittest.TestCase):
         written = drawing._written
 
         def second_fails(document, out, data, report, started):
-            if len(list(folder.glob(".*.staged.png"))) == 1:
+            if len(list(folder.glob(".*.tmp/*.png"))) == 1:  # the first picture is in its staging folder
                 raise OSError("the disk is full")
             return written(document, out, data, report, started)
 

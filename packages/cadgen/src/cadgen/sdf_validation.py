@@ -222,6 +222,24 @@ def _validate_model(
     parent_targets: set[str],
     renames: bool,
 ) -> None:
+    """A model and every model nested in it, depth first in document order, walked with a stack
+    of its own: a nesting as deep as a file can write is no recursion."""
+    pending: list[tuple[ET.Element, set[str]]] = [(model_element, parent_targets)]
+    while pending:
+        element, targets = pending.pop()
+        nested = _validate_one_model(element, result, base_dir, parent_targets=targets, renames=renames)
+        pending.extend(reversed(nested))
+
+
+def _validate_one_model(
+    model_element: ET.Element,
+    result: FindingsReport,
+    base_dir: Path,
+    *,
+    parent_targets: set[str],
+    renames: bool,
+) -> list[tuple[ET.Element, set[str]]]:
+    """One model's own checks; its nested models, each with the frames it may name, to walk next."""
     model_name = _required_name(model_element, result, _path("model", model_element), "model")
     model_path = _path("model", model_element, fallback="/sdf/model")
     if not model_name:
@@ -314,8 +332,7 @@ def _validate_model(
                     path=f"{model_path}/link[@name='{name}']",
                 )
 
-    for nested_model in nested_model_elements:
-        _validate_model(nested_model, result, base_dir, parent_targets=local_targets, renames=renames)
+    return [(nested_model, local_targets) for nested_model in nested_model_elements]
 
 
 def _validate_link(
@@ -701,25 +718,24 @@ def _validate_frame_cycles(
         if name and target in frame_names:
             edges[name] = target
 
-    visiting: set[str] = set()
+    # Each frame has one target, so a walk from a frame is a chain: followed with a loop, not by
+    # recursion, so a chain as long as a file can write is no deeper a call.
     visited: set[str] = set()
-
-    def visit(frame_name: str, stack: list[str]) -> None:
-        if frame_name in visited:
-            return
-        if frame_name in visiting:
-            cycle = " -> ".join([*stack, frame_name])
-            result.add("error", "frame_cycle", f"frame graph contains a cycle: {cycle}", path=f"{owner_path}/frame")
-            return
-        visiting.add(frame_name)
-        target = edges.get(frame_name)
-        if target:
-            visit(target, [*stack, frame_name])
-        visiting.remove(frame_name)
-        visited.add(frame_name)
-
-    for frame_name in edges:
-        visit(frame_name, [])
+    for start in edges:
+        chain: list[str] = []
+        on_chain: set[str] = set()
+        frame_name = start
+        while frame_name not in visited:
+            if frame_name in on_chain:
+                cycle = " -> ".join([*chain, frame_name])
+                result.add("error", "frame_cycle", f"frame graph contains a cycle: {cycle}", path=f"{owner_path}/frame")
+                break
+            on_chain.add(frame_name)
+            chain.append(frame_name)
+            frame_name = edges.get(frame_name)
+            if not frame_name:
+                break
+        visited.update(chain)
 
 
 def _validate_mesh_uri(uri: str, result: FindingsReport, base_dir: Path, uri_path: str) -> None:

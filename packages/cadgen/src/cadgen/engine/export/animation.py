@@ -492,10 +492,14 @@ def _channel(motion: _Animation, index: int, path: str, kinds: set[str], breaks:
                 split.append((a + b) / 2)
         if not split:
             break
-        times = sorted(set(times) | set(split))
-        if len(times) > mechanism.MOST_KEYS:
+        grown = sorted(set(times) | set(split))
+        # A split whose midpoints round onto existing keys adds no time (two key times one ulp
+        # apart): the key count then never reaches MOST_KEYS and the loop would not end, so a pass
+        # that does not grow the keys is refused, as too many keys already is.
+        if len(grown) == len(times) or len(grown) > mechanism.MOST_KEYS:
             raise ExportRefused(f"the {path} of instance {index} does not settle within the tolerance in "
                                 f"{mechanism.MOST_KEYS} keys")
+        times = grown
     rows = np.array([key(t) for t in times])
     return Channel(index, path, _INTERPOLATION[ease], np.array(times), _signed(path, rows)), worst
 

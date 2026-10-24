@@ -29,13 +29,12 @@ Importing this package imports no kernel: a kind's writer loads on its first use
 from __future__ import annotations
 
 import importlib
-import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from cadgen.engine.atomic_replace import replace_atomic
+from cadgen.engine.atomic_replace import replace_atomic, staging
 
 __all__ = ["KINDS", "ExportRefused", "Kind", "Source", "View", "kind_of", "refused", "translate"]
 
@@ -358,12 +357,8 @@ def translate(document: Any, kind: str | None, path: Any) -> int:
     if not spec.atomic:
         spec.write(view, path)
         return path.stat().st_size
-    temporary = path.with_name(f".{path.stem}.{os.getpid()}.{threading.get_ident()}.tmp{path.suffix}")
-    try:
+    with staging(path) as temporary:
         spec.write(view, temporary)
         size = temporary.stat().st_size
         replace_atomic(temporary, path)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
     return size

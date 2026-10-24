@@ -124,9 +124,37 @@ def socket_path(protocol: int | None = None) -> Path:
 
 
 def socket_folder_ok(path: Path) -> bool:
-    """Whether a socket at ``path`` may be bound or connected: one beside the lock is; one in the
-    shared ``/tmp`` only in a folder that is this user's alone (``private_folder``)."""
-    return path.parent == state_dir() or private_folder(path.parent)
+    """Whether a socket at ``path`` may be bound or connected: one beside the lock is, in an engine
+    folder no one else can change (``folder_refusal``); one in the shared ``/tmp`` only in a folder
+    that is this user's alone (``private_folder``)."""
+    if path.parent == state_dir():
+        return folder_refusal(path.parent) is None
+    return private_folder(path.parent)
+
+
+def folder_refusal(folder: Path) -> str | None:
+    """Why ``folder`` may not hold the engine's socket, lock and port file, or None when it may. On
+    POSIX it must be a folder of this user's that no one else can write to: whoever owns the folder,
+    or can write to it, can take the socket's place, and every request carries its client's
+    environment. (The default folder's name is shared by every user of a machine: another user who
+    made it first owns it.)"""
+    if WINDOWS:
+        return None
+    import stat
+
+    try:
+        found = os.lstat(folder)
+    except OSError as error:
+        return f"the engine's folder {folder} cannot be read: {error.strerror or error}"
+    if not stat.S_ISDIR(found.st_mode):
+        return f"the engine's folder {folder} is not a folder"
+    if found.st_uid != os.getuid():
+        return (f"the engine's folder {folder} belongs to another user (uid {found.st_uid}): "
+                "set CADGEN_ENGINE_DIR to a folder of your own")
+    if found.st_mode & 0o022:
+        return (f"the engine's folder {folder} can be written by others (mode {stat.S_IMODE(found.st_mode):o}): "
+                "run chmod go-w on it, or set CADGEN_ENGINE_DIR to a folder of your own")
+    return None
 
 
 def private_folder(folder: Path) -> bool:
@@ -1140,11 +1168,37 @@ class Daemon:
             self.server.stop()
 
 
+# How long a connection to the Windows loopback port has to show its token: anyone on the machine can
+# connect there, so nothing more is read, or waited for, until it has.
+AUTH_SECONDS = 10.0
+
+
+def _admitted(daemon: Daemon, connection: socket.socket, stream: Any) -> bytes | None:
+    """On Windows, the request line's first bytes: the client puts its token first
+    (``{"token": "<token>", ...``, ``client._exchange``), so a peer without it is refused after
+    those few bytes and ``AUTH_SECONDS`` at most, before the line is read or parsed. None: refused."""
+    import hmac
+
+    expected = b'{"token": "' + daemon.token.encode("ascii") + b'"'
+    connection.settimeout(AUTH_SECONDS)
+    prefix = stream.read(len(expected))
+    if not daemon.token or not hmac.compare_digest(prefix, expected):
+        return None
+    connection.settimeout(None)
+    return prefix
+
+
 def _serve_connection(daemon: Daemon, connection: socket.socket) -> None:
     with connection:
         stream = connection.makefile("rwb")
         try:
-            line = stream.readline()
+            prefix = b""
+            if WINDOWS:
+                admitted = _admitted(daemon, connection, stream)
+                if admitted is None:
+                    return
+                prefix = admitted
+            line = prefix + stream.readline()
             if not line:
                 return
             request = json.loads(line)
@@ -1189,6 +1243,9 @@ def lock(path: Path | None = None) -> Any:
     """The daemon's lock (or another protocol's, at ``path``), held for its life; None when
     another daemon holds it."""
     state_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
+    refusal = folder_refusal(state_dir())
+    if refusal is not None:
+        raise PermissionError(refusal)
     handle = open(path or lock_path(), "a+")
     try:
         if WINDOWS:

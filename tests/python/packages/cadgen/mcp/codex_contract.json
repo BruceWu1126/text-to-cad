@@ -43,7 +43,7 @@
      "page": "viewer",
      "pick": "<pick>",
      "platform": "<platform>",
-     "protocol": 8,
+     "protocol": 9,
      "surface": "file",
      "version": "<version>"
     }
@@ -66,7 +66,7 @@
      "page": "home",
      "pick": "<pick>",
      "platform": "<platform>",
-     "protocol": 8,
+     "protocol": 9,
      "recents": [],
      "surface": "sidebar",
      "version": "<version>"
@@ -90,7 +90,7 @@
      "page": "viewer",
      "pick": "<pick>",
      "platform": "<platform>",
-     "protocol": 8,
+     "protocol": 9,
      "surface": "agent",
      "version": "<version>"
     }
@@ -133,7 +133,7 @@
      "page": "viewer",
      "pick": "<pick>",
      "platform": "<platform>",
-     "protocol": 8,
+     "protocol": 9,
      "surface": "tab",
      "version": "<version>"
     }
@@ -546,6 +546,10 @@
    "inputSchema": {
     "additionalProperties": false,
     "properties": {
+     "app": {
+      "description": "The view's capability, from its launch's metadata.",
+      "type": "string"
+     },
      "closed": {
       "type": "boolean"
      },
@@ -582,7 +586,8 @@
     },
     "required": [
      "view",
-     "surface"
+     "surface",
+     "app"
     ],
     "type": "object"
    },
@@ -606,6 +611,10 @@
    "inputSchema": {
     "additionalProperties": false,
     "properties": {
+     "app": {
+      "description": "The view's capability, from its launch's metadata.",
+      "type": "string"
+     },
      "error": {
       "type": "string"
      },
@@ -617,7 +626,8 @@
      }
     },
     "required": [
-     "requestId"
+     "requestId",
+     "app"
     ],
     "type": "object"
    },

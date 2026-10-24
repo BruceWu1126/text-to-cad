@@ -37,6 +37,7 @@ __all__ = ["CREASE", "CREASED_MAX", "EDGE_ANGLE", "buffer", "creased_normals", "
 EDGE_ANGLE = 16.0  # degrees: the viewer's CAD_EDGE_THRESHOLD_DEG
 CREASE = 30.0  # degrees: the viewer's MESH_NORMAL_CREASE_ANGLE
 CREASED_MAX = 10_000  # triangles: above, flat normals (CREASED_NORMAL_MAX_TRIANGLES)
+CREASE_PAIRS_MAX = 4_000_000  # corner pairs a crease compares: above, flat normals
 
 
 def _unit_normals(corners: np.ndarray) -> np.ndarray:
@@ -67,7 +68,12 @@ def creased_normals(corners: np.ndarray, crease: float = CREASE, hashed: float =
     sorted_points = point[order]
     starts = np.flatnonzero(np.r_[True, sorted_points[1:] != sorted_points[:-1]])
     sizes = np.diff(np.r_[starts, len(order)])
-    # Every pair of corners at one point: each corner against every corner of its group.
+    # Every pair of corners at one point: each corner against every corner of its group, so the
+    # work is sum(group size squared), not the corner count. A mesh whose corners pile into a few
+    # cells would blow that up far past its triangle count, so past a fixed budget the crease is
+    # dropped for flat (per-face) normals, as the >CREASED_MAX path does.
+    if int((sizes.astype(np.int64) ** 2).sum()) > CREASE_PAIRS_MAX:
+        return np.repeat(faces, 3, axis=0)
     group_of = np.repeat(np.arange(len(starts)), sizes)
     pairs = sizes[group_of]
     left = np.repeat(order, pairs)

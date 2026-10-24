@@ -12,7 +12,6 @@ import io
 import os
 import secrets
 import threading
-from http.cookies import SimpleCookie
 from urllib.parse import urlencode
 
 from cadgen.engine.ids import is_id
@@ -184,34 +183,43 @@ class EngineApp:
             return self._default
 
     def handle(self, request, response):
+        return self._handle(request, response)
+
+    def _handle(self, request, response):
+        # Nothing before the gates counts as use: a request refused for its Host or its token
+        # neither keeps the engine from retiring nor counts as an active client.
+        if not host_is_allowed(request.header('host'), self.host):
+            return response.send_json(403, {'error': 'Host is not a local name'})
+        bearer = request.header('authorization').removeprefix('Bearer ')
+        # Read only this engine's cookie out of the header by hand. A stdlib SimpleCookie parse
+        # is all-or-nothing: a sibling cookie another page on this host set (cookies are scoped by
+        # host, not port) with a name or value it rejects would drop the whole jar, and the engine's
+        # own valid cookie with it, turning a good request into a 403.
+        cookie_name = f'cadgen-engine-{self.server.port}'
+        saved = ''
+        for pair in (request.header('cookie') or '').split(';'):
+            name, _, value = pair.strip().partition('=')
+            if name == cookie_name:
+                saved = value.strip().strip('"')
+        # Any one credential suffices: a cookie left by an engine that held this port before
+        # must not outrank the token of the URL a launch just printed.
+        supplied = (bearer, saved, request.query.get('token', ''))
+        expected = self.token.encode()
+        if not any(secrets.compare_digest(str(value).encode('utf-8', 'surrogateescape'), expected)
+                   for value in supplied if value):
+            return self._refused(request, response)
         with self.lock:
             self.active_requests += 1
+        self.server.touch()
         try:
-            return self._handle(request, response)
+            return self._admitted(request, response, cookie_name)
         finally:
             with self.lock:
                 self.active_requests -= 1
             self.server.touch()
 
-    def _handle(self, request, response):
-        self.server.touch()
-        if not host_is_allowed(request.header('host'), self.host):
-            return response.send_json(403, {'error': 'Host is not a local name'})
-        bearer = request.header('authorization').removeprefix('Bearer ')
-        cookie = SimpleCookie()
-        try:
-            cookie.load(request.header('cookie'))
-        except Exception:
-            pass
-        cookie_name = f'cadgen-engine-{self.server.port}'
-        saved = cookie.get(cookie_name)
-        # Any one credential suffices: a cookie left by an engine that held this port before
-        # must not outrank the token of the URL a launch just printed.
-        supplied = (bearer, saved.value if saved else '', request.query.get('token', ''))
-        expected = self.token.encode()
-        if not any(secrets.compare_digest(str(value).encode('utf-8', 'surrogateescape'), expected)
-                   for value in supplied if value):
-            return self._refused(request, response)
+    def _admitted(self, request, response, cookie_name):
+        """A request past the Host and token gates."""
         if request.query.get('token') == self.token and request.method == 'GET':
             query = {k: v for k, v in request.query if k != 'token'}
             location = request.path + ('?' + urlencode(query) if query else '')

@@ -299,6 +299,35 @@ class HingeTest(_Folder):
         self.assertEqual(refused.exception.code, 400)
         self.assertIn("'elbw'", json.loads(refused.exception.read())["error"])
 
+    def test_a_pose_body_is_bounded_and_the_engine_keeps_only_its_latest_poses(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine import serve
+
+        self.hinge()
+        server = Server(port=0, mesh_mode="inline")
+        server.start()
+        self.addCleanup(server.stop)
+        ident = server.add(self.folder / "XBF/hinge.xbf")
+
+        def call(path: str, body: bytes | None = None) -> dict:
+            request = urllib.request.Request(server.url + path, data=body, method="GET" if body is None else "POST")
+            with urllib.request.urlopen(request, timeout=60) as answer:
+                return json.loads(answer.read())
+
+        with self.assertRaises(urllib.error.HTTPError) as refused:
+            call(f"/api/doc/{ident}/pose", b'{"pose": {"elbow": 90}, "pad": "' + b"x" * serve.POSE_BODY_LIMIT + b'"}')
+        self.assertEqual(refused.exception.code, 400)
+        self.assertIn("at most", json.loads(refused.exception.read())["error"])
+        with mock.patch.object(serve, "POSES_HELD", 2):
+            made = [call(f"/api/doc/{ident}/pose", json.dumps({"pose": {"elbow": angle}}).encode())["id"]
+                    for angle in (40, 60, 90)]
+            self.assertEqual(list(server.poses), made[1:])
+            self.assertEqual(call(f"/api/doc/{made[2]}")["kinematics"]["pose"]["values"], {"elbow": 90.0})
+            with self.assertRaises(urllib.error.HTTPError) as gone:
+                call(f"/api/doc/{made[0]}")
+            self.assertEqual(gone.exception.code, 404)
+
 
 class JointMemoTest(_Folder):
     def test_a_body_with_joints_is_retained_and_an_edited_joint_runs_it_again(self) -> None:
@@ -787,7 +816,8 @@ def mechanism():
     return configuration_sequence(assembly, "spin", sweep={"lead": (0, 300)}, duration=2, ease="linear")
 """
 # NAMED's document as cadgen 0.8.0 wrote it when its functions were ``couple``, ``configuration``
-# and ``motion`` (the same source with those three names), before the AP242 names replaced them.
+# and ``motion`` (the same source with those three names), before the AP242 names replaced them;
+# its parts' keys since rewritten as the engine makes them now (``document.geometry_key``).
 NAMED_GOLDEN = Path(__file__).resolve().parent / "kinematics_golden" / "mechanism.xbf"
 _RECORD = b'{"schema":"cadgen.engine closure/1",'
 

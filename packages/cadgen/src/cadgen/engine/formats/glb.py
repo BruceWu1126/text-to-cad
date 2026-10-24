@@ -77,6 +77,18 @@ def _loud(kept: Any) -> None:
         printer.SetTraceLevel(level)
 
 
+def _whole_from_itself(path: Path, gltf: dict[str, Any]) -> None:
+    """Refuse a GLB that names a buffer or image outside itself. OCCT's reader would resolve
+    such a ``uri`` against the file's folder and read that file as the model's bytes; a GLB is
+    read whole from itself, as the numpy reader (``gltf._buffers``) already requires."""
+    for kind in ("buffers", "images"):
+        for index, item in enumerate(gltf.get(kind) or []):
+            uri = (item or {}).get("uri") if isinstance(item, dict) else None
+            if uri is not None and not (isinstance(uri, str) and uri.startswith("data:") and ";base64," in uri):
+                raise FormatError(f"{path.name}: {kind[:-1]} {index} is a file outside the GLB ({uri}); "
+                                  "a GLB is read whole from itself")
+
+
 def _document(path: Path, z_up: bool) -> Any:
     from OCP.Message import Message_ProgressRange
     from OCP.RWGltf import RWGltf_CafReader
@@ -252,6 +264,7 @@ def read_glb(path: Path) -> tuple[list[Part], list[Placed], dict[str, Any], list
 
     path = Path(path)
     gltf = _json(path)
+    _whole_from_itself(path, gltf)
     z_up = any(str(((node or {}).get("extras") or {}).get("cadUpAxis") or "").lower() == "z"
                for node in gltf.get("nodes") or [] if isinstance(node, dict))
     document = _document(path, z_up)
@@ -270,7 +283,19 @@ def read_glb(path: Path) -> tuple[list[Part], list[Placed], dict[str, Any], list
         TDF_Tool.Entry_s(label, text)
         return text.ToCString()
 
+    # OCCT keeps a node listed by several parents as one label they share; the walk places it once
+    # for each, so a small file can name an exponential tree: bounded as a document's assembly is.
+    from cadgen.engine.document import MAX_ASSEMBLY_DEPTH, MAX_OCCURRENCES
+
+    visited = 0
+
     def visit(label: Any, world: np.ndarray, names: list[str], name: str) -> dict[str, Any]:
+        nonlocal visited
+        visited += 1
+        if visited > MAX_OCCURRENCES:
+            raise FormatError(f"{path.name}: its node tree names more than {MAX_OCCURRENCES} occurrences")
+        if len(names) > MAX_ASSEMBLY_DEPTH:
+            raise FormatError(f"{path.name}: its node tree is deeper than {MAX_ASSEMBLY_DEPTH} levels")
         if XCAFDoc_ShapeTool.IsReference_s(label):
             referred = TDF_Label()
             XCAFDoc_ShapeTool.GetReferredShape_s(label, referred)

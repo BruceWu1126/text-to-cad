@@ -34,12 +34,13 @@ from __future__ import annotations
 import bisect
 import math
 import os
-import shutil
 import struct
 import subprocess
 import sys
 from functools import lru_cache
 from pathlib import Path
+
+from cadgen.engine import executables
 from typing import Any
 
 import numpy as np
@@ -47,6 +48,7 @@ import numpy as np
 TEXT_SCALE = 2  # the viewer's text canvas is twice the words' size (annotation.js textCanvas)
 LINE_HEIGHT = 1.25
 SUPERSAMPLE = 10
+MAX_TEXT_RASTER = 256_000_000  # a text mark's supersampled canvas (px); any real label is far smaller
 MAC_FACE = Path("/System/Library/Fonts/SFNS.ttf")
 # How far FreeType's ink sits from CoreText's for the same baseline, fitted on macOS: up a fifth
 # of a pixel.
@@ -67,11 +69,11 @@ def face_source(weight: float) -> tuple[str | None, str]:
         for name in (["SegUIVar.ttf"] + (["seguisb.ttf"] if weight >= 600 else []) + ["segoeui.ttf"]):
             if (fonts / name).is_file():
                 return str(fonts / name), name
-    elif shutil.which("fc-match"):
+    elif fc_match := executables.find("fc-match"):  # by its absolute path: never the working folder's
         # fontconfig's weights: regular 80, medium 100, demibold 180, bold 200.
         fc = 80 if weight < 450 else 100 if weight < 550 else 180 if weight < 650 else 200
         try:
-            found = subprocess.run(["fc-match", "-f", "%{file}", f"sans-serif:weight={fc}"], capture_output=True,
+            found = subprocess.run([fc_match, "-f", "%{file}", f"sans-serif:weight={fc}"], capture_output=True,
                                    text=True, timeout=5).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             found = ""
@@ -515,6 +517,8 @@ def text_canvas(text: str, font_px: float, color: str) -> np.ndarray:
     face_ = face(500, font_px * TEXT_SCALE)
     width = max(1.0, *(face_.width(line) for line in lines))
     size = (int(math.ceil(width)) + 2, int(math.ceil(len(lines) * font_px * LINE_HEIGHT * TEXT_SCALE)) + 2)
+    if size[0] * size[1] * SUPERSAMPLE * SUPERSAMPLE > MAX_TEXT_RASTER:
+        raise ValueError(f"a text mark's canvas is {size[0]}x{size[1]} at {SUPERSAMPLE}x; over {MAX_TEXT_RASTER} px")
     alpha = coverage(lines, face_, size, (1.0, 1.0), font_px * LINE_HEIGHT * TEXT_SCALE)
     rgb = np.array([int(color.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)], np.uint8)
     out = np.zeros((size[1], size[0], 4), np.uint8)

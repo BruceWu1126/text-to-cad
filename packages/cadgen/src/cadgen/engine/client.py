@@ -39,16 +39,35 @@ def _connect(address: Path | None = None) -> socket.socket | None:
         return None
 
 
+# Switches that govern only the process they are set in -- ``DO_NOT_TRACK`` and
+# ``CADGEN_TELEMETRY`` (the distribution's ``cadgen.analytics.ENVIRONMENT``). The daemon serves
+# every later client, so it is one of the "processes started for others" that go by the
+# person's saved choice, never by the switch of whichever client happened to start it. The
+# engine imports nothing of cadgen (law 3), so it carries the names here rather than importing them.
+_PER_PROCESS_TELEMETRY = ("DO_NOT_TRACK", "CADGEN_TELEMETRY")
+
+
 def _start() -> None:
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items() if name not in _PER_PROCESS_TELEMETRY}
     root = _daemon.engine_root()
     path = env.get("PYTHONPATH", "")
     if root not in path.split(os.pathsep):
         env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     subprocess.Popen([sys.executable, "-P", "-m", DAEMON_MODULE], stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=str(_daemon.state_dir().parent)
-                     if _daemon.state_dir().parent.exists() else None, **_daemon.detached())
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=_working_folder(),
+                     **_daemon.detached())
+
+
+def _working_folder() -> str | None:
+    """Where the daemon (and every child it starts) stands. On POSIX the engine's own folder, which
+    is this user's alone (``daemon.folder_refusal``): never the shared temporary folder above it,
+    where another user could leave a file a name-resolved helper would find. On Windows the
+    per-user temporary folder above it, so the engine's folder holds no process's working folder."""
+    folder = _daemon.state_dir()
+    if not _daemon.WINDOWS:
+        return str(folder) if folder.is_dir() else None
+    return str(folder.parent) if folder.parent.exists() else None
 
 
 def connect(*, start: bool = True, timeout: float = 60.0) -> socket.socket | None:
@@ -57,6 +76,9 @@ def connect(*, start: bool = True, timeout: float = 60.0) -> socket.socket | Non
     if found is not None or not start:
         return found
     _daemon.state_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
+    refusal = _daemon.folder_refusal(_daemon.state_dir())
+    if refusal is not None:  # said now, not after waiting out a daemon that cannot start there
+        raise ConnectionError(refusal)
     _start()
     started = time.monotonic()
     deadline = started + timeout
@@ -104,7 +126,8 @@ def request(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] = 
 def _exchange(connection: socket.socket, message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] = lambda _m: None,
               on_progress: Callable[[dict[str, Any]], None] | None = None, address: Path | None = None) -> dict[str, Any]:
     if _daemon.WINDOWS:
-        message = {**message, "token": (address or _daemon.port_path()).read_text(encoding="utf-8").split()[1]}
+        # The token first, so the daemon checks it in the line's first bytes, before it reads the rest.
+        message = {"token": (address or _daemon.port_path()).read_text(encoding="utf-8").split()[1], **message}
     with connection:
         connection.settimeout(None)
         stream = connection.makefile("rwb")
@@ -151,8 +174,8 @@ def _remove_dead(endpoint: _daemon.Endpoint) -> list[str]:
     """The files of ``endpoint`` removed when its daemon is dead: its lock free (taken here while
     they go, so no daemon starts between) and nothing answering at its address."""
     present = [path for path in (endpoint.address, endpoint.lock) if path.exists() or path.is_symlink()]
-    if not present:
-        return []
+    if not present or _daemon.folder_refusal(endpoint.lock.parent) is not None:
+        return []  # nothing, or a folder another can change: none of it this user's daemon's to remove
     held = _daemon.lock(endpoint.lock)
     if held is None:
         return []  # a daemon holds it: starting, stopping or running

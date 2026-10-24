@@ -113,8 +113,10 @@ def _probe_kernel() -> tuple[str, str]:
     try:
         # Both ends name utf-8: the child's stdio would otherwise be the ANSI code page
         # on Windows, which cannot carry every path or every localized loader error.
+        # ``-P``, as every child cadgen starts: the kernel the installation imports, never a
+        # module of that name in the folder the command was run from.
         result = subprocess.run(
-            [sys.executable, "-c", "import OCP; print(OCP.__file__)"],
+            [sys.executable, "-P", "-c", "import OCP; print(OCP.__file__)"],
             capture_output=True,
             text=True,
             encoding="utf-8",

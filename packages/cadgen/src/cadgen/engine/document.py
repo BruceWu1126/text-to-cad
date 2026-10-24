@@ -22,7 +22,8 @@ colour per part and per painted face; a material per part and per face given one
 base colour the part's colour too so a reader of colours alone agrees; on each part's face and edge sub-shape labels
 the element names the memo's history gave them (``kernel.trace``), so a face's name
 survives into the file and into a STEP; and on each part the key of its geometry
-(``KEY_GUID``), what a reader caches the part's tessellation by. Saved with the
+(``KEY_GUID``), which a reader caches the part's tessellation by only once the part it
+read makes that key again (``Loaded``). Saved with the
 BinXCAF driver as ``.xbf``, atomically, and only when its bytes changed -- every
 sub-shape's ``Checked`` flag written cleared (``unchecked``), so a cold build and a
 warm one of the same sources write the same bytes.
@@ -47,7 +48,6 @@ from __future__ import annotations
 
 import functools
 import hashlib
-import os
 import re
 import threading
 from collections import OrderedDict
@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-from cadgen.engine.atomic_replace import replace_atomic
+from cadgen.engine.atomic_replace import replace_atomic, staging
 
 __all__ = ["Assembly", "Component", "Kept", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "merge",
            "mesh_faces", "read_step_shape", "read_xbf_shape", "save", "to_xcaf", "unchecked"]
@@ -189,6 +189,12 @@ def _children(topods: Any) -> list[Any]:
 # once, as the parts a build keeps (``build._PARTS``) are named once.
 _MESH_FACES: "OrderedDict[Any, tuple[int, ...]]" = OrderedDict()
 _MESH_FACES_HELD = 1 << 16
+
+# A document's assembly as the engine reads it: a sub-assembly shared by several components is
+# walked once for each of them, so a few kilobytes can name an exponential tree, and a component
+# that refers to its own assembly names an endless one. A read refuses either.
+MAX_OCCURRENCES = 250_000
+MAX_ASSEMBLY_DEPTH = 64
 
 
 def mesh_faces(shape: Any) -> tuple[int, ...]:
@@ -412,18 +418,39 @@ def direct(shape: Any) -> Any:
     return shape if found is None or found.IsNull() else found
 
 
-def geometry_key(shape: Any) -> str:
-    """A key of a part's geometry: a digest of its binary BRep as the document writes
-    it (``unchecked``), no triangulation. Two parts with the same key tessellate
-    alike, in any process."""
-    import io
+def geometry_key(shape: Any, *, read: bool = False) -> str:
+    """A key of a part's geometry: a digest of the bytes it is meshed from
+    (``mesh.shape_bytes``: its binary BRep written and read once, no triangulation). Two
+    parts with the same key tessellate alike, in any process. A part a document read
+    (``read``) makes the key its build gave it, so a reader checks the key a file names
+    for each part against the part itself (``Loaded``)."""
+    from cadgen.engine.mesh import shape_bytes
 
-    from OCP.BinTools import BinTools, BinTools_FormatVersion_VERSION_4
+    return hashlib.blake2b(shape_bytes(shape, read=read), digest_size=16).hexdigest()
 
-    stream = io.BytesIO()
-    with unchecked([shape]):
-        BinTools.Write_s(shape, stream, False, False, BinTools_FormatVersion_VERSION_4)
-    return hashlib.blake2b(stream.getvalue(), digest_size=16).hexdigest()
+
+def _checked_keys(prototypes: list, claims: dict[int, str]) -> None:
+    """Each prototype keyed by what its file names (``claims``, by index) only where the
+    file's word holds: a key every part naming it makes again from its own geometry
+    (``geometry_key``) is kept, and is shared with every document of that geometry. Where
+    one part naming a key does not make it, the parts naming it are keyed apart, by the
+    key and their own geometry's keys together: a file never lends its part the key of
+    another document's, so the daemon's caches -- meshes, facts, shapes -- never answer
+    one document's part with another's geometry. A part's look kept apart from another
+    of its geometry is a copy of its topology (``_apart``), whose bytes are not the
+    first's: the two keep one key all the same, the one made of both. A part the file
+    names no key for keeps its own geometry's."""
+    named: dict[str, list] = {}
+    for prototype in prototypes:
+        claim = claims.get(prototype.index)
+        if claim:
+            named.setdefault(claim, []).append(prototype)
+    for claim, group in named.items():
+        if any(prototype.key != claim for prototype in group):
+            made = "\0".join(["named", claim, *sorted(prototype.key for prototype in group)])
+            claim = hashlib.blake2b(made.encode(), digest_size=16).hexdigest()
+        for prototype in group:
+            prototype.key = claim
 
 
 # --- the XCAF document --------------------------------------------------------------------
@@ -1108,19 +1135,17 @@ def save(doc: Any, path: Path, *, compare: bool) -> tuple[bool, int]:
         _MADE.clear()
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.stem}.{os.getpid()}.{threading.get_ident()}.xbf")
     shapes = [part.shape for part in tree.parts] if tree is not None else _free_shapes(doc)
-    with _XCAF_LOCK, unchecked(shapes):
-        status = _application().SaveAs(doc, TCollection_ExtendedString(str(temporary), True))
-    if status != PCDM_StoreStatus.PCDM_SS_OK or not temporary.exists():
-        temporary.unlink(missing_ok=True)
-        raise OSError(f"could not save {path}: {status}")
-    _fix_date(temporary)
-    size = temporary.stat().st_size
-    if compare and path.exists() and path.stat().st_size == size and _same_bytes(path, temporary):
-        temporary.unlink()
-        return False, size
-    replace_atomic(temporary, path)
+    with staging(path.with_suffix(".xbf")) as temporary:
+        with _XCAF_LOCK, unchecked(shapes):
+            status = _application().SaveAs(doc, TCollection_ExtendedString(str(temporary), True))
+        if status != PCDM_StoreStatus.PCDM_SS_OK or not temporary.exists():
+            raise OSError(f"could not save {path}: {status}")
+        _fix_date(temporary)
+        size = temporary.stat().st_size
+        if compare and path.exists() and path.stat().st_size == size and _same_bytes(path, temporary):
+            return False, size
+        replace_atomic(temporary, path)
     if tree is not None:
         for listener in list(SAVED_LISTENERS):
             listener(path.resolve(), tree)
@@ -1261,12 +1286,27 @@ class Loaded:
             TDF_Tool.Entry_s(label, text)
             return text.ToCString()
 
+        counted = 0
+        claims: dict[int, str] = {}
+
         def visit(label: Any, location: Any, path: list[str], inherited: tuple | None, name: str,
-                  occurrence: tuple[int, ...], entries: list[str]) -> dict[str, Any]:
+                  occurrence: tuple[int, ...], entries: list[str], ancestors: frozenset = frozenset()) -> dict[str, Any]:
+            nonlocal counted
+            counted += 1
+            if counted > MAX_OCCURRENCES:
+                raise ValueError(f"cannot read {self.path.name}: its assembly names more than "
+                                 f"{MAX_OCCURRENCES} occurrences")
+            if len(occurrence) > MAX_ASSEMBLY_DEPTH:
+                raise ValueError(f"cannot read {self.path.name}: its assembly is deeper than "
+                                 f"{MAX_ASSEMBLY_DEPTH} levels")
             color = _label_color(label) or inherited
             self.worlds[occurrence] = location
             self.occurrences["/".join(entries)] = occurrence
             if XCAFDoc_ShapeTool.IsAssembly_s(label):
+                own = entry_of(label)
+                if own in ancestors:
+                    raise ValueError(f"cannot read {self.path.name}: an assembly contains itself")
+                inner = ancestors | {own}
                 node: dict[str, Any] = {"name": name, "children": []}
                 components = TDF_LabelSequence()
                 XCAFDoc_ShapeTool.GetComponents_s(label, components, False)
@@ -1278,7 +1318,7 @@ class Loaded:
                     child_name = named(component) or named(referred) or f"{name}.{at}"
                     child_color = _label_color(component) or color
                     node["children"].append(visit(referred, placed, path + [child_name], child_color, child_name,
-                                                  occurrence + (at - 1,), entries + [entry_of(component)]))
+                                                  occurrence + (at - 1,), entries + [entry_of(component)], inner))
                 return node
             shape = XCAFDoc_ShapeTool.GetShape_s(label)
             entry = entry_of(label)
@@ -1286,6 +1326,9 @@ class Loaded:
             if index is None:
                 index = by_entry[entry] = len(self.prototypes)
                 self.prototypes.append(_prototype(index, label, shape, entry, self))
+                claim = _label_text(label, KEY_GUID)
+                if claim is not None:
+                    claims[index] = claim
             placed = location.Multiplied(shape.Location())
             prototype = self.prototypes[index]
             self.instances.append(Instance(index, path, _matrix(placed),
@@ -1306,6 +1349,7 @@ class Loaded:
             self.name = roots[0]["name"]
         else:
             self.tree = {"name": self.path.stem, "children": roots}
+        _checked_keys(self.prototypes, claims)
 
     @property
     def closure(self) -> dict[str, Any] | None:
@@ -1503,11 +1547,30 @@ def _read(path: Path) -> Any:
             reader.SetMatMode(True)
             # The reader defines the translator's parameters: set them once it exists.
             Interface_Static.SetIVal_s("read.stepcaf.subshapes.name", 1)
-            if reader.ReadFile(str(path)) != IFSelect_RetDone or not reader.Transfer(doc):
+            if reader.ReadFile(str(path)) != IFSelect_RetDone:
+                raise ValueError(f"cannot read {path}")
+            refuse_external_files(reader, path)
+            if not reader.Transfer(doc):
                 raise ValueError(f"cannot read {path}")
         else:
             raise ValueError(f"not a document the engine reads: {path.name}")
     return doc
+
+
+def refuse_external_files(reader: Any, path: Any) -> None:
+    """A STEP that names another file (an external document: ``DOCUMENT_FILE``) refused, after
+    ``ReadFile`` and before ``Transfer``: the XCAF reader's transfer opens every file such a STEP
+    names -- beside it, above it, or anywhere by an absolute path -- and adds what it reads to the
+    document as the STEP's own parts. A STEP read is the file it is, so a reference to another is
+    an error here, wherever the read is made (``_read``, ``reader._parse``)."""
+    from OCP.StepBasic import StepBasic_DocumentFile
+
+    model = reader.ChangeReader().Model()
+    kind = StepBasic_DocumentFile.get_type_descriptor_s()
+    for index in range(1, model.NbEntities() + 1):
+        if model.Value(index).IsKind(kind):
+            raise ValueError(f"cannot read {Path(path).name}: it names another file to read (an external "
+                             f"reference); the engine reads a STEP's own geometry only")
 
 
 def read_bytes(data: bytes) -> Any:
@@ -1749,8 +1812,6 @@ def _label_material(label: Any) -> Any:
 
 
 def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -> Prototype:
-    from OCP.Standard import Standard_GUID
-    from OCP.TDataStd import TDataStd_AsciiString
     from OCP.TDF import TDF_LabelSequence
     from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
     from OCP.TopExp import TopExp
@@ -1758,12 +1819,7 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
     from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
     local = shape.Located(_identity())
-    key = TDataStd_AsciiString()
-    guid = Standard_GUID(KEY_GUID)
-    if _find(label, key, guid):
-        found_key = key.Get().ToCString()
-    else:
-        found_key = f"{loaded.version[0]}-{loaded.version[1]}-{entry}"
+    found_key = geometry_key(local, read=True)  # the file's key is checked against it (``_checked_keys``)
     face_names: dict[int, str] = {}
     edge_names: dict[int, str] = {}
     vertex_names: dict[int, str] = {}

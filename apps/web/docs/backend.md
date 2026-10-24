@@ -73,7 +73,8 @@ Vite serves the client from source with HMR. It spawns
 `python -m cadgen.viewer --api-only --json` (a launch) and proxies `/__cad` to that
 authenticated engine. `VIEWER_PYTHON` selects its interpreter; the
 default is `python3`. `VIEWER_BACKEND_URL` attaches to a backend you started
-separately. The app needs no production build in this mode, but shared package
+separately, with its token in `CAD_ENGINE_TOKEN` (outside `VIEWER_`, the prefix Vite
+hands to the page). The app needs no production build in this mode, but shared package
 imports still resolve to their compiled `dist/` exports.
 
 Vite defaults to port 5173 and refuses to roll to another port; pass `--port`

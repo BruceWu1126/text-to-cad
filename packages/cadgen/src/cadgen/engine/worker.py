@@ -288,6 +288,17 @@ def resident_after_build() -> float | None:
     return resident
 
 
+def _neutral_folder() -> str:
+    """Where an idle worker stands: the engine's folder on POSIX when it is this user's alone,
+    else the temporary folder (``main``)."""
+    from cadgen.engine import daemon
+
+    folder = daemon.state_dir()
+    if not daemon.WINDOWS and folder.is_dir() and daemon.folder_refusal(folder) is None:
+        return str(folder)
+    return tempfile.gettempdir()
+
+
 def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, Any]:
     """An ``export`` request: the document -- one this worker holds (``held``: a document named
     by its id, read as it is and never built), a ``Model`` this program built first (its own
@@ -502,9 +513,10 @@ def main() -> int:
 
     # A request runs in its folder (its ``cwd``, else the one this worker started in: its script's),
     # so a model's relative reads resolve as before; between requests the worker stands in the
+    # engine's own folder where it is this user's alone (``daemon.folder_refusal``), else the
     # temporary folder, so an idle worker holds no project folder open (on Windows, a folder a
-    # process stands in cannot be renamed or deleted).
-    home, neutral = os.getcwd(), tempfile.gettempdir()
+    # process stands in cannot be renamed or deleted) and never stands in a folder others write.
+    home, neutral = os.getcwd(), _neutral_folder()
     os.chdir(neutral)
 
     def leave() -> None:

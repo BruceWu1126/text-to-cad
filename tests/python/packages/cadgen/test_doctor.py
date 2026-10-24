@@ -198,6 +198,20 @@ class KernelProbeTest(unittest.TestCase):
         self.assertEqual(state, doctor.KERNEL_OK, detail)
         self.assertIn("OCP", detail)
 
+    def test_the_probe_imports_the_installed_kernel_whatever_folder_it_runs_from(self) -> None:
+        import os
+
+        with TemporaryDirectory() as folder:
+            Path(folder, "OCP.py").write_text("raise SystemExit('the working folder was searched')\n", encoding="utf-8")
+            here = os.getcwd()
+            os.chdir(folder)
+            try:
+                state, detail = doctor._probe_kernel()
+            finally:
+                os.chdir(here)
+        self.assertEqual(state, doctor.KERNEL_OK, detail)
+        self.assertNotIn(os.path.realpath(folder), os.path.realpath(detail))
+
     def test_the_probe_tells_a_missing_kernel_from_a_refused_one(self) -> None:
         # The child interpreter's last stderr line is all the probe has. A
         # ModuleNotFoundError is "not installed" (a --no-deps wheel install, a

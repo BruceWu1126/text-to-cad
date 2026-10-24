@@ -191,7 +191,10 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   an app capability, only telemetry status and opt-out are authorized. Every
   page launch includes a session capability in result `_meta["dev.texttocad/httpToken"]`,
   which [MCP Apps hosts deliver to the UI](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx#2-tool-results), outside model context; content and structured content never
-  carry it. The page sends `x-cadgen-app` with HTTP calls. The server validates
+  carry it. The page sends `x-cadgen-app` with HTTP calls, and the same capability
+  as the `app` argument of `cad_sync` and `cad_capture_reply`, which refuse a call
+  without it: a host is asked to keep app-only tools from the model, and the server
+  does not rely on it. The server validates
   it before routing or serving cached ranges. An arbitrary guard header, view
   id, or caller assertion cannot grant app access; another session's capability
   fails. The local host itself retains installation-level authority.

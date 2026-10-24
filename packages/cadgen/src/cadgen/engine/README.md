@@ -419,7 +419,7 @@ header is always `01/01/2000` (`document.WRITTEN_DATE`, put over the driver's in
 place), so two cold builds of the same code are the same bytes on any day.
 If a body raises, the error is reported with the model's frames and the
 previous files stay. Builds run in the daemon's warm workers, at most one per core alive
-(**The engine server and its workers**). `CADGEN_ENGINE_DIR` moves its socket and lock; the client and the server resolve it alike (`daemon.state_dir`: a `..`, a symlink or a trailing slash names the same folder).
+(**The engine server and its workers**). `CADGEN_ENGINE_DIR` moves its socket and lock; the client and the server resolve it alike (`daemon.state_dir`: a `..`, a symlink or a trailing slash names the same folder). On POSIX the folder must be the user's own and closed to writing by anyone else (`daemon.folder_refusal`): whoever owns or can write the folder could take the socket's place, so a client refuses to connect or start there and the daemon refuses to lock there, saying why.
 `CADGEN_ENGINE_MEMORY_MB` sets the server's memory budget (**Document lifetime**).
 `CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_VIEWER_WARM=0` keeps `cadgen viewer`
 from warming the engine at its launch (**The viewer and the snapshot**). `CADGEN_ENGINE_MESH=processes|inline`
@@ -1517,6 +1517,13 @@ and the worker assembles the tree from them. A shape written and read once is wh
 document reads back, so the tree is a function of the file. An xbf is read in the worker by the
 document's own retrieval driver.
 
+**A STEP is the file it is.** A STEP can name other files as its parts (an external document
+reference, `DOCUMENT_FILE`), which the XCAF reader's transfer would open -- beside it, above it or
+anywhere by an absolute path -- and add to the document as the STEP's own. Every STEP read
+(`read_step`'s reader process, and the read behind the viewer, an export and a snapshot) checks
+the parsed file before it transfers it and refuses one that names another file
+(`document.refuse_external_files`).
+
 ## Placements
 
 A part used ten times is one prototype placed ten times, in the worker's memory as in the
@@ -1567,6 +1574,13 @@ bytes its document holds of it. A build's live part is written and read once to
 get them, as saving its document does. A part read from a document (the served
 document, `cadgen export`) is written as it was read. So a worker, the
 server and an export all mesh one geometry key from the same bytes.
+The geometry key is the digest of those bytes (`document.geometry_key`), so a
+reader makes a part's key again from the part it read, and takes the key the file
+names for it only when the two agree (`document.Loaded`). Where one part naming a
+key does not make it, the parts naming it are keyed apart, by the key and their
+own keys together (a placement's look kept apart is such a copy, and keeps one key
+with its first). The daemon's caches are shared by every document it serves, so a
+file never lends its part another document's key, and never its mesh or facts.
 
 Every edge has a class read from the B-rep: 1 feature (two faces at an angle),
 2 tangent (two faces meeting at least G1), 3 seam (a face closing on itself),

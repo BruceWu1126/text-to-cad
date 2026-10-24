@@ -88,8 +88,10 @@ Dev announces itself to the same engine with
 `python -m cadgen.viewer --api-only --json` (a launch: its folder becomes the home's), then
 proxies `/__cad` with the engine token. Vite owns the client and closing it leaves the engine
 running. `VIEWER_PYTHON` names the interpreter with cadgen installed (default `python3`).
-`VIEWER_BACKEND_URL` and `VIEWER_ENGINE_TOKEN` attach to an existing engine
-using its `apiUrl` and `token`. Build shared packages first; Vite needs no web
+`VIEWER_BACKEND_URL` and `CAD_ENGINE_TOKEN` attach to an existing engine
+using its `apiUrl` and `token`. The token is named outside `VIEWER_`, the prefix Vite hands
+to the page (dev refuses a `VIEWER_` variable named like a token), and the dev server sends
+no CORS headers, so no other origin reads what its token-bearing proxy answers. Build shared packages first; Vite needs no web
 production build.
 
 Prod is `cadgen viewer`, run from anywhere. It serves the client bundled by
@@ -306,9 +308,12 @@ compiler output, whose Retry reloads only that file and whose Report Issue opens
 new issue titled "Issue: ", labelled `bug`, filled in from the card. A failed update the
 model survives can be dismissed, leaving the previous version to inspect.
 
-The page checks its session's `identityToken` and reloads when the served client
-changes. Python code does not trigger a server restart: the engine owns other
-pages and sessions. Vite handles client HMR and consumes compiled workspace
+The page checks its session's `identityToken`. Under Vite it reloads when the
+served client changes. A page the engine serves never reloads into another identity
+on its port: every engine has a new token, so a later engine refuses the page, and
+another identity answering there is a process the page cannot authenticate. That
+page stops asking and says its engine is gone. Python code does not trigger a server
+restart: the engine owns other pages and sessions. Vite handles client HMR and consumes compiled workspace
 exports; React is deduplicated with the shared packages.
 
 Prompt actions prepare clipboard content for an external composer. References

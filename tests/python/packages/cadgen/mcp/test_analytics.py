@@ -73,7 +73,10 @@ class _Tmp(unittest.TestCase):
 
     def call(self, server: Server, name: str, arguments: dict | None = None) -> dict:
         context = RequestContext(1, {"threadId": "t"})
-        return server.handle("tools/call", {"name": name, "arguments": arguments or {}}, context)
+        arguments = dict(arguments or {})
+        if name in ("cad_sync", "cad_capture_reply"):  # as the page sends them: with its app capability
+            arguments.setdefault("app", server._app_token)
+        return server.handle("tools/call", {"name": name, "arguments": arguments}, context)
 
     def http(self, server: Server, method: str, url: str, body: dict | None = None, *, agent: bool = False) -> tuple[int, dict | None]:
         """A request the page sends through ``cad_http`` (a POST with the header its client sends)."""

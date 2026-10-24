@@ -504,6 +504,21 @@ class BufferTest(unittest.TestCase):
         mesh, _uv = buffer(flat, np.arange(len(flat)).reshape(-1, 3), normals=given)
         self.assertGreater(float(np.linalg.norm(mesh.normals, axis=1).min()), 0.99)
 
+    def test_many_corners_in_one_cell_fall_back_to_flat_normals(self) -> None:
+        """A mesh whose corners pile into one hash cell must not make the crease pass allocate the
+        square of the group size; past the pair budget it draws flat (per-face) normals instead."""
+        from cadgen.engine.formats.buffer import CREASE_PAIRS_MAX, _unit_normals, creased_normals
+
+        clustered = np.random.default_rng(0).uniform(1e-4, 9e-3, (1200, 3, 3))  # all corners in one 1e-2 cell
+        group = len(clustered) * 3
+        self.assertGreater(group * group, CREASE_PAIRS_MAX, "the fixture must exceed the pair budget")
+        normals = creased_normals(clustered)
+        self.assertEqual(normals.shape, (group, 3))
+        flat = np.repeat(_unit_normals(clustered), 3, axis=0)
+        self.assertTrue(np.array_equal(normals, flat), "over the budget the crease is dropped for flat normals")
+        spread = np.array([[[0, 0, 0], [1, 0, 0], [0, 1, 0]], [[10, 0, 0], [11, 0, 0], [10, 1, 0]]], float)
+        self.assertEqual(creased_normals(spread).shape, (6, 3))  # a small spread mesh still creases
+
     def test_normals_crease_at_thirty_degrees_and_a_dense_mesh_is_flat(self) -> None:
         cylinder = cylinder_soup(5, 10, segments=24)
         mesh, _uv = buffer(cylinder.reshape(-1, 3), np.arange(len(cylinder) * 3).reshape(-1, 3))
@@ -516,6 +531,23 @@ class BufferTest(unittest.TestCase):
         mesh, _uv = buffer(dense.reshape(-1, 3), np.arange(len(dense) * 3).reshape(-1, 3))
         flat = mesh.normals.reshape(-1, 3, 3)
         self.assertTrue(np.allclose(flat[:, 0], flat[:, 1]) and np.allclose(flat[:, 0], flat[:, 2]))
+
+
+class GlbWholeFromItselfTest(unittest.TestCase):
+    """The OCCT GLB reader refuses a file that names a buffer or image outside itself."""
+
+    def test_an_embedded_buffer_passes_and_an_external_uri_is_refused(self) -> None:
+        from cadgen.engine.formats import FormatError
+        from cadgen.engine.formats.glb import _whole_from_itself
+
+        _whole_from_itself(Path("m.glb"), {"buffers": [{"byteLength": 36}]})  # embedded BIN chunk: no uri
+        _whole_from_itself(Path("m.glb"), {"buffers": [{"uri": "data:application/octet-stream;base64,AAAA"}]})
+        for item in ({"buffers": [{"uri": "../outside.bin"}]},
+                     {"buffers": [{"uri": "side.bin"}]},
+                     {"images": [{"uri": "/etc/hosts"}]},
+                     {"buffers": [{"uri": "data:text/plain,not-base64"}]}):
+            with self.assertRaisesRegex(FormatError, "outside the GLB"):
+                _whole_from_itself(Path("m.glb"), item)
 
 
 class MeshFileTest(FixtureTest):
