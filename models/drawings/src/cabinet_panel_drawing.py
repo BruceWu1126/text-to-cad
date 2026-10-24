@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from cadgen.engine import dxf
+from cadgen import model
 
 import build123d as bd
 
@@ -137,7 +137,7 @@ def _diameter_callout(ann, centre, radius, label, side):
     )
 
 
-@dxf(out="../DXF/cabinet_panel_drawing.dxf")
+@model
 def cabinet_panel_drawing():
     elevation_x, elevation_y = ELEVATION_ORIGIN
     section_x, section_y = SECTION_ORIGIN

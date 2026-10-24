@@ -24,7 +24,7 @@
 
 from __future__ import annotations
 
-from cadgen.engine import dxf
+from cadgen import model
 
 import build123d as bd
 
@@ -75,7 +75,7 @@ def _outline() -> list[tuple[float, float]]:
     ]
 
 
-@dxf(out="../DXF/multi_bend_test_panel.dxf")
+@model
 def multi_bend_test_panel():
     with bd.BuildSketch() as cut:
         with bd.BuildLine():

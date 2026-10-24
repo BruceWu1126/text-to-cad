@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from cadgen.engine import dxf
+from cadgen import model
 
 import build123d as bd
 
@@ -22,7 +22,7 @@ BLANK_LENGTH_MM = FLANGE_LENGTH_MM + WEB_LENGTH_MM + FLANGE_LENGTH_MM
 BEND_XS_MM = (FLANGE_LENGTH_MM, FLANGE_LENGTH_MM + WEB_LENGTH_MM)
 
 
-@dxf(out="../DXF/u_channel_bracket.dxf")
+@model
 def u_channel_bracket():
     with bd.BuildSketch() as cut:
         with bd.Locations((BLANK_LENGTH_MM / 2.0, BLANK_WIDTH_MM / 2.0)):
