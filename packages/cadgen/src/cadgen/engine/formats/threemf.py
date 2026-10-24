@@ -299,7 +299,19 @@ def read_3mf(path: Path) -> Model:
             model.parts.append(Part(str(element.get("name") or "").strip() or label, points, triangles, paints))
             return made[key]
 
+        # An object listed by several components is placed once for each, so a small file can name
+        # an exponential build: bounded as a document's assembly is.
+        from cadgen.engine.document import MAX_ASSEMBLY_DEPTH, MAX_OCCURRENCES
+
+        visited = 0
+
         def place(name: str, ident: str, matrix: np.ndarray, at: tuple[int, ...], trail: tuple) -> None:
+            nonlocal visited
+            visited += 1
+            if visited > MAX_OCCURRENCES:
+                raise ThreeMfError(f"{path.name}: its build names more than {MAX_OCCURRENCES} occurrences")
+            if len(trail) >= MAX_ASSEMBLY_DEPTH:
+                raise ThreeMfError(f"{path.name}: its components nest deeper than {MAX_ASSEMBLY_DEPTH} levels")
             resources(name)
             element = objects.get((name, ident))
             if element is None:

@@ -283,7 +283,19 @@ def read_glb(path: Path) -> tuple[list[Part], list[Placed], dict[str, Any], list
         TDF_Tool.Entry_s(label, text)
         return text.ToCString()
 
+    # OCCT keeps a node listed by several parents as one label they share; the walk places it once
+    # for each, so a small file can name an exponential tree: bounded as a document's assembly is.
+    from cadgen.engine.document import MAX_ASSEMBLY_DEPTH, MAX_OCCURRENCES
+
+    visited = 0
+
     def visit(label: Any, world: np.ndarray, names: list[str], name: str) -> dict[str, Any]:
+        nonlocal visited
+        visited += 1
+        if visited > MAX_OCCURRENCES:
+            raise FormatError(f"{path.name}: its node tree names more than {MAX_OCCURRENCES} occurrences")
+        if len(names) > MAX_ASSEMBLY_DEPTH:
+            raise FormatError(f"{path.name}: its node tree is deeper than {MAX_ASSEMBLY_DEPTH} levels")
         if XCAFDoc_ShapeTool.IsReference_s(label):
             referred = TDF_Label()
             XCAFDoc_ShapeTool.GetReferredShape_s(label, referred)

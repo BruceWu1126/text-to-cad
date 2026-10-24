@@ -293,9 +293,21 @@ def _read(path: Path, gltf: dict[str, Any], buffers: list[bytes]) -> Read:
         part_of[index] = len(parts) - 1
         return part_of[index]
 
+    # A node listed by several parents (or one parent several times) is placed once for each, so
+    # a small file can name an exponential tree: bounded as a document's assembly is.
+    from cadgen.engine.document import MAX_ASSEMBLY_DEPTH, MAX_OCCURRENCES
+
+    visited = 0
+
     def visit(index: int, parent: np.ndarray, trail: tuple[int, ...]) -> None:
+        nonlocal visited
         if index in trail:
             raise GltfError(f"{path.name}: node {index} holds itself")
+        if len(trail) >= MAX_ASSEMBLY_DEPTH:
+            raise GltfError(f"{path.name}: its node tree is deeper than {MAX_ASSEMBLY_DEPTH} levels")
+        visited += 1
+        if visited > MAX_OCCURRENCES:
+            raise GltfError(f"{path.name}: its node tree names more than {MAX_OCCURRENCES} occurrences")
         node = nodes[index] or {}
         world = parent @ _local(node)
         if "mesh" in node:
