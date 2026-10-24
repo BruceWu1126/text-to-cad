@@ -17,9 +17,9 @@ def _delta(before: dict, after: dict) -> dict:
                                                                              "unreplayable", "errors")}
 
 
-def _run(function, *args):
+def _run(function, *args, program=None, model=None):
     before = memo.stats()
-    with memo.run(None) as run:
+    with memo.run(None, program=program, model=model) as run:
         result = function(*args)
     return result, _delta(before, memo.stats()), run
 
@@ -265,6 +265,23 @@ class RetentionTest(MemoCase):
         self.assertEqual(gone["misses"], 2, "unused for longer: forgotten (the cylinder and the cut)")
         # What is held is what those runs made: the box, and a cylinder and a cut per radius.
         self.assertLessEqual(memo.stats()["entries"], 2 * memo.RUNS_KEPT + 1 + memo.RUNS_KEPT)
+
+    def test_a_programs_pass_over_more_models_than_the_runs_kept_is_one_run(self) -> None:
+        # A script building a robot and its links: each model's next run finds what this one used.
+        radii = [1.0 + i / 10 for i in range(memo.RUNS_KEPT + 2)]
+        for i, radius in enumerate(radii):
+            _run(self._model, radius, program="first", model=f"link_{i}")
+        for i, radius in enumerate(radii):
+            _, again, _ = _run(self._model, radius, program="second", model=f"link_{i}")
+            self.assertEqual(again["misses"], 0, f"link_{i}: kept across the program's pass")
+
+    def test_a_program_building_one_model_again_begins_another_pass(self) -> None:
+        # An edit loop in one process: each build of the model is a run of its own.
+        _run(self._model, 1.0, program="loop", model="part")
+        for radius in [2.0 + i / 10 for i in range(memo.RUNS_KEPT + 1)]:
+            _run(self._model, radius, program="loop", model="part")
+        _, gone, _ = _run(self._model, 1.0, program="loop", model="part")
+        self.assertEqual(gone["misses"], 2, "unused for longer than the runs kept: forgotten")
 
 
 class QueryTest(MemoCase):

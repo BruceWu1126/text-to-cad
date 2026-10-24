@@ -385,7 +385,8 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
     from cadgen.engine import reader
 
     # One reader process for the build's STEP reads (``reader``), gone when the build is.
-    with memo.run(script) as run, BuildContext() as context, reader.session():
+    with memo.run(script, program=run_token, model=tuple(functions or ())) as run, BuildContext() as context, \
+            reader.session():
         run.verify = verify
         _MODELS.clear()  # the models this build defines, known by name to what its replays ran
         load_key = (run_token, str(script), str(cwd))

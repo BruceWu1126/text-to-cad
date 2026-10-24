@@ -128,7 +128,10 @@ gives are the same either way.
 The memo lives in this process's memory for the life of the process and holds what
 the last ``RUNS_KEPT`` builds used (``_sweep``): a build is a scan of every call the
 model makes, so a bound by count would evict, on a model larger than the bound, each
-entry just before the next build asks for it. Nothing of it is ever written anywhere,
+entry just before the next build asks for it. A build is one program's pass over the
+models it builds (``_mark``): a script building more models than ``RUNS_KEPT`` (a robot
+and its links) is one build, so each model's next run finds what this one used, and a
+program building a model again in one pass begins another. Nothing of it is ever written anywhere,
 and a new process computes everything. ``CADGEN_ENGINE_MEMO=0`` turns hits off and nothing else.
 """
 
@@ -181,6 +184,8 @@ _KEY_IDS_NEXT = itertools.count(1)
 # key table, behind which everything it touched is moved (``_sweep``).
 _GENERATIONS = itertools.count(1)
 _MARKS: list[int] = []
+# The pass the last marker began: its program's run and the models it has built so far.
+_PASS: dict[str, Any] = {"program": None, "models": set()}
 _MAPS: "OrderedDict[tuple[int, int], tuple[Any, Any]]" = OrderedDict()
 # A root's sub-shapes of one kind, TShape to its first ordinal (``_held``), for the roots a
 # model keeps casting shapes out of.
@@ -1052,17 +1057,19 @@ def scope(name: str) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def run(script_path: Path | None = None) -> Iterator[_Run]:
+def run(script_path: Path | None = None, *, program: str | None = None, model: Any = None) -> Iterator[_Run]:
     """A model run on this thread: inside it every patched call from the
     model's code is a feature, and a hit when the memo has one. ``script_path``
     is the model's script, whose folder feature paths are relative to. The run's
-    ``tally`` says how its calls went: hits, misses, calls that ran uncached."""
+    ``tally`` says how its calls went: hits, misses, calls that ran uncached.
+    ``program`` names the calling program's run and ``model`` what this run builds: runs of
+    one program building models it has not built in its pass count as one (``_mark``)."""
     install()
     state = _Run(script_path)
     previous = getattr(_LOCAL, "run", None)
     outermost = previous is None
     if outermost:
-        _mark()
+        _mark(program, model)
     _LOCAL.run = state
     try:
         yield state
@@ -1073,9 +1080,17 @@ def run(script_path: Path | None = None) -> Iterator[_Run]:
             _sweep()
 
 
-def _mark() -> None:
+def _mark(program: str | None = None, model: Any = None) -> None:
     """A run begins: a marker at the end of both LRU orders. What the run hits, makes or
-    keys moves behind it."""
+    keys moves behind it. A run of the program whose pass the last marker began, building a
+    model that pass has not built, joins the pass: the marker stands, and what the run
+    touches moves behind it, so the pass is one of the ``RUNS_KEPT`` however many models it
+    builds."""
+    with _LOCK:
+        if program is not None and program == _PASS["program"] and model not in _PASS["models"] and _MARKS:
+            _PASS["models"].add(model)
+            return
+        _PASS["program"], _PASS["models"] = program, {model}
     generation = next(_GENERATIONS)
     with _LOCK:
         _MEMO[(-generation, 0)] = None  # type: ignore[assignment]
@@ -1119,6 +1134,7 @@ def clear() -> None:
     with _LOCK:
         _MEMO.clear()
         _MARKS.clear()
+        _PASS["program"], _PASS["models"] = None, set()
         _BODIES.clear()
         _ALWAYS.clear()
         _REGISTRY.clear()
