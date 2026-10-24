@@ -166,8 +166,11 @@ step "The installation published its launchers, as the skills name them"
 VERSION_INSTALLED="$("$VENV/bin/python" -c 'import cadgen; print(cadgen.__version__)')"
 CADGEN_LAUNCHER="$CADGEN_LAUNCHER_DIR/cadgen-$VERSION_INSTALLED"
 PYTHON_LAUNCHER="$CADGEN_LAUNCHER_DIR/cadgen-python-$VERSION_INSTALLED"
-[ "$(readlink "$CADGEN_LAUNCHER")" = "$VENV/bin/cadgen" ] || fail "$CADGEN_LAUNCHER is not a link to $VENV/bin/cadgen"
-[ "$("$PYTHON_LAUNCHER" -c 'import sys; print(sys.prefix)')" = "$VENV" ] \
+# Compared resolved: the temporary folder's path may be spelled through a symlink (/var, /private/var).
+same() { "$VENV/bin/python" -c 'import os, sys; sys.exit(os.path.realpath(sys.argv[1]) != os.path.realpath(sys.argv[2]))' "$1" "$2"; }
+[ -L "$CADGEN_LAUNCHER" ] && same "$CADGEN_LAUNCHER" "$VENV/bin/cadgen" \
+  || fail "$CADGEN_LAUNCHER is not a link to $VENV/bin/cadgen"
+same "$("$PYTHON_LAUNCHER" -c 'import sys; print(sys.prefix)')" "$VENV" \
   || fail "$PYTHON_LAUNCHER does not run the installation's python"
 echo "   $(basename "$CADGEN_LAUNCHER") and $(basename "$PYTHON_LAUNCHER")"
 
