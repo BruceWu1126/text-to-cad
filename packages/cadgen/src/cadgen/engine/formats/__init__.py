@@ -13,6 +13,9 @@ drawn by ``render/drawing.py``.
 | ``.urdf``, ``.sdf``, ``.srdf`` | ``robot.py`` (XML) | the link meshes placed by forward kinematics |
 | ``.dxf`` | ``dxf.py`` (text) | lines, arcs, circles, polylines, splines, ellipses, solids |
 
+A conversion reads a mesh file with these readers' numpy halves and no kernel
+(``export/mesh_file.py``): a GLB through ``gltf.py``, not OCCT's reader.
+
 Nothing is written, nothing is cached on disk: a reader's answer lives in the process that drew
 it (the daemon's render process for the file keeps it, warm, until a file it read changes:
 ``Foreign.files``)."""

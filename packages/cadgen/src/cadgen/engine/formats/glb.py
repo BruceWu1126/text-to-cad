@@ -36,6 +36,7 @@ import numpy as np
 
 from cadgen.engine.formats import Foreign, FormatError, Part, Placed, assemble, files_of
 from cadgen.engine.formats.buffer import buffer
+from cadgen.engine.formats.gltf import look_extensions
 
 __all__ = ["glb_file", "read_glb"]
 
@@ -219,22 +220,7 @@ def _vis_material(label: Any, authored: list[dict[str, Any]]) -> tuple[tuple, di
     name = raw.ToCString() if raw is not None else _name(label)
     found: dict[str, Any] = {"name": name or "glTF material", "color": list(colour), "metallic": round(metallic, 6),
                              "roughness": round(roughness, 6), "ior": round(ior, 6), "emissive": emissive}
-    extensions = _extensions(authored, name, colour, metallic, roughness)
-    if "KHR_materials_ior" in extensions:
-        found["ior"] = float(extensions["KHR_materials_ior"].get("ior", 1.5))
-    if "KHR_materials_transmission" in extensions:
-        found["transmission"] = float(extensions["KHR_materials_transmission"].get("transmissionFactor", 0.0))
-        volume = extensions.get("KHR_materials_volume") or {}
-        if volume.get("attenuationColor"):
-            found["transmissionColor"] = [float(c) for c in volume["attenuationColor"]]
-    if "KHR_materials_clearcoat" in extensions:
-        coat = extensions["KHR_materials_clearcoat"]
-        found["coat"] = float(coat.get("clearcoatFactor", 0.0))
-        found["coatRoughness"] = float(coat.get("clearcoatRoughnessFactor", 0.0))
-    if "KHR_materials_anisotropy" in extensions:
-        found["anisotropy"] = float(extensions["KHR_materials_anisotropy"].get("anisotropyStrength", 0.0))
-    if "KHR_materials_emissive_strength" in extensions:
-        found["emissiveStrength"] = float(extensions["KHR_materials_emissive_strength"].get("emissiveStrength", 1.0))
+    found.update(look_extensions(_extensions(authored, name, colour, metallic, roughness)))
     aspect = Graphic3d_AspectFillArea3d()
     material.FillAspect(aspect)
     texture = aspect.TextureSet() if aspect.ToMapTexture() else None

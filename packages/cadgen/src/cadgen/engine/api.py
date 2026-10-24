@@ -281,7 +281,7 @@ def build_script(script: Path, functions: list[str] | None = None, *, verify: bo
 def _source(source: Any) -> dict[str, Any]:
     """What an export or a snapshot reads: a ``Model`` this Python program names (or the
     ``Built`` handle of one), a document's id (``{"id"}``: the document the engine holds, read
-    as it is and never built), or an on-disk document's path."""
+    as it is and never built), or an on-disk document's or mesh file's path."""
     from cadgen.engine.export import MESHES, SOURCES, ExportRefused
     from cadgen.engine.ids import is_id
     from cadgen.engine.model import Model
@@ -294,10 +294,9 @@ def _source(source: Any) -> dict[str, Any]:
     if is_id(text):
         return {"id": text}
     path = Path(text).resolve()
-    if path.suffix.lower() in MESHES:
-        raise ExportRefused(f"{path.name} is a mesh: it has no B-rep, and no export is made from one")
-    if path.suffix.lower() not in SOURCES:
-        raise ExportRefused(f"{path.name} is no document: an export reads an .xbf, a .step or a document id")
+    if path.suffix.lower() not in SOURCES + MESHES:
+        raise ExportRefused(f"{path.name} is no document: an export reads an .xbf, a .step, a mesh "
+                            f"({', '.join(MESHES)}) or a document id")
     if not path.is_file():
         raise ExportRefused(f"no document {path}")
     return {"path": str(path)}
@@ -309,8 +308,10 @@ def export(source: Any, *destinations: Any,
     """Write a document to each destination, its kind from its suffix (``.xbf``, ``.step``,
     ``.glb``, ``.stl``, ``.3mf``, and ``.dxf`` of a planar document): the document of an
     ``.xbf``, of a ``.step`` read into one, of a document id (the one the engine holds, never
-    built), or of a ``Model`` (built first: this program's own call). Several destinations read
-    the document once. The file holds what the code built: no option selects a part or a state
+    built), or of a ``Model`` (built first: this program's own call); or a mesh file (``.glb``,
+    ``.stl``, ``.3mf``) to the other two mesh kinds, each file holding what its format carries,
+    with no CAD kernel loaded (a mesh has no B-rep: no xbf, STEP or DXF is made from one). Several
+    destinations read the document once. The file holds what the code built: no option selects a part or a state
     (``README``, the law of options). ``daemon=False`` does it in this process, cold. A GLB
     carries every configuration sequence the document defines, as a clip."""
     from cadgen.engine.export import ExportRefused, kind_of
@@ -321,6 +322,13 @@ def export(source: Any, *destinations: Any,
     for destination in resolved:
         kind_of(destination)
     spec = _source(source)
+    if "path" in spec:
+        from cadgen.engine.export import refused
+
+        for destination in resolved:  # every one, before anything is written
+            why = refused(spec["path"], destination)
+            if why:
+                raise ExportRefused(why)
     cwd = str(source.cwd) if isinstance(source, Built) else os.getcwd()
     shown = log or (lambda _text: None)
     order = {"op": "export", "source": spec, "destinations": [str(path) for path in resolved], "cwd": cwd}

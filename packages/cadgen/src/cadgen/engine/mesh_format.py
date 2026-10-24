@@ -23,7 +23,7 @@ CLASS_NAMES = {FEATURE: "feature", TANGENT: "tangent", SEAM: "seam", BOUNDARY: "
 @dataclass
 class Mesh:
     positions: np.ndarray  # (V, 3) float32
-    normals: np.ndarray  # (V, 3) float32
+    normals: np.ndarray  # (V, 3) float32; None for a mesh file of a format with none (``export/mesh_file.py``), never sent
     indices: np.ndarray  # (I,) uint32
     faces: np.ndarray  # (F, 3) uint32: ordinal, first index, index count
     edges: np.ndarray  # (E, 4) uint32: ordinal, first point, point count, class

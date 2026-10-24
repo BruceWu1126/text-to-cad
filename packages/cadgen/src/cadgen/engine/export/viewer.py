@@ -36,11 +36,14 @@ def options(source, *, original_allowed=True) -> list[dict]:
     from cadgen.engine.export import ExportRefused
     from cadgen.engine.export.dxf import dxf_bytes
 
-    view = source.view()
     rows = [{"format": kind, "label": label, "extension": extension, "reason": None}
             for kind, label, extension in (("step", "STEP", ".step"), ("glb", "GLB", ".glb"),
                                            ("stl", "STL", ".stl"), ("threemf", "3MF", ".3mf"),
                                            ("dxf", "DXF", ".dxf"), ("xbf", "XBF", ".xbf"))]
+    if source.mesh:
+        # A mesh file's page offers the other two mesh kinds, and nothing else.
+        return [row for row in rows if row["format"] in ("glb", "stl", "threemf") and row["format"] != source.mesh]
+    view = source.view()
     for row in rows:
         if row["format"] == "dxf":
             try:

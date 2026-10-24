@@ -13,7 +13,8 @@ the smallest extent of its box; its attenuation the material's transmission colo
 is a matte one of its colour. A
 placement whose own colour is not its part's is drawn by a second mesh of the same
 accessors in that colour. The placements are in the document's millimetres, Z up; the
-root node shows them in glTF's frame, Y up and metres, as cadgen's other GLBs do.
+root node shows them in glTF's frame, Y up and metres, as cadgen's other GLBs do. A mesh of a
+format that carries no normals (an STL's, a 3MF's) is given the viewer's (``mesh.shaded``).
 
 Every configuration sequence of the document is an animation of the same name (``export/motion.py``):
 CUBICSPLINE translation and rotation channels for each placement it moves, over one shared
@@ -36,7 +37,7 @@ from typing import Any
 
 import numpy as np
 
-from cadgen.engine.export.mesh import groups, meshes, placed_points
+from cadgen.engine.export.mesh import groups, meshes, placed_points, shaded
 
 __all__ = ["write"]
 
@@ -52,7 +53,7 @@ SCALE = (0.001, 0.001, 0.001)
 
 
 def write(view: Any, path: Path) -> None:
-    held = meshes(view)
+    held = {index: shaded(mesh) for index, mesh in meshes(view).items()}
     blob = bytearray()
     views: list[dict] = []
     accessors: list[dict] = []

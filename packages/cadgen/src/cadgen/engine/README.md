@@ -317,12 +317,12 @@ only, and a file's id is derived again from its path after a restart.
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
 | `refs.py` | references to geometry: the ref grammar, occurrence paths, resolution by name in the latest build, for `inspect` and the viewer (**References**) |
-| `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a planar document's drawing through build123d's DXF exporter, with the drawing checks (`dxf`); a motion baked into a glTF clip (`motion`); a view made a document again, for a STEP of a document held without its XCAF document and an xbf written from a STEP (`tree`) |
-| `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
+| `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); a mesh file read as a document of triangles, no kernel (`mesh_file`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a planar document's drawing through build123d's DXF exporter, with the drawing checks (`dxf`); a motion baked into a glTF clip (`motion`); a view made a document again, for a STEP of a document held without its XCAF document and an xbf written from a STEP (`tree`) |
+| `mesh.py`, `mesh_format.py` | per-part tessellation at FreeCAD's default tolerance, element facts; the part buffer, its wire format and edge classes (`mesh_format`, kernel-free) |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a STEP read in a reader process, held by its bytes; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
 | `snapshot.py` | `cadgen snapshot`: one dispatcher by suffix -- a document, a mesh file, a robot or a DXF drawn by OCCT (`render/`) into a PNG; a script's model drawn from its worker's memory |
-| `formats/` | the files the stills draw that are not documents, each read into a structure and part buffers: STL (numpy), 3MF (zip + XML), GLB (OCCT's glTF reader, textures and all), URDF/SDF/SRDF (XML, the viewer's forward kinematics), DXF (group codes, flattened as the viewer's pane draws it) |
+| `formats/` | the files the stills draw that are not documents, each read into a structure and part buffers: STL (numpy), 3MF (zip + XML), GLB (OCCT's glTF reader, textures and all; and numpy's, for a conversion: `gltf`), URDF/SDF/SRDF (XML, the viewer's forward kinematics), DXF (group codes, flattened as the viewer's pane draws it) |
 | `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document and per file (`service.py`); the scene (`occt.py`); a DXF drawn in the 2D look (`drawing.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, at most one per core alive (`Pool`), connect-or-start; a worker's memory cap |
 | `progress.py` | where a build is: the engine's stages heard where they begin, each body a model's body runs by name, the frames, and the terminal's bar |
@@ -335,7 +335,8 @@ only, and a file's id is derived again from its path after a restart.
 ```
 python SCRIPT.py                             the models the script explicitly calls
 cadgen export SRC DST [DST ...] [--json]
-                                             SRC an .xbf, a .step, or a document id
+                                             SRC an .xbf, a .step, a document id, or a mesh
+                                             (.glb, .stl, .3mf: to the other two mesh kinds)
 cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
                 [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
                 [--width W --height H | --size-profile P] [--json]
@@ -877,8 +878,8 @@ checks it in the worker. A live source must still be held: this path never execu
 source or rebuilds a model. Scope is the whole model or one canonical part/assembly
 reference; position is authored or an explicit joint-value map. Clip, visibility and
 explode are not geometry inputs. DXF requires a planar drawing; XBF refuses a pose.
-An existing whole XBF uses a separate original-byte download. There is no source bundle
-in this interface.
+An existing whole XBF uses a separate original-byte download. A mesh file's formats are the
+other two mesh kinds and nothing else. There is no source bundle in this interface.
 
 The enclosing distribution owns the HTTP queue, the browser download and temporary
 artifact lifetime; the standalone engine owns inspection, revision validation and
@@ -898,11 +899,37 @@ target and moved over it; a DXF only when its bytes change.
   document's id (written from what the engine holds of it -- its worker's document, or the whole
   document the server took from the worker before it went (**Document lifetime**) -- byte for byte
   what it would write however the script has changed since, and nothing is built); from Python, a
-  `Model` (built first, in its worker: the program's own call) too. A mesh is never a
-  source: it has no B-rep. An xbf is written from a STEP; never from an xbf, which already is the
-  document. Several destinations read the document once; an export
+  `Model` (built first, in its worker: the program's own call) too. An xbf is written from a
+  STEP; never from an xbf, which already is the document. Several destinations read the document
+  once, and every destination is checked before any is written; an export
   runs in the worker that built the document while the file is as it left it, else in the
   daemon's documents worker, which reads it.
+- **A mesh file is a source of the other mesh kinds**: `cadgen export part.stl part.3mf`, any
+  pair of GLB, STL and 3MF either way. It is read as a document of its own kind
+  (`export/mesh_file.py`): triangles, with the parts, names, colours and placements its format
+  carries, each part's mesh the file's own (never meshed again, never cached); the GLB, STL and
+  3MF writers write it as any document. It runs where a file's export runs (the daemon's
+  documents worker; in this process with `daemon=False`) and loads no CAD kernel: its readers
+  are numpy and the standard library (a GLB through `formats/gltf.py`, not OCCT's reader). A mesh
+  has no B-rep, so no xbf, STEP or DXF is made from one (`part.stl is a mesh: it has no B-rep, and
+  no STEP export is made from one`), and a mesh file is not written from one of its own kind.
+  What the destination cannot hold is left out, as a CAD program's Save As does, and nothing
+  warns of it:
+
+  | from \ to | STL | GLB | 3MF |
+  | --- | --- | --- | --- |
+  | **STL** | -- | one part, its file's name; the viewer's normals (creased at 30 degrees) | one object, welded |
+  | **GLB** | every placed triangle, one soup | -- | a part per mesh, a build item per mesh node; colours, names, metallic and roughness; textures, the materials' other extensions, normals and animations are dropped |
+  | **3MF** | every placed triangle, one soup | an object a mesh, a build item a node; colours and display properties as materials; the viewer's normals | -- |
+
+  Units are the viewer's for each format: an STL's numbers are millimetres (it says no unit; the
+  viewer draws them as they are); a GLB's are glTF's metres, Y up, read as Z-up millimetres
+  (times 1000) unless a node declares `extras.cadUpAxis: "z"`, and written in the document's
+  millimetres under a root node turning them back; a 3MF's are in its `unit` (millimeter when
+  absent; one the 3MF specification does not define is refused, as the viewer refuses it), made
+  millimetres, and written `unit="millimeter"`. So a 10 mm cube is 10 mm in each, and 0.01 in a
+  GLB's numbers. A part with no colour of its own is written in the writers' default grey, as a
+  document's is.
 - **STEP** (AP242, `export/step.py`): the assembly with instance and product names, colours per
   part and per painted face, material names and densities, element names on face, edge and
   vertex sub-shape labels. Read back through the engine's own reader, the instance tree, every

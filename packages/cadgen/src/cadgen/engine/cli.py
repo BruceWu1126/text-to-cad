@@ -34,8 +34,9 @@ __all__ = ["VERBS", "Failed", "answered", "build_parser", "main", "parser_for", 
 
 
 def _export_arguments(export: argparse.ArgumentParser) -> None:
-    export.add_argument("source", metavar="SRC", help="an .xbf, a .step, or a document id (a model's, which "
-                                                      "python SCRIPT.py prints)")
+    export.add_argument("source", metavar="SRC", help="an .xbf, a .step, a document id (a model's, which "
+                                                      "python SCRIPT.py prints), or a mesh file (.glb, .stl, "
+                                                      ".3mf), which exports to the other two mesh kinds")
     export.add_argument("destinations", nargs="+", metavar="DST",
                         help=".xbf (from a STEP), .step, .glb, .stl, .3mf or .dxf (of a planar document): the "
                              "document as its code built it")
@@ -224,16 +225,13 @@ def _log(text: str) -> None:
 
 
 def _export(args: argparse.Namespace, prog: str) -> int:
-    """``cadgen export SRC DST...``: an ``.xbf`` or a ``.step`` written to each destination; with
-    ``--json``, what was written as one JSON object."""
+    """``cadgen export SRC DST...``: an ``.xbf``, a ``.step``, a document id or a mesh file written
+    to each destination (``api.export`` refuses any other source); with ``--json``, what was written
+    as one JSON object."""
     from cadgen.engine import api
-    from cadgen.engine.export import SOURCES, ExportRefused
-
     from cadgen.engine.addresses import key
-    from cadgen.engine.ids import is_id
+    from cadgen.engine.export import ExportRefused
 
-    if not is_id(args.source) and Path(args.source).suffix.lower() not in SOURCES:
-        raise Failed(f"{args.source} is no document: an export reads an .xbf, a .step or a document id", 2)
     try:
         written = api.export(args.source, *args.destinations,
                              log=lambda text: print(text, file=sys.stderr))
