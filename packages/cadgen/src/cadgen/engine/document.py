@@ -1587,15 +1587,15 @@ def refuse_external_files(reader: Any, path: Any) -> None:
     ``ReadFile`` and before ``Transfer``: the XCAF reader's transfer opens every file such a STEP
     names -- beside it, above it, or anywhere by an absolute path -- and adds what it reads to the
     document as the STEP's own parts. A STEP read is the file it is, so a reference to another is
-    an error here, wherever the read is made (``_read``, ``reader._parse``)."""
+    an error here, wherever the read is made (``_read``, ``reader._parse``). The model's entities
+    are counted by kind in the kernel (``NbTyped``): fetched into Python one by one, each costs
+    about 0.25 ms, four minutes for a 63 MB STEP of a million entities."""
     from OCP.StepBasic import StepBasic_DocumentFile
 
     model = reader.ChangeReader().Model()
-    kind = StepBasic_DocumentFile.get_type_descriptor_s()
-    for index in range(1, model.NbEntities() + 1):
-        if model.Value(index).IsKind(kind):
-            raise ValueError(f"cannot read {Path(path).name}: it names another file to read (an external "
-                             f"reference); the engine reads a STEP's own geometry only")
+    if model.Entities().NbTyped(StepBasic_DocumentFile.get_type_descriptor_s()):
+        raise ValueError(f"cannot read {Path(path).name}: it names another file to read (an external "
+                         f"reference); the engine reads a STEP's own geometry only")
 
 
 def read_bytes(data: bytes) -> Any:

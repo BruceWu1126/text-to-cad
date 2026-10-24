@@ -240,6 +240,29 @@ class StepReferenceTest(FolderTest):
         [prototype] = document.load(named).prototypes  # the part's own file reads as itself
         self.assertEqual(prototype.shape.ShapeType().name, "TopAbs_SOLID")
 
+    def test_the_check_counts_entities_in_the_kernel_not_one_by_one(self) -> None:
+        # Fetching a STEP's entities into Python one at a time cost about 0.25 ms each: 235 s of
+        # tom's cold build went to one million-entity file. The check never takes one entity.
+        from OCP.IFSelect import IFSelect_RetDone
+        from OCP.STEPCAFControl import STEPCAFControl_Reader
+
+        path = external_step(self.folder)
+        [named] = [entry for entry in self.folder.iterdir() if entry.name.startswith("named")]
+        for step, refused in ((path, True), (named, False)):
+            reader = STEPCAFControl_Reader()
+            self.assertEqual(reader.ReadFile(str(step)), IFSelect_RetDone)
+            model = reader.ChangeReader().Model()
+            fetched = mock.Mock(side_effect=AssertionError("an entity fetched into Python"))
+            # The reader as the check sees it: its model's every entity reachable one by one too.
+            seen = mock.Mock(Entities=model.Entities, NbEntities=model.NbEntities, Value=fetched)
+            stand_in = mock.Mock(ChangeReader=lambda: mock.Mock(Model=lambda: seen))
+            if refused:
+                with self.assertRaisesRegex(ValueError, "names another file"):
+                    document.refuse_external_files(stand_in, step)
+            else:
+                document.refuse_external_files(stand_in, step)
+            fetched.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
