@@ -225,5 +225,69 @@ class ExportsTest(unittest.TestCase):
         self.jobs.release(ident)
 
 
+STL = b"solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid t\n"
+
+
+class MeshFileExportTest(unittest.TestCase):
+    """A mesh file's page: the job reads the file the page shows (its path, at the hash of the bytes
+    on screen) and writes one of the other mesh kinds, the worker's export in this process."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.part = Path(self.tmp.name).resolve() / "part.stl"
+        self.part.write_bytes(STL)
+        server = SimpleNamespace(touch=lambda: None, load_lock=threading.Lock(), served={})
+
+        def run(spec, target, progress):  # ``ExportJobs._worker`` with the daemon's hop left out
+            from cadgen.engine.worker import _export
+
+            source, expected, _name = self.jobs._source(spec)
+            return _export({"source": source, "expected": expected, "destinations": [str(target)] if target else [],
+                            "inspect": target is None}, lambda _text: None)
+        self.downloads = Path(self.tmp.name) / "downloads"
+        self.downloads.mkdir()
+        self.jobs = ExportJobs(server, run=run, root=self.downloads)
+        self.addCleanup(self.jobs.close)
+
+    def shown(self):
+        from cadgen.viewer.scanner import asset_for_path
+
+        return {"doc": str(self.part), "revision": asset_for_path(str(self.part))["hash"]}
+
+    def finished(self, ident):
+        with self.jobs.changed:
+            self.assertTrue(self.jobs.changed.wait_for(
+                lambda: self.jobs.jobs[ident]["state"] in ("ready", "failed", "cancelled") and not self.jobs.executing, 30))
+        return self.jobs.get(ident)
+
+    def test_a_mesh_file_exports_to_the_other_mesh_kinds_and_a_changed_one_is_refused(self):
+        source = self.shown()
+        with self.jobs.changed:
+            self.jobs.options(source)
+            self.assertTrue(self.jobs.changed.wait_for(lambda: all(row["done"] for row in self.jobs.inspections.values()), 30))
+        status, offered = self.jobs.options(source)
+        self.assertEqual((status, [row["format"] for row in offered["formats"]]), (200, ["glb", "threemf"]))
+        job = self.finished(self.jobs.create({"requestId": "mesh-request-000001", "epoch": self.jobs.epoch,
+                                              "source": source, "format": "threemf"})["id"])
+        self.assertEqual((job["state"], job["filename"]), ("ready", "part.3mf"), job)
+        self.assertEqual([path.suffix for path in self.downloads.rglob("*.3mf")], [".3mf"])
+        # The file changes under the page: the bytes shown are no longer the file's.
+        self.part.write_bytes(STL.replace(b"vertex 0 1 0", b"vertex 0 2 0"))
+        stale = self.finished(self.jobs.create({"requestId": "mesh-request-000002", "epoch": self.jobs.epoch,
+                                                "source": source, "format": "glb"})["id"])
+        self.assertEqual(stale["state"], "failed")
+        self.assertIn("The source changed", stale["error"])
+        # And one that changes after that check is refused by the worker's: its version is the file's stat.
+        from cadgen.engine.export import ExportRefused
+        from cadgen.engine.worker import _export
+
+        with self.assertRaisesRegex(ExportRefused, "The source changed"):
+            _export({"source": {"path": str(self.part)}, "expected": {"version": "1-1"},
+                     "destinations": [str(self.downloads / "late.glb")]}, lambda _text: None)
+        self.assertFalse((self.downloads / "late.glb").exists())
+        self.jobs.release(job["id"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -77,6 +77,15 @@ async function open(t, file, { record = null } = {}) {
 }
 
 const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
+// What the view handed Export (the harness's ExportContext records it): the file it shows, named by
+// its path, at the bytes on screen (their catalog hash), which Export converts to the other mesh kinds.
+async function exported(page, file) {
+  await page.waitForFunction(() => window.cadHarness.exportViews.at(-1));
+  const shown = await page.evaluate(() => window.cadHarness.exportViews.at(-1));
+  assert.deepEqual(Object.keys(shown).sort(), ['doc', 'file', 'name', 'preview', 'revision']);
+  assert.deepEqual([shown.doc, shown.file, shown.name, shown.preview], [`/models/${file}`, `/models/${file}`, file, false]);
+  assert.ok(shown.revision.endsWith(`-${file}`), `the catalog hash of the bytes shown: ${shown.revision}`);
+}
 
 // A GLB of two nodes that draw has a GLB's every tool on its strip, Select in hand; its view's
 // controls end the strip, in the section of Explode and Clip: Projection, Display, then Preview.
@@ -211,6 +220,7 @@ test('a static GLB opens on its native scene in Select: display settings, orbit,
   const { page, pane, errors } = await open(t, 'static.glb');
   await ready(pane);
   assert.deepEqual(errors, []);
+  await exported(page, 'static.glb');
 
   await glbTools(pane);
   assert.equal(await pane.locator('[data-quick-edit-box]').count(), 0, 'Quick Edit opens on a pick or a mark, never by itself');
