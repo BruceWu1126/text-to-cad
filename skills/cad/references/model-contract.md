@@ -291,6 +291,12 @@ it again.
   geometry). The home's Recents lists the records, most recent first. A record whose
   script is gone is detached: listed, saying so, with no rebuild command. Nothing else is
   written beside your files: no cache folder, and no record of a run.
+- **A restart reopens what was built.** The engine keeps each model document's bytes in
+  the platform's cache folder (`~/.cache/cadgen/documents/`), once it is idle, so after a
+  restart its id answers every verb as last built (`cadgen status`: `held`, on `disk`).
+  When a file its build read changed since, the page, `cadgen inspect` and `cad_show`
+  say "the code changed since this was built" with the rebuild command; nothing reruns.
+  The cache is bounded (`CADGEN_ENGINE_CACHE_GB`, default 4) and safe to delete.
 - **`@model(store="memory")`** keeps a document in its worker's memory alone: no record,
   no Recents entry, gone when its worker retires or the engine exits. It suits a
   throwaway probe, and needs a saved script.

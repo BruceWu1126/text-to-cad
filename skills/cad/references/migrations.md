@@ -233,8 +233,9 @@ old spellings resolve to nothing: take refs again from the viewer, or from what
   carries the mechanism. Delete them once the model is ported.
 - STEP, STL, 3MF and GLB files 0.7 runs wrote stay where they were; nothing rewrites
   them. Export them again from the ported model when the person wants them current.
-- cadgen 0.7 kept a cache store, which can hold gigabytes; 0.8 neither reads nor writes
-  it, and never removes it. Once no 0.7 install is left on the machine (no 0.7 plugin in
+- cadgen 0.7 kept a cache store, which can hold gigabytes; 0.8 keeps its own document
+  cache in the same folder, under `documents/` alone, and neither reads, writes nor
+  removes 0.7's store beside it. Once no 0.7 install is left on the machine (no 0.7 plugin in
   any agent app), the person may delete it, or ask you to: `~/.cache/cadgen`
   (`$XDG_CACHE_HOME/cadgen` when that is set) on macOS and Linux, `%LOCALAPPDATA%\cadgen`
   on Windows, or the folder `CADGEN_CACHE_DIR` named. Settings, the telemetry answer and

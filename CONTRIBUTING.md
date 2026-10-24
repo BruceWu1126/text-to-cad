@@ -147,15 +147,21 @@ The engine's switches are environment variables, never script options (the
 engine's README, **The engine server and its workers** and **Body retention**):
 `CADGEN_ENGINE_WORKERS`, `CADGEN_ENGINE_WORKER_IDLE`,
 `CADGEN_ENGINE_WORKER_RSS_MB`, `CADGEN_ENGINE_MEMORY_MB` (the daemon's one memory budget,
-**Document lifetime**), `CADGEN_ENGINE_IDLE`, `CADGEN_ENGINE_MEMO=0` (no memo
+**Document lifetime**), `CADGEN_ENGINE_CACHE_GB` (the document cache's size, `0` for none;
+`CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, the tests' seam), `CADGEN_ENGINE_IDLE`, `CADGEN_ENGINE_MEMO=0` (no memo
 hits), `CADGEN_ENGINE_BODIES=0` (no body replay), `CADGEN_ENGINE_MESH=processes|inline`
 `CADGEN_ENGINE_THREE` (the three.js folder `cadgen serve` pages load) and
-`CADGEN_VIEWER_WARM=0` (no engine warm-up at `cadgen viewer`'s launch). The
-engine caches nothing on disk: what it builds is written only as the files models
-declare or a command exports. Beside cadgen's settings it keeps one record per model
-or opened file (`documents/<uuid>/document.json`: the script and function that build
-it, or the file's path, and its rebuild command; never geometry; a copied model's
-sources and inputs beside it), and a restart is cold but for each model's `.xbf`.
+`CADGEN_VIEWER_WARM=0` (no engine warm-up at `cadgen viewer`'s launch). What the
+engine builds is written beside a project only as the files models declare or a command
+exports. Beside cadgen's settings, in the state folder, it keeps one record per model or
+opened file (`documents/<uuid>/document.json`: the script and function that build it, or
+the file's path, and its rebuild command; never geometry; a copied model's sources and
+inputs beside it). In the cache folder (`CADGEN_CACHE_DIR`, else the platform's:
+`~/.cache/cadgen`) it keeps each model document's bytes as last built,
+`documents/<uuid>/document.xbf`, regenerable and wiped at no loss, so a restart reopens
+every document without a build; it touches nothing else in that folder, which a 0.7
+install's store may share. Tests point both folders at temporary ones
+(`scripts/test/unittest_files.py` does).
 
 The skills ship no launcher scripts: every operational verb is a `cadgen`
 subcommand (`cadgen <verb>`, or `python -m cadgen.cli <verb>` when the console

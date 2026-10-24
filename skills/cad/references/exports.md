@@ -110,10 +110,13 @@ materials, element names and mechanism, read back losslessly, and the compiled t
 the model's animations, which only a GLB exported from it reads. Export one only:
 
 - to share a model without its code;
-- to compose it in another project, where `read_xbf` reads it as an input;
-- to keep the last state of a slow model after an engine restart: the file opens in the
-  viewer, answers `cadgen inspect` and exports again without a rebuild, as a document of
-  its own. The next run of the script still builds cold.
+- to compose it in another project, where `read_xbf` reads it as an input.
+
+An engine restart needs none: the engine keeps each model document it built in its own
+cache, so after a restart the document's id opens in the viewer, answers `cadgen inspect`,
+exports and snapshots without a rebuild. It is the last built state: when the code changed
+since, the page and `inspect` say so, with the command that builds it again, and nothing
+reruns.
 
 A vendor STEP converted once (`cadgen export vendor/motor.step vendor/motor.xbf`) is
 read by `read_xbf` many times faster than `read_step` parses the STEP, with the same

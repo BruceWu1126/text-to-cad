@@ -68,11 +68,14 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    socket path past the Unix limit lives in the user's own `/tmp/cadgen-<uid>` instead) -- and cadgen's own
    state in the user's state folder: settings, Recents' small previews, and the registry of the
    documents it has built or opened, one record each that points at its script or file, with a
-   source copy only where the author had no saved file (`store="copy"`); never geometry, never a
-   cache of derived data. It writes no
-   sidecar, record of a build beside a model, cache, index, memo, mesh or parsed document, and no derived file
-   beside an input. A restart is cold, but for the xbf itself: a model whose xbf holds the
-   closure the model has now is not run. Explicit viewer exports write only the requested
+   source copy only where the author had no saved file (`store="copy"`); never geometry. In the
+   platform's cache folder (`~/.cache/cadgen`, by 0.7's rule) it keeps, under `documents/` and
+   nowhere else there, each model document's bytes as it last built them: its own file, never a
+   declared or exported xbf, regenerable and wiped at no loss, so a restart opens every project at
+   once. The code stays the only source of truth: a document whose code changed since says so,
+   with the command that builds it again, and nothing reruns. It writes no
+   sidecar, record of a build beside a model, index, memo, mesh or parsed document, and no derived file
+   beside an input. A model whose xbf holds the closure the model has now is not run. Explicit viewer exports write only the requested
    artifact to managed temporary storage for delivery; no source or intermediate XBF
    is written (the engine's **Viewer exports**).
 3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself: OCP, build123d (and
@@ -85,11 +88,12 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    materials per part and per painted face, element names on face, edge and vertex labels, and
    an assembly's mechanism. STEP, GLB, STL, 3MF and, of a planar document, DXF are translations
    of it; `cadgen export` writes any of them from the xbf alone.
-5. **The memo is the only cache, and it lives in the worker.** Every kernel operation a model
+5. **The memo is the only build cache, and it lives in the worker.** Every kernel operation a model
    runs is keyed by its inputs. A hit hands back the objects the first run made, and a miss
    makes everything downstream of it miss. So an edit costs what it changed, and an element
-   keeps the name its feature history gave it across edits. Across a restart, a model's only
-   cache is its own xbf, taken whole or not at all.
+   keeps the name its feature history gave it across edits. Across a restart, a model's build
+   is cold but for its own xbf, taken whole or not at all; what a restart shows without a build
+   is the engine's document cache (law 2): the last built state, never a step of a build.
 6. **One document per model, with one id.** Every called model makes one document, with an
    id derived from its script and function (`ids.model_id`): the same in every process, worked
    out without asking the engine. A file the engine serves is known inside it by the id of its
@@ -323,10 +327,12 @@ model builds by running its script: `python model.py`.
 
 Coming from 0.7: cadgen 0.7.x kept a cache store, which can hold gigabytes, at
 `~/.cache/cadgen` (macOS and Linux; `$XDG_CACHE_HOME/cadgen` when that is set),
-`%LOCALAPPDATA%\cadgen` (Windows) or the folder `CADGEN_CACHE_DIR` named. 0.8 neither reads
-nor writes it, and never removes it. Once no 0.7 install is left on the machine, delete that
-folder by hand; an agent may do it when asked. Settings, the telemetry answer and recents
-live in the state directory, not there.
+`%LOCALAPPDATA%\cadgen` (Windows) or the folder `CADGEN_CACHE_DIR` named. 0.8 keeps its
+document cache in that folder's `documents/` alone, and neither reads, writes nor removes 0.7's
+store beside it. Once no 0.7 install is left on the machine, delete that folder by hand; an
+agent may do it when asked. 0.8 loses nothing by it: its documents are built again by the next
+run of their scripts. Settings, the telemetry answer and recents live in the state directory,
+not there.
 
 The viewer exposes `POST /__cad/clipboard` for explicit viewport PNG copies. It
 uses the same host and custom-header POST gates as other mutation routes, limits

@@ -159,9 +159,9 @@ and nothing else: a posed file is a model that returns the posed assembly
 (`posed(arm(), "folded")`), and a part on its own is the part's own model.
 
 The xbf, cadgen's own document, is Save As: export one only to share a model without its
-code, to compose it in another project with `read_xbf`, or to keep the last state of a
-slow model viewable and exportable after an engine restart (the next run of the script
-still builds cold). A vendor STEP is converted to an xbf once
+code, or to compose it in another project with `read_xbf`. A restart needs none: the
+engine's own cache reopens every document it built, as last built, and says when the code
+changed since (nothing reruns). A vendor STEP is converted to an xbf once
 (`cadgen export vendor/motor.step vendor/motor.xbf`) and read with `read_xbf`, many
 times faster than parsing the STEP.
 

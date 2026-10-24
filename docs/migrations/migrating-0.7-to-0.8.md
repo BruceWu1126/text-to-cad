@@ -240,10 +240,8 @@ tolerances are gone from every decorator.
 
 **The xbf is Save As.** `.xbf` is cadgen's own document format: parts and placements,
 names, colours, materials, element names and the mechanism, read back losslessly.
-Export one only to share a model without its code, to compose it in another project
-with `read_xbf`, or to keep the last state of a slow model viewable and exportable after
-an engine restart (the next run of the script still builds cold). It is not a build
-stage. A vendor STEP converts to one once, and `read_xbf` reads it many times
+Export one only to share a model without its code, or to compose it in another project
+with `read_xbf`; an engine restart needs none (below). It is not a build stage. A vendor STEP converts to one once, and `read_xbf` reads it many times
 faster than `read_step` parses the STEP:
 
 ```bash
@@ -404,6 +402,8 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   (`documents/<uuid>/document.json`: the script and function that build it, never
   geometry), and the home's Recents lists them, most recent first. 0.7's Recents are not
   read: they start empty after the upgrade.
+- **Documents reopen after a restart** from the engine's cache, as last built; the code
+  stays the source, and a document whose code changed since says so.
 - **`store=` says where a document's source lives.** The default, `pointer`, is the
   script on disk. A model defined in a notebook cell is a `copy`: its sources and the
   files it read are copied beside its record, and `@model(id="<uuid>")` keeps one id
@@ -480,9 +480,11 @@ too, for `cadgen inspect` and build123d's selectors in the body, and
   by nothing. Delete them once each model is ported.
 - **Old exports**: STEP, STL, 3MF and GLB files 0.7 runs wrote stay where they were and
   nothing rewrites them. Export them again from the ported models, or delete them.
-- **The 0.7 store.** cadgen 0.7 kept a cache store that can hold gigabytes. 0.8 neither
-  reads nor writes it, and never removes it. Once no 0.7 install is left on the machine
-  (no 0.7 plugin in any agent app), delete the folder by hand:
+- **The 0.7 store.** cadgen 0.7 kept a cache store that can hold gigabytes. 0.8 keeps its
+  own document cache in the same folder, under `documents/` alone, and neither reads,
+  writes nor removes 0.7's store beside it. Once no 0.7 install is left on the machine
+  (no 0.7 plugin in any agent app), delete the folder by hand (0.8 loses nothing: the
+  next run of each script builds its document again):
 
   | Platform | Folder |
   | --- | --- |
@@ -490,8 +492,8 @@ too, for `cadgen inspect` and build123d's selectors in the body, and
   | Windows | `%LOCALAPPDATA%\cadgen` |
   | anywhere | the folder `CADGEN_CACHE_DIR` named, if you set it for 0.7 |
 
-  Your settings, telemetry answer and recent files live elsewhere, in cadgen's state
-  folder, and deleting the store does not touch them.
+  Your settings, telemetry answer, recent files and documents' records live elsewhere, in
+  cadgen's state folder, and deleting the store does not touch them.
 
 - **Quick Edit's preference**: Quick Edit is always available; a `features.quickEdit:
   false` left in settings does nothing.
