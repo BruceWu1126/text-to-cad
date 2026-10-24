@@ -587,6 +587,41 @@ class GlbTest(_Folder):
         translate(self.xbf, None, again)
         self.assertEqual(again.read_bytes(), out.read_bytes(), "the same document bakes the same bytes")
 
+    def test_a_clip_samples_with_the_frames_worked_out_once_and_its_quaternions_stacked(self) -> None:
+        """The bake's inner loop: a sample is each link's pair motion and the products along the
+        chain -- no frame read or inverted again (``mechanism.LinkWorlds``) -- and every moving
+        placement's quaternion one stack (``motion.quaternions``), the same numbers, bit for bit, as
+        worked out link by link and placement by placement."""
+        from unittest import mock
+
+        from cadgen.engine.export import Source, motion
+
+        self.arm()
+        view = Source.read(self.xbf).view()
+        kinematics = view.source.structure["kinematics"]
+        for name in kinematics["motions"]:
+            moving = motion._Motion(view, name, [placed.instance for placed in view.placements])
+            for t in np.linspace(0.0, moving.timeline.duration, 7):
+                values = moving.timeline.values(float(t))
+                with mock.patch.object(mechanism, "_from_column", side_effect=AssertionError("a frame read again")):
+                    worlds = moving.worlds(values)
+                    translations, rotations = moving.at(float(t))
+                for got, want in zip(worlds, _link_worlds(kinematics, values), strict=True):
+                    self.assertTrue(np.array_equal(got, want), (name, t))
+                for at, index in enumerate(moving.instances):
+                    link = moving.owner[index]
+                    matrix = worlds[link] @ moving.unrest[link] @ moving.base[index]
+                    self.assertTrue(np.array_equal(translations[at], matrix[:3, 3]), (name, t))
+                    self.assertTrue(np.array_equal(rotations[at], _quaternion(matrix)), (name, t))
+        # Every branch of the stacked quaternion (the trace's and each diagonal's), as one matrix's.
+        turns = [np.eye(4)]
+        for axis in range(3):
+            for degrees in (10.0, 179.0, -170.0, 90.0):
+                turns.append(mechanism._rotation(axis, degrees) @ mechanism._rotation((axis + 1) % 3, degrees / 3))
+        stacked = motion.quaternions(np.array(turns))
+        for turn, got in zip(turns, stacked, strict=True):
+            self.assertTrue(np.array_equal(got, _quaternion(turn)))
+
     def test_a_glb_keeps_its_clips_and_the_other_exports_ignore_motions(self) -> None:
         from cadgen.engine.export import translate
 
@@ -622,6 +657,56 @@ class GlbTest(_Folder):
 
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             cli.build_parser().parse_args(["export", "a.xbf", "a.glb", "--animate", "x"])
+
+
+def _quaternion(matrix: np.ndarray) -> np.ndarray:
+    """A rotation matrix's quaternion one at a time, as the bake took them before it stacked them."""
+    m = matrix[:3, :3]
+    trace = m[0, 0] + m[1, 1] + m[2, 2]
+    if trace > 0:
+        s = math.sqrt(trace + 1.0) * 2
+        q = np.array([(m[2, 1] - m[1, 2]) / s, (m[0, 2] - m[2, 0]) / s, (m[1, 0] - m[0, 1]) / s, 0.25 * s])
+    elif m[0, 0] > m[1, 1] and m[0, 0] > m[2, 2]:
+        s = math.sqrt(1.0 + m[0, 0] - m[1, 1] - m[2, 2]) * 2
+        q = np.array([0.25 * s, (m[0, 1] + m[1, 0]) / s, (m[0, 2] + m[2, 0]) / s, (m[2, 1] - m[1, 2]) / s])
+    elif m[1, 1] > m[2, 2]:
+        s = math.sqrt(1.0 + m[1, 1] - m[0, 0] - m[2, 2]) * 2
+        q = np.array([(m[0, 1] + m[1, 0]) / s, 0.25 * s, (m[1, 2] + m[2, 1]) / s, (m[0, 2] - m[2, 0]) / s])
+    else:
+        s = math.sqrt(1.0 + m[2, 2] - m[0, 0] - m[1, 1]) * 2
+        q = np.array([(m[0, 2] + m[2, 0]) / s, (m[1, 2] + m[2, 1]) / s, 0.25 * s, (m[1, 0] - m[0, 1]) / s])
+    q /= np.linalg.norm(q)
+    return -q if q[3] < 0 else q
+
+
+def _link_worlds(kinematics: dict, values: dict) -> list[np.ndarray]:
+    """Each link's placement worked out from the structure at every call, as the bake did before
+    ``mechanism.LinkWorlds`` kept its frames."""
+    links = kinematics["links"]
+    read = mechanism._from_column
+    found: list[Any] = [None] * len(links)
+    found[kinematics["ground"]] = read(links[kinematics["ground"]]["matrix"])
+    pending = [pair for pair in kinematics["pairs"] if pair.get("frames")]
+    progress = True
+    while pending and progress:
+        progress = False
+        for pair in list(pending):
+            first, second = pair["links"]
+            if pair["label"] not in values:
+                item_1, item_2 = np.linalg.inv(read(links[first]["matrix"])), np.linalg.inv(read(links[second]["matrix"]))
+                moved = np.eye(4)
+            else:
+                item_1, item_2 = (read(frame) for frame in pair["frames"])
+                moved = mechanism.pair_motion(pair["type"], values[pair["label"]])
+            if found[first] is not None and found[second] is None:
+                found[second] = found[first] @ item_1 @ moved @ np.linalg.inv(item_2)
+            elif found[second] is not None and found[first] is None:
+                found[first] = found[second] @ item_2 @ np.linalg.inv(moved) @ np.linalg.inv(item_1)
+            elif found[first] is None:
+                continue
+            pending.remove(pair)
+            progress = True
+    return [matrix if matrix is not None else read(links[at]["matrix"]) for at, matrix in enumerate(found)]
 
 
 if __name__ == "__main__":
