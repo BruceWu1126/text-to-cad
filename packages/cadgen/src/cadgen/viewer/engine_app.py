@@ -183,17 +183,11 @@ class EngineApp:
             return self._default
 
     def handle(self, request, response):
-        with self.lock:
-            self.active_requests += 1
-        try:
-            return self._handle(request, response)
-        finally:
-            with self.lock:
-                self.active_requests -= 1
-            self.server.touch()
+        return self._handle(request, response)
 
     def _handle(self, request, response):
-        self.server.touch()
+        # Nothing before the gates counts as use: a request refused for its Host or its token
+        # neither keeps the engine from retiring nor counts as an active client.
         if not host_is_allowed(request.header('host'), self.host):
             return response.send_json(403, {'error': 'Host is not a local name'})
         bearer = request.header('authorization').removeprefix('Bearer ')
@@ -214,6 +208,18 @@ class EngineApp:
         if not any(secrets.compare_digest(str(value).encode('utf-8', 'surrogateescape'), expected)
                    for value in supplied if value):
             return self._refused(request, response)
+        with self.lock:
+            self.active_requests += 1
+        self.server.touch()
+        try:
+            return self._admitted(request, response, cookie_name)
+        finally:
+            with self.lock:
+                self.active_requests -= 1
+            self.server.touch()
+
+    def _admitted(self, request, response, cookie_name):
+        """A request past the Host and token gates."""
         if request.query.get('token') == self.token and request.method == 'GET':
             query = {k: v for k, v in request.query if k != 'token'}
             location = request.path + ('?' + urlencode(query) if query else '')
