@@ -95,37 +95,37 @@ def motorbike():
     rx, ry, rz = S.REAR_SIGNAL_POS
 
     # --- fixed root + front body ------------------------------------------
-    chassis = _label(frame(), "frame")
-    shroud = _label(steering_cover(), "steering_cover")
-    shield = _label(leg_shield(), "leg_shield")
+    chassis = _label(frame().shape, "frame")
+    shroud = _label(steering_cover().shape, "steering_cover")
+    shield = _label(leg_shield().shape, "leg_shield")
 
     # --- steering front end -------------------------------------------------
-    fork = _label(front_fork(), "front_fork")
-    bars = _label(handlebar(), "handlebar")
-    fender_front = _label(front_fender(), "front_fender")
-    wheel_front = _label(front_wheel(), "front_wheel")
-    lamp = _label(headlight(), "headlight")
-    signal_fl = _label(turn_signal_left(), "turn_signal", "front_left")
-    signal_fr = _label(turn_signal_right(), "turn_signal", "front_right")
+    fork = _label(front_fork().shape, "front_fork")
+    bars = _label(handlebar().shape, "handlebar")
+    fender_front = _label(front_fender().shape, "front_fender")
+    wheel_front = _label(front_wheel().shape, "front_wheel")
+    lamp = _label(headlight().shape, "headlight")
+    signal_fl = _label(turn_signal_left().shape, "turn_signal", "front_left")
+    signal_fr = _label(turn_signal_right().shape, "turn_signal", "front_right")
 
     # --- powertrain ---------------------------------------------------------
-    motor = _label(engine(), "engine")
-    pipe = _label(exhaust(), "exhaust")
-    shock = _label(rear_shock(), "rear_shock")
-    wheel_rear = _label(rear_wheel(), "rear_wheel")
+    motor = _label(engine().shape, "engine")
+    pipe = _label(exhaust().shape, "exhaust")
+    shock = _label(rear_shock().shape, "rear_shock")
+    wheel_rear = _label(rear_wheel().shape, "rear_wheel")
 
     # --- rear body + trim ---------------------------------------------------
-    body = _label(under_seat_body(), "under_seat_body")
-    fender_rear = _label(rear_fender(), "rear_fender")
-    saddle = _label(seat(), "seat")
-    lamp_rear = _label(tail_light(), "tail_light")
-    signal_rl = _label(bd.Pos(rx - fx, ry - fy, rz - fz) * turn_signal_left(),
+    body = _label(under_seat_body().shape, "under_seat_body")
+    fender_rear = _label(rear_fender().shape, "rear_fender")
+    saddle = _label(seat().shape, "seat")
+    lamp_rear = _label(tail_light().shape, "tail_light")
+    signal_rl = _label(bd.Pos(rx - fx, ry - fy, rz - fz) * turn_signal_left().shape,
                        "turn_signal", "rear_left")
-    signal_rr = _label(bd.Pos(rx - fx, -(ry - fy), rz - fz) * turn_signal_right(),
+    signal_rr = _label(bd.Pos(rx - fx, -(ry - fy), rz - fz) * turn_signal_right().shape,
                        "turn_signal", "rear_right")
-    mirror_l = _label(mirror_left(), "mirror", "left")
-    mirror_r = _label(mirror_right(), "mirror", "right")
-    stand = _label(center_stand(), "center_stand")
+    mirror_l = _label(mirror_left().shape, "mirror", "left")
+    mirror_r = _label(mirror_right().shape, "mirror", "right")
+    stand = _label(center_stand().shape, "center_stand")
 
     # --- joints: motion ------------------------------------------------------
     # Order matters: connect_to() repositions the moving part, and a part that

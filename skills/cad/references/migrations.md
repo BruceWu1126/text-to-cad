@@ -74,7 +74,7 @@ cadgen export "$ID" STEP/bracket.step     # the file, when asked
 
 | 0.7 | 0.8 |
 | --- | --- |
-| `@step(out=...)`, `@stl`, `@glb`, `@threemf` on a model | `@model`; files by `cadgen export <id> FILE` when asked, or an `exports.py` calling `export(model, path)` |
+| `@step(out=...)`, `@stl`, `@glb`, `@threemf` on a model | `@model`; files by `cadgen export <id> FILE` when asked, or an `exports.py` calling `export(x, path)` |
 | `@dxf(out=...)` on a drawing | `@model` returning the planar geometry; `cadgen export <id> drawing.dxf` writes it, running the drawing checks (`$dxf`) |
 | `@step(out=..., kinematics=..., materials=..., animation=...)` | `@model`; joints, materials and motions in the body (below) |
 | `@stl(mesh_tolerance=..., mesh_angular_tolerance=...)`, `--mesh-tolerance` | none: every mesh is made at FreeCAD's default tolerance |
@@ -101,7 +101,7 @@ cadgen export "$ID" STEP/bracket.step     # the file, when asked
 | `cadgen step snapshot`, `cadgen stl snapshot`, `cadgen 3mf snapshot`, `cadgen glb snapshot` | `cadgen snapshot SRC OUT.png`, one command for every kind; SRC a model's id or a file |
 | snapshot `--kinematics` | `--pose` |
 | snapshot `--animation`, `--time`, `--video` | none: export a GLB and play it in the viewer |
-| snapshot `--mode list` | none: list parts from the model's tree (`[p.label for p in kit().leaves]`) |
+| snapshot `--mode list` | none: list parts from the model's tree (`[p.label for p in kit().shape.leaves]`) |
 | snapshot `--focus`, `--hide` | `--display '{"isolated": ["lid"]}'`, `--display '{"hidden": ["lid"]}'` (part refs) |
 | a `--job` file's `kinematics`, a STEP job's `selection`, `animation`, `video`, `quality`, `mode`, `output.viewLabels` | a job's pose is `jointValues`; hidden and isolated parts are its `display.hidden` and `display.isolated` |
 | `cadgen store why`, `store where`, `store forget`, `store gc`, `store info` | none: no store. `cadgen inspect <id>` prints what a document was built from, `cadgen inspect <id> REF` what made an element |
@@ -262,8 +262,13 @@ Code written against an 0.8 preview may use names the release renamed or removed
 | `couple(assembly, name, joint=(turn, travel))` of one cylindrical joint | `screw_pair(assembly, name, joint=360 * travel / turn)`: its pitch; the value is now the turn in degrees |
 | `from cadgen import mechanism_state, configuration_sequence, gear_pair, ...` | `from cadgen.ap242 import ...` |
 | `from cadgen import animation` | `from cadgen.gltf import animation` |
-| `cadgen build SOURCE`, `cadgen.build(code_or_shape, ...)`, `cad_build` | none: a decorated function called from Python, in a `.py` file (or a notebook cell, kept as a `copy`); a shape made elsewhere is wrapped in a `@model` function |
-| `@xbf` + `@glb` stacked so a GLB bakes its animations | `@model`; `cadgen export <id> model.glb` or `export(model, "model.glb")` bakes them |
+| `cadgen build SOURCE`, `cadgen.build(code_or_shape, ...)`, `cad_build` | none: a decorated function called from Python, in a `.py` file; a shape made elsewhere (a notebook cell, a REPL) is handed over, `model(shape, name=...)` |
+| `@xbf` + `@glb` stacked so a GLB bakes its animations | `@model`; `cadgen export <id> model.glb` or `export(x, "model.glb")` bakes them |
+| a model call returning its shape (`base = plate()`, `posed(arm(), ...)`) | the call returns the document's handle: compose `plate().shape`; `.id`, `.url` and `.export(...)` are the document's |
+| `@model(store="copy")`, a notebook cell's model kept as a copy | none: no copy mode. A cell's shape is handed over, `model(shape, name="plate")`; a model lives in a `.py` file |
+| `@model(id="<uuid>")` | none: an id is derived (the script and the function), or `key="plate"` names one: `@model(key=...)`, `@xbf(..., key=...)`, `model(shape, name=..., key=...)` |
+| `@model` stacked with `@xbf`, `@step` or another file decorator | one or the other: `@model` for a document with no file, the file decorators for one with files; the stack is refused, drop `@model` |
+| `Model.export(...)`, `Model.snapshot(...)`, `Model.document` on the decorated function | the handle a call returns: `arm().export(...)`, `arm().snapshot(...)`, or `export(arm(), ...)` |
 | `cadgen export DOC OUT --pose NAME`, `export(..., pose=)` | a model returning `posed(assembly, NAME)`, exported |
 | `cadgen export DOC OUT --part OWNER`, `export(..., part=)` | the part's own `@model`, exported |
 | `cadgen export ... --no-daemon`, `cadgen snapshot ... --no-daemon` | the same command without the flag |

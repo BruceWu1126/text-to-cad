@@ -1,10 +1,17 @@
-"""Document ids: one internal id for every document, and the one canonical spelling of a path.
+"""Document ids: one formula for every document, and the one canonical spelling of a path.
 
-An id is a lower-case canonical UUID string. A file's is ``file_id``: uuid5 of its canonical
-path, inside the engine only -- a file's public name stays its path. A model's is ``model_id``:
-uuid5 of its script's canonical path and its function's name, so any process that knows the
-script and the function knows the id without asking the engine. Whether a text is an id is
-``is_id``; what an id names is the engine's to say, never the uuid's version.
+An id is a lower-case canonical UUID string, made by one formula (``derived_id``)::
+
+    uuid5(NAMESPACE, canonical(scope) + "::" + name)
+
+``scope`` is a path and ``name`` a name in it: a model's script and its function's name
+(``model_id``), an opened file's path and no name (``file_id``: inside the engine only -- a file's
+public name stays its path), a shape handed over (``model(shape, name=...)``) the calling script, or
+the working folder where there is none, and the name it is given. Any process that knows the scope
+and the name knows the id without asking the engine. A ``key`` given at the declaration replaces the
+derived id with ``key_id``: ``uuid5(NAMESPACE, "key::" + key)``, global and readable, the same
+wherever the declaration moves. Whether a text is an id is ``is_id``; what an id names is the
+engine's to say, never the uuid's version.
 
 ``canonical`` is the one spelling of a path the engine and the viewer key by: ``realpath``,
 then, on macOS, each name as the file system spells it (``getattrlist``, which opens nothing), so
@@ -22,7 +29,7 @@ import sys
 import uuid
 from typing import Any
 
-__all__ = ["NAMESPACE", "canonical", "file_id", "is_id", "model_id"]
+__all__ = ["NAMESPACE", "canonical", "check_key", "check_name", "derived_id", "file_id", "is_id", "key_id", "model_id"]
 
 # cadgen's namespace for derived ids: written once, never changed.
 NAMESPACE = uuid.UUID("ad198b15-841c-4d1f-81be-6aa78d2737c0")
@@ -90,14 +97,41 @@ def canonical(path: str | os.PathLike) -> str:
     return spelled or "/"
 
 
+def derived_id(scope: str | os.PathLike, name: str = "") -> str:
+    """The one formula: uuid5 of ``scope``'s canonical path and ``name`` (the module docstring)."""
+    return str(uuid.uuid5(NAMESPACE, canonical(scope) + "::" + name))
+
+
 def file_id(path: str | os.PathLike) -> str:
-    """A file's document id: uuid5 of its canonical path."""
-    return str(uuid.uuid5(NAMESPACE, "file\0" + canonical(path)))
+    """An opened file's document id: its canonical path, with no name."""
+    return derived_id(path)
 
 
 def model_id(script: str | os.PathLike, function: str) -> str:
-    """A model's document id: uuid5 of its script's canonical path and its function's name."""
-    return str(uuid.uuid5(NAMESPACE, "model\0" + canonical(script) + "\0" + function))
+    """A model's document id: its script's canonical path and its function's name."""
+    return derived_id(script, function)
+
+
+def check_name(name: object, what: str = "name") -> str:
+    """A document's name (a shape's ``name=``) or a ``key=`` as a declaration gives it: readable -- a
+    non-empty string with no surrounding space and no control character -- and with no ``::``, the
+    formula's separator, so that no scope and name spell another's; else refused by name."""
+    if not isinstance(name, str) or not name or name != name.strip() or any(ord(c) < 32 for c in name):
+        raise ValueError(f"{what} is a readable name (no surrounding space, no control character), not {name!r}")
+    if "::" in name:
+        raise ValueError(f"{what} {name!r} holds '::', which separates a scope from a name in an id: drop it")
+    return name
+
+
+def check_key(key: object) -> str:
+    """A ``key=`` as a declaration gives it (``check_name``)."""
+    return check_name(key, "key")
+
+
+def key_id(key: str) -> str:
+    """The id a ``key=`` gives a document in place of its derived one: uuid5 of ``key::`` and the key,
+    global, the same wherever its declaration is."""
+    return str(uuid.uuid5(NAMESPACE, "key::" + check_key(key)))
 
 
 def is_id(text: object) -> bool:

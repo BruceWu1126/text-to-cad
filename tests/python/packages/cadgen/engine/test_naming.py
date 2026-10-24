@@ -115,7 +115,7 @@ def baked():
     hub = bd.Cylinder(10, 5) - bd.Cylinder(4, 10)
     copied = bake(hub, "copy")
     stretched = bake(bd.Pos(0, 30, 0) * hub, "gtransform")
-    return bd.Compound(children=[wheel().moved(bd.Location((0, 0, OFFSET))), copied.moved(bd.Location((60, 0, 0))),
+    return bd.Compound(children=[wheel().shape.moved(bd.Location((0, 0, OFFSET))), copied.moved(bd.Location((60, 0, 0))),
                                  stretched])
 """
 
@@ -264,7 +264,7 @@ def peg():
 
 @xbf("XBF/stand.xbf")
 def stand():
-    post = peg()
+    post = peg().shape
     return bd.Compound(children=[post, bd.Pos(10, 0, 0) * bd.Box(2, 2, 2)])
 """
         alone = self.names(child, name="peg")["faces"]

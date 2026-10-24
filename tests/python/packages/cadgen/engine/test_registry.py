@@ -1,13 +1,14 @@
 """The registry: a record per document the engine built (or a page opened), in the user's state
 folder, pointing and never caching; read again after a restart, so an id is known with the command
 that builds it again and nothing is run; a moved script's record detached, listed, and removable; a
-``memory`` document with none. And the store a model's source gives it: a saved file's ``pointer``,
-the source Python holds ``copy``, and no source at all refused."""
+``memory`` document with none; a shape handed over recorded with no command, never detached. And
+the declarations: a function in a saved file points; one in no file is refused, with the words
+that hand its shape over instead; ``@model`` stacked with a file decorator is refused, saying which
+to drop; a ``key=`` another declaration's record holds is refused, naming it."""
 
 from __future__ import annotations
 
 import json
-import linecache
 import os
 import shutil
 import sys
@@ -60,52 +61,55 @@ class RegistryTest(unittest.TestCase):
         self.assertTrue(self.registry.delete(self.ident))
         self.assertEqual((self.registry.get(self.ident), self.registry.list()), (None, []))
 
-    def test_a_record_is_relocated_by_its_root_alone_and_a_bundle_s_is_its_own_folder(self) -> None:
+    def test_a_record_is_relocated_by_its_root_alone_and_a_shape_s_is_never_detached(self) -> None:
         moved = self.state / "elsewhere"
         self.registry.put(_record(self.ident, moved))
-        self.assertEqual(registry.home(self.registry, self.registry.get(self.ident)), moved / "parts.py")
-        bundle = self.registry.write_bundle(self.ident, {"model.py": b"# a copy\n"})
-        self.registry.put({**_record(self.ident, self.state), "root": ".", "home": "model.py", "store": "copy",
-                           "run": ["python", "model.py"]})
         record = self.registry.get(self.ident)
-        self.assertEqual(registry.home(self.registry, record), bundle / "model.py")
-        self.assertEqual(self.registry.bundle_of(bundle / "model.py"), self.ident)
-        self.assertIsNone(self.registry.bundle_of(self.state / "parts.py"))
+        self.assertEqual(registry.home(self.registry, record), moved / "parts.py")
+        self.assertTrue(registry.detached(self.registry, record), "its script is not there")
+        self.registry.put({**_record(self.ident, moved), "store": "shape", "run": []})
+        record = self.registry.get(self.ident)
+        self.assertFalse(registry.detached(self.registry, record), "a shape points at nothing that builds it")
+        self.assertIsNone(registry.command(self.registry, record))
 
 
 class StoreTest(unittest.TestCase):
-    """Where a model's document is kept follows where its source is (no provider is asked)."""
+    """What a declaration makes of a function: a document from its file, through one declaration."""
 
-    def define(self, source: str, filename: str, prime: bool) -> Model:
-        if prime:  # what IPython and ipykernel do with a cell: its source held, its file nowhere
-            linecache.cache[filename] = (len(source), None, source.splitlines(True), filename)
-            self.addCleanup(linecache.cache.pop, filename, None)
+    def define(self, source: str, filename: str) -> Model:
         namespace: dict = {"__name__": "__main__"}
         exec(compile(source, filename, "exec"), namespace)  # noqa: S102
         return namespace["cell"]
 
-    def test_a_saved_file_points_a_held_source_copies_and_no_source_is_refused(self) -> None:
+    def test_a_saved_file_points_and_a_function_in_no_file_is_refused_with_the_shape_form(self) -> None:
         folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="store-")))
         self.addCleanup(shutil.rmtree, folder, True)
         source = "from cadgen.engine import model\n\n@model\ndef cell():\n    return None\n"
         saved = folder / "cell.py"
         saved.write_text(source, encoding="utf-8")
-        self.assertEqual(self.define(source, str(saved), False).store, "pointer")
-        with mock.patch.dict(os.environ, {"JPY_SESSION_NAME": str(folder / "cells.ipynb")}):
-            copied = self.define(source, str(folder / "ipykernel_1" / "2.py"), True)
-            again = self.define(source, str(folder / "ipykernel_1" / "3.py"), True)
-        self.assertEqual(copied.store, "copy", "a cell's file is nowhere: its source is copied")
-        self.assertNotEqual(copied.id, again.id, "a copy given no id is a new document each run")
-        self.assertEqual(copied.id, copied.id, "and one document for the run's definition")
-        with self.assertRaisesRegex(ValueError, "save this as a file"):
-            self.define(source, "<stdin>", False)
-        with self.assertRaisesRegex(ValueError, "store='pointer' needs the model in a saved .py file"):
-            self.define(source.replace("@model", "@model(store='pointer')"), str(folder / "k" / "4.py"), True)
-        chosen = "6f1c0c6e-2b4b-4d8e-9a43-0c2a5d7e9b11"
-        self.assertEqual(self.define(source.replace("@model", f"@model(id='{chosen.upper()}')"),
-                                     str(folder / "k" / "5.py"), True).id, chosen, "the author's id, canonical")
-        with self.assertRaisesRegex(ValueError, "takes no id="):
-            self.define(source.replace("@model", f"@model(id='{chosen}')"), str(saved), False)
+        self.assertEqual(self.define(source, str(saved)).store, "pointer")
+        self.assertEqual(self.define(source.replace("@model", "@model(store='memory')"), str(saved)).store, "memory")
+        for nowhere in ("<stdin>", str(folder / "ipykernel_1" / "2.py")):  # a REPL's, a notebook cell's
+            with self.subTest(file=nowhere), self.assertRaisesRegex(ValueError, r"model\(shape, name='cell'\)"):
+                self.define(source, nowhere)
+        with self.assertRaisesRegex(ValueError, "store is one of 'pointer', 'memory', not 'copy'"):
+            self.define(source.replace("@model", "@model(store='copy')"), str(saved))
+        with self.assertRaisesRegex(TypeError, "no name="):
+            self.define(source.replace("@model", "@model(name='other')"), str(saved))
+
+    def test_model_stacked_with_a_file_decorator_is_refused_saying_which_to_drop(self) -> None:
+        folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="store-")))
+        self.addCleanup(shutil.rmtree, folder, True)
+        saved = folder / "cell.py"
+        saved.write_text("", encoding="utf-8")
+        for stack in ("@model\n@xbf('XBF/cell.xbf')", "@step('cell.step')\n@model", "@glb('a.glb')\n@model\n@stl('a.stl')"):
+            with self.subTest(stack=stack), self.assertRaisesRegex(
+                    TypeError, "model 'cell' is declared by @model and @[a-z]+: .* never both; drop @model"):
+                self.define(f"from cadgen.engine import model, xbf, step, glb, stl\n\n{stack}\ndef cell():\n"
+                            "    return None\n", str(saved))
+        both = self.define("from cadgen.engine import xbf, step\n\n@xbf('XBF/cell.xbf')\n@step('cell.step')\n"
+                           "def cell():\n    return None\n", str(saved))
+        self.assertEqual([kind for kind, _path in both.targets()], ["xbf", "step"], "file decorators stack")
 
 
 PARTS = """
@@ -123,23 +127,18 @@ def scratch():
     return bd.Box(1, 1, 1)
 """
 
-# A module on disk whose model asks to be copied, reading a file of its folder.
-SCRATCH = """
+# Two scripts whose models claim one key.
+KEYED = """
 import build123d as bd
 from cadgen import model
-import geom
-
-LENGTH = 6.0
 
 
-def depth():
-    with open("depth.txt", encoding="utf-8") as handle:
-        return float(handle.read())
+@model(key="arm")
+def {name}():
+    return bd.Box(1, 1, 1)
 
 
-@model(store="copy"{id})
-def bar():
-    return bd.Box(LENGTH, geom.WIDTH, depth())
+{name}()
 """
 
 
@@ -225,46 +224,20 @@ class RegistryDaemonTest(unittest.TestCase):
         RecentStore(self.state).remove(cube)
         self.assertFalse((self.state / "documents" / cube).exists())
 
-    def test_a_copy_holds_what_its_build_read_a_new_id_each_run_and_id_upserts(self) -> None:
-        project = self.project("copy", {"geom.py": "WIDTH = 2.0\n", "depth.txt": "1.5",
-                                        "scratch.py": SCRATCH.format(id=""),
-                                        "run.py": "import scratch\n\nscratch.bar()\nprint('ID', scratch.bar.id)\n"})
-        ids = []
-        for _ in range(2):
-            done = self.run_python("run.py", cwd=project)
-            self.assertEqual(done.returncode, 0, done.stderr)
-            ids.append(done.stdout.rsplit("ID ", 1)[1].split()[0])
-        self.assertNotEqual(ids[0], ids[1], "a copy given no id is a new document each run")
-        bundle = self.state / "documents" / ids[0]
-        record = self.records()[ids[0]]
-        self.assertEqual((record["store"], record["root"], record["home"], record["run"]),
-                         ("copy", ".", "model.py", ["python", "model.py"]))
-        self.assertIn("def bar():", (bundle / "model.py").read_text(encoding="utf-8"))
-        self.assertTrue((bundle / "modules" / "geom.py").is_file(), "the module its code reaches")
-        [(original, inside)] = record["copied"].items()
-        self.assertEqual((Path(original), (bundle / inside).read_text(encoding="utf-8")),
-                         (project / "depth.txt", "1.5"))
-        # Its own model.py builds it again from the copy, under its id, with the original gone.
-        (project / "depth.txt").rename(project / "depth.moved")
-        rerun = self.run_python(str(bundle / "model.py"), cwd=self.folder)
-        self.assertEqual(rerun.returncode, 0, rerun.stderr)
-        self.assertIn(f"id: {ids[0]}", rerun.stdout)
-        cached = sorted(str(path.relative_to(bundle)) for path in bundle.rglob("*")
-                        if path.name == "__pycache__" or path.suffix == ".pyc")
-        self.assertEqual(cached, [], "no bytecode in the bundle, from the copy or its rerun")
-        (project / "depth.moved").rename(project / "depth.txt")
-        # With id=: both runs are that one document, upserted.
-        chosen = "6f1c0c6e-2b4b-4d8e-9a43-0c2a5d7e9b11"
-        (project / "scratch.py").write_text(textwrap.dedent(SCRATCH.format(id=f', id="{chosen}"')), encoding="utf-8")
-        for _ in range(2):
-            done = self.run_python("run.py", cwd=project)
-            self.assertEqual(done.returncode, 0, done.stderr)
-            self.assertIn(f"ID {chosen}", done.stdout)
-        self.assertEqual(sum(1 for found in self.records() if found == chosen), 1)
-        # A definition with no source anywhere is refused, in the words.
-        refused = self.run_python("-", cwd=project, input="from cadgen import model\n\n@model\ndef s():\n    return 1\n")
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("save this as a file", refused.stderr)
+    def test_a_key_another_declaration_s_record_holds_is_refused_naming_it(self) -> None:
+        project = self.project("keyed", {"left.py": KEYED.format(name="left"), "right.py": KEYED.format(name="right")})
+        first = self.run_python("left.py", cwd=project)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        from cadgen.engine.ids import key_id
+
+        record = self.records()[key_id("arm")]
+        self.assertEqual((record["key"], record["entry"]), ("arm", "left"))
+        second = self.run_python("right.py", cwd=project)
+        self.assertNotEqual(second.returncode, 0)
+        self.assertIn(f"key 'arm' is claimed by {project / 'left.py'}::left", second.stderr)
+        self.assertEqual(self.records()[key_id("arm")]["entry"], "left", "the record stays the first's")
+        again = self.run_python("left.py", cwd=project)
+        self.assertEqual(again.returncode, 0, again.stderr)
 
 
 if __name__ == "__main__":

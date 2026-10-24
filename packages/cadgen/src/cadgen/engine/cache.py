@@ -1,7 +1,7 @@
 """The engine's document cache: each model document it held, kept in its own state folder, so a
 restart opens every project at once -- with the code still the only source of truth.
 
-For every ``pointer`` and ``copy`` model document (never a file's document: that is its own file),
+For every ``pointer`` and ``shape`` model document (never a file's document: that is its own file),
 the engine keeps ``<cache>/documents/<id>/document.xbf`` -- ``<cache>`` the platform's cache folder
 the distribution names (``Registry.cache``: ``CADGEN_CACHE_DIR``, else ``$XDG_CACHE_HOME/cadgen`` or
 ``%LOCALAPPDATA%\\cadgen``, else ``~/.cache/cadgen``), the record staying in the state folder

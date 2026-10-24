@@ -274,8 +274,8 @@ class ThroughTheDaemonTest(unittest.TestCase):
         self.assertEqual({build["kind"] for counts in (first, third) for build in counts["builds"]}, {"xbf"})
 
     def test_a_telemetry_batch_holds_no_id_and_no_path(self) -> None:
-        """Verbs by document id -- a pointer model's and a copy's, one refused, one whose body raised -- count
-        kinds, outcomes and times: no id, script, state folder or copy bundle reaches the spool or the batch."""
+        """Verbs by document id -- a pointer model's and a shape's handed over, one refused, one whose body
+        raised -- count kinds, outcomes and times: no id, script or state folder reaches the spool or the batch."""
         from cadgen.engine.ids import canonical, model_id
 
         (self.folder / "part.py").write_text(textwrap.dedent("""
@@ -288,23 +288,17 @@ class ThroughTheDaemonTest(unittest.TestCase):
                 return bd.Box(3, 2, 1)
 
 
-            @model(store="copy")
-            def copied():
-                return bd.Box(1, 2, 3)
-
-
             @model
             def broken():
                 raise ValueError(f"broken in {__file__}")
         """), encoding="utf-8")
-        run = self.run_in("-c", "import part\npart.part()\npart.copied()\nprint('COPY', part.copied.id)\n"
+        run = self.run_in("-c", "import part, build123d as bd, cadgen\npart.part()\n"
+                                "print('SHAPE', cadgen.model(bd.Box(1, 2, 3), name='handed').id)\n"
                                 "try:\n    part.broken()\nexcept Exception:\n    pass\n")
         self.assertEqual(run.returncode, 0, run.stderr)
-        pointer, copy = model_id(self.folder / "part.py", "part"), run.stdout.split("COPY ", 1)[1].split()[0]
-        bundle = self.state / "documents" / copy
-        self.assertTrue((bundle / "model.py").is_file())
+        pointer, handed = model_id(self.folder / "part.py", "part"), run.stdout.split("SHAPE ", 1)[1].split()[0]
         refused = model_id(self.folder / "part.py", "nowhere")
-        for ident in (pointer, copy):
+        for ident in (pointer, handed):
             done = self.run_in("-m", "cadgen.cli", "export", ident, str(self.folder / f"{ident}.stl"))
             self.assertEqual(done.returncode, 0, done.stderr)
         self.assertNotEqual(self.run_in("-m", "cadgen.cli", "export", refused, str(self.folder / "x.stl")).returncode, 0)
@@ -334,9 +328,8 @@ class ThroughTheDaemonTest(unittest.TestCase):
         batch = (self.state / analytics.KEPT).read_text(encoding="utf-8")
         self.assertIn('"events"', batch)
         for text, where in ((spooled, "spool"), (batch, "batch")):
-            for secret in (pointer, copy, refused, canonical(self.folder / "part.py"), str(self.folder),
-                           canonical(self.folder), str(self.state), canonical(self.state), str(bundle),
-                           canonical(bundle), "part.py"):
+            for secret in (pointer, handed, refused, canonical(self.folder / "part.py"), str(self.folder),
+                           canonical(self.folder), str(self.state), canonical(self.state), "part.py"):
                 self.assertNotIn(secret, text, f"the {where} holds {secret}")
 
     def test_cadgen_observes_the_engine_once_its_verbs_are_imported_and_never_sooner(self) -> None:

@@ -25,7 +25,7 @@ from electronics_enclosure_base import (
 
 @eng_drawing(out="../PDF/electronics_enclosure_base_drawing.pdf")
 def electronics_enclosure_base_drawing():
-    part = electronics_enclosure_base()
+    part = electronics_enclosure_base().shape
     sheet = Sheet(
         "A3", title="ELECTRONICS ENCLOSURE BASE", part_number="ENC-001", material="ABS",
         revision="A", author="text-to-cad", general_tolerance="ISO 2768-m",

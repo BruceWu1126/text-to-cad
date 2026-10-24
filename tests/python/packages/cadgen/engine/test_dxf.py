@@ -128,7 +128,7 @@ from bracket import bracket
 
 @dxf("flat.dxf")
 def flat():
-    return bd.Pos(0, 0, -3) * bracket().faces().sort_by(bd.Axis.Z)[-1]
+    return bd.Pos(0, 0, -3) * bracket().shape.faces().sort_by(bd.Axis.Z)[-1]
 """
 
 

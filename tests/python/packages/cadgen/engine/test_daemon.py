@@ -934,7 +934,7 @@ def document(): return bd.Box(3, 2, 3)
 if __name__ == '__main__':
     print('before', sys.argv[1:])
     value = bare()
-    print('volume', round(value.volume))
+    print('volume', round(value.shape.volume))
     saved()
     document()
     print('after')
@@ -1228,9 +1228,9 @@ if __name__ == '__main__':
         probe = textwrap.dedent("""
             import json, plug
             report = plug.plug.build().models[0]
-            shape = plug.plug()
-            print(json.dumps({"bodies": report["bodies"], "name": plug.plug.document.name,
-                              "volume": round(shape.volume, 3)}))
+            handle = plug.plug()
+            print(json.dumps({"bodies": report["bodies"], "name": handle.shape.label,
+                              "volume": round(handle.shape.volume, 3)}))
         """)
         done = engine_daemon.run([sys.executable, "-c", probe], cwd=self.folder, env=self.env)
         self.assertEqual(done.returncode, 0, done.stderr)

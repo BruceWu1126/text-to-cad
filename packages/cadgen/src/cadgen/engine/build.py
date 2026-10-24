@@ -370,7 +370,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
     differs runs on every call for the worker's life (``memo.always``)."""
     from cadgen.engine import previous
     from cadgen.engine.kernel import determinism, memo
-    from cadgen.engine.model import _MODELS, BuildContext, models_in
+    from cadgen.engine.model import _KEYS, _MODELS, BuildContext, models_in
 
     script = Path(script).resolve()
     if not script.is_file():
@@ -390,6 +390,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
             reader.session():
         run.verify = verify
         _MODELS.clear()  # the models this build defines, known by name to what its replays ran
+        _KEYS.clear()  # and the keys their declarations claim (``model.claim``)
         load_key = (run_token, str(script), str(cwd))
         kept = _kept_load(load_key) if run_token and not verify else None
         fresh = None
@@ -535,6 +536,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
         report["id"] = model.id
         report["source"] = {"script": str(model.script), "name": model.name}
         report["store"] = model.store
+        report["key"] = model.key
         if result is not None:
             report["timings"] = {"load": round(load_seconds, 4), "body": round(body, 4)}
             _written(model, result, run, report, log, model.plan(), context)
@@ -757,6 +759,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
     report["id"] = model.id
     report["source"] = {"script": str(model.script), "name": model.name}
     report["store"] = model.store
+    report["key"] = model.key
 
 
 def held(script: Path | None = None, name: str | None = None, *, path: Path | None = None) -> Any:

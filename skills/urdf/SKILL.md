@@ -36,11 +36,14 @@ The first run downloads that installation; later runs reuse it.
 ## Show the model
 
 Show the user each model and file you create or change, and any they ask to see.
-Snapshots and validation don't replace this.
+Snapshots and validation don't replace this. Once a viewer is open, the person is looking
+at the model: after an edit, report the run's one line and stop. Never screenshot the
+viewer to confirm your own work.
 
 - If your tools include `cad_show` (your host may prefix it), call it with the model's id
   or the file's absolute path, and follow its description for when to call it again.
-  `cad_view` reads what the user selected; `cad_screenshot` shows you what they see.
+  `cad_view` reads what the user selected; `cad_screenshot` shows you what they see, for
+  when they ask about it.
 - Otherwise give the user the page's link once: a model's page is the `view:` line its
   run prints. For a file, run the CAD Viewer, from any folder:
 

@@ -134,7 +134,7 @@ from hinge import hinge
 @xbf("XBF/{name}.xbf")
 @step(out="{name}.step")
 def {name}():
-    return posed(hinge(), {state})
+    return posed(hinge().shape, {state})
 """
 
 
@@ -386,7 +386,7 @@ class JointMemoTest(_Folder):
 
             @xbf("XBF/pegs.xbf")
             def pegs():
-                first, second, third = peg(), bd.Pos(10, 0, 0) * peg(), peg()
+                first, second, third = peg().shape, bd.Pos(10, 0, 0) * peg().shape, peg().shape
                 bd.RigidJoint("front", first, bd.Location())
                 bd.RigidJoint("rear", third, bd.Location())
                 SEEN.update(shared=first.joints is third.joints, first=sorted(first.joints), third=sorted(third.joints),
@@ -490,7 +490,7 @@ from mounted import mounted
 
 @xbf("XBF/mounted_up.xbf")
 def mounted_up():
-    return posed(mounted(), {"mount": 90})
+    return posed(mounted().shape, {"mount": 90})
 """)
         plate = _vertices(document.Loaded(self.folder / "XBF/mounted_up.xbf"), "plate")
         np.testing.assert_allclose(plate, _vertices(document.Loaded(path), "plate", _sampled(path, {"mount": 90})),

@@ -10,7 +10,7 @@ new one starts past the cap; with every worker busy, the build waits, first come
 for the first to come free. Nothing is refused, and nothing is predicted: no admission. A
 worker idle ``CADGEN_ENGINE_WORKER_IDLE`` seconds (by default the daemon's own idle time, an
 hour) is retired, and so is one over its memory cap after a build (``worker.retirement``).
-Before a worker is stopped, every ``pointer`` and ``copy`` document of it the server does not hold is taken
+Before a worker is stopped, every ``pointer`` document of it the server does not hold is taken
 from it (``models.Models.drain``): a document outlives its worker. A retired script's next build
 is a fresh worker's, a restart. Each such document is also kept in the engine's cache once it is
 idle, at its drain and at shutdown (``cache``), so a restart of the daemon opens it at once.
@@ -1084,24 +1084,40 @@ class Daemon:
                      "draw": request.get("draw"), "draw_still": request.get("draw_still"),
                      "expected": request.get("expected"), "inspect": request.get("inspect"), "original": request.get("original")}
             return self._call(request, order, send, payload)
+        if op == "result" and "id" in request:
+            # A handle's shape (``api.Document.shape``): the document its id names, as the engine
+            # holds it -- asked of the worker that holds it, or read from the bytes the engine holds --
+            # and never built.
+            ident = str(request["id"])
+            try:
+                source, payload = self.document(ident)
+            except ValueError as error:
+                send(refused(error))
+                return
+            if "document" in source:
+                order = {"id": 1, "op": "result", "document": True, "name": source["name"], "cwd": request.get("cwd")}
+            elif "script" in source:
+                order = {"id": 1, "op": "result", "script": source["script"], "name": source["function"],
+                         "cwd": request.get("cwd")}
+            else:
+                send({"failed": f"{ident} is a file's document: read_xbf or read_step reads its shape"})
+                return
+            return self._call({**request, "source": source}, order, send, payload)
         if op == "result":
             order = {"id": 1, "op": "result", "script": request["script"], "name": request["name"],
                      "cwd": request.get("cwd")}
             return self._call(request, order, send)
+        if op == "shape":
+            # A shape handed over (``api.hand_over``): held as a drained document is, nothing to run.
+            try:
+                send(self.models.hand_over(request))
+            except ValueError as error:
+                send(refused(error))
+            return
         if op == "build":
             with self.busy_lock:
                 self.busy += 1
             try:
-                copying = request.get("copy")
-                if copying:
-                    # A copied model: its bundle written in its registry folder first, and built
-                    # there, as ``python model.py`` builds it (``copies``).
-                    try:
-                        script = self.models.bundle(copying)
-                    except (OSError, ValueError) as error:
-                        send(refused(error) if isinstance(error, ValueError) else {"failed": str(error)})
-                        return
-                    request = {**request, "script": script, "program": script}
                 script = request["script"]
                 key, cwd = self._routed(request)
                 for attempt in (1, 2):
@@ -1112,7 +1128,7 @@ class Daemon:
                         order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
                                  "cwd": request.get("cwd"), "verify": bool(request.get("verify")),
                                  "profile": bool(request.get("profile")), "acknowledged": True,
-                                 "run": request.get("run"), **self.models.serving(script)}
+                                 "run": request.get("run")}
                         server = self.server
                         if server is not None:
                             # The worker sends each served document it builds back as a patch,
@@ -1130,8 +1146,6 @@ class Daemon:
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
                         # The program that asked: what a document it built names to build it again.
                         answer["program"] = request.get("program")
-                        if copying:
-                            answer["copy"] = {key: copying.get(key) for key in ("id", "source", "origin")}
                         self._built(worker, answer)
                         send(answer)
                         return

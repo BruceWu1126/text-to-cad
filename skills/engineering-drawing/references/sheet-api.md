@@ -14,7 +14,7 @@ from enclosure import HOLES, L, H, W, enclosure
 
 @eng_drawing(out="../PDF/enclosure_drawing.pdf")
 def enclosure_drawing():
-    part = enclosure()    # the model, built by the engine (a replay when it holds it)
+    part = enclosure().shape    # the model, built by the engine (a replay when it holds it)
     sheet = Sheet("A3", title="ENCLOSURE", part_number="ENC-001", material="ABS",
                   revision="A", general_tolerance="ISO 2768-m",
                   notes=["BREAK SHARP EDGES."])

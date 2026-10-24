@@ -55,9 +55,11 @@ them on `__file__` in code that must run from any folder.
 
 ## Write a model and run it
 
-A part or an assembly is a function with no parameters, decorated `@model`, that returns
-a build123d shape. Its dimensions are the arguments of a plain helper function, and each
-configuration is a `@model` of its own. For example, `src/bracket.py`:
+A part or an assembly is a function with no parameters, decorated `@model` (or with its
+file decorators, never both), that returns a build123d shape. Its dimensions are the
+arguments of a plain helper function, and each configuration is a `@model` of its own. A
+call builds it and returns its document: a handle with `.id`, `.url`, `.shape` (the built
+shape) and `.export(...)`. For example, `src/bracket.py`:
 
 ```python
 import build123d as bd
@@ -102,9 +104,10 @@ built src/bracket.py::bracket_wide warm in 0.01s: bodies 1 run; 6 misses, 0 hits
 ```
 
 Each call the script's `__main__` makes prints its document's `id:` and its page,
-`view:`. Give the user the page once ([Show the model](#show-the-model)) and use the id
-for every command after it. The id comes from the script's path and the function's name,
-so it is the same run after run, and the open page follows every run.
+`view:` (the handle's `.id` and `.url`). Give the user the page once ([Show the
+model](#show-the-model)) and use the id for every command after it. The id comes from the
+script's path and the function's name (or `@model(key="...")`), so it is the same run after
+run, and the open page follows every run.
 
 - **Running the script is the rebuild.** It writes no file. The engine's warm worker for
   the script replays every operation an edit did not reach, so a comment re-runs nothing
@@ -117,9 +120,9 @@ so it is the same run after run, and the open page follows every run.
   mark only a function holding seconds of kernel work that an edit elsewhere leaves
   alone, such as a whole sub-assembly stage; never a part, never a helper called many
   times ([`@memo`](references/model-contract.md#memo-marks-stages)).
-- **An assembly calls its parts.** Its body calls each part model (`plate()`), places and
-  labels what they return, and returns a `Compound`. Each child builds in the same run and
-  keeps its own document and id. Running a child's script alone leaves the assemblies that
+- **An assembly calls its parts.** Its body calls each part model and composes its shape
+  (`plate().shape`), places and labels it, and returns a `Compound`. Each child builds in
+  the same run and keeps its own document and id. Running a child's script alone leaves the assemblies that
   use it as they were: run the assembly.
 - **`import build123d as bd`, and use it attribute-style** (`bd.Box`). The import is lazy:
   the kernel loads on first use, in the worker. `from build123d import Box`, or a
@@ -134,6 +137,8 @@ so it is the same run after run, and the open page follows every run.
 - **References** to faces, edges and parts come from `cadgen inspect <id> [ref]`, and the
   body picks the same element with build123d's selectors; verify with a snapshot when in
   doubt ([references](references/inspection-and-validation.md#references)).
+- **A shape with no function** (a notebook cell, a REPL) is handed over:
+  `model(shape, name="plate")` returns the same handle, and no command builds it again.
 - **The engine never reruns code.** When it no longer holds a document (it restarted, or
   dropped the document to free memory), the page, `cadgen inspect <id>` and `cad_show`
   print the command that brings it back (`python src/bracket.py`). Run it.
@@ -153,10 +158,10 @@ cadgen export "$ID" STEP/bracket.step STL/bracket.stl GLB/bracket.glb 3MF/bracke
 ```
 
 A project with standing deliverables gets an `exports.py` that imports its models and
-calls `export(model, path, ...)` on each; running it rewrites every deliverable
+calls `export(x, path, ...)` on each (`x` a model call's handle); running it rewrites every deliverable
 ([exports](references/exports.md)). An export takes a document and its destinations,
 and nothing else: a posed file is a model that returns the posed assembly
-(`posed(arm(), "folded")`), and a part on its own is the part's own model.
+(`posed(arm().shape, "folded")`), and a part on its own is the part's own model.
 
 The xbf, cadgen's own document, is Save As: export one only to share a model without its
 code, or to compose it in another project with `read_xbf`. A restart needs none: the
@@ -167,15 +172,21 @@ times faster than parsing the STEP.
 
 ## Pictures
 
+Look only when it changes what you do. When a viewer is open (the CAD card or tab, or the
+page URL the person has), the person is looking at the model: after an edit, report the
+run's one line and stop. Take a snapshot only when no viewer is open, or when you must see
+something the person has not asked about, and then one picture from one angle. Write a
+check script only when the person asks for a dimension, a fit or a mass, or when the change
+is numeric and the number matters. Resolve a reference with `cadgen inspect` only when a
+prompt names one. Never screenshot the card to confirm your own work.
+
 ```bash
 cadgen snapshot "$ID" tmp/review.png
-cadgen snapshot "$ID" tmp/top.png --camera top --display hidden-line
-cadgen snapshot "$ID" tmp/open.png --pose open
 ```
 
 A snapshot draws the document as the viewer does, rendered by OCCT, and writes nothing
-but the PNG. Its options say how the picture is drawn: camera, display, grid, Preview,
-pose and size. It shows arrangement and appearance, not dimensions
+but the PNG. Its options say how the picture is drawn: camera (`--camera top`), display,
+grid, Preview, pose (`--pose open`) and size. It shows arrangement and appearance, not dimensions
 ([snapshots](references/snapshot-review.md)).
 
 ## Prompt references and inspection
@@ -185,7 +196,7 @@ in a document by the engine's own names: the document (a model's id, or a file's
 absolute path), `#`, a part or an assembly by the labels on its way from the root
 (`hand/finger.2` is the second component labelled `finger` in `hand`), then, after a
 slash, one element by its name (`f:`, `e:`, `v:`) or its number (`face 7`). The CAD
-viewer copies them. Resolve one with `cadgen inspect`:
+viewer copies them. When a prompt names one, resolve it with `cadgen inspect`:
 
 ```bash
 cadgen inspect "$ID" "bracket/face 7"
@@ -211,8 +222,8 @@ cadgen snapshot "$ID" tmp/quick_edit.png --annotation tmp/bracket.snapshot.json 
 ```
 
 Inspect supplied annotations before editing. Without annotations, the captured view is
-optional context; render it when useful to the request. After editing, run the script
-and draw it again to check the change
+optional context; render it when useful to the request. After editing, run the script and
+report its line: the person's viewer shows the change
 ([annotations and Quick Edit views](references/snapshot-review.md#annotations-and-quick-edit-views)).
 
 A reference into a file that is not a document names what the viewer picked in it, in
@@ -228,14 +239,15 @@ that file's own terms (none is a ref `cadgen inspect` resolves):
 ## Check the design
 
 A check is a Python script that calls the model and measures what it returns, so it
-tests the model as it is now:
+tests the model as it is now. Write one only when the person asks for a dimension, a fit
+or a mass, or when the change is numeric and the number matters ([Pictures](#pictures)):
 
 ```python
 from cadgen.geometry import closest_points
 
 from assembly import assembly
 
-kit = assembly()                                    # rebuilt (replayed), returned as a tree
+kit = assembly().shape                              # rebuilt (replayed), returned as a tree
 parts = {part.label: part for part in kit.leaves}   # every placed part, world coordinates
 plate, post = parts["plate"], parts["standoff_left"]
 print(plate.bounding_box().size)              # the envelope: not a hole's diameter or a wall's thickness
@@ -249,8 +261,8 @@ print(closest_points(plate, post).distance)   # 0: the standoff sits on the plat
   ([measurements](references/inspection-and-validation.md#measurements)).
 - `cadgen inspect "$ID" assembly` weighs an assembly: each part's volume times its
   material's density, and the parts that have no material.
-- A snapshot is diagnostic, not proof: turn each visual concern into a measurement
-  before reporting it as checked.
+- A snapshot shows arrangement, not dimensions: a number the person asked for is
+  measured, never read off a picture.
 - A check that fails or cannot decide has shown nothing about the design.
 - A retry that leaves out or shrinks a specified feature (a fillet skipped, a radius
   reduced) builds a different design from the one asked for.
@@ -268,11 +280,14 @@ every assumption or departure from the request.
 ### Show the model
 
 Show the user each model and file you create or change, and any they ask to see.
-Snapshots and validation don't replace this.
+Snapshots and validation don't replace this. Once a viewer is open, the person is looking
+at the model: after an edit, report the run's one line and stop. Never screenshot the
+viewer to confirm your own work.
 
 - If your tools include `cad_show` (your host may prefix it), call it with the model's id
   or the file's absolute path, and follow its description for when to call it again.
-  `cad_view` reads what the user selected; `cad_screenshot` shows you what they see.
+  `cad_view` reads what the user selected; `cad_screenshot` shows you what they see, for
+  when they ask about it.
 - Otherwise give the user the page's link once: a model's page is the `view:` line its
   run prints. For a file, run the CAD Viewer, from any folder:
 

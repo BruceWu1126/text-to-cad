@@ -38,8 +38,8 @@ def bracket():
 @xbf(out="out/frame.xbf")
 @step(out="out/frame.step")
 def frame():
-    left = bracket()
-    right = bracket().moved(bd.Location((0, 20, 0)))
+    left = bracket().shape
+    right = bracket().shape.moved(bd.Location((0, 20, 0)))
     right.label = "right"
     rail = bd.Box(4, 40, 4).moved(bd.Location((WIDTH, 10, 0)))
     rail = paint(rail, rail.faces().sort_by(bd.Axis.Z)[-1], "#ff0000")
@@ -113,8 +113,15 @@ class DecoratorTest(unittest.TestCase):
         self.assertIsInstance(plain, Model)
         self.assertEqual(plain.targets(), [])
         self.assertIs(model(plain), plain)
-        self.assertIs(step("plain.step")(plain), plain)
-        self.assertEqual([kind for kind, _path in plain.targets()], ["step"])
+        with self.assertRaisesRegex(TypeError, "declared by @model and @step: .* drop @model"):
+            step("plain.step")(plain)
+
+        @step("filed.step")
+        def filed():
+            raise AssertionError("decoration must not execute the body")
+
+        self.assertIsInstance(filed, Model)
+        self.assertEqual([kind for kind, _path in filed.targets()], ["step"])
 
 
 class BuildTest(EngineCase):
@@ -273,7 +280,7 @@ class BuildTest(EngineCase):
             @xbf("XBF/stand.xbf")
             def stand():
                 part = read_step(BOUGHT).moved(bd.Location((10, 0, 0)))
-                return bd.Compound(children=[holder(), part])
+                return bd.Compound(children=[holder().shape, part])
         """)
         self.assertTrue(self.build("stand")["stand"]["ok"])
         holder = self.build("holder")["holder"]
@@ -323,11 +330,11 @@ def peg():
 
 @xbf("XBF/rig.xbf")
 def rig():
-    left = bracket()
-    right = bracket().moved(bd.Location((0, 20, 0)))
+    left = bracket().shape
+    right = bracket().shape.moved(bd.Location((0, 20, 0)))
     right.label = "right"
     {last}
-    return bd.Compound(children=[left, right, peg()], label="rig")
+    return bd.Compound(children=[left, right, peg().shape], label="rig")
 """
 
 
@@ -440,11 +447,11 @@ def right():
 @xbf("XBF/kit.xbf")
 @step(out="kit.step")
 def kit():
-    one = right().moved(bd.Location((30, 0, 0)))
+    one = right().shape.moved(bd.Location((30, 0, 0)))
     one.label = "one"
-    two = right().moved(bd.Location((0, 30, 0)))
+    two = right().shape.moved(bd.Location((0, 30, 0)))
     two.label = "two"
-    return bd.Compound(children=[left(), one, two], label="kit")
+    return bd.Compound(children=[left().shape, one, two], label="kit")
 """
 
 

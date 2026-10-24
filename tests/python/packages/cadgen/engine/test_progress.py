@@ -128,7 +128,7 @@ class BodiesTest(unittest.TestCase):
 
             @xbf("XBF/hand.xbf")
             def hand():
-                return bd.Compound(children=[palm(), finger(0), finger(1)], label="hand")
+                return bd.Compound(children=[palm().shape, finger(0), finger(1)], label="hand")
         """), encoding="utf-8")
         here = Path.cwd()
         os.chdir(folder)
@@ -161,7 +161,7 @@ class StagesTest(unittest.TestCase):
             @xbf("XBF/kit.xbf")
             @step("kit.step")
             def kit():
-                return bd.Compound(children=[bd.Box(4, 4, 1), bd.Pos(0, 0, 2) * peg()], label="kit")
+                return bd.Compound(children=[bd.Box(4, 4, 1), bd.Pos(0, 0, 2) * peg().shape], label="kit")
         """), encoding="utf-8")
         here = Path.cwd()
         os.chdir(folder)

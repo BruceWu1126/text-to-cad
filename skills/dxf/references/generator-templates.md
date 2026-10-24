@@ -122,7 +122,7 @@ unions the result:
 ```python
 @model
 def drawing():
-    part = bracket()
+    part = bracket().shape
     faces = [
         *flatten.planar_faces(part, normal_axis="z", normal_sign=1.0,
                               coordinate_axis="z", coordinate=3.0),

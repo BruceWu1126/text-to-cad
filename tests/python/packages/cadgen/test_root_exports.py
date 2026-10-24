@@ -13,6 +13,7 @@ import sys
 import unittest
 
 import cadgen
+import cadgen.engine.model
 
 HEAVY = ("OCP", "build123d")
 
@@ -82,6 +83,21 @@ class RootExports(unittest.TestCase):
                 with self.subTest(name=f"{namespace}.{name}"):
                     self.assertIs(getattr(module, name), getattr(defined[name], name))
                     self.assertFalse(hasattr(cadgen, name), f"{name} is {namespace}'s, not the root's")
+
+    def test_model_declares_a_function_or_hands_a_shape_over_and_a_decorator_takes_its_path(self):
+        """``model`` is one name of two forms: a decorator (``@model``, ``@model(store=, key=)``) and the
+        shape form (``model(shape, name=, key=, animations=)``); a file decorator takes its path, its
+        store and its key. No ``id=``: an id is derived, or a key's."""
+        import inspect
+
+        parameters = inspect.signature(cadgen.engine.model.model).parameters
+        self.assertEqual([(name, p.kind) for name, p in parameters.items()], [
+            ("target", inspect.Parameter.POSITIONAL_ONLY), ("store", inspect.Parameter.KEYWORD_ONLY),
+            ("key", inspect.Parameter.KEYWORD_ONLY), ("name", inspect.Parameter.KEYWORD_ONLY),
+            ("animations", inspect.Parameter.KEYWORD_ONLY)])
+        for kind in ("xbf", "step", "glb", "stl", "threemf", "dxf"):
+            with self.subTest(kind=kind):
+                self.assertEqual(list(inspect.signature(getattr(cadgen, kind)).parameters), ["out", "store", "key"])
 
     def test_a_name_the_root_never_had_is_pythons_own_error(self):
         # No backwards compatibility: a retired name is no name, and says nothing about history.

@@ -80,6 +80,20 @@ class RecentStoreTest(unittest.TestCase):
         store.remove(ident)
         self.assertEqual((store.list(), Registry(self.tmp).get(ident)), ([], None))
 
+    def test_a_shape_handed_over_from_a_folder_is_present_and_says_what_it_is(self) -> None:
+        from cadgen.engine.ids import derived_id
+
+        ident, built = derived_id(self.tmp, "plate"), time.time() - 60
+        Registry(self.tmp).put({"id": ident, "kind": "model", "store": "shape", "root": str(self.tmp), "home": ".",
+                                "entry": "plate", "label": "plate", "run": [], "built": built,
+                                "shown": "a shape handed over from a Python session the engine did not run: no script "
+                                         "to rerun, and no command builds it again"})
+        [entry] = [recent.public() for recent in RecentStore(self.tmp).list()]
+        self.assertEqual((entry["id"], entry["missing"], entry["rebuild"], entry["store"], entry["modified"]),
+                         (ident, False, None, "shape", built), "a folder home is where it came from, not a lost file")
+        self.assertIn("a shape handed over", entry["shown"])
+        self.assertIn("no script to rerun", entry["shown"])
+
     def test_two_processes_write_at_once_and_a_record_it_cannot_read_is_skipped(self) -> None:
         code = "import sys\nfrom cadgen.viewer.recents import RecentStore\nstore = RecentStore(__import__('pathlib').Path(sys.argv[1]))\n" \
                "for index in range(120):\n    store.opened(f'/{sys.argv[2]}/{index}.stl')\n"

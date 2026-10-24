@@ -284,8 +284,7 @@ def again(record: dict[str, Any], model: Any, folder: Path, modules: dict[str, s
 
 def located(record: dict[str, Any], folder: Path) -> dict[str, Any]:
     """What a build's report says of its closure (``record``, its paths relative to ``folder``):
-    its key, and its modules and inputs by absolute path -- what the engine's registry records and
-    a copied document's bundle copies."""
+    its key, and its modules and inputs by absolute path -- what the engine's registry records."""
     inputs = []
     for row in record.get("inputs") or []:
         row = list(row)

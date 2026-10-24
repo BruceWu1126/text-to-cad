@@ -105,6 +105,11 @@ class Recent:
     name: str | None = None
     script: str | None = None
     rebuild: str | None = None
+    # A shape handed over (``store: "shape"``): its home is the script or the folder it was handed
+    # over from, nothing builds it again, and ``shown`` says so; ``built`` is when it was handed over.
+    store: str | None = None
+    shown: str | None = None
+    built: float | None = None
 
     def public(self) -> dict[str, Any]:
         on_disk = self.script if self.kind == "model" else self.path
@@ -113,13 +118,20 @@ class Recent:
         except OSError:
             status = None
         exists = status is not None and stat.S_ISREG(status.st_mode)
+        shape = self.kind == "model" and self.store == "shape"
+        if shape:
+            # Its document is the engine's, not its home's: a folder home (a REPL's) is where it came
+            # from, and nothing of it goes missing (``registry.detached``).
+            exists = True
+            status = status if status is not None and stat.S_ISREG(status.st_mode) else None
         found = {
             "path": self.path,
             "name": self.name or os.path.basename(self.path),
             "folder": os.path.dirname(on_disk or ""),
             "opened": self.opened,
             # When the file (a model's script) last changed, in seconds, for "Edited 16h ago"; None once it is gone.
-            "modified": status.st_mtime if exists else None,
+            "modified": (status.st_mtime if status is not None else self.built) if shape else
+            status.st_mtime if exists else None,
             "pinned": self.pinned,
             # A file that is gone, or a model whose script is (``detached``): listed, and removable.
             "missing": not exists,
@@ -128,6 +140,8 @@ class Recent:
         }
         if self.kind == "model":
             found.update(kind="model", id=self.path, script=self.script, rebuild=self.rebuild)
+        if shape:
+            found.update(store="shape", shown=self.shown or "a shape handed over: no script to rerun")
         return found
 
 
@@ -163,7 +177,7 @@ class RecentStore:
         self._change(path, lambda record: {**record, "pinned": bool(pinned)})
 
     def remove(self, path: str) -> None:
-        """Forget an entry: its record, and a copied model's bundle with it."""
+        """Forget an entry: its record."""
         self.registry.delete(self._ident(path))
 
     def thumbnail(self, path: str, png: bytes) -> str:
@@ -207,6 +221,7 @@ class RecentStore:
                 entries.append(Recent(path=record["id"], kind="model", name=record.get("label") or record.get("entry"),
                                       script=str(registering.home(self.registry, record)),
                                       rebuild=registering.command(self.registry, record),
+                                      store=record.get("store"), shown=record.get("shown"), built=record.get("built"),
                                       opened=float(max(record.get("opened") or 0, record.get("built") or 0)), **common))
         ordered = sorted(entries, key=lambda entry: (not entry.pinned, -entry.opened))
         return ordered[:LIMIT]

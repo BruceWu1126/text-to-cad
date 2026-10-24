@@ -3,6 +3,10 @@
 Read this file when resolving a reference, measuring a model, checking clearances or
 contact, or diagnosing geometry.
 
+This is the catalogue of what exists. Write a check only when the person asks for a dimension, a
+fit or a mass, or the change is numeric and the number matters; run `cadgen inspect` only when a
+prompt names a reference ([Pictures](../SKILL.md#pictures)).
+
 ## Contents
 
 - [Opening geometry](#opening-geometry)
@@ -23,7 +27,7 @@ import build123d as bd
 
 from kit import kit
 
-doc = kit()                                           # the model, as a build123d tree
+doc = kit().shape                                     # the model, as a build123d tree
 for part in doc.leaves:                               # every placed part, world coordinates
     print(part.label, part.volume)
 
@@ -33,7 +37,7 @@ top = fingers[1].faces().sort_by(bd.Axis.Z)[-1]                         # build1
 ```
 
 - Calling a model from a plain script builds it in the engine (a replay when nothing
-  changed) and returns a build123d compound tree: each assembly a `Compound` of its
+  changed) and returns its document, whose `.shape` is a build123d compound tree: each assembly a `Compound` of its
   components, each part named, coloured and given its material, in world coordinates.
   `read_xbf(path)` and `read_step(path)` read a file into the same tree. Walk it by labels
   (`children`, `descendants`, `leaves`) and select within a part with build123d
@@ -136,7 +140,7 @@ from plate import plate
 
 @model
 def bracket():
-    base = plate()
+    base = plate().shape
     top = base.faces().sort_by(bd.Axis.Z)[-1]                 # the face the person picked: the top
     return base + bd.Pos(top.center(bd.CenterOf.MASS)) * bd.Cylinder(4, 10)
 ```
