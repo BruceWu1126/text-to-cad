@@ -15,6 +15,14 @@ __pycache__/
 htmlcov/
 .python-version
 
+# Local secrets: environment files, keys and certificates are never committed (an example
+# file that names the variables, with no values, is).
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
 # Local environments and caches
 .venv
 .cache
