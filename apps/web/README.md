@@ -131,9 +131,12 @@ header. Every route, including documents, requires it. The loopback Host check,
 cross-site POST guard and raw-file response headers remain. Binding `--host`
 off loopback exposes these same authenticated routes; anyone with the token has
 local-file access. Keep the URL private. Vite remains on its own strict port, 5173.
-A refused navigation (a tab reloaded after its engine stopped, or under a newer one) is answered
-403 with a static page of a few lines, no script and no asset, saying the link no longer works
-and that opening the viewer again (from the agent, or `cadgen viewer`) gives a fresh one. A
+A refused navigation is answered 403 with a static page of a few lines, no script and no asset.
+One that carried a token this engine never issued (a tab reloaded after its engine stopped, or
+under a newer one) says the link no longer works and that opening the viewer again (from the
+agent, or `cadgen viewer`) gives a fresh one. One that carried no token (the page's address without
+its `?token=`, or a fetch that kept no cookie) says the engine is running and the page must be
+opened in a browser from the whole link the agent gave. A
 loaded page whose engine stops under it says the engine is not running, in the person's
 language, over the page until a read answers again.
 

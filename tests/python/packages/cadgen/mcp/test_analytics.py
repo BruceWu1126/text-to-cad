@@ -22,8 +22,8 @@ from unittest import mock
 
 from cadgen import cli
 from cadgen._internal import channel as install_channel
-from cadgen.analytics import (KEPT, NOTICE_ENV, NOTICE_TEXT, PRIVACY_URL, Recorder, _post, choose, forget_pending,
-                              notify, status)
+from cadgen.analytics import (KEPT, NOTICE_ENV, PRIVACY_URL, Recorder, _post, choose, forget_pending,
+                              notice_text, notify, status)
 from cadgen.cli import telemetry as telemetry_cli
 from cadgen.mcp.shim import initialize_params
 from cadgen.mcp.protocol import RequestContext, RpcError
@@ -707,7 +707,7 @@ class NoticeTest(_Tmp):
         said = io.StringIO()
         self.assertTrue(notify(said, path=self.path))
         self.assertFalse(notify(said, path=self.path))  # once
-        self.assertEqual(said.getvalue(), NOTICE_TEXT + "\n")
+        self.assertEqual(said.getvalue(), notice_text() + "\n")
         found = status(path=self.path)
         self.assertEqual((found["sharing"], found["reason"]), (True, "default"))
         # A choice, either way, keeps when it was said: a yes to less than is sent later falls back to the default.
@@ -716,6 +716,28 @@ class NoticeTest(_Tmp):
             self.assertEqual(status(path=self.path)["reason"], "default")
         choose(False, by="cli", path=self.path, forget=lambda id: True)
         self.assertIn("notifiedAt", json.loads(self.path.read_text(encoding="utf-8"))["telemetry"])
+
+    def test_its_off_command_runs_the_installation_that_said_it_when_pasted(self) -> None:
+        from cadgen import __version__
+        from cadgen.analytics import off_command
+
+        script = self.tmp / "bin" / ("cadgen.exe" if os.name == "nt" else "cadgen")
+        script.parent.mkdir()
+        script.write_text("#!/bin/sh\n", encoding="utf-8")
+        script.chmod(0o755)
+        # uvx made it: the plugin's own pinned line, which reuses this installation.
+        with mock.patch("sys.prefix", str(self.tmp / "uv" / "archive-v0" / "abc")):
+            self.assertEqual(off_command(), "uvx --no-config --managed-python --python 3.13 "
+                                            f"--from cadgen=={__version__} cadgen telemetry off")
+        # The cadgen on PATH is the one that runs; one off PATH is named by its path.
+        with mock.patch("sys.argv", [str(script)]):
+            with mock.patch.dict("os.environ", {"PATH": str(script.parent)}):
+                self.assertEqual(off_command(), "cadgen telemetry off")
+            with mock.patch.dict("os.environ", {"PATH": str(self.tmp)}):
+                self.assertEqual(off_command(), f"{script.resolve()} telemetry off")
+        with mock.patch("sys.argv", ["/x/cadgen/cli/__main__.py"]), mock.patch("sys.executable", "/venv/bin/python"):
+            self.assertEqual(off_command(), "/venv/bin/python -m cadgen.cli telemetry off")
+        self.assertIn(f"Turn off: {off_command()} · {PRIVACY_URL}", notice_text())
 
     def test_a_larger_default_is_said_again_before_it_is_sent(self) -> None:
         notify(io.StringIO(), path=self.path)
@@ -752,7 +774,7 @@ class NoticeTest(_Tmp):
         with mock.patch.dict("os.environ", {"CADGEN_STATE_DIR": str(self.tmp)}), \
                 mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
             self.assertEqual(telemetry_cli.main([]), 0)
-        self.assertEqual(err.getvalue(), NOTICE_TEXT + "\n")
+        self.assertEqual(err.getvalue(), notice_text() + "\n")
         self.assertRegex(out.getvalue(), r"^Telemetry is on: by default, since cadgen said so on \d{4}-\d{2}-\d{2}\.\n")
 
 

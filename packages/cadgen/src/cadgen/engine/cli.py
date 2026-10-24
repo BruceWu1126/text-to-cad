@@ -67,13 +67,14 @@ def _inspect_arguments(parser: argparse.ArgumentParser) -> None:
                              "geometry (requires REF), or build metadata; never builds a model")
     parser.add_argument("--json", action="store_true",
                         help="without REF, the summary and the closure as one JSON object (a REF's answer is JSON)")
-    parser.add_argument("document", help="an .xbf, a STEP, or a document id")
+    parser.add_argument("document", help="an .xbf, a STEP, or a document id; a GLB says its nodes, meshes and "
+                                          "animations")
     parser.add_argument("ref", nargs="?", help="[FILE#][OWNER/]ELEMENT or [FILE#]OWNER (cadgen.engine.refs): OWNER a "
                                                "part's or an assembly's label, or its occurrence path (hand/finger.2); "
                                                "ELEMENT an element name (f:..., e:..., v:...) or face N (edge, vertex). "
                                                "An element answers what the kernel measures of it, placed where its "
-                                               "occurrence stands, and what made it; a part or an assembly its volume "
-                                               "and mass. Without it: what the document holds (its state, parts, "
+                                               "occurrence stands, and what made it; a part or an assembly its volume, "
+                                               "mass and world bounds, a part its placement. Without it: what the document holds (its state, parts, "
                                                "bounds, volume, materials, joints, states, sequences, animations and "
                                                "declared files), then its build closure")
 
@@ -204,11 +205,19 @@ def _verified(found: dict[str, Any] | None) -> str:
 
 
 def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as_json: bool) -> int:
-    """Each report on stdout, described or as JSON, a failed one's error on stderr; 1 if any failed."""
+    """Each report on stdout, described or as JSON; a failed one's error and the line naming it on
+    stderr, and nothing more of it; 1 if any failed."""
     failed = False
     for report in reports:
         if as_json:
             print(json.dumps({**report, "wall": round(wall, 4)}))
+        elif not report.get("ok"):
+            # The model's frames, once, then the line that names what failed: nothing else.
+            failed = True
+            sys.stdout.flush()
+            print(report.get("error", ""), file=sys.stderr)
+            print(_describe(report, wall, fresh), file=sys.stderr)
+            continue
         else:
             print(_describe(report, wall, fresh))
             if report.get("profile"):
@@ -225,6 +234,45 @@ def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as
             failed = True
             print(report.get("error", ""), file=sys.stderr)
     return 1 if failed else 0
+
+
+def told_state(source: Any, doing: str) -> None:
+    """A model document read by its id, said once on stderr once a verb has read it, when it is not
+    what its code makes now: its last run failed, so the previous good build is read, or its code
+    changed since it was built (``stale``). Both from what the engine reports of it (``model_info``);
+    the verb goes on: a notice, never a refusal, and nothing reruns."""
+    from cadgen.engine.ids import is_id
+
+    ident = os.fspath(source).partition("#")[0]
+    if not is_id(ident):
+        return
+    from cadgen.engine.client import request
+
+    try:
+        model = (request({"op": "model_info", "id": ident}, start=False) or {}).get("model")
+    except (OSError, ValueError):
+        return
+    words = state_notice(model, doing) if isinstance(model, dict) else None
+    if words:
+        print(words, file=sys.stderr)
+
+
+def state_notice(model: dict[str, Any], doing: str) -> str | None:
+    """The words ``told_state`` says of a model document (``model_info``'s record), or None when it
+    is what its code makes now."""
+    import shlex
+
+    name = (model.get("source") or {}).get("name") or model.get("id")
+    if model.get("state") == "failed":
+        program = model.get("program") or (model.get("source") or {}).get("script")
+        fix = f"; fix it and run `python {shlex.quote(str(program))}` to update it" if program else ""
+        return f"the last run of {name} failed; {doing} its previous good build{fix}"
+    stale = model.get("stale")
+    if stale:
+        changed = " and ".join(text.replace(" is missing", " went missing") for text in stale.get("changes") or [])
+        return (f"{doing} the build of {name} from before {changed or 'its code changed'}; "
+                f"run `{stale['rebuild']}` to update it")
+    return None
 
 
 def _log(text: str) -> None:
@@ -246,6 +294,7 @@ def _export(args: argparse.Namespace, prog: str) -> int:
         raise Failed(str(error), 2) from None
     except api.EngineError as error:
         raise Failed(str(error)) from None
+    told_state(args.source, "exporting")
     if args.json:
         print(json.dumps({"ok": True, "source": str(key(args.source)),
                           "files": [{"path": str(row.path), "kind": row.kind, "bytes": row.bytes, "seconds": row.seconds}
@@ -324,20 +373,28 @@ def _inspect(args: argparse.Namespace, prog: str) -> int:
         raise Failed(str(error), 2) from None
     except api.EngineError as error:
         raise Failed(str(error)) from None
-    if query == "summary" and not args.json:
+    told_state(args.document, "inspecting")
+    if "mesh" in found and not args.json:
+        mesh = found["mesh"]
+        print(f"{mesh['name']}  a mesh (GLB)")
+        print(f"nodes       {mesh['nodes']}")
+        print(f"meshes      {mesh['meshes']}")
+        rows = [f"{row['name']}  {_number(row['duration'])} s" for row in mesh["animations"]]
+        print("animations" + "".join(f"\n  {row}" for row in rows) if rows else "animations  none")
+        print("closure     none: a mesh carries none, only an .xbf does")
+    elif query == "summary" and not args.json:
         print(summary_text(found["summary"]))
-        if found["closure"] is None:
+        path = Path(str(found["summary"]["state"].get("path") or ""))
+        if found["closure"] is None and path.suffix.lower() in (".step", ".stp"):
+            print("closure     none: a STEP file carries none, only an .xbf does (a model's document, inspected by its "
+                  "id, has one)")
+        elif found["closure"] is None:
             print("closure     none: no cadgen build wrote this document")
         else:
             print("closure")
             print(json.dumps(found["closure"], indent=2))
     else:
         print(json.dumps(found, indent=2))
-    if query == "summary":
-        found = found["closure"] or {}
-    stale = found.get("stale") or ((found.get("live") or {}).get("stale")) if isinstance(found, dict) else None
-    if stale:  # the last built state, said beside the answer: nothing reran
-        print(stale["text"], file=sys.stderr)
     return 0
 
 
@@ -570,6 +627,10 @@ def status_text(answer: dict[str, Any]) -> str:
                 line += f"  run `{row['rebuild']}`" + (" (kept in memory only)" if row.get("store") == "memory" else "")
             elif row.get("store") == "shape":
                 line += "  a shape handed over: no script to rerun"
+            if row.get("state") == "failed":
+                line += "  serving its previous good build"
+            elif row.get("stale"):
+                line += f"  stale: run `{row['stale']['rebuild']}`"
             lines.append(line)
     return "\n".join(lines)
 

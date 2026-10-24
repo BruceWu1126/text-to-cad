@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from cadgen.viewer.engine_app import LINK_GONE_PAGE
+from cadgen.viewer.engine_app import LINK_GONE_PAGE, TOKEN_NEEDED_PAGE
 from tests.python.support import engine_daemon
 
 
@@ -110,11 +110,20 @@ class LauncherTest(unittest.TestCase):
         for route in ('/', '/assets/app.js', '/__cad/server', '/api/docs', '/__cad/api/docs', '/mcp'):
             self.assertEqual(self.get(launch, route, token=False)[0], 403, route)
             self.assertEqual(self.get(launch, route, headers={'Host': 'evil.example'})[0], 403, route)
-        # A navigation without the token is refused too, with a static page saying the link is gone
-        # (no script, no asset), never the raw JSON.
+        # A navigation without the token is refused too, with a static page (no script, no asset),
+        # never the raw JSON: one with no token at all needs its link, opened in a browser; one with
+        # a token this engine never issued (its link's, or the cookie of an engine on this port
+        # before) has an engine that was restarted or stopped.
         status, headers, body = self.get(launch, '/', token=False, headers={'Sec-Fetch-Dest': 'document'})
-        self.assertEqual((status, headers['content-type'], body), (403, 'text/html; charset=utf-8', LINK_GONE_PAGE))
-        self.assertNotIn(b'<script', body)
+        self.assertEqual((status, headers['content-type'], body), (403, 'text/html; charset=utf-8', TOKEN_NEEDED_PAGE))
+        self.assertIn(b'The engine is running, but this request carried no token', body)
+        for gone in ({'Sec-Fetch-Dest': 'document'}, {'Sec-Fetch-Dest': 'document',
+                                                     'Cookie': f"cadgen-engine-{launch['port']}=gone"}):
+            path = '/?token=gone' if 'Cookie' not in gone else '/'
+            status, headers, body = self.get(launch, path, token=False, headers=gone)
+            self.assertEqual((status, body), (403, LINK_GONE_PAGE), gone)
+        for body in (TOKEN_NEEDED_PAGE, LINK_GONE_PAGE):
+            self.assertNotIn(b'<script', body)
         status, headers, _ = self.get(launch, urlsplit(launch['url']).path+'?token='+launch['token'], token=False)
         self.assertEqual(status, 302)
         self.assertIn('HttpOnly', headers['set-cookie'])

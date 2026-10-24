@@ -601,14 +601,15 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
     measures of it -- its points placed where its occurrence stands, in the document's frame --
     with its canonical ``ref``, its occurrence's ``path`` and ``made_by``; a part or an assembly
     its volume and its mass: each part's volume times its material's density, summed
-    (``cli.weighed``). One answer per selector (a list for several). Without ``ref``, the build
+    (``cli.weighed``), its world bounds and a part's placement (``_placed``). One answer per selector (a list for several). Without ``ref``, the build
     closure the xbf holds (``previous``): its engine, libraries, source, modules, inputs and
     key, read from the file alone. A ref that names nothing, or several things, is refused by
     name (``refs.RefError``). No query builds a missing model or writes its declared
     outputs. ``query="build"`` returns file metadata/closure or live build metadata;
     ``query="geometry"`` requires a ref, and ``query="closure"`` accepts none.
     ``query="summary"`` (``cadgen inspect DOC`` with no ref) is ``{"summary", "closure"}``:
-    what the document holds at a glance (``_summary``), and its closure, as the engine holds it."""
+    what the document holds at a glance (``_summary``), and its closure, as the engine holds it; of
+    a GLB, ``{"mesh"}``: its nodes, meshes and animations, from its JSON alone (``_mesh``)."""
     from cadgen.engine import refs
     from cadgen.engine.cli import weighed
 
@@ -624,6 +625,9 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
         raise EngineError("query is closure, geometry, build or summary")
     if (query == "geometry") != (ref is not None):
         raise EngineError("only a geometry query requires a reference")
+    mesh = key(os.fspath(source))
+    if isinstance(mesh, Path) and mesh.suffix.lower() in (".glb", ".stl", ".3mf"):
+        return _mesh(mesh, named, query)
     path = _document(source, "inspect", named)
     if query == "build":
         if not isinstance(path, Path):
@@ -640,6 +644,8 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
     if ref is None and isinstance(path, Path) and query == "closure":
         from cadgen.engine import previous
 
+        if path.suffix.lower() in (".step", ".stp"):
+            raise EngineError(_no_closure(path))
         writer, found = previous.scan(path)
         if found is None:
             raise EngineError(f"{path.name} holds no build closure"
@@ -673,12 +679,14 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
         return {**structure["closure"], "stale": structure["stale"]} if structure.get("stale") else structure["closure"]
     found: list[Facts] = []
     volumes: dict[str, float] = {}
+    boxes: dict[str, Any] = {}
     for hit in refs.resolve_structure(structure, ref, path):
         if hit.kind is None:
             for key in sorted({structure["prototypes"][node.payload["prototype"]]["key"] for node in hit.node.parts()}):
                 if key not in volumes:
-                    volumes[key] = get(f"/part/{key}/volume")["volume"]
-            found.append(weighed(structure, hit, volumes))
+                    measured = get(f"/part/{key}/volume")
+                    volumes[key], boxes[key] = measured["volume"], measured.get("box")
+            found.append({**weighed(structure, hit, volumes), **_placed(structure, hit, boxes)})
             continue
         prototype = structure["prototypes"][hit.node.payload["prototype"]]
         matrix = structure["instances"][hit.node.payload["instance"]]["matrix"]
@@ -690,6 +698,68 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
                       "key": prototype["key"], "kind": hit.kind, "ordinal": hit.ordinal, "name": hit.name,
                       **refs.placed_facts(facts, matrix)})
     return found[0] if len(found) == 1 else found
+
+
+def _mesh(path: Path, named: str, query: str) -> Facts:
+    """``inspect`` of a mesh file: a GLB's nodes, meshes and animations, each with its duration, read
+    from its JSON alone (``{"mesh": ...}``, without a ref); an STL's or a 3MF's, and any ref or
+    closure of a mesh, refused in words. A mesh has no B-rep, so no ref names a face of it, and no
+    build closure: only an .xbf carries one."""
+    if not path.is_file():
+        raise ValueError(f"no document {named}")
+    if query != "summary" or path.suffix.lower() != ".glb":
+        said = (f"`cadgen inspect {path.name}` alone tells its nodes, meshes and animations, and "
+                f"`cadgen viewer {path.name}` shows it" if path.suffix.lower() == ".glb" else
+                f"inspect reads nothing more of it: `cadgen viewer {path.name}` shows it, and the document it was "
+                "exported from, inspected, tells the rest")
+        raise ValueError(f"{path.name} is a mesh: it has no B-rep for a ref to name and no build closure (only an "
+                         f".xbf carries one); {said}")
+    from cadgen.engine.formats.gltf import _chunks
+
+    gltf, _binary = _chunks(path)
+    accessors = gltf.get("accessors") or []
+    animations = []
+    for at, animation in enumerate(gltf.get("animations") or []):
+        ends = [(accessors[sampler["input"]].get("max") or [0.0])[0] for sampler in animation.get("samplers") or []
+                if isinstance(sampler, dict) and isinstance(sampler.get("input"), int) and sampler["input"] < len(accessors)]
+        animations.append({"name": animation.get("name") or f"animation {at + 1}",
+                           "duration": float(max(ends, default=0.0))})
+    return {"mesh": {"name": path.name, "path": str(path), "nodes": len(gltf.get("nodes") or []),
+                     "meshes": len(gltf.get("meshes") or []), "animations": animations}}
+
+
+def _placed(structure: dict[str, Any], hit: Any, boxes: dict[str, Any]) -> dict[str, Any]:
+    """Where the occurrence a ref names stands, in the document's frame: its world ``bounds`` (each
+    part's box, as the engine measured it, placed where its occurrence stands; None with no
+    geometry), and for a part its ``placement`` -- the origin and axes of its instance's matrix, as
+    the structure holds it (an assembly's own placement the structure does not hold). Nothing is built or measured again."""
+    from cadgen.engine.refs import placed_facts
+
+    def clean(values: list[float]) -> list[float]:
+        return [round(value, 9) + 0.0 for value in values]
+
+    low, high = [math.inf] * 3, [-math.inf] * 3
+    nodes = hit.node.parts()
+    for node in nodes:
+        instance = structure["instances"][node.payload["instance"]]
+        box = boxes.get(structure["prototypes"][instance["prototype"]]["key"])
+        if box:
+            box = placed_facts({"box": box}, instance["matrix"])["box"]
+            low = [min(a, b) for a, b in zip(low, box["min"])]
+            high = [max(a, b) for a, b in zip(high, box["max"])]
+    found: dict[str, Any] = {"bounds": None if low[0] == math.inf else
+                             {"min": clean(low), "max": clean(high), "size": clean([b - a for a, b in zip(low, high)])}}
+    if hit.node.part:
+        m = structure["instances"][hit.node.payload["instance"]]["matrix"]
+        found["placement"] = {"origin": clean(m[12:15]), "x": clean(m[0:3]), "y": clean(m[4:7]), "z": clean(m[8:11])}
+    return found
+
+
+def _no_closure(path: Path) -> str:
+    """Why a STEP holds no build closure: the format carries none (an xbf does, law 1), whoever wrote
+    it -- cadgen's own export among them -- and what to inspect instead."""
+    return (f"{path.name} holds no build closure: a STEP file carries none, only an .xbf does; inspect the model's "
+            f"document by its id for its closure, or name a ref in the file (cadgen inspect {path.name} REF)")
 
 
 def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], Any], ident: str) -> dict[str, Any]:

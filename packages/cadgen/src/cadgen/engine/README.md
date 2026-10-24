@@ -401,7 +401,10 @@ cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
                                              every picture a Quick Edit packet (or a job file) names
 cadgen serve DOC [--port N] [--three DIR]
 cadgen inspect DOC [REF] [--json]              what the document holds, then its build closure; with REF (**References**): an element's facts and
-                                             what made it, or a part's or an assembly's volume and mass
+                                             what made it, or a part's or an assembly's volume, mass and
+                                             world bounds (a part's placement too); of a GLB, its nodes,
+                                             meshes and animations (an STL or a 3MF, and a ref into any
+                                             mesh, is refused, saying what shows it)
 cadgen status [--json] | stop [--json] | server
 ```
 
@@ -467,7 +470,10 @@ Nor does the day: the creation date the BinXCAF driver writes in the file's
 header is always `01/01/2000` (`document.WRITTEN_DATE`, put over the driver's in
 place), so two cold builds of the same code are the same bytes on any day.
 If a body raises, the error is reported with the model's frames and the
-previous files stay. Builds run in the daemon's warm workers, at most one per core alive
+previous files stay: the program's own call prints those frames once on stderr, then `failed
+<script>::<model>`, and nothing else; the call still raises (`EngineError`), so a caller may catch
+it, and left uncaught it ends the program with status 1 without its traceback again
+(`model._told`). Builds run in the daemon's warm workers, at most one per core alive
 (**The engine server and its workers**). `CADGEN_ENGINE_DIR` moves its door and lock; the client and the server resolve it alike (`daemon.state_dir`: a `..`, a symlink or a trailing slash names the same folder). On POSIX the folder must be the user's own and closed to writing by anyone else (`daemon.folder_refusal`): whoever owns or can write the folder could take the door's place, so a client refuses to connect or start there and the daemon refuses to lock there, saying why.
 `CADGEN_ENGINE_MEMORY_MB` sets the server's memory budget, and `CADGEN_ENGINE_CACHE_GB` the
 document cache's size (`0`: no cache; `CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, is the tests'
@@ -800,11 +806,18 @@ record says, is not cached.
 
 **Staleness.** `read` is what the build read, with digests: the script and each module its model
 reached (each file's bytes, SHA-256, as the build answered) and each file its bodies read (the
-closure's own digests). On a page's open, `cadgen inspect` and `cad_show` of a document no worker
-holds, the engine compares them with the files now (`Models.stale`): unchanged, the page shows the
+closure's own digests). On a page's open, a verb's read, `status` and `cad_show` of a document,
+whether or not a worker holds it, the engine compares them with the files now (`Models.stale`; a
+file's digest is kept by its size and mtime, so an unchanged file is not read again): unchanged, the page shows the
 current model; changed, it shows the last built state, with a badge -- "The code changed since this
-was built" and the rebuild command -- and `inspect` says the same words (`stale` in its answer, the
-sentence on stderr). Nothing reruns. A font is named by a family, not checked.
+was built" and the rebuild command -- and `inspect` answers `stale`. Nothing reruns. Every verb
+that reads a document by its id (`export`, `snapshot`, `inspect`, with a ref or without) says once
+on stderr what it reads when that is not what the code makes now (`cli.told_state`, from
+`model_info`): "exporting the build of turbine from before turbine.py changed; run `python
+…/turbine.py` to update it", or, for a document whose last run failed, "the last run of turbine
+failed; exporting its previous good build; fix it and run `python …/turbine.py` to update it". It
+goes on: a notice, never a refusal. `cadgen status` ends such a document's line with the word: stale
+and the command, or "serving its previous good build". A font is named by a family, not checked.
 
 **The bound.** Past `CADGEN_ENGINE_CACHE_GB` (default 4 GB; `0`: no cache at all), the least
 recently used cache files go down to 80 % of it, as 0.7's store did, never one a live worker holds
@@ -2000,7 +2013,9 @@ A ref resolves inside the engine, for `inspect` and the viewer, never in a model
 `cadgen inspect DOC REF` (`cadgen.inspect(source, ref)`) answers what it names, placed where its
 occurrence stands -- an element's kind, ordinal, name and canonical ref, the kernel's facts of it,
 and `made_by`, the feature and the function, file and line of the call that made it; a part's or
-an assembly's volume and mass. A model that changes what a person picked reads that answer and
+an assembly's volume and mass, and its world `bounds` (each part's measured box placed where it
+stands), with a part's `placement`: the origin and the x, y and z axes of its instance's matrix.
+Nothing is built or measured again for them. A model that changes what a person picked reads that answer and
 edits the code `made_by` names, or selects the element from the live shape with build123d
 (`base.faces().sort_by(bd.Axis.Z)[-1]`); a check reads the document with `read_xbf` and walks its
 tree by labels.

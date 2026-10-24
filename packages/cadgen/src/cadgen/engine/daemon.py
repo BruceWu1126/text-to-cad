@@ -1052,9 +1052,9 @@ class Daemon:
                 model["cached"] = (self.models.where(ident) or "").endswith("disk")
                 if model["state"] == "held":
                     model["held"] = self.models.where(ident)
-                    stale = self.models.stale(ident)
-                    if stale:
-                        model["stale"] = stale
+                stale = self.models.stale(ident) if model["state"] in ("live", "held") else None
+                if stale:
+                    model["stale"] = stale
                 lost = self.models.rebuild(ident)
                 if lost is not None:
                     model["rebuild"] = lost["rebuild"]
@@ -1074,7 +1074,7 @@ class Daemon:
             lost = self.models.rebuild(ident)
             state = self.models.state(ident) if lost is None else lost["state"]
             held = {"held": self.models.where(ident)} if state == "held" else {}
-            stale = self.models.stale(ident) if state == "held" else None
+            stale = self.models.stale(ident) if state in ("live", "held") else None
             send({"ok": True, "state": state, **held, **({"stale": stale} if stale else {}),
                   **({"rebuild": lost["rebuild"], "error": lost["error"]} if lost else {})})
             return

@@ -50,6 +50,9 @@ export const pinTargets = [
   "mcp.json",
   "gemini-extension.json",
   "README.md",
+  // The turn-off command the README and the docs site print, the plugin's own launch line.
+  "apps/docs/src/lib/content.ts",
+  "apps/docs/src/app/privacy-policy/page.tsx",
   ...skillLaunchTargets(),
 ];
 
