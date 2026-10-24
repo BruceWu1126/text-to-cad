@@ -1545,6 +1545,36 @@ class Server:
             kind = "text/javascript"
         self.send(handler, 200, path.read_bytes(), kind)
 
+    def read(self, path: str) -> tuple[int, bytes]:
+        """A document read (``GET /api/doc/<id>...``) answered in process, as a page would be
+        answered over HTTP: its status and body. What a client of the daemon asks through its door
+        (``inspect``), so a shell that may not open a loopback socket reads it all the same."""
+        import io
+
+        class Reading:
+            command = "GET"
+            headers: dict[str, str] = {}
+
+            def __init__(self) -> None:
+                self.path = path
+                self.status = 200
+                self.rfile = io.BytesIO()
+                self.wfile = io.BytesIO()
+
+            def send_response(self, status: int) -> None:
+                self.status = status
+
+            def send_header(self, _name: str, _value: str) -> None:
+                pass
+
+            def end_headers(self) -> None:
+                pass
+
+        reading = Reading()
+        self.touch()
+        self.route(reading, "GET")  # type: ignore[arg-type]
+        return reading.status, reading.wfile.getvalue()
+
     def json(self, handler: BaseHTTPRequestHandler, payload: Any) -> None:
         self.send(handler, 200, json.dumps(payload, separators=(",", ":")).encode(), "application/json")
 

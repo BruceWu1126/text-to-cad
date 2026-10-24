@@ -605,7 +605,7 @@ class DaemonRenderTest(unittest.TestCase):
     """`cadgen snapshot` drawn by OCCT through the daemon: a render process per served
     document, warm from its second picture, sent each build's patch with only the parts it
     lacks, gone with the daemon; and in this process with ``daemon=False`` from Python. Nothing is written but
-    the pictures, and the daemon's socket and lock."""
+    the pictures, and the daemon's door, lock and clients' pipes."""
 
     def setUp(self) -> None:
         gl()
@@ -670,7 +670,8 @@ class DaemonRenderTest(unittest.TestCase):
         model = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertEqual((model["renderer"], "process" in model), ("occt", False))
         # The daemon's socket (on Windows the port file standing in for it) and its lock, nothing else.
-        self.assertEqual({path.suffix for path in self.state.iterdir()}, {".port" if os.name == "nt" else ".sock", ".lock"})
+        self.assertEqual({path.suffix or path.name for path in self.state.iterdir()},
+                         {".port", ".lock"} if os.name == "nt" else {".door", ".lock", "clients"})
         self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/pair.xbf", "edited.png", "first.png", "model.png", "pair.py", "warm.png"])
         self.cli("stop")
@@ -691,7 +692,7 @@ class DaemonRenderTest(unittest.TestCase):
         report = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertEqual((report["renderer"], report["exploded"]), ("occt", 0.5))
         self.assertNotIn("process", report)
-        self.assertEqual([path for path in self.state.iterdir() if path.suffix == ".sock"], [], "no daemon started")
+        self.assertEqual([path for path in self.state.iterdir() if path.suffix == ".door"], [], "no daemon started")
 
 
 def _alive(pid: int) -> bool:

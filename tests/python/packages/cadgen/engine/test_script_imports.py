@@ -181,7 +181,7 @@ class PackageScriptRunTest(unittest.TestCase):
     def _stop(self) -> None:
         self.python("-m", "cadgen.engine", "stop")
         deadline = time.monotonic() + 20
-        while any(self.state.glob("*.sock")) and time.monotonic() < deadline:
+        while any(self.state.glob("*.door")) and time.monotonic() < deadline:
             time.sleep(0.05)
         shutil.rmtree(self.root, ignore_errors=True)
         shutil.rmtree(self.state, ignore_errors=True)

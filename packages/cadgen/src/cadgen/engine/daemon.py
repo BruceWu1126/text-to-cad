@@ -24,9 +24,10 @@ first picture, sent every version the document is patched to, gone with the daem
 the workers' idle time, and held to their memory cap; render processes are not workers, and
 do not count toward the cap.
 
-Its only files are the operating system's coordination: a Unix socket and a lock in its own folder,
-``state_dir`` (a socket path past the Unix limit: in ``/tmp/cadgen-<uid>``,
-``socket_path``; on Windows, a localhost TCP port and a token, in a port file there). Requests are one JSON object per line on a connection; answers
+Its only files are the operating system's coordination, in its own folder, ``state_dir``: a lock,
+and on POSIX its door, a named pipe (``door_path``), and the pipes of the connections being opened
+(``door``: no socket, so a sandbox that refuses sockets still reaches it); on Windows a localhost
+TCP port and a token, in a port file there. Requests are one JSON object per line on a connection; answers
 are JSON lines, the last of which carries ``done``, ``failed`` or ``ok``. Before it, a build
 sends its caller its ``{"log"}`` lines and its ``{"progress"}`` frames as its worker sends them
 (``progress.py``); the daemon keeps each busy worker's last frame for ``status``, and wakes the
@@ -55,13 +56,13 @@ from typing import Any, Callable
 from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.ids import canonical, file_id, is_id
 
-__all__ = ["IDLE_SECONDS", "Endpoint", "Pool", "endpoints", "lock", "lock_path", "main", "socket_path", "state_dir",
-           "worker_cap", "worker_idle"]
+__all__ = ["IDLE_SECONDS", "Endpoint", "Pool", "address", "door_path", "endpoints", "failure_path", "lock", "lock_path",
+           "main", "state_dir", "worker_cap", "worker_idle"]
 
 HTTP_FACTORY = None  # optional application supplied by the enclosing distribution
 
 IDLE_SECONDS = 3600.0
-PROTOCOL = 2
+PROTOCOL = 3  # 3: the door (named pipes) in place of the Unix socket
 WINDOWS = os.name == "nt"
 # The retirements ``status`` lists, the latest first.
 RETIRED_KEPT = 12
@@ -89,9 +90,9 @@ def worker_idle(idle: float) -> float:
 
 
 def state_dir() -> Path:
-    """Where the daemon's socket and lock live: ``CADGEN_ENGINE_DIR``, else ``default_state_dir``.
+    """Where the daemon's door and lock live: ``CADGEN_ENGINE_DIR``, else ``default_state_dir``.
     Resolved once, here, for the client and the server alike (``os.path.realpath``): a ``..``, a
-    symlink or a trailing slash in either spelling names the same socket, lock and port file."""
+    symlink or a trailing slash in either spelling names the same door, lock and port file."""
     override = os.environ.get("CADGEN_ENGINE_DIR")
     return Path(os.path.realpath(override if override else default_state_dir()))
 
@@ -148,34 +149,10 @@ def _tag(protocol: int | None = None) -> str:
     return hashlib.sha256(material.encode()).hexdigest()[:12]
 
 
-# A Unix socket's path is at most 104 bytes on macOS and 108 on Linux, its terminator included.
-SOCKET_PATH_LIMIT = 100
-
-
-def socket_path(protocol: int | None = None) -> Path:
-    """The daemon's socket: beside its lock, or -- when that path is past ``SOCKET_PATH_LIMIT``
-    (a long temporary folder or ``CADGEN_ENGINE_DIR``) -- named by its digest in the user's own
-    ``/tmp/cadgen-<uid>`` (``private_folder``). Nothing binds or connects by changing folder: the
-    daemon's threads share one working folder with every request they serve."""
-    path = state_dir() / f"{_tag(protocol)}.sock"
-    if WINDOWS or len(os.fsencode(path)) < SOCKET_PATH_LIMIT:
-        return path
-    return Path("/tmp") / f"cadgen-{os.getuid()}" / f"{hashlib.sha256(os.fsencode(path)).hexdigest()[:16]}.sock"
-
-
-def socket_folder_ok(path: Path) -> bool:
-    """Whether a socket at ``path`` may be bound or connected: one beside the lock is, in an engine
-    folder no one else can change (``folder_refusal``); one in the shared ``/tmp`` only in a folder
-    that is this user's alone (``private_folder``)."""
-    if path.parent == state_dir():
-        return folder_refusal(path.parent) is None
-    return private_folder(path.parent)
-
-
 def folder_refusal(folder: Path) -> str | None:
-    """Why ``folder`` may not hold the engine's socket, lock and port file, or None when it may. On
+    """Why ``folder`` may not hold the engine's door, lock and port file, or None when it may. On
     POSIX it must be a folder of this user's that no one else can write to: whoever owns the folder,
-    or can write to it, can take the socket's place, and every request carries its client's
+    or can write to it, can take the door's place, and every request carries its client's
     environment. (The default folder's name is shared by every user of a machine: another user who
     made it first owns it.)"""
     if WINDOWS:
@@ -197,19 +174,6 @@ def folder_refusal(folder: Path) -> str | None:
     return None
 
 
-def private_folder(folder: Path) -> bool:
-    """Whether ``folder`` (made when missing) is this user's alone: a real folder, not a link, owned
-    by this user and closed to everyone else -- a socket in it can only be this user's daemon."""
-    try:
-        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-        found = os.lstat(folder)
-    except OSError:
-        return False
-    import stat
-
-    return stat.S_ISDIR(found.st_mode) and found.st_uid == os.getuid() and not found.st_mode & 0o077
-
-
 def lock_path(protocol: int | None = None) -> Path:
     return state_dir() / f"{_tag(protocol)}.lock"
 
@@ -218,9 +182,37 @@ def port_path(protocol: int | None = None) -> Path:
     return state_dir() / f"{_tag(protocol)}.port"
 
 
+def door_path(protocol: int | None = None) -> Path:
+    """The daemon's door on POSIX: a named pipe beside its lock, which it reads hellos from
+    (``door``). A pipe's path has no length limit but the file system's."""
+    return state_dir() / f"{_tag(protocol)}.door"
+
+
+def address(protocol: int | None = None) -> Path:
+    """Where a client reaches the daemon: its door, on Windows its port file."""
+    return port_path(protocol) if WINDOWS else door_path(protocol)
+
+
+def failure_path() -> Path:
+    """Why the last daemon started here could not take its lock or listen, as JSON: ``reason``, and
+    ``denied`` when the system refused it (a sandbox that forbids a local port). Its stderr goes
+    nowhere, so this is what the client that started it reads when it exits at once."""
+    return state_dir() / f"{_tag()}.failed"
+
+
+def _note_failure(reason: str, error: OSError) -> None:
+    said = f"{reason}: {error.strerror or error}"
+    print(f"cadgen: {said}", file=sys.stderr)  # ``cadgen server``'s terminal; nowhere when started for a client
+    try:
+        failure_path().write_text(json.dumps({"reason": said, "denied": isinstance(error, PermissionError)}),
+                                  encoding="utf-8")
+    except OSError:
+        pass  # a folder it cannot write either: the client says the daemon exited, and its code
+
+
 @dataclass(frozen=True)
 class Endpoint:
-    """Where one protocol's daemon of this installation listens and locks: its socket (on Windows,
+    """Where one protocol's daemon of this installation listens and locks: its door (on Windows,
     its port file) and its lock."""
 
     protocol: int
@@ -230,10 +222,10 @@ class Endpoint:
 
 def endpoints() -> list[Endpoint]:
     """Every daemon this installation may have running, this protocol's first and then each older
-    one's (``_tag``): the files ``stop`` looks at, in the engine folder and, for a socket past the
-    path limit, in ``/tmp/cadgen-<uid>``. A protocol bump never strands the daemon that runs."""
-    return [Endpoint(protocol, port_path(protocol) if WINDOWS else socket_path(protocol), lock_path(protocol))
-            for protocol in range(PROTOCOL, 0, -1)]
+    one's (``_tag``): the files ``stop`` looks at, in the engine folder. A protocol bump never
+    strands a daemon that has a door (protocol 3 on); one of an earlier protocol listened on a
+    socket, which nothing reaches now, and leaves on its idle timeout."""
+    return [Endpoint(protocol, address(protocol), lock_path(protocol)) for protocol in range(PROTOCOL, 0, -1)]
 
 
 def engine_root() -> str:
@@ -737,6 +729,10 @@ class Daemon:
         self.busy = 0
         self.busy_lock = threading.Lock()
         self.stopping = threading.Event()
+        # The connections that hold the engine up (``hold``: an agent host's MCP server, while the
+        # host runs): no idle stop while one is open.
+        self.holders = 0
+        self.door = None  # on POSIX, the door clients reach it by (``door.Door``)
         self.server = None
         self.token = secrets.token_hex(16) if WINDOWS else ""
         # Per document a build made (its id: each xbf's ``file_id``, each model's ``model_id``),
@@ -750,6 +746,21 @@ class Daemon:
 
     def touch(self) -> None:
         self.last = time.monotonic()
+
+    def hold(self, reader: Any, send: Callable[[dict[str, Any]], None]) -> None:
+        """A hold on the engine (``{"op": "hold"}``): answered, then kept until its client goes (its
+        end of file). While any is kept the engine does not stop for idleness; the idle time counts
+        again from the last one's end, so the engine still leaves once its host has quit."""
+        with self.busy_lock:
+            self.holders += 1
+        try:
+            send({"ok": True})
+            while reader.read(4096):
+                pass  # a holder says nothing more: whatever it sends is read and dropped
+        finally:
+            with self.busy_lock:
+                self.holders -= 1
+            self.touch()
 
     def connected(self, worker: Worker) -> bool:
         """A page watching any document this worker built keeps its memo warm."""
@@ -1192,6 +1203,15 @@ class Daemon:
                 send({"failed": "this engine has no application host"})
             else:
                 send(application.launch(request) if op == "viewer" else application.endpoint())
+        elif op == "read":
+            # A document's JSON read (``/api/doc/<id>...``), answered in process: ``inspect``'s,
+            # through the door, so it needs no loopback socket of the client's.
+            route = str(request.get("route") or "")
+            if not route.startswith("/api/doc/"):
+                send({"failed": f"not a document read: {route!r}"})
+                return
+            status, body = self.serve(request).read(route)
+            send({"ok": True, "status": status, "body": body.decode("utf-8")})
         elif op == "draw":
             self.draw(request, send)
         elif op == "warm":
@@ -1248,7 +1268,7 @@ class Daemon:
         return {"ok": True, "pid": os.getpid(), "up": round(time.time() - self.born, 1), "workers": workers,
                 "cap": self.pool.cap, "waiting": self.pool.waiting(), "idleTimeout": self.pool.idle,
                 "rssCapMb": rss_cap_mb(), "retired": list(self.pool.retired),
-                "idle": round(now - self.last, 1),
+                "idle": round(now - self.last, 1), "holders": self.holders,
                 "serving": None if self.server is None else {"url": self.server.url,
                                                              "documents": self.server.listing(every=True),
                                                              "memory": self.server.memory()},
@@ -1261,13 +1281,21 @@ class Daemon:
     def watch(self) -> None:
         period = min(30.0, max(min(self.idle, self.pool.idle) / 10, 0.2))
         while not self.stopping.wait(period):
+            if self.door is not None:
+                self.door.sweep()
             self.pool.retire_idle()
             self.models.prune()
             if self.renders is not None:
                 self.renders.retire_idle(self.pool.idle)
-            if (self.busy == 0 and time.monotonic() - self.last > self.idle
-                    and not (self.server is not None and (self.server.watched() or self.server.clients_active()))):
+            if self.idle_out():
                 self.stopping.set()
+
+    def idle_out(self, now: float | None = None) -> bool:
+        """Whether the engine has been idle its time: no request running, no hold, no page watching
+        or client calling, and none for ``idle`` seconds."""
+        now = time.monotonic() if now is None else now
+        return (self.busy == 0 and self.holders == 0 and now - self.last > self.idle
+                and not (self.server is not None and (self.server.watched() or self.server.clients_active())))
 
     def shutdown(self) -> None:
         # The documents built or read in the last idle window, saved first, best effort (``cache``).
@@ -1299,33 +1327,53 @@ def _admitted(daemon: Daemon, connection: socket.socket, stream: Any) -> bytes |
     return prefix
 
 
+def _serve(daemon: Daemon, reader: Any, writer: Any, prefix: bytes = b"") -> None:
+    """One connection: its request line (after ``prefix``, what the Windows check read of it), and
+    every answer line the request sends. A hold keeps the connection until its client goes."""
+    line = prefix + reader.readline()
+    if not line:
+        return
+    request = json.loads(line)
+    if WINDOWS and request.get("token") != daemon.token:
+        return
+    lock = threading.Lock()
+
+    def send(message: dict[str, Any]) -> None:
+        with lock:
+            writer.write((json.dumps(message, separators=(",", ":")) + "\n").encode())
+            writer.flush()
+
+    if request.get("op") == "hold":
+        daemon.hold(reader, send)
+        return
+    try:
+        daemon.handle(request, send)
+    except (OSError, ValueError) as error:
+        send({"failed": str(error)})
+
+
+def _serve_door(daemon: Daemon, ident: str) -> None:
+    """A connection through the door (POSIX): the hello's pair answered (``door.answer``)."""
+    from cadgen.engine import door
+
+    def serve(reader: Any, writer: Any) -> None:
+        try:
+            _serve(daemon, reader, writer)
+        except (OSError, ValueError):
+            pass  # the client went, or sent no request
+
+    door.answer(state_dir() / door.CLIENTS, ident, serve)
+
+
 def _serve_connection(daemon: Daemon, connection: socket.socket) -> None:
+    """A connection to the Windows loopback port: its token shown first (``_admitted``), then served."""
     with connection:
         stream = connection.makefile("rwb")
         try:
-            prefix = b""
-            if WINDOWS:
-                admitted = _admitted(daemon, connection, stream)
-                if admitted is None:
-                    return
-                prefix = admitted
-            line = prefix + stream.readline()
-            if not line:
+            admitted = _admitted(daemon, connection, stream)
+            if admitted is None:
                 return
-            request = json.loads(line)
-            if WINDOWS and request.get("token") != daemon.token:
-                return
-            lock = threading.Lock()
-
-            def send(message: dict[str, Any]) -> None:
-                with lock:
-                    stream.write((json.dumps(message, separators=(",", ":")) + "\n").encode())
-                    stream.flush()
-
-            try:
-                daemon.handle(request, send)
-            except (OSError, ValueError) as error:
-                send({"failed": str(error)})
+            _serve(daemon, stream, stream, admitted)
         except (OSError, ValueError):
             pass
         finally:
@@ -1336,18 +1384,21 @@ def _serve_connection(daemon: Daemon, connection: socket.socket) -> None:
 
 
 def _bind() -> socket.socket:
-    if WINDOWS:
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.bind(("127.0.0.1", 0))
-        return server
-    path = socket_path()
-    if not socket_folder_ok(path):
-        raise OSError(f"the engine's socket folder {path.parent} is not this user's alone")
-    path.unlink(missing_ok=True)
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(str(path))
-    os.chmod(path, 0o600)
+    """Windows' listener: a loopback port (its port file names it, and the token a client shows)."""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
     return server
+
+
+def _can_listen() -> None:
+    """Raise when this process may not listen on a loopback port, as the engine's HTTP server
+    must: a sandbox that refuses sockets (Codex's Seatbelt answers EPERM) would let a daemon make
+    its door and then fail every build, so none starts there. The port is bound and let go."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("127.0.0.1", 0))  # refused where listening would be: Seatbelt refuses the bind
+    finally:
+        probe.close()
 
 
 def lock(path: Path | None = None) -> Any:
@@ -1376,42 +1427,68 @@ def lock(path: Path | None = None) -> Any:
 def main(argv: list[str] | None = None) -> int:
     sys.dont_write_bytecode = True
     idle = float(os.environ.get("CADGEN_ENGINE_IDLE") or IDLE_SECONDS)
-    held = lock()
+    try:
+        held = lock()
+    except OSError as error:
+        _note_failure(f"the engine server cannot take its lock in {state_dir()}", error)
+        return 1
     if held is None:
         return 0  # another daemon is up
+    try:
+        listener = _bind() if WINDOWS else None
+        if listener is not None:
+            listener.listen(64)
+        else:
+            _can_listen()
+    except OSError as error:
+        _note_failure("the engine server cannot listen on a local port", error)
+        held.close()
+        return 1
     daemon = Daemon(idle)
-    server = _bind()
-    server.listen(64)
-    if WINDOWS:
-        port = server.getsockname()[1]
-        temporary = port_path().with_suffix(".tmp")
-        temporary.write_text(f"{port} {daemon.token}\n", encoding="utf-8")
-        replace_atomic(temporary, port_path())
-    server.settimeout(0.5)
     if not WINDOWS:
         import signal
 
         # A terminate (a logout, ``kill``) stops the daemon as ``cadgen stop`` does: its workers,
-        # pools, socket and listener go with it.
+        # pools, door and listener go with it. A client gone mid-answer is a write's BrokenPipeError.
         signal.signal(signal.SIGTERM, lambda _signum, _frame: daemon.stopping.set())
+        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
     threading.Thread(target=daemon.watch, daemon=True).start()
     try:
-        while not daemon.stopping.is_set():
+        if listener is not None:
+            port = listener.getsockname()[1]
+            temporary = port_path().with_suffix(".tmp")
+            temporary.write_text(f"{port} {daemon.token}\n", encoding="utf-8")
+            replace_atomic(temporary, port_path())
+            listener.settimeout(0.5)
+            while not daemon.stopping.is_set():
+                try:
+                    connection, _address = listener.accept()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break
+                connection.settimeout(None)
+                threading.Thread(target=_serve_connection, args=(daemon, connection), daemon=True).start()
+        else:
+            from cadgen.engine.door import Door
+
             try:
-                connection, _address = server.accept()
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            connection.settimeout(None)
-            threading.Thread(target=_serve_connection, args=(daemon, connection), daemon=True).start()
+                daemon.door = Door(door_path(), lambda ident: _serve_door(daemon, ident))
+            except OSError as error:
+                _note_failure(f"the engine server cannot make its door {door_path()}", error)
+                return 1
+            daemon.stopping.wait()
     finally:
-        server.close()
+        if listener is not None:
+            listener.close()
+        if daemon.door is not None:
+            daemon.door.close()  # first: no hello is taken while the rest stops
         daemon.shutdown()
-        try:
-            (port_path() if WINDOWS else socket_path()).unlink(missing_ok=True)
-        except OSError:
-            pass
+        if listener is not None:
+            try:
+                port_path().unlink(missing_ok=True)
+            except OSError:
+                pass
         held.close()
     return 0
 

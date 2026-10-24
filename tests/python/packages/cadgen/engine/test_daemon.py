@@ -1,10 +1,11 @@
 """The warm loop through the daemon: started on demand, one worker per script that keeps
-its memo between builds, its socket and lock its only files, gone when idle."""
+its memo between builds, its door and lock its only files, gone when idle."""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -310,33 +311,92 @@ class ClientGoneTest(unittest.TestCase):
 
 
 class ConnectTest(unittest.TestCase):
-    @unittest.skipIf(os.name == "nt", "a stale socket file is a Unix daemon's")
-    def test_a_connect_to_a_stale_socket_fails_and_leaves_no_socket_open(self) -> None:
+    @unittest.skipIf(os.name == "nt", "a door is a POSIX daemon's")
+    def test_a_door_nobody_reads_is_no_engine_and_leaves_no_pipe_or_file_open(self) -> None:
         import gc
-        import socket
         import warnings
         from unittest import mock
 
         from cadgen.engine import client
 
-        engine = tempfile.mkdtemp(prefix="eng-", dir="/tmp")  # a short socket path
+        engine = tempfile.mkdtemp(prefix="eng-")
         self.addCleanup(shutil.rmtree, engine, True)
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": engine}):
-            path = client._daemon.socket_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            stale.bind(str(path))
-            stale.close()  # the file stays, and nothing listens on it
+            door = client._daemon.door_path()
+            os.mkfifo(door, 0o600)  # a dead daemon's: the file stays, and nothing reads it
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always", ResourceWarning)
                 self.assertIsNone(client._connect())
                 gc.collect()
+            self.assertEqual(list((Path(engine) / "clients").iterdir()), [], "its pair went with it")
         self.assertEqual([w for w in caught if issubclass(w.category, ResourceWarning)], [])
 
 
+class SandboxTest(unittest.TestCase):
+    """In a shell whose sandbox refuses the loopback port the engine's HTTP server needs, no engine
+    is started: the client says so at once, and so does one whose daemon could not listen."""
+
+    def setUp(self) -> None:
+        from unittest import mock
+
+        self.engine = tempfile.mkdtemp(prefix="eng-")
+        self.addCleanup(shutil.rmtree, self.engine, True)
+        cleared = {key: value for key, value in os.environ.items() if not key.startswith("CODEX_SANDBOX")}
+        patched = mock.patch.dict(os.environ, {**cleared, "CADGEN_ENGINE_DIR": self.engine}, clear=True)
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def test_no_engine_in_a_sandbox_without_network_is_said_in_one_line_and_starts_none(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine import client
+
+        with mock.patch.dict(os.environ, {"CODEX_SANDBOX": "seatbelt", "CODEX_SANDBOX_NETWORK_DISABLED": "1"}), \
+                mock.patch.object(client, "_start", side_effect=AssertionError("a daemon was started")):
+            with self.assertRaises(ConnectionError) as said:
+                client.request({"op": "status"})
+        self.assertEqual(str(said.exception), client.SANDBOXED)
+        self.assertNotIn("\n", client.SANDBOXED)
+
+    def test_a_daemon_that_cannot_listen_leaves_its_reason_and_the_client_says_it_at_once(self) -> None:
+        import errno
+        from unittest import mock
+
+        from cadgen.engine import client, daemon
+
+        bytecode = sys.dont_write_bytecode
+        self.addCleanup(setattr, sys, "dont_write_bytecode", bytecode)
+        with mock.patch.object(daemon, "_can_listen", side_effect=PermissionError(errno.EPERM, "Operation not permitted")), \
+                mock.patch.object(daemon, "_bind", side_effect=PermissionError(errno.EPERM, "Operation not permitted")), \
+                mock.patch("sys.stderr"):
+            self.assertEqual(daemon.main(), 1)
+        note = json.loads(daemon.failure_path().read_text(encoding="utf-8"))
+        self.assertTrue(note["denied"])
+        held = daemon.lock()
+        self.assertIsNotNone(held, "its lock was let go")
+        held.close()
+
+        class Exited:  # the daemon as the client sees it: gone, failing, its note left
+            returncode = 1
+
+            def __init__(self, written: dict) -> None:
+                daemon.failure_path().write_text(json.dumps(written), encoding="utf-8")
+
+            def poll(self) -> int:
+                return 1
+
+        with mock.patch.object(client, "_start", lambda: Exited(note)):
+            with self.assertRaisesRegex(ConnectionError, "^" + re.escape(client.SANDBOXED)
+                                        + r" \(the engine server cannot listen on a local port: Operation not permitted\)$"):
+                client.connect(timeout=30)
+        with mock.patch.object(client, "_start", lambda: Exited({"reason": "it broke", "denied": False})):
+            with self.assertRaisesRegex(ConnectionError, r"^the engine server did not start: it broke$"):
+                client.connect(timeout=30)
+
+
 class EngineFolderTest(unittest.TestCase):
-    """The engine's folder holds its socket, lock and port file. One another user owns, or that
-    others can write to, would let them take the socket's place: client and daemon refuse it."""
+    """The engine's folder holds its door, lock and port file. One another user owns, or that
+    others can write to, would let them take the door's place: client and daemon refuse it."""
 
     def setUp(self) -> None:
         self.engine = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None))
@@ -350,11 +410,9 @@ class EngineFolderTest(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.engine)}):
             self.assertIsNone(daemon.folder_refusal(daemon.state_dir()))
-            self.assertTrue(daemon.socket_folder_ok(daemon.socket_path()))
             os.chmod(self.engine, 0o777)
             refusal = daemon.folder_refusal(daemon.state_dir())
             self.assertIn("can be written by others", refusal)
-            self.assertFalse(daemon.socket_folder_ok(daemon.socket_path()))
             with mock.patch.object(client, "_start", side_effect=AssertionError("a daemon was started")):
                 with self.assertRaisesRegex(ConnectionError, "can be written by others"):
                     client.connect()
@@ -373,7 +431,6 @@ class EngineFolderTest(unittest.TestCase):
 
             with mock.patch.object(os, "lstat", side_effect=foreign):
                 self.assertIn("belongs to another user", daemon.folder_refusal(daemon.state_dir()))
-                self.assertFalse(daemon.socket_folder_ok(daemon.socket_path()))
                 with self.assertRaisesRegex(PermissionError, "belongs to another user"):
                     daemon.lock()
 
@@ -439,22 +496,6 @@ class DefaultEngineFolderTest(unittest.TestCase):
         with mock.patch.object(os, "stat", side_effect=foreign):
             self.assertEqual(self.folder(TMPDIR=str(own)), Path(os.path.realpath(f"/tmp/cadgen-{os.getuid()}")))
 
-    def test_a_long_temporary_folder_names_its_socket_by_digest_in_the_users_own_tmp_folder(self) -> None:
-        from unittest import mock
-
-        from cadgen.engine import daemon
-
-        own = self.private("T" + "-long" * 20)
-        cleared = {key: value for key, value in os.environ.items() if key != "CADGEN_ENGINE_DIR"}
-        with mock.patch.dict(os.environ, {**cleared, "TMPDIR": str(own)}, clear=True):
-            os.environ.pop("XDG_RUNTIME_DIR", None)
-            self.assertEqual(daemon.state_dir(), own / "cadgen-engine")
-            sock = daemon.socket_path()
-            self.assertLess(len(os.fsencode(sock)), daemon.SOCKET_PATH_LIMIT)
-            self.assertEqual(sock.parent, Path("/tmp") / f"cadgen-{os.getuid()}")
-            self.assertTrue(daemon.socket_folder_ok(sock))
-
-
 class WindowsTokenFirstTest(unittest.TestCase):
     """On Windows the daemon listens on loopback TCP, which any local user can reach: a connection
     shows its token in its first bytes (the client puts it first), and one that does not is refused
@@ -477,8 +518,8 @@ class WindowsTokenFirstTest(unittest.TestCase):
             done.start()
             try:
                 client_side.sendall(payload)
-            except (BrokenPipeError, ConnectionResetError):
-                pass  # refused after the first bytes: the rest was never read
+            except OSError:
+                pass  # refused after the first bytes, the rest never read (macOS may say ENOTCONN)
             done.join(timeout=30)
         self.assertFalse(done.is_alive(), "the connection was answered or refused, not held")
         return handled, engine.token
@@ -511,11 +552,30 @@ class WindowsTokenFirstTest(unittest.TestCase):
         answering = threading.Thread(target=engine)
         answering.start()
         with mock.patch.object(client._daemon, "WINDOWS", True):
-            self.assertEqual(client._exchange(ours, {"op": "status"}, address=port_file), {"ok": True})
+            stream = ours.makefile("rwb")
+            connection = client.Connection(stream, stream, stream, ours)
+            self.assertEqual(client._exchange(connection, {"op": "status"}, address=port_file), {"ok": True})
         answering.join(timeout=30)
         self.assertTrue(sent[0].startswith(b'{"token": "' + token.encode() + b'", "op": "status"'))
         handled, _token = self.serve(sent[0])
         self.assertEqual(handled, [{"token": token, "op": "status"}])
+
+
+class HoldTest(unittest.TestCase):
+    """A hold (an agent host's MCP server, while the host runs) keeps the engine from its idle stop;
+    once let go, the idle time counts from then."""
+
+    def test_a_held_engine_is_never_idle_and_one_let_go_counts_from_then(self) -> None:
+        import types
+
+        from cadgen.engine import daemon
+
+        engine = types.SimpleNamespace(busy=0, holders=1, last=0.0, idle=60.0, server=None)
+        self.assertFalse(daemon.Daemon.idle_out(engine, now=10_000.0), "held: never idle")
+        engine.holders = 0
+        self.assertTrue(daemon.Daemon.idle_out(engine, now=10_000.0))
+        engine.last = 9_990.0  # the hold let go ten seconds ago (``Daemon.hold`` touches)
+        self.assertFalse(daemon.Daemon.idle_out(engine, now=10_000.0))
 
 
 class DaemonEnvironmentTest(unittest.TestCase):
@@ -556,18 +616,15 @@ class SweepTest(unittest.TestCase):
     def cli(self, *args: str) -> subprocess.CompletedProcess:
         return engine_daemon.run([sys.executable, "-m", "cadgen.engine", *args], env=self.env)
 
-    @unittest.skipIf(os.name == "nt", "a stale socket file is a Unix daemon's")
-    def test_a_dead_server_s_socket_and_lock_are_removed_and_said(self) -> None:
-        import socket
+    @unittest.skipIf(os.name == "nt", "a door is a POSIX daemon's")
+    def test_a_dead_server_s_door_and_lock_are_removed_and_said(self) -> None:
         from unittest import mock
 
         from cadgen.engine import daemon
 
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)}):
-            path, lock = daemon.socket_path(), daemon.lock_path()
-        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        stale.bind(str(path))
-        stale.close()  # the file stays, and nothing listens on it
+            path, lock = daemon.door_path(), daemon.lock_path()
+        os.mkfifo(path, 0o600)  # the file stays, and nothing reads it
         lock.write_text("", encoding="utf-8")
         done = self.cli("status")
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -575,9 +632,7 @@ class SweepTest(unittest.TestCase):
         self.assertIn(f"removed stale engine file {path}", done.stderr)
         self.assertIn(f"removed stale engine file {lock}", done.stderr)
         self.assertEqual(list(self.state.iterdir()), [])
-        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        stale.bind(str(path))
-        stale.close()
+        os.mkfifo(path, 0o600)
         done = self.cli("stop")
         self.assertEqual((done.returncode, done.stdout), (0, "no engine server is running\n"), done.stderr)
         self.assertEqual(done.stderr, f"removed stale engine file {path}\n", "a swept file a line on stderr")
@@ -588,14 +643,14 @@ class SweepTest(unittest.TestCase):
         from cadgen.engine import client, daemon
 
         older = daemon.PROTOCOL - 1 or 1
-        # The server a cadgen of an older protocol started: the same installation, its own socket.
+        # The server a cadgen of an older protocol started: the same installation, its own door.
         server = subprocess.Popen([sys.executable, "-c", "import sys; from cadgen.engine import daemon; "
                                    f"daemon.PROTOCOL = {older}; sys.exit(daemon.main())"], env=self.env,
                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.addCleanup(lambda: server.poll() is None and server.kill())
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)}), \
                 mock.patch.object(daemon, "PROTOCOL", older + 1):
-            address = (daemon.port_path if daemon.WINDOWS else daemon.socket_path)(older)
+            address = daemon.address(older)
             deadline = time.monotonic() + 60
             while (found := client._connect(address)) is None:
                 self.assertIsNone(server.poll(), "the older server exited before it listened")
@@ -624,9 +679,7 @@ class StateDirSpellingTest(unittest.TestCase):
         state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.addCleanup(shutil.rmtree, state, True)
         (state / "sub").mkdir()
-        # Long enough that the socket is named by its folder's digest (``SOCKET_PATH_LIMIT``): two
-        # spellings of one folder must hash alike.
-        engine = "engine-" * 14
+        engine = "engine-" * 14  # a long folder: a pipe's path has no socket's length limit
         dotted = f"{state / 'sub'}{os.sep}..{os.sep}{engine}{os.sep}"  # a `..` and a trailing separator
         plain = str(state / engine)
         env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_IDLE": "60"}
@@ -638,36 +691,13 @@ class StateDirSpellingTest(unittest.TestCase):
         self.assertEqual(started.returncode, 0, started.stderr)
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": plain}):
             found = client.request({"op": "status"}, start=False)
-            address = client._daemon.port_path() if client._daemon.WINDOWS else client._daemon.socket_path()
+            address = client._daemon.address()
         self.assertIsNotNone(found, "the plain spelling reaches the server the dotted one started")
         self.assertEqual(str(found["pid"]), started.stdout.split()[-1])
         done = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "stop"], env=plain_env)
         self.assertEqual((done.returncode, done.stdout), (0, f"stopped the engine server at {address}\n"), done.stderr)
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": dotted}):
             self.assertIsNone(client.request({"op": "status"}, start=False), "stopped under either spelling")
-
-
-class LongStatePathTest(unittest.TestCase):
-    @unittest.skipIf(os.name == "nt", "a socket's path limit is a Unix socket's")
-    def test_a_state_folder_past_the_socket_path_limit_works_and_nobody_changes_folder(self) -> None:
-        from unittest import mock
-
-        from cadgen.engine import client
-
-        engine = Path(tempfile.mkdtemp(prefix="eng-")) / ("long-" * 24)
-        self.addCleanup(shutil.rmtree, engine.parent, True)
-        env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(engine)},
-                                    self.addCleanup)
-        self.addCleanup(engine_daemon.run, [sys.executable, "-m", "cadgen.engine", "stop"], env=env)
-        probe = "from cadgen.engine.client import request; print(request({'op': 'status'})['ok'])"
-        started = engine_daemon.run([sys.executable, "-c", probe], env=env)
-        self.assertEqual((started.returncode, started.stdout.split()[-1:]), (0, ["True"]), started.stderr)
-        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(engine)}), \
-                mock.patch.object(os, "chdir", side_effect=AssertionError("the client changed folder")):
-            path = client._daemon.socket_path()
-            self.assertLess(len(os.fsencode(path)), 100, "the socket's own path fits the limit")
-            self.assertTrue(client.request({"op": "status"}, start=False)["ok"])
-        self.assertEqual(os.stat(path.parent).st_mode & 0o077, 0, "the socket's folder is the user's alone")
 
 
 class InstallationTest(unittest.TestCase):
@@ -681,12 +711,12 @@ class InstallationTest(unittest.TestCase):
         tags = set()
         for name in names:
             with mock.patch.object(sys, "executable", name):
-                tags.add(daemon.socket_path())
+                tags.add(daemon.address())
         self.assertEqual(len(tags), 1, "`python3 model.py` and `cadgen viewer` share one engine")
 
     def test_a_relative_and_an_absolute_launch_reach_one_engine(self) -> None:
         # `../../.venv/bin/python model.py` from a model folder, and the absolute path.
-        probe = "from cadgen.engine import daemon; print(daemon.socket_path())"
+        probe = "from cadgen.engine import daemon; print(daemon.address())"
         env = {**os.environ, "PYTHONPATH": str(SRC)}
         with tempfile.TemporaryDirectory() as folder:
             folder = os.path.realpath(folder)
@@ -751,7 +781,7 @@ class DaemonTest(unittest.TestCase):
     def _stop_daemon(self) -> None:
         self.cli("stop")
         deadline = time.monotonic() + 20
-        while any(self.state.glob("*.sock")) and time.monotonic() < deadline:
+        while any(self.state.glob("*.door")) and time.monotonic() < deadline:
             time.sleep(0.05)
 
     def cli(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
@@ -982,9 +1012,10 @@ if __name__ == '__main__':
         status = json.loads(self.cli("status", "--json").stdout)
         self.assertEqual(len(status["workers"]), 1)
         self.assertEqual(status["workers"][0]["builds"], 3)
-        # The daemon's only files are its socket and lock; the build's, its outputs.
+        # The daemon's only files are its door, its lock and its clients' pipes; the build's, its outputs.
         # The daemon's socket (on Windows the port file standing in for it) and its lock, nothing else.
-        self.assertEqual({path.suffix for path in self.state.iterdir()}, {".port" if os.name == "nt" else ".sock", ".lock"})
+        self.assertEqual({path.suffix or path.name for path in self.state.iterdir()},
+                         {".port", ".lock"} if os.name == "nt" else {".door", ".lock", "clients"})
         self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/block.xbf", "block.py"])
 
@@ -1279,8 +1310,8 @@ if __name__ == '__main__':
         pid = int(done.stdout.split()[-1])
         os.kill(pid, signal.SIGTERM)
         deadline = time.monotonic() + 30
-        while engine_daemon._alive(pid) or any(self.state.glob("*.sock")):
-            self.assertLess(time.monotonic(), deadline, "the daemon shut down and removed its socket")
+        while engine_daemon._alive(pid) or any(self.state.glob("*.door")):
+            self.assertLess(time.monotonic(), deadline, "the daemon shut down and removed its door")
             time.sleep(0.05)
 
     def test_an_idle_daemon_exits(self) -> None:
@@ -1288,9 +1319,9 @@ if __name__ == '__main__':
         self.script.write_text(textwrap.dedent(MODEL.format(size=3)), encoding="utf-8")
         self.assertEqual(self.run_script("block.py", env=env).returncode, 0)
         deadline = time.monotonic() + 30
-        while any(self.state.glob("*.sock")) and time.monotonic() < deadline:
+        while any(self.state.glob("*.door")) and time.monotonic() < deadline:
             time.sleep(0.1)
-        self.assertFalse(any(self.state.glob("*.sock")), "the idle daemon left")
+        self.assertFalse(any(self.state.glob("*.door")), "the idle daemon left")
 
 
 if __name__ == "__main__":

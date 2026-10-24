@@ -3,9 +3,9 @@
 ``tests.python.support.engine_daemon`` puts this folder first on ``PYTHONPATH`` and names a
 journal folder in ``CADGEN_TEST_JOURNAL``; the command, the engine daemon it starts and the
 daemon's workers all inherit both, so each one, at its start, writes ``<role>-<pid>.txt``
-there: when it started, when it listened (a daemon that bound its socket), when it left and
-with what, an uncaught error's traceback, and every thread's stack each ``DUMP_SECONDS`` it
-is alive -- where a process that hangs is waiting. The test reads the folder when a command
+there: when it started, when it listened (a daemon that made its door, or on Windows listened on
+its port), when it left and with what, an uncaught error's traceback, and every thread's stack
+each ``DUMP_SECONDS`` it is alive -- where a process that hangs is waiting. The test reads the folder when a command
 does not finish. Nothing here may fail the process it is in."""
 
 from __future__ import annotations
@@ -56,6 +56,16 @@ def _record() -> None:
             write("listening")
 
     socket.socket.listen = listening  # type: ignore[method-assign]
+
+    if hasattr(os, "mkfifo"):
+        mkfifo = os.mkfifo
+
+        def door(path: object, *args: object, **kwargs: object) -> None:
+            mkfifo(path, *args, **kwargs)  # type: ignore[arg-type]
+            if str(path).endswith(".door"):  # a POSIX daemon listens on its door, a named pipe
+                write(f"listening {path}")
+
+        os.mkfifo = door  # type: ignore[assignment]
 
     previous = sys.excepthook
 

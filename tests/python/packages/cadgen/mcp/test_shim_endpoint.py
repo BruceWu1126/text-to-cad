@@ -1,5 +1,5 @@
-"""The stdio shim speaks only to the endpoint the engine's Unix socket names. A loopback port the
-engine has let go is anyone's: once the engine moves, the shim reads its endpoint from the socket
+"""The stdio shim speaks only to the endpoint the engine's door names. A loopback port the
+engine has let go is anyone's: once the engine moves, the shim reads its endpoint from the door
 again and never sends the host's initialize to a port held from an earlier call."""
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ class Listener:
 class ShimEndpointTest(unittest.TestCase):
     def setUp(self) -> None:
         self.first = Listener("first")
-        self.names = self.first.endpoint()  # what the engine's socket says now
+        self.names = self.first.endpoint()  # what the engine's door says now
         self.reads = 0
 
         def read(_message):
@@ -96,7 +96,7 @@ class ShimEndpointTest(unittest.TestCase):
 
     def test_a_listener_on_the_freed_port_is_never_spoken_to_after_the_engine_moved(self) -> None:
         second, old = self.move()
-        self.assertEqual(self.ask(2), {"from": "second"})  # refused at the old port: the socket asked
+        self.assertEqual(self.ask(2), {"from": "second"})  # refused at the old port: the door asked
         squatter = Listener(None, port=old)
         self.addCleanup(squatter.close)
         self.assertEqual(self.ask(3), {"from": "second"})

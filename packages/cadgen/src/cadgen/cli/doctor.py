@@ -10,7 +10,7 @@ It also proves the CAD kernel loads. ``OCP`` is imported in a fresh interpreter
 and a refused load is named for what it is: on Windows 11 that is Smart App
 Control blocking the unsigned ``.pyd``, which the bare ``ImportError`` never
 says (``cadgen._internal.kernel_load_hint``). And it says where the engine's server,
-where every build runs, keeps its socket and whether one is running, without starting one.
+where every build runs, keeps its door and whether one is running, without starting one.
 
 Exit codes: 0 = installed cadgen matches the pin (or nothing claims a pin);
 3 = pin mismatch; 4 = the kernel is installed but cannot be loaded (the report
@@ -49,13 +49,13 @@ def _resolve_skill(target: str | None) -> Path | None:
 
 
 def _server() -> str:
-    """The engine server this installation shares (``cadgen.engine.daemon``): where its socket is,
+    """The engine server this installation shares (``cadgen.engine.daemon``): where its door is,
     and whether one is running -- asked, never started."""
     try:
         from cadgen.engine import daemon as engine_daemon
         from cadgen.engine.client import request
 
-        where = engine_daemon.port_path() if engine_daemon.WINDOWS else engine_daemon.socket_path()
+        where = engine_daemon.address()
         answer = request({"op": "status"}, start=False)
     except Exception as error:  # noqa: BLE001 - a report line, never a reason for the report to fail
         return f"unknown ({type(error).__name__}: {error})"
@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     sys.stdout.write(f"cadgen {installed}\n")
     sys.stdout.write(f"  python   {sys.version.split()[0]} ({sys.executable})\n")
     sys.stdout.write(f"  install  {location}\n")
-    # One per installation: the same socket means the same warm daemon.
+    # One per installation: the same door means the same warm daemon.
     sys.stdout.write(f"  server   {_server()}\n")
     sharing = _sharing()
     if sharing:
