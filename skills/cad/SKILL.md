@@ -286,8 +286,13 @@ viewer to confirm your own work.
 
 - If your tools include `cad_show` (your host may prefix it), call it with the model's id
   or the file's absolute path, and follow its description for when to call it again.
-  `cad_view` reads what the user selected; `cad_screenshot` shows you what they see, for
-  when they ask about it.
+  The other tools depend on the host. A host that draws CAD cards or tabs (Claude
+  Desktop, the Codex app) also has `cad_view`, which reads what the user selected, and
+  `cad_screenshot`, which shows you what they see, for when they ask about it. A text host
+  (Claude Code in a terminal, `codex exec`) draws nothing: its `cad_show` opens the
+  model's page in the user's browser and answers with the URL to give them, and it has no
+  view to read. `cad_inspect`, `cad_snapshot` and `cad_export` are on every host. Call
+  only the tools you have, and never say a card shows a model when your host drew none.
 - Otherwise give the user the page's link once: a model's page is the `view:` line its
   run prints. For a file, run the CAD Viewer, from any folder:
 
