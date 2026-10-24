@@ -13,8 +13,9 @@ each triangle's colour, and the model's ``unit``.
   material a slicer generated (named ``default``, in ``#fafafb`` or ``#b6c4ce``) is no colour at
   all, as the viewer has it: the part takes the look's fill. A texture coordinate group, a
   composite and a multi-property name no colour either.
-- **Units**: ``unit`` (micron, millimeter, centimeter, inch, foot, meter) gives the millimetres a
-  number is (``Model.unit``); the numbers themselves are kept, for a robot's link mesh, whose
+- **Units**: ``unit`` (micron, millimeter, centimeter, inch, foot, meter; millimeter when absent,
+  any other refused, as the viewer refuses it) gives the millimetres a number is (``Model.unit``);
+  the numbers themselves are kept, for a robot's link mesh, whose
   description's mesh scale says what they are.
 
 The XML is read in two parts, for speed (a robot's link meshes can be a hundred megabytes of it):
@@ -214,7 +215,12 @@ def read_3mf(path: Path) -> Model:
 
         start = _start(package)
         root = document(start)
-        model = Model(UNITS.get(str(root.get("unit") or "millimeter").strip().lower(), 1.0))
+        declared = str(root.get("unit") or "millimeter")
+        if declared.strip().lower() not in UNITS:
+            # As the viewer refuses it (``sceneUnits.js``): a number of no known length is no millimetre.
+            raise ThreeMfError(f'{path.name}: its model unit "{declared}" is not one the 3MF specification '
+                               f'defines ({", ".join(UNITS)})')
+        model = Model(UNITS[declared.strip().lower()])
         paint_of: dict[tuple, int] = {}
         properties: dict[tuple[str, str], list[int]] = {}  # (part, group id): paint per index
         objects: dict[tuple[str, str], ET.Element] = {}
