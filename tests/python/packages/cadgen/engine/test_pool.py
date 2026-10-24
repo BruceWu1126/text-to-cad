@@ -139,14 +139,22 @@ class PoolTest(unittest.TestCase):
         self.assertEqual([(row["script"], row["reason"]) for row in pool.retired], [("a.py", "idle")])
         self.assertIsNot(pool.lease("a.py", {}), idle)
 
-    def test_a_worker_of_another_environment_is_replaced_in_its_slot(self) -> None:
+    def test_only_what_shapes_the_import_system_replaces_a_worker_and_the_rest_is_adopted(self) -> None:
         pool = self.pool(1)
-        old = pool.lease("a.py", {"PYTHONPATH": "/one"})
-        pool.release(old)
-        new = pool.lease("a.py", {"PYTHONPATH": "/two"})
-        self.assertTrue(old.stopped)
-        self.assertEqual(new.environment, {"PYTHONPATH": "/two"})
-        self.assertEqual(pool.retired[0]["reason"], "environment")
+        worker = pool.lease("a.py", {"PATH": "/one", "VIRTUAL_ENV": "/venv", "TURN": "1"})
+        pool.release(worker)
+        for name in ("PATH", "VIRTUAL_ENV", "TURN", "HOME"):
+            again = pool.lease("a.py", {"PATH": "/one", "VIRTUAL_ENV": "/venv", "TURN": "1", name: "/other"})
+            pool.release(again)
+            self.assertIs(again, worker, f"another {name} is the run's to adopt: the warm worker serves it")
+        for name in ("PYTHONPATH", "PYTHONHOME", "PYTHONSAFEPATH", "PYTHONNOUSERSITE", "PYTHONUSERBASE",
+                     "PYTHONPLATLIBDIR"):
+            new = pool.lease("a.py", {name: "1"})
+            pool.release(new)
+            self.assertTrue(worker.stopped and not new.stopped, f"another {name} is another interpreter")
+            self.assertEqual(pool.retired[0]["reason"], "environment")
+            worker = new
+        self.assertEqual(len(self.started), 7)
 
     def test_a_gone_or_capped_worker_leaves_the_pool_when_let_go(self) -> None:
         pool = self.pool(2)

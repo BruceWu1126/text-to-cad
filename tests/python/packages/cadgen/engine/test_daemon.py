@@ -14,6 +14,7 @@ import time
 import unittest
 import urllib.request
 from pathlib import Path
+from unittest import mock
 from tests.python.support import engine_daemon
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
@@ -267,6 +268,21 @@ class WorkerLoopTest(unittest.TestCase):
     def _asked(self, ident: int, functions: list | None, run: str | None) -> int:
         self.ask(ident, functions, run)
         return ident
+
+
+class AdoptTest(unittest.TestCase):
+    def test_a_run_adopts_its_caller_s_environment_but_what_started_the_worker(self) -> None:
+        from cadgen.engine.worker import adopt
+
+        started = {"PYTHONPATH": "/engine", "CADGEN_ENGINE_WORKER": "1", "PYTHONDONTWRITEBYTECODE": "1",
+                   "PATH": "/turn/1", "GONE": "x"}
+        with mock.patch.dict(os.environ, started, clear=True):
+            adopt({"PATH": "/turn/2", "TURN": "2", "PYTHONPATH": "/caller"}, {"PYTHONPATH": "/engine",
+                  "CADGEN_ENGINE_WORKER": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+            self.assertEqual(dict(os.environ), {"PATH": "/turn/2", "TURN": "2", "PYTHONPATH": "/engine",
+                                                "CADGEN_ENGINE_WORKER": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+            adopt(None, {})
+            self.assertEqual(os.environ["TURN"], "2", "a request with no environment leaves it as it is")
 
 
 class ClientGoneTest(unittest.TestCase):
@@ -987,6 +1003,35 @@ if __name__ == '__main__':
         self.assertEqual({path.suffix for path in self.state.iterdir()}, {".port" if os.name == "nt" else ".sock", ".lock"})
         self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/block.xbf", "block.py"])
+
+    def test_a_caller_s_other_path_keeps_the_warm_worker_and_another_pythonpath_replaces_it(self) -> None:
+        # Each load of the script in the worker says which caller's environment it runs in.
+        seen = "import os\nif os.environ.get('CADGEN_ENGINE_WORKER'):\n" \
+               "    open('seen.txt', 'a').write(os.environ.get('TURN', '') + ' ' + os.environ['PATH'] + '\\n')\n"
+        self.script.write_text(seen + textwrap.dedent(MODEL.format(size=10)), encoding="utf-8")
+
+        def pid() -> int:
+            status = json.loads(self.cli("status", "--json").stdout)
+            self.assertEqual(len(status["workers"]), 1)
+            return status["workers"][0]["pid"]
+
+        self.assertGreater(self.built("block", env={**self.env, "TURN": "1"})["memo"]["misses"], 0)
+        first = pid()
+        # An agent's next turn: its shell's PATH and its own variables are new; the run adopts them.
+        turn = {**self.env, "TURN": "2", "PATH": os.pathsep.join([str(self.folder), self.env.get("PATH", "")])}
+        warm = self.built("block", env=turn)
+        self.assertEqual((warm["memo"]["misses"], warm["cache"]), (0, {"used": True, "from": "memory"}),
+                         "taken from the warm worker's memory, as a restart never is")
+        self.assertEqual(pid(), first)
+        self.assertEqual(json.loads(self.cli("status", "--json").stdout)["retired"], [])
+        self.assertEqual((self.folder / "seen.txt").read_text(encoding="utf-8").splitlines()[-1],
+                         f"2 {turn['PATH']}", "the run adopted its caller's environment")
+        # Another PYTHONPATH is another interpreter: its worker is replaced, and says why.
+        other = {**self.env, "PYTHONPATH": os.pathsep.join([self.env["PYTHONPATH"], str(self.folder)])}
+        self.built("block", env=other)
+        self.assertNotEqual(pid(), first)
+        retired = json.loads(self.cli("status", "--json").stdout)["retired"]
+        self.assertEqual([(row["pid"], row["reason"]) for row in retired], [(first, "environment")])
 
     def test_a_warm_build_writes_the_bytes_a_cold_one_does(self) -> None:
         """A warm worker's faces carry whichever ``Checked`` flag the memo's replay left
