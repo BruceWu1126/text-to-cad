@@ -775,16 +775,21 @@ green: that is the release. `Publish Release`, on the merge commit:
    (`@text-to-cad/core/chunk-ids`; rolldown's own names the code alone): one id
    names one map in every page and version, so no page's or version's map
    overwrites another's, and a later release that ships the same chunk and map
-   uploads it once. Then the
-   wheel, with `skip-existing`, so a rerun is a no-op. Then
-   the job waits until PyPI's simple index, which uv resolves a pin through,
-   lists the version: usually seconds.
+   uploads it once. Then the `pypi` job uploads the wheel and sdist: the only job
+   that may mint a PyPI token, in the `pypi` environment (below, "Repository
+   settings"). It uploads only what PyPI does not hold yet
+   (`scripts/release/pypi_release.py`), so a resumed release uploads nothing twice,
+   and what PyPI already holds is downloaded and checked against PyPI's sha256 for
+   the GitHub Release to attach; a file PyPI holds that the run did not build stops
+   the release. Then the job waits until PyPI's simple index, which uv resolves a
+   pin through, lists the version: usually seconds.
 6. **Install branches** (on `main` only). `plugin_branch.py` commits the plugin
    alone onto `latest` and `claude-plugin`, in one atomic push. Only now does
    an installer see the version.
 7. **Announce** (on `main` only), after the branches: `Deploy Docs`, whose
    header names the release; and the `v<VERSION>`
-   tag and the GitHub Release, with the wheel and sdist from that same artifact,
+   tag and the GitHub Release, with the wheel and sdist as PyPI serves them (the
+   `pypi` job's artifact, `cadgen-<version>-released`),
    the plugin ZIP and the source maps (`cadgen-sourcemaps-<version>.zip`, to
    upload a version's maps again) attached as release assets (PyPI stays the
    install channel; the release page is the provenance copy).
@@ -1041,7 +1046,13 @@ by both.
 requests `Prepare Release` opens start their checks. It needs Contents and Pull
 requests write on this repository; nothing merges with it, so it need not be an
 admin's.
-`build-test` needs no protection: the irreversible steps never run there. The
+PyPI is published to from one place. The `pypi` job runs in the GitHub environment
+`pypi`, whose deployment branches are `main` alone, and cadgen's trusted publisher on
+PyPI names this repository, `release-publish.yml` and that environment, so no run on
+another branch (or a workflow changed on one) can mint a token PyPI takes. No other
+job asks for `id-token`. `build-test` is protected as `main` is (a pull request to
+change it, no force pushes or deletions): a push there runs `Publish Release`, and
+its irreversible steps are skipped by the workflow, not by who may push. The
 install branches, `latest` and `claude-plugin`, have two rulesets. Install
 branches refuses their deletion and any force push, from anyone. Install
 branches: release only lets only a deploy key update them, so `Publish Release`
