@@ -410,7 +410,10 @@ id is read as the engine holds it, never built: one it does not hold is refused 
 that builds it again, `python <the program that built it>`. A script is never a source: `x.py`
 and `x.py::fn` are refused as any other file that is no document is.
 
-Every build and every verb goes through the engine: no command runs one in its own process.
+Every build and every verb goes through the engine: no command runs one in its own process. A
+verb that starts the engine to answer says so, `engine started` on stderr, once, and only when the
+engine that answers is the one it started (`client.on_started`); `status` and `stop` never start
+one, nor does an MCP host closing its session.
 `daemon=False` on the Python functions (`Model.build`, `export`, `snapshot`) is a seam for tests
 and debugging only: it runs in this process, cold, and no document is served: no page, and
 nothing for `inspect` to read by its id.

@@ -549,6 +549,8 @@ class DaemonEnvironmentTest(unittest.TestCase):
         captured = {}
 
         class FakePopen:
+            pid = 0
+
             def __init__(self, _argv, **kwargs):
                 captured.update(kwargs.get("env") or {})
 
@@ -597,6 +599,20 @@ class SweepTest(unittest.TestCase):
         done = self.cli("stop")
         self.assertEqual((done.returncode, done.stdout), (0, "no engine server is running\n"), done.stderr)
         self.assertEqual(done.stderr, f"removed stale engine file {path}\n", "a swept file a line on stderr")
+
+    def test_status_starts_no_engine_a_verb_that_starts_one_says_so_and_stop_leaves_none(self) -> None:
+        self.env.update(CADGEN_STATE_DIR=str(self.state / "state"), CADGEN_CACHE_DIR=str(self.state / "cache"))
+        for _ in range(2):
+            done = self.cli("status")
+            self.assertEqual((done.returncode, done.stdout, done.stderr), (0, "no engine server is running\n", ""))
+        self.assertEqual(list(self.state.iterdir()), [], "status started nothing")
+        unknown = "00000000-0000-5000-8000-000000000000"
+        first, again = self.cli("inspect", unknown), self.cli("inspect", unknown)
+        self.assertEqual((first.returncode, first.stderr.splitlines()[0]), (2, "engine started"), first.stderr)
+        self.assertNotIn("engine started", again.stderr, "said only by the verb that started it")
+        self.assertEqual(self.cli("stop").returncode, 0)
+        done = self.cli("status")
+        self.assertEqual((done.returncode, done.stdout, done.stderr), (0, "no engine server is running\n", ""))
 
     def test_a_server_of_an_older_protocol_is_still_stopped(self) -> None:
         from unittest import mock

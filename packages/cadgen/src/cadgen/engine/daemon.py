@@ -1217,6 +1217,8 @@ class Daemon:
             send({"ok": True})
         elif op == "status":
             send(self.status())
+        elif op == "pid":
+            send({"ok": True, "pid": os.getpid()})  # who answers: a client that started a daemon asks
         elif op == "stop":
             send({"ok": True})
             self.stopping.set()

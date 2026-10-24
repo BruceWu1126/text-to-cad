@@ -16,6 +16,9 @@ from cadgen.engine import daemon as _daemon
 __all__ = ["request", "sweep"]
 
 DAEMON_MODULE = "cadgen.engine.daemon"  # the enclosing distribution may supply an application host
+# Called once a connection reaches a daemon this process started (``connect``): a command that
+# starts the engine says so (``cli.answered``); None, the default, says nothing.
+on_started: Callable[[], None] | None = None
 
 
 def _connect(address: Path | None = None) -> socket.socket | None:
@@ -47,16 +50,17 @@ def _connect(address: Path | None = None) -> socket.socket | None:
 _PER_PROCESS_TELEMETRY = ("DO_NOT_TRACK", "CADGEN_TELEMETRY")
 
 
-def _start() -> None:
+def _start() -> int:
+    """A daemon started, detached; its process id."""
     env = {name: value for name, value in os.environ.items() if name not in _PER_PROCESS_TELEMETRY}
     root = _daemon.engine_root()
     path = env.get("PYTHONPATH", "")
     if root not in path.split(os.pathsep):
         env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    subprocess.Popen([sys.executable, "-P", "-m", DAEMON_MODULE], stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=_working_folder(),
-                     **_daemon.detached())
+    return subprocess.Popen([sys.executable, "-P", "-m", DAEMON_MODULE], stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=_working_folder(),
+                            **_daemon.detached()).pid
 
 
 def _working_folder() -> str | None:
@@ -79,20 +83,35 @@ def connect(*, start: bool = True, timeout: float = 60.0) -> socket.socket | Non
     refusal = _daemon.folder_refusal(_daemon.state_dir())
     if refusal is not None:  # said now, not after waiting out a daemon that cannot start there
         raise ConnectionError(refusal)
-    _start()
+    mine = {_start()}
     started = time.monotonic()
     deadline = started + timeout
     while time.monotonic() < deadline:
         found = _connect()
         if found is not None:
+            _told_started(mine)
             return found
         time.sleep(0.05)
         if time.monotonic() - started > 1.0:
             # A daemon that is stopping still holds the lock, and the one just started
             # left at once: start another once the lock is free.
-            _start()
+            mine.add(_start())
             started = time.monotonic()
     raise ConnectionError("the engine server did not start")
+
+
+def _told_started(mine: set[int]) -> None:
+    """``on_started``, when the daemon that answers is one of ``mine`` (the daemons this process
+    started): a command racing this one may have started the one that won the lock."""
+    if on_started is None:
+        return
+    connection = _connect()
+    try:
+        answer = _exchange(connection, {"op": "pid"}) if connection is not None else {}
+    except (OSError, ValueError):
+        return
+    if answer.get("pid") in mine:
+        on_started()
 
 
 def wait_gone(timeout: float = 60.0, endpoint: _daemon.Endpoint | None = None) -> bool:
