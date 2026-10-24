@@ -289,6 +289,27 @@ class ChangesRunWhatCanBreak(unittest.TestCase):
             with self.subTest(target=target):
                 self.assertEqual(route(target)["web_client"], "true")
 
+    def test_the_docs_hero_runs_on_what_makes_its_glb(self):
+        # The docs job's hero check holds the committed GLB to the planetary model's declared
+        # motion; a rename in the names the model calls once broke it with docs never selected.
+        for path in ("models/assemblies/src/planetary_gear_assembly/planetary_gear_assembly.py",
+                     "packages/cadgen/src/cadgen/ap242.py", "packages/cadgen/src/cadgen/gltf.py",
+                     "packages/cadgen/src/cadgen/engine/animations.py",
+                     "packages/cadgen/src/cadgen/engine/mechanism.py",
+                     "packages/cadgen/src/cadgen/engine/document.py",
+                     "apps/docs/scripts/check-hero-glb.mjs", "apps/docs/scripts/sync-hero-glb.mjs",
+                     "apps/docs/public/hero/planetary.glb"):
+            with self.subTest(path=path):
+                self.assertEqual(route(path)["docs"], "true")
+        export = next(path for path in TRACKED if path.startswith("packages/cadgen/src/cadgen/engine/export/"))
+        self.assertEqual(route(export)["docs"], "true")
+        # An engine change still reaches everything cadgen reaches.
+        self.assertEqual(tests_for("packages/cadgen/src/cadgen/engine/animations.py")["cadgen_tests"], [CADGEN])
+        # The rest of the engine changes no clip, and no other model is the hero.
+        for path in ("packages/cadgen/src/cadgen/engine/build.py", "models/assemblies/src/planetary_gear_stage/planetary_gear_stage.py"):
+            with self.subTest(path=path):
+                self.assertEqual(route(path)["docs"], "false")
+
     def test_scripts_run_what_runs_them(self):
         cases = {
             "scripts/test/test-viewer-launch.sh": {"packaging", "skills"},
