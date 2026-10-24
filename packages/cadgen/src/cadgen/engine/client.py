@@ -55,8 +55,19 @@ def _start() -> None:
         env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     subprocess.Popen([sys.executable, "-P", "-m", DAEMON_MODULE], stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=str(_daemon.state_dir().parent)
-                     if _daemon.state_dir().parent.exists() else None, **_daemon.detached())
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=_working_folder(),
+                     **_daemon.detached())
+
+
+def _working_folder() -> str | None:
+    """Where the daemon (and every child it starts) stands. On POSIX the engine's own folder, which
+    is this user's alone (``daemon.folder_refusal``): never the shared temporary folder above it,
+    where another user could leave a file a name-resolved helper would find. On Windows the
+    per-user temporary folder above it, so the engine's folder holds no process's working folder."""
+    folder = _daemon.state_dir()
+    if not _daemon.WINDOWS:
+        return str(folder) if folder.is_dir() else None
+    return str(folder.parent) if folder.parent.exists() else None
 
 
 def connect(*, start: bool = True, timeout: float = 60.0) -> socket.socket | None:

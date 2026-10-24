@@ -34,12 +34,13 @@ from __future__ import annotations
 import bisect
 import math
 import os
-import shutil
 import struct
 import subprocess
 import sys
 from functools import lru_cache
 from pathlib import Path
+
+from cadgen.engine import executables
 from typing import Any
 
 import numpy as np
@@ -68,11 +69,11 @@ def face_source(weight: float) -> tuple[str | None, str]:
         for name in (["SegUIVar.ttf"] + (["seguisb.ttf"] if weight >= 600 else []) + ["segoeui.ttf"]):
             if (fonts / name).is_file():
                 return str(fonts / name), name
-    elif shutil.which("fc-match"):
+    elif fc_match := executables.find("fc-match"):  # by its absolute path: never the working folder's
         # fontconfig's weights: regular 80, medium 100, demibold 180, bold 200.
         fc = 80 if weight < 450 else 100 if weight < 550 else 180 if weight < 650 else 200
         try:
-            found = subprocess.run(["fc-match", "-f", "%{file}", f"sans-serif:weight={fc}"], capture_output=True,
+            found = subprocess.run([fc_match, "-f", "%{file}", f"sans-serif:weight={fc}"], capture_output=True,
                                    text=True, timeout=5).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             found = ""
