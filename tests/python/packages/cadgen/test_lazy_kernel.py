@@ -124,6 +124,14 @@ class PthTest(unittest.TestCase):
         self.assertEqual(found.returncode, 0, found.stderr)
         return found.stdout.strip()
 
+    def test_the_installed_cadgen_runs_the_pth_editable_or_not(self) -> None:
+        """setup.py ships it in an editable wheel too, so a checkout's ``requirements-dev.txt``
+        venv (CI's included) defers the kernel as a user's install does."""
+        found = subprocess.run([sys.executable, "-c", "import build123d, sys; print('OCP' in sys.modules)"],
+                               capture_output=True, text=True, cwd=tempfile.gettempdir())
+        self.assertEqual((found.returncode, found.stdout.strip()), (0, "False"),
+                         found.stderr or "no cadgen-lazy-kernel.pth: reinstall requirements-dev.txt")
+
     def test_the_pth_is_one_import_line(self) -> None:
         self.assertEqual((PACKAGE / "cadgen-lazy-kernel.pth").read_text(encoding="utf-8"),
                          "import cadgen._internal.lazy_kernel\n")
