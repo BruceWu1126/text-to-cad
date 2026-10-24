@@ -190,6 +190,12 @@ def _children(topods: Any) -> list[Any]:
 _MESH_FACES: "OrderedDict[Any, tuple[int, ...]]" = OrderedDict()
 _MESH_FACES_HELD = 1 << 16
 
+# A document's assembly as the engine reads it: a sub-assembly shared by several components is
+# walked once for each of them, so a few kilobytes can name an exponential tree, and a component
+# that refers to its own assembly names an endless one. A read refuses either.
+MAX_OCCURRENCES = 250_000
+MAX_ASSEMBLY_DEPTH = 64
+
 
 def mesh_faces(shape: Any) -> tuple[int, ...]:
     """The ordinals (``TopExp.MapShapes``) of ``shape``'s faces that have no surface: a mesh's
@@ -1261,12 +1267,26 @@ class Loaded:
             TDF_Tool.Entry_s(label, text)
             return text.ToCString()
 
+        counted = 0
+
         def visit(label: Any, location: Any, path: list[str], inherited: tuple | None, name: str,
-                  occurrence: tuple[int, ...], entries: list[str]) -> dict[str, Any]:
+                  occurrence: tuple[int, ...], entries: list[str], ancestors: frozenset = frozenset()) -> dict[str, Any]:
+            nonlocal counted
+            counted += 1
+            if counted > MAX_OCCURRENCES:
+                raise ValueError(f"cannot read {self.path.name}: its assembly names more than "
+                                 f"{MAX_OCCURRENCES} occurrences")
+            if len(occurrence) > MAX_ASSEMBLY_DEPTH:
+                raise ValueError(f"cannot read {self.path.name}: its assembly is deeper than "
+                                 f"{MAX_ASSEMBLY_DEPTH} levels")
             color = _label_color(label) or inherited
             self.worlds[occurrence] = location
             self.occurrences["/".join(entries)] = occurrence
             if XCAFDoc_ShapeTool.IsAssembly_s(label):
+                own = entry_of(label)
+                if own in ancestors:
+                    raise ValueError(f"cannot read {self.path.name}: an assembly contains itself")
+                inner = ancestors | {own}
                 node: dict[str, Any] = {"name": name, "children": []}
                 components = TDF_LabelSequence()
                 XCAFDoc_ShapeTool.GetComponents_s(label, components, False)
@@ -1278,7 +1298,7 @@ class Loaded:
                     child_name = named(component) or named(referred) or f"{name}.{at}"
                     child_color = _label_color(component) or color
                     node["children"].append(visit(referred, placed, path + [child_name], child_color, child_name,
-                                                  occurrence + (at - 1,), entries + [entry_of(component)]))
+                                                  occurrence + (at - 1,), entries + [entry_of(component)], inner))
                 return node
             shape = XCAFDoc_ShapeTool.GetShape_s(label)
             entry = entry_of(label)

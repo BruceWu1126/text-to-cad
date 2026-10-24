@@ -225,15 +225,27 @@ def assemble(header: dict[str, Any], shapes: list[Any], locations: list[Any]) ->
     from cadgen.engine.kernel import imported
     from cadgen.engine.kernel.memo import FACE_COLORS, FACE_MATERIALS
 
-    products = header["products"]
+    from cadgen.engine.document import MAX_ASSEMBLY_DEPTH, MAX_OCCURRENCES
 
-    def build(entries: list[dict[str, Any]]) -> list[Any]:
+    products = header["products"]
+    counted = 0
+
+    def build(entries: list[dict[str, Any]], ancestors: frozenset = frozenset()) -> list[Any]:
+        # A shared product is built once per placement: bound the tree (as Loaded's walk does).
+        nonlocal counted
+        if len(ancestors) > MAX_ASSEMBLY_DEPTH:
+            raise ValueError(f"the document's assembly is deeper than {MAX_ASSEMBLY_DEPTH} levels")
         made = []
         for entry in entries:
+            counted += 1
+            if counted > MAX_OCCURRENCES:
+                raise ValueError(f"the document's assembly names more than {MAX_OCCURRENCES} occurrences")
             found = products[entry["product"]]
             if found["assembly"]:
+                if entry["product"] in ancestors:
+                    raise ValueError("the document's assembly contains itself")
                 node = Compound()
-                node.children = build(found["components"])
+                node.children = build(found["components"], ancestors | {entry["product"]})
             else:
                 topods = downcast(shapes[found["shape"]])
                 node = topods_lut[type(topods)](downcast(topods.Located(topods.Location())))
