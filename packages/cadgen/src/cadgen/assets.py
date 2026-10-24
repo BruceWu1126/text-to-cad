@@ -12,7 +12,8 @@ long-lived server must import light. A format that needs an asset asks for it at
 moment it needs it, and gets an actionable error if it is absent.
 
 In a source checkout the Viewer resolves to ``apps/web/dist``. An installed wheel has
-no source tree and falls through to its bundled ``_runtime`` copy.
+no source tree and falls through to its bundled ``_runtime`` copy: a checkout is the exact
+layout that builds cadgen (``checkout_root``), never a folder found above an installation.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from pathlib import Path
 __all__ = [
     "AssetMissing",
     "browser_runtime_dir",
+    "checkout_root",
     "require_browser_runtime",
     "runtime_build_hint",
     "runtime_root",
@@ -61,14 +63,25 @@ def runtime_build_hint(path: Path | str, *, overridable: bool = True) -> str:
     )
 
 
+def checkout_root() -> Path | None:
+    """The repository this cadgen is imported out of, or None: only the exact layout that
+    builds it -- this file at ``<root>/packages/cadgen/src/cadgen/assets.py``, with
+    ``<root>/packages/core`` beside it. An installed wheel, wherever it sits, matches nothing
+    here: no folder above an installation is ever taken for a checkout."""
+    here = Path(__file__).resolve()
+    package, src, project, packages = here.parents[0], here.parents[1], here.parents[2], here.parents[3]
+    if (package.name, src.name, project.name, packages.name) != ("cadgen", "src", "cadgen", "packages"):
+        return None
+    if not (packages / "core" / "package.json").is_file() or not (project / "pyproject.toml").is_file():
+        return None
+    return packages.parent
+
+
 def _in_source_checkout() -> bool:
-    """True when this cadgen is being imported out of the repository that builds it:
-    a ``packages`` ancestor with ``core`` beside us. A wheel matches nothing here.
+    """True when this cadgen is being imported out of the repository that builds it
+    (``checkout_root``). A wheel matches nothing here.
     """
-    for parent in Path(__file__).resolve().parents:
-        if parent.name == "packages" and (parent / "core" / "package.json").is_file():
-            return True
-    return False
+    return checkout_root() is not None
 
 
 def require_browser_runtime(directory: Path | str) -> Path:
@@ -100,13 +113,12 @@ def _env_dir(name: str) -> Path | None:
 
 
 def _dev_viewer_dist_dir() -> Path | None:
-    """A built ``apps/web/dist`` when imported from this repository checkout."""
-    for parent in Path(__file__).resolve().parents:
-        app = parent / "apps" / "web"
-        if (app / "package.json").is_file():
-            dist = app / "dist"
-            return dist if (dist / "index.html").is_file() else None
-    return None
+    """A built ``apps/web/dist`` when imported from this repository checkout (``checkout_root``)."""
+    root = checkout_root()
+    if root is None:
+        return None
+    dist = root / "apps" / "web" / "dist"
+    return dist if (dist / "index.html").is_file() else None
 
 
 def browser_runtime_dir(explicit: Path | str | None = None) -> Path:

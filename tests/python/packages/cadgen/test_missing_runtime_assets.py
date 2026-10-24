@@ -83,6 +83,30 @@ class ExplicitRuntimeAssets(unittest.TestCase):
         if (web_dist / "index.html").is_file():
             self.assertEqual(assets.viewer_dist_dir(), web_dist)
 
+    def test_an_installation_never_takes_a_folder_above_it_for_a_checkout(self):
+        # A wheel installed under any folder (a venv inside some project, a tool directory): an
+        # apps/web or apps/mcp build in a folder above it is not this cadgen's, and is never served.
+        from cadgen.mcp import ui
+
+        with tempfile.TemporaryDirectory() as tmp:
+            above = Path(tmp).resolve()
+            for app in ("web", "mcp"):
+                (above / "apps" / app / "dist").mkdir(parents=True)
+                (above / "apps" / app / "package.json").write_text("{}", encoding="utf-8")
+                (above / "apps" / app / "dist" / "index.html").write_text("<!doctype html>", encoding="utf-8")
+            (above / "packages" / "core").mkdir(parents=True)
+            (above / "packages" / "core" / "package.json").write_text("{}", encoding="utf-8")
+            installed = above / "venv" / "lib" / "python3.12" / "site-packages" / "cadgen"
+            installed.mkdir(parents=True)
+            packaged = installed / "_runtime"
+            with mock.patch.object(assets, "__file__", str(installed / "assets.py")), \
+                    mock.patch.object(assets, "_RUNTIME", packaged), \
+                    mock.patch.dict(os.environ, {"CADGEN_VIEWER_DIST": "", "CADGEN_MCP_APP_DIR": ""}):
+                self.assertIsNone(assets.checkout_root())
+                self.assertFalse(assets._in_source_checkout())
+                self.assertEqual(assets.viewer_dist_dir(), packaged / "viewer")
+                self.assertEqual(ui.app_dir(), packaged / "mcp")
+
     def test_development_overrides_are_explicit(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
