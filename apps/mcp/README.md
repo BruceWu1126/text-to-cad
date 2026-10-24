@@ -8,13 +8,15 @@ engine, then forwards JSON-RPC to `/mcp` using its installation token. Each shim
 negotiates a separate MCP session. Closing a shim releases that session and leaves
 the engine, its workers and other clients alive.
 
-Hosts present it in one of two ways, which declared capabilities select at
-`initialize` (the shim translates Codex’s `codex-mcp-client` identity; any other host can declare
-the `dev.texttocad/tabs` extension with the `global`, `thread` and `file`
-entrypoints; an MCP Apps host advertises the `io.modelcontextprotocol/ui`
-extension):
+Hosts present it in one of two ways, which `initialize` selects (`cadgen/mcp/host.py`):
+a host can declare the `dev.texttocad/tabs` extension with the `global`, `thread` and `file`
+entrypoints, and an MCP Apps host advertises the `io.modelcontextprotocol/ui` extension.
+Codex declares neither, from its app or from `codex exec`, and names itself
+`codex-mcp-client` from both, so the shim reads which host started it from its parent
+processes: the Codex app's `codex app-server` shows tabs, while `codex exec` and the `codex`
+terminal UI show none and are served as text clients.
 
-- **Tabs (Codex, and hosts that declare those entrypoints).** **CAD** in the
+- **Tabs (the Codex app, and hosts that declare those entrypoints).** **CAD** in the
   sidebar (the home: the models opened before, and Open), a **CAD** tab beside
   each thread, and *Open with CAD* for a model file. The agent opens a tab once
   (`cad_open`) and drives it (`cad_show`). These remain separate because the host mounts
@@ -39,10 +41,18 @@ for the agent to give the person: "opened in your browser at <url>". Where a bro
 reads that document (the engine's `Server.in_page`: a version read within the last 90 seconds,
 or a browser opened on it in the last 30), it opens nothing and answers "already open in your
 browser at <url>"; where no browser can be opened here (no display), it answers with the URL alone.
-Codex greets the server the same way headless or not, so `codex exec` (and each `codex exec
-resume` turn, a new process) is told apart per call: its turn's metadata says
-`turn_trigger: exec`, and that call's `cad_open` and `cad_show` act as a text client's `cad_show`,
-claiming no tab. A host that renders apps never has a browser opened by a tool. `CADGEN_MCP_PRESENTATION=inline`
+A tab is claimed only on evidence, never on a client's name. Strongest first: an extension the
+host declares; a view that reached the server (its first `cad_sync` or `cad_http` with the app
+capability: only a host that draws views makes one); the call's own metadata (the 0.163 app
+server's binary sends `x-codex-turn-metadata.turn_trigger: exec` for an exec turn, and that
+call acts as a text client's); the host the shim found among its parent processes (exactly as
+started: `KERN_PROCARGS2` on macOS, `/proc` on Linux, nothing on Windows); and last the name. A
+Codex client with nothing but its name gets Codex's catalog, and its `cad_open` says the tab
+opens with that answer where the app shows CAD tabs, and gives the page's URL for the person
+otherwise. A `cad_show` after a `cad_open` waits for that tab (`OPENING_SECONDS`) and shows the
+model in it, says it is still opening (and shows the model once it opens), or, where nothing
+said the host shows tabs, takes a tab that never came as evidence that it shows none and opens
+the browser page. A host that renders apps never has a browser opened by a tool. `CADGEN_MCP_PRESENTATION=inline`
 tells the shim that a client renders apps without advertising them, as the
 reference host `basic-host` does.
 

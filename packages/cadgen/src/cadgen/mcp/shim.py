@@ -1,7 +1,9 @@
 """The host's stdio transport: forward JSON-RPC to this installation's engine.
 
 Only connection metadata lives here. Tools, views, pages and document state belong
-in the engine. Host capability corrections are made at this boundary.
+in the engine. Host capability corrections are made at this boundary: what the person
+said (``CADGEN_MCP_PRESENTATION``), and which host launched this process, read from its
+parent processes (``host.launcher``), which only this process can see.
 """
 from __future__ import annotations
 
@@ -13,26 +15,28 @@ import sys
 import threading
 
 from cadgen.viewer.engine_client import EngineClient
+from .host import MIME, TABS_EXTENSION, UI_EXTENSION
 from .protocol import Connection, RequestContext, RpcError, claim_stdin, claim_stdout
 
 LOG = logging.getLogger('cadgen.mcp')
 
 
-def initialize_params(params):
+def initialize_params(params, launcher=None):
+    """The host's initialize as the engine is sent it: with what the person said of the host
+    (``CADGEN_MCP_PRESENTATION``) as a declaration, and ``launcher``, the host that started this
+    process (``host.launcher``), for the server to weigh (``host.presentation``)."""
     params = copy.deepcopy(params)
-    client = params.get('clientInfo') or {}
     offered = params.setdefault('capabilities', {})
     extensions = offered.setdefault('extensions', {})
-    if client.get('name') == 'codex-mcp-client':
-        extensions['dev.texttocad/tabs'] = {'entrypoints': ['global', 'thread', 'file']}
-    elif os.environ.get('CADGEN_MCP_PRESENTATION') in ('inline', 'text'):
-        if os.environ['CADGEN_MCP_PRESENTATION'] == 'inline':
-            extensions['io.modelcontextprotocol/ui'] = {'mimeTypes': ['text/html;profile=mcp-app']}
-        else:
-            extensions.pop('io.modelcontextprotocol/ui', None)
-            extensions.pop('dev.texttocad/tabs', None)
+    told = os.environ.get('CADGEN_MCP_PRESENTATION')
+    if told == 'inline':
+        extensions[UI_EXTENSION] = {'mimeTypes': [MIME]}
+    elif told == 'text':
+        extensions.pop(UI_EXTENSION, None)
+        extensions.pop(TABS_EXTENSION, None)
+        launcher = {'host': 'CADGEN_MCP_PRESENTATION=text', 'renders': False}
     params.setdefault('_meta', {})['dev.texttocad/transport'] = {
-        'appDir': os.environ.get('CADGEN_MCP_APP_DIR', ''), 'cwd': os.getcwd(),
+        'appDir': os.environ.get('CADGEN_MCP_APP_DIR', ''), 'cwd': os.getcwd(), 'launcher': launcher,
     }
     return params
 
@@ -89,9 +93,10 @@ class Proxy:
     reconnect. Only a request the engine never took is sent again: one it refused for an unknown
     session, or one whose connection was refused."""
 
-    def __init__(self, client=None, holder=None):
+    def __init__(self, client=None, holder=None, launcher=lambda: None):
         self.client = client or EngineClient()
         self.holder = holder
+        self.launcher = launcher  # the host that started this process, read once (``serve``)
         self.session = None
         self.protocol = None
         self.initialize = None  # the host's initialize, as the engine was sent it
@@ -170,7 +175,7 @@ class Proxy:
 
     def handle(self, method, params, context: RequestContext):
         if method == 'initialize':
-            params = initialize_params(params)
+            params = initialize_params(params, self.launcher())
             result, _session = self._open(context.request_id, params)
             with self.lock:
                 self.initialize = params
@@ -202,7 +207,17 @@ def serve(argv=None):
     remembering.start()
     holder = Holder()
     holder.start()  # the engine up and held from the start, not from the first card
-    proxy = Proxy(holder=holder)
+    # Which host started this process, read from its parents while the host starts to greet it.
+    from .host import launcher
+    found = {}
+    reading = threading.Thread(target=lambda: found.update(host=launcher()), name='cadgen-host', daemon=True)
+    reading.start()
+
+    def launched():
+        reading.join(5)
+        return found.get('host')
+
+    proxy = Proxy(holder=holder, launcher=launched)
     connection = Connection(requests, output, proxy.handle, workers=64, notification=proxy.notify)
     try:
         connection.serve()

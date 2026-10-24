@@ -108,12 +108,13 @@
   "cad_show": {
    "content": [
     {
-     "text": "No CAD viewer is open in this thread. Call cad_open to open one.",
+     "text": "The CAD tab cad_open opened is still opening; it shows <tmp>/project/parts/bracket.stl once it opens.",
      "type": "text"
     }
    ],
    "structuredContent": {
-    "delivered": 0
+    "delivered": 0,
+    "opening": true
    }
   },
   "cad_tab": {
