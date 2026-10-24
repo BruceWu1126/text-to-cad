@@ -159,10 +159,12 @@ def inspect(version: str, where: str | None = None, found: tuple[str, str] | Non
 
 def _replace(path: str, write) -> None:
     """Write ``path`` whole, beside it first, so a reader never finds half a launcher."""
-    temporary = f"{path}.{os.getpid()}.tmp"
+    from cadgen._internal.atomic_replace import replace_atomic, temp_suffix
+
+    temporary = f"{path}{temp_suffix()}"
     try:
         write(temporary)
-        os.replace(temporary, path)
+        replace_atomic(temporary, path)
     except BaseException:
         try:
             os.unlink(temporary)
