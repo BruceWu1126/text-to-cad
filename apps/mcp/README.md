@@ -31,9 +31,18 @@ extension):
   ending in Display and Preview, the file sidebar, the view cube, and Quick Edit. A
   newer card retires the older ones.
 
-A client that renders no MCP Apps never loads this page: its `cad_show` answers
-with the model's page in this machine's CAD Viewer, `/<id>` (the file registered by its id, as
-a launch registers it), started if none runs (`cadgen/mcp/browser.py`), and opens no browser. `CADGEN_MCP_PRESENTATION=inline`
+A client that renders no MCP Apps never loads this page. Its `cad_show` opens the
+model's page in this machine's CAD Viewer, `/<id>` (the file registered by its id, as
+a launch registers it), started if none runs (`cadgen/mcp/browser.py`), in the person's
+browser through the same opener as the card's Open in browser, and answers with the page's URL
+for the agent to give the person: "opened in your browser at <url>". Where a browser page already
+reads that document (the engine's `Server.in_page`: a version read within the last 90 seconds,
+or a browser opened on it in the last 30), it opens nothing and answers "already open in your
+browser at <url>"; where no browser can be opened here (no display), it answers with the URL alone.
+Codex greets the server the same way headless or not, so `codex exec` (and each `codex exec
+resume` turn, a new process) is told apart per call: its turn's metadata says
+`turn_trigger: exec`, and that call's `cad_open` and `cad_show` act as a text client's `cad_show`,
+claiming no tab. A host that renders apps never has a browser opened by a tool. `CADGEN_MCP_PRESENTATION=inline`
 tells the shim that a client renders apps without advertising them, as the
 reference host `basic-host` does.
 

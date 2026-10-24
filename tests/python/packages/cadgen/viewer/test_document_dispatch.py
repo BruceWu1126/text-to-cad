@@ -9,8 +9,8 @@ from cadgen.viewer.engine_app import DocumentResponse, document_route
 from cadgen.viewer.response import Request
 
 
-def request(path, method='GET'):
-    return Request(raw_method=method, path=path, query=[], headers={'x-cadgen-viewer': '1'}, read_body=lambda: b'')
+def request(path, method='GET', query=()):
+    return Request(raw_method=method, path=path, query=list(query), headers={'x-cadgen-viewer': '1'}, read_body=lambda: b'')
 
 
 class DocumentDispatchTest(unittest.TestCase):
@@ -49,3 +49,30 @@ class DocumentDispatchTest(unittest.TestCase):
         self.assertIn('content-disposition', dict(headers))
         self.assertNotIn('access-control-allow-origin', dict(headers))
         self.assertEqual(dict(headers)['x-content-type-options'], 'nosniff')
+
+
+class BrowserPageTest(unittest.TestCase):
+    """A host with no app opens a document's page once (``cadgen.mcp``): the engine knows a browser
+    page shows a document by that page's version reads, which an MCP view's tunnel does not make."""
+
+    def test_only_the_browser_pages_version_read_says_a_page_shows_the_document(self):
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        folder = Path(tempfile.mkdtemp(prefix='browser-page-'))
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        server = Server(port=0, mesh_mode='inline')
+        self.addCleanup(server.stop)
+        path = folder / 'part.xbf'
+        ident = server.put(path, {'version': 'one', 'prototypes': [], 'name': 'part'}, {})
+        version = request(f'/__cad/api/doc/{ident}/version', query=[('after', ''), ('wait', '0')])
+        document_route(server, version, Mock(), page=False)  # an MCP view's, through its tunnel
+        server.sync(ident)  # and its heartbeat
+        self.assertFalse(server.in_page(str(path)))
+        document_route(server, version, Mock(), page=True)
+        self.assertTrue(server.in_page(str(path)))
+        self.assertTrue(server.in_page(ident))
+        other = server.put(folder / 'other.xbf', {'version': 'one', 'prototypes': [], 'name': 'other'}, {})
+        server.page_opening(other)  # a browser opened on it, its page still loading
+        self.assertTrue(server.in_page(other))

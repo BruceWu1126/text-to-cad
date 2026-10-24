@@ -41,8 +41,10 @@ def bounce_page(location):
 
 
 class DocumentResponse:
-    """Adapt the engine's socket-shaped writer to the application's response, in process."""
-    def __init__(self, request):
+    """Adapt the engine's socket-shaped writer to the application's response, in process. ``page``:
+    the request is the browser page's (the engine's own app), not an MCP view's tunnel."""
+    def __init__(self, request, page=False):
+        self.page = page
         self.command = request.method
         self.path = request.path.removeprefix('/__cad')
         if request.query:
@@ -63,11 +65,11 @@ class DocumentResponse:
         pass
 
 
-def document_route(server, request, response):
+def document_route(server, request, response, page=False):
     if request.method == 'POST' and not request.header('x-cadgen-viewer'):
         response.send_json(403, {'error': 'missing x-cadgen-viewer header'})
         return
-    handler = DocumentResponse(request)
+    handler = DocumentResponse(request, page)
     server.route(handler, request.method)
     # Deliberately no CORS headers: all application reads are same-origin or authenticated MCP.
     response.send_bytes(handler.status, handler.wfile.getvalue(),
@@ -80,6 +82,10 @@ def document_route(server, request, response):
 class ViewerApp(CadApp):
     """The viewer's routes over the engine's documents: the page's, and each MCP session's tunnel's.
     Files are known by id through the engine's server (``Server.remember``)."""
+
+    # The browser page's app (``EngineApp.default_app``), whose version reads say a page shows a
+    # document (``Server.in_page``); an MCP session's tunnel's is not.
+    page = False
 
     def __init__(self, server, **kwargs):
         super().__init__(documents=EngineDocuments(server=server), **kwargs)
@@ -96,7 +102,7 @@ class ViewerApp(CadApp):
         if not host_is_allowed(request.header('host'), self.host):
             return response.send_json(403, {'error': 'Host is not a local name'})
         if request.path.startswith('/__cad/api/') or request.path.startswith('/api/'):
-            return document_route(self.server, request, response)
+            return document_route(self.server, request, response, self.page)
         return super().handle(request, response)
 
 
@@ -189,6 +195,7 @@ class EngineApp:
                 self._default = ViewerApp(self.server, host=self.host, port=self.server.port,
                                           dist_dir=dist or resolve_dist_dir(''))
                 self._default.analytics = self.analytics
+                self._default.page = True
             elif dist:
                 self._default.dist_dir = os.path.abspath(dist)
             return self._default
