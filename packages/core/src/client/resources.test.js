@@ -68,6 +68,22 @@ test('HTTP dependency resolution preserves catalog query versions', () => {
   assert.equal(new URL(asset).searchParams.get('v'), 'abc');
 });
 
+test('a model dependency resolves only to a file beside it, never a remote or foreign origin', () => {
+  const resources = createHttpCadResourceProvider({origin:'https://cad.test'});
+  const source = '/__cad/asset?file=/models/model.gltf&v=abc';
+  // A relative reference stays a same-origin /__cad/asset URL; a data: URI passes through.
+  assert.equal(new URL(resources.resolveDependency(source, 'textures/skin.png')).searchParams.get('file'), '/models/textures/skin.png');
+  assert.equal(resources.resolveDependency(source, 'data:application/octet-stream;base64,AAAA'), 'data:application/octet-stream;base64,AAAA');
+  // An explicit http(s) scheme (a cross-origin fetch) is refused rather than fetched.
+  for (const remote of ['https://attacker.example/beacon.bin', 'http://127.0.0.1:9/x']) {
+    assert.throws(() => resources.resolveDependency(source, remote), /only a file beside it/);
+  }
+  // A //host or file:// reference is rebased to a same-origin /__cad/asset path, not a remote
+  // fetch; the backend's CAD-extension gate is what bounds those local paths.
+  assert.equal(new URL(resources.resolveDependency(source, '//attacker.example/x')).origin, 'https://cad.test');
+  assert.equal(new URL(resources.resolveDependency(source, 'file:///etc/hosts')).origin, 'https://cad.test');
+});
+
 test('worker URL tickets retain the configured HTTP cache policy and headers', async t => {
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {

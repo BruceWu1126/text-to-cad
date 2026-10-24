@@ -99,9 +99,17 @@ export function createHttpCadResourceProvider({ origin = '', fetch: fetchImpl = 
     resolveDependency(source, reference) {
       const asset = resolveCadAssetMeshUrl(reference, resourceUrl(source));
       if (asset) return asset;
+      const ref = String(reference);
+      if (/^(data|blob):/i.test(ref)) return ref;
       const base = new URL(resourceUrl(source), globalThis.window?.location?.href || 'http://cad.local/');
-      const resolved = new URL(reference, base);
-      return /^[a-z][a-z0-9+.-]*:/i.test(resourceUrl(source)) || /^(https?:)?\/\//i.test(reference) ? resolved.href : `${resolved.pathname}${resolved.search}`;
+      const resolved = new URL(ref, base);
+      // A model names only a file beside it: same origin as the file it came from. An explicit
+      // scheme, a protocol-relative //host, or any other origin is refused, so opening a model
+      // never makes the viewer fetch an attacker-chosen host.
+      if (resolved.origin !== base.origin || base.origin === 'null') {
+        throw new Error(`a model may load only a file beside it, not ${reference}`);
+      }
+      return /^[a-z][a-z0-9+.-]*:/i.test(resourceUrl(source)) ? resolved.href : `${resolved.pathname}${resolved.search}`;
     },
     async workerTicket(url, options = {}) {
       aborted(options.signal); aborted(lifetimeSignal);
