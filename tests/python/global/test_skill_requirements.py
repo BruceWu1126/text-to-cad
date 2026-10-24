@@ -32,7 +32,10 @@ LAUNCH = "uvx --no-config --managed-python --python 3.13 --from cadgen=={version
 LAUNCHER = {"cadgen": "~/.local/bin/cadgen-{version}", "python": "~/.local/bin/cadgen-python-{version}"}
 INSTALL = ("If either file is missing (a skills-only install, or a purged uv cache), run\n"
            "`{command}` once,\noutside any sandbox or with the sandbox's permission: it installs cadgen and "
-           "publishes the\nlaunchers. Nothing else ever needs escalation.\n")
+           "publishes the\nlaunchers. With the CAD app's server running, nothing else needs the sandbox's\n"
+           "permission: it starts the engine and holds it. Without it, a sandboxed shell cannot start\n"
+           "the engine; when a command says no engine is running, run `cadgen server` outside the\n"
+           "sandbox once.\n")
 
 
 _HANDOFF_MARKER = re.compile(r"\$(?P<name>[a-z0-9-]+)")

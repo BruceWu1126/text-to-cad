@@ -44,7 +44,10 @@ one installation, and its engine server, with the CAD app's:
 If either file is missing (a skills-only install, or a purged uv cache), run
 `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen doctor` once,
 outside any sandbox or with the sandbox's permission: it installs cadgen and publishes the
-launchers. Nothing else ever needs escalation.
+launchers. With the CAD app's server running, nothing else needs the sandbox's
+permission: it starts the engine and holds it. Without it, a sandboxed shell cannot start
+the engine; when a command says no engine is running, run `cadgen server` outside the
+sandbox once.
 
 `cadgen doctor <skill-dir>` reports the installation in use, whether it is the one
 this skill pins, whether the CAD kernel loads, and whether the engine is running. Each
@@ -58,9 +61,9 @@ and the documents it holds; `cadgen stop` stops it, and any older one left runni
 A build cut off by the shell's time limit keeps running in the engine; run the same
 command again and it waits for that build and replays it (`cadgen status` shows it).
 Give a cold build of a large model the shell tool's longest timeout, or run it in the
-background. If a command ends with 'the system denies cadgen's local engine', this
-shell's sandbox forbids the engine's folder: rerun it with the sandbox's permission (in
-Codex, escalated permissions) rather than retrying.
+background. A refused folder is another case: if a command ends with 'the system denies
+cadgen's local engine', this shell's sandbox forbids the engine's folder itself: rerun it
+with the sandbox's permission (in Codex, escalated permissions) rather than retrying.
 
 Command-line paths, and the paths `read_step`, `read_xbf`, `read_mesh` and `export`
 take, are relative to the working directory, as are a model's own file reads. Anchor
