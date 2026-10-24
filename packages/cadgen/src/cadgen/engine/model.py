@@ -144,20 +144,56 @@ class Model:
         functools.update_wrapper(self, function)
         self.function = function
         self.name = function.__name__
-        source = inspect.getsourcefile(function) or inspect.getfile(function)
-        self.script = Path(canonical(source))
+        # Where its document is kept (``STORES``), by where its source is (``store_of``): its file
+        # on disk, ``pointer``; else the source Python holds (a notebook cell), ``copy``.
+        filename = function.__code__.co_filename
+        self.saved = os.path.isfile(filename)
+        self.store = "pointer" if self.saved else "copy"
+        if not self.saved:
+            try:
+                inspect.getsource(function)
+            except (OSError, TypeError):
+                raise ValueError(f"model {self.name!r} is defined in {filename}, which keeps no source to build "
+                                 "it from: save this as a file") from None
+        self.script = Path(canonical(filename)) if self.saved else Path(filename)
         self.outputs: list[Output] = []
-        # Where its document is kept (``STORES``): ``pointer`` by default; ``memory`` when asked.
-        self.store = "pointer"
         self._store_given: str | None = None
+        self._id: str | None = None  # ``@model(id=...)``: a copied document's, chosen by its author
         self.__xbf_model__ = True
         _MODELS[f"{self.script}::{self.name}"] = self
 
     @property
     def id(self) -> str:
-        """This model's document id, worked out here from its script and function, never asked
-        of the engine: any process that knows both knows it (``ids.model_id``)."""
-        return model_id(self.script, self.name)
+        """This model's document id, worked out here, never asked of the engine: from its script
+        and function (``ids.model_id``), the same in any process that knows both; the one its author
+        gave (``@model(id=...)``); or, for a copy given none, a new one for this definition."""
+        if self._id is None and self.store == "copy":
+            import uuid
+
+            self._id = str(uuid.uuid4())
+        return self._id if self._id is not None else model_id(self.script, self.name)
+
+    def identified(self, ident: Any) -> "Model":
+        """The id ``@model(id=...)`` gives: a UUID, its author's, which a later run's document of the
+        same id replaces (an upsert). Only a copied document takes one (``store="copy"``, or a copy's
+        own ``model.py``) and a ``memory`` one: a model in a saved file has the id of its script and
+        function."""
+        if ident is None:
+            return self
+        import uuid
+
+        try:
+            found = str(uuid.UUID(str(ident)))
+        except ValueError:
+            raise ValueError(f"id is a UUID, not {ident!r}") from None
+        self._id = found
+        return self._checked()
+
+    def _checked(self) -> "Model":
+        if self._id is not None and self.store == "pointer" and not _in_bundle(self.script):
+            raise ValueError(f"model {self.name!r} is in a saved file: its id is its script's and function's, and "
+                             "takes no id=; id= names a copied document (store='copy')")
+        return self
 
     @property
     def address(self) -> str:
@@ -194,18 +230,28 @@ class Model:
             raise api.EngineError(next(row.get("error", "model failed") for row in built.models if not row.get("ok")))
         if _caller_discards_model_result():
             return None
-        return api.Built(self.name, self.script, built.models[0], Path.cwd()).shape
+        return api.Built(self.name, self.built_from(built.models[0]), built.models[0], Path.cwd()).shape
+
+    def built_from(self, report: dict[str, Any]) -> Path:
+        """The script a build of this model ran: its own, or a copy's ``model.py`` (its report's)."""
+        found = (report.get("source") or {}).get("script")
+        return Path(found) if found else self.script
 
     def stored(self, store: str | None) -> "Model":
-        """The store a decorator gives (``store=``), checked: one store per model."""
+        """The store a decorator gives (``store=``), checked against where the source is: one store
+        per model; ``pointer`` and ``memory`` need a saved file, ``copy`` the source Python holds or
+        a saved file."""
         if store is None:
             return self
         if store not in STORES:
             raise ValueError(f"store is one of {', '.join(map(repr, STORES))}, not {store!r}")
         if self._store_given is not None and self._store_given != store:
             raise TypeError(f"model {self.name!r} declares two stores, {self._store_given!r} and {store!r}")
+        if store != "copy" and not self.saved:
+            raise ValueError(f"store={store!r} needs the model in a saved .py file; {self.name!r} is defined in "
+                             f"{self.function.__code__.co_filename}")
         self.store = self._store_given = store
-        return self
+        return self._checked()
 
     def _path(self, kind: str, out: Any) -> Path:
         if out is None:
@@ -237,6 +283,8 @@ class Model:
         the actual build call without forcing cache misses (engine README, Profiling)."""
         from cadgen.engine import api
 
+        if self.store == "copy":
+            return api.build_copy(self, verify=verify, profile=profile, log=log, daemon=daemon)
         return api.build_script(self.script, [self.name], verify=verify, profile=profile, log=log, daemon=daemon)
 
     def export(self, *destinations: Any) -> Any:
@@ -261,6 +309,12 @@ class Model:
         if found is None:
             from cadgen.engine.api import Built
 
+            if self.store == "copy":
+                from cadgen.engine import registry
+
+                held = registry.current()
+                script = held.folder(self.id) / "model.py" if held is not None else self.script
+                return Built(self.name, script, {}, Path.cwd()).document
             return Built(self.name, self.script, {}, Path.cwd()).document
         if not found.is_file():
             raise FileNotFoundError(f"model {self.identity} is not built yet: {found} is missing (.build() it)")
@@ -328,19 +382,31 @@ def as_package_module(main: Any) -> None:
     main.__spec__, main.__package__ = spec, package
 
 
-# Where a model's document is kept: ``pointer``, held by the engine, which knows the program that
-# builds it again; ``memory``, kept in its worker's memory only, gone when the worker is.
-STORES = ("pointer", "memory")
+# Where a model's document is kept: ``pointer``, a model in a saved file, which the engine's registry
+# points at and knows the program that builds it again; ``copy``, a model whose source is in no
+# saved file (a notebook cell), its source and the files its build read copied into its registry
+# folder (``copies``); ``memory``, kept in its worker's memory only, gone when the worker is.
+STORES = ("pointer", "copy", "memory")
 
 
-def model(function: Any = None, /, *, store: str | None = None) -> Any:
+def _in_bundle(script: Path) -> bool:
+    """Whether ``script`` is a copied document's own ``model.py`` (in the registry's folder of it)."""
+    from cadgen.engine import registry
+
+    held = registry.current()
+    return held is not None and held.bundle_of(script) is not None
+
+
+def model(function: Any = None, /, *, store: str | None = None, id: str | None = None) -> Any:  # noqa: A002
     """Declare a model without an output file. A call builds its document. ``@model(store=...)``
-    says where its document is kept (``STORES``)."""
+    says where its document is kept (``STORES``): by default ``pointer`` for a model in a saved
+    file, ``copy`` for one whose source only Python holds (a notebook cell). ``@model(id=...)``
+    gives a copied document its id, a UUID its author chooses: a later run's replaces it."""
     if function is None:
         if store is not None and store not in STORES:
             raise ValueError(f"store is one of {', '.join(map(repr, STORES))}, not {store!r}")
-        return lambda target: model(target, store=store)
-    return (function if isinstance(function, Model) else Model(function)).stored(store)
+        return lambda target: model(target, store=store, id=id)
+    return (function if isinstance(function, Model) else Model(function)).stored(store).identified(id)
 
 
 def _decorator(kind: str) -> Callable[..., Any]:
@@ -363,7 +429,7 @@ def _decorator(kind: str) -> Callable[..., Any]:
     decorate.__name__ = kind
     decorate.__qualname__ = kind
     decorate.__doc__ = (f"Declare an explicit output: @{kind}(out='path{SUFFIXES[kind]}'), where its "
-                        "document is kept with store= (pointer, the default, or memory). "
+                        "document is kept with store= (pointer, copy or memory). "
                         "The output path is required; decoration builds nothing.")
     return decorate
 
@@ -583,6 +649,9 @@ def read_step(path: Any) -> Any:
 
     from cadgen.engine.reader import refuse_written
 
+    from cadgen.engine.copies import copied_path
+
+    path = copied_path(path)  # a copied document's rerun reads the copy (``copies.serving``)
     # Before the memo: a read of a file this build writes is refused, whether or not the memo holds it.
     refuse_written(path, "read_step")
     return _READ_STEP(os.fspath(path))
@@ -614,6 +683,9 @@ def read_xbf(path: Any) -> Any:
 
     from cadgen.engine.reader import refuse_written
 
+    from cadgen.engine.copies import copied_path
+
+    path = copied_path(path)  # a copied document's rerun reads the copy (``copies.serving``)
     refuse_written(path, "read_xbf")  # before the memo, as read_step's
     return _READ_XBF(os.fspath(path))
 

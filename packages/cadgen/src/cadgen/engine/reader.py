@@ -610,6 +610,9 @@ def read_mesh(path: Any) -> Mesh:
         other = {".step": "a STEP with read_step", ".stp": "a STEP with read_step", ".xbf": "an xbf with read_xbf"}
         raise ValueError(f"read_mesh reads an .stl, not {Path(os.fspath(path)).name}"
                          + (f": read {other[suffix]}" if suffix in other else ""))
+    from cadgen.engine.copies import copied_path
+
+    path = copied_path(path)  # a copied document's rerun reads the copy (``copies.serving``)
     refuse_written(path, "read_mesh")  # before the memo, as read_step's
     if _READ_MESH is None:
         from cadgen.engine.kernel.memo import wrap_function

@@ -10,7 +10,7 @@ new one starts past the cap; with every worker busy, the build waits, first come
 for the first to come free. Nothing is refused, and nothing is predicted: no admission. A
 worker idle ``CADGEN_ENGINE_WORKER_IDLE`` seconds (by default the daemon's own idle time, an
 hour) is retired, and so is one over its memory cap after a build (``worker.retirement``).
-Before a worker is stopped, every ``pointer`` document of it the server does not hold is taken
+Before a worker is stopped, every ``pointer`` and ``copy`` document of it the server does not hold is taken
 from it (``models.Models.drain``): a document outlives its worker. A retired script's next build
 is a fresh worker's, a restart.
 
@@ -967,6 +967,16 @@ class Daemon:
             with self.busy_lock:
                 self.busy += 1
             try:
+                copying = request.get("copy")
+                if copying:
+                    # A copied model: its bundle written in its registry folder first, and built
+                    # there, as ``python model.py`` builds it (``copies``).
+                    try:
+                        script = self.models.bundle(copying)
+                    except (OSError, ValueError) as error:
+                        send(refused(error) if isinstance(error, ValueError) else {"failed": str(error)})
+                        return
+                    request = {**request, "script": script, "program": script}
                 script = request["script"]
                 key, cwd = self._routed(request)
                 for attempt in (1, 2):
@@ -977,7 +987,7 @@ class Daemon:
                         order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
                                  "cwd": request.get("cwd"), "verify": bool(request.get("verify")),
                                  "profile": bool(request.get("profile")), "acknowledged": True,
-                                 "run": request.get("run")}
+                                 "run": request.get("run"), **self.models.serving(script)}
                         server = self.server
                         if server is not None:
                             # The worker sends each served document it builds back as a patch,
@@ -995,6 +1005,8 @@ class Daemon:
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
                         # The program that asked: what a document it built names to build it again.
                         answer["program"] = request.get("program")
+                        if copying:
+                            answer["copy"] = {key: copying.get(key) for key in ("id", "source", "origin")}
                         self._built(worker, answer)
                         send(answer)
                         return
