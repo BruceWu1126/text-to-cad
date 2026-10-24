@@ -172,15 +172,21 @@ times faster than parsing the STEP.
 
 ## Pictures
 
+Look only when it changes what you do. When a viewer is open (the CAD card or tab, or the
+page URL the person has), the person is looking at the model: after an edit, report the
+run's one line and stop. Take a snapshot only when no viewer is open, or when you must see
+something the person has not asked about, and then one picture from one angle. Write a
+check script only when the person asks for a dimension, a fit or a mass, or when the change
+is numeric and the number matters. Resolve a reference with `cadgen inspect` only when a
+prompt names one. Never screenshot the card to confirm your own work.
+
 ```bash
 cadgen snapshot "$ID" tmp/review.png
-cadgen snapshot "$ID" tmp/top.png --camera top --display hidden-line
-cadgen snapshot "$ID" tmp/open.png --pose open
 ```
 
 A snapshot draws the document as the viewer does, rendered by OCCT, and writes nothing
-but the PNG. Its options say how the picture is drawn: camera, display, grid, Preview,
-pose and size. It shows arrangement and appearance, not dimensions
+but the PNG. Its options say how the picture is drawn: camera (`--camera top`), display,
+grid, Preview, pose (`--pose open`) and size. It shows arrangement and appearance, not dimensions
 ([snapshots](references/snapshot-review.md)).
 
 ## Prompt references and inspection
@@ -190,7 +196,7 @@ in a document by the engine's own names: the document (a model's id, or a file's
 absolute path), `#`, a part or an assembly by the labels on its way from the root
 (`hand/finger.2` is the second component labelled `finger` in `hand`), then, after a
 slash, one element by its name (`f:`, `e:`, `v:`) or its number (`face 7`). The CAD
-viewer copies them. Resolve one with `cadgen inspect`:
+viewer copies them. When a prompt names one, resolve it with `cadgen inspect`:
 
 ```bash
 cadgen inspect "$ID" "bracket/face 7"
@@ -216,8 +222,8 @@ cadgen snapshot "$ID" tmp/quick_edit.png --annotation tmp/bracket.snapshot.json 
 ```
 
 Inspect supplied annotations before editing. Without annotations, the captured view is
-optional context; render it when useful to the request. After editing, run the script
-and draw it again to check the change
+optional context; render it when useful to the request. After editing, run the script and
+report its line: the person's viewer shows the change
 ([annotations and Quick Edit views](references/snapshot-review.md#annotations-and-quick-edit-views)).
 
 A reference into a file that is not a document names what the viewer picked in it, in
@@ -233,7 +239,8 @@ that file's own terms (none is a ref `cadgen inspect` resolves):
 ## Check the design
 
 A check is a Python script that calls the model and measures what it returns, so it
-tests the model as it is now:
+tests the model as it is now. Write one only when the person asks for a dimension, a fit
+or a mass, or when the change is numeric and the number matters ([Pictures](#pictures)):
 
 ```python
 from cadgen.geometry import closest_points
@@ -254,8 +261,8 @@ print(closest_points(plate, post).distance)   # 0: the standoff sits on the plat
   ([measurements](references/inspection-and-validation.md#measurements)).
 - `cadgen inspect "$ID" assembly` weighs an assembly: each part's volume times its
   material's density, and the parts that have no material.
-- A snapshot is diagnostic, not proof: turn each visual concern into a measurement
-  before reporting it as checked.
+- A snapshot shows arrangement, not dimensions: a number the person asked for is
+  measured, never read off a picture.
 - A check that fails or cannot decide has shown nothing about the design.
 - A retry that leaves out or shrinks a specified feature (a fillet skipped, a radius
   reduced) builds a different design from the one asked for.
@@ -273,11 +280,14 @@ every assumption or departure from the request.
 ### Show the model
 
 Show the user each model and file you create or change, and any they ask to see.
-Snapshots and validation don't replace this.
+Snapshots and validation don't replace this. Once a viewer is open, the person is looking
+at the model: after an edit, report the run's one line and stop. Never screenshot the
+viewer to confirm your own work.
 
 - If your tools include `cad_show` (your host may prefix it), call it with the model's id
   or the file's absolute path, and follow its description for when to call it again.
-  `cad_view` reads what the user selected; `cad_screenshot` shows you what they see.
+  `cad_view` reads what the user selected; `cad_screenshot` shows you what they see, for
+  when they ask about it.
 - Otherwise give the user the page's link once: a model's page is the `view:` line its
   run prints. For a file, run the CAD Viewer, from any folder:
 

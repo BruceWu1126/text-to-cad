@@ -3,6 +3,10 @@
 Read this file when resolving a reference, measuring a model, checking clearances or
 contact, or diagnosing geometry.
 
+This is the catalogue of what exists. Write a check only when the person asks for a dimension, a
+fit or a mass, or the change is numeric and the number matters; run `cadgen inspect` only when a
+prompt names a reference ([Pictures](../SKILL.md#pictures)).
+
 ## Contents
 
 - [Opening geometry](#opening-geometry)
