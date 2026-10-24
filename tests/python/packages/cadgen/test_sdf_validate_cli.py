@@ -213,6 +213,36 @@ class SdfValidateCliTests(unittest.TestCase):
         self.assertIn("did not finish", failed[0].message)
         self.assertEqual([sdf_path], list(self.temp_root.glob("*.sdf")))  # the scratch copy is removed
 
+    @unittest.skipUnless(os.name == "posix", "native POSIX interpreter lookup")
+    def test_gz_does_not_run_on_a_document_that_names_a_remote_reference_unless_allowed(self) -> None:
+        # gz resolves a document's <include>/<uri> references itself; the document names
+        # those hosts, so gz is not run on it unless the caller lets it reach them.
+        from cadgen import sdf
+
+        ran = self.temp_root / "gz-ran"
+        launcher = self._write("gz", f"#!/bin/sh\ntouch {ran}\nexit 0\n")
+        launcher.chmod(0o755)
+        remote = VALID_WORLD_SDF.replace(
+            "</world>", "<include><uri>&#104;ttps://models.example/box</uri></include></world>")
+        sdf_path = self._write("world.sdf", remote)
+        path = os.pathsep.join([str(self.temp_root), "/bin", "/usr/bin"])
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            result = sdf.validate(sdf_path, gz_check="auto")
+            notes = [issue for issue in result.issues if issue.code == "gz_check_remote"]
+            self.assertTrue(notes)
+            self.assertEqual(notes[0].severity, "info")
+            self.assertIn("https://models.example/box", notes[0].message)
+            self.assertFalse(ran.exists())
+
+            result = sdf.validate(sdf_path, gz_check="required")
+            self.assertFalse(result.ok)
+            self.assertIn("gz_check_remote", {issue.code for issue in result.issues if issue.severity == "error"})
+            self.assertFalse(ran.exists())
+
+            result = sdf.validate(sdf_path, gz_check="required", gz_remote=True)
+            self.assertIn("gz_check_passed", {issue.code for issue in result.issues})
+            self.assertTrue(ran.exists())
+
     def test_missing_file_fails(self) -> None:
         exit_code, output = self._run(str(self.temp_root / "absent.sdf"), "--gz-check", "never")
         self.assertEqual(exit_code, 1)

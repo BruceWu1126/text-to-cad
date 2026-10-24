@@ -143,6 +143,8 @@ After `.sdf` files are created or modified, show them ([Show the model](../SKILL
 
 A `gz` on PATH that cannot start (a broken launcher, a missing interpreter) is a `gz_check_failed` **error** under `auto` and `required` alike, naming why it could not start.
 
+`gz sdf --check` resolves the document's own `<include>`/`<uri>` references, and the document chooses them. So gz does not run on a document that names a remote reference (`http://`, `https://`, `fuel://`), or that does not parse as XML: that is a `gz_check_remote` info under `auto` and an **error** under `required`, naming the references. `--gz-remote` lets gz fetch them; without it, validating a file never waits on a host the file names. Local references (relative paths, `file://`, `model://`, `package://`) are not refused, and a local model the document includes is not read for remote references of its own.
+
 A tool that is not installed says nothing about the document, so under `auto` its absence is a note and never blocks — including under `--strict`, which promotes warnings about the FILE. Use `required` to demand the external check. Record which mode ran in the diagnostics report.
 
 ## SDF validity vs project policy

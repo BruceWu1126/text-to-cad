@@ -100,7 +100,7 @@ cadgen sdf validate path/to/model.sdf --gz-check required
 cadgen sdf validate path/to/model.sdf --gz-check never
 ```
 
-`gz sdf --check` is target-consumer validation. `--gz-check auto` is the default: it runs when `gz` is on PATH, reporting `gz_check_passed` or the tool's own output as the error `gz_check_failed`, and otherwise notes `info: gz_check_unavailable` and carries on. An absent optional tool says nothing about the file, so it never fails a clean document and `--strict` does not change that. `--gz-check required` makes the tool mandatory — a missing `gz` is then an error — and `--gz-check never` skips it outright.
+`gz sdf --check` is target-consumer validation. `--gz-check auto` is the default: it runs when `gz` is on PATH, reporting `gz_check_passed` or the tool's own output as the error `gz_check_failed`, and otherwise notes `info: gz_check_unavailable` and carries on. An absent optional tool says nothing about the file, so it never fails a clean document and `--strict` does not change that. `--gz-check required` makes the tool mandatory — a missing `gz` is then an error — and `--gz-check never` skips it outright. gz resolves a document's `<include>`/`<uri>` references itself, so it does not run on a document that names a remote one (`http`, `https`, `fuel`): that is `info: gz_check_remote` (an error under `required`), and `--gz-remote` lets gz fetch them.
 
 ## Required report shape
 
