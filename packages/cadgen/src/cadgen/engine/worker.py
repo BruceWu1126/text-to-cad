@@ -307,10 +307,9 @@ def kept() -> dict[str, str]:
     """What of this worker's environment no run's replaces (``adopt``): what started its
     interpreter (``daemon.RESTARTS``; the engine's own folder is on its PYTHONPATH) and what it
     set for itself."""
-    from cadgen.engine.daemon import RESTARTS
+    from cadgen.engine.daemon import BYTECODE, RESTARTS
 
-    return {name: os.environ[name] for name in (*RESTARTS, "PYTHONDONTWRITEBYTECODE", "CADGEN_ENGINE_WORKER")
-            if name in os.environ}
+    return {name: os.environ[name] for name in (*RESTARTS, *BYTECODE, "CADGEN_ENGINE_WORKER") if name in os.environ}
 
 
 def adopt(environment: dict[str, str] | None, own: dict[str, str]) -> None:
@@ -318,9 +317,10 @@ def adopt(environment: dict[str, str] | None, own: dict[str, str]) -> None:
     request with none leaves it as it is. Only what differs is set or unset."""
     if not environment:
         return
-    from cadgen.engine.daemon import RESTARTS
+    from cadgen.engine.daemon import BYTECODE, RESTARTS
 
-    wanted = {name: value for name, value in environment.items() if name not in RESTARTS}
+    # The worker's bytecode is the daemon's (``daemon.bytecode``), never a run's.
+    wanted = {name: value for name, value in environment.items() if name not in (*RESTARTS, *BYTECODE)}
     wanted.update(own)
     for name in [name for name in os.environ if name not in wanted]:
         del os.environ[name]
@@ -498,7 +498,6 @@ def refusal(error: BaseException) -> dict[str, str]:
     return {"kind": f"{kind.__module__}:{kind.__qualname__}"}
 
 def main() -> int:
-    sys.dont_write_bytecode = True
     os.environ["CADGEN_ENGINE_WORKER"] = "1"
     protocol = os.fdopen(os.dup(1), "wb")
     os.dup2(2, 1)  # the model's prints go where the daemon reads logs from

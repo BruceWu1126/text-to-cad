@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -559,6 +560,50 @@ class DaemonEnvironmentTest(unittest.TestCase):
             client._start()
         self.assertNotIn("DO_NOT_TRACK", captured)
         self.assertNotIn("CADGEN_TELEMETRY", captured)
+
+    def test_the_daemon_and_its_workers_cache_bytecode_in_the_engine_s_folder_alone(self) -> None:
+        from cadgen.engine import client, daemon, registry
+
+        cache = Path(tempfile.mkdtemp(prefix="engine-bytecode-")).resolve()
+        self.addCleanup(shutil.rmtree, cache, True)
+
+        def started(given: dict[str, str]) -> dict[str, dict[str, str]]:
+            """The environment a daemon is started with from a caller's ``given``, and the one that
+            daemon starts a worker with for a run in ``given``."""
+            found: dict[str, dict] = {}
+
+            class Captured(Exception):
+                pass
+
+            def popen(argv, **kwargs):
+                found["worker" if argv[-1].endswith("worker") else "daemon"] = kwargs["env"]
+                raise Captured
+
+            with mock.patch.object(subprocess, "Popen", popen):
+                with mock.patch.dict(os.environ, given):
+                    if "PYTHONPYCACHEPREFIX" not in given:
+                        os.environ.pop("PYTHONPYCACHEPREFIX", None)
+                    with self.assertRaises(Captured):
+                        client._start()
+                with mock.patch.dict(os.environ, found["daemon"], clear=True), self.assertRaises(Captured):
+                    daemon.Worker(str(cache / "model.py"), dict(given))  # in the daemon, for a run in ``given``
+            return found
+
+        ours = str(cache / daemon.PYCACHE / daemon._tag())
+        found = started({"CADGEN_CACHE_DIR": str(cache), "PYTHONDONTWRITEBYTECODE": "1"})
+        for process in ("daemon", "worker"):
+            self.assertEqual(found[process].get("PYTHONPYCACHEPREFIX"), ours, process)
+            self.assertNotIn("PYTHONDONTWRITEBYTECODE", found[process], f"a caller's switch is not the {process}'s")
+        self.assertEqual(stat.S_IMODE(os.stat(ours).st_mode) & 0o077, 0, "this user's alone")
+        given = started({"CADGEN_CACHE_DIR": str(cache), "PYTHONPYCACHEPREFIX": str(cache / "theirs")})
+        self.assertEqual(given["daemon"]["PYTHONPYCACHEPREFIX"], str(cache / "theirs"), "a prefix given is honoured")
+        with mock.patch.object(registry, "FACTORY", None):  # no distribution names a cache folder: nothing written
+            bare = started({"PYTHONDONTWRITEBYTECODE": ""})
+        self.assertEqual((bare["daemon"].get("PYTHONDONTWRITEBYTECODE"), bare["daemon"].get("PYTHONPYCACHEPREFIX")), ("1", None))
+        if os.name != "nt":
+            os.chmod(ours, 0o777)
+            self.assertEqual(started({"CADGEN_CACHE_DIR": str(cache)})["daemon"].get("PYTHONDONTWRITEBYTECODE"), "1",
+                             "a folder others can write to is none of the engine's")
 
 
 class SweepTest(unittest.TestCase):

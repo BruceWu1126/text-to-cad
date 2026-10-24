@@ -170,9 +170,9 @@ class _FirstPartyFromSource(importlib.abc.MetaPathFinder):
 
 
 def _from_source() -> None:
-    """The model's code runs from its source: no bytecode written for anything a build
-    imports, none read for a first-party module. Once per process, first on the meta path."""
-    sys.dont_write_bytecode = True
+    """The model's code runs from its source: no bytecode read or written for a first-party
+    module (a library's is the interpreter's to cache: a worker's under the engine's own folder,
+    ``daemon.bytecode``). Once per process, first on the meta path."""
     if not any(isinstance(finder, _FirstPartyFromSource) for finder in sys.meta_path):
         sys.meta_path.insert(0, _FirstPartyFromSource())
 

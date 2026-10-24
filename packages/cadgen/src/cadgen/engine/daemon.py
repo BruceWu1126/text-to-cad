@@ -70,6 +70,99 @@ RETIRED_KEPT = 12
 # adopts the rest of its caller's environment (``worker.adopt``), so a caller whose PATH changes
 # from one run to the next (an agent's shell) keeps its warm worker and its memo.
 RESTARTS = ("PYTHONPATH", "PYTHONHOME", "PYTHONSAFEPATH", "PYTHONNOUSERSITE", "PYTHONUSERBASE", "PYTHONPLATLIBDIR")
+# How the engine's processes treat bytecode (``bytecode``): one of the two, never a run's to change.
+BYTECODE = ("PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE")
+# The folder of the engine's bytecode in the cache folder the distribution names (``registry``):
+# one folder per installation in it (``_tag``), and one no daemon started in this many days goes.
+PYCACHE = "pycache"
+PYCACHE_UNUSED_DAYS = 30
+# What a kernel load is (``warm``): its libraries imported, and one shape made.
+WARM = "import OCP.TopoDS, build123d; build123d.Box(1, 1, 1)"
+
+
+def bytecode(env: dict[str, str]) -> dict[str, str]:
+    """``env`` (the daemon's, or a worker's), its bytecode set as the engine's processes keep it:
+    cached under ``pycache/`` in the cache folder (``PYTHONPYCACHEPREFIX``), so a worker's start
+    imports the kernel's pure-Python libraries from bytecode (a uvx installation compiles nothing
+    on install: every start compiled them, seconds each) and nothing is written beside a library
+    or a model. A ``PYTHONPYCACHEPREFIX`` already given is honoured. A caller's
+    ``PYTHONDONTWRITEBYTECODE`` is not: the daemon and its workers serve every later client, and
+    write their bytecode in a folder of their own, ``pycache/<installation>`` (``_tag``). With no
+    cache folder this user alone can write -- no distribution to name one, or one others can write
+    to -- nothing is written: ``PYTHONDONTWRITEBYTECODE``. A model's own modules are compiled from
+    their source whatever this says (``build._SourceOnlyLoader``)."""
+    if not env.get("PYTHONPYCACHEPREFIX"):
+        env.pop("PYTHONPYCACHEPREFIX", None)
+        folder = _pycache()
+        if folder is None:
+            env["PYTHONDONTWRITEBYTECODE"] = "1"
+            return env
+        env["PYTHONPYCACHEPREFIX"] = folder
+    env.pop("PYTHONDONTWRITEBYTECODE", None)
+    return env
+
+
+def _pycache() -> str | None:
+    """This installation's folder under ``pycache/`` in the cache folder, made this user's alone and
+    marked in use (its time); None where there is none to use."""
+    from cadgen.engine import registry
+
+    held = registry.current()
+    if held is None or held.cache is None:
+        return None
+    root = Path(held.cache.root) / PYCACHE
+    folder = root / _tag()
+    try:
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        folder.mkdir(exist_ok=True, mode=0o700)
+        os.utime(folder)  # in use: ``_prune`` leaves it
+    except OSError:
+        return None
+    if not WINDOWS and not (_users_own(str(root)) and _users_own(str(folder))):
+        return None  # a folder another can write to would hand them the engine's code
+    return str(folder)
+
+
+def warm() -> subprocess.Popen | None:
+    """When a host first asks the engine for its page or warms it (``Daemon.handle``: ``http``, an
+    MCP server's first call, and ``warm``, the viewer's launch), once per installation: the kernel
+    loaded in a process of its own (``WARM``), so the first build pays neither the compilation of
+    its libraries, which that process caches, nor the operating system's first look at a fresh
+    installation's native libraries (macOS checks each once: 43 s measured on a new uvx
+    environment, against 2.5 s loaded again). A build that starts the engine loads the kernel
+    itself at once: nothing is warmed for it. Nothing either when the kernel's bytecode is cached
+    already, or the engine caches none; and the folders of installations no daemon started in
+    ``PYCACHE_UNUSED_DAYS`` go, in the background."""
+    import importlib.machinery
+    import importlib.util
+
+    ours = _pycache()
+    if ours is None or os.path.realpath(sys.pycache_prefix or "") != os.path.realpath(ours):
+        return None  # none cached, or the caller's own folder: neither ours to judge or prune
+    threading.Thread(target=_prune, args=(Path(ours),), daemon=True).start()
+    found = importlib.machinery.PathFinder.find_spec("build123d")
+    if found is None or not found.origin or os.path.exists(importlib.util.cache_from_source(found.origin)):
+        return None
+    return subprocess.Popen([sys.executable, "-P", "-c", WARM], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, env=dict(os.environ), cwd=str(state_dir()), **windowless())
+
+
+def _prune(ours: Path) -> None:
+    """The other installations' bytecode folders beside ``ours`` that no daemon started in
+    ``PYCACHE_UNUSED_DAYS``: regenerable, and each a release's worth of libraries."""
+    import shutil
+
+    unused = time.time() - PYCACHE_UNUSED_DAYS * 86400
+    try:
+        others = [entry for entry in ours.parent.iterdir() if entry.name != ours.name and entry.is_dir()]
+    except OSError:
+        return
+    for entry in others:
+        try:
+            if entry.stat().st_mtime < unused:
+                shutil.rmtree(entry, ignore_errors=True)
+        except OSError:
+            pass
 
 
 def worker_cap() -> int:
@@ -304,7 +397,10 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
         root = engine_root()
         if root not in path.split(os.pathsep):
             env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        # The daemon's bytecode, whoever's run starts the worker: it serves every later run too.
+        own = {name: os.environ[name] for name in BYTECODE if name in os.environ}
+        env = {name: value for name, value in env.items() if name not in BYTECODE}
+        env.update(own or bytecode({}))
         env["CADGEN_ENGINE_WORKER"] = "1"
         self.process = subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.worker"], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
@@ -750,6 +846,7 @@ class Daemon:
         self.builders: dict[str, Worker] = {}
         self.renders = None  # the served documents' render processes (``render.service.Renders``)
         self.serving = threading.Lock()
+        self.warming: Any = None  # the kernel's warm process (``warm``), False once none was needed
         from cadgen.engine.models import Models
 
         self.models = Models(self)
@@ -1019,6 +1116,10 @@ class Daemon:
     def handle(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
         self.touch()
         op = request.get("op")
+        if op in ("http", "warm") and self.warming is None:
+            with self.busy_lock:
+                if self.warming is None:
+                    self.warming = warm() or False
         if op == "models":
             send({"ok": True, "models": self.models.listing()})
             return
@@ -1288,6 +1389,8 @@ class Daemon:
                 self.stopping.set()
 
     def shutdown(self) -> None:
+        if self.warming and self.warming.poll() is None:
+            self.warming.kill()  # its bytecode is regenerable; the engine's processes end with it
         # The documents built or read in the last idle window, saved first, best effort (``cache``).
         self.models.cache.final()
         self.pool.stop()
@@ -1392,7 +1495,9 @@ def lock(path: Path | None = None) -> Any:
 
 
 def main(argv: list[str] | None = None) -> int:
-    sys.dont_write_bytecode = True
+    bytecode(os.environ)  # its own (``client._start`` set it), or made here: a daemon run in the foreground
+    sys.pycache_prefix = os.environ.get("PYTHONPYCACHEPREFIX") or None
+    sys.dont_write_bytecode = sys.pycache_prefix is None
     idle = float(os.environ.get("CADGEN_ENGINE_IDLE") or IDLE_SECONDS)
     held = lock()
     if held is None:

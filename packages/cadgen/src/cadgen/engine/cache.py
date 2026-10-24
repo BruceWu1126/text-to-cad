@@ -22,7 +22,8 @@ When it is written, never on the run path:
   built or read in the last idle window -- are saved, best effort, within ``SHUTDOWN_SECONDS``.
 
 The cache folder is shared: a cadgen 0.7 installation keeps its store there too, in folders of its
-own. The engine reads, writes, sizes and evicts only under ``documents/`` (``DOCUMENTS``), and never
+own. The cache reads, writes, sizes and evicts only under ``documents/`` (``DOCUMENTS``; the engine's
+bytecode is under ``pycache/``, ``daemon.bytecode``), and never
 lists, counts or removes anything else there. The record is authoritative: a cache file missing,
 or not the size its record says, is simply not cached.
 

@@ -72,7 +72,9 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    platform's cache folder (`~/.cache/cadgen`, by 0.7's rule) it keeps, under `documents/` and
    nowhere else there, each model document's bytes as it last built them: its own file, never a
    declared or exported xbf, regenerable and wiped at no loss, so a restart opens every project at
-   once. The code stays the only source of truth: a document whose code changed since says so,
+   once; and under `pycache/` the bytecode its own processes compile of the libraries they load
+   (`PYTHONPYCACHEPREFIX`, a folder per installation), regenerable too, so nothing is written
+   beside a library or a model. The code stays the only source of truth: a document whose code changed since says so,
    with the command that builds it again, and nothing reruns. It writes no
    sidecar, record of a build beside a model, index, memo, mesh or parsed document, and no derived file
    beside an input. A model whose xbf holds the closure the model has now is not run, nor one with no file
@@ -337,8 +339,8 @@ model builds by running its script: `python model.py`.
 Coming from 0.7: cadgen 0.7.x kept a cache store, which can hold gigabytes, at
 `~/.cache/cadgen` (macOS and Linux; `$XDG_CACHE_HOME/cadgen` when that is set),
 `%LOCALAPPDATA%\cadgen` (Windows) or the folder `CADGEN_CACHE_DIR` named. 0.8 keeps its
-document cache in that folder's `documents/` alone, and neither reads, writes nor removes 0.7's
-store beside it. Once no 0.7 install is left on the machine, delete that folder by hand; an
+document cache in that folder's `documents/` and its engine's bytecode in `pycache/`, and
+neither reads, writes nor removes 0.7's store beside it. Once no 0.7 install is left on the machine, delete that folder by hand; an
 agent may do it when asked. 0.8 loses nothing by it: its documents are built again by the next
 run of their scripts. Settings, the telemetry answer and recents live in the state directory,
 not there.

@@ -57,7 +57,7 @@ def _start() -> int:
     path = env.get("PYTHONPATH", "")
     if root not in path.split(os.pathsep):
         env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    _daemon.bytecode(env)
     return subprocess.Popen([sys.executable, "-P", "-m", DAEMON_MODULE], stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=_working_folder(),
                             **_daemon.detached()).pid

@@ -163,8 +163,9 @@ the file's path, and its rebuild command; never geometry; a copied model's sourc
 inputs beside it). In the cache folder (`CADGEN_CACHE_DIR`, else the platform's:
 `~/.cache/cadgen`) it keeps each model document's bytes as last built,
 `documents/<uuid>/document.xbf`, regenerable and wiped at no loss, so a restart reopens
-every document without a build; it touches nothing else in that folder, which a 0.7
-install's store may share. Tests point both folders at temporary ones
+every document without a build, and under `pycache/` the bytecode the daemon and its
+workers compile of the libraries they load (`PYTHONPYCACHEPREFIX`); it touches nothing else in
+that folder, which a 0.7 install's store may share. Tests point both folders at temporary ones
 (`scripts/test/unittest_files.py` does).
 
 The skills ship no launcher scripts: every operational verb is a `cadgen`

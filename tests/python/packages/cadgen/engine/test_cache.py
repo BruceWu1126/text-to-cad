@@ -176,6 +176,9 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(sorted(row[1] for row in meta["read"]), ["cube.py"], "what the build read, by digest")
         self.assertEqual(sorted(os.listdir(self.state / "documents" / ident)), ["document.json"],
                          "the bytes are the cache folder's, never the state folder's")
+        compiled = list((self.cache / "pycache").glob("*/**/build123d/__init__.*.pyc"))  # the prefix mirrors its path
+        self.assertEqual(len(compiled), 1, "the worker's libraries' bytecode, in the engine's folder")
+        self.assertEqual(list(self.project.rglob("*.pyc")), [], "none beside the model")
         stamps = (self.file(ident).stat().st_mtime_ns, (self.state / "documents" / ident / "document.json").stat().st_mtime_ns)
         self.run_script("cube")
         time.sleep(IDLE * 4)  # its idle window passed again
