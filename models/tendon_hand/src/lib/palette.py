@@ -60,7 +60,7 @@ the sub-assembly studies, but the assembled hand no longer uses it -- the
 palette below folds steel into aluminium.
 """
 
-from cadgen.engine import materials
+from cadgen import materials
 
 # --- physical surfaces ------------------------------------------------------
 # Roughness/metalness/clearcoat of each surface: the look of `MATERIALS` below.

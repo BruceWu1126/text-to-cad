@@ -7,7 +7,7 @@ called the four finger models; here each finger's combs are one `@memo` stage,
 model and the four-finger review both place, so a build makes each finger's combs once.
 """
 
-from cadgen.engine import memo, xbf
+from cadgen import memo, model
 
 import build123d as bd
 
@@ -31,38 +31,38 @@ def finger_guide_mounts(finger):
     return mounts
 
 
-@xbf(out="../XBF/index_guide_mounts.xbf")
+@model
 def index_guide_mounts():
     """Physical reaction combs for the index finger, in assembled neutral fan."""
     return finger_guide_mounts("index")
 
 
-@xbf(out="../XBF/middle_guide_mounts.xbf")
+@model
 def middle_guide_mounts():
     """Physical reaction combs for the middle finger, in assembled neutral fan."""
     return finger_guide_mounts("middle")
 
 
-@xbf(out="../XBF/ring_guide_mounts.xbf")
+@model
 def ring_guide_mounts():
     """Physical reaction combs for the ring finger, in assembled neutral fan."""
     return finger_guide_mounts("ring")
 
 
-@xbf(out="../XBF/little_guide_mounts.xbf")
+@model
 def little_guide_mounts():
     """Physical reaction combs for the little finger, in assembled neutral fan."""
     return finger_guide_mounts("little")
 
 
-@xbf(out="../XBF/phalanx_guide_mounts_review.xbf")
+@model
 def phalanx_guide_mounts_review():
     """Complete four-finger phalanx guide-comb mounting hardware."""
     return bd.Compound(label="four_finger_phalanx_guide_mounts",
                        children=[finger_guide_mounts(finger) for finger in ("index", "middle", "ring", "little")])
 
 
-@xbf(out="../XBF/guide_comb_review.xbf")
+@model
 def guide_comb_review():
     """Exact mid-finger reaction comb and original skeletal rail mounting study."""
     pieces = [make_phalanx(45, 18, label="original_middle_proximal_frame")]
@@ -74,26 +74,26 @@ def guide_comb_review():
     return bd.Compound(label="supported_split_reaction_comb_review", children=pieces)
 
 
-@xbf(out="../XBF/fixed_outlet_review.xbf")
+@model
 def fixed_outlet_review():
     """Two fixed PIP drive-guide outlets with real removable side-rail mounts."""
     return bd.Compound(label="fixed_pip_guide_outlet_mounts",
                        children=[make_phalanx(45, 18), *make_fixed_outlet_pair(45, 18, 4.5, "middle_pip_drive_guide")])
 
 
-@xbf(out="../XBF/fixed_outlet_mounts_review.xbf")
+@model
 def fixed_outlet_mounts_review():
     """Four-finger fixed guide outlet hardware; full range acceptance is pending."""
     return bd.Compound(label="fixed_guide_outlet_mounts", children=[p[0] for p in fixed_phalanx_guide_mounts()])
 
 
-@xbf(out="../XBF/yaw_reaction_mounts_review.xbf")
+@model
 def yaw_reaction_mounts_review():
     """Eight carrier-anchored finger MCP yaw-reaction outlet mouths."""
     return bd.Compound(label="eight_finger_yaw_reaction_outlet_mounts", children=[s for s, f, y, k in yaw_reaction_mounts()])
 
 
-@xbf(out="../XBF/yaw_outlet_mount_review.xbf")
+@model
 def yaw_outlet_mount_review():
     """Reaction mouths attached to the universal carrier beside both drive drums."""
     p = [make_universal_carrier(), *make_yaw_reaction_mounts(18, "middle_mcp")]
@@ -102,7 +102,7 @@ def yaw_outlet_mount_review():
     return bd.Compound(label="yaw_reaction_open_mouth_clamps", children=p)
 
 
-@xbf(out="../XBF/yaw_guide_macro_review.xbf")
+@model
 def yaw_guide_macro_review():
     """The index MCP's yaw mouths on its actual carrier, beside both flexion drums."""
     parts = make_yaw_reaction_mounts(18, "index_mcp")
@@ -114,7 +114,7 @@ def yaw_guide_macro_review():
     return bd.Compound(label="mounted_index_yaw_mouth_macro", children=parts)
 
 
-@xbf(out="../XBF/thumb_cmc_negative_jaw_repair_review.xbf")
+@model
 def thumb_cmc_negative_jaw_repair_review():
     """A continuous CMC reaction arm routed around both yaw drums.
 
@@ -127,13 +127,13 @@ def thumb_cmc_negative_jaw_repair_review():
     return bd.Compound(label="continuous_CMC_reaction_arm", children=[bd.Pos(*THUMB_CMC) * bd.Rot(0, 0, 45) * selected[0]])
 
 
-@xbf(out="../XBF/thumb_downstream_mounts_review.xbf")
+@model
 def thumb_downstream_mounts_review():
     """The thumb's downstream guide mounts."""
     return bd.Compound(label="thumb_downstream_guide_mounts", children=[s for s, f, y, k in thumb_downstream_mounts()])
 
 
-@xbf(out="../XBF/thumb_reaction_arm_context_candidate.xbf")
+@model
 def thumb_reaction_arm_context_candidate():
     """Context-constrained reaction-arm candidate; not yet a clearance certificate."""
     shape = bd.Pos(*THUMB_CMC) * bd.Rot(0, 0, 45) * make_candidate(bow_x=4., bow_y=-14.)
