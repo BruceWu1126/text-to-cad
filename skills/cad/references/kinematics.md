@@ -32,8 +32,8 @@ they write (`from cadgen.ap242 import mechanism_state, gear_pair`):
   writes: `gear_pair`, `rack_and_pinion_pair` and `screw_pair(assembly, name, **joints)`.
 - **Configuration sequences** are the mechanism's motions over time:
   `configuration_sequence(assembly, name, ...)`. The viewer calls them motions.
-- **`posed(assembly, state)`** returns the assembly placed at a named state: the body of
-  a posed model ([below](#mechanism-states)).
+- **`posed(model(), state)`** returns the assembly placed at a named state: the body of
+  a posed model, or a check's pose ([below](#mechanism-states)).
 
 None of the first three moves the build. The document keeps the mechanism, its states,
 couplings and sequences; a STEP, STL or 3MF export is placements only, and a GLB export
@@ -108,11 +108,17 @@ leaves out as built, and returns the assembly. A cylindrical joint takes
 (`curl=0.5`). Mechanism states are what the viewer's Position lists as presets, and what
 a snapshot's `--pose` names.
 
-A file of the mechanism in another pose is a model of its own: `posed(assembly, state)`
+A file of the mechanism in another pose is a model of its own: `posed(hinge(), state)`
 returns a copy of the assembly with every part where the named state, or a mapping of
 joint label to value, puts it. The copy keeps its joints, couplings, states and
 sequences, with the asked values as its as-built state, so its page's Position and
 motions still work. An unknown state or joint is refused by name.
+
+`posed` takes the handle the model call returns, as every verb does. In a body it poses
+the child's shape. In a plain script (a check) it poses the document the engine holds and
+returns the tree `.shape` would, at that pose: placed parts, no joints. A plain script's
+`.shape` carries no joints, so `posed(hinge().shape, ...)` there is refused with the call
+to make instead.
 
 ```python
 # src/hinge_poses.py
@@ -124,7 +130,7 @@ from hinge import hinge
 
 @model
 def hinge_open():
-    return posed(hinge().shape, "open")
+    return posed(hinge(), "open")
 
 
 if __name__ == "__main__":
@@ -253,14 +259,14 @@ where to review one.
 
 A pose or a motion shows movement; it does not measure it. A check of the model measures
 the parts as built, so a part that clears there can still pass through another
-mid-motion. Measure a pose by checking its posed model:
+mid-motion. Measure a pose by posing the model in the check:
 
 ```python
+from cadgen.ap242 import posed
 from cadgen.geometry import overlap_volume
 
-from hinge_poses import hinge_open
+from hinge import hinge
 
-posed = hinge_open().shape
-parts = {part.label: part for part in posed.leaves}
+parts = {part.label: part for part in posed(hinge(), "open").leaves}
 print(overlap_volume(parts["arm"].solids()[0], parts["base"].solids()[0]))   # 0: the open arm clears the base
 ```

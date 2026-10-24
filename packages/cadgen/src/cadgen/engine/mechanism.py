@@ -534,14 +534,20 @@ def configuration_sequence(assembly: Any, name: str, waypoints_or_fn: Any = None
 
 
 def posed(assembly: Any, state: Any) -> Any:
-    """A copy of ``assembly`` with every part where ``state`` puts it: a mechanism state's name, or
+    """``assembly`` with every part where ``state`` puts it: a mechanism state's name, or
     ``{joint label or coupling name: value}`` (the values ``mechanism_state`` takes, the rest as
     built). The parts move by the forward kinematics the viewer and the snapshot use
     (``link_worlds``): each link's placement at the asked values over its placement as built,
-    applied to that link's parts. The copy shares the geometry, and keeps the joints, couplings,
-    mechanism states and configuration sequences, the asked values its as-built state. An unknown
-    state, joint or coupling, or a value out of range, is refused by name (``resolve``). A posed
-    file is this, a function in the model's code: ``return posed(arm().shape, "folded")``."""
+    applied to that link's parts. An unknown state, joint or coupling, or a value out of range, is
+    refused by name (``resolve``).
+
+    ``assembly`` is what the model call returned, its document's handle, or a shape. Inside a body
+    (``return posed(arm(), "folded")``: a posed file is this) the result is a copy of the shape that
+    shares its geometry and keeps the joints, couplings, mechanism states and configuration
+    sequences, the asked values its as-built state. From a plain script (a check) the handle's
+    document is posed where the engine holds its mechanism (``posed_structure``), and the answer is
+    the tree ``.shape`` is, at that pose: placed parts, no joints. A shape a plain script read
+    through ``.shape`` has no joints left to pose, and is refused with what to pass instead."""
     from collections.abc import Mapping
 
     import build123d as bd
@@ -551,11 +557,9 @@ def posed(assembly: Any, state: Any) -> Any:
     from OCP.TopLoc import TopLoc_Location
 
     from cadgen.engine import document
+    from cadgen.engine.api import Document
     from cadgen.engine.model import instance
 
-    if not isinstance(assembly, bd.Shape):
-        hint = ": a model call returns its document, whose .shape is the assembly" if hasattr(assembly, "shape") else ""
-        raise TypeError(f"posed() takes the assembly whose joints it sets, not {type(assembly).__name__}{hint}")
     if isinstance(state, Mapping):
         pose: Any = dict(state)
     elif isinstance(state, str):
@@ -563,6 +567,13 @@ def posed(assembly: Any, state: Any) -> Any:
     else:
         raise TypeError("posed() takes a mechanism state's name or a mapping of joint labels to values, "
                         f"not {type(state).__name__}")
+    if isinstance(assembly, Document):
+        if not assembly._inside:
+            return _posed_document(assembly, pose)
+        assembly = assembly.shape
+    if not isinstance(assembly, bd.Shape):
+        raise TypeError(f"posed() takes a model call's handle or the assembly whose joints it sets, "
+                        f"not {type(assembly).__name__}")
     made = instance(assembly)
     tree = document.collect(made, made.__dict__.get("label") or "posed")
     children = made.__dict__.get("_NodeMixin__children") or ()
@@ -571,6 +582,11 @@ def posed(assembly: Any, state: Any) -> Any:
     root_path = () if whole and made.wrapped.Location().IsIdentity() else (0,)
     kinematics = None if tree.mechanism is None else block(
         tree.mechanism, [], lambda at: _column(_numpy(_occurrence(tree, at)[0])))
+    if kinematics is None:
+        transferred = assembly.__dict__.get(TRANSFERRED)
+        if transferred is not None:
+            raise KinematicsError(f"posed() was given {transferred}'s .shape, which carries its parts and not its "
+                                  f"joints: pass the handle the model call returns, posed({transferred}(), {pose!r})")
     values, _named = resolve(kinematics, pose)
     if kinematics is None:
         return made
@@ -628,6 +644,25 @@ def posed(assembly: Any, state: Any) -> Any:
             else:
                 joint.angle, joint.position = value
     return made
+
+
+# Set on the tree a plain script's ``.shape`` brings out of the engine (``api.Document.shape``): the
+# model's name, for ``posed`` to say what to pass in place of a shape with no joints.
+TRANSFERRED = "_cadgen_transferred"
+
+
+def _posed_document(handle: Any, pose: Any) -> Any:
+    """``posed(handle, pose)`` outside the body that builds it: the document's structure as the
+    engine holds it, mechanism included, placed at ``pose`` (``posed_structure``), as the
+    build123d tree ``.shape`` makes of it."""
+    from cadgen.engine.export import Source
+
+    source = handle._transferred()
+    if source.structure.get("kinematics") is None:
+        raise KinematicsError(f"{handle.name} has no joints to pose")
+    shape = Source(posed_structure(source.structure, pose), source.shapes, live=False).shape()
+    shape.__dict__[TRANSFERRED] = handle.name
+    return shape
 
 
 def _objects(result: Any, root_path: tuple[int, ...]) -> list[tuple[Any, tuple[int, ...]]]:

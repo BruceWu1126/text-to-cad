@@ -45,7 +45,9 @@ if __name__ == "__main__":
   page), `.name`, `.shape` and `.export(...)`. `.shape` is the built shape, brought into
   the calling process when it is first read (a check, a drawing) and never before, so a
   script that only builds pays nothing for it. Inside another model's body, `.shape` is
-  the child's result itself: compose `plate().shape`.
+  the child's result itself: compose `plate().shape`. The handle is what verbs take
+  (`export(handle, ...)`, `posed(handle, state)`): a plain script's `.shape` holds the
+  parts, not the joints.
 - **One declaration per function**: bare `@model` (a document with no file) or its file
   decorators (`@xbf`, `@step`, ...: a document with those files), never both; stacking
   `@model` on a file decorator is refused. The function's name is the model's name:
@@ -72,7 +74,7 @@ if __name__ == "__main__":
 - **Called from a plain script** (a check, a drawing), a model is built in the engine
   and its call's `.shape` is the result as a build123d tree: every assembly a `Compound`,
   every part placed, named, coloured and given its material (its joints stay in the
-  document: measure a pose by its posed model).
+  document: measure a pose by `posed(handle, state)`, which poses the document).
 
 ## Parameters and configurations
 

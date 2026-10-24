@@ -122,7 +122,10 @@ by (`mechanism.link_worlds`). The copy keeps the joints, couplings, states and s
 asked values its as-built state, so its viewer Position and motions still work; an unknown
 state, joint or coupling, or a value out of range, is refused by name as `--pose` refuses it.
 A folded arm's STEP is a model: `@step(out="arm_folded.step") def arm_folded(): return
-posed(arm().shape, "folded")`.
+posed(arm(), "folded")`. `posed` takes the handle a model call returns, as every verb does: in a
+body it poses the child's shape; in a plain script, where `.shape` brings the parts out of the
+engine without their joints, it poses the document the engine holds (`posed_structure`) and
+answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to pass the handle.
 
 ## Laws
 
@@ -1131,7 +1134,7 @@ target and moved over it; a DXF only when its bytes change.
   error refuses the file, saying which. `export.dxf.validate_dxf_file` runs them on any DXF.
 - **No option selects a part or a state** (law 22): a file of one part is that part's own
   model (a function returning it), and a posed file a model returning the assembly posed
-  (`posed(arm().shape, "folded")`, `cadgen.ap242`). Snapshot's `--pose` is the picture's: ad
+  (`posed(arm(), "folded")`, `cadgen.ap242`). Snapshot's `--pose` is the picture's: ad
   hoc, never cached, never declared.
 
 **Motions in a GLB.** Each motion (**Configuration sequences**) is baked into a glTF animation of its name:

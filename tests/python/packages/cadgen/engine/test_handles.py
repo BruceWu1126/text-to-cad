@@ -87,6 +87,54 @@ print("RESULT " + json.dumps({"id": handle.id, "url": handle.url, "same": handle
 """
 
 
+HINGE = """
+import build123d as bd
+from cadgen import model
+from cadgen.ap242 import mechanism_state, posed
+
+
+@model
+def hinge():
+    base = bd.Box(100, 60, 20, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    arm = bd.Pos(40, 0, 20) * bd.Box(120, 20, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.MIN))
+    base.label, arm.label = "base", "arm"
+    elbow = bd.Axis((40, 0, 20), (0, -1, 0))
+    bd.RevoluteJoint("elbow", base, axis=elbow, angular_range=(-10, 120))
+    bd.RigidJoint("elbow", arm, bd.Plane(origin=elbow.position, z_dir=elbow.direction).location)
+    base.joints["elbow"].connect_to(arm.joints["elbow"], angle=0)
+    assembly = bd.Compound(children=[base, arm], label="hinge")
+    return mechanism_state(assembly, "open", elbow=90)
+
+
+@model
+def hinge_open():
+    return posed(hinge().shape, "open")
+"""
+
+POSER = """
+import json
+
+from cadgen.ap242 import posed
+from hinge import hinge, hinge_open
+
+
+def arm(shape):
+    box = next(part for part in shape.leaves if part.label == "arm").bounding_box()
+    return [round(value, 6) for value in (*box.min, *box.max)]
+
+
+handle = hinge()
+try:
+    posed(handle.shape, "open")
+    refused = None
+except ValueError as error:
+    refused = str(error)
+print("RESULT " + json.dumps({"built": arm(handle.shape), "posed": arm(posed(handle, "open")),
+                              "valued": arm(posed(handle, {"elbow": 90})), "in_body": arm(hinge_open().shape),
+                              "refused": refused}))
+"""
+
+
 def _served(url: str, ident: str) -> dict:
     """The document a page serves (``/api/doc/<id>``), with the token its URL carries."""
     page, _, query = url.partition("?")
@@ -183,6 +231,19 @@ class HandleTest(unittest.TestCase):
         answer = self.ask({"op": "state", "id": ident})
         self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", None))
 
+
+    def test_a_handle_is_posed_where_the_engine_holds_its_mechanism(self) -> None:
+        # From a plain script, the handle is posed (its .shape carries no joints, and says what to pass
+        # instead); in a body, the child's shape is posed as it always was.
+        project = self.project("hinge", {"hinge.py": HINGE, "poser.py": POSER})
+        found = self.run_python("poser.py", cwd=project)
+        self.assertEqual(found["built"], [40, -10, 20, 160, 10, 30])
+        # A quarter turn about -Y through (40, 0, 20) stands the arm up: its tip at z 140.
+        self.assertEqual(found["posed"], [30, -10, 20, 40, 10, 140])
+        self.assertEqual(found["valued"], found["posed"])
+        self.assertEqual(found["in_body"], found["posed"])
+        self.assertEqual(found["refused"], "posed() was given hinge's .shape, which carries its parts and not its "
+                                           "joints: pass the handle the model call returns, posed(hinge(), 'open')")
 
 if __name__ == "__main__":
     unittest.main()

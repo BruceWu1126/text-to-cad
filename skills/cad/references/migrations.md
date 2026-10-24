@@ -264,7 +264,7 @@ Code written against an 0.8 preview may use names the release renamed or removed
 | `from cadgen import animation` | `from cadgen.gltf import animation` |
 | `cadgen build SOURCE`, `cadgen.build(code_or_shape, ...)`, `cad_build` | none: a decorated function called from Python, in a `.py` file; a shape made elsewhere (a notebook cell, a REPL) is handed over, `model(shape, name=...)` |
 | `@xbf` + `@glb` stacked so a GLB bakes its animations | `@model`; `cadgen export <id> model.glb` or `export(x, "model.glb")` bakes them |
-| a model call returning its shape (`base = plate()`, `posed(arm(), ...)`) | the call returns the document's handle: compose `plate().shape`; `.id`, `.url` and `.export(...)` are the document's |
+| a model call returning its shape (`base = plate()` used as a shape) | the call returns the document's handle: compose `plate().shape`; `.id`, `.url` and `.export(...)` are the document's |
 | `@model(store="copy")`, a notebook cell's model kept as a copy | none: no copy mode. A cell's shape is handed over, `model(shape, name="plate")`; a model lives in a `.py` file |
 | `@model(id="<uuid>")` | none: an id is derived (the script and the function), or `key="plate"` names one: `@model(key=...)`, `@xbf(..., key=...)`, `model(shape, name=..., key=...)` |
 | `@model` stacked with `@xbf`, `@step` or another file decorator | one or the other: `@model` for a document with no file, the file decorators for one with files; the stack is refused, drop `@model` |

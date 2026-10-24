@@ -167,7 +167,11 @@ class Document:
     @property
     def shape(self) -> Any:
         if self._shape is _UNSET:
-            self._shape = self._transferred().shape()
+            from cadgen.engine.mechanism import TRANSFERRED
+
+            shape = self._transferred().shape()
+            shape.__dict__[TRANSFERRED] = self.name  # no joints came with it: ``posed`` says to pass the handle
+            self._shape = shape
         return self._shape
 
     def _transferred(self) -> Any:
