@@ -1,5 +1,7 @@
-"""Document ids: one id per document, derived from the canonical path (and function), the same in
-every process, and the one key the engine's server and the viewer agree on."""
+"""Document ids: one formula for every document -- uuid5 of a scope's canonical path and a name: a
+model's script and function, a file's path and no name, a shape's calling script (or working folder)
+and its name -- or a ``key=``'s, the same in every process, and the one key the engine's server and
+the viewer agree on."""
 
 from __future__ import annotations
 
@@ -21,7 +23,8 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from cadgen.engine.addresses import document_id  # noqa: E402
-from cadgen.engine.ids import canonical, file_id, is_id, model_id  # noqa: E402
+from cadgen.engine import model as declaring  # noqa: E402
+from cadgen.engine.ids import NAMESPACE, canonical, derived_id, file_id, is_id, key_id, model_id  # noqa: E402
 
 SCRIPT = """
 from cadgen.engine import model
@@ -66,6 +69,40 @@ class IdsTest(unittest.TestCase):
         self.assertEqual(json.loads(done.stdout.strip().splitlines()[-1]), model_id(self.script, "part"))
         self.assertFalse((self.folder / "no-engine").exists(), "no engine was asked or started")
 
+    def test_one_formula_names_a_model_a_file_and_a_shape_with_no_prefix(self) -> None:
+        def formula(scope: Path, name: str = "") -> str:
+            return str(uuid.uuid5(NAMESPACE, canonical(scope) + "::" + name))
+
+        self.assertEqual(model_id(self.script, "part"), formula(self.script, "part"))
+        self.assertEqual(file_id(self.script), formula(self.script), "a file: its path, no name")
+        self.assertEqual(derived_id(self.folder, "plate"), formula(self.folder, "plate"),
+                         "a shape handed over from a REPL: the working folder and its name")
+        older = {str(uuid.uuid5(NAMESPACE, "model\0" + canonical(self.script) + "\0part")),
+                 str(uuid.uuid5(NAMESPACE, "file\0" + canonical(self.script)))}
+        self.assertFalse(older & {model_id(self.script, "part"), file_id(self.script)}, "the prefixes are gone")
+
+    def test_a_key_replaces_the_derived_id_and_names_one_declaration(self) -> None:
+        self.assertEqual(key_id("arm"), str(uuid.uuid5(NAMESPACE, "key::arm")))
+        for bad in ("", " arm", "arm\n", 7):
+            with self.subTest(key=bad), self.assertRaises(ValueError):
+                key_id(bad)  # type: ignore[arg-type]
+        import importlib.util
+
+        def load(name: str, text: str):
+            path = self.folder / f"{name}.py"
+            path.write_text(textwrap.dedent(text), encoding="utf-8")
+            spec = importlib.util.spec_from_file_location(f"ids_{name}", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        self.addCleanup(declaring._KEYS.clear)
+        keyed = load("left", "from cadgen.engine import model, xbf\n\n@model(key='arm')\ndef left():\n    return None\n"
+                             "\n@xbf('XBF/r.xbf', key='rail')\ndef rail():\n    return None\n")
+        self.assertEqual((keyed.left.id, keyed.rail.id), (key_id("arm"), key_id("rail")))
+        with self.assertRaisesRegex(ValueError, f"key 'arm' is claimed by two declarations, {canonical(self.folder / 'left.py')}::left"):
+            load("right", "from cadgen.engine import model\n\n@model(key='arm')\ndef right():\n    return None\n")
+
     def test_two_scripts_with_one_function_name_are_two_models(self) -> None:
         other = self.folder / "other.py"
         other.write_text(textwrap.dedent(SCRIPT), encoding="utf-8")
@@ -80,7 +117,7 @@ class IdsTest(unittest.TestCase):
         for spelling in spellings:
             with self.subTest(spelling=str(spelling)):
                 self.assertEqual(model_id(spelling, "part"), model_id(self.script, "part"))
-                # A script's name never names its model: `parts.py::part` is a file name like any other.
+                # A script's name never names its model through the address: `parts.py::part` is a file name.
                 self.assertNotEqual(document_id(f"{spelling}::part"), model_id(self.script, "part"))
 
     def test_a_symlinked_or_case_variant_file_is_one_file(self) -> None:
