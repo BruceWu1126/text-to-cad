@@ -161,6 +161,19 @@ class NotHeldRefusalTest(unittest.TestCase):
         self.assertIsInstance(api._failed(answers[0]), NotHeld, "an id it never built is refused the same")
 
 
+class StatusTextTest(unittest.TestCase):
+    def test_the_serving_line_counts_what_was_opened_beside_the_documents_held(self) -> None:
+        from cadgen.engine.cli import status_text
+
+        live = [{"id": f"id-{n}", "name": f"part{n}", "state": "live"} for n in range(6)]
+        text = status_text({"pid": 1, "up": 5, "cap": 4, "idleTimeout": 60, "workers": [], "models": live,
+                            "serving": {"url": "http://127.0.0.1:1", "documents": [
+                                {"id": "f", "path": "/a.xbf", "state": "evicted", "bytes": 0}]}})
+        lines = text.splitlines()
+        self.assertIn("serving http://127.0.0.1:1: 0 documents opened by a page or a command", lines)
+        self.assertEqual(sum(line.startswith("  live") for line in lines), 6, "the documents held, listed apart")
+
+
 SCRIPT = """
 import pathlib
 import build123d as bd

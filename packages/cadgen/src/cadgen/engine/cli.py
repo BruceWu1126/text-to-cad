@@ -434,11 +434,13 @@ def status_text(answer: dict[str, Any]) -> str:
                                               f"{_span(now - row['at'])} ago" for row in retired))
     serving = answer.get("serving")
     if serving:
-        documents = len(serving.get("documents") or [])
+        # What the server has loaded because a page or a command opened it -- not the documents the
+        # engine holds, which the ``documents:`` lines list -- an evicted file's row left out.
+        opened = sum(1 for row in serving.get("documents") or [] if row.get("state", "held") == "held")
         renders = len(answer.get("renders") or [])
         memory = serving.get("memory") or {}
         held = (memory.get("documents") or 0) + (memory.get("meshes") or 0)
-        lines.append(f"serving {serving['url']}: {documents} document{'' if documents == 1 else 's'}"
+        lines.append(f"serving {serving['url']}: {opened} document{'' if opened == 1 else 's'} opened by a page or a command"
                      + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else "")
                      + (f" · {_gb(held / 2**20)} of {_gb(memory['budget'] / 2**20)} held" if memory.get("budget") else ""))
     models = answer.get("models") or []
