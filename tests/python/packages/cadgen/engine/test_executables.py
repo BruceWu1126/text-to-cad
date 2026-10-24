@@ -57,6 +57,16 @@ class DaemonWorkingFolderTest(unittest.TestCase):
         self.assertEqual(started.call_args.kwargs["cwd"], str(engine))
         self.assertIsNone(daemon.folder_refusal(engine))
 
+    def test_an_idle_worker_stands_in_the_engine_s_folder_and_never_one_others_can_write(self) -> None:
+        from cadgen.engine import worker
+
+        engine = Path(tempfile.mkdtemp(prefix="eng-")).resolve()
+        self.addCleanup(shutil.rmtree, engine, True)
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(engine)}):
+            self.assertEqual(worker._neutral_folder(), str(engine))
+            engine.chmod(0o777)
+            self.assertEqual(worker._neutral_folder(), tempfile.gettempdir())
+
 
 if __name__ == "__main__":
     unittest.main()
