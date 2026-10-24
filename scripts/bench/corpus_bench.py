@@ -560,8 +560,8 @@ def prepare(spec: dict[str, Any], out: Path, engine_dir: Path, cadgen_src: Path)
 class Bench:
     """One batch: its rows, appended to ``rows.jsonl`` as each step ends."""
 
-    def __init__(self, out: Path, python: str, timeout: float) -> None:
-        self.out, self.python, self.timeout = out, python, timeout
+    def __init__(self, out: Path, python: str, timeout: float, limit: float | None = None) -> None:
+        self.out, self.python, self.timeout, self.limit = out, python, timeout, limit
         self.rows: list[dict[str, Any]] = []
         self.failed = False
         self.ids: dict[str, dict[str, str]] = {}  # per model: the id of each model its last build built
@@ -605,8 +605,24 @@ class Bench:
         self.emit(row)
         return row
 
+    def daemon(self, model: Model) -> list[int]:
+        """The pid of the model's own engine daemon, if one is serving its socket."""
+        done, _wall = self.run(model, ["-c", "from cadgen.engine.daemon import socket_path; print(socket_path())"], 60)
+        path = done.stdout.strip() if done is not None and done.returncode == 0 else ""
+        if not path or not os.path.exists(path):
+            return []
+        found = subprocess.run(["lsof", "-t", path], capture_output=True, text=True).stdout.split()
+        return [int(pid) for pid in found if pid.isdigit()]
+
+    def quiet(self, model: Model) -> dict[str, float]:
+        """``--max-load``'s guard before a step: the load at most the limit and no other cadgen
+        build busy; then the load the step starts at."""
+        wait_until_quiet(self.limit, self.daemon(model) if self.limit is not None else ())
+        return loads()
+
     def build(self, model: Model, step: str) -> dict[str, Any]:
-        load = loads()
+        top = {"top": top_three()} if step in ("cold", "restart-cold") and self.limit is not None else {}
+        load = self.quiet(model)
         done, wall = self.run(model, ["-c", DRIVER, json.dumps(model.targets)])
         if done is None:
             row = {"ok": False, "error": f"no answer in {self.timeout:.0f} s"}
@@ -621,7 +637,7 @@ class Bench:
             if not row["ok"]:
                 row["stderr"] = done.stderr[-3000:]
         row["rss_mb"] = worker_memory(self.status(model), model.scripts)
-        return self.step(model, step, wall, load, **row)
+        return self.step(model, step, wall, load, **row, **top)
 
     def document(self, model: Model) -> None:
         """The document saved, served and meshed whole, its structure read, and two snapshots."""
@@ -636,7 +652,7 @@ class Bench:
                           error=(done.stderr[-2000:] if done else f"no model {model.document.stem} was built"))
                 return
             self.step(model, "export", wall, load, ok=True, xbf_bytes=model.document.stat().st_size)
-        load = loads()
+        load = self.quiet(model)
         done, wall = self.run(model, ["-m", "cadgen.cli", "serve", str(model.document)], timeout=600)
         url = (done.stdout.strip().splitlines() or [""])[-1] if done is not None else ""
         page = urllib.parse.urlsplit(url)
@@ -681,7 +697,7 @@ class Bench:
         pictures.mkdir(exist_ok=True)
         for step in ("snapshot-first", "snapshot"):
             png = pictures / f"{model.name}{'-first' if step == 'snapshot-first' else ''}.png"
-            load = loads()
+            load = self.quiet(model)
             done, wall = self.run(model, ["-m", "cadgen.cli", "snapshot", str(model.document), str(png), "--json"],
                                   timeout=1800)
             report = last_json(done.stdout) if done is not None else None
@@ -729,12 +745,67 @@ class Bench:
                 remove(model.work)
 
 
-def wait_until_quiet(limit: float | None) -> None:
-    """Wait while the 1-minute load average is over ``limit``."""
+def _processes() -> dict[int, tuple[int, float, str]]:
+    """Every process: its parent, CPU seconds so far and command line (``ps``)."""
+    try:
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,time=,command="], capture_output=True, text=True).stdout
+    except OSError:
+        return {}
+    found: dict[int, tuple[int, float, str]] = {}
+    for line in out.splitlines():
+        fields = line.split(None, 3)
+        if len(fields) == 4:
+            days, _sep, clock = fields[2].rpartition("-")
+            seconds = 0.0
+            for part in clock.split(":"):
+                seconds = seconds * 60 + float(part)
+            found[int(fields[0])] = (int(fields[1]), seconds + (float(days) * 86400 if days else 0.0), fields[3])
+    return found
+
+
+def busy_builds(own: Iterable[int], seconds: float = 2.0, share: float = 0.05) -> list[str]:
+    """The cadgen processes outside ``own`` (a daemon's pid and its descendants are left out) using
+    more than ``share`` of a core over ``seconds``: another build on the machine."""
+    first = _processes()
+    time.sleep(seconds)
+    second = _processes()
+    mine = {pid for pid in own if pid in second} | {os.getpid()}
+    grew = True
+    while grew:
+        grew = False
+        for pid, (parent, _cpu, _command) in second.items():
+            if parent in mine and pid not in mine:
+                mine.add(pid)
+                grew = True
+    return [f"{pid} {command[:120]}" for pid, (_parent, cpu, command) in second.items()
+            if pid not in mine and "cadgen" in command and pid in first
+            and (cpu - first[pid][1]) / seconds > share]
+
+
+def top_three() -> list[str]:
+    """The three processes using the most CPU now (macOS ``top``, its second sample)."""
+    try:
+        out = subprocess.run(["top", "-l", "2", "-o", "cpu", "-n", "3", "-stats", "pid,command,cpu"],
+                             capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    lines = [line.split() for line in out.splitlines()]
+    rows = [line for line in lines if len(line) >= 3 and line[0].isdigit()]
+    return [" ".join(row) for row in rows[-3:]]
+
+
+def wait_until_quiet(limit: float | None, own: Iterable[int] = ()) -> None:
+    """Wait while the 1-minute load average is over ``limit`` or another cadgen build is busy."""
     if limit is None or not hasattr(os, "getloadavg"):
         return
-    while (load := os.getloadavg()[0]) > limit:
-        print(f"load {load:.1f} is over {limit:g}: waiting", file=sys.stderr, flush=True)
+    own = list(own)
+    while True:
+        load = os.getloadavg()[0]
+        others = busy_builds(own) if load <= limit else []
+        if load <= limit and not others:
+            return
+        why = f"load {load:.1f} is over {limit:g}" if load > limit else f"another build is busy: {others[0]}"
+        print(f"{why}: waiting", file=sys.stderr, flush=True)
         time.sleep(15)
 
 
@@ -749,7 +820,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--python", default=sys.executable, help="the interpreter that builds (default: this one)")
     parser.add_argument("--cadgen-src", type=Path, default=ROOT / "packages/cadgen/src",
                         help="the cadgen it imports (default: this checkout's)")
-    parser.add_argument("--max-load", type=float, help="before each model, wait until the load is at most this")
+    parser.add_argument("--max-load", type=float, help="before each step, wait until the 1-minute load is at most this and no other cadgen build "
+                        "uses more than 5%% of a core")
     parser.add_argument("--timeout", type=float, default=3600, help="seconds a build may take (default 3600)")
     parser.add_argument("--keep", action="store_true", help="keep each model's work copy")
     args = parser.parse_args(argv)
@@ -794,7 +866,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out = (args.out or ROOT / "tmp" / "bench" / f"corpus-{datetime.now():%Y%m%d-%H%M%S}").resolve()
     out.mkdir(parents=True, exist_ok=True)
-    bench = Bench(out, args.python, args.timeout)
+    bench = Bench(out, args.python, args.timeout, args.max_load)
     run = {"kind": "run", "started": datetime.now().isoformat(timespec="seconds"), "commit": git("rev-parse", "HEAD"),
            "branch": git("rev-parse", "--abbrev-ref", "HEAD"), "dirty": bool(git("status", "--porcelain")),
            "cadgen": found_cadgen["cadgen"], "python": found_cadgen["python"], "interpreter": args.python,
@@ -804,7 +876,6 @@ def main(argv: list[str] | None = None) -> int:
     bench.emit(run)
     print(f"corpus_bench: {len(chosen)} model{'s' if len(chosen) != 1 else ''} into {out}", file=sys.stderr, flush=True)
     for spec in chosen:
-        wait_until_quiet(args.max_load)
         bench.model(spec, args.engine_dir, args.cadgen_src, args.keep)
         (out / "table.md").write_text(heading(run) + "\n" + table(bench.rows), encoding="utf-8")
     work = out / "work"

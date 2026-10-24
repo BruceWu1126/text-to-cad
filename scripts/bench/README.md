@@ -15,7 +15,7 @@ warm, and times every step:
 
 ```sh
 .venv/bin/python scripts/bench/corpus_bench.py --dry-run         # the config and the interpreter, checked
-.venv/bin/python scripts/bench/corpus_bench.py --max-load 8      # every model
+.venv/bin/python scripts/bench/corpus_bench.py --max-load 16     # every model; each step waits for load <= 16 and no other busy cadgen build
 .venv/bin/python scripts/bench/corpus_bench.py --model tom       # one; repeat --model for more
 ```
 
