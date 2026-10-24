@@ -9,6 +9,9 @@ import build123d as b
 from lib.booleans import as_single_shape as one
 from lib.m2_connection_profiles import profile,END_HALF_WIDTH
 from lib.short_gripper_trial import box
+from lib.link_connection_finish import finish_wrist_step_corners
+from lib.gripper_connection_finish import finish_gripper_connections
+from lib.horn_relief_finish import finish_horn_junctions
 
 # code, origin, along-row, sheet normal, extrusion sign, stock, coverage
 LOWER=[
@@ -94,13 +97,10 @@ def revise_part(p,specs):
     reference=p
     for spec in specs:p=replace_connection(p,spec,reference)
     if specs is UPPER:
-        from lib.link_connection_finish import finish_wrist_step_corners
         p=finish_wrist_step_corners(trim_upper_end_lands(p))
     elif specs is GRIPPER:
-        from lib.gripper_connection_finish import finish_gripper_connections
         p=finish_gripper_connections(p,reference=reference)
     if specs is not GRIPPER:
-        from lib.horn_relief_finish import finish_horn_junctions
         p=finish_horn_junctions(p)
     return p
 

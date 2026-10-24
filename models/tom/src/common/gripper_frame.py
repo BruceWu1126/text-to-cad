@@ -51,7 +51,7 @@ def centered_frame(legacy):
         if len(holes) != 2:
             raise ValueError('Expected two occupied holes per jaw case face')
         side = 'lower' if sign > 0 else 'upper'
-        seat = getattr(SERVO, f'case_{side}_y_mm')
+        seat = SERVO.case_lower_y_mm if side == 'lower' else SERVO.case_upper_y_mm
         edges = []
         for kind, *coords in gripper_case_outline(side):
             pts = [(x, seat, y) for x,y in coords]

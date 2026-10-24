@@ -29,6 +29,10 @@ from lib.gripper_horn_phase import moving_screw_xy,RECOVERED_JAW_BAND_SHIFT_Y_MM
 from lib.screw_datums import BRACKET_SCREW_DATUMS,DATUM_SHEET_THICKNESS_MM
 from hardware.hex_socket_cap import hex_socket_m2x6,hex_socket_m3x5
 from lib.link_assembly import location_from_transform
+from lib import camera_mount_geometry as g, camera_bends as bends
+from lib.camera_mount_interface import cut_face
+from camera.camera_payload import camera_payload
+from functools import partial
 
 ROOT=SRC.parent
 T=2.032
@@ -205,7 +209,7 @@ def connector_parts(native_frame):
         holes=[]
         for mirror in (-1,1):
             for p in case_hole_centers(side,mirror,reversible=False):
-                if p[0]!=max(getattr(SERVO,f'case_{side}_hole_x_mm')):continue
+                if p[0]!=max(SERVO.case_lower_hole_x_mm if side=='lower' else SERVO.case_upper_hole_x_mm):continue
                 c=bd.Vertex(*p).moved(sixth_placement()).center()
                 holes.append((c.X,c.Y))
         end=holes[0][0]+2.65+(CAMERA_ROOT_LAND_MM if sign>0 else 0)
@@ -279,7 +283,7 @@ def make_connector():
     for side in ('lower','upper'):
         for sign in (-1,1):
             for p in case_hole_centers(side,sign,reversible=False):
-                if p[0]!=max(getattr(SERVO,f'case_{side}_hole_x_mm')):continue
+                if p[0]!=max(SERVO.case_lower_hole_x_mm if side=='lower' else SERVO.case_upper_hole_x_mm):continue
                 outward=(0,-1 if side=='lower' else 1,0)
                 seat=tuple(p[i]+T*outward[i] for i in range(3))
                 q=m2.moved(bd.Plane(origin=seat,z_dir=outward).location).moved(sixth_placement())
@@ -515,10 +519,6 @@ def integrated_camera(frame,upper_plate,*,thickness_mm=T,bend_radius_mm=None,sea
     Two bends lift the camera above the wrist; the optical axis points
     toward the jaws at the tom2-specific 25-degree downward pitch.
     """
-    from lib import camera_mount_geometry as g,camera_bends as bends
-    from lib.camera_mount_interface import cut_face
-    from camera.camera_payload import camera_payload
-    from functools import partial
     T=thickness_mm
     radius=bends.RI if bend_radius_mm is None else bend_radius_mm
     bend=partial(bends.bend,thickness=T,radius=radius)

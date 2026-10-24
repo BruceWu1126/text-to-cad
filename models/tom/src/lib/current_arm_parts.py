@@ -26,6 +26,8 @@ from lib import gripper_flush_geometry as jaw
 from lib import forearm_roll_flip as roll_flip
 from lib import yoke_clearance_layout as clearance
 from lib import forearm_shortening as shorter
+from lib.gripper_hook_trim import trim_gripper_hook
+from stages.diagonal_lightning_current import make_diagonal_links
 
 ARM_RETRACTION_X=12.0
 LINK_NAMES=('shoulder_pitch_yoke','elbow_roll_link_plate_pair')
@@ -142,7 +144,6 @@ def build_current_arm(stock, *, only_labels=None):
         ('shoulder_yaw_yoke','elbow_pitch_yoke','temporary_wrist_yoke')) else {}
     links={}
     if only_labels is None or any(wanted(n) for n in LINK_NAMES):
-        from stages.diagonal_lightning_current import make_diagonal_links
         links=dict(zip(LINK_NAMES,make_diagonal_links(lower_root=-20.775+clearance.COLLAR_EXTENSION,
                        upper_rise=clearance.AXIS_INCREASE,upper_shortening=shorter.SHORTENING,
                        toe_clearance=clearance.UPPER_TOE_CLEARANCE,
@@ -247,7 +248,6 @@ def build_current_arm(stock, *, only_labels=None):
         if roll_flip.flipped_leaf(label):part.pending=roll_flip.placement()*part.pending
         part.shift(state.clearance)
         if name=='servo6_fixed_gripper_frame':
-            from lib.gripper_hook_trim import trim_gripper_hook
             # This cut is in the part's construction datum. Keep the pending
             # final wrist/yoke placement instead of resetting it via replace().
             part.part=trim_gripper_hook(part.part)
