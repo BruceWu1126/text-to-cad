@@ -404,8 +404,12 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
 - **The engine never reruns code.** A document it no longer holds (the engine restarted,
   or it dropped the document to free memory) is answered, by its page, by
   `cadgen inspect <id>` and by the CAD app, with the command that brings it back:
-  `python <the script>`. A viewer link from before an engine restart opens a page saying
-  to open the viewer again.
+  `python <the script>`.
+- **A viewer link outlives a restart.** The engine keeps one port (3245, or the next free
+  one it remembers) and one page token per installation, so a link works across a stop, a
+  crash or a reboot, and an open page reconnects on its own when the engine comes back.
+  `cadgen server --rotate-token`, run with the engine stopped, retires every link handed
+  out before it.
 - **Every document has a record** in cadgen's state folder, beside your settings
   (`documents/<uuid>/document.json`: the script and function that build it, never
   geometry), and the home's Recents lists them, most recent first. 0.7's Recents are not

@@ -363,7 +363,7 @@ jobs:
           scripts/release/publish-github-release.sh "${args[@]}"
 
   # The upload alone, and the one job that may mint a token PyPI takes (id-token): it runs in the
-  # `pypi` environment, which deploys from main only, and PyPI's trusted publisher for cadgen names
+  # `release` environment, which deploys from main only, and PyPI's trusted publisher for cadgen names
   # this workflow AND that environment (CONTRIBUTING.md, "Repository settings"). So a run on any
   # other branch -- build-test, or a workflow changed there -- cannot publish. Uploaded BEFORE
   # anything an installer follows names the version; if a later job fails, dispatch this workflow
