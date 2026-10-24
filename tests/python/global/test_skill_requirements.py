@@ -1,11 +1,15 @@
-"""A skill that runs cadgen must teach the launch command, pinned to this release.
+"""A skill that runs cadgen must name its launchers and its install command, pinned to this release.
 
-The CAD plugin's server and every skill run cadgen as one command,
-`uvx --no-config --managed-python --python 3.13 --from cadgen==<release> <tool>`
-(cadgen._internal.launch): uv keeps one installation per requirement, so the same command is
-the same installation and the same warm daemon. A skill that runs cadgen any other way -- a
-`pip install -r requirements.txt` into the project's interpreter -- makes a second installation
-with a daemon of its own, and its docs may describe a cadgen that is not the one running.
+The CAD plugin's server is one command,
+`uvx --no-config --managed-python --python 3.13 --from cadgen==<release> cadgen mcp`
+(cadgen._internal.launch): uv keeps one installation per requirement, and that installation
+publishes its launchers, `~/.local/bin/cadgen-<release>` and `~/.local/bin/cadgen-python-<release>`
+(cadgen._internal.launchers), which every skill runs -- uvx cannot start in an agent's sandbox, a
+launcher can. The same installation, so the same warm daemon. A skill names the uvx command once,
+as `cadgen doctor`, which installs cadgen and publishes the launchers when they are missing. A
+skill that runs cadgen any other way -- a `pip install -r requirements.txt` into the project's
+interpreter -- makes a second installation with a daemon of its own, and its docs may describe a
+cadgen that is not the one running.
 
 Stated as a criterion rather than a list, as before: "uses cadgen" is what the skill's docs
 TEACH (`cadgen ...`) or what its own Python imports. Skills that never touch cadgen
@@ -25,6 +29,10 @@ SKILLS = sorted(p for p in (REPO_ROOT / "skills").iterdir() if p.is_dir())
 
 VERSION = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 LAUNCH = "uvx --no-config --managed-python --python 3.13 --from cadgen=={version} {tool}"
+LAUNCHER = {"cadgen": "~/.local/bin/cadgen-{version}", "python": "~/.local/bin/cadgen-python-{version}"}
+INSTALL = ("If either file is missing (a skills-only install, or a purged uv cache), run\n"
+           "`{command}` once,\noutside any sandbox or with the sandbox's permission: it installs cadgen and "
+           "publishes the\nlaunchers. Nothing else ever needs escalation.\n")
 
 
 _HANDOFF_MARKER = re.compile(r"\$(?P<name>[a-z0-9-]+)")
@@ -75,7 +83,7 @@ class SkillLaunchCommand(unittest.TestCase):
     def test_skills_were_found(self) -> None:
         self.assertGreaterEqual(len(SKILLS), 8, "the skills/ glob found almost nothing")
 
-    def test_every_skill_that_uses_cadgen_defines_the_launch_command(self) -> None:
+    def test_every_skill_that_uses_cadgen_names_its_launchers_and_install_command(self) -> None:
         for skill in SKILLS:
             text = (skill / "SKILL.md").read_text(encoding="utf-8")
             with self.subTest(skill=skill.name):
@@ -83,7 +91,8 @@ class SkillLaunchCommand(unittest.TestCase):
                     self.assertNotIn("--from cadgen==", text, "a skill that never runs cadgen downloads nothing")
                     continue
                 for tool in ("cadgen", "python"):
-                    self.assertIn(f"`{tool}` below means `{LAUNCH.format(version=VERSION, tool=tool)}`", text)
+                    self.assertIn(f"`{tool}` below means `{LAUNCHER[tool].format(version=VERSION)}`", text)
+                self.assertIn(INSTALL.format(command=LAUNCH.format(version=VERSION, tool="cadgen doctor")), text)
 
     def test_no_skill_installs_cadgen_any_other_way(self) -> None:
         # A requirements.txt naming cadgen is a second installation, with a daemon of its own.
@@ -94,13 +103,17 @@ class SkillLaunchCommand(unittest.TestCase):
                     lines = [line.split("#")[0].strip() for line in manifest.read_text(encoding="utf-8").splitlines()]
                     self.assertFalse([line for line in lines if line.startswith("cadgen")], manifest)
 
-    def test_the_launch_command_is_cadgens_own(self) -> None:
+    def test_the_launch_command_and_launchers_are_cadgens_own(self) -> None:
         import sys
 
         sys.path.insert(0, str(REPO_ROOT / "packages" / "cadgen" / "src"))
-        from cadgen._internal.launch import launch_command
+        from cadgen._internal.launch import launch_command, launcher
+        from cadgen._internal.launchers import names
 
         self.assertEqual(launch_command("python", VERSION), LAUNCH.format(version=VERSION, tool="python"))
+        for tool, name in zip(("cadgen", "python"), names(VERSION, windows=False)):
+            self.assertEqual(launcher(tool, VERSION), LAUNCHER[tool].format(version=VERSION))
+            self.assertEqual(launcher(tool, VERSION), f"~/.local/bin/{name}")
 
 
 if __name__ == "__main__":

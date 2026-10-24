@@ -24,8 +24,10 @@ const tomlTargets = [
   "packages/cadgen/pyproject.toml",
 ];
 
-// Every skill that runs cadgen teaches the launch command (`uvx ... --from cadgen==<version>`)
-// in its SKILL.md, pinned like the server's so the two share one installation.
+// Every skill that runs cadgen names the launchers the server's installation publishes
+// (`~/.local/bin/cadgen-<version>`, `cadgen-python-<version>`) and the command that installs it
+// (`uvx ... --from cadgen==<version> cadgen doctor`) in its SKILL.md, pinned like the server's so
+// the two share one installation.
 function skillLaunchTargets() {
   const skills = path.join(repoRoot, "skills");
   if (!existsSync(skills)) {
@@ -41,7 +43,7 @@ function skillLaunchTargets() {
 
 // Files that pin the cadgen runtime by a requirement string rather than a version field: the
 // commands the agent apps run to start CAD's MCP server, the README's Claude Desktop config,
-// and every cadgen skill's launch command. A file may also be a JSON target (the Gemini
+// and every cadgen skill's install command and launchers. A file may also be a JSON target (the Gemini
 // extension carries both); its pin is stamped on top of that change, not over it.
 export const pinTargets = [
   "codex.mcp.json",
@@ -204,19 +206,32 @@ function syncTomlTarget(relativePath, version) {
   };
 }
 
+// A skill's launchers carry the version in their names: `~/.local/bin/cadgen-0.8.0`.
+export const launcherPattern = /(~\/\.local\/bin\/cadgen-(?:python-)?)(\d[^\s`"'\\]*)/g;
+
 function syncPinTarget(relativePath, version, text = readRequiredText(relativePath)) {
   const pin = /(cadgen(?:\[[a-z0-9_,.-]+\])?==)([^"\s]+)/g;
   const matches = [...text.matchAll(pin)];
   if (matches.length === 0) {
     throw new Error(`${relativePath} must pin cadgen==<version>`);
   }
-  if (matches.every((match) => match[2] === version)) {
+  const launchers = [...text.matchAll(launcherPattern)];
+  const labels = [];
+  if (!matches.every((match) => match[2] === version)) {
+    labels.push("cadgen pin");
+  }
+  if (!launchers.every((match) => match[2] === version)) {
+    labels.push("cadgen launchers");
+  }
+  if (labels.length === 0) {
     return null;
   }
   return {
     path: relativePath,
-    labels: ["cadgen pin"],
-    text: text.replace(pin, (_, prefix) => `${prefix}${version}`),
+    labels,
+    text: text
+      .replace(pin, (_, prefix) => `${prefix}${version}`)
+      .replace(launcherPattern, (_, prefix) => `${prefix}${version}`),
   };
 }
 
