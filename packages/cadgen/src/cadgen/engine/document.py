@@ -47,7 +47,6 @@ from __future__ import annotations
 
 import functools
 import hashlib
-import os
 import re
 import threading
 from collections import OrderedDict
@@ -56,7 +55,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-from cadgen.engine.atomic_replace import replace_atomic
+from cadgen.engine.atomic_replace import replace_atomic, staging
 
 __all__ = ["Assembly", "Component", "Kept", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "merge",
            "mesh_faces", "read_step_shape", "read_xbf_shape", "save", "to_xcaf", "unchecked"]
@@ -1114,19 +1113,17 @@ def save(doc: Any, path: Path, *, compare: bool) -> tuple[bool, int]:
         _MADE.clear()
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.stem}.{os.getpid()}.{threading.get_ident()}.xbf")
     shapes = [part.shape for part in tree.parts] if tree is not None else _free_shapes(doc)
-    with _XCAF_LOCK, unchecked(shapes):
-        status = _application().SaveAs(doc, TCollection_ExtendedString(str(temporary), True))
-    if status != PCDM_StoreStatus.PCDM_SS_OK or not temporary.exists():
-        temporary.unlink(missing_ok=True)
-        raise OSError(f"could not save {path}: {status}")
-    _fix_date(temporary)
-    size = temporary.stat().st_size
-    if compare and path.exists() and path.stat().st_size == size and _same_bytes(path, temporary):
-        temporary.unlink()
-        return False, size
-    replace_atomic(temporary, path)
+    with staging(path.with_suffix(".xbf")) as temporary:
+        with _XCAF_LOCK, unchecked(shapes):
+            status = _application().SaveAs(doc, TCollection_ExtendedString(str(temporary), True))
+        if status != PCDM_StoreStatus.PCDM_SS_OK or not temporary.exists():
+            raise OSError(f"could not save {path}: {status}")
+        _fix_date(temporary)
+        size = temporary.stat().st_size
+        if compare and path.exists() and path.stat().st_size == size and _same_bytes(path, temporary):
+            return False, size
+        replace_atomic(temporary, path)
     if tree is not None:
         for listener in list(SAVED_LISTENERS):
             listener(path.resolve(), tree)

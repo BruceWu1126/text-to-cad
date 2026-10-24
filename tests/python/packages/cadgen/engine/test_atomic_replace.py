@@ -92,3 +92,50 @@ class ReplaceAtomicTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StagingTest(unittest.TestCase):
+    """Every engine writer stages its file in a folder made beside the target for it alone: a
+    name no one knows first, closed to others, so a link or file someone else left in the target's
+    folder is never written through or moved into place."""
+
+    def setUp(self) -> None:
+        folder = tempfile.TemporaryDirectory(prefix="cadgen-engine-staging-")
+        self.addCleanup(folder.cleanup)
+        self.folder = Path(folder.name)
+
+    def test_a_stage_is_in_a_private_folder_of_its_own_that_goes_with_the_block(self) -> None:
+        target = self.folder / "part.glb"
+        with atomic_replace.staging(target) as stage:
+            self.assertEqual(stage.name, target.name)
+            self.assertEqual(stage.parent.parent, self.folder)
+            self.assertTrue(stage.parent.name.startswith(".part.") and stage.parent.name.endswith(".tmp"))
+            if os.name != "nt":
+                self.assertEqual(stage.parent.stat().st_mode & 0o077, 0)
+            stage.write_bytes(b"glTF")
+            atomic_replace.replace_atomic(stage, target)
+        self.assertEqual(target.read_bytes(), b"glTF")
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["part.glb"])
+
+    @unittest.skipIf(os.name == "nt", "a symbolic link another user leaves is a POSIX folder's")
+    def test_writers_never_write_through_or_move_a_link_left_at_a_predictable_name(self) -> None:
+        import threading
+
+        from cadgen.engine import snapshot
+        from cadgen.engine.export import dxf
+
+        kept = self.folder / "kept.txt"
+        kept.write_text("MARKER", encoding="utf-8")
+        planted = []
+        for name in (f".view.{os.getpid()}.tmp.png", f".plan.{os.getpid()}.{threading.get_ident()}.tmp.dxf"):
+            link = self.folder / name
+            link.symlink_to(kept)
+            planted.append(link)
+        snapshot.write_png(self.folder / "view.png", b"\x89PNG\r\n\x1a\nfixture")
+        with mock.patch.object(dxf, "dxf_bytes", return_value=b"0\nEOF\n"):
+            dxf.write(object(), self.folder / "plan.dxf")
+        self.assertEqual(kept.read_text(encoding="utf-8"), "MARKER")
+        self.assertTrue(all(link.is_symlink() for link in planted))
+        self.assertEqual((self.folder / "view.png").read_bytes(), b"\x89PNG\r\n\x1a\nfixture")
+        self.assertFalse((self.folder / "view.png").is_symlink())
+        self.assertEqual((self.folder / "plan.dxf").read_bytes(), b"0\nEOF\n")

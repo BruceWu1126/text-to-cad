@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import json
 import math
 import os
@@ -59,7 +60,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from cadgen.engine.atomic_replace import replace_atomic
+from cadgen.engine.atomic_replace import replace_atomic, staging
 
 __all__ = ["SnapshotRefused", "Still", "add_parser", "authored", "build_parser", "draw", "draw_pictures", "job_input",
            "job_pictures", "main", "options", "parse_annotation", "parse_camera", "parse_display", "parse_measurements",
@@ -611,13 +612,9 @@ def picture_path(out: Any, source: Any, *, at: str | None = None, job: tuple[int
 def write_png(out: Path, data: bytes) -> None:
     """The one file a snapshot writes: beside ``out`` first, then moved over it, so a failure
     leaves whatever was at ``out`` as it was, and no temporary file beside it."""
-    temporary = out.with_name(f".{out.stem}.{os.getpid()}.tmp.png")
-    try:
+    with staging(out) as temporary:
         temporary.write_bytes(data)
         replace_atomic(temporary, out)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
 
 
 def options(display: Any = None, camera: Any = None, grid: bool = False, width: int | None = None,
@@ -961,19 +958,16 @@ def draw_pictures(pictures: list[tuple[Path, Path, Still]], *, daemon: bool = Tr
     pictures. All or nothing: every picture is drawn into a staged file beside its output, and
     the staged files are moved over the outputs only once every one is drawn. A picture that
     fails leaves every output as it was and removes only the staged files (``_staged``)."""
-    staged = [(document, out, out.with_name(f".{out.stem}.{os.getpid()}.{at}.staged.png"), still)
-              for at, (document, out, still) in enumerate(pictures)]
-    try:
-        for _document, out, _stage, _still in staged:
+    with contextlib.ExitStack() as stages:  # each picture's staging folder, gone with the job
+        staged = []
+        for document, out, still in pictures:
             out.parent.mkdir(parents=True, exist_ok=True)
+            staged.append((document, out, stages.enter_context(staging(out)), still))
         drawn = _draw_staged(staged, daemon)
         for (_document, out, stage, _still), found in zip(staged, drawn):
             replace_atomic(stage, out)
             found["output"] = str(out)
         return drawn
-    finally:
-        for _document, _out, stage, _still in staged:
-            stage.unlink(missing_ok=True)
 
 
 def _draw_staged(staged: list[tuple[Path, Path, Path, Still]], daemon: bool) -> list[dict[str, Any]]:

@@ -1,7 +1,9 @@
 """The one rename every engine writer moves a finished file into place with.
 
 Every file the engine writes is written beside its target first and renamed over it, so a reader
-never sees half of one. On Windows that rename can be refused by a handle that is about to
+never sees half of one. It is written in a folder made beside the target for that one writer
+(``staging``): a name no one can know first, closed to everyone else, so nothing another user put
+in the target's folder is written through or moved into place. On Windows that rename can be refused by a handle that is about to
 close: ``WinError 32`` (a sharing violation; on an SMB share the redirector still holds the
 handle Python just closed) and ``WinError 5`` when another process has the DESTINATION open --
 two builds of one model, each reading back the document the other is replacing. Both wait out
@@ -18,8 +20,10 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
+import tempfile
 import time
 from pathlib import Path
+from typing import Iterator
 
 WINDOWS_SHARING_VIOLATION = 32
 WINDOWS_ACCESS_DENIED = 5
@@ -47,6 +51,20 @@ def _ladder(source: Path | str, target: Path | str) -> OSError | None:
                 return error
             time.sleep(delay)
     return None
+
+
+@contextlib.contextmanager
+def staging(target: Path | str) -> Iterator[Path]:
+    """Where to write ``target`` before it is moved over it (``replace_atomic``): a path of the same
+    name in a folder made beside it for this writer alone (``tempfile.mkdtemp``: a fresh random
+    name, mode 0700, ``*.tmp`` so a checkout ignores it). Whatever is left in it goes with the
+    folder when the block ends."""
+    target = Path(target)
+    folder = Path(tempfile.mkdtemp(prefix=f".{target.stem}.", suffix=".tmp", dir=target.parent))
+    try:
+        yield folder / target.name
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def replace_atomic(source: Path | str, target: Path | str) -> None:
