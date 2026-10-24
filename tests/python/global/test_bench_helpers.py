@@ -33,6 +33,9 @@ def model(**overrides):
             "edit": {"file": "src/part.py", "from": "WIDTH = 8.0", "to": "WIDTH = 9.0"}, **overrides}
 
 
+SCRIPT = "from __future__ import annotations\nfrom cadgen import model\nWIDTH = 8.0\nDEPTH = 8.0\n\n\n@model\ndef part():\n    return WIDTH\n"
+
+
 def step(model_name, name, **row):
     return {"kind": "step", "model": model_name, "step": name, "ok": True, **row}
 
@@ -47,7 +50,8 @@ class ConfigTest(unittest.TestCase):
         with temporary_directory(prefix="bench-config-") as folder:
             root = Path(folder)
             (root / "proj" / "src").mkdir(parents=True)
-            (root / "proj" / "src" / "part.py").write_text("WIDTH = 8.0\nDEPTH = 8.0\n", encoding="utf-8")
+            (root / "proj" / "src" / "part.py").write_text(SCRIPT, encoding="utf-8")
+            (root / "proj" / "src" / "loose.py").write_text("WIDTH = 8.0\n", encoding="utf-8")
             self.assertEqual(corpus_bench.problems({"models": [model()]}, root), [])
             cases = {
                 "part: a second model of this name": [model(), model()],
@@ -58,6 +62,8 @@ class ConfigTest(unittest.TestCase):
                 "part: the edit's `to` is its `from`": [model(edit={"file": "src/part.py", "from": "A", "to": "A"})],
                 "part: no script gone.py in proj/src": [model(targets=["gone.py"])],
                 "part: no STEP/imported: an input the build reads": [model(needs=["STEP/imported"])],
+                "part: loose.py has no `@model` directly above `def loose(`": [
+                    model(targets=["loose.py"], xbf="XBF/loose.xbf")],
                 "part: the edit's `from` occurs 0 times in src/part.py": [
                     model(edit={"file": "src/part.py", "from": "HEIGHT", "to": "LENGTH"})],
                 "part: the edit's `from` occurs 2 times in src/part.py": [
@@ -67,6 +73,15 @@ class ConfigTest(unittest.TestCase):
                 with self.subTest(expected=expected):
                     found = corpus_bench.problems({"models": models}, root)
                     self.assertTrue(any(text.startswith(expected) for text in found), found)
+
+
+class WorkCopyTest(unittest.TestCase):
+    def test_the_work_copy_declares_the_xbf_its_stem_names(self):
+        declared = corpus_bench.with_xbf(SCRIPT, "part", "../XBF/part.xbf")
+        self.assertEqual(declared.splitlines()[1:3], ["from cadgen import model", corpus_bench.XBF_IMPORT])
+        self.assertEqual(declared.splitlines()[-4:-2], ["@_corpus_bench_xbf(out='../XBF/part.xbf')", "@model"])
+        self.assertIsNone(corpus_bench.with_xbf(SCRIPT, "other", "../XBF/other.xbf"))
+        self.assertEqual(corpus_bench.declared_script(model(targets=["a.py", "b.py::part"])), "b.py")
 
 
 class BuildRowTest(unittest.TestCase):
@@ -113,14 +128,15 @@ class TableTest(unittest.TestCase):
                 step("arm", "noop", wall=1.48, load=8.9),
                 step("arm", "edit", wall=8.27, timings={"body": 3.71}, misses=110, bodies_run=1, bodies_replayed=7,
                      rss_mb=3800, load=8.9),
-                step("arm", "revert", wall=7.01), step("arm", "restart", wall=6.11, load=8.6),
+                step("arm", "revert", wall=7.01), step("arm", "restart", wall=6.11, load=8.6, cache="file"),
+                step("arm", "restart-cold", wall=150.2),
                 step("arm", "mesh-cold", wall=1.85), step("arm", "mesh-warm", wall=0.88), step("arm", "snapshot", wall=1.04),
                 {"kind": "step", "model": "plate", "step": "cold", "ok": False, "wall": 3.0, "error": "boom"}]
         lines = corpus_bench.table(rows).splitlines()
         self.assertEqual(lines[0], "| " + " | ".join(corpus_bench.COLUMNS) + " |")
-        self.assertEqual(lines[2], "| arm | 146 / 128 | 1.48 | 8.27 / 3.71 (110; 1+7) | 7.01 | 6.11 | 58.9 | "
+        self.assertEqual(lines[2], "| arm | 146 / 128 | 1.48 | 8.27 / 3.71 (110; 1+7) | 7.01 | 6.11 (file) | 150 | 58.9 | "
                                    "1.85 / 0.88 | 1.04 | 3800 | 8.6–17.2 |")
-        self.assertEqual(lines[3], "| plate | failed | — | — | — | — | — | — | — | — | — |")
+        self.assertEqual(lines[3], "| plate | failed | — | — | — | — | — | — | — | — | — | — |")
 
 
 class CompareTest(unittest.TestCase):

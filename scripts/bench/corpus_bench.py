@@ -19,20 +19,24 @@ script.py`` builds it, or ``script.py::model`` for one model of a script), its d
 snapshot steps read), one ``edit`` (``{file, from, to}``: ``from`` occurs exactly once in ``file``), the
 inputs a build reads that are never committed (``needs``) and a ``note``. Each is copied to
 ``<out>/work/<name>`` without its outputs (``XBF/``, ``DXF/``; an APFS clone on macOS), so the
-checkout is never written, and built on a daemon of its own (``CADGEN_ENGINE_DIR``, a folder of
-``--engine-dir`` per model, emptied first; telemetry off) in these steps:
+checkout is never written, and the copy's model (the function its ``xbf`` stem names) declares
+that document, ``@xbf(out=...)`` above its ``@model`` (``with_xbf``), so each build saves it and a
+restart takes it, as the old engine reloaded its store. It is built on a daemon of its own
+(``CADGEN_ENGINE_DIR``, a folder of ``--engine-dir`` per model, emptied first; telemetry off) in
+these steps:
 
 1. ``cold``: the first build, on a fresh daemon, with no xbf to take;
 2. ``noop``: the same build again, warm;
 3. ``edit``: the configured edit, built;
 4. ``revert``: the file's original bytes, built;
-5. ``restart``: the daemon stopped, the unchanged model built again (cold: a model that
-   declares no xbf has no cache across a restart);
-6. ``export``, ``serve``, ``mesh-cold``, ``mesh-warm``, ``structure``: the document saved to
-   ``xbf`` (``cadgen export <id>``), served (``cadgen serve``), every part meshed on the
-   server's pool (``POST /api/doc/<id>/mesh``), again with its meshes dropped, and the
-   structure a page reads first;
-7. ``snapshot-first``, ``snapshot``: ``cadgen snapshot --json`` of the document, twice.
+5. ``restart``: the daemon stopped, the unchanged model built again, its xbf taken;
+6. ``restart-cold``: the daemon stopped and the xbf deleted, the model built again: a restart
+   with nothing to take;
+7. ``serve``, ``mesh-cold``, ``mesh-warm``, ``structure``: the document served
+   (``cadgen serve``), every part meshed on the server's pool (``POST /api/doc/<id>/mesh``),
+   again with its meshes dropped, and the structure a page reads first (``export``, the document
+   saved by ``cadgen export <id>``, only when a build left none);
+8. ``snapshot-first``, ``snapshot``: ``cadgen snapshot --json`` of the document, twice.
 
 A build is what ``python script.py`` asks for (``cadgen.engine.api.build_script``, which
 ``Model.build()`` calls too), in a process of its own: its ``wall`` is that process's, from
@@ -70,7 +74,7 @@ from typing import Any, Iterable, NamedTuple
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = Path(__file__).with_name("corpus.json")
-BUILDS = ("cold", "noop", "edit", "revert", "restart")
+BUILDS = ("cold", "noop", "edit", "revert", "restart", "restart-cold")
 NOT_COPIED = frozenset({"XBF", "DXF", "__pycache__", ".DS_Store"})  # a cold build starts with no xbf
 MODEL_KEYS = frozenset({"name", "root", "cwd", "pythonpath", "targets", "xbf", "edit", "needs", "note"})
 REQUIRED = ("name", "root", "targets", "xbf", "edit")
@@ -158,6 +162,11 @@ def _file_problems(model: dict[str, Any], root: Path) -> list[str]:
     found += [f"no folder {folder} (pythonpath)" for folder in model.get("pythonpath", []) if not (project / folder).is_dir()]
     found += [f"no {need}: an input the build reads that is never committed (the model's README says how to "
               "put it there)" for need in model.get("needs", []) if not (project / need).exists()]
+    script = cwd / declared_script(model)
+    if script.is_file() and with_xbf(script.read_text(encoding="utf-8"), Path(model["xbf"]).stem, "x.xbf") is None:
+        found.append(f"{declared_script(model)} has no `@model` directly above `def {Path(model['xbf']).stem}(` "
+                     "(the model the xbf stem names) or no `from cadgen import` line before it: its work copy "
+                     "cannot declare the xbf")
     edit = model["edit"]
     path = project / edit["file"]
     if not path.is_file():
@@ -167,6 +176,36 @@ def _file_problems(model: dict[str, Any], root: Path) -> list[str]:
         if count != 1:
             found.append(f"the edit's `from` occurs {count} times in {edit['file']}, not once")
     return found
+
+
+XBF_IMPORT = "from cadgen import xbf as _corpus_bench_xbf  # corpus_bench: the work copy declares its xbf"
+
+
+def with_xbf(source: str, function: str, out: str) -> str | None:
+    """A script's ``source`` with the model ``function`` declaring its document,
+    ``@xbf(out=out)`` on the line above its ``@model``, and that decorator imported after the
+    script's first ``from cadgen import`` line; None when the script has no top-level ``@model``
+    directly above ``def function(`` or no single-line ``from cadgen import``."""
+    lines = source.splitlines(keepends=True)
+    at = next((index for index in range(1, len(lines))
+               if lines[index].startswith(f"def {function}(") and lines[index - 1].strip() == "@model"), None)
+    imported = next((index for index, line in enumerate(lines)
+                     if line.startswith("from cadgen import ") and "(" not in line), None)
+    if at is None or imported is None or imported > at:
+        return None
+    lines.insert(at - 1, f"@_corpus_bench_xbf(out={out!r})\n")
+    lines.insert(imported + 1, XBF_IMPORT + "\n")
+    return "".join(lines)
+
+
+def declared_script(model: dict[str, Any]) -> str:
+    """The target script (relative to the model's ``cwd``) whose model the ``xbf`` stem names."""
+    stem = Path(model["xbf"]).stem
+    for target in model["targets"]:
+        script, _sep, function = target.partition("::")
+        if (function or Path(script).stem) == stem:
+            return script
+    return model["targets"][0].partition("::")[0]
 
 
 def problems(config: Any, root: Path | None = None) -> list[str]:
@@ -298,7 +337,7 @@ def last_json(stdout: str) -> Any:
 # --- the table ----------------------------------------------------------------------------------
 
 COLUMNS = ("model", "cold wall / body", "no-op", "edit wall / body (misses; run+replayed)", "revert", "restart",
-           "xbf MB", "mesh cold / warm", "snapshot", "worker MB", "load")
+           "cold restart", "xbf MB", "mesh cold / warm", "snapshot", "worker MB", "load")
 
 
 def seconds(value: Any) -> str:
@@ -326,9 +365,17 @@ def _body(row: dict[str, Any] | None) -> str:
     return f" / {seconds(((row or {}).get('timings') or {}).get('body'))}"
 
 
+def _taken(row: dict[str, Any] | None) -> str:
+    """After a restart's wall: what it took whole (``file``, the xbf), or that it took nothing."""
+    if row is None or "cache" not in row:
+        return ""
+    return f" ({row['cache']})" if row["cache"] else " (not taken)"
+
+
 def table(rows: Iterable[dict[str, Any]]) -> str:
     """The batch as Markdown, a line a model in the order they ran: each build's wall (and the cold's
-    and the edit's body, the edit's memo misses and bodies run and replayed), the document's size,
+    and the edit's body, the edit's memo misses and bodies run and replayed, and what the restart
+    took whole), the document's size,
     the whole-document mesh cold and warm, the warm snapshot, the largest worker memory after a build
     and the range of the 1-minute load average. A step that failed says so; one not run is a dash."""
     steps: dict[str, dict[str, dict[str, Any]]] = {}
@@ -352,7 +399,8 @@ def table(rows: Iterable[dict[str, Any]]) -> str:
             _wall(done.get("edit"), _body(edit) + f" ({edit.get('misses')}; {edit.get('bodies_run')}+"
                                                    f"{edit.get('bodies_replayed')})"),
             _wall(done.get("revert")),
-            _wall(done.get("restart")),
+            _wall(done.get("restart"), _taken(done.get("restart"))),
+            _wall(done.get("restart-cold")),
             megabytes(sizes[0]) if sizes else "—",
             mesh,
             _wall(done.get("snapshot")),
@@ -649,6 +697,12 @@ class Bench:
         and the copy removed unless kept."""
         model = prepare(spec, self.out, engine_dir, cadgen_src)
         copy_project(ROOT / spec["root"], model.work)
+        script = model.cwd / declared_script(spec)
+        declared = with_xbf(script.read_text(encoding="utf-8"), model.document.stem,
+                            Path(os.path.relpath(model.document, script.parent)).as_posix())
+        if declared is None:
+            raise SystemExit(f"corpus_bench: {script} cannot declare its xbf")
+        script.write_text(declared, encoding="utf-8")
         self.stop(model)  # one a previous batch left in this model's own folder
         remove(Path(model.env["CADGEN_ENGINE_DIR"]))
         original = model.edit.read_bytes()
@@ -660,6 +714,10 @@ class Bench:
                     model.edit.write_bytes(original)
                 elif step == "restart":
                     self.stop(model)
+                elif step == "restart-cold":
+                    self.stop(model)
+                    if model.document.exists():
+                        model.document.unlink()
                 if not self.build(model, step)["ok"]:
                     return
             self.document(model)
