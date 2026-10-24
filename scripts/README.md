@@ -111,11 +111,12 @@ where those files ship, so these scripts are what produces them.
   the sha256 PyPI lists, go to `--released`; a file PyPI holds that the run did
   not build fails it. Called by `release-publish.yml`'s `pypi` job.
 - `check-version.sh [--incremented-from REF]` — `VERSION` is valid semver, every
-  skill pins `cadgen==VERSION`, and (with the flag) `VERSION` is greater than the
+  skill pins `cadgen==VERSION` and names the launchers `cadgen-VERSION` and
+  `cadgen-python-VERSION`, and (with the flag) `VERSION` is greater than the
   one at `REF`. Called by `test.yml` (Version Check), `release-publish.yml`,
   `publish-github-release.sh`.
 - `sync-version.mjs [--check]` — stamps the derived versions (package, plugin,
-  lockfile and `pyproject.toml` metadata, the cadgen pins) from `VERSION`. Called
+  lockfile and `pyproject.toml` metadata, the cadgen pins and launcher names) from `VERSION`. Called
   by `bump-version.sh`, `bundle.sh`, `test.yml` (Version Check), `release-publish.yml`.
 - `check-wheel-contents.sh` — builds the wheel and asserts the Python modules,
   the engine's page, environment image and README, and `_runtime/{browser,viewer,mcp}`

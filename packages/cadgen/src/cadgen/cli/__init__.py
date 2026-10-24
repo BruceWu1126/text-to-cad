@@ -55,15 +55,15 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     "telemetry": ("cadgen.cli.telemetry", "show or change the usage stats and crash reports CAD sends: status, on, off"),
 }
 
-# A skill's pin is the version in the launch command its SKILL.md teaches
-# (`uvx ... --from cadgen==1.2.3 cadgen`), stamped by the release.
+# A skill's pin is the version its SKILL.md's install command names
+# (`uvx ... --from cadgen==1.2.3 cadgen doctor`), stamped by the release with its launchers' names.
 _PIN_RE = re.compile(r"--from\s+cadgen==(?P<pin>[^\s`'\"]+)")
 
 
 def read_skill_pin(skill_path) -> str | None:
-    """The cadgen version a SKILL.md's launch command pins, or ``None``.
+    """The cadgen version a SKILL.md pins, or ``None``.
 
-    ``None`` covers the non-cases uniformly: file absent or unreadable, or no launch command
+    ``None`` covers the non-cases uniformly: file absent or unreadable, or no install command
     with a pin (a development install rewrites it to the checkout's interpreter). The caller
     decides what a mismatch means (``cadgen doctor`` reports it and exits 3). String comparison
     rather than PEP 440 on purpose: the release stamps the pin mechanically.
@@ -206,6 +206,13 @@ def _main(argv: list[str] | None) -> int:
         sys.stderr.write(f"cadgen: unknown command {noun!r}\n\n" + _usage())
         return 2
 
+    # Every command but the engine's own server keeps this installation's launchers published, the
+    # paths a skill runs it by inside a sandbox (`cadgen/_internal/launchers.py`): a check in well
+    # under a millisecond, a write only when one is missing or another's, never a failure.
+    if command != "server":
+        from cadgen._internal.launchers import startup
+
+        startup()
     # No command says a newer text-to-cad is out: it cannot tell which plugin, if any, it came
     # with, so the CAD app and the CAD Viewer say it (`cadgen/updates.py`). What a command does say,
     # once and before its work, is what those two send by default (`cadgen/analytics.py`).

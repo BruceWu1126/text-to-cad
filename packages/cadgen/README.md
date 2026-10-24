@@ -321,7 +321,9 @@ src/cadgen/
   assets.py              # where the bundled runtime is
   check_fonts.py         # `python -m cadgen.check_fonts`: the font that breaks
                          #   `import build123d`
-  _internal/             # the launch command, the font guard, the kernel-import recorder,
+  _internal/             # the launch command and the launchers it publishes (launchers:
+                         #   ~/.local/bin/cadgen-<version>, cadgen-python-<version>, what
+                         #   the skills run), the font guard, the kernel-import recorder,
                          #   the lazy kernel (lazy_kernel: `import build123d` binds, the
                          #   kernel loads on first use; cadgen-lazy-kernel.pth, at the root
                          #   of site-packages, installs it at interpreter start),
@@ -335,7 +337,7 @@ src/cadgen/
 Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and
 `server` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
 snapshot for those files alone; `cadgen urdf|sdf|srdf validate` the validators; `cadgen
-doctor` the installation and a skill's pin; `cadgen viewer` the engine page launcher;
+doctor` the installation, its launchers and a skill's pin; `cadgen viewer` the engine page launcher;
 `cadgen mcp` the stateless proxy an agent host starts; and `cadgen telemetry` the person's answer. A
 model builds by running its script: `python model.py`.
 

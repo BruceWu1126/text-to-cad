@@ -169,7 +169,7 @@ def notice_text() -> str:
 
 def off_command() -> str:
     """``cadgen telemetry off`` as a command that runs this installation when pasted: the pinned ``uvx``
-    line the plugin and its skills run (``launch.launch_command``) for an installation uvx made, which
+    line the plugin's server runs (``launch.launch_command``) for an installation uvx made, which
     that line reuses; ``cadgen`` where the ``cadgen`` on PATH is the script that runs now; else that
     script by its path, or this interpreter with ``-m cadgen.cli``."""
     import shlex

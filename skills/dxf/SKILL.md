@@ -12,13 +12,19 @@ repository link is only for provenance and release review.
 
 ## Setup
 
-Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
+Run cadgen by the launchers its installation publishes, so this skill's commands share
 one installation, and its engine server, with the CAD app's:
 
-- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen`
-- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 python`
+- `cadgen` below means `~/.local/bin/cadgen-0.8.0`
+- `python` below means `~/.local/bin/cadgen-python-0.8.0`
 
-The first run downloads that installation; later runs reuse it.
+If either file is missing (a skills-only install, or a purged uv cache), run
+`uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen doctor` once,
+outside any sandbox or with the sandbox's permission: it installs cadgen and publishes the
+launchers. With the CAD app's server running, nothing else needs the sandbox's
+permission: it starts the engine and holds it. Without it, a sandboxed shell cannot start
+the engine; when a command says no engine is running, run `cadgen server` outside the
+sandbox once.
 
 `cadgen doctor <skill-dir>` reports the installation in use and checks that it is
 the one this skill pins, that the CAD kernel loads, and whether the engine every

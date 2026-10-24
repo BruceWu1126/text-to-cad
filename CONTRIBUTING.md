@@ -115,8 +115,10 @@ dist-info by design — it is release-grained, so dev code is always newer than
 its number — and nothing behavioral consults it, but stale metadata makes the
 reported number drift further from the code than it has to.
 
-Skills run cadgen through their launch command, `uvx ... --from cadgen==<VERSION>`,
-which installs the RELEASE from PyPI. To run your working copy, use the checkout's
+Skills run cadgen by the launchers `~/.local/bin/cadgen-<VERSION>` and
+`cadgen-python-<VERSION>`, which the RELEASE's installation (`uvx ... --from
+cadgen==<VERSION>`, from PyPI) publishes; a checkout's editable cadgen publishes none
+of its own. To run your working copy, use the checkout's
 `.venv` (`requirements-dev.txt`), or `scripts/install/dev_install.py`, which points a
 dev install's server and skills at it (see [Test In Agent Apps](#test-in-agent-apps)).
 
@@ -206,13 +208,16 @@ npx skills add . -g -a <agent>
 A plugin host gets `text-to-cad@earthtojake-dev`: this checkout's skills, and
 `cadgen mcp` run by this checkout's `.venv` (`CADGEN_PYTHON` overrides it), serving
 a copy of the `apps/mcp` page built for that install (`--no-build` reuses the last
-build). The copied skills' launch command is rewritten to that same `.venv`, so the
+build). The copied skills' launchers are renamed to that install's version
+(`~/.local/bin/cadgen-<VERSION>-dev.<time>`) and published pointing at that same `.venv`
+(the server republishes them, told the name by `CADGEN_LAUNCHER_VERSION`), so the
 server and the agent's scripts share this checkout's installation and its engine daemon;
 each worktree is an installation of its own (one daemon per installation), so
 several can be installed side by side, one per app. With `--wheel`, the checkout's
-wheel is built as the release builds it (`bundle.sh`, then `uv build`) and the
-server and skills run it through `uvx --from <wheel>`: exactly what users get,
-each build its own installation. Install again to see a skill or page edit. A page that changed under a
+wheel is built as the release builds it (`bundle.sh`, then `uv build`), the
+server runs it through `uvx --from <wheel>` and its installation publishes the
+release-named launchers the skills run: exactly what users get, each build its own
+installation (and the launchers follow the latest). Install again to see a skill or page edit. A page that changed under a
 running app would change its URI, and hosts drop the frames already showing it,
 which is why each install serves its own copy. A running server keeps the
 Python it started with, so restart the app after a Python-only change. The
@@ -451,7 +456,7 @@ must not put `skills/`, the repository root, or a sibling skill directory on
 independent of *each other*.
 
 They are not independent of `cadgen`. Each cadgen skill's SKILL.md runs that
-distribution through the launch command, and a skill's `scripts/<tool>` is a thin
+distribution through the launchers its installation publishes, and a skill's `scripts/<tool>` is a thin
 entrypoint whose parser and behaviour live in `cadgen.cli` — so what a published skill
 needs is an install, not a copy. Skills used to vendor cadgen and its JavaScript builders into
 `skills/*/scripts/packages/`; six copies of one runtime is what that cost, and it
