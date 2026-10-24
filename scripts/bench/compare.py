@@ -112,6 +112,9 @@ def new_numbers(rows: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             continue
         mine = found.setdefault(row["model"], {"declares": set(), "failed": set()})
         step = row.get("step")
+        if step == "export" and row.get("ok") and row.get("xbf_bytes"):
+            mine.setdefault("xbf_mb", []).append(row["xbf_bytes"] / 1e6)  # a model that declares no xbf
+            continue
         if step not in ("cold", "noop", "edit"):
             continue
         if not row.get("ok"):
