@@ -1195,17 +1195,21 @@ class _Body:
     of it may be replayed (``direct``: false for a ``@memo`` function that returned no
     geometry, whose log is kept only for the bodies that called it)."""
 
-    __slots__ = ("name", "source", "log", "snapshot", "generation", "inputs", "direct")
+    __slots__ = ("name", "source", "log", "snapshot", "generation", "inputs", "direct", "serial")
 
     def __init__(self, name: str, source: str, log: _BodyLog, snapshot: Any, generation: int,
                  inputs: tuple = ()) -> None:
         self.name, self.source, self.log, self.snapshot, self.generation = name, source, log, snapshot, generation
         self.inputs, self.direct = inputs, True
+        # Which run of the body this is, process-wide: a replay keeps it, a run makes another
+        # (``adopt``: what the shapes its run made past the engine are keyed by).
+        self.serial = next(_SERIALS)
 
 
 # Per model body, by its caller's name for it: the body's last run, kept while one of the
 # last ``RUNS_KEPT`` outermost runs used it (``_sweep``).
 _BODIES: dict[str, _Body] = {}
+_SERIALS = itertools.count(1)
 # Per function a verifying build found impure (``body``'s ``family``): it runs on every
 # call for the worker's life, and so do the bodies that call it. With why.
 _ALWAYS: dict[str, str] = {}
@@ -1324,6 +1328,34 @@ def direct(name: str) -> None:
     record = _BODIES.get(name)
     if record is not None:
         record.direct = False
+
+
+def adopt(name: str, result: Any) -> Any:
+    """A kept ``@memo`` call's result whose shapes its run made past the engine -- OCCT's own
+    makers, which no key names -- as one operation of the caller's: keyed by the call (its
+    name, which holds its arguments' digest) and by which run of it made them (``_Body.serial``),
+    and registered, so what the caller makes of them is keyed and kept too. A replay of the call
+    hands back those very shapes, and the operation is a hit; a run of it makes others, and a
+    miss. A result any shape of which the memo made already, a call not kept, or none running:
+    ``result`` as it is."""
+    state = getattr(_LOCAL, "run", None)
+    if state is None or state.depth or not enabled() or os.environ.get("CADGEN_ENGINE_BODIES", "1").strip() == "0":
+        return result
+    record = _BODIES.get(name)
+    if record is None or not record.direct:
+        return result
+    Shape = _build123d().Shape
+    shapes = list(result.values()) if isinstance(result, dict) else list(result) if isinstance(result, (list, tuple)) else [result]
+    for shape in shapes:
+        wrapped = _wrapped(shape) if isinstance(shape, Shape) else None
+        if wrapped is None or _made_of(wrapped.TShape(), state) is not None or wrapped.TShape() in _SUBS:
+            return result
+    if isinstance(result, dict):
+        names = list(result)
+        made = _call(state, "memo", "function", lambda _name, _serial: [result[key] for key in names],
+                     (name, record.serial), {})
+        return dict(zip(names, made))
+    return _call(state, "memo", "function", lambda _name, _serial: result, (name, record.serial), {})
 
 
 def always() -> dict[str, str]:

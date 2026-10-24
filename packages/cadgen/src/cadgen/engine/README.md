@@ -1917,6 +1917,14 @@ writes no file. Outside a build it is its function. Its contract:
 - **Geometry back**: a shape, or a tuple, list or dict whose leaves are shapes. A call
   returning anything else runs every time it is called (its log stays, for the bodies
   that called it).
+- **OCCT's own makers**: a shape the call made past the engine -- an OCCT maker no key
+  names, a hand-built B-spline surface made a face -- is keyed by the call itself
+  (`memo.adopt`): when every shape it returns is such a shape, the result is one operation
+  of the caller's, keyed by the call's name (its function and arguments) and by which run of
+  it made them, and registered, so what the caller makes of them is keyed and kept. A replay
+  hands back those very shapes, and the operation is a hit; a run of the call makes others,
+  and a miss. Inside the call, a build123d operation on such a shape is unkeyed and keeps
+  the call running: it returns them as made.
 - **No methods**: `@memo` on a function whose first parameter is `self` or `cls` raises
   at decoration.
 - **Pure**, the author's part: it reads only what its key holds -- its arguments, the

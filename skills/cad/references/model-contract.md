@@ -111,7 +111,8 @@ of the first one's result. Outside a run it is its function.
   and `Rotation`; a `Material`; a shape this run made. A call given anything else (a
   callable, an arbitrary object) runs every time.
 - **Geometry back**: a shape, or a tuple, list or dict of shapes. A call returning
-  anything else runs every time.
+  anything else runs every time. Shapes it made with OCCT's own makers, returned as made,
+  are keyed by the call: the way to keep a construction build123d has no operation for.
 - **No methods**, and **pure**: it reads only what its key holds and changes nothing
   outside itself. A global it sets for another function, or an argument it mutates, is
   not seen, and a replay leaves it undone.
