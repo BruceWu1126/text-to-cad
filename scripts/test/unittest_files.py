@@ -161,7 +161,7 @@ def stop_engine(top: str, engine_dir: str) -> None:
         names = os.listdir(engine_dir)
     except FileNotFoundError:
         return
-    if not any(name.endswith((".sock", ".port")) for name in names):
+    if not any(name.endswith((".door", ".port")) for name in names):
         return
     env = {**os.environ, "CADGEN_ENGINE_DIR": engine_dir,
            "PYTHONPATH": os.pathsep.join(filter(None, [os.path.join(top, "packages", "cadgen", "src"),
@@ -209,7 +209,7 @@ def run_files(files: list[str], top: str, jobs: int, verbose: bool, print_weight
     durations: list[tuple[str, float]] = []
     failed_modules: list[str] = []
     unparsed: list[str] = []
-    # Short: a Unix socket path caps near 104 bytes, and the engine's sits in this folder.
+    # Each file's engine folder is in here, its door beside its lock.
     engines = tempfile.mkdtemp(prefix="cgt-")
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
