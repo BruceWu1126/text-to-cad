@@ -30,13 +30,12 @@ build fails the aircraft.
 
 Which skin cutters the airframe applies is decided in ``src/airframe.py``.
 
-Nothing about the aircraft articulates.  Its mechanism is the staged teardown's
-alone: the root holds a prismatic joint per system (every system moves, the
-airframe too, so the world is the one fixed reference), and the wings and the aft
-section each hold a prismatic joint per part group their second act separates.
-``teardown`` and ``explodedHold`` are motions, functions of time over those
-joints.  It is one xbf (``XBF/f14d.xbf``); STEP, GLB, STL and 3MF are written
-from it on demand, and a GLB export bakes the two motions into clips.
+Nothing about the aircraft articulates, so it has no mechanism.  The staged
+teardown is the GLB's: ``teardown`` and ``explodedHold`` are animations
+(``cadgen.gltf``) moving every system (the airframe too) and, on top, the part
+groups the wings' and the aft section's second act separates.  It is one model,
+``f14d``; STEP, GLB, STL and 3MF are written from its document on demand, and a GLB
+export bakes the two animations into clips.
 """
 
 from __future__ import annotations
@@ -44,8 +43,8 @@ from __future__ import annotations
 import math
 import re
 
-from cadgen.ap242 import configuration_sequence
-from cadgen.engine import xbf
+from cadgen import model
+from cadgen.gltf import animation
 
 import build123d as bd
 
@@ -85,11 +84,10 @@ SYSTEMS = [
 # single pop; the acts overlap on purpose (act 1 spans [0, 0.58] of the ramp,
 # act 2 [0.52, 1]).
 #
-# Every system moves, the airframe too, so nothing in the aircraft is a fixed
-# reference: the ROOT holds each system's prismatic joint (`explode_<system>`,
-# along its vector), which is the old clips' world-space motion exactly. Each act-2
-# group slides on a prismatic joint its system's compound holds, its first part
-# the rigid half and the rest fastened to it.
+# Every system moves, the airframe too, each along its vector in the world, which is
+# the old clips' world-space motion exactly; each act-2 group moves on top of its
+# system's travel, by its own vector. The old clips also faded the airframe to 22%
+# opacity; a GLB has no opacity channel, so the airframe stays opaque.
 # ---------------------------------------------------------------------------
 
 ACT1_END = 0.58
@@ -153,7 +151,8 @@ def _windowed(ramp: float, start: float, end: float) -> float:
 
 
 def _explode(ramp: float) -> dict:
-    """Every teardown joint at one point on the master ramp."""
+    """Every group's travel along its vector (mm) at one point on the master ramp, by its name
+    (`explode_<system>`, or an act-2 group's)."""
     values = {}
     for system, ((start, end), vector) in EXPLODE.items():
         values[f"explode_{system}"] = _length(vector) * _windowed(ramp, start * ACT1_END, end * ACT1_END)
@@ -180,54 +179,64 @@ def _exploded_hold(t: float) -> dict:
     return _explode(ramp)
 
 
-def _in_parent(part, world: bd.Location) -> bd.Location:
-    """``world`` in the frame of ``part``'s parent, where build123d takes a joint's location."""
-    return world if part.parent is None else part.parent.global_location.inverse() * world
-
-
-def _slide(label: str, holder, rider, vector) -> None:
-    """A prismatic joint along ``vector`` (world) through the world origin on ``holder``,
-    its rigid half on ``rider`` where the joint holds it at 0: the holder's axes at the
-    axis's origin."""
-    direction = tuple(c / _length(vector) for c in vector)
-    parent_world = bd.Location() if holder.parent is None else holder.parent.global_location
-    axis = bd.Axis((0.0, 0.0, 0.0), direction).located(parent_world.inverse())
-    joint = bd.LinearJoint(label, holder, axis=axis, linear_range=(0.0, _length(vector)))
-    held = holder.global_location * bd.Location(joint.relative_axis.position)
-    bd.RigidJoint(label, rider, _in_parent(rider, held))
-
-
 def _descendants(node):
     for child in node.children:
         yield child
         yield from _descendants(child)
 
 
-def _teardown_joints(aircraft, groups) -> None:
-    by_system = {group.label: group for group in groups}
-    for system, (_stage, vector) in EXPLODE.items():
-        _slide(f"explode_{system}", aircraft, by_system[system], vector)
-    for joint, system, patterns, side, _stage, vector in SUBS:
+def _path(root, node) -> str:
+    """``node``'s occurrence path below ``root``, as a ref's owner names it from ``root``'s
+    label: each label down, numbered among the siblings that share it (``panel.2``)."""
+    steps = []
+    while node is not root:
+        siblings = [child for child in node.parent.children if child.label == node.label]
+        steps.append(node.label if len(siblings) == 1 else f"{node.label}.{siblings.index(node) + 1}")
+        node = node.parent
+    return "/".join([root.label, *reversed(steps)])
+
+
+def _groups(aircraft, systems) -> dict:
+    """Each teardown group's references in the aircraft and its unit vector: a system by its
+    label, an act-2 group by its members' paths, chosen by label as the old clips chose them."""
+    by_system = {system.label: system for system in systems}
+    groups = {f"explode_{name}": ([f"{aircraft.label}/{name}"], vector) for name, (_stage, vector) in EXPLODE.items()}
+    for group, system, patterns, side, _stage, vector in SUBS:
         members = [part for part in _descendants(by_system[system])
                    if any(re.match(pattern, part.label or "") for pattern in patterns)
                    and (side is None or f":{side}" in (part.label or ""))]
-        if len(members) != SUB_COUNTS[joint]:
-            raise RuntimeError(f"teardown group {joint!r} holds {len(members)} parts, not {SUB_COUNTS[joint]}")
-        lead = members[0]
-        _slide(joint, by_system[system], lead, vector)
-        # The rest of the group fastened to its first part: a rigid pair of one label each.
-        for index, part in enumerate(members[1:]):
-            bd.RigidJoint(f"{joint}_rides_{index}", lead, bd.Location())
-            bd.RigidJoint(f"{joint}_rides_{index}", part, bd.Location())
+        if len(members) != SUB_COUNTS[group]:
+            raise RuntimeError(f"teardown group {group!r} holds {len(members)} parts, not {SUB_COUNTS[group]}")
+        groups[group] = ([_path(aircraft, part) for part in members], vector)
+    return {name: (refs, tuple(c / _length(vector) for c in vector)) for name, (refs, vector) in groups.items()}
 
 
-@xbf(out="../XBF/f14d.xbf")
+_KEY_STEP = 0.1  # s between the sampled keys of a teardown's channels
+
+
+def _teardown_animation(aircraft, groups: dict, name: str, duration: float, explode_at) -> None:
+    """A GLB animation of the teardown: each group's translation along its vector by
+    ``explode_at(t)``'s travel, sampled every ``_KEY_STEP`` as LINEAR keys (a key whose
+    neighbours hold its value is dropped), so the old clip's eases play as they were."""
+    show = animation(aircraft, name, duration=duration)
+    count = round(duration / _KEY_STEP)
+    times = [duration * i / count for i in range(count + 1)]
+    poses = [explode_at(t) for t in times]
+    for group, (refs, unit) in groups.items():
+        values = [pose[group] for pose in poses]
+        kept = [i for i in range(len(times))
+                if i in (0, len(times) - 1) or not values[i - 1] == values[i] == values[i + 1]]
+        keys = [(times[i], tuple(c * values[i] for c in unit)) for i in kept]
+        show.channel(refs, path="translation", keys=keys, interpolation="LINEAR")
+
+
+@model
 def f14d():
     groups = [system() for system in SYSTEMS]
     aircraft = bd.Compound(children=groups, label="f14d_super_tomcat")
-    _teardown_joints(aircraft, groups)
-    configuration_sequence(aircraft, "teardown", _teardown, duration=60)
-    configuration_sequence(aircraft, "explodedHold", _exploded_hold, duration=24)
+    teardown = _groups(aircraft, groups)
+    _teardown_animation(aircraft, teardown, "teardown", 60, _teardown)
+    _teardown_animation(aircraft, teardown, "explodedHold", 24, _exploded_hold)
     return aircraft
 
 
