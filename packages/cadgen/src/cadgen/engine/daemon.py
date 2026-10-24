@@ -1168,11 +1168,37 @@ class Daemon:
             self.server.stop()
 
 
+# How long a connection to the Windows loopback port has to show its token: anyone on the machine can
+# connect there, so nothing more is read, or waited for, until it has.
+AUTH_SECONDS = 10.0
+
+
+def _admitted(daemon: Daemon, connection: socket.socket, stream: Any) -> bytes | None:
+    """On Windows, the request line's first bytes: the client puts its token first
+    (``{"token": "<token>", ...``, ``client._exchange``), so a peer without it is refused after
+    those few bytes and ``AUTH_SECONDS`` at most, before the line is read or parsed. None: refused."""
+    import hmac
+
+    expected = b'{"token": "' + daemon.token.encode("ascii") + b'"'
+    connection.settimeout(AUTH_SECONDS)
+    prefix = stream.read(len(expected))
+    if not daemon.token or not hmac.compare_digest(prefix, expected):
+        return None
+    connection.settimeout(None)
+    return prefix
+
+
 def _serve_connection(daemon: Daemon, connection: socket.socket) -> None:
     with connection:
         stream = connection.makefile("rwb")
         try:
-            line = stream.readline()
+            prefix = b""
+            if WINDOWS:
+                admitted = _admitted(daemon, connection, stream)
+                if admitted is None:
+                    return
+                prefix = admitted
+            line = prefix + stream.readline()
             if not line:
                 return
             request = json.loads(line)

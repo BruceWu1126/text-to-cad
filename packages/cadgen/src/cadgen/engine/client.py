@@ -126,7 +126,8 @@ def request(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] = 
 def _exchange(connection: socket.socket, message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] = lambda _m: None,
               on_progress: Callable[[dict[str, Any]], None] | None = None, address: Path | None = None) -> dict[str, Any]:
     if _daemon.WINDOWS:
-        message = {**message, "token": (address or _daemon.port_path()).read_text(encoding="utf-8").split()[1]}
+        # The token first, so the daemon checks it in the line's first bytes, before it reads the rest.
+        message = {"token": (address or _daemon.port_path()).read_text(encoding="utf-8").split()[1], **message}
     with connection:
         connection.settimeout(None)
         stream = connection.makefile("rwb")

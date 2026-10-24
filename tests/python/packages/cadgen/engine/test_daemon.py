@@ -338,6 +338,69 @@ class EngineFolderTest(unittest.TestCase):
                     daemon.lock()
 
 
+class WindowsTokenFirstTest(unittest.TestCase):
+    """On Windows the daemon listens on loopback TCP, which any local user can reach: a connection
+    shows its token in its first bytes (the client puts it first), and one that does not is refused
+    before the rest of its line is read or parsed."""
+
+    def serve(self, payload: bytes):
+        import socket
+        import threading
+        import types
+        from unittest import mock
+
+        from cadgen.engine import daemon
+
+        handled = []
+        engine = types.SimpleNamespace(token="ab" * 16, handle=lambda request, send: handled.append(request) or send({"ok": True}))
+        server_side, client_side = socket.socketpair()
+        self.addCleanup(client_side.close)
+        with mock.patch.object(daemon, "WINDOWS", True):
+            done = threading.Thread(target=daemon._serve_connection, args=(engine, server_side))
+            done.start()
+            try:
+                client_side.sendall(payload)
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # refused after the first bytes: the rest was never read
+            done.join(timeout=30)
+        self.assertFalse(done.is_alive(), "the connection was answered or refused, not held")
+        return handled, engine.token
+
+    def test_a_connection_without_the_token_first_is_refused_before_its_line_is_read(self) -> None:
+        handled, _token = self.serve(b'{"token": "' + b"0" * 32 + b'", "op": "status", "pad": "' + b"x" * 200_000)
+        self.assertEqual(handled, [])
+
+    def test_the_client_puts_its_token_first_and_is_served(self) -> None:
+        import socket
+        import threading
+        from unittest import mock
+
+        from cadgen.engine import client
+
+        token = "ab" * 16
+        port_file = Path(tempfile.mkdtemp(prefix="eng-port-")) / "x.port"
+        self.addCleanup(shutil.rmtree, port_file.parent, True)
+        port_file.write_text(f"1234 {token}\n", encoding="utf-8")
+        ours, theirs = socket.socketpair()
+        sent = []
+
+        def engine() -> None:
+            with theirs:
+                stream = theirs.makefile("rwb")
+                sent.append(stream.readline())
+                stream.write(b'{"ok": true}\n')
+                stream.flush()
+
+        answering = threading.Thread(target=engine)
+        answering.start()
+        with mock.patch.object(client._daemon, "WINDOWS", True):
+            self.assertEqual(client._exchange(ours, {"op": "status"}, address=port_file), {"ok": True})
+        answering.join(timeout=30)
+        self.assertTrue(sent[0].startswith(b'{"token": "' + token.encode() + b'", "op": "status"'))
+        handled, _token = self.serve(sent[0])
+        self.assertEqual(handled, [{"token": token, "op": "status"}])
+
+
 class DaemonEnvironmentTest(unittest.TestCase):
     """The daemon serves every later client, so the client that starts it does not hand it a
     per-process telemetry switch: those are the person's saved choice's to decide."""
