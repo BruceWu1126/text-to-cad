@@ -145,6 +145,12 @@ path, the rehearsal, and local/manual fallbacks.
   repository-root module, and must not add `skills/`, the repository root, or a
   sibling skill directory to `sys.path`, `PYTHONPATH`, `NODE_PATH`, or any other
   runtime lookup path. Skills are independent of each other, not of everything.
+- A skill's process text is curated by a person. Changes to a skill's strategy
+  or process guidance (what to check, when to look, how to validate, the order
+  of the workflow) in `skills/*/SKILL.md` or `skills/*/references/` are
+  reviewed by the maintainer before they merge, shown as the exact diff. Agents
+  and lanes change tool names, commands, paths and version pins in those files
+  on their own, and nothing else. Enforced by review, not by a test.
 - Shared runtime comes from the **`cadgen` distribution**. A skill that uses it
   defines `cadgen` and `python` in its SKILL.md as the launchers above,
   named by `VERSION` (the release stamps every pin); no skill installs cadgen
