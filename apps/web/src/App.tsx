@@ -46,7 +46,11 @@ const DOCUMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
  * showing a document or the home is a new entry.
  */
 export default function App({ client, server, tabStore, notice = null, language: chosenLanguage = null }: { client: CadClient; server: CadServerInfo; tabStore: TabStore; notice?: UpdateNotice | null; language?: string | null }) {
-  useViewerAutoReload(server, { fetchServerInfo: () => client.serverInfo({ fresh: true }).then(info => ({ ok: true, identityToken: String(info.identityToken || '') }), () => ({ ok: false })) });
+  // Another process answering on this page's port: never loaded into the tab (a dev server's restart
+  // alone is followed), and said as the engine being gone.
+  const [foreign, setForeign] = useState(false);
+  useViewerAutoReload(server, { fetchServerInfo: () => client.serverInfo({ fresh: true }).then(info => ({ ok: true, identityToken: String(info.identityToken || '') }), () => ({ ok: false })),
+    follow: Boolean(import.meta.env?.DEV), onForeign: () => setForeign(true) });
   const downloads = useMemo(() => createBrowserDownloads(), []);
   const source = useMemo(() => createCadFileSource(client), [client]);
   const promptContext = useMemo(() => createWebPromptContext(browserClipboard, browserClipboardSupportsImages()), []);
@@ -153,7 +157,7 @@ export default function App({ client, server, tabStore, notice = null, language:
     environment: { colorScheme: appearance.colorScheme, locale, platform: keyboardPlatform() },
   }), [downloads, client, source, fileActions, promptContext, promptFiles, links, appearance.colorScheme, locale]);
   // The engine gone under the page: said over it, which stays as it was for the engine's return.
-  const engineGone = useSyncExternalStore(client.subscribe, () => client.getSnapshot().engineGone, () => false);
+  const engineGone = useSyncExternalStore(client.subscribe, () => client.getSnapshot().engineGone, () => false) || foreign;
   return <div className="relative flex h-svh flex-col overflow-hidden">{engineGone ? <EngineStopped locale={locale} /> : null}<div className="min-h-0 flex-1">
     <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={next => { void show(next); }} onShown={shown} start={start}
       library={library} onThumbnail={client.keepThumbnail} appSettings={appSettings}

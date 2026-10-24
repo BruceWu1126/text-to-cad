@@ -15,18 +15,23 @@ const INSTALLED_CADENCE = Object.freeze({ watchMs: VIEWER_INSTALL_POLL_MS, reloa
  * timer, the fetch and the reload.
  *
  * @param {{identityToken?: string}|null} serverInfo
- * @param {{ fetchServerInfo: () => Promise<{ ok: boolean, identityToken?: string }> }} options  `fetchServerInfo`
- *   asks the backend who it is now; a closed port mid-restart answers `{ ok: false }`, not a throw.
+ * @param {{ fetchServerInfo: () => Promise<{ ok: boolean, identityToken?: string }>, follow?: boolean,
+ *   onForeign?: () => void }} options  `fetchServerInfo` asks the backend who it is now; a closed port
+ *   mid-restart answers `{ ok: false }`, not a throw. `follow` reloads into a new identity (a dev
+ *   server); otherwise a new identity is a process this page cannot authenticate, so polling stops and
+ *   `onForeign` says so.
  */
 export function useViewerAutoReload(serverInfo, {
   fetchServerInfo,
+  follow = false,
+  onForeign = () => {},
   reload = defaultReload,
   now = () => Date.now(),
   schedule = (run, delayMs) => setTimeout(run, delayMs),
   cancel = (handle) => clearTimeout(handle)
 }) {
   const optionsRef = useRef(null);
-  optionsRef.current = { fetchServerInfo, reload, now, schedule, cancel };
+  optionsRef.current = { fetchServerInfo, follow, onForeign, reload, now, schedule, cancel };
   const baseline = String(serverInfo?.identityToken || "");
 
   useEffect(() => {
@@ -53,8 +58,14 @@ export function useViewerAutoReload(serverInfo, {
       if (!active) {
         return;
       }
-      const next = nextAutoReloadState(state, poll, { baseline, now: optionsRef.current.now(), ...cadence });
+      const next = nextAutoReloadState(state, poll, { baseline, now: optionsRef.current.now(), ...cadence,
+        follow: optionsRef.current.follow });
       state = { phase: next.phase, since: next.since };
+      if (next.phase === AUTO_RELOAD_PHASE.FOREIGN) {
+        active = false;
+        optionsRef.current.onForeign();
+        return;
+      }
       if (next.reload) {
         active = false;
         optionsRef.current.reload();

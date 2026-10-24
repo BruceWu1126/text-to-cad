@@ -308,9 +308,12 @@ compiler output, whose Retry reloads only that file and whose Report Issue opens
 new issue titled "Issue: ", labelled `bug`, filled in from the card. A failed update the
 model survives can be dismissed, leaving the previous version to inspect.
 
-The page checks its session's `identityToken` and reloads when the served client
-changes. Python code does not trigger a server restart: the engine owns other
-pages and sessions. Vite handles client HMR and consumes compiled workspace
+The page checks its session's `identityToken`. Under Vite it reloads when the
+served client changes. A page the engine serves never reloads into another identity
+on its port: every engine has a new token, so a later engine refuses the page, and
+another identity answering there is a process the page cannot authenticate. That
+page stops asking and says its engine is gone. Python code does not trigger a server
+restart: the engine owns other pages and sessions. Vite handles client HMR and consumes compiled workspace
 exports; React is deduplicated with the shared packages.
 
 Prompt actions prepare clipboard content for an external composer. References
