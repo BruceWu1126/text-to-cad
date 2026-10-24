@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 from math import cos, radians, sin, tau
 
 import build123d as bd
@@ -54,7 +54,7 @@ def _edge_fillets(part):
     return edges
 
 
-@xbf(out="../XBF/radial_engine_cylinder.xbf")
+@model
 def radial_engine_cylinder():
     """Return the radial-engine-style cylinder model in millimeters."""
     boss_rotation_y = 90.0 - BOSS_ANGLE_DEGREES

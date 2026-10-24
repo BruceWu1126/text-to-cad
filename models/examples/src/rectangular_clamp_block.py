@@ -1,11 +1,11 @@
 from __future__ import annotations
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 # Prompt: Rectangular clamp block with a split slot and two transverse screw holes.
 
 from lib.simple_model_library import make_rectangular_clamp_block
 
 
-@xbf(out="../XBF/rectangular_clamp_block.xbf")
+@model
 def rectangular_clamp_block():
     part = make_rectangular_clamp_block()
     part.material = materials.aluminium_6061.but(color=None)

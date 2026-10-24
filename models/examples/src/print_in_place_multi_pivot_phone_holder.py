@@ -30,7 +30,7 @@ Print footprint: 94 x 248 mm, 18 mm tall — fits a 250 mm bed; scale or shorten
 the arm links for a 220 mm bed.
 """
 from __future__ import annotations
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 
 import build123d as bd
 
@@ -240,7 +240,7 @@ def _make_cradle():
 PIVOTS = (("base_pivot", Y_J1), ("elbow_pivot", Y_J2), ("wrist_pivot", Y_J3))
 
 
-@xbf(out="../XBF/print_in_place_multi_pivot_phone_holder.xbf")
+@model
 def print_in_place_multi_pivot_phone_holder():
     """Return the print-in-place holder as a labeled four-link assembly compound."""
     links = [_make_base(), _make_lower_arm(), _make_upper_arm(), _make_cradle()]

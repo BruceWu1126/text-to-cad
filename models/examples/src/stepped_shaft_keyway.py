@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 import build123d as bd
 
 from lib.part_common import circular_edges, safe_chamfer
@@ -30,7 +30,7 @@ def _add_shaft_section(x_start: float, x_end: float, diameter: float):
         )
 
 
-@xbf(out="../XBF/stepped_shaft_keyway.xbf")
+@model
 def stepped_shaft_keyway():
     """Return the stepped shaft with keyway model in millimeters."""
     with bd.BuildPart() as shaft:

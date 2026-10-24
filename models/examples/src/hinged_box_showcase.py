@@ -3,22 +3,21 @@
 The lid's hinge is the mechanism (a revolute joint, two configurations, one motion): the xbf
 keeps it, and every GLB of the box carries the motion `open_close` as a clip. The showcase is the
 GLB's own (`animation`): the lid opens through the mechanism's forward kinematics, the feet drop
-out one after the other, the latch spins off and is hidden. The xbf never holds it; the GLB this
-function declares bakes it when it is written. `cadgen export ../XBF/hinged_box_showcase.xbf
-box.glb` writes a GLB with the motion alone.
+out one after the other, the latch spins off and is hidden. The document never holds it; a GLB
+exported while the model is live bakes it (`cadgen export <id> GLB/hinged_box_showcase.glb`, the
+id its run prints); one exported from a saved xbf carries the motion alone.
 """
 
 import build123d as bd
 
-from cadgen import glb, xbf
+from cadgen import model
 from cadgen.ap242 import configuration_sequence, mechanism_state
 from cadgen.gltf import animation
 
 HINGE = bd.Axis((-40, 0, 30), (0, -1, 0))  # +angle lifts the lid
 
 
-@xbf(out="../XBF/hinged_box_showcase.xbf")
-@glb(out="../XBF/hinged_box_showcase.glb")
+@model
 def hinged_box_showcase():
     body = bd.Box(80, 50, 30, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
     lid = bd.Pos(0, 0, 30) * bd.Box(80, 50, 6, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))

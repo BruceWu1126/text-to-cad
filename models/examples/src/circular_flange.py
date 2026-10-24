@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 from math import tau
 
 import build123d as bd
@@ -16,7 +16,7 @@ BOLT_CIRCLE_DIAMETER = 60.0
 OUTER_FILLET = 1.5
 
 
-@xbf(out="../XBF/circular_flange.xbf")
+@model
 def circular_flange():
     """Return the circular flange model in millimeters."""
     with bd.BuildPart() as flange:

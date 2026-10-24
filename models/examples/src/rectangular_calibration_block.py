@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 import build123d as bd
 
 from lib.part_common import line_edges_at_z, safe_chamfer
@@ -13,7 +13,7 @@ HOLE_LOCATIONS = ((-35.0, -20.0), (-35.0, 20.0), (35.0, -20.0), (35.0, 20.0))
 TOP_CHAMFER = 2.0
 
 
-@xbf(out="../XBF/rectangular_calibration_block.xbf")
+@model
 def rectangular_calibration_block():
     """Return the rectangular calibration block model in millimeters."""
     with bd.BuildPart() as block:

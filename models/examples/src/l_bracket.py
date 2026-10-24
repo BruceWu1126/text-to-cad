@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 import build123d as bd
 
 from lib.part_common import safe_fillet
@@ -60,7 +60,7 @@ def _transition_edges(part):
     return edges
 
 
-@xbf(out="../XBF/l_bracket.xbf")
+@model
 def l_bracket():
     """Return the L-bracket model in millimeters."""
     with bd.BuildPart() as bracket:

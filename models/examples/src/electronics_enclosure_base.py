@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import materials, xbf
+from cadgen import materials, model
 import build123d as bd
 
 
@@ -22,7 +22,7 @@ STANDOFF_LOCATIONS = (
 )
 
 
-@xbf(out="../XBF/electronics_enclosure_base.xbf")
+@model
 def electronics_enclosure_base():
     """Return a single solid open-top electronics enclosure base in millimeters."""
     inner_length = OUTER_LENGTH - 2.0 * WALL_THICKNESS
