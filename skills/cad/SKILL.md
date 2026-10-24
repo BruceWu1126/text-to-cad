@@ -43,11 +43,19 @@ one installation, and its engine server, with the CAD app's:
 
 `cadgen doctor <skill-dir>` reports the installation in use, whether it is the one
 this skill pins, whether the CAD kernel loads, and whether the engine is running. Each
-command's `--help` lists its flags.
+command's `--help` lists its flags. The first launch downloads cadgen and may outlast a
+host's server start timeout (Claude Code: 30 s unless `MCP_TIMEOUT` is raised; Codex: the
+plugin asks for 300 s); a restart resumes the download.
 
 One engine serves the installation: the first run starts it, every run and every
 command goes through it, and it serves the viewer. `cadgen status` lists its workers
 and the documents it holds; `cadgen stop` stops it, and any older one left running.
+A build cut off by the shell's time limit keeps running in the engine; run the same
+command again and it waits for that build and replays it (`cadgen status` shows it).
+Give a cold build of a large model the shell tool's longest timeout, or run it in the
+background. If a command ends with 'the system denies cadgen's local engine', this
+shell's sandbox forbids the engine's folder: rerun it with the sandbox's permission (in
+Codex, escalated permissions) rather than retrying.
 
 Command-line paths, and the paths `read_step`, `read_xbf`, `read_mesh` and `export`
 take, are relative to the working directory, as are a model's own file reads. Anchor
