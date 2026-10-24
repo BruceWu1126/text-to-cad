@@ -126,6 +126,9 @@ class VersionSyncMirrorTests(unittest.TestCase):
             self.assertIn("cadgen==9.9.9", manifest["mcpServers"]["cad"]["args"])
             # Every cadgen skill's launch command moves with the server's, so they stay one installation.
             self.assertIn("--from cadgen==9.9.9 cadgen`", (root / "skills/cad/SKILL.md").read_text(encoding="utf-8"))
+            # So does the turn-off command the README and the docs site print.
+            for page in ("README.md", "apps/docs/src/lib/content.ts", "apps/docs/src/app/privacy-policy/page.tsx"):
+                self.assertIn("--from cadgen==9.9.9 cadgen telemetry off", (root / page).read_text(encoding="utf-8"))
 
     def test_derived_metadata_is_synced_at_the_current_version(self) -> None:
         """The gate the release workflows run, at the version in VERSION."""
