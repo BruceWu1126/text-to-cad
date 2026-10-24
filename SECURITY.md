@@ -7,9 +7,10 @@ distribution that builds, views and exports CAD models on your own machine.
 Everything below runs as you, with your files.
 
 **The engine.** One warm `cadgen` daemon per installation does the building,
-viewing and exporting. Its clients reach it through a Unix socket that only you
-can open (on Windows, a loopback port and a token in a file only you can read).
-The socket lives in the engine's folder (`CADGEN_ENGINE_DIR`, by default
+viewing and exporting. Its clients reach it through its door, a named pipe
+with a pair of pipes per connection, that only you can open (on Windows, a
+loopback port and a token in a file only you can read). The door lives in the
+engine's folder (`CADGEN_ENGINE_DIR`, by default
 `cadgen-engine` in `$XDG_RUNTIME_DIR`, else in a temporary folder that is yours alone (on macOS
 the system's per-user one, else `$TMPDIR`),
 else `/tmp/cadgen-<uid>`). The client and the daemon refuse a folder that
