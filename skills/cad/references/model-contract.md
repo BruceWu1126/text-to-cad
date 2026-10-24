@@ -355,15 +355,19 @@ hour. It keeps a warm worker per model script, each with its own memo, and build
   (`CADGEN_ENGINE_MEMORY_MB`, default a quarter of the machine's) that never evicts one a
   page watches. `@model(store="memory")` (or `store="memory"` on a file decorator) keeps a
   document in its worker alone: it expires with the worker.
-- A document no longer held (`cadgen status`: `evicted`, `expired`) is never rebuilt for
+- A document no longer held (`cadgen status`: `evicted`, `expired`, `detached` once its
+  script is gone) is never rebuilt for
   you: `cadgen status`, `cadgen inspect` and its page print the command that builds it
   again, `python` and the program that built it. Run it.
 - `CADGEN_ENGINE_IDLE` sets the daemon's idle time in seconds, and
   `CADGEN_ENGINE_DIR` where it keeps its socket and lock (one daemon per folder). A
   build asked with another `PYTHONPATH`, `PATH` or `VIRTUAL_ENV` replaces its
   script's worker.
-- Nothing else is written: no cache folder, and no record of a build beside the
-  `.xbf`.
+- Nothing else is written beside your files: no cache folder, and no record of a build
+  beside the `.xbf`. cadgen's state folder keeps a record per document that points at
+  its script, which Recents lists; a model defined where no file holds it (a notebook
+  cell) is copied there, its source and the files its build read, and must be
+  self-contained.
 
 A successful server-backed build reports its model's id and localhost viewer URL,
 including when it writes files. To build a shape made elsewhere, wrap the shape in a
