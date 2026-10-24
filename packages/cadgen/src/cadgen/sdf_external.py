@@ -9,6 +9,10 @@ from cadgen.findings import FindingsReport
 
 GzCheckMode = str
 
+# An external `gz sdf --check` resolves the document's own <include>/<uri> references.
+# Bound it: a reference to a host that accepts but never answers must not hang the verb forever.
+GZ_CHECK_TIMEOUT = 60.0
+
 
 def run_gz_sdf_check(xml_text: str, *, output_path: Path, mode: GzCheckMode = "auto") -> FindingsReport:
     result = FindingsReport()
@@ -56,7 +60,12 @@ def run_gz_sdf_check(xml_text: str, *, output_path: Path, mode: GzCheckMode = "a
             text=True,
             encoding="utf-8",
             errors="backslashreplace",
+            timeout=GZ_CHECK_TIMEOUT,
         )
+    except subprocess.TimeoutExpired:
+        result.add("error", "gz_check_failed",
+                   f"gz sdf --check did not finish within {GZ_CHECK_TIMEOUT:g}s")
+        return result
     except OSError as exc:
         result.add("error", "gz_check_failed", f"gz sdf --check could not start: {exc}")
         return result
