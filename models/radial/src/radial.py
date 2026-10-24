@@ -1,6 +1,6 @@
 """Nine-cylinder supercharged radial -- the full, sectioned assembly.
 
-One model, `radial` (XBF/radial.xbf): the engine's eighteen
+One model, `radial`: the engine's eighteen
 systems in occurrence (and explode) order, each a compound of its labelled parts.
 Every system is a `@memo` stage below -- `lib/<system>.py`'s `build()`, each part
 given the finish its colour names (`lib/palette.py`) -- so an edit that does not
@@ -8,15 +8,16 @@ reach a system's code replays it from the worker's memory instead of running it.
 
 The mechanism is `lib/mechanism.py`'s (`assemble`): build123d joints on the parts its
 label contract picks, standing at 0 as built (crank angle 0, cylinder 1 at firing TDC),
-the gear train one coupling, `drive` (degrees of crank), two configurations, and three
-motions a GLB exported from the xbf carries as clips: `running`, the 720-degree
-four-stroke cycle in 8 s from `lib/kin.py`; `explode`, the original's 24 s teardown; and
-`exploded-running`, the cycle with the engine held partly apart (`lib/explode.py`).
+the gear train one coupling, `drive` (degrees of crank), two configurations, and the
+`running` motion, the 720-degree four-stroke cycle in 8 s from `lib/kin.py`. Two GLB
+animations join it (`lib/explode.py`): `explode`, the original's 24 s teardown, and
+`exploded-running`, the cycle with the engine held partly apart and some parts hidden.
+A GLB exported from the model carries all three as clips.
 """
 
 from __future__ import annotations
 
-from cadgen.engine import memo, xbf
+from cadgen import memo, xbf
 
 from lib import (
     accessory as accessory_lib,
@@ -222,6 +223,11 @@ def mount():
     return system
 
 
+# Declares its xbf, the corpus's example of a slow model's result kept across runs and
+# engine restarts: a cold build takes most of an hour, and four of its bodies run on every
+# run (OCCT called past build123d, a scipy interpolator in a module, a module held as a
+# value: each named in the report's retention), so a run whose closure the xbf holds takes
+# it instead of running them.
 @xbf(out="../XBF/radial.xbf")
 def radial():
     systems = [

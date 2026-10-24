@@ -15,7 +15,7 @@ that colour names: an engine `Material` set on the part (`FINISHES`).
 
 from __future__ import annotations
 
-from cadgen.engine import Material, materials
+from cadgen import Material, materials
 
 import build123d as bd
 

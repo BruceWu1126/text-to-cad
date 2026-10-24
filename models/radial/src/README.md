@@ -1,21 +1,27 @@
 # radial models
 
-`models/radial` ported to `cadgen.engine`: a nine-cylinder, single-row, supercharged,
+`models/radial` on cadgen 0.8: a nine-cylinder, single-row, supercharged,
 air-cooled radial aircraft engine, modelled as a museum restoration of the 1930s-40s
 archetype, unbranded, with a sectioned cylinder and a front crankcase window. One
 script, `radial.py`, holds one model:
 
-| Model | Writes | What it is |
+| Model | | What it is |
 | --- | --- | --- |
-| `radial` | `XBF/radial.xbf` | The engine: eighteen systems, their mechanism, the `drive` coupling, two configurations and the `running`, `explode` and `exploded-running` motions |
+| `radial` | `XBF/radial.xbf` | The engine: eighteen systems, their mechanism, the `drive` coupling, two configurations, the `running` motion and the `explode` and `exploded-running` GLB animations |
 
-Build from this folder: `python radial.py`.
+Build from this folder: `python radial.py`. The model declares its xbf (`@xbf`), this
+corpus's example of a slow model's result kept across runs and engine restarts: a cold
+build takes most of an hour (54 min on 2026-10-23, load 10-35), and four of its bodies
+(the engine's, `barrels`, `cam` and `propeller`) run on every run, OCCT called past
+build123d, a scipy interpolator held in a module and a module held as a value keeping
+them from being replayed (the report's `retention` names each), 34 s a no-op. A run
+whose closure the xbf holds takes the file instead: 0.2 s.
 
 ```
 python radial.py
-python -m cadgen.engine snapshot ../XBF/radial.xbf radial.png
-python -m cadgen.engine snapshot ../XBF/radial.xbf bdc.png --pose cylinder1_bdc
-python -m cadgen.engine export ../XBF/radial.xbf radial.glb      # the three clips, baked
+cadgen snapshot "$ID" radial.png                      # ID: the id: line the run printed
+cadgen snapshot "$ID" bdc.png --pose cylinder1_bdc
+cadgen export "$ID" GLB/radial.glb                    # the three clips, baked
 ```
 
 ## How it is built
@@ -93,18 +99,13 @@ configurations and motions.
 - Two configurations, each a crank angle with every joint where `kin.py` puts it:
   `cylinder1_bdc` (180 degrees, the bottom of cylinder 1's power stroke) and
   `cylinder1_overlap` (360: its TDC between exhaust and intake, both valves open).
-- Three motions, each a function of time stored as its samples, which a GLB exported
-  from the xbf carries as clips of their names (the original looped `running` and
-  `exploded-running`; a player repeats a clip):
-  - `running`, the 720-degree four-stroke cycle in 8 s: `drive` and every free joint
-    from `kin.py` (`mechanism.running_values`).
-  - `explode`, the original's teardown, 24 s from the rest pose with nothing turning
-    (below).
-  - `exploded-running`, `running` with the engine held partly apart (below).
-
-  No decorator declares the GLB: its bake keys every moving placement at every key
-  (`running` alone keyed 493 placements at 2,425 times and wrote 140 MB in 138 s, and
-  the exploded clips move all 2,400), which a declared GLB would repeat on every edit.
+- One motion, `running`, the 720-degree four-stroke cycle in 8 s: `drive` and every free
+  joint from `kin.py` (`mechanism.running_values`), a function of time stored as its
+  samples. Two GLB animations join it (below): `explode`, the original's teardown, 24 s
+  from the rest pose with nothing turning, and `exploded-running`, `running` with the
+  engine held partly apart. A GLB exported from the model carries all three as clips of
+  their names (the original looped `running` and `exploded-running`; a player repeats a
+  clip).
 
 Two approximations, where `kin.py` is exact: a pushrod turns about one fixed axis
 through its tappet socket (normal to its rest and full-lift directions; it turns about
@@ -121,65 +122,23 @@ parts leaving together -- each a track of smoothstep-eased straight moves, a fas
 its own moves after its host's) and the layout `lib/explodedrun.py` made (25 groups at
 constant offsets over the running cycle: the cylinders 205 mm out along their bores,
 their rocker covers 60 mm further, the crankcase halves, cam section, nose and
-propeller forward, the blower and accessory case back). `lib/explode.py` turns them
-into joints:
+propeller forward, the blower and accessory case back). `lib/explode.py` plays them as
+GLB animations (`cadgen.gltf`), exactly:
 
-- **One link per unit** (per exploded-running group, where a unit's parts are in
-  several: the crankcase front half leaves with the cam ring and the nose case's rear),
-  its parts fastened to its first, on a prismatic joint
-  `x_<part>` along its own move, held by its host's link (a fastener rides its host, as
-  it did) or by the root, the ground; units that move alike (one holder, line and
-  timing) share a link, 825 moving joints in all. A slide's value
-  at each instant is the old offset's projection on its line: exact wherever the
-  unit's moves relative to its holder lie on one line, so 1,356 of the 1,360 units
-  follow their old tracks exactly where nothing below forces otherwise; the other four
-  (the three propeller blades and the collector's bottom) bend in the original, and
-  take the straight line from rest to their end with the old timing.
-- **The running groups keep their joints** and take their translations where those
-  can be exact. A free joint whose part leaves along its own axis leaves on it: each
-  piston slides out of its bore on its own joint, and the master rod's joint is a
-  cylindrical one (turn, slide), so it slides off the crankpin. The gear train cannot
-  slide (the coupling's joints move through it alone), so its members leave on links
-  of their own: four systems' compounds slide on the root (`x_crankshaft`, `x_cam`,
-  `x_reduction`, `x_blower`) as the crank, the cam ring, the propeller shaft and the
-  impeller moved, holding those members' joints; and carriers, parts round about a
-  member's axis on slides of their own, hold the rest: each planet turns on its bearing,
-  each blower gear on its bushing. Carriers hold three free groups too: each tappet
-  slides in its guide, each valve in its head's guide, each rocker turns on its needle
-  bearing. A carrier no longer turns with its part (a bearing's race and needles, a
-  bushing, about the part's own axis, inside it). The group's other parts that leave on
-  their own ride its link on slides along its axis.
-- **exploded-running** holds every slide at its offset while `drive` and the free
-  joints run the cycle: exact for every shown part but the few below. The cam section
-  (ring, idler, tappets) stands 310 mm forward on `x_cam`, and each pushrod rides its
-  cylinder on its tappet's axle, which slides on the line from the cam section's offset
-  to its cylinder's: the pushrod keeps its lift and swing, seated in its rocker, as in
-  the original.
+- **`explode`**: each unit's translation, its whole track (its host's moves and its
+  own) sampled every 0.05 s as LINEAR keys, from the rest pose. Every part is a
+  reference of its own in the engine's tree, so a unit moves by its own track alone,
+  whatever joint holds it.
+- **`exploded-running`**: the running cycle posed every 0.02 s (1.8 degrees of crank),
+  each layout group held at its offset after the pose, and the 466 parts the original
+  hid (the propeller blades, the ignition, exhaust, intake, mount, pushrod tubes,
+  crankcase through-bolts and fuel line) hidden (`.hide`: a GLB has no visibility
+  channel, so a part is scaled to 0).
 
-Deliberate differences, every one measured by `explode.Plan.report()` (a link off the
-old clips by more than 0.5 mm):
+The mechanism takes no part in either: no joint exists for the explode. A rocker turns
+with its needle bearing, a tappet with its axle, a planet with its bearing and a blower
+gear with its bushing, as the original's label contract moved them.
 
-- The teardown, after a part's own move: the tappet guides, tappets and rollers ride
-  the cam section 840 mm forward when the cam ring leaves (17.3 s), 6 s after they came
-  out (so the tappets stand on the cam ring in exploded-running); the rocker shafts and
-  their washers and nuts ride their cylinders out (up to 510 mm) after being drawn (so
-  they stay in the rockers' bosses in exploded-running); the propeller blades ride the
-  propeller shaft's carrier 1,580 mm forward when it leaves (3.6 s), as no part of the
-  turning propeller stays put.
-- The pushrods: a pushrod turns on its tappet's axle and cannot also slide, and its old
-  draw (up its own length, before its tappet) is not on the axle's line, so it leaves
-  with its tappet and along the axle's line, 400 to 700 mm from its old track at worst.
-  The axle (a 25 mm pin) goes with the pushrod, in both exploded clips.
-- In exploded-running, fasteners whose old layout group is not their host's stay with
-  their hosts: 16 exhaust-flange nuts with the exhaust (205 mm off their cylinders'
-  offset), and the rear crankcase drain and two scavenge bolts and their wires (62 to
-  360 mm).
-- The 466 parts the original hid in exploded-running (the propeller blades, the
-  ignition, exhaust, intake, mount, pushrod tubes, crankcase through-bolts and fuel
-  line) are shown: a motion cannot hide a part. Each stays where its link puts it, at
-  rest unless it rides a moving link (the blades turn with the propeller shaft, 430 mm
-  forward), so the cylinders stand clear of their exhaust stacks, intake pipes and
-  leads.
 - The springs' compression and the old clips' display labels ("Exploded view
   (teardown)") have no engine equivalent.
 
@@ -191,7 +150,7 @@ left it.
 ## Not ported
 
 - The valve springs' compression (a tube deformation, no joint's).
-- The clips' looping: a motion has no loop, a player repeats a clip.
+- The clips' looping: neither a motion nor an animation has a loop, a player repeats a clip.
 - The validation tools (`lib/gate.py`, the interference gate; `lib/animcheck.py`, the
   clips against `kin.py`) and `tools/` (`engine.py`, which serialised builds and
   renders; `critic_pack.py`): they read the old pipeline's stored documents and
