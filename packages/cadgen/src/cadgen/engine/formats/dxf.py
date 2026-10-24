@@ -57,6 +57,12 @@ DRAWN = {"LINE", "CIRCLE", "ARC", "LWPOLYLINE", "POLYLINE", "ELLIPSE", "SPLINE",
 CAP_PER_EM = 0.7  # a face's cap height in ems, where the face does not say (the pane's fallback)
 LINE_SPACING = 5 / 3  # MTEXT's line pitch in cap heights, at its spacing factor 1
 SPECIALS = {"%%d": "\u00b0", "%%p": "\u00b1", "%%c": "\u00d8", "%%%": "%", "%%u": "", "%%o": "", "%%k": ""}
+# A block is drawn once for every insert of it (and every cell of a MINSERT's grid), and its own
+# inserts again inside it, so a few kilobytes can name an exponential drawing. A read draws at
+# most this many entities, its blocks' members counted once for each place they are drawn, and
+# nests blocks at most this deep.
+MAX_EXPANDED = 1_000_000
+MAX_BLOCK_DEPTH = 16
 
 
 class DxfError(FormatError):
@@ -559,6 +565,7 @@ class _Reader:
             elif name is not None:
                 members.append(record)
         self.drawing = Drawing(path, layers=len(self.layers), files=files_of([path]))
+        self.expanded = 0  # the entities drawn so far, a block's members once per place they are drawn
         for record in _records(sections["ENTITIES"]):
             if int(record.number(67, 0)) == 1:  # paper space
                 continue
@@ -580,8 +587,15 @@ class _Reader:
             return layer_pen, shown
         return _aci(abs(colour)), shown
 
+    def room(self, count: float) -> None:
+        """Refuse the drawing if ``count`` more entities would take it past ``MAX_EXPANDED``."""
+        if not self.expanded + count <= MAX_EXPANDED:  # a NaN or infinite count is past it too
+            raise DxfError(f"{self.drawing.path.name}: its blocks draw more than {MAX_EXPANDED:,} entities")
+
     def entity(self, entity: Entity, transform: np.ndarray, block_pen: str | None, block_layer: str, depth: int) -> None:
         kind = entity.kind
+        self.room(1)
+        self.expanded += 1
         if kind not in DRAWN:
             self.drawing.skipped[kind] += 1
             return
@@ -662,7 +676,7 @@ class _Reader:
         elif kind in ("INSERT", "DIMENSION"):
             name = str(entity.get(2, "")).strip()
             block = self.blocks.get(name.upper())
-            if block is None or depth > 16:
+            if block is None or depth > MAX_BLOCK_DEPTH:
                 self.drawing.skipped[kind] += block is None
                 return
             base, members = block
@@ -676,9 +690,11 @@ class _Reader:
                 turned = place @ np.array([[c, -s, entity.number(10)], [s, c, entity.number(20)], [0, 0, 1]])
                 scaled = np.diag([entity.number(41, 1.0), entity.number(42, 1.0), 1.0]) \
                     @ np.array([[1, 0, -base[0]], [0, 1, -base[1]], [0, 0, 1]])
+                columns, rows = max(entity.number(70, 1), 1.0), max(entity.number(71, 1), 1.0)
+                self.room(columns * rows * max(len(members), 1))  # every cell of the grid draws the block
                 placements = []
-                for column in range(max(int(entity.number(70, 1)), 1)):
-                    for row in range(max(int(entity.number(71, 1)), 1)):
+                for column in range(int(columns)):
+                    for row in range(int(rows)):
                         shift = np.eye(3)
                         shift[:2, 2] = (column * entity.number(44, 0.0), row * entity.number(45, 0.0))
                         placements.append(turned @ shift @ scaled)
