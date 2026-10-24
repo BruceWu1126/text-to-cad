@@ -6,12 +6,12 @@ colored body; rows articulate about shared pin axes with 0.06 radial
 clearance.
 """
 
-from cadgen.engine import xbf
+from cadgen import model
 
 from lib import watch
 
 
-@xbf(out="../XBF/bracelet.xbf")
+@model
 def bracelet():
     return watch.bracelet()
 

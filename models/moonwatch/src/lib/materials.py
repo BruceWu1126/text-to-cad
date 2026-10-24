@@ -1,7 +1,7 @@
 """Materials for the Moonwatch model entries.
 
 The original authored named PBR "finishes" (`materials=` on the decorator,
-assigned by leaf label). Here each finish is a `cadgen.engine.Material` set on
+assigned by leaf label). Here each finish is a `cadgen.Material` set on
 the part itself: the catalogue's entry for the metal, glass or rubber in
 question, in the finish's look (`.but(...)`), or a `Material` of the
 project's own where the catalogue has none (sapphire, ruby, print ink). A
@@ -21,7 +21,7 @@ retarget a finish through occurrence order.
 
 from __future__ import annotations
 
-from cadgen.engine import Material, materials
+from cadgen import Material, materials
 
 
 def _finish(base: Material, description: str, **look) -> Material:

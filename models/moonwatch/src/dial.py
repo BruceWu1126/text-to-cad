@@ -5,12 +5,12 @@ Positioned in the WATCH frame (`lib/spec.py`): dial top at S.DIAL_Z, +Z up,
 12 o'clock at +Y. Unbranded — numerals and scale markings only.
 """
 
-from cadgen.engine import xbf
+from cadgen import model
 
 from lib import watch
 
 
-@xbf(out="../XBF/dial.xbf")
+@model
 def dial():
     return watch.dial()
 

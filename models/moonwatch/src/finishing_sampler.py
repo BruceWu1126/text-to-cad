@@ -6,14 +6,14 @@ screws, jewels, wheels, heart cam) before it is spent on real parts.
 """
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen import model
 
 from lib import finishing as F
 from lib import materials as M
 from lib import spec as S
 
 
-@xbf(out="../XBF/finishing_sampler.xbf")
+@model
 def finishing_sampler():
     parts = []
 
