@@ -65,8 +65,11 @@ PROTOCOL = 2
 WINDOWS = os.name == "nt"
 # The retirements ``status`` lists, the latest first.
 RETIRED_KEPT = 12
-# What a worker's environment must share with a request's for the request to use it.
-_RELEVANT = ("PYTHONPATH", "PATH", "VIRTUAL_ENV")
+# What a worker's environment must share with a request's for the request to use it: what shapes
+# the import system of the interpreter it started (the interpreter itself is the daemon's). A run
+# adopts the rest of its caller's environment (``worker.adopt``), so a caller whose PATH changes
+# from one run to the next (an agent's shell) keeps its warm worker and its memo.
+RESTARTS = ("PYTHONPATH", "PYTHONHOME", "PYTHONSAFEPATH", "PYTHONNOUSERSITE", "PYTHONUSERBASE", "PYTHONPLATLIBDIR")
 
 
 def worker_cap() -> int:
@@ -539,8 +542,10 @@ class _Ticket:
         return self.worker is not None or self.start
 
 
-def _shared(environment: dict[str, str]) -> dict[str, str]:
-    return {name: environment.get(name, "") for name in _RELEVANT}
+def interpreter(environment: dict[str, str]) -> dict[str, str]:
+    """What of ``environment`` a worker started in it is bound to (``RESTARTS``): a request whose
+    differs from its script's worker's replaces that worker."""
+    return {name: environment.get(name, "") for name in RESTARTS}
 
 
 class Pool:
@@ -672,7 +677,7 @@ class Pool:
         granted = False
         for ticket in self.queue:
             worker = self.live.get(ticket.key)
-            if worker is not None and _shared(worker.environment) == _shared(ticket.environment):
+            if worker is not None and interpreter(worker.environment) == interpreter(ticket.environment):
                 if not worker.leased and id(worker) not in taken:
                     worker.leased, worker.since = True, time.monotonic()
                     ticket.worker = worker
@@ -682,7 +687,8 @@ class Pool:
             if ticket.key in self.starting:
                 continue  # its key's worker is being started: it waits for that one
             if worker is not None:
-                # Its script's worker, of another environment: replaced in its slot once it is free.
+                # Its script's worker, of another interpreter's environment: replaced in its slot once
+                # it is free.
                 if not worker.leased and id(worker) not in taken:
                     del self.live[ticket.key]
                     self._note(worker, "environment")
@@ -952,6 +958,8 @@ class Daemon:
                 worker = None
                 try:
                     environment = request.get("env") or {}
+                    # An export runs in its caller's environment (``worker.adopt``), as a build does.
+                    ordered = {**order, "env": environment} if environment and order.get("op") == "export" else order
                     if request.get("expected") or (request.get("source") or {}).get("held"):
                         # Viewer exports and a document named by its id borrow the held document's
                         # worker, including its environment: another caller's environment must not
@@ -959,6 +967,7 @@ class Daemon:
                         with self.pool.lock:
                             held = self.pool.live.get(os.path.normcase(key))
                             environment = held.environment if held else dict(os.environ)
+                        ordered = order
                         if held is None and "script" in request["source"]:
                             named = request["source"].get("held")
                             send(refused(self.models.not_held(named)) if isinstance(named, str) else
@@ -976,7 +985,7 @@ class Daemon:
                         if not matches:
                             send({"failed": "The source changed. Open Export again to use the displayed revision."})
                             return
-                    answer = worker.build(order, send, payload)
+                    answer = worker.build(ordered, send, payload)
                     returned = answer.pop("payload", b"")
                     if returned:
                         import base64
@@ -1129,6 +1138,8 @@ class Daemon:
                                  "cwd": request.get("cwd"), "verify": bool(request.get("verify")),
                                  "profile": bool(request.get("profile")), "acknowledged": True,
                                  "run": request.get("run")}
+                        if request.get("env"):
+                            order["env"] = request["env"]  # the run's own (``worker.adopt``)
                         server = self.server
                         if server is not None:
                             # The worker sends each served document it builds back as a patch,

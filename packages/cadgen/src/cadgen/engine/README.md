@@ -591,6 +591,21 @@ between requests: an idle worker holds no project folder (on Windows, one a proc
 cannot be renamed or deleted). A meshing or reading pool's processes exit with the process that
 started them, however it ends.
 
+A worker is an interpreter; a run is the script in its caller's environment. A build goes to its
+script's live worker whatever the caller's environment but for what shapes the interpreter's
+import system (`daemon.RESTARTS`): `PYTHONPATH`, `PYTHONHOME`, `PYTHONSAFEPATH`,
+`PYTHONNOUSERSITE`, `PYTHONUSERBASE` and `PYTHONPLATLIBDIR`. A build with another value of any of
+them replaces the worker (retired `environment`), and its memo goes with it. Everything else the
+run adopts (`worker.adopt`): before the body runs, the caller's environment replaces the worker's
+`os.environ`, keeping only those variables and what the worker set for itself
+(`CADGEN_ENGINE_WORKER`, `PYTHONDONTWRITEBYTECODE`). `PATH` and `VIRTUAL_ENV` are adopted, not
+restarts: neither changes a running interpreter's `sys.path` (the worker is the daemon's
+interpreter, started with `-P`, and `site` finds a virtual environment by the interpreter's own
+`pyvenv.cfg`, never by `VIRTUAL_ENV`, which only activation scripts and installers read), and
+the kernel reads neither; a model that starts a program finds it on its caller's `PATH`. An
+agent's shell may give each turn its own `PATH` (Codex puts a temporary folder of its own on it,
+`~/.codex/tmp/arg0/codex-arg0…`, new with each Codex process): one warm worker serves every turn.
+
 `cadgen status` says what the server holds (`--json`: the same as data, `api.status()`):
 
 ```
@@ -611,8 +626,8 @@ documents:
 A worker's memory is as it measured it after its last build; a busy one's build is where its
 last progress frame says (**Progress**); the time is how long it has been busy, or idle. A
 retirement's reason is `LRU` (room at the cap), `idle`, `RSS` (over its memory cap),
-`environment` (a build asked for the script with another `PYTHONPATH`, `PATH` or `VIRTUAL_ENV`:
-its worker is replaced in its slot) or `exited` (it died). The `documents:` lines are each model
+`environment` (a build asked for the script with another `PYTHONPATH`, or another of the variables
+that shape the interpreter's import system: its worker is replaced in its slot) or `exited` (it died). The `documents:` lines are each model
 document, its state and, for one not held, the command that builds it again (**Document
 lifetime**), and a held one where it is held: in memory, on disk (the cache), or both. The
 `cache` line is the cache folder, the documents and bytes in it against its cap, the files evicted

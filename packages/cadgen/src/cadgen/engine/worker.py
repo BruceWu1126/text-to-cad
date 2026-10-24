@@ -2,7 +2,7 @@
 
 The daemon starts one per script and talks to it over the worker's stdin and its
 original stdout. A request is one JSON object per line: ``{"id", "op": "build", "script",
-"functions", "cwd", "run"}`` (``run``: the calling process's run, ``build.build``), and, when the daemon serves documents, ``served`` (each served
+"functions", "cwd", "run", "env"}`` (``run``: the calling process's run, ``build.build``; ``env``: its environment, ``adopt``), and, when the daemon serves documents, ``served`` (each served
 document's id and the version served of it), ``served_keys`` (each served document's id and
 the keys of the parts it holds), ``held`` (the geometry keys it holds a mesh for) and
 ``shapes`` (the keys it holds a shape for). The answers are frames: a JSON object on one
@@ -48,6 +48,12 @@ document the daemon holds and no worker does (``{"document", "name"}``: the whol
 bytes, which its worker made of it before it retired: a ``result`` request with ``whole``) reads
 them as an on-disk xbf, so the documents worker exports, inspects and draws it, kinematics and
 all, with no worker of its script started.
+
+A ``build`` or ``export`` request carries its caller's environment (``env``), and the worker adopts it
+before it runs (``adopt``): its ``os.environ`` becomes the caller's, but for what started this
+interpreter (``daemon.RESTARTS``, which a request shares with its worker or is given another) and
+what the worker set for itself. A run is the script in its caller's environment, as under
+``python SCRIPT``; the worker is the interpreter, kept warm across them.
 
 A ``{"id", "op": "save", "ident", "script", "name", "generation"}`` request asks for a document
 this worker built as the engine's cache keeps it (``cache``): the whole document's xbf bytes
@@ -295,6 +301,32 @@ def resident_after_build() -> float | None:
         gc.collect()
         resident = resident_mb()
     return resident
+
+
+def kept() -> dict[str, str]:
+    """What of this worker's environment no run's replaces (``adopt``): what started its
+    interpreter (``daemon.RESTARTS``; the engine's own folder is on its PYTHONPATH) and what it
+    set for itself."""
+    from cadgen.engine.daemon import RESTARTS
+
+    return {name: os.environ[name] for name in (*RESTARTS, "PYTHONDONTWRITEBYTECODE", "CADGEN_ENGINE_WORKER")
+            if name in os.environ}
+
+
+def adopt(environment: dict[str, str] | None, own: dict[str, str]) -> None:
+    """A run's environment (its caller's) as ``os.environ``, but for ``own`` (``kept``); a
+    request with none leaves it as it is. Only what differs is set or unset."""
+    if not environment:
+        return
+    from cadgen.engine.daemon import RESTARTS
+
+    wanted = {name: value for name, value in environment.items() if name not in RESTARTS}
+    wanted.update(own)
+    for name in [name for name in os.environ if name not in wanted]:
+        del os.environ[name]
+    for name, value in wanted.items():
+        if os.environ.get(name) != value:
+            os.environ[name] = value
 
 
 def _neutral_folder() -> str:
@@ -564,6 +596,7 @@ def main() -> int:
     # process stands in cannot be renamed or deleted) and never stands in a folder others write.
     home, neutral = os.getcwd(), _neutral_folder()
     os.chdir(neutral)
+    own = kept()
 
     def leave() -> None:
         try:
@@ -608,6 +641,7 @@ def main() -> int:
             continue
         if op in ("export", "result"):
             try:
+                adopt(request.get("env"), own)
                 cwd = request.get("cwd")
                 os.chdir(cwd or home)
                 if op == "export":
@@ -644,6 +678,7 @@ def main() -> int:
                           acknowledged=bool(request.get("acknowledged")))
         document.SAVED_LISTENERS.append(patcher.saved)
         try:
+            adopt(request.get("env"), own)
             cwd = request.get("cwd")
             os.chdir(cwd or home)
             script = Path(request["script"])
