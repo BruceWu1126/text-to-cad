@@ -10,13 +10,15 @@ function driver(answers, { follow = true } = {}) {
   const reloads = [];
   const foreign = [];
   let clock = 0;
+  let asks = 0;
   let asked = Promise.resolve();
   return {
     reloads,
     foreign,
+    get asks() { return asks; },
     options: {
       follow, onForeign: () => foreign.push(clock),
-      fetchServerInfo: () => (asked = Promise.resolve(answers.shift() ?? { ok: true, identityToken: 'a' })),
+      fetchServerInfo: () => { asks += 1; return (asked = Promise.resolve(answers.shift() ?? { ok: true, identityToken: 'a' })); },
       reload: () => reloads.push(clock), now: () => clock,
       schedule: (run, delayMs) => { const timer = { run, delayMs }; queued.push(timer); return timer; },
       cancel: timer => { const index = queued.indexOf(timer); if (index >= 0) queued.splice(index, 1); },
@@ -52,6 +54,8 @@ test('an engine-served page stops at another process on its port and never loads
     assert.deepEqual(drive.reloads, [], 'nothing on the port is loaded into the tab');
     assert.deepEqual(drive.foreign, [5_000], 'it is said as the engine being gone');
     assert.equal(drive.scheduled, 0, 'and it stops asking');
+    await view.focus();
+    assert.equal(drive.asks, 2, 'coming back to the window asks nothing more');
   } finally { await view.dispose(); }
 });
 

@@ -45,6 +45,9 @@ export function useViewerAutoReload(serverInfo, {
     let state = { phase: AUTO_RELOAD_PHASE.WATCHING, since: optionsRef.current.now() };
 
     const ask = async () => {
+      if (!active) {
+        return;  // stopped (another process answered, or a reload is under way): never ask again
+      }
       if (timer !== null) {
         optionsRef.current.cancel(timer);
         timer = null;
@@ -63,6 +66,7 @@ export function useViewerAutoReload(serverInfo, {
       state = { phase: next.phase, since: next.since };
       if (next.phase === AUTO_RELOAD_PHASE.FOREIGN) {
         active = false;
+        window.removeEventListener("focus", askNow);
         optionsRef.current.onForeign();
         return;
       }
