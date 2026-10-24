@@ -290,10 +290,12 @@ class LifetimeDaemonTest(unittest.TestCase):
         self.assertEqual([Path(w["script"]).name for w in self.ask({"op": "status"})["workers"]], ["documents"],
                          "the documents worker read the held bytes: no worker of its script started")
         self.assertFalse((self.folder / "bracket.ran").exists(), "nothing ran the script")
-        # Its author's run builds it again: the same id, a new version.
+        # Its author's run builds it again: the same id, a new generation (a token, never a count).
+        first = self.row(ident)["version"]
         again = engine_daemon.run([sys.executable, "caller_bracket.py"], cwd=self.folder, env=self.env)
         self.assertEqual(again.returncode, 0, again.stderr)
-        self.assertEqual((self.row(ident)["version"], self.row(ident)["id"]), (2, ident))
+        self.assertEqual(self.row(ident)["id"], ident)
+        self.assertNotEqual(self.row(ident)["version"], first)
 
     def test_a_child_model_is_live_and_answers_by_its_id_from_the_worker_that_built_it(self) -> None:
         (self.folder / "part.py").write_text(textwrap.dedent(PART), encoding="utf-8")

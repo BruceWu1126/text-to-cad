@@ -861,7 +861,7 @@ class Daemon:
                         with self.models.lock:
                             model = self.models.records.get(expected.get("id") or "")
                             matches = (model is not None and model["worker"] is worker
-                                       and f"{model['version']}-0" == expected["modelRevision"])
+                                       and model["version"] == expected["modelRevision"])
                         if not matches:
                             send({"failed": "The source changed. Open Export again to use the displayed revision."})
                             return
@@ -948,7 +948,7 @@ class Daemon:
                 with self.models.lock:
                     record = self.models.records.get(ident)
                 served = self.server.served.get(ident) if self.server is not None else None
-                if (record is None or served is None or f"{record['version']}-0" != expected["modelRevision"]
+                if (record is None or served is None or record["version"] != expected["modelRevision"]
                         or served.structure.get("exportRevision") != expected.get("digest")):
                     send({"failed": "The source changed. Open Export again to use the displayed revision."})
                     return
