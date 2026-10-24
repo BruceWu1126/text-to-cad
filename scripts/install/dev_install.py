@@ -3,10 +3,11 @@
 
 Each host gets the development plugin, text-to-cad@earthtojake-dev: this checkout's skills, and
 CAD's server run by this checkout's .venv (`cadgen mcp`), serving a copy of this checkout's
-apps/mcp build. The skills' launch command is rewritten to that same .venv, so the server and the
-agent's scripts share this checkout's installation and warm daemon -- and every worktree has its
-own. With --wheel, the checkout's wheel is built as the release builds it and everything runs it
-through uvx instead: the shape users get. Claude Desktop's chat takes servers, not plugins, so it
+apps/mcp build. The skills' launchers are renamed to this install's version
+(~/.local/bin/cadgen-<version>-dev.<time>) and published pointing at that same .venv, so the server
+and the agent's scripts share this checkout's installation and warm daemon -- and every worktree
+has its own. With --wheel, the checkout's wheel is built as the release builds it, the server runs
+it through uvx and its installation publishes the release's launchers: the shape users get. Claude Desktop's chat takes servers, not plugins, so it
 gets that server alone. Run it again after a change; --uninstall takes the install out. For an agent without plugins,
 install the skills alone from the checkout with the Skills CLI: `npx skills add . -g -a <agent>`.
 
@@ -34,6 +35,7 @@ Environment:
     CODEX_CLI               the codex CLI (default: the newer of `codex` on PATH and the Codex app's)
     GEMINI_CLI              the gemini CLI (default: `gemini` on PATH)
     CLAUDE_DESKTOP_CONFIG   Claude Desktop's config file (default: its own, per platform)
+    CADGEN_LAUNCHER_DIR     where the launchers go (default: ~/.local/bin, where the skills name them)
 """
 
 from __future__ import annotations
@@ -84,36 +86,107 @@ def dev_root(host: str, root: Path = REPO_ROOT) -> Path:
 CHANNEL = {"CADGEN_INSTALL_CHANNEL": "dev"}
 
 
-def server_entry(host: str, python: str, page_dir: Path) -> dict:
-    """CAD's server for a development install: this checkout's interpreter, this install's page."""
+def server_entry(host: str, python: str, page_dir: Path, version: str | None = None) -> dict:
+    """CAD's server for a development install: this checkout's interpreter, this install's page, and
+    the launchers it keeps published for the skills, named by this install's `version` (cadgen's
+    _internal/launchers.py; a source tree publishes none unless named)."""
     entry = {"command": python, "args": ["-m", "cadgen.cli", "mcp"], "env": {**CHANNEL, "CADGEN_MCP_APP_DIR": str(page_dir)}}
+    if version:
+        entry["env"]["CADGEN_LAUNCHER_VERSION"] = version
     if host == "codex":
         entry["startup_timeout_sec"] = CODEX_STARTUP_SECONDS
     return entry
 
 
 def launch(tool: str, version: str) -> str:
-    """The skills' launch command for ``tool`` (``cadgen`` or ``python``), as the release stamps it."""
+    """The uvx command for ``tool`` (``cadgen`` or ``python``), as the release stamps it in the skills."""
     return " ".join((*LAUNCHER, f"cadgen=={version}", tool))
 
 
+def launcher_dir() -> str:
+    """The launchers' folder as a skill names it: ``~/.local/bin`` unless CADGEN_LAUNCHER_DIR moves it."""
+    return os.environ.get("CADGEN_LAUNCHER_DIR") or "~/.local/bin"
+
+
+def launcher(tool: str, version: str, folder: str = "~/.local/bin") -> str:
+    """The launcher a skill runs for ``tool`` (cadgen's _internal/launch.py ``launcher``)."""
+    return f"{folder}/{'cadgen' if tool == 'cadgen' else 'cadgen-python'}-{version}"
+
+
+# Publishes this install's launchers through the checkout's own cadgen (this script cannot import it).
+PUBLISH = ("import sys\n"
+           "from cadgen._internal import launchers\n"
+           "failed = [f'{path}: {error}' for path, _, error in launchers.publish(sys.argv[1]) if error]\n"
+           "print('\\n'.join(path for path, *_ in launchers.inspect(sys.argv[1])))\n"
+           "sys.exit('; '.join(failed) if failed else 0)\n")
+
+
+def publish_launchers(host: str, python: str, version: str) -> None:
+    """Publish this install's launchers, and take out the ones of this host's installs before it that
+    are over a day old: a Codex thread started earlier may still run its own."""
+    record = dev_root(host) / "launchers.json"
+    try:
+        earlier = json.loads(record.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        earlier = {}
+    stale = time.time() - PAGE_COPY_DAYS * 86400
+    for old_version, paths in list(earlier.items()):
+        if old_version != version and all(_older(path, stale) for path in paths):
+            for path in paths:
+                Path(path).unlink(missing_ok=True)
+            del earlier[old_version]
+    published = run(python, "-c", PUBLISH, version, capture=True).splitlines()
+    write_json(record, {**earlier, version: published})
+
+
+def _older(path: str, than: float) -> bool:
+    try:
+        return os.lstat(path).st_mtime < than
+    except OSError:
+        return True
+
+
+def remove_launchers(host: str) -> None:
+    """Take out every launcher this host's installs published."""
+    try:
+        recorded = json.loads((dev_root(host) / "launchers.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    for path in (path for paths in recorded.values() for path in paths):
+        Path(path).unlink(missing_ok=True)
+
+
+def skill_rewrites(released: str, version: str, python: str | None = None, wheel: Path | None = None) -> dict:
+    """What a development install changes in its skills' text, ``{release's: this install's}``.
+
+    The .venv shape: the launchers take this install's version (and folder), and the install command
+    becomes the checkout's interpreter, told that version so its `cadgen doctor` publishes them (a
+    source tree publishes none unless named; Windows shells take no such prefix). The wheel shape: the launchers stay the release's, since the
+    wheel's installation publishes them under its own version, and the install command takes the wheel.
+    """
+    if wheel is not None:
+        return {launch("cadgen", released): " ".join((*LAUNCHER, str(wheel), "cadgen"))}
+    named = "" if os.name == "nt" else f"CADGEN_LAUNCHER_VERSION={version} "
+    return {launch("cadgen", released): f"{named}{python} -m cadgen.cli",
+            **{launcher(tool, released): launcher(tool, version, launcher_dir()) for tool in ("cadgen", "python")}}
+
+
 def assemble(host: str, plugin_dir: Path, version: str, server: dict, root: Path = REPO_ROOT,
-             commands: dict | None = None) -> dict:
+             rewrites: dict | None = None) -> dict:
     """Write the plugin `host` loads into `plugin_dir` and return its manifest.
 
-    The skills are copied, their launch command pointed at ``commands`` (``{"cadgen": ...,
-    "python": ...}``: the runtime the server uses), the host's manifest takes `version` (each
-    install its own, so a host that caches by version takes this build) and names `server` alone:
-    in a server config beside it, or, for Gemini, which keeps servers in the manifest itself, inline.
+    The skills are copied with ``rewrites`` applied (:func:`skill_rewrites`: the runtime the server
+    uses), the host's manifest takes `version` (each install its own, so a host that caches by
+    version takes this build) and names `server` alone: in a server config beside it, or, for
+    Gemini, which keeps servers in the manifest itself, inline.
     """
     if plugin_dir.exists():
         shutil.rmtree(plugin_dir)
     shutil.copytree(root / "skills", plugin_dir / "skills", ignore=IGNORED)
-    released = (root / "VERSION").read_text(encoding="utf-8").strip()
     for skill in plugin_dir.glob("skills/*/SKILL.md"):
         text = skill.read_text(encoding="utf-8")
-        for tool, command in (commands or {}).items():
-            text = text.replace(launch(tool, released), command)
+        for released, ours in (rewrites or {}).items():
+            text = text.replace(released, ours)
         skill.write_text(text, encoding="utf-8")
     if host == "gemini":
         manifest = json.loads((root / "gemini-extension.json").read_text(encoding="utf-8"))
@@ -275,18 +348,26 @@ def build_wheel(host: str, bundle: bool) -> Path:
 
 
 def runtime(host: str, args: argparse.Namespace, version: str) -> tuple[dict, dict, Path | None]:
-    """``(server, skill commands, page copy)`` for this install: the .venv, or with --wheel the wheel."""
+    """``(server, skill rewrites, page copy)`` for this install: the .venv, or with --wheel the wheel.
+
+    Either way the launchers the skills name exist before the app restarts: the wheel's installation
+    publishes them as its `cadgen doctor` installs it, the .venv's are published here.
+    """
+    released = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
     if args.wheel:
         wheel = build_wheel(host, args.build)
         server = {"command": LAUNCHER[0], "args": [*LAUNCHER[1:], str(wheel), "cadgen", "mcp"], "env": dict(CHANNEL)}
         if host == "codex":
             server["startup_timeout_sec"] = CODEX_STARTUP_SECONDS
-        prefix = " ".join((*LAUNCHER, str(wheel)))
-        return server, {"cadgen": f"{prefix} cadgen", "python": f"{prefix} python"}, None
+        run(*LAUNCHER, str(wheel), "cadgen", "doctor", capture=True)
+        return server, skill_rewrites(released, version, wheel=wheel), None
     python = interpreter()
     # Codex keeps an earlier install's server running until it restarts, so its page stays too.
     page_dir = copy_page(host, args.build, version, prune=host != "codex")
-    return server_entry(host, python, page_dir), {"cadgen": f"{python} -m cadgen.cli", "python": python}, page_dir
+    if host not in PLUGIN_HOSTS:  # Claude Desktop's chat runs no skills
+        return server_entry(host, python, page_dir), {}, page_dir
+    publish_launchers(host, python, version)
+    return server_entry(host, python, page_dir, version), skill_rewrites(released, version, python=python), page_dir
 
 
 def dev_version() -> str:
@@ -375,6 +456,7 @@ def install_codex(args: argparse.Namespace) -> str:
             run(codex, "plugin", "remove", dev_id)
         if marketplace_known():
             run(codex, "plugin", "marketplace", "remove", MARKETPLACE)
+        remove_launchers("codex")
         shutil.rmtree(root, ignore_errors=True)
         return f"Removed {dev_id}."
     others = [plugin_id for plugin_id in installed() if plugin_id != dev_id]
@@ -383,8 +465,8 @@ def install_codex(args: argparse.Namespace) -> str:
                       "Remove it first (codex plugin remove <id>); two copies means every skill twice.")
     refuse_other_copies("codex")
     version = dev_version()
-    server, commands, page_dir = runtime("codex", args, version)
-    assemble("codex", root / "plugins" / name, version, server, commands=commands)
+    server, rewrites, page_dir = runtime("codex", args, version)
+    assemble("codex", root / "plugins" / name, version, server, rewrites=rewrites)
     write_json(root / ".agents" / "plugins" / "marketplace.json", {
         "name": MARKETPLACE, "interface": {"displayName": "CAD (this checkout)"},
         "plugins": [{"name": name, "source": {"source": "local", "path": f"./plugins/{name}"},
@@ -419,12 +501,13 @@ def install_claude(args: argparse.Namespace) -> str:
             run(claude, "plugin", "uninstall", dev_id)
         if MARKETPLACE in marketplaces:
             run(claude, "plugin", "marketplace", "remove", MARKETPLACE)
+        remove_launchers("claude")
         shutil.rmtree(root, ignore_errors=True)
         return f"Removed {dev_id}."
     refuse_other_copies("claude")
     version = dev_version()
-    server, commands, _ = runtime("claude", args, version)
-    assemble("claude", root / "plugins" / name, version, server, commands=commands)
+    server, rewrites, _ = runtime("claude", args, version)
+    assemble("claude", root / "plugins" / name, version, server, rewrites=rewrites)
     write_json(root / ".claude-plugin" / "marketplace.json", {
         "name": MARKETPLACE, "owner": {"name": "this checkout"},
         "description": f"{name} from {REPO_ROOT}, for development",
@@ -444,14 +527,15 @@ def install_cursor(args: argparse.Namespace) -> str:
         raise Refused(f"{target} exists and is not this script's install; move it away first.")
     if args.uninstall:
         shutil.rmtree(target, ignore_errors=True)
+        remove_launchers("cursor")
         shutil.rmtree(dev_root("cursor"), ignore_errors=True)
         return f"Removed {target}."
     refuse_other_copies("cursor")
     version = dev_version()
-    server, commands, _ = runtime("cursor", args, version)
+    server, rewrites, _ = runtime("cursor", args, version)
     # Cursor follows no symlink out of its plugins folder, so the plugin is a real copy there.
     staged = dev_root("cursor") / "plugins" / name
-    assemble("cursor", staged, version, server, commands=commands)
+    assemble("cursor", staged, version, server, rewrites=rewrites)
     (staged / OWNER_MARK).write_text(f"{REPO_ROOT}\n", encoding="utf-8")
     shutil.rmtree(target, ignore_errors=True)
     shutil.copytree(staged, target)
@@ -466,12 +550,13 @@ def install_grok(args: argparse.Namespace) -> str:
     if args.uninstall:
         if str(plugin_dir) in grok_installed():
             run(grok, "plugin", "uninstall", name)
+        remove_launchers("grok")
         shutil.rmtree(root, ignore_errors=True)
         return f"Removed {name} from Grok Build."
     refuse_other_copies("grok")
     version = dev_version()
-    server, commands, _ = runtime("grok", args, version)
-    assemble("grok", plugin_dir, version, server, commands=commands)
+    server, rewrites, _ = runtime("grok", args, version)
+    assemble("grok", plugin_dir, version, server, rewrites=rewrites)
     if str(plugin_dir) in grok_installed():
         run(grok, "plugin", "uninstall", name)
     run(grok, "plugin", "install", str(plugin_dir), "--trust")
@@ -487,6 +572,7 @@ def install_gemini(args: argparse.Namespace) -> str:
     if args.uninstall:
         if linked:
             run(gemini, "extensions", "uninstall", name)
+        remove_launchers("gemini")
         shutil.rmtree(dev_root("gemini"), ignore_errors=True)
         return f"Removed {name} from Gemini CLI."
     others = [source for source in gemini_installed(gemini) if source != str(plugin_dir)]
@@ -495,8 +581,8 @@ def install_gemini(args: argparse.Namespace) -> str:
                       f"(gemini extensions uninstall {name}): two copies means every skill twice.")
     refuse_other_copies("gemini")
     version = dev_version()
-    server, commands, _ = runtime("gemini", args, version)
-    assemble("gemini", plugin_dir, version, server, commands=commands)
+    server, rewrites, _ = runtime("gemini", args, version)
+    assemble("gemini", plugin_dir, version, server, rewrites=rewrites)
     if not linked:
         # A link reads the folder in place, so a later install only rewrites it. Gemini asks whether
         # to trust the folder even with --consent; this is the folder we just wrote.
