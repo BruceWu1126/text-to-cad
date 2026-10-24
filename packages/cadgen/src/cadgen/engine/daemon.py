@@ -958,8 +958,8 @@ class Daemon:
                 worker = None
                 try:
                     environment = request.get("env") or {}
-                    if environment and order.get("op") == "export":
-                        order = {**order, "env": environment}  # the run's own, when it builds (``worker.adopt``)
+                    # An export runs in its caller's environment (``worker.adopt``), as a build does.
+                    ordered = {**order, "env": environment} if environment and order.get("op") == "export" else order
                     if request.get("expected") or (request.get("source") or {}).get("held"):
                         # Viewer exports and a document named by its id borrow the held document's
                         # worker, including its environment: another caller's environment must not
@@ -967,7 +967,7 @@ class Daemon:
                         with self.pool.lock:
                             held = self.pool.live.get(os.path.normcase(key))
                             environment = held.environment if held else dict(os.environ)
-                        order.pop("env", None)
+                        ordered = order
                         if held is None and "script" in request["source"]:
                             named = request["source"].get("held")
                             send(refused(self.models.not_held(named)) if isinstance(named, str) else
@@ -985,7 +985,7 @@ class Daemon:
                         if not matches:
                             send({"failed": "The source changed. Open Export again to use the displayed revision."})
                             return
-                    answer = worker.build(order, send, payload)
+                    answer = worker.build(ordered, send, payload)
                     returned = answer.pop("payload", b"")
                     if returned:
                         import base64
