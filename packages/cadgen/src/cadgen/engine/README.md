@@ -102,8 +102,10 @@ posed(arm(), "folded")`.
 2. **Only requested files to disk.** The engine writes the files a model declares -- the xbf
    and the exports its decorators name, nothing beside them -- and the operating
    system's coordination for its warm process: a socket and a lock in
-   `tempfile.gettempdir()/cadgen-engine` (a socket path past the Unix limit lives in the
-   user's own `/tmp/cadgen-<uid>` instead) -- and, in the user's state folder its host names,
+   a folder only the user can make (`daemon.default_state_dir`): `cadgen-engine` in
+   `$XDG_RUNTIME_DIR`, else in a `$TMPDIR` that is the user's own (macOS's), else
+   `/tmp/cadgen-<uid>`; on Windows in the temporary folder (a socket path past the Unix limit
+   lives in the user's own `/tmp/cadgen-<uid>` instead) -- and, in the user's state folder its host names,
    the registry: one record per document it has built or a page opened, pointing at its
    script or file, with a source copy only for a `copy` document (**Document lifetime**);
    never geometry, never a cache. It writes no sidecar, record of a build beside a model,

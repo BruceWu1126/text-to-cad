@@ -10,8 +10,9 @@ Everything below runs as you, with your files.
 viewing and exporting. Its clients reach it through a Unix socket that only you
 can open (on Windows, a loopback port and a token in a file only you can read).
 The socket lives in the engine's folder (`CADGEN_ENGINE_DIR`, by default
-`cadgen-engine` in the temporary folder). The client and the daemon refuse a
-folder that another user owns or that others can write to.
+`cadgen-engine` in `$XDG_RUNTIME_DIR`, else in a `$TMPDIR` that is yours alone,
+else `/tmp/cadgen-<uid>`). The client and the daemon refuse a folder that
+another user owns or that others can write to.
 
 **The CAD Viewer and the MCP endpoint.** The engine serves the CAD Viewer and
 the CAD app's MCP endpoint over HTTP on `127.0.0.1`. Every route needs the
