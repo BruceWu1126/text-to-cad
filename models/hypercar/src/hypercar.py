@@ -22,17 +22,19 @@ The assembly tree is grouped BY SYSTEM -- thirteen sibling stages under
     o1.12 hinge             dihedral synchro-helix door mechanism
     o1.13 details           mirrors, badges, filler, vents, fasteners
 
-The car is one xbf (``XBF/hypercar.xbf``), holding the three motions below: ``doors``,
-``showcase`` and ``explode``. Its GLB, whose clips they are, is exported on demand
-(``cadgen export XBF/hypercar.xbf hypercar.glb``).
+The car is one model, ``hypercar``, holding the doors' motion, ``doors``, and two
+GLB animations, the ``showcase`` tour and the ``explode``. Its GLB, whose clips they
+are, is exported on demand (``cadgen export <id> GLB/hypercar.glb``, the id its run
+prints).
 """
 
 from __future__ import annotations
 
 import math
 
+from cadgen import model
 from cadgen.ap242 import configuration_sequence, mechanism_state
-from cadgen.engine import xbf
+from cadgen.gltf import animation
 
 import build123d as bd
 
@@ -103,11 +105,6 @@ def _parent_world(node):
     return parent.global_location if parent is not None else bd.Location()
 
 
-def _turn_only(location):
-    """``location``'s rotation, about the origin."""
-    return bd.Location(location.position).inverse() * location
-
-
 def _axis_for(holder, origin, direction):
     """A world axis as a joint on ``holder`` takes it: in the holder's parent frame."""
     world = bd.Plane(origin=origin, z_dir=direction).location
@@ -121,17 +118,15 @@ def _rides(label, carrier, rider):
     bd.RigidJoint(label, rider, bd.Location())
 
 
-def _slide(label, holder, lead, direction, limits, riders=()):
-    """``lead`` on a prismatic joint of ``holder`` along the world ``direction`` (its axis
-    through the world origin), ``riders`` fastened to ``lead``. The rigid half stands where
-    the joint holds it at 0: the holder's axes, at the axis origin (in ``lead``'s parent
-    frame)."""
-    origin = (0.0, 0.0, 0.0)
-    bd.LinearJoint(label, holder, axis=_axis_for(holder, origin, direction), linear_range=limits)
-    held = bd.Location(origin) * _turn_only(holder.global_location)
-    bd.RigidJoint(label, lead, _parent_world(lead).inverse() * held)
-    for index, rider in enumerate(riders):
-        _rides(f"{label}_{index}", lead, rider)
+def _path(car, node):
+    """``node``'s occurrence path below ``car``, as a ref's owner names it from the car's label:
+    each label down, numbered among the siblings that share it (``panel.2``)."""
+    steps = []
+    while node is not car:
+        siblings = [child for child in node.parent.children if child.label == node.label]
+        steps.append(node.label if len(siblings) == 1 else f"{node.label}.{siblings.index(node) + 1}")
+        node = node.parent
+    return "/".join([car.label, *reversed(steps)])
 
 
 def _norm(v):
@@ -141,10 +136,6 @@ def _norm(v):
 def _unit(v):
     m = _norm(v)
     return tuple(c / m for c in v)
-
-
-def _dot(a, b):
-    return sum(x * y for x, y in zip(a, b))
 
 
 # ---------------------------------------------------------------------------
@@ -158,16 +149,11 @@ def _dot(a, b):
 # so a motion between shut and open keeps them in step. The numbers come
 # straight from lib/hinge.py, so changing the tower changes the joints with it.
 #
-# The joint is held by the door's FLANK (the front fender, which leads the
-# flank's explode group below), not by the chassis: the explodes carry the
-# door off with its flank, and at the flank's rest -- every pose but the
-# explodes' -- the flank stands where it was built, so the door turns about the
-# same tower axis it did on the chassis.
+# The joint is held by the chassis, which the hinge towers stand on.
 #
 # Everything that rides the door -- glass, trim, mirror, and the two mechanism
 # parts bolted to it -- lives in another system's group, so it does not ride for
-# free: each set hangs on a prismatic joint the door holds (``RIDERS`` below),
-# which stands at 0 in every pose but the explodes', so it rides the door.
+# free: each set is fastened to the door (``RIDERS`` below).
 # ---------------------------------------------------------------------------
 
 def _sweep(side):
@@ -182,10 +168,10 @@ def _open(side):
 
 
 def _door_joints(car):
-    """Each door's cylindrical joint on its flank's lead panel."""
+    """Each door's cylindrical joint on the chassis, and its riders fastened to it."""
     for side in SIDES:
         name, sweep = f"door_{side}", _sweep(side)
-        holder = _part(car, f"front_fender:{side}")
+        holder = _part(car, "chassis")
         origin, direction = hinge_lib.HELIX_AXIS_ORIGIN[side], hinge_lib.HELIX_AXIS_DIR[side]
         bd.CylindricalJoint(name, holder, axis=_axis_for(holder, origin, direction),
                             angular_range=(min(0.0, sweep), max(0.0, sweep)),
@@ -193,6 +179,9 @@ def _door_joints(car):
         door = _part(car, f"door:{side}")
         frame = bd.Plane(origin=origin, z_dir=direction).location
         bd.RigidJoint(name, door, _parent_world(door).inverse() * frame)   # shut: as built
+        for rider_set, _side, labels, *_rest in (r for r in _riders() if r[1] == side):
+            for index, label in enumerate(labels):
+                _rides(f"{rider_set}_{index}", door, _part(car, label))
 
 
 # ---------------------------------------------------------------------------
@@ -206,11 +195,10 @@ def _door_joints(car):
 #   lateral  straight out in +/-Y by the side its centre sits on: [0, +-gain, 0]
 #   fixed    along one declared vector
 #
-# so each group slides on ONE prismatic joint the chassis holds (the chassis is
-# the ground: it appears in no group), along its vector, at ``k`` times its
-# length. The group's first part leads (holds the joint's rigid half), the rest
-# are fastened to it; where a group is a whole sub-assembly (a corner, the
-# powertrain, the interior), the sub-assembly itself leads.
+# so each group is a translation of a GLB animation (``cadgen.gltf``) along its
+# vector, at ``k`` times its length; the chassis appears in no group and holds
+# still. Where a group is a whole sub-assembly (a corner, the powertrain, the
+# interior), the sub-assembly itself moves.
 #
 # ``tour`` is the window the group occupies in the 48 s showcase. The order --
 # skin, then glass and trim, then interior, then powertrain, then running gear
@@ -237,8 +225,8 @@ def _lateral(centre, gain):
     return (0.0, gain if centre[1] >= 0 else -gain, 0.0)
 
 
-# (joint, old occurrence ids, vector, tour). Doors and their riders, which the old
-# groups moved too, are taken out of their groups below (``RIDERS``).
+# (group, old occurrence ids, vector, tour). Each door flies with its flank, as the
+# old groups moved it; its riders fly with their own groups (``RIDERS``).
 GROUPS = [
     # body: the flanks swing out sideways, the upper skins lift, the ends draw
     # fore and aft, the floor drops away
@@ -310,15 +298,10 @@ GROUPS = [
 # --- the doors' riders ------------------------------------------------------
 #
 # The old explodes moved each door with its flank and each rider with its own
-# group, the doors clip moved them all together. A rider set now hangs on a
-# prismatic joint its door holds, along its old displacement RELATIVE to the
-# door, ``v_rider - v_door``: where the two share a window (every part of the
-# explode clip; the mirror's five parts in the showcase too) that is the old
-# move exactly. Where the showcase's windows differ (side glass, door cards,
-# bracket and lug rise a little or a lot after the door), the joint stands at
-# the old relative move's projection on that line -- the nearest point a single
-# slide can reach; the holds and the fall back, which the windows share, are
-# exact. (side, joint, the rider set's labels, the old group it flew with.)
+# group, the doors clip moved them all together. A rider set is fastened to its
+# door, so it rides the doors' motion, and in the explodes it flies with its own
+# group's vector and window, after the pose, as the old clips moved it. (name, the
+# rider set's labels, its old group's vector and window.)
 
 RIDERS = [
     ("side_glass", ["side_glass"], _radial((-237.9, 513.6, 943.9), 2150), GLASS_TOUR),
@@ -335,10 +318,9 @@ def _mirrored(vector, side):
 
 
 def _riders():
-    """(joint, side, labels, rider vector, rider tour, door vector) for every rider set."""
-    door_vector = {side: dict((g[0], g[2]) for g in GROUPS)[f"explode_flank_{side}"] for side in SIDES}
+    """(name, side, labels, rider vector, rider tour) for every rider set."""
     return [(f"explode_{name}_{side}", side, [f"{label}:{side}" for label in labels], _mirrored(vector, side),
-             tour, door_vector[side])
+             tour)
             for side in SIDES for name, labels, vector, tour in RIDERS]
 
 
@@ -349,8 +331,9 @@ def _riders():
 # derived from each part's rest-pose centre relative to the block, so heads and
 # cam covers leave along their real bank angle rather than a hand-picked
 # vector; ``vec`` overrides that where a fixed direction reads better (the
-# plenum straight up, the transaxle straight back). Each slides on a prismatic
-# joint the powertrain holds, so it comes apart where the unit already stands.
+# plenum straight up, the transaxle straight back). Each is a translation inside
+# the powertrain, on top of the unit's own, so it comes apart where the unit
+# already stands.
 
 ENGINE_ANCHOR = (-1500.0, 0.0, 478.6)    # engine_block:v12
 ENGINE_TOUR = (0.52, 0.62, 0.8, 0.9)
@@ -374,24 +357,40 @@ ENGINE_PARTS = [
 ]
 
 
-def _explode_joints(car):
-    """Every explode group on a prismatic of the chassis, the engine's parts on prismatics of
-    the powertrain, each door's riders on prismatics of the door."""
-    tub = _part(car, "chassis")
-    on_doors = {f"door:{side}" for side in SIDES} | {label for _j, _s, labels, *_r in _riders() for label in labels}
+def _explode_groups(car):
+    """Every explode group's references in the car and its vector: the old groups (each door
+    in its flank's, its riders out of theirs), the engine's parts and the doors' rider sets."""
+    on_doors = {label for _n, _s, labels, *_r in _riders() for label in labels}
+    groups = {}
     for name, refs, vector, _tour in GROUPS:
         members = [node for node in (_old(car, ref) for ref in refs) if node.label not in on_doors]
-        length = _norm(vector)
-        _slide(name, tub, members[0], _unit(vector), (0.0, math.ceil(length)), members[1:])
-    powertrain_group = _old(car, "o1.9")
+        groups[name] = ([_path(car, node) for node in members], vector)
     for name, refs, vector in ENGINE_PARTS:
-        members = [_old(car, ref) for ref in refs]
-        _slide(name, powertrain_group, members[0], _unit(vector), (0.0, math.ceil(_norm(vector))), members[1:])
-    for name, side, labels, vector, _tour, door_vector in _riders():
-        members = [_part(car, label) for label in labels]
-        relative = tuple(a - b for a, b in zip(vector, door_vector))
-        reach = math.ceil(_norm(vector) + _norm(door_vector))   # holds every projection the showcase takes
-        _slide(name, _part(car, f"door:{side}"), members[0], _unit(relative), (-reach, reach), members[1:])
+        groups[name] = ([_path(car, _old(car, ref)) for ref in refs], vector)
+    for name, _side, labels, vector, _tour in _riders():
+        groups[name] = ([_path(car, _part(car, label)) for label in labels], vector)
+    return groups
+
+
+_KEY_STEP = 0.1  # s between the sampled keys of an explode's channels
+
+
+def _explode_animation(car, groups, name, duration, k_at):
+    """A GLB animation of an explode: each group's translation along its vector by
+    ``k_at(t)``'s factor for it, sampled every ``_KEY_STEP`` as LINEAR keys (a key whose
+    neighbours hold its value is dropped), so the old clip's windows play as they were."""
+    show = animation(car, name, duration=duration)
+    count = round(duration / _KEY_STEP)
+    times = [duration * i / count for i in range(count + 1)]
+    factors = [k_at(t) for t in times]
+    for group, (refs, vector) in groups.items():
+        values = [frame[group] for frame in factors]
+        if not any(values):
+            continue
+        last = len(times) - 1
+        keys = [(times[i], tuple(c * values[i] for c in vector)) for i in range(len(times))
+                if i in (0, last) or not values[i - 1] == values[i] == values[i + 1]]
+        show.channel(refs, path="translation", keys=keys, interpolation="LINEAR")
 
 
 # --- the clips ----------------------------------------------------------------
@@ -419,17 +418,13 @@ def _bump(p):
 
 
 def _explode_values(k_of, engine_k):
-    """Every explode joint's value: each group at ``k_of(tour)`` of its vector, the engine's
-    parts at ``engine_k`` of theirs, each rider at its old move relative to its door,
-    projected on its joint's line."""
-    values = {name: _norm(vector) * k_of(tour) for name, _refs, vector, tour in GROUPS}
-    for name, _refs, vector in ENGINE_PARTS:
-        values[name] = _norm(vector) * engine_k
-    door_k = k_of(SKIN_TOUR)
-    for name, _side, _labels, vector, tour, door_vector in _riders():
-        line = _unit(tuple(a - b for a, b in zip(vector, door_vector)))
-        k = k_of(tour)
-        values[name] = _dot(line, tuple(r * k - d * door_k for r, d in zip(vector, door_vector)))
+    """Every explode group's factor of its vector: each group's ``k_of(tour)``, the engine's
+    parts' ``engine_k``, each rider set its own group's."""
+    values = {name: k_of(tour) for name, _refs, _vector, tour in GROUPS}
+    for name, _refs, _vector in ENGINE_PARTS:
+        values[name] = engine_k
+    for name, _side, _labels, _vector, tour in _riders():
+        values[name] = k_of(tour)
     return values
 
 
@@ -446,19 +441,20 @@ def _explode(t):
     return _explode_values(lambda _tour: k, k)
 
 
-@xbf(out="../XBF/hypercar.xbf")
+@model
 def hypercar():
     groups = [system() for system in SYSTEMS]
     car = bd.Compound(children=groups, label="mid_engine_hypercar")
     _door_joints(car)
-    _explode_joints(car)
     # Shut is as built; open is each door through its full synchro-helix.
     mechanism_state(car, "open", **{f"door_{side}": _open(side) for side in SIDES})
     # Both doors open and shut again, 7 s (a player repeats it).
     shut = {f"door_{side}": (0.0, 0.0) for side in SIDES}
     configuration_sequence(car, "doors", [(0, shut), (3.5, "open"), (7, shut)], ease="cubic")
-    configuration_sequence(car, "showcase", _showcase, duration=48)
-    return configuration_sequence(car, "explode", _explode, duration=10)
+    groups = _explode_groups(car)
+    _explode_animation(car, groups, "showcase", 48, _showcase)
+    _explode_animation(car, groups, "explode", 10, _explode)
+    return car
 
 
 if __name__ == "__main__":

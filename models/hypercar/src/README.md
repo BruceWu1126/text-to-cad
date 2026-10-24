@@ -1,20 +1,20 @@
 # hypercar models
 
-`models/hypercar` ported to `cadgen.engine`: a mid-engine hypercar whose body
-panels are cut from one master surface. `hypercar.py` is the one model:
+`models/hypercar` on cadgen 0.8: a mid-engine hypercar whose body panels are cut
+from one master surface. `hypercar.py` is the one model (`@model`; a run writes nothing):
 
-| Script | Writes | What it is |
+| Script | Model | What it is |
 | --- | --- | --- |
-| `hypercar.py` | `XBF/hypercar.xbf` | The car: 13 system stages, 706 parts, the dihedral doors' mechanism, the explode joints, the `doors`, `showcase` and `explode` motions (clips of its GLB) |
+| `hypercar.py` | `hypercar` | The car: 13 system stages, 706 parts, the dihedral doors' mechanism, the `doors` motion and the `showcase` and `explode` animations (clips of its GLB) |
 | `body.py` ... `details.py` (13) | nothing | One system each, a `@memo` stage the car calls in its body |
 
 Build from this folder: `python hypercar.py`. The GLB is exported on demand
-(`cadgen export XBF/hypercar.xbf hypercar.glb`); it is 49 MB with the clips.
+(`cadgen export "$ID" GLB/hypercar.glb`, the id the run prints), its three clips baked.
 
 ```
 python hypercar.py
-python -m cadgen.engine snapshot ../XBF/hypercar.xbf open.png --pose open
-python -m cadgen.engine snapshot ../XBF/hypercar.xbf half.png --pose '{"door_left": [-31, 155], "door_right": [31, 155]}'
+cadgen snapshot "$ID" open.png --pose open
+cadgen snapshot "$ID" half.png --pose '{"door_left": [-31, 155], "door_right": [31, 155]}'
 ```
 
 A half-open STEP is a model of its own: one returning `posed(hypercar(), {"door_left": [-31, 155],
@@ -60,12 +60,9 @@ rotation and axial travel about the same tower axis, from `lib/hinge.py`'s
 constants -- and a `RigidJoint` of the same label on the door skin, where it stands
 shut: the parts live in different systems' groups, so `connect_to` cannot place
 them, and the label pairs them as built (shut, 0 and 0). The joint is held by the
-door's flank (its front fender), which the explodes carry off and every other pose
-leaves where it was built, so the door turns about the same tower axis it did on the
 chassis. Everything that rides the door (side glass, door cards and pull, the
-mirror's five parts, the hinge's door bracket and lower lug) hangs on a prismatic
-joint the door holds (below), at 0 in every pose but the explodes', so it rides the
-door.
+mirror's five parts, the hinge's door bracket and lower lug) is fastened to it by a
+pair of rigid joints.
 
 | Joint | Range | Rides it |
 | --- | --- | --- |
@@ -88,45 +85,25 @@ apart and back) moved 37 groups of parts and 10 of the engine's,
 each by one fixed vector times a 0..1 factor: radial (away from the car's long axis,
 from the group's pinned rest centre), lateral (out in Y by its side) or fixed. The
 chassis never moved.
-Each group is now a prismatic joint along its vector, at that factor times its
-length, its first part leading (the joint's rigid half) and the rest fastened to it;
-the vectors, centres, windows and engine anchor are the old clip's numbers, and the
-groups name parts by the old occurrence ids (`o1.3.49`), the port's tree being the
-old one, child for child:
+Both are GLB animations now (`cadgen.gltf`): each group a translation along its
+vector, that factor times it, sampled every 0.1 s, after the pose; the vectors, centres,
+windows and engine anchor are the old clip's numbers, and the groups name parts by the
+old occurrence ids (`o1.3.49`), the port's tree being the old one, child for child:
 
-- 35 `explode_<group>` joints on the chassis (the flanks, the upper skins, the nose,
-  the lamps, each suspension corner, wheel and brake, the powertrain, the interior,
-  the aero sets, the hinges, the details), the systems' own compounds leading where a
-  group is a whole sub-assembly;
+- 35 groups (the flanks, each door with its own, the upper skins, the nose, the lamps,
+  each suspension corner, wheel and brake, the powertrain, the interior, the aero sets,
+  the hinges, the details), a system's own compound where a group is a whole
+  sub-assembly;
 - 10 for the engine's own sub-explode (heads, cam covers, gear covers, cam bosses,
-  intake, exhaust, transaxle) on the powertrain group, so the V12 comes apart where
-  the unit already stands, as the old moves added up;
-- 8 for the doors' riders, four sets a side (`explode_side_glass_<side>`,
-  `explode_door_card_<side>`, `explode_mirror_<side>`, `explode_door_hardware_<side>`)
-  on the door, along each set's old move RELATIVE to its door (`v_rider - v_door`).
+  intake, exhaust, transaxle), inside the powertrain, so the V12 comes apart where the
+  unit already stands, as the old moves added up;
+- the doors' riders, four sets a side, each on its own group's vector and window, as
+  the old clips moved them.
 
-`showcase` and `explode` are motions, functions of time over those 53 joints (the
-old `win` windows on their tours, and the raised-cosine `bump`), which a GLB export
-bakes into clips beside `doors`. The old clips looped; a motion has no loop (a
-player repeats a clip), and each of these ends where it starts, so it repeats
-seamlessly. Every part moves as the old clips moved it, within
-the motions' sampling tolerance (1e-3 of the car's size, about 5 mm), but where a
-rider and its door rose on different windows -- deliberate, measured over the 48 s:
-
-- A rider has one line to slide on relative to its door, so where the showcase
-  raised it on a window other than the door's skin window it stands at the old
-  relative move's projection on that line, the nearest a single slide reaches. The
-  holds and the fall back, which the windows share, are exact, and so is all of
-  `explode` (one factor for every group) and the mirror in both clips (the door's
-  window). The side glass strays up to 184 mm (its window starts 0.5 s after the
-  door's), the door bracket and lower lug up to 47 mm, and the door cards and pull
-  up to 1.2 m: from 4.8 s, when the door leaves, to 17.3 s, when the interior they
-  belonged to has lifted, they hang between the two instead of staying in the cabin.
-- The doors stay shut in both clips, as before.
-
-With the three clips the GLB is 49 MB (26 MB with `doors` alone): a clip carries
-channels for every part it moves. Its bake took 92 s against 77 s for `doors` alone,
-both under a load of 130-290 from other work.
+The mechanism takes no part in them: every group moves by its own translation, exactly
+as the old clips moved it. The old clips looped; an animation has no loop (a player
+repeats a clip), and each of these ends where it starts, so it repeats seamlessly. The
+doors stay shut in both clips, as before.
 
 ## Not ported
 
