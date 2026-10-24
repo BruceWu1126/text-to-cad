@@ -408,6 +408,9 @@ class Mesher:
         """The pool, started on its first use: a build serves its document with no page open,
         and a pool started then would hold ``workers`` kernels nobody asked for."""
         with self.lock:
+            if self._processes is not None and getattr(self._processes, "_broken", False):
+                self._processes.shutdown(wait=False, cancel_futures=True)  # a child died; rebuild on next use
+                self._processes = None
             if self._processes is None:
                 import multiprocessing
 
@@ -945,7 +948,12 @@ class Server:
         if path.suffix.lower() in FOREIGN:
             return self._read_step(ident, path)
         if self.isolated:
-            structure, version, shapes, names = self._readers().submit(_read_document, str(path)).result()
+            try:
+                structure, version, shapes, names = self._readers().submit(_read_document, str(path)).result()
+            except concurrent.futures.BrokenExecutor:  # the reader died mid-read
+                with self.foreign_lock:
+                    self.reader = None  # the next read starts a reader afresh
+                raise ValueError(f"the reader exited reading {path.name}") from None
             return Served(ident, path, structure, version, shapes, names)
         from cadgen.engine.document import Loaded
 
@@ -968,6 +976,9 @@ class Server:
         """The reader processes: one at a time, each gone after its read (with what the parse
         left in its memory), the next started and warm meanwhile."""
         with self.foreign_lock:
+            if self.reader is not None and getattr(self.reader, "_broken", False):
+                self.reader.shutdown(wait=False, cancel_futures=True)  # a child died; it serves no one now
+                self.reader = None
             if self.reader is None:
                 import multiprocessing
 
