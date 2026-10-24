@@ -118,7 +118,8 @@ def _uncached_said(call: str, count: int) -> str:
         return (f"runs {call} uncached ({times}): it is never retained; use build123d's operation for it, "
                 "or an engine reader (read_step, read_xbf, read_mesh)")
     return (f"runs {call} uncached ({times}) on a shape no keyed call made (OCCT called past build123d, say): it is "
-            "never retained; make that shape with build123d's operation, or read it with an engine reader")
+            "never retained; make that shape with build123d's operation, read it with an engine reader, or make it in "
+            "a @memo function of values that returns it as made")
 
 
 def _first_party_namespace(module: Any) -> bool:

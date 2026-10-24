@@ -118,7 +118,10 @@ handles placement itself.
   `BRepPrimAPI_MakeCylinder`). The engine keys and names build123d's operations, and
   of the OCCT makers a model drives itself only the transforms, `BRepBuilderAPI_Copy`,
   `ShapeFix_Shape`, `ShapeUpgrade_UnifySameDomain` and `BRepFilletAPI_MakeFillet`; a
-  body built with another cannot be replayed.
+  body built with another cannot be replayed. Where build123d has no construction for
+  it (a hand-built B-spline surface), make that shape in a `@memo` function of values
+  that returns it as OCCT made it, with no build123d operation on it inside: the call
+  keys it, and what the model makes of it replays.
 - **Lofts:** sampled sections need consistent feature order, edge correspondence
   and orientation; equal sample counts alone do not guarantee it. A disconnected
   or self-crossing section produces misleading downstream loft failures, so check

@@ -48,8 +48,7 @@ project delivers them and because something outside the model reads them:
 | `juno`, `lyra` (every link model) | `3MF/<link>.3mf` | `src/exports.py` | the URDFs reference them |
 | `tom` (`rev3_parts.py`) | `STEP/imported/parts/<occurrence>.xbf` | `export(part, path)` in its `__main__` | the xbf handed to another model: Tom rev3's parts, converted once from the 354 MB vendor STEP and read by the `tom2` stage with `read_xbf` |
 | `examples` (`electronics_enclosure_base_drawing`) | `PDF/electronics_enclosure_base_drawing.pdf` | `@eng_drawing` | an engineering drawing is its PDF |
-| `tendon_hand` (`phalanx_continuous_supports_r5`, `phalanx_continuous_representative_r5`) | `XBF/<name>.xbf` | `@xbf` | their bodies run operations the memo cannot key, so the xbf is what spares a warm run their 17 s each |
-| `radial` | `XBF/radial.xbf` | `@xbf` | the slow model's result kept across runs and engine restarts: a cold build takes most of an hour, and four of its bodies cannot be replayed, so a no-op takes the file (0.2 s) instead of running them (34 s) |
+| `radial` | `XBF/radial.xbf` | `@xbf` | the slow model's result kept across runs and engine restarts: a cold build takes most of an hour; every body replays, and a no-op takes the file (0.2 s) instead of sampling the running motion again (5.6 s without it) |
 
 ## Build and snapshot
 
@@ -130,7 +129,7 @@ one piece.
 | `drawings` | all eight scripts of the old `drawings`, and `exports.py` | drawings as models of planar documents, their DXFs written by `exports.py`: a layer per part (`CUT`, open `BEND` and `ENGRAVE` lines, a layer of several shapes one part of them all), bend fixtures in every orientation, `bd.Text` outlines engraved, a workshop drawing of three views and eleven dimensions, and a profile laid out from a solid's top face; byte-for-byte the old emitter's for the gasket |
 | `juno` | one script: the robot and its 28 URDF links, 29 models | 27 revolute joints connected at the athletic stance (absolute angles, the URDF's travel as ranges) and the SRDF's five group states as configurations and the seven gait clips as motions of time (a root-held vertical slide, `pelvis_lift`, for the bounce); each link a model whose 3MF `juno.urdf` references `exports.py` writes; one `@memo` stage, `links()`, shared by all 29 (30.8 s cold against 56.2 s without it) |
 | `assemblies` | 23 models in 21 groups | the demo assemblies: `AssemblyHelper` frames as build123d joints, the planetary gear's `drive` coupling, its `meshCycle` motion (its GLB, the docs hero) and `inspectExplode` animation, the mars rover's joints, its differential's coupling (`rocker_split`), 4 configurations, three motions and the `explodedAssembly` animation; no `@memo`, no model calling another |
-| `tendon_hand` | 56 of the 112 one-model scripts, folded into 5 scripts by subsystem | the research hand's components, phalanges, routing, guide mounts and forearm, each model a `@model` (the two R5 models declare their xbf); four shared `@memo` stages (each finger's guide combs, the forearm frame, its guide banks, the R5 supports) placed by several models; a STEP round trip made in memory; `anatomy_layout`'s finger joints with a curl coupling per finger and two configurations; the other 56, reviews on frozen STEP snapshots, dropped |
+| `tendon_hand` | 56 of the 112 one-model scripts, folded into 5 scripts by subsystem | the research hand's components, phalanges, routing, guide mounts and forearm, each model a `@model`; four shared `@memo` stages (each finger's guide combs, the forearm frame, its guide banks, the R5 supports) placed by several models; a STEP round trip made in memory, a `@memo` call that keys what OCCT's reader made; `anatomy_layout`'s finger joints with a curl coupling per finger and two configurations; the other 56, reviews on frozen STEP snapshots, dropped |
 | `radial` | 19 scripts -> one model, 18 `@memo` system stages | a sectioned nine-cylinder radial, 473 parts in 2,400 placements: finishes as catalogue materials on every part; the old animation's label contract made its joints (revolute and prismatic, fastened links), the gear train one coupling (`drive`, a constraint), two configurations, the `running` motion, and `explode` and `exploded-running` as GLB animations of the old plan, `lib/explode_plan.json` (the teardown's 1,360 units, the running layout and its 466 hidden parts) |
 | `lyra` | one script: the hand and its 17 URDF links, 18 models | 16 revolute joints connected at the relaxed pose (absolute angles, the URDF's travel as ranges), the SRDF's seven group states as configurations and the five clips as motions of time (joint-space already); each link a model whose 3MF `lyra.urdf` references `exports.py` writes; one `@memo` stage, `links()`, shared by all 18 (7.7 s cold against 11.1 s without it) |
 | `falcon_heavy` | 3 scripts -> one script, 3 models | the full stack, a 270° cutaway and an exploded view of one vehicle library: 85 parts in 2,142 placements, 27 engines as `moved` placements of one Merlin; two `@memo` stages, `engine_prototype()` (one Merlin per build, not nine) and `build_vehicle(cutaway)` (the exploded view's vehicle a placement of the stack's): 7.1 s cold with none, 5.0 s with both |
@@ -167,18 +166,16 @@ resident memory during the cold build.
 | `moonwatch` case, dial, bracelet, finishing sampler | 4 | 8-54 | 5.7-49 s | 0.14-0.36 s |
 | `moonwatch` movement | 1 | | 178 s | 0.45 s |
 | `moonwatch` (the full watch) | 1 | 258 / 301 | 255 s | 4.3 s |
-| `tom` | 1 | 221 / 628 | 103 s (peak 2.9 GB) | 6.6 s |
+| `tom` | 1 | 221 / 628 | 103 s (peak 2.9 GB) | 3.9 s |
 | `tom` `rev3_parts.py` | 8 | | 460 s, the eight exports | |
 | `hypercar` | 1 | 706 / 1,450 | 183 s | 1.5 s |
 | `f1` | 1 | 833 / 853 | 492 s (2.3 GB after) | 1.2 s |
 | `f14d` | 1 | 903 / 2,392 | 689 s (peak 17.2 GB, 2.4 GB after) | 1.0 s |
 | `w16` | 1 | 794 / 2,575 | 927 s (peak 3.9 GB) | 5.9 s |
-| `radial` | 1 | 473 / 2,400 | 3,238 s (peak 6.0 GB) | 2.8 s, its xbf taken (34 s without) |
+| `radial` | 1 | 473 / 2,400 | 3,238 s (peak 6.0 GB) | 2.9 s, its xbf taken (8.3 s without, every body replayed) |
 
-What a no-op still spends, by the engine's own report: `juno`, `lyra`, `w16` and `moonwatch`
-sample their motions' functions of time again on every run (`collect`: 1.6 s of `juno`'s
-1.7 s, 2.1 s of `w16`'s 3.0 s), and `tom`'s root body runs on every run (2.8 s), its
-`retention.fallbacks` naming why: computed `getattr`s, imports inside functions and two
-`.brep` reads through build123d's `import_brep`. A GLB of a model with long motions or
+What a no-op still spends, by the engine's own report: `juno`, `lyra`, `w16`, `moonwatch`
+and `tom` sample their motions' functions of time again on every run (`collect`: 1.6 s of
+`juno`'s 1.7 s, 2.1 s of `w16`'s 3.0 s, 1.6 s of `tom`'s 2.6 s). A GLB of a model with long motions or
 animations is large (`juno` 109 MB, `tom` 99 MB, `w16` 83 MB, `radial` 79 MB): every
 moving part carries keys at its motions' sample times.

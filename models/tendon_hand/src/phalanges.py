@@ -2,15 +2,16 @@
 
 `anatomy_layout` is the hand's skeleton: every phalanx and every joint's two drive
 pulleys at the neutral pose, with the finger joints authored as build123d joints
-(below). The other models are phalanx and fingertip reviews, each its own xbf. Each
+(below). The other models are phalanx and fingertip reviews. Each
 model was its own script in `models/tendon_hand/src/`, and no model calls another:
 `phalanx_continuous_representative_r5` read the supports model's STEP, and here both
-place `continuous_supports()`, the one `@memo` stage (about 20 s of kernel work).
+place `continuous_supports()`, a `@memo` stage (about 20 s of kernel work), clipped against
+`lib/phalanx_r5_host.py`'s `warm_host()`.
 """
 
 import copy
 
-from cadgen import memo, model, xbf
+from cadgen import memo, model
 from cadgen.ap242 import gear_pair, mechanism_state
 
 import build123d as bd
@@ -176,17 +177,13 @@ def phalanx_continuous_r5():
     return make_continuous_phalanx(45, 18, label="middle_proximal_frame")
 
 
-# Declares its xbf: the R5 bodies run raw BRepAlgoAPI booleans and a STEP round trip the
-# memo cannot key, so a warm run would run them whole (17 s each); a model whose xbf holds
-# the closure it has now is not run.
-@xbf(out="../XBF/phalanx_continuous_supports_r5.xbf")
+@model
 def phalanx_continuous_supports_r5():
     """The R5 rail's matched guide supports, in the assembled neutral fan."""
     return continuous_supports()
 
 
-# Declares its xbf, as phalanx_continuous_supports_r5 does.
-@xbf(out="../XBF/phalanx_continuous_representative_r5.xbf")
+@model
 def phalanx_continuous_representative_r5():
     """The continuous rail, as STEP gives it back, with its actual guide supports."""
     host = finish(_middle_place() * warm_host(), "aluminum", "middle_proximal_frame")

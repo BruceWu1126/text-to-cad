@@ -327,6 +327,74 @@ class MemoTest(MemoCase):
         self.assertEqual(report["cache"]["reason"], "../parts.py: plate changed")
 
 
+# A shape made with OCCT's own makers, which no key names: alone in a model's body it keeps
+# the body running; marked @memo, the call keys it.
+NATIVE = """
+from pathlib import Path
+
+import build123d as bd
+from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+from cadgen.engine import memo, model
+
+HERE = Path(__file__).resolve().parent
+HOLE = {hole}
+
+
+def _note(name):
+    with open(HERE / "calls.log", "a") as handle:
+        handle.write(name + "\\n")
+
+
+{marker}
+def native_block(size):
+    _note("native_block")
+    return bd.Solid(BRepPrimAPI_MakeBox(size, size, size).Shape())
+
+
+@model
+def drilled():
+    _note("drilled")
+    part = native_block(4.0) - bd.Pos(2, 2, 0) * bd.Cylinder(HOLE, 10)
+    part.label = "part"
+    return bd.Compound(children=[part], label="drilled")
+"""
+
+
+class MemoNativeTest(MemoCase):
+    def native(self, marker: str, hole: float = 1.0) -> dict:
+        self.write("native.py", NATIVE.format(marker=marker, hole=hole))
+        return self.build("native.py")
+
+    def test_a_memo_call_keys_the_shapes_it_made_with_occt_s_own_makers(self) -> None:
+        # Unmarked, the box no key names keeps the body running, and the report says why.
+        self.native("")
+        self.calls()
+        report = self.native("")
+        self.assertEqual((self.calls(), self.statuses(report)), (["drilled", "native_block"],
+                                                                 {"native.py::drilled": ["run"]}))
+        self.assertIn("no keyed call made", " ".join(report["retention"]["fallbacks"]["native.py::drilled"]))
+        # Marked, the call keys its result: a no-op replays both bodies, with no fallback.
+        self.native("@memo")
+        self.calls()
+        report = self.native("@memo")
+        self.assertEqual((self.calls(), report["retention"]["fallbacks"]), ([], {}))
+        self.assertEqual(self.statuses(report), {"native.py::drilled": ["replayed"],
+                                                 "native.py::native_block": ["replayed"]})
+        # An edit of the caller runs it on the very box the replayed call hands back; then a
+        # no-op replays both again.
+        report = self.native("@memo", hole=1.5)
+        self.assertEqual((self.calls(), report["retention"]["fallbacks"]), (["drilled"], {}))
+        self.assertEqual(self.statuses(report)["native.py::native_block"], ["replayed"])
+        self.native("@memo", hole=1.5)
+        self.assertEqual(self.calls(), [])
+        # A worker that holds nothing runs both, keyed again.
+        self.restart()
+        report = self.native("@memo", hole=1.5)
+        self.assertEqual((self.calls(), report["retention"]["fallbacks"]), (["drilled", "native_block"], {}))
+        report = self.native("@memo", hole=1.5)
+        self.assertEqual((self.calls(), report["memo"]["bodies_run"]), ([], 0))
+
+
 class MemoNamesTest(MemoCase):
     def stage(self, marker: str, spare: float = 1.0) -> None:
         imports = "from cadgen.engine import memo, xbf" if marker else "from cadgen.engine import xbf"

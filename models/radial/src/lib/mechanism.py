@@ -44,23 +44,23 @@ from lib import spec as S
 
 # prefix regex -> motion kind (the original's `lib/clips.py` contract)
 CONTRACT = [
-    ("crank", re.compile(r"crank")),
-    ("master", re.compile(r"master")),
-    ("artrod", re.compile(r"artrod([2-9])")),
-    ("piston", re.compile(r"piston([1-9])")),
-    ("camring", re.compile(r"camring")),
-    ("camidler", re.compile(r"camidler")),
-    ("tappet", re.compile(r"tappet([1-9])([IE])")),
-    ("pushrod", re.compile(r"pushrod([1-9])([IE])")),
-    ("rocker", re.compile(r"rocker([1-9])([IE])")),
-    ("valve", re.compile(r"valve([1-9])([IE])")),
-    ("spring", re.compile(r"spring([1-9])([IE])")),
-    ("planet", re.compile(r"planet([1-6])")),
-    ("propshaft", re.compile(r"propshaft")),
-    ("prop", re.compile(r"prop")),
-    ("impeller", re.compile(r"impeller")),
-    ("blowergear", re.compile(r"blowergear([1-3])")),
-]
+    ("crank", r"crank"),
+    ("master", r"master"),
+    ("artrod", r"artrod([2-9])"),
+    ("piston", r"piston([1-9])"),
+    ("camring", r"camring"),
+    ("camidler", r"camidler"),
+    ("tappet", r"tappet([1-9])([IE])"),
+    ("pushrod", r"pushrod([1-9])([IE])"),
+    ("rocker", r"rocker([1-9])([IE])"),
+    ("valve", r"valve([1-9])([IE])"),
+    ("spring", r"spring([1-9])([IE])"),
+    ("planet", r"planet([1-6])"),
+    ("propshaft", r"propshaft"),
+    ("prop", r"prop"),
+    ("impeller", r"impeller"),
+    ("blowergear", r"blowergear([1-3])"),
+]  # patterns as strings: a compiled pattern is a value the memo cannot key (re caches them)
 
 CYCLE_S = 8.0                  # one 720 deg four-stroke cycle
 DEG_PER_S = 720.0 / CYCLE_S    # theta = 90 t
@@ -72,8 +72,8 @@ def classify(label: str):
     if ":" not in label:
         return None
     prefix, part = label.split(":", 1)
-    for kind, rx in CONTRACT:
-        found = rx.fullmatch(prefix)
+    for kind, pattern in CONTRACT:
+        found = re.fullmatch(pattern, prefix)
         if not found:
             continue
         args = found.groups()

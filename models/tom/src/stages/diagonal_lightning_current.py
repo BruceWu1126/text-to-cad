@@ -15,6 +15,7 @@ from lib.tapered_link_patterns import offset, clip, face, section
 from lib.m2_connection_rollout import revise_part, LOWER, UPPER
 from lib.scs_link_bends import correct_link_bends
 from lib.upper_roll_return import level_roll_bend_ends
+from lib.stacked_link_contact import extend_bend_section
 ROOT=Path(__file__).resolve().parents[2]
 BASE=ROOT/'STEP/imported/recovered/narrow_truss'
 T=1.6
@@ -104,7 +105,6 @@ def blank_links(lower_floor=LOWER_FLOOR,*,lower_root=-20.775):
 
 def make_diagonal_links(lower_floor=LOWER_FLOOR,*,lower_root=-20.775,upper_rise=0.0,upper_shortening=0.0,toe_clearance=0.8,align_upper_relief=False,extra_upper_wrist_opening=False,extra_upper_web_opening=False,pattern_shift_x=0.0,upper_relief_x=None):
     blanks,dimensions=blank_links(lower_floor,lower_root=lower_root);slope=dimensions['slope']
-    from lib.stacked_link_contact import extend_bend_section
     blanks[1]=extend_bend_section(blanks[1],upper_rise)
     if upper_shortening:
         from lib.forearm_roll_flip import extend_return

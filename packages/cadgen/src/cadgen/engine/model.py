@@ -951,6 +951,9 @@ class BuildContext:
             self._fallback(marked, f"runs on every call: it returned {type(result).__name__}, not geometry "
                                    "(a shape, or a tuple, list or dict of shapes)")
             return result
+        # Shapes it made past the engine (OCCT's own makers) are keyed by the call itself, so
+        # what this caller makes of them is kept too.
+        result = kernel.adopt(name, result)
         self.results[name] = (result, _placement(result))
         return result
 

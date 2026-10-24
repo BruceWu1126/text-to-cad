@@ -113,7 +113,8 @@ of the first one's result. Outside a run it is its function.
   and `Rotation`; a `Material`; a shape this run made. A call given anything else (a
   callable, an arbitrary object) runs every time.
 - **Geometry back**: a shape, or a tuple, list or dict of shapes. A call returning
-  anything else runs every time.
+  anything else runs every time. Shapes it made with OCCT's own makers, returned as made,
+  are keyed by the call: the way to keep a construction build123d has no operation for.
 - **No methods**, and **pure**: it reads only what its key holds and changes nothing
   outside itself. A global it sets for another function, or an argument it mutates, is
   not seen, and a replay leaves it undone.
@@ -235,9 +236,13 @@ re-runs the body that read it:
   built from, never placed in a model.
 - **Every file the body's Python opens** for reading is an input too: `open`,
   `json.load`, `Path.read_text`, `np.loadtxt`. A file opened only for writing is not.
-- **A read past the engine runs the body on every run**: build123d's `import_step`,
-  `import_brep` and `import_stl`, and OCCT's readers driven directly, read files where
-  the engine cannot hear them. Use `read_step`, `read_xbf` or `read_mesh`.
+- **build123d's `import_step`, `import_brep` and `import_stl`** are inputs by the file's
+  bytes as the engine's readers are. Prefer `read_step` (names, colours, materials, the
+  assembly tree) and `read_xbf` (fastest); `import_stl` makes a mesh, which no model
+  holds: measure it with `read_mesh`.
+- **A read past the engine runs the body on every run**: OCCT's readers driven directly
+  (`BRepTools.Read_s`, `STEPControl_Reader`, ...) read files where the engine cannot hear
+  them. Use `read_step`, `read_xbf`, `read_mesh` or build123d's importers.
 - **Compose project models by calling them.** A file the project exported is a
   deliverable, not an input: reading it ties a model to an export's moment.
 

@@ -87,8 +87,8 @@ def fixed_case_outline(side, *, outer_extension_mm=0.0):
 def case_hole_centers(side, z_sign=-1, *, reversible=True):
     """Union of original and end-for-end pairs as vendor-frame XYZ points."""
     if side not in ('upper','lower'):raise ValueError(side)
-    y=getattr(fit.SERVO,f'case_{side}_y_mm')
-    xs=getattr(fit.SERVO,f'case_{side}_hole_x_mm')
+    y=fit.SERVO.case_upper_y_mm if side=='upper' else fit.SERVO.case_lower_y_mm
+    xs=fit.SERVO.case_upper_hole_x_mm if side=='upper' else fit.SERVO.case_lower_hole_x_mm
     selected=sorted(set(round(x,9) for x0 in xs
         for x in ((x0,2*CASE_MIRROR_X_MM-x0) if reversible else (x0,))))
     return tuple((x,y,z_sign*fit.SERVO.case_hole_z_mm) for x in selected)
@@ -98,7 +98,7 @@ def case_flange(side, z_sign=-1, *, reversible=True, thickness_mm=scs.THICKNESS_
                 outer_extension_mm=0.0):
     """One constant-gauge flange extending outward from its case seat."""
     if side not in ('upper','lower') or z_sign not in (-1,1):raise ValueError((side,z_sign))
-    y=getattr(fit.SERVO,f'case_{side}_y_mm')
+    y=fit.SERVO.case_upper_y_mm if side=='upper' else fit.SERVO.case_lower_y_mm
     if reversible and outer_extension_mm:raise ValueError('Outer extension requires a fixed case flange')
     outline=(CASE_UPPER_OUTLINE if side=='upper' else CASE_LOWER_OUTLINE) if reversible else fixed_case_outline(side, outer_extension_mm=outer_extension_mm)
     def point(p):return (p[0],y,-z_sign*p[1])

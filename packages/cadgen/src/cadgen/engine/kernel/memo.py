@@ -17,14 +17,17 @@ subclasses, each run of one an operation (``_maker_class``) and a feature
 file the engine reads for a model (``wrap_function``: ``read_step``, ``read_xbf``,
 ``read_mesh``) is an operation keyed by the file's bytes.
 
-**Reads past the engine.** build123d's importers (``import_step``, ``import_brep``,
-``import_stl``: operations keyed by the file's bytes too) and the readers a model may drive
-itself (``_READER_TARGETS``: OCCT's, patched in place on their classes, and build123d's
-``Mesher.read``) read their file in C or C++, where the audit hook on Python's ``open`` hears
-nothing. A body that calls one is not kept (``_bypassed``): it runs on every build, and the
-build names the call and the file (``_Run.bypassed``). The file is one of its inputs all the same,
-held to its bytes as a file it opened itself is, so its closure keeps a key: a restart with nothing
-changed takes its document, and one after the file changed builds it.
+build123d's importers (``import_step``, ``import_brep``, ``import_stl``) are operations keyed by
+the file's bytes as the engine's readers are: the body that calls one holds the file to its bytes
+(its ``checks``), and is kept and replayed while they are the same.
+
+**Reads past the engine.** The readers a model may drive itself (``_READER_TARGETS``: OCCT's,
+patched in place on their classes, and build123d's ``Mesher.read``) read their file in C or C++,
+where the audit hook on Python's ``open`` hears nothing, and make what no key names. A body that
+calls one is not kept (``_bypassed``): it runs on every build, and the build names the call and
+the file (``_Run.bypassed``). The file is one of its inputs all the same, held to its bytes as a
+file it opened itself is, so its closure keeps a key: a restart with nothing changed takes its
+document, and one after the file changed builds it.
 
 **Keys.** A call is keyed by its operation, every setting it runs with, its
 canonical parameters and the keys of the shapes it was given. The settings are what
@@ -43,7 +46,8 @@ afresh from a compound -- what iterating one hands back, as build123d's intersec
 and ``unwrap`` do -- has no ancestor to name it by; when a root holds its TShape
 (``_SUBS``) it is keyed as that root's sub-shape, by its kind and its ordinal among the
 root's sub-shapes of that kind (``_held``). A shape no operation of this process made
-has no key, and a call given one runs uncached. The n-th call with one key in a
+has no key, and a call given one runs uncached. An empty shape (``bd.Sketch()``, what
+build123d's ``+`` sums onto) holds no geometry: it is keyed by its class, and is no input. The n-th call with one key in a
 model's body is its own entry (``scope``), so two identical constructions in one body
 are two objects, as in plain Python; and the body's ordinals are its own, the same
 whether it runs as a build's root or as a child and whatever the build ran before it
@@ -306,7 +310,6 @@ _IMPORTER_TARGETS = ("import_step", "import_brep", "import_stl")
 # Operations whose first argument is a file, keyed by the file's bytes: the importers,
 # and the engine's own readers (``wrap_function``: ``read_step``, ``read_xbf``, ``read_mesh``).
 _FILE_OPS = {"import_step", "import_brep", "import_stl", "read_step", "read_xbf", "read_mesh"}
-_IMPORTERS = frozenset(_IMPORTER_TARGETS)
 # Readers past the engine's (see the module), patched in place on their classes: (module,
 # class, method, whether it is static). XSControl_Reader's is IGES's readers' too, and
 # RWMesh_CafReader's glTF's and OBJ's; ``Mesher.read`` is build123d's 3MF and STL reader (lib3mf).
@@ -1193,17 +1196,21 @@ class _Body:
     of it may be replayed (``direct``: false for a ``@memo`` function that returned no
     geometry, whose log is kept only for the bodies that called it)."""
 
-    __slots__ = ("name", "source", "log", "snapshot", "generation", "inputs", "direct")
+    __slots__ = ("name", "source", "log", "snapshot", "generation", "inputs", "direct", "serial")
 
     def __init__(self, name: str, source: str, log: _BodyLog, snapshot: Any, generation: int,
                  inputs: tuple = ()) -> None:
         self.name, self.source, self.log, self.snapshot, self.generation = name, source, log, snapshot, generation
         self.inputs, self.direct = inputs, True
+        # Which run of the body this is, process-wide: a replay keeps it, a run makes another
+        # (``adopt``: what the shapes its run made past the engine are keyed by).
+        self.serial = next(_SERIALS)
 
 
 # Per model body, by its caller's name for it: the body's last run, kept while one of the
 # last ``RUNS_KEPT`` outermost runs used it (``_sweep``).
 _BODIES: dict[str, _Body] = {}
+_SERIALS = itertools.count(1)
 # Per function a verifying build found impure (``body``'s ``family``): it runs on every
 # call for the worker's life, and so do the bodies that call it. With why.
 _ALWAYS: dict[str, str] = {}
@@ -1322,6 +1329,34 @@ def direct(name: str) -> None:
     record = _BODIES.get(name)
     if record is not None:
         record.direct = False
+
+
+def adopt(name: str, result: Any) -> Any:
+    """A kept ``@memo`` call's result whose shapes its run made past the engine -- OCCT's own
+    makers, which no key names -- as one operation of the caller's: keyed by the call (its
+    name, which holds its arguments' digest) and by which run of it made them (``_Body.serial``),
+    and registered, so what the caller makes of them is keyed and kept too. A replay of the call
+    hands back those very shapes, and the operation is a hit; a run of it makes others, and a
+    miss. A result any shape of which the memo made already, a call not kept, or none running:
+    ``result`` as it is."""
+    state = getattr(_LOCAL, "run", None)
+    if state is None or state.depth or not enabled() or os.environ.get("CADGEN_ENGINE_BODIES", "1").strip() == "0":
+        return result
+    record = _BODIES.get(name)
+    if record is None or not record.direct:
+        return result
+    Shape = _build123d().Shape
+    shapes = list(result.values()) if isinstance(result, dict) else list(result) if isinstance(result, (list, tuple)) else [result]
+    for shape in shapes:
+        wrapped = _wrapped(shape) if isinstance(shape, Shape) else None
+        if wrapped is None or _made_of(wrapped.TShape(), state) is not None or wrapped.TShape() in _SUBS:
+            return result
+    if isinstance(result, dict):
+        names = list(result)
+        made = _call(state, "memo", "function", lambda _name, _serial: [result[key] for key in names],
+                     (name, record.serial), {})
+        return dict(zip(names, made))
+    return _call(state, "memo", "function", lambda _name, _serial: result, (name, record.serial), {})
 
 
 def always() -> dict[str, str]:
@@ -1784,10 +1819,6 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
     frame = state.trace.frame()
     if frame is None:
         return function(*args, **kwargs)
-    if label in _IMPORTERS:
-        # build123d's importer reads its file in C++: keyed by the file's bytes as an
-        # operation, but its body runs on every build (see the module).
-        _bypassed(state, f"build123d's {label}", _path_argument(args, kwargs))
     state.depth += 1
     try:
         op = _op_name(label, kind, args, kwargs)
@@ -2752,6 +2783,10 @@ def _normalize(value: Any, state: _Run) -> Any:
     if isinstance(value, dict):
         return ("map", tuple(sorted((str(key), _normalize(item, state)) for key, item in value.items())))
     if isinstance(value, _build123d().Shape):
+        if _wrapped(value) is None:
+            # An empty shape -- ``bd.Sketch()``, ``bd.Part()``, what ``+`` starts from -- holds no
+            # geometry: it is keyed by its class, and is no input of the call (``_shape_args``).
+            return ("empty", type(value).__module__, type(value).__qualname__)
         return ("shape", _shape_key(value, state))
     type_name = type(value).__name__
     if type_name.startswith("BRepAlgoAPI"):
@@ -2817,7 +2852,8 @@ def _build123d() -> Any:
 
 
 def _shape_args(args: tuple, kwargs: dict) -> list:
-    """The shapes a call was given, in call order, lists and tuples opened."""
+    """The shapes a call was given, in call order, lists and tuples opened; an empty shape
+    holds no geometry and is none of them (``_normalize`` keys it by its class)."""
     shape = _build123d().Shape
     found: list = []
     pending = [value for _name, value in sorted(kwargs.items(), reverse=True)] if kwargs else []
@@ -2825,7 +2861,8 @@ def _shape_args(args: tuple, kwargs: dict) -> list:
     while pending:
         value = pending.pop()
         if isinstance(value, shape):
-            found.append(value)
+            if _wrapped(value) is not None:
+                found.append(value)
         elif isinstance(value, (list, tuple)):
             pending.extend(reversed(value))
     return found

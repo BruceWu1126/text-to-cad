@@ -1,8 +1,8 @@
 """What a model imports: ``read_step`` and ``read_xbf`` copy a file's geometry with its names,
 colours and materials (an xbf's mechanism stays behind); a STEP is parsed in a reader process
 of the build's, so the parse's working memory never stays in the worker. ``read_mesh`` reads an
-STL as data, keyed by its bytes; a file read past the engine's readers runs its body on every
-build, and the build names the call."""
+STL as data, keyed by its bytes, as build123d's importers are; a file read past the engine's
+readers (OCCT's, driven directly) runs its body on every build, and the build names the call."""
 
 from __future__ import annotations
 
@@ -247,7 +247,7 @@ from OCP.BRepTools import BRepTools
 from OCP.gp import gp_Pnt
 from OCP.Poly import Poly_Triangle, Poly_Triangulation
 from OCP.TopoDS import TopoDS_Face, TopoDS_Shape
-from cadgen.engine import read_mesh, xbf
+from cadgen.engine import model, read_mesh, xbf
 
 HERE = Path(__file__).resolve().parent
 
@@ -266,6 +266,11 @@ def by_import_stl():
 @xbf("XBF/by_import_step.xbf")
 def by_import_step():
     return bd.import_step(HERE / "part.step")
+
+
+@model
+def by_import_brep():
+    return bd.import_brep(HERE / "part.brep")
 
 
 @xbf("XBF/by_occt.xbf")
@@ -310,8 +315,8 @@ def sized():
 
 
 class ReadsTest(unittest.TestCase):
-    """A mesh read as data, keyed by its bytes; a file read past the engine's readers, in C++
-    where no hook hears it, runs its body on every build."""
+    """A mesh read as data, keyed by its bytes, as build123d's importers are; a file read past
+    the engine's readers, in C++ where no hook hears it, runs its body on every build."""
 
     def setUp(self) -> None:
         import build123d as bd
@@ -396,12 +401,32 @@ class ReadsTest(unittest.TestCase):
         self.assertEqual(self.built("enclosure")["cache"]["changed"], ["../scans/pcb.stl changed"])
         self.assertEqual(self.size("enclosure"), (66.0, 36.0, 6.0))
 
+    def test_build123d_s_importers_are_inputs_by_their_bytes_and_their_bodies_replay(self) -> None:
+        import build123d as bd
+
+        from cadgen.engine import previous
+
+        for name, path in (("by_import_stl", "scans/pcb.stl"), ("by_import_step", "part.step")):
+            report = self.built(name)
+            self.assertEqual((report["bodies"], report["retention"]["fallbacks"]), ({f"reads.py::{name}": "run"}, {}))
+            _writer, record = previous.scan(self.folder / f"XBF/{name}.xbf")
+            closure = json.loads(record)
+            self.assertIsNotNone(closure["key"], name)
+            self.assertIn(["file", f"../{path}"], [row[:2] for row in closure["inputs"]], name)
+        # A model with no file: its body replays while the brep's bytes are the same, and runs
+        # once they changed.
+        for status in ("run", "replayed"):
+            report = self.built("by_import_brep")
+            self.assertEqual((report["bodies"], report["retention"]["fallbacks"]),
+                             ({"reads.py::by_import_brep": status}, {}))
+        bd.export_brep(bd.Box(12, 10, 10), str(self.folder / "part.brep"))
+        self.assertEqual(self.built("by_import_brep")["bodies"], {"reads.py::by_import_brep": "run"})
+        self.assertEqual(self.built("by_import_brep")["bodies"], {"reads.py::by_import_brep": "replayed"})
+
     def test_a_file_read_past_the_engine_is_an_input_by_its_bytes_and_its_body_never_retained(self) -> None:
         from cadgen.engine import previous
 
-        for name, call, path in (("by_import_stl", "build123d's import_stl", "scans/pcb.stl"),
-                                 ("by_import_step", "build123d's import_step", "part.step"),
-                                 ("by_occt", "OCCT's BRepTools.Read_s", "part.brep")):
+        for name, call, path in (("by_occt", "OCCT's BRepTools.Read_s", "part.brep"),):
             for status in ("run", "loaded"):
                 report = self.built(name)
                 self.assertEqual(report["bodies"], {f"reads.py::{name}": status}, name)
