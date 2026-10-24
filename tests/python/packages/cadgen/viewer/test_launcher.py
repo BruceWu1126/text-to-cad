@@ -126,6 +126,12 @@ class LauncherTest(unittest.TestCase):
                                       token=False, headers=stale)
         self.assertEqual(status, 302)
         self.assertIn(launch['token'], headers['set-cookie'])
+        # A sibling cookie that another page on this host set (cookies are host-scoped, not
+        # port-scoped), even one a strict parser rejects, must not drop the engine's own cookie.
+        for header in (f"x=y z; cadgen-engine-{launch['port']}={launch['token']}",
+                       f"cadgen-engine-{launch['port']}={launch['token']}; a[b]=1"):
+            status, _, _ = self.get(launch, '/__cad/server', token=False, headers={'Cookie': header})
+            self.assertEqual(status, 200, header)
         self.assertEqual(self.get(launch, '/__cad/server?token=%C3%A9', token=False)[0], 403)
         conn = http.client.HTTPConnection('127.0.0.1', launch['port'], timeout=10)
         try:
