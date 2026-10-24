@@ -308,8 +308,11 @@ it again.
 - **A restart reopens what was built.** The engine keeps each model document's bytes in
   the platform's cache folder (`~/.cache/cadgen/documents/`), once it is idle, so after a
   restart its id answers every verb as last built (`cadgen status`: `held`, on `disk`).
-  When a file its build read changed since, the page, `cadgen inspect` and `cad_show`
-  say "the code changed since this was built" with the rebuild command; nothing reruns.
+  When a file its build read changed since, whether or not its worker lives, the page and
+  `cad_show` say "the code changed since this was built" with the rebuild command, every
+  verb that reads it says what it read ("exporting the build of arm from before arm.py
+  changed; run `python arm.py` to update it"), and `cadgen status` marks it stale; nothing
+  reruns.
   The cache is bounded (`CADGEN_ENGINE_CACHE_GB`, default 4) and safe to delete.
 - **`@model(store="memory")`** keeps a document in its worker's memory alone: no record,
   no Recents entry, gone when its worker retires or the engine exits. It suits a
