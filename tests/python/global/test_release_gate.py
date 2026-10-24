@@ -149,13 +149,13 @@ class PublishGate(unittest.TestCase):
     def test_installers_get_the_version_only_once_pypi_serves_it(self):
         # The upload, then PyPI's index -- what uv resolves a pin through -- listing it, both in the
         # pypi job, which the branches job needs. The docs deploy and the tag follow the branches.
-        pypi = JOBS["release"]
+        pypi = JOBS["pypi"]
         self.assertLess(pypi.index("pypa/gh-action-pypi-publish"), pypi.index("https://pypi.org/simple/cadgen/"))
         branches = condition("branches")
-        self.assertTrue(evaluate(branches, {"release": "success"}, {"is_main": "true"}))
-        self.assertFalse(evaluate(branches, {"release": "success"}, {"is_main": "false"}))
+        self.assertTrue(evaluate(branches, {"pypi": "success"}, {"is_main": "true"}))
+        self.assertFalse(evaluate(branches, {"pypi": "success"}, {"is_main": "false"}))
         for result in ("failure", "skipped", "cancelled"):
-            self.assertFalse(evaluate(branches, {"release": result}, {"is_main": "true"}))
+            self.assertFalse(evaluate(branches, {"pypi": result}, {"is_main": "true"}))
         for job in ("deploy-docs", "tag-release"):
             with self.subTest(job=job):
                 self.assertTrue(evaluate(condition(job), {"branches": "success"}, {}))
@@ -166,8 +166,8 @@ class PublishGate(unittest.TestCase):
         # PyPI's trusted publisher names this workflow and the `release` environment, which deploys from
         # main alone: the token-minting permission lives in that one job, and nowhere else.
         minting = [job for job, body in JOBS.items() if re.search(r"^\s+id-token: write$", body, re.M)]
-        self.assertEqual(minting, ["release"])
-        self.assertRegex(JOBS["release"], re.compile(r"^    environment: pypi$", re.M))
+        self.assertEqual(minting, ["pypi"])
+        self.assertRegex(JOBS["pypi"], re.compile(r"^    environment: release$", re.M))
         self.assertNotRegex(WORKFLOW, re.compile(r"^permissions:(?:\n  .*)*\n  id-token", re.M), "no workflow-wide token")
         pypi = condition("release")
         self.assertTrue(evaluate(pypi, {"publish": "success"}, {"is_main": "true"}))
@@ -178,7 +178,7 @@ class PublishGate(unittest.TestCase):
         # A file PyPI already holds is never uploaded again unchecked: no skip-existing, and the
         # release attaches what PyPI serves.
         self.assertNotIn("skip-existing", WORKFLOW)
-        self.assertIn("scripts/release/pypi_release.py", JOBS["release"])
+        self.assertIn("scripts/release/pypi_release.py", JOBS["pypi"])
         self.assertIn("name: cadgen-${{ needs.gate.outputs.version }}-released", JOBS["tag-release"])
 
     def test_the_branches_get_their_copies_of_the_plugin(self):
