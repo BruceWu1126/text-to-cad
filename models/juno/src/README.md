@@ -1,22 +1,25 @@
 # juno models
 
-`models/juno` ported to `cadgen.engine`: a ~1.40 m research humanoid with 27 body
+`models/juno` on cadgen 0.8: a ~1.40 m research humanoid with 27 body
 degrees of freedom, and the 28 link meshes its URDF references. One script,
 `juno.py`, holds every model:
 
-| Model | Writes | What it is |
+| Model | Files | What it is |
 | --- | --- | --- |
-| `juno` | `XBF/juno.xbf` | The robot: 28 links, 363 occurrences, 27 revolute joints and `pelvis_lift`, 5 configurations, 7 motions |
-| `pelvis` ... `hand_right` (28) | `XBF/<link>.xbf`, `XBF/<link>.3mf` | One URDF link alone, in its part-local frame; `../juno.urdf` references the 3MF |
+| `juno` | — | The robot: 28 links, 363 occurrences, 27 revolute joints and `pelvis_lift`, 5 configurations, 7 motions |
+| `pelvis` ... `hand_right` (28) | `3MF/<link>.3mf`, by `exports.py` | One URDF link alone, in its part-local frame; `../juno.urdf` references the 3MF |
 
 Build from this folder: `python juno.py` builds all 29. `../juno.urdf` and
-`../juno.srdf` are authored (not generated); the URDF's meshes are `XBF/<link>.3mf`.
+`../juno.srdf` are authored (not generated); the URDF's meshes are `3MF/<link>.3mf`, which `exports.py` writes
+(`export(link, ...)` for each link model): run it after changing a link, before loading the
+URDF.
 
 ```
-python juno.py
-python -m cadgen.engine snapshot ../XBF/juno.xbf juno.png --pose wave_right
-python -m cadgen.engine snapshot ../juno.urdf urdf.png
-python -m cadgen.engine export ../XBF/juno.xbf juno.glb     # the seven motions as clips
+python juno.py                                    # prints each model's id: and view:
+python exports.py                                # the URDF's link meshes, 3MF/<link>.3mf
+cadgen snapshot "$ID" juno.png --pose wave_right         # ID: the juno model's id: line
+cadgen urdf snapshot ../juno.urdf urdf.png
+cadgen export "$ID" GLB/juno.glb                  # the seven motions as clips
 ```
 
 ## How it is built
@@ -31,9 +34,8 @@ calls, ~23 s cold). The robot and each link model call it, so a build makes ever
 link once. The first call runs it, or replays it when no edit reaches a builder,
 and every other call is a new placement of its result. Measured: 30.8 s cold with
 it, 56.2 s without it, when the robot and the link models each build the links.
-Because every link model reaches `links()`, an edit to any builder changes every
-link model's closure. All 29 xbfs are written again, and each 3MF is written with
-the same bytes unless its mesh changed.
+Because every link model reaches `links()`, an edit to any builder re-runs it;
+`exports.py` then writes each 3MF with the same bytes unless its mesh changed.
 
 ## Kinematics
 
@@ -95,13 +97,12 @@ to 6.3 mm at takeoff and landing, as the old did.
 
 The old clips played joint values with no limit, and two reach past the URDF's
 assumed ankle travel: the run's heel recovery dorsiflexes the ankle to -51.6° and the
-jump's crouch to -41.1°, below the URDF's -30. The xbf's `ankle_pitch_*` travel is
+jump's crouch to -41.1°, below the URDF's -30. The model's `ankle_pitch_*` travel is
 -55..50 (`juno.ANKLE_PITCH_RANGE_DEG`); `lib/chain.py`, the URDF and the SRDF keep
 -30..50.
 
 ## Not ported
 
-- Per-link STEP files. The xbf replaces them, and `cadgen export` writes one
-  on demand.
+- Per-link STEP files. `cadgen export` writes one of a link model on demand.
 - The 28 one-link scripts. Each link is a model of `juno.py` now, so no model
   calls another.

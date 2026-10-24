@@ -20,13 +20,14 @@ edit the choreography there and here, then rerun `python -m lib.clearance`.
 
 The models of this script:
 
-- `lyra` (XBF/lyra.xbf): the hand. Its 17 links are placed by their joints,
+- `lyra`: the hand. Its 17 links are placed by their joints,
   connected at the relaxed pose: that pose is the as-built configuration,
   every joint's value its absolute angle, every range the URDF's travel, the
   SRDF's seven hand group states are configurations, and the five clips are
   motions (functions of time over the joints).
 - one model per URDF link (`palm` ... `thumb_distal`): the link alone in its
-  part-local frame, whose 3MF ../lyra.urdf references (XBF/<link>.3mf).
+  part-local frame, whose 3MF ../lyra.urdf references (3MF/<link>.3mf, which
+  exports.py writes).
 
 Every link is made once a build. `links()` is the one `@memo` stage: all 17
 links, which the hand and each link model call. The first call in a build
@@ -36,8 +37,8 @@ is a new placement of its result.
 
 from __future__ import annotations
 
+from cadgen import memo, model
 from cadgen.ap242 import configuration_sequence, mechanism_state
-from cadgen.engine import memo, threemf, xbf
 
 import math
 
@@ -251,7 +252,7 @@ MOTIONS = {
 }
 
 
-@xbf(out="../XBF/lyra.xbf")
+@model
 def lyra():
     link = links()
     # Root to leaf: each joint on its parent link, connected at the relaxed pose.
@@ -274,104 +275,87 @@ def lyra():
 # --- the URDF's link meshes: each link alone, in its part-local frame -------------------------
 
 
-@xbf(out="../XBF/palm.xbf")
-@threemf(out="../XBF/palm.3mf")
+@model
 def palm():
     return links()["palm"]
 
 
-@xbf(out="../XBF/index_proximal.xbf")
-@threemf(out="../XBF/index_proximal.3mf")
+@model
 def index_proximal():
     return links()["index_proximal"]
 
 
-@xbf(out="../XBF/index_middle.xbf")
-@threemf(out="../XBF/index_middle.3mf")
+@model
 def index_middle():
     return links()["index_middle"]
 
 
-@xbf(out="../XBF/index_distal.xbf")
-@threemf(out="../XBF/index_distal.3mf")
+@model
 def index_distal():
     return links()["index_distal"]
 
 
-@xbf(out="../XBF/middle_proximal.xbf")
-@threemf(out="../XBF/middle_proximal.3mf")
+@model
 def middle_proximal():
     return links()["middle_proximal"]
 
 
-@xbf(out="../XBF/middle_middle.xbf")
-@threemf(out="../XBF/middle_middle.3mf")
+@model
 def middle_middle():
     return links()["middle_middle"]
 
 
-@xbf(out="../XBF/middle_distal.xbf")
-@threemf(out="../XBF/middle_distal.3mf")
+@model
 def middle_distal():
     return links()["middle_distal"]
 
 
-@xbf(out="../XBF/ring_proximal.xbf")
-@threemf(out="../XBF/ring_proximal.3mf")
+@model
 def ring_proximal():
     return links()["ring_proximal"]
 
 
-@xbf(out="../XBF/ring_middle.xbf")
-@threemf(out="../XBF/ring_middle.3mf")
+@model
 def ring_middle():
     return links()["ring_middle"]
 
 
-@xbf(out="../XBF/ring_distal.xbf")
-@threemf(out="../XBF/ring_distal.3mf")
+@model
 def ring_distal():
     return links()["ring_distal"]
 
 
-@xbf(out="../XBF/pinky_proximal.xbf")
-@threemf(out="../XBF/pinky_proximal.3mf")
+@model
 def pinky_proximal():
     return links()["pinky_proximal"]
 
 
-@xbf(out="../XBF/pinky_middle.xbf")
-@threemf(out="../XBF/pinky_middle.3mf")
+@model
 def pinky_middle():
     return links()["pinky_middle"]
 
 
-@xbf(out="../XBF/pinky_distal.xbf")
-@threemf(out="../XBF/pinky_distal.3mf")
+@model
 def pinky_distal():
     return links()["pinky_distal"]
 
 
-@xbf(out="../XBF/thumb_base.xbf")
-@threemf(out="../XBF/thumb_base.3mf")
+@model
 def thumb_base():
     return links()["thumb_base"]
 
 
-@xbf(out="../XBF/thumb_metacarpal.xbf")
-@threemf(out="../XBF/thumb_metacarpal.3mf")
+@model
 def thumb_metacarpal():
     return links()["thumb_metacarpal"]
 
 
-@xbf(out="../XBF/thumb_proximal.xbf")
-@threemf(out="../XBF/thumb_proximal.3mf")
+@model
 def thumb_proximal():
     return links()["thumb_proximal"]
 
 
-@xbf(out="../XBF/thumb_distal.xbf")
-@threemf(out="../XBF/thumb_distal.3mf")
+@model
 def thumb_distal():
     return links()["thumb_distal"]
 
