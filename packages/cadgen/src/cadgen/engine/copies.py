@@ -38,6 +38,8 @@ import types
 from pathlib import Path
 from typing import Any, Iterator
 
+from cadgen.engine.ids import canonical
+
 __all__ = ["CopyFailed", "bundle_sources", "copy_inputs", "serving"]
 
 # What a copy reconstructs as an assignment: a literal, or a container of literals.
@@ -221,9 +223,10 @@ def copy_inputs(registry: Any, ident: str, closure: dict[str, Any] | None, copie
     copied, fail loudly (``CopyFailed``)."""
     found: dict[str, str] = {}
     folder = Path(registry.folder(ident))
-    copies = {os.path.normpath(folder / inside): original for original, inside in copied.items()}
+    # Every path is keyed by its canonical spelling (``ids.canonical``), the engine's one.
+    copies = {canonical(folder / inside): original for original, inside in copied.items()}
     for kind, path, digest in _rows(closure or {}):
-        path = os.path.normpath(path)
+        path = canonical(path)
         if path in copies:  # read through its copy (``serving``): the copy is the input
             found[copies[path]] = copied[copies[path]]
             continue
@@ -260,7 +263,7 @@ def copied_path(path: Any) -> Any:
     if isinstance(text, bytes):
         return path
     origin = _ORIGIN[0]
-    found = os.path.normpath(text if os.path.isabs(text) else os.path.join(origin or os.getcwd(), text))
+    found = canonical(text if os.path.isabs(text) else os.path.join(origin or os.getcwd(), text))
     return _COPIED.get(found, path)
 
 
@@ -277,7 +280,7 @@ def serving(copied: dict[str, str] | None, origin: str | None) -> Iterator[None]
     def opened(file: Any, *args: Any, **kwargs: Any) -> Any:
         return real_open(copied_path(file), *args, **kwargs)
 
-    _COPIED.update({os.path.normpath(original): copy for original, copy in copied.items()})
+    _COPIED.update({canonical(original): copy for original, copy in copied.items()})
     _ORIGIN[0] = origin
     builtins.open = io.open = opened
     try:
