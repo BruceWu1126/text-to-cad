@@ -293,12 +293,18 @@ class Model:
 
         return api.export(self, *destinations)
 
-    def snapshot(self, out: Any, **options: Any) -> Any:
+    def snapshot(self, out: Any, *, display: Any = None, camera: Any = None, grid: bool = False,
+                 preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
+                 size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
+                 measurements: Any = None) -> Any:
         """Build this model, then draw its document, from the worker's memory, into ``out``
-        (a ``.png``) as the viewer does; ``options`` are the ``snapshot`` verb's."""
+        (a ``.png``) as the viewer does; every option is the ``snapshot`` verb's, about the picture
+        (law 22)."""
         from cadgen.engine import api
 
-        return api.snapshot(self, out, **options)
+        return api.snapshot(self, out, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
+                            width=width, height=height, size_profile=size_profile, daemon=daemon,
+                            annotation=annotation, measurements=measurements)
 
     @property
     def document(self) -> Any:
