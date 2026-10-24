@@ -414,11 +414,11 @@ class ClosureTest(unittest.TestCase):
         self.plate()
         record = previous.of(self.xbf)
         self.assertEqual(list(record), ["schema", "engine", "libs", "source", "modules", "symbols", "inputs", "bodies",
-                                        "key"])
+                                        "animations", "key"])
         self.assertEqual(record["schema"], "cadgen.engine closure/1")
         version = (Path(__file__).resolve().parents[5] / "VERSION").read_text(encoding="utf-8").strip()
         self.assertEqual(record["engine"]["release"], f"cadgen {version}", "the release VERSION stamps")
-        self.assertEqual((record["engine"]["format"], len(record["engine"]["digest"])), ("xbf/5", 32))
+        self.assertEqual((record["engine"]["format"], len(record["engine"]["digest"])), ("xbf/6", 32))
         self.assertEqual(set(record["libs"]), {"build123d", "OCP"})
         self.assertEqual(record["source"], {"kind": "script", "path": "../plate.py", "function": "plate"})
         self.assertEqual([path for path, _digest in record["modules"]], ["../dims.py", "../plate.py"])
