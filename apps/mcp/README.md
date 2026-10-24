@@ -249,7 +249,10 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
 
 ## Protocol migration
 
-Protocol 8 replaces protocol 7: reopen restored views so their launch carries the
+Protocol 9 replaces protocol 8: `cad_sync` and `cad_capture_reply` take the session's
+app capability as an argument, as `cad_http` takes it as a header, and refuse a call
+without it or with another session's; a page from an earlier build says CAD was updated.
+Protocol 8 replaced protocol 7: reopen restored views so their launch carries the
 app capability. `cad_telemetry` is removed, with no alias; agents use `cad_http`
 with `GET /__cad/analytics` or opt-out `POST` and base64 `eyJzaGFyZSI6ZmFsc2V9`.
 The obsolete `/__cad/features` route and shared client's `features()` are removed.

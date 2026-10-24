@@ -295,7 +295,8 @@ and agent opt-out cannot exchange authority. Opt-out removes the installation ID
 and schedules deletion of previously sent data; `saved:false` reports a failed
 settings write. This is an MCP host/model boundary, not a sandbox against the
 local authenticated host, which already has the installation's file authority.
-Page protocol 8 requires the capability; older pages must reopen, with no alias
+Page protocol 9 requires the capability, on `cad_http` and on the page's own `cad_sync` and
+`cad_capture_reply`; older pages must reopen, with no alias
 for the removed telemetry tool. Sidebar views alone are shared through
 an in-memory registry; thread views remain session-local. The host's stdio process
 proxies JSON-RPC and owns no page, tool implementation, catalog or view state.
