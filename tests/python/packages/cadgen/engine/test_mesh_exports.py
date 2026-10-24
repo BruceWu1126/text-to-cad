@@ -234,6 +234,37 @@ class WhatIsRefused(MeshExportTestCase):
                                                                      str(self.folder / "cube.step")]}, lambda _text: None)
         self.assertFalse((self.folder / "cube.3mf").exists())
 
+    def test_an_accessor_reads_only_the_bytes_its_buffer_view_holds(self) -> None:
+        # A POSITION accessor whose bufferView stride or count would reach past the file's own
+        # buffer is refused, rather than reading whatever bytes follow it in memory.
+        from cadgen.engine.formats import gltf as gltf_reader
+
+        def one_triangle(stride: int | None, count: int) -> Path:
+            positions = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], "<f4")
+            blob = positions.tobytes()
+            view = {"buffer": 0, "byteOffset": 0, "byteLength": len(blob)}
+            if stride is not None:
+                view["byteStride"] = stride
+            doc = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}],
+                   "nodes": [{"name": "m", "mesh": 0}],
+                   "meshes": [{"name": "m", "primitives": [{"attributes": {"POSITION": 0}}]}],
+                   "accessors": [{"bufferView": 0, "componentType": 5126, "count": count, "type": "VEC3"}],
+                   "bufferViews": [view], "buffers": [{"byteLength": len(blob)}]}
+            text = json.dumps(doc).encode()
+            text += b" " * (-len(text) % 4)
+            path = self.folder / "poke.glb"
+            path.write_bytes(struct.pack("<III", 0x46546C67, 2, 28 + len(text) + len(blob))
+                             + struct.pack("<II", len(text), 0x4E4F534A) + text
+                             + struct.pack("<II", len(blob), 0x004E4942) + blob)
+            return path
+
+        # A matching stride reads the three real vertices.
+        self.assertEqual(len(gltf_reader.read_gltf(one_triangle(12, 3)).parts[0].points), 3)
+        # A stride wider than the element, or a count past the buffer, is refused by name.
+        for stride, count in ((4096, 3), (16, 3), (12, 64)):
+            with self.assertRaisesRegex(gltf_reader.GltfError, "does not hold"):
+                gltf_reader.read_gltf(one_triangle(stride, count))
+
     def test_a_compressed_glb_is_refused_by_name(self) -> None:
         path = self.folder / "squeezed.glb"
         text = json.dumps({"asset": {"version": "2.0"}, "extensionsUsed": ["KHR_draco_mesh_compression"]}).encode()
