@@ -1491,9 +1491,10 @@ makes), and a document holds B-rep alone. Read the mesh as data with read_mesh(p
 kernel's face modifier, which every part passes through (`document.direct`), crashed the
 process on one.
 
-build123d's own importers (`import_step`, `import_brep`, `import_stl`, `Mesher.read`) and
-OCCT's readers read a file past the engine: a body that calls one runs on every build
-(**Body retention**).
+build123d's importers (`import_step`, `import_brep`, `import_stl`) are file reads the memo keys
+by the file's bytes too: a body that calls one is kept and replayed while the bytes are the same.
+build123d's `Mesher.read` and OCCT's readers driven directly read a file past the engine: a
+body that calls one runs on every build (**Body retention**).
 
 **The fast input is an xbf.** Reading one is many times faster than parsing a STEP of the same
 geometry (tom-sized: seconds against most of a minute) and keeps the engine's names losslessly.
@@ -1803,7 +1804,9 @@ arguments -- is one coarse entry above its calls, kept in the worker's memory
   code reads counts as what it is bound to, by the module that holds it, so
   rebinding a name is an edit. The walk stops at what is not first-party (the
   standard library, build123d, OCP, numpy): the engine's own code covers those;
-- every file it reads through the engine, by its bytes: `read_step`, `read_xbf`, `read_mesh`;
+- every file it reads through the engine, by its bytes: `read_step`, `read_xbf`, `read_mesh`,
+  and build123d's importers (`import_step`, `import_brep`, `import_stl`), which the memo keys
+  as it keys the engine's readers;
 - every file it reads itself, observed, by its bytes: an audit hook on `open`
   (`kernel/memo.py`, `_audited`) hears each file the body opens for reading
   (`open`, `json.load`, `Path.read_text`, `np.loadtxt`), Python's own files
@@ -1820,14 +1823,16 @@ arguments -- is one coarse entry above its calls, kept in the worker's memory
 
 A model's inputs are its code, what it reads through the engine, and every file
 its body reads, observed, by their bytes. A file read past the engine's readers is read
-in C or C++, where the hook on `open` hears nothing: build123d's importers (`import_step`,
-`import_brep`, `import_stl`, `Mesher.read`) and the OCCT readers a model may drive itself
+in C or C++, where the hook on `open` hears nothing, into a shape no key names: build123d's
+`Mesher.read` and the OCCT readers a model may drive itself
 (`STEPControl_Reader.ReadFile`, `STEPCAFControl_Reader.ReadFile` and `.Perform`, IGES's
 readers, `RWStl.ReadFile_s`, `StlAPI`, `BRepTools.Read_s` and `BinTools.Read_s` given a
 path, `RWMesh_CafReader.Perform`: glTF's and OBJ's; `kernel/memo.py`, `_READER_TARGETS`).
 A body that calls one is never retained, so any edit runs it whole, and `retention.fallbacks`
-names the call: `reads ../scans/pcb.stl through build123d's import_stl: its body is never retained
-(any edit runs it whole); use read_step/read_xbf/read_mesh`. The file it named is one of its
+names the call: `reads ../part.brep through OCCT's BRepTools.Read_s: its body is never retained
+(any edit runs it whole); use read_step/read_xbf/read_mesh`. (build123d's `import_step`,
+`import_brep` and `import_stl` are not on that list: the memo wraps them as operations keyed by
+the file's bytes, as the engine's readers are, so a body that calls one is kept.) The file it named is one of its
 inputs all the same, held to its bytes (a read of what is no regular file leaves its closure with no
 key): a build with nothing changed takes its document, after a restart too, and one after the file
 changed builds it. What the engine

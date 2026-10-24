@@ -17,14 +17,17 @@ subclasses, each run of one an operation (``_maker_class``) and a feature
 file the engine reads for a model (``wrap_function``: ``read_step``, ``read_xbf``,
 ``read_mesh``) is an operation keyed by the file's bytes.
 
-**Reads past the engine.** build123d's importers (``import_step``, ``import_brep``,
-``import_stl``: operations keyed by the file's bytes too) and the readers a model may drive
-itself (``_READER_TARGETS``: OCCT's, patched in place on their classes, and build123d's
-``Mesher.read``) read their file in C or C++, where the audit hook on Python's ``open`` hears
-nothing. A body that calls one is not kept (``_bypassed``): it runs on every build, and the
-build names the call and the file (``_Run.bypassed``). The file is one of its inputs all the same,
-held to its bytes as a file it opened itself is, so its closure keeps a key: a restart with nothing
-changed takes its document, and one after the file changed builds it.
+build123d's importers (``import_step``, ``import_brep``, ``import_stl``) are operations keyed by
+the file's bytes as the engine's readers are: the body that calls one holds the file to its bytes
+(its ``checks``), and is kept and replayed while they are the same.
+
+**Reads past the engine.** The readers a model may drive itself (``_READER_TARGETS``: OCCT's,
+patched in place on their classes, and build123d's ``Mesher.read``) read their file in C or C++,
+where the audit hook on Python's ``open`` hears nothing, and make what no key names. A body that
+calls one is not kept (``_bypassed``): it runs on every build, and the build names the call and
+the file (``_Run.bypassed``). The file is one of its inputs all the same, held to its bytes as a
+file it opened itself is, so its closure keeps a key: a restart with nothing changed takes its
+document, and one after the file changed builds it.
 
 **Keys.** A call is keyed by its operation, every setting it runs with, its
 canonical parameters and the keys of the shapes it was given. The settings are what
@@ -306,7 +309,6 @@ _IMPORTER_TARGETS = ("import_step", "import_brep", "import_stl")
 # Operations whose first argument is a file, keyed by the file's bytes: the importers,
 # and the engine's own readers (``wrap_function``: ``read_step``, ``read_xbf``, ``read_mesh``).
 _FILE_OPS = {"import_step", "import_brep", "import_stl", "read_step", "read_xbf", "read_mesh"}
-_IMPORTERS = frozenset(_IMPORTER_TARGETS)
 # Readers past the engine's (see the module), patched in place on their classes: (module,
 # class, method, whether it is static). XSControl_Reader's is IGES's readers' too, and
 # RWMesh_CafReader's glTF's and OBJ's; ``Mesher.read`` is build123d's 3MF and STL reader (lib3mf).
@@ -1771,10 +1773,6 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
     frame = state.trace.frame()
     if frame is None:
         return function(*args, **kwargs)
-    if label in _IMPORTERS:
-        # build123d's importer reads its file in C++: keyed by the file's bytes as an
-        # operation, but its body runs on every build (see the module).
-        _bypassed(state, f"build123d's {label}", _path_argument(args, kwargs))
     state.depth += 1
     try:
         op = _op_name(label, kind, args, kwargs)
