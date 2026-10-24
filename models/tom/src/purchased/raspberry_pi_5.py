@@ -9,7 +9,7 @@ Purchased raspberry pi 5; dimensions preserved from supplied/catalog STEP.
 Pinned STEP input; see STEP/imported/README.md for provenance.
 """
 from pathlib import Path
-from cadgen.engine import read_step
+from cadgen import read_step
 INPUT=Path(__file__).resolve().parents[2]/"STEP/imported/electronics/raspberry_pi_5.step"
 
 def raspberry_pi_5():

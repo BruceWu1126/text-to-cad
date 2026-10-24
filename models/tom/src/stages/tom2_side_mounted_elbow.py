@@ -6,7 +6,7 @@ Production tom2 is unchanged.
 """
 from dataclasses import asdict
 import build123d as bd
-from cadgen.engine import memo
+from cadgen import memo
 from lib.mates import revolute, fastened
 from stages import tom2 as base
 
@@ -144,6 +144,3 @@ def tom2_side_mounted_elbow():
                   (x-EXTENSION,y+sign*GAUGE,z),sign)
                 for i,(sign,x,y,z) in enumerate(MOUNTS,1)]
     return bd.Compound(children=updated,label='tom2_side_mounted_elbow')
-
-
-if __name__=='__main__':tom2_side_mounted_elbow()

@@ -5,7 +5,7 @@ Two layers, because they are consumed by different things:
 
 * a **colour** per leaf (an sRGB hex) — what normal-CAD snapshots, the viewer
   and the STEP's XCAF labels show;
-* a **material** per part (`cadgen.engine.Material`: name, density, PBR) — set on
+* a **material** per part (`cadgen.Material`: name, density, PBR) — set on
   the shapes by `apply_materials` at the end of the build, which colour alone
   cannot express.
 
@@ -116,7 +116,7 @@ BOARD_FINISHES = {
 # finish's look (`.but`): its metallic and roughness, its finish name as the description, and the
 # entry's own look beyond them (the sheet's rolled grain, the solder mask's gloss). `color=None`, so
 # every part keeps the colour its builder gave it.
-from cadgen.engine import materials as _catalogue
+from cadgen import materials as _catalogue
 
 
 def _finish(base, entry, **look):

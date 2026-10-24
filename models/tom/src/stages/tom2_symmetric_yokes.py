@@ -5,7 +5,7 @@ yoke roll sweep; full-arm collision envelopes remain a separate constraint.
 """
 from dataclasses import asdict
 import build123d as bd
-from cadgen.engine import memo
+from cadgen import memo
 from lib.mates import revolute
 from stages.tom2_side_mounted_elbow import tom2_side_mounted_elbow,preview_kinematics
 from lib.symmetric_horn_yoke import make_yoke,PITCH,ROLL,T,WEB_X,AXIS_OFFSET,AXIS_SPACING_REDUCTION
@@ -213,6 +213,3 @@ def tom2_symmetric_yokes():
             return bd.Compound(children=[visit(c,shift) for c in children],label=p.label,color=p.color).moved(loc)
         return p.moved(bd.Pos(*shift))
     result=visit(source);result.label='tom2_symmetric_yokes';return result
-
-
-if __name__=='__main__':tom2_symmetric_yokes()
