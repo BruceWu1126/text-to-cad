@@ -95,8 +95,8 @@ python src/assembly.py
 cadgen inspect "$ID"
 ```
 
-Running the root builds its children in the same run; running a child alone leaves the
-root as it was until the root runs, and prints the child's own id and page. `cadgen inspect`
+Running the root builds its children in the same run, each keeping its own document;
+running a child alone leaves the root as it was until the root runs. `cadgen inspect`
 prints what the root's document was built from.
 
 | Need | Add |
@@ -140,8 +140,8 @@ A parent calls its child models inside its body, and each child builds in the sa
 **running the root is the whole rebuild** (`python src/assembly.py`). Running a child
 alone rebuilds the child and leaves the assemblies that use it as they were.
 
-A child model is a model of its own, with its own id and page when its own script runs
-it; a helper runs within its caller and is no document. A sub-assembly needs no folder of its own. Mirrored geometry can stay inline or
+A child model has its own document and page; a helper runs within its caller and is no
+document. A sub-assembly needs no folder of its own. Mirrored geometry can stay inline or
 become separate left and right models.
 
 A big assembly stays fast to edit without splitting: the worker replays what an edit

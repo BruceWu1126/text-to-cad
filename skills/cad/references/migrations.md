@@ -238,6 +238,8 @@ old spellings resolve to nothing: take refs again from the viewer, or from what
   (`$XDG_CACHE_HOME/cadgen` when that is set) on macOS and Linux, `%LOCALAPPDATA%\cadgen`
   on Windows, or the folder `CADGEN_CACHE_DIR` named. Settings, the telemetry answer and
   recent files live elsewhere and are untouched.
+- The CAD Viewer's Recents are the records of 0.8's documents; 0.7's list is not read,
+  so they start empty after the upgrade.
 - The CAD app: Quick Edit has no enable/disable preference (a stale
   `features.quickEdit: false` does nothing). The `cad_telemetry` tool is gone: telemetry
   status is `cad_http` with method `GET` and URL `/__cad/analytics`, and opt-out, when the
@@ -258,8 +260,8 @@ Code written against an 0.8 preview may use names the release renamed or removed
 | `couple(assembly, name, joint=(turn, travel))` of one cylindrical joint | `screw_pair(assembly, name, joint=360 * travel / turn)`: its pitch; the value is now the turn in degrees |
 | `from cadgen import mechanism_state, configuration_sequence, gear_pair, ...` | `from cadgen.ap242 import ...` |
 | `from cadgen import animation` | `from cadgen.gltf import animation` |
-| `cadgen build SOURCE`, `cadgen.build(code_or_shape, ...)`, `cad_build` | none: write a decorated function in a `.py` file and run it; a shape made elsewhere is wrapped in a `@model` function |
-| `@xbf` + `@glb` stacked so a GLB bakes its animations | `@model`; `export(model, "model.glb")`, or `cadgen export <id> model.glb` while the model is live, bakes them |
+| `cadgen build SOURCE`, `cadgen.build(code_or_shape, ...)`, `cad_build` | none: a decorated function called from Python, in a `.py` file (or a notebook cell, kept as a `copy`); a shape made elsewhere is wrapped in a `@model` function |
+| `@xbf` + `@glb` stacked so a GLB bakes its animations | `@model`; `cadgen export <id> model.glb` or `export(model, "model.glb")` bakes them |
 | `cadgen export DOC OUT --pose NAME`, `export(..., pose=)` | a model returning `posed(assembly, NAME)`, exported |
 | `cadgen export DOC OUT --part OWNER`, `export(..., part=)` | the part's own `@model`, exported |
 | `cadgen export ... --no-daemon`, `cadgen snapshot ... --no-daemon` | the same command without the flag |

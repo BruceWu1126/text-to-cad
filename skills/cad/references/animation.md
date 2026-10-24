@@ -33,11 +33,9 @@ The rules:
 - **Prefer a motion where the mechanism says it**, and waypoints in it.
 - **No helper joints to fake an explode.** A joint per part only to slide it out is an
   animation's job, and the Position panel would show a slider for each.
-- **Animations are GLB-only, and come from the code**, so the model's worker must hold
-  it: `export(model, "model.glb")` runs the model first and always bakes them, and
-  `cadgen export "$ID" model.glb` bakes them while `cadgen status` lists the model
-  `live`. Exported from a `held` document (its worker retired) or a saved `.xbf`, a GLB
-  carries the motions alone: run the script again first.
+- **Animations are GLB-only.** `cadgen export "$ID" model.glb` and
+  `export(model, "model.glb")` bake them; a GLB exported from a saved `.xbf` carries the
+  motions alone.
 - **`.hide` is a scale trick.** glTF has no visibility channel, so a hidden part is
   scaled to 0. Use `.scale(parts, to=1, start=t, end=t, interpolation="STEP")` to bring
   it back.
@@ -69,7 +67,7 @@ def hinged_box_showcase():
 
 ```bash
 python src/hinged_box.py                             # prints the model's id
-cadgen export "$ID" GLB/hinged_box_showcase.glb      # while the model is live
+cadgen export "$ID" GLB/hinged_box_showcase.glb
 ```
 
 `animation(assembly, name, duration=)` returns a builder; every call returns it, so calls

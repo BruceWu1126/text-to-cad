@@ -32,7 +32,11 @@ cadgen export vendor/motor.step vendor/motor.xbf
 cadgen export share/arm.xbf GLB/arm.glb
 ```
 
-A mesh is never a source: it has no B-rep. Each file is written beside its target and
+A mesh file converts to another mesh format: an `.stl`, `.glb` or `.3mf` exports to
+either of the other two, keeping what the target format can hold, with no kernel loaded
+(`cadgen export scan.stl scan.3mf`). A mesh never becomes an `.xbf`, `.step` or `.dxf`:
+it has no B-rep, so model it in build123d, with `read_mesh` for its numbers
+([inputs](model-contract.md#inputs)). Each file is written beside its target and
 moved over it, so a failed export leaves the old file whole. `--json` prints what was
 written as one object (`{"ok": true, "source", "files": [{"path", "kind", "bytes",
 "seconds"}]}`), and a failure as `{"ok": false, "error": ...}` with exit status 1.
@@ -106,8 +110,9 @@ materials, element names and mechanism, read back losslessly. Export one only:
 
 - to share a model without its code;
 - to compose it in another project, where `read_xbf` reads it as an input;
-- to keep a slow model's result across an engine restart: the file opens in the viewer,
-  answers `cadgen inspect` and exports again without a rebuild.
+- to keep the last state of a slow model after an engine restart: the file opens in the
+  viewer, answers `cadgen inspect` and exports again without a rebuild, as a document of
+  its own. The next run of the script still builds cold.
 
 A vendor STEP converted once (`cadgen export vendor/motor.step vendor/motor.xbf`) is
 read by `read_xbf` many times faster than `read_step` parses the STEP, with the same
@@ -126,9 +131,9 @@ geometry, names, colours and materials. Keep the xbf beside the STEP, and read t
   transmission, clear coat, anisotropy and emission where a material has them), each of
   the model's configuration sequences as an animation of its name
   ([kinematics](kinematics.md#configuration-sequences)), and each of its `animation()`s
-  ([animation](animation.md)). The animations come from the model's code, so a GLB
-  exported by `export(model, path)`, or from the id of a `live` model, carries them; one
-  exported from a `held` document or a saved `.xbf` carries the sequences alone.
+  ([animation](animation.md)). A GLB exported from the model (by its id, or by
+  `export(model, path)`) carries its sequences and its animations, the file the run would
+  write; one exported from a saved `.xbf` carries the sequences alone.
 - **3MF**: an object per part, a build item per placement, in millimetres, with colours
   and materials through the materials extension.
 - **STL**: binary, every placed triangle, in millimetres.

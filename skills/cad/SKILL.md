@@ -118,10 +118,9 @@ so it is the same run after run, and the open page follows every run.
   alone, such as a whole sub-assembly stage; never a part, never a helper called many
   times ([`@memo`](references/model-contract.md#memo-marks-stages)).
 - **An assembly calls its parts.** Its body calls each part model (`plate()`), places and
-  labels what they return, and returns a `Compound`. Each child builds in the same run.
-  Running a child's script alone leaves the assemblies that use it as they were: run the
-  assembly. To show, export or inspect a part on its own, run its own script and use the
-  id that run prints.
+  labels what they return, and returns a `Compound`. Each child builds in the same run and
+  keeps its own document and id. Running a child's script alone leaves the assemblies that
+  use it as they were: run the assembly.
 - **`import build123d as bd`, and use it attribute-style** (`bd.Box`). The import is lazy:
   the kernel loads on first use, in the worker. `from build123d import Box`, or a
   module-level `bd.Color(...)` or `bd.Align` default, loads it at that line instead.
@@ -160,8 +159,9 @@ and nothing else: a posed file is a model that returns the posed assembly
 (`posed(arm(), "folded")`), and a part on its own is the part's own model.
 
 The xbf, cadgen's own document, is Save As: export one only to share a model without its
-code, to compose it in another project with `read_xbf`, or to keep a slow model's result
-across an engine restart. A vendor STEP is converted to an xbf once
+code, to compose it in another project with `read_xbf`, or to keep the last state of a
+slow model viewable and exportable after an engine restart (the next run of the script
+still builds cold). A vendor STEP is converted to an xbf once
 (`cadgen export vendor/motor.step vendor/motor.xbf`) and read with `read_xbf`, many
 times faster than parsing the STEP.
 

@@ -175,8 +175,8 @@ Mechanically:
 4. **Keep the `__main__` calls.** Decoration only declares; a call builds. Each call your
    `__main__` makes prints its model's id and page.
 5. **Composition is unchanged.** An assembly's body calls its part models, places what
-   they return and labels the placements. A child builds in the same run; running its
-   own script gives it its own page.
+   they return and labels the placements. A child builds in the same run and keeps its
+   own document, id and page.
 6. **Mark only big stages `@memo`.** `@memo` (new in 0.8) marks a function the engine
    may replay whole instead of running, keyed by its code and its arguments. Since every
    kernel call is replayed anyway, a memo hit saves only Python time (0.1 to 0.4 ms per
@@ -241,8 +241,9 @@ tolerances are gone from every decorator.
 **The xbf is Save As.** `.xbf` is cadgen's own document format: parts and placements,
 names, colours, materials, element names and the mechanism, read back losslessly.
 Export one only to share a model without its code, to compose it in another project
-with `read_xbf`, or to keep a slow model's result across an engine restart. It is not a
-build stage. A vendor STEP converts to one once, and `read_xbf` reads it many times
+with `read_xbf`, or to keep the last state of a slow model viewable and exportable after
+an engine restart (the next run of the script still builds cold). It is not a build
+stage. A vendor STEP converts to one once, and `read_xbf` reads it many times
 faster than `read_step` parses the STEP:
 
 ```bash
@@ -338,9 +339,8 @@ moving occurrences directly. 0.8 has two layers, each true to its format:
   show.hide("latch", at=3)
   ```
 
-  It is baked into a GLB exported from the model while its worker holds it
-  (`export(box, "box.glb")`, or `cadgen export <id> box.glb` right after a run); a GLB
-  exported from a saved `.xbf`, or once the worker has retired, carries the sequences
+  It is baked into a GLB exported from the model (`cadgen export <id> box.glb`, or
+  `export(box, "box.glb")`); a GLB exported from a saved `.xbf` carries the sequences
   only. The viewer's Animation section plays a GLB's animations.
 
 Remove helper joints that existed only to slide parts apart for an explode: that is an
@@ -399,9 +399,15 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   `cadgen inspect <id>` and by the CAD app, with the command that brings it back:
   `python <the script>`. A viewer link from before an engine restart opens a page saying
   to open the viewer again.
-- **`@model(store="memory")`** keeps a document in its worker's memory alone, unrecorded
-  and out of Recents: for throwaway probes. The default, for a script on disk, records
-  the script so the document is listed in Recents.
+- **Every document has a record** in cadgen's state folder, beside your settings
+  (`documents/<uuid>/document.json`: the script and function that build it, never
+  geometry), and the home's Recents lists them, most recent first. 0.7's Recents are not
+  read: they start empty after the upgrade.
+- **`store=` says where a document's source lives.** The default, `pointer`, is the
+  script on disk. A model defined in a notebook cell is a `copy`: its sources and the
+  files it read are copied beside its record, and `@model(id="<uuid>")` keeps one id
+  across runs of the cell. `@model(store="memory")` keeps a document in its worker's
+  memory alone, unrecorded and out of Recents: for throwaway probes.
 - **No page sessions.** `/s/<session>/...`, `?file=` and `?doc=` links open the home.
   The home shows Recents and the folder of the most recent `cadgen viewer` launch.
 - **The CAD app** shows a model by its id or a file by its path (`cad_show`), and its
@@ -424,7 +430,8 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
 
 `--no-daemon` is gone from every command, and `cadgen build` and `cadgen.build()`, which
 0.8 previews had, are gone too: the only way to build is a decorated function called
-from Python. A shape made elsewhere is wrapped in a `@model` function and called.
+from Python, in a script or a notebook cell. A shape made elsewhere is wrapped in a
+`@model` function and called.
 
 ### 8. Replace `read_scene` refs and checks
 

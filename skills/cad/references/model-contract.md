@@ -165,9 +165,9 @@ if __name__ == "__main__":
 ```
 
 - **A child builds in the same run**, in the caller's worker, and returns what its body
-  returned, before the caller placed or labelled it. A child called twice is one model,
-  built once. Its own id and page come from a run of its own script: running the
-  assembly prints the assembly's.
+  returned, before the caller placed or labelled it. It keeps its own document and id,
+  which every command answers; its rebuild command is the parent's script. A child called
+  twice is one model, built once.
 - **Running a child's script alone builds the child** and leaves the assemblies that use
   it as they were: run the assembly to update them.
 - **A placement shares its shape.** `Pos(...) * part`, `part.moved(...)` and
@@ -277,16 +277,21 @@ it again.
   brings it back, `python <the program that built it>`, by the page, `cadgen inspect`
   and `cad_show` alike (`cadgen status`: `evicted`, `expired`, or `detached` once its
   script is gone). Running it updates the same document and its open pages.
+- **Each document has a record** in cadgen's state folder (`documents/<uuid>/document.json`:
+  the script and function that build it, its store, the rebuild command; never
+  geometry). The home's Recents lists the records, most recent first. A record whose
+  script is gone is detached: listed, saying so, with no rebuild command. Nothing else is
+  written beside your files: no cache folder, and no record of a run.
 - **`@model(store="memory")`** keeps a document in its worker's memory alone: no record,
   no Recents entry, gone when its worker retires or the engine exits. It suits a
-  throwaway probe. The default, for a script on disk, records the script, so the
-  document is listed in Recents and comes back by its printed command.
-- **Nothing else is written beside your files**: no cache folder, and no record of a build
-  beside the `.xbf`. cadgen's state folder keeps the record per document that points at its
-  script; a model defined where no file holds it (a notebook cell) is copied there, its
-  source and the files its build read, and must be self-contained.
-- **A shape made elsewhere** (a probe in a REPL, a shape from another library) is shown
-  the same way: wrap it in a `@model` function in a `.py` file and call it.
+  throwaway probe, and needs a saved script.
+- **When the source is not a file** (a notebook cell, a function defined interactively),
+  the store is `copy`: the record's folder keeps a copy of the sources the run reached and
+  every file it read, so the document is rebuilt and traced without the original; the
+  cell must be self-contained. A copy gets a new id each time the cell runs, unless
+  `@model(id="<uuid>")` names one, which each run then replaces. Code piped to Python
+  (`python -c`, stdin) is refused: save it as a file. `id=` is refused on a script on
+  disk.
 - `cadgen status` lists the workers and the documents the engine holds (`--json` as
   data); `cadgen stop` stops the engine and any older one still running. At most
   `CADGEN_ENGINE_WORKERS` workers live (default: the machine's cores); a worker idle for
