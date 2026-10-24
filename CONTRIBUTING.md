@@ -784,7 +784,7 @@ green: that is the release. `Publish Release`, on the merge commit:
    names one map in every page and version, so no page's or version's map
    overwrites another's, and a later release that ships the same chunk and map
    uploads it once. Then the `pypi` job uploads the wheel and sdist: the only job
-   that may mint a PyPI token, in the `pypi` environment (below, "Repository
+   that may mint a PyPI token, in the `release` environment (below, "Repository
    settings"). It uploads only what PyPI does not hold yet
    (`scripts/release/pypi_release.py`), so a resumed release uploads nothing twice,
    and what PyPI already holds is downloaded and checked against PyPI's sha256 for

@@ -376,7 +376,7 @@ jobs:
     if: ${{ !cancelled() && needs.publish.result == 'success' && needs.gate.outputs.is_main == 'true' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: pypi
+    environment: release
     permissions:
       contents: read
       # Trusted publishing (OIDC) for the PyPI upload: this job's alone.
