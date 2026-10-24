@@ -57,9 +57,28 @@ class DoctorTests(unittest.TestCase):
         self.state = Path(state.name)
         # A plugin's install outside CI, where telemetry's default holds.
         environment = mock.patch.dict("os.environ", {"CADGEN_STATE_DIR": state.name, "DO_NOT_TRACK": "", "CADGEN_TELEMETRY": "",
-                                                     "CADGEN_INSTALL_CHANNEL": "claude-github", "CI": ""})
+                                                     "CADGEN_INSTALL_CHANNEL": "claude-github", "CI": "",
+                                                     # Launchers go to a folder of the test's, never ~/.local/bin.
+                                                     "CADGEN_LAUNCHER_DIR": str(self.state / "bin"),
+                                                     "CADGEN_LAUNCHER_VERSION": ""})
         environment.start()
         self.addCleanup(environment.stop)
+
+    def test_the_report_publishes_the_launchers_and_says_so(self) -> None:
+        from cadgen._internal import launchers
+
+        env = self.state / "env"
+        env.mkdir()
+        found = tuple(str(env / name) for name in ("cadgen.exe" if launchers.WINDOWS else "cadgen", "python"))
+        for path in found:
+            Path(path).write_text("", encoding="utf-8")
+        with TemporaryDirectory() as tmp, mock.patch.object(launchers, "targets", return_value=found), \
+                mock.patch.dict("os.environ", {"CADGEN_LAUNCHER_VERSION": "1.2.3-dev.1"}):
+            _, out, _ = _run([tmp])
+            again = _run([tmp])[1]
+        for name in launchers.names("1.2.3-dev.1"):
+            self.assertIn(f"launcher {self.state / 'bin' / name} published (was missing)\n", out)
+            self.assertIn(f"launcher {self.state / 'bin' / name} OK\n", again)
 
     def test_the_report_says_what_cads_apps_share(self) -> None:
         with TemporaryDirectory() as tmp:

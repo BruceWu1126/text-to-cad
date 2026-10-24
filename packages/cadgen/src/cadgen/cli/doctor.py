@@ -1,9 +1,13 @@
-"""``cadgen doctor`` — report the installed cadgen and check a skill's version pin.
+"""``cadgen doctor`` — report the installed cadgen, publish its launchers, check a skill's pin.
 
-The one check a skill teaches: run it with the skill's launch command, pointed at the skill
-(its directory or SKILL.md), and it says which installation is running -- its folder, and the
-engine server it shares -- and whether that is the cadgen the skill's docs were written
-against: the version its launch command pins (``uvx ... --from cadgen==<version>``).
+The one check a skill teaches: run it pointed at the skill (its directory or SKILL.md), and it
+says which installation is running -- its folder, and the engine server it shares -- and whether
+that is the cadgen the skill's docs were written against: the version its install command pins
+(``uvx ... --from cadgen==<version> cadgen doctor``). Run by that command, it is also how a skill
+gets its launchers back: it installs cadgen and publishes ``~/.local/bin/cadgen-<version>`` and
+``cadgen-python-<version>`` (``cadgen._internal.launchers``), and says whether each is present
+and runs this installation, dangling, or missing. ``--prune-launchers`` removes every version's
+launchers whose environment is gone.
 
 It also proves the CAD kernel loads. ``OCP`` is imported in a fresh interpreter
 (never in this one, so the report itself stays stdlib-only and fast to reach),
@@ -136,6 +140,42 @@ def _probe_kernel() -> tuple[str, str]:
     return KERNEL_FAILED, detail
 
 
+_SAY = {
+    "ok": "OK",
+    "missing": "missing",
+    "dangling": "dangling — its environment is gone",
+    "other": "another installation's",
+    "foreign": "not cadgen's (left alone)",
+}
+
+
+def _launchers() -> list[str]:
+    """One report line per launcher: published (or repaired) when this installation may, else
+    as found -- and why a write failed, which in a sandbox is the folder being out of reach."""
+    from cadgen._internal import launchers
+
+    try:
+        version = launchers.own_version()
+        if version:
+            results = launchers.publish(version)
+        else:  # a source tree: says what the release's launchers are, writes nothing
+            from cadgen import __version__
+
+            results = [(path, status, None) for path, status in launchers.inspect(__version__)]
+            version = None
+    except Exception as error:  # noqa: BLE001 - a report line, never a reason for the report to fail
+        return [f"unknown ({type(error).__name__}: {error})"]
+    lines = []
+    for path, status, error in results:
+        if status in launchers.REPAIRABLE and version and not error:
+            lines.append(f"{path} published (was {_SAY[status]})")
+        elif error:
+            lines.append(f"{path} {_SAY[status]}; cannot write it here ({error}): run this outside any sandbox")
+        else:
+            lines.append(f"{path} {_SAY[status]}")
+    return lines
+
+
 def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     parser = argparse.ArgumentParser(
         prog=prog,
@@ -146,7 +186,22 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
         nargs="?",
         help="A skill's SKILL.md, or a directory containing one (default: the working directory).",
     )
+    parser.add_argument(
+        "--prune-launchers",
+        action="store_true",
+        help="Remove every version's launchers in ~/.local/bin whose environment is gone, and exit.",
+    )
     args = parser.parse_args(argv)
+
+    if args.prune_launchers:
+        from cadgen._internal import launchers
+
+        removed = launchers.prune()
+        for path in removed:
+            sys.stdout.write(f"removed {path}\n")
+        if not removed:
+            sys.stdout.write(f"no launcher in {launchers.folder()} has lost its environment\n")
+        return 0
 
     import cadgen
     from cadgen._internal.launch import launch_command
@@ -159,6 +214,9 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     sys.stdout.write(f"  install  {location}\n")
     # One per installation: the same door means the same warm daemon.
     sys.stdout.write(f"  server   {_server()}\n")
+    # The paths the skills run this installation by (`cadgen._internal.launchers`).
+    for line in _launchers():
+        sys.stdout.write(f"  launcher {line}\n")
     sharing = _sharing()
     if sharing:
         # Whether CAD's apps send usage stats, as `cadgen telemetry` says it.
