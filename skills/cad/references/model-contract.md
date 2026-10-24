@@ -221,7 +221,9 @@ re-runs the body that read it:
   a build123d compound tree: each assembly a `Compound`, each part named, coloured and
   given its material as the file has them, each element keeping the name the file gives
   it. An xbf's joints, mechanism states and sequences are not imported: a part is a
-  part.
+  part. A STEP that names other files as its parts (an external reference, written by a
+  CAD tool's multi-file export) is refused by name, here and in the CAD Viewer and
+  `cadgen export`: export it again from its CAD tool as one file.
 - **A vendor STEP is converted once**: `cadgen export vendor.step vendor.xbf` writes an
   xbf of it, which `read_xbf` reads many times faster than `read_step` parses the STEP
   (seconds against most of a minute for a large assembly), with the same names. Keep the

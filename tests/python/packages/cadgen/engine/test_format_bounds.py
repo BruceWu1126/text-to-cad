@@ -5,7 +5,8 @@ name an exponential drawing or build; each reader counts what it expands and ref
 its bound before it holds what it would draw. The mesh readers share the bounds of a document's
 assembly (``document.MAX_OCCURRENCES``, ``document.MAX_ASSEMBLY_DEPTH``). A 3MF is a zip, so what
 a read unpacks from it is bounded too: its entries, its parts' bytes in all, and how far a large
-part unpacks past the bytes it is stored in."""
+part unpacks past the bytes it is stored in. A STEP is read as the file it is: one that names
+another file for the reader to open is refused."""
 
 from __future__ import annotations
 
@@ -195,6 +196,49 @@ class ThreeMfUnpackTest(FolderTest):
         with mock.patch.object(threemf, "MAX_ENTRIES", 10):
             with self.assertRaisesRegex(threemf.ThreeMfError, "more than 10 entries"):
                 threemf.read_3mf(path)
+
+
+
+def external_step(folder: Path) -> Path:
+    """A STEP assembly whose one part is another file it names (an external document reference, by
+    absolute path), as OCCT's writer makes one in its multi-file mode; the part's file beside it."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPCAFControl import STEPCAFControl_Writer
+    from OCP.STEPControl import STEPControl_AsIs
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    doc = TDocStd_Document(TCollection_ExtendedString("XCAF"))
+    shapes = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+    assembly = shapes.NewShape()
+    TDataStd_Name.Set_s(assembly, TCollection_ExtendedString("assembly"))
+    part = shapes.AddShape(BRepPrimAPI_MakeBox(7, 11, 13).Shape(), False)
+    TDataStd_Name.Set_s(part, TCollection_ExtendedString("part"))
+    shapes.AddComponent(assembly, part, TopLoc_Location())
+    shapes.UpdateAssemblies()
+    writer = STEPCAFControl_Writer()
+    assert writer.Transfer(doc, STEPControl_AsIs, str(folder / "named"))
+    assert writer.Write(str(folder / "main.step")) == IFSelect_RetDone
+    return folder / "main.step"
+
+
+class StepReferenceTest(FolderTest):
+    def test_a_step_that_names_another_file_is_refused_by_both_readers(self) -> None:
+        from cadgen.engine import reader
+
+        path = external_step(self.folder)
+        [named] = [entry for entry in self.folder.iterdir() if entry.name.startswith("named")]
+        self.assertNotIn(b"MANIFOLD_SOLID_BREP", path.read_bytes(), "the STEP holds no geometry of its own")
+        with self.assertRaisesRegex(ValueError, "names another file"):
+            document.load(path)  # the viewer's, an export's and a snapshot's read
+        with self.assertRaisesRegex(ValueError, "names another file"):
+            reader._parse(str(path))  # read_step's, in its reader process
+        [prototype] = document.load(named).prototypes  # the part's own file reads as itself
+        self.assertEqual(prototype.shape.ShapeType().name, "TopAbs_SOLID")
 
 
 if __name__ == "__main__":

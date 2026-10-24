@@ -1547,11 +1547,30 @@ def _read(path: Path) -> Any:
             reader.SetMatMode(True)
             # The reader defines the translator's parameters: set them once it exists.
             Interface_Static.SetIVal_s("read.stepcaf.subshapes.name", 1)
-            if reader.ReadFile(str(path)) != IFSelect_RetDone or not reader.Transfer(doc):
+            if reader.ReadFile(str(path)) != IFSelect_RetDone:
+                raise ValueError(f"cannot read {path}")
+            refuse_external_files(reader, path)
+            if not reader.Transfer(doc):
                 raise ValueError(f"cannot read {path}")
         else:
             raise ValueError(f"not a document the engine reads: {path.name}")
     return doc
+
+
+def refuse_external_files(reader: Any, path: Any) -> None:
+    """A STEP that names another file (an external document: ``DOCUMENT_FILE``) refused, after
+    ``ReadFile`` and before ``Transfer``: the XCAF reader's transfer opens every file such a STEP
+    names -- beside it, above it, or anywhere by an absolute path -- and adds what it reads to the
+    document as the STEP's own parts. A STEP read is the file it is, so a reference to another is
+    an error here, wherever the read is made (``_read``, ``reader._parse``)."""
+    from OCP.StepBasic import StepBasic_DocumentFile
+
+    model = reader.ChangeReader().Model()
+    kind = StepBasic_DocumentFile.get_type_descriptor_s()
+    for index in range(1, model.NbEntities() + 1):
+        if model.Value(index).IsKind(kind):
+            raise ValueError(f"cannot read {Path(path).name}: it names another file to read (an external "
+                             f"reference); the engine reads a STEP's own geometry only")
 
 
 def read_bytes(data: bytes) -> Any:

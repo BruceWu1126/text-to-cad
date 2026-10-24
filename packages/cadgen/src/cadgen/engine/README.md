@@ -1517,6 +1517,13 @@ and the worker assembles the tree from them. A shape written and read once is wh
 document reads back, so the tree is a function of the file. An xbf is read in the worker by the
 document's own retrieval driver.
 
+**A STEP is the file it is.** A STEP can name other files as its parts (an external document
+reference, `DOCUMENT_FILE`), which the XCAF reader's transfer would open -- beside it, above it or
+anywhere by an absolute path -- and add to the document as the STEP's own. Every STEP read
+(`read_step`'s reader process, and the read behind the viewer, an export and a snapshot) checks
+the parsed file before it transfers it and refuses one that names another file
+(`document.refuse_external_files`).
+
 ## Placements
 
 A part used ten times is one prototype placed ten times, in the worker's memory as in the

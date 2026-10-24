@@ -333,6 +333,9 @@ def _parse(path: str) -> tuple[dict[str, Any], bytes]:
     Interface_Static.SetIVal_s("read.stepcaf.subshapes.name", 1)  # the names the file gives elements
     if reader.ReadFile(os.fspath(path)) != IFSelect_RetDone:
         raise ValueError(f"cannot read the STEP file {path}")
+    from cadgen.engine.document import refuse_external_files
+
+    refuse_external_files(reader, path)
     reader.Transfer(doc)
     header, shapes, locations = describe(doc, step=True)
     header["shapes"] = len(shapes)
