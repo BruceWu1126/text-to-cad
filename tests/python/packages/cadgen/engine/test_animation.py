@@ -1,8 +1,9 @@
 """Animations (``animation()``): a GLB's own channels, authored in a model's body, refused by name
 where they name nothing or collide, recorded in the xbf beside its closure, and baked into the GLB
-the model declares -- and into a GLB of its xbf, the same bytes -- STEP, LINEAR and CUBICSPLINE samplers on translation, rotation and scale,
+the model declares -- and into a GLB of its xbf, the same bytes -- STEP and LINEAR samplers on translation, rotation and scale,
 ``pose`` through the mechanism's forward kinematics -- within the tolerance of what the channels
-say, their CUBICSPLINE tangents reproducing the curve under an independent Hermite (scipy's).
+say; the GLB's LINEAR keys within ``KEY_MM`` and ``KEY_DEGREES`` of the dense bake at 240 Hz, and
+its STEP keys the bake's own.
 
 The two GLBs the core suite plays and validates (``packages/core/src/lib/render/fixtures``:
 ``animation.glb``, ``motion.glb``) are this module's ``CHANNELS`` and ``MOTION`` baked; a test
@@ -26,6 +27,7 @@ import numpy as np
 
 from cadgen.engine import build as engine_build
 from cadgen.engine import document, mechanism
+from cadgen.engine.export import keys
 from tests.python.support.paths import REPO_ROOT
 
 FIXTURES = REPO_ROOT / "packages/core/src/lib/render/fixtures"
@@ -95,6 +97,42 @@ def motion_box():
     return configuration_sequence(box, "open_close", [(0, {"hinge": 0}), (1, "open"), (2, {"hinge": 0})])
 '''
 
+
+# The hinged box with a configuration sequence and an animation of every helper but one: a pose, an
+# explode, a stagger and a hide. What the GLB's keys are held to (``export/keys.py``).
+FIDELITY = '''
+import build123d as bd
+from cadgen import glb, xbf
+from cadgen.ap242 import configuration_sequence, mechanism_state
+from cadgen.gltf import animation
+
+HINGE = bd.Axis((-40, 0, 30), (0, -1, 0))
+
+
+@xbf("XBF/fidelity.xbf")
+@glb("fidelity.glb")
+def fidelity():
+    body = bd.Box(80, 50, 30, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    lid = bd.Pos(0, 0, 30) * bd.Box(80, 50, 6, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    knob = bd.Pos(0, 27, 15) * bd.Box(10, 4, 10)
+    feet = [bd.Pos(x, 0, -4) * bd.Box(10, 40, 4, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+            for x in (-30, 0, 30)]
+    body.label, lid.label, knob.label = "body", "lid", "knob"
+    for at, foot in enumerate(feet):
+        foot.label = f"foot_{at + 1}"
+    bd.RevoluteJoint("hinge", body, axis=HINGE, angular_range=(0, 110))
+    bd.RigidJoint("hinge", lid, bd.Plane(origin=HINGE.position, z_dir=HINGE.direction).location)
+    body.joints["hinge"].connect_to(lid.joints["hinge"], angle=0)
+    box = bd.Compound(children=[body, lid, knob, bd.Compound(children=feet, label="feet")], label="fidelity")
+    mechanism_state(box, "open", hinge=100)
+    configuration_sequence(box, "open_close", [(0, {"hinge": 0}), (1, "open"), (2, {"hinge": 0})])
+    show = animation(box, "show", duration=3)
+    show.pose(at={0: {}, 1.5: "open", 3: {}})
+    show.explode("feet/*", direction=(1, 0, 0), distance=15, end=1)
+    show.stagger("feet/*", by=(0, 0, -10), step=0.4, start=1.2)
+    show.hide("knob", at=2.5)
+    return box
+'''
 
 def _glb(path: Path) -> tuple[dict, Any]:
     """A GLB's JSON chunk, and a reader of its accessors (as float64 rows)."""
@@ -289,6 +327,56 @@ class RefinementLoopTest(unittest.TestCase):
         self.assertLess(time.monotonic() - start, 10.0, 'the loop must end quickly, not spin')
 
 
+class KeysTest(unittest.TestCase):
+    """``keys.linear`` alone: what it keeps of a track, and what it adds to one."""
+
+    def test_a_line_keeps_its_ends_and_a_jump_both_its_keys(self) -> None:
+        times = np.array([0.0, 0.5, 1.0, 1.0 + 1e-9, 1.5, 2.0])
+        values = np.array([[0, 0, 0], [5, 0, 0], [10, 0, 0], [30, 0, 0], [35, 0, 0], [40, 0, 0]], dtype=float)
+        kept, rows = keys.linear(times, values, "LINEAR", "translation", 2.0)
+        self.assertEqual(kept.tolist(), [0.0, 1.0, 1.0 + 1e-9, 2.0], "collinear keys go; the jump's stay")
+        np.testing.assert_array_equal(rows, values[[0, 2, 3, 5]])
+
+    def test_an_eased_step_gets_the_keys_a_line_needs_between_the_bakes(self) -> None:
+        # One CUBICSPLINE step easing 60 mm over a second: two keys, flat tangents.
+        rows = np.zeros((2, 3, 3))
+        rows[1, 1] = (60.0, 0.0, 0.0)
+        kept, values = keys.linear(np.array([0.0, 1.0]), rows, "CUBICSPLINE", "translation", 1.0)
+        self.assertGreater(len(kept), 10)
+        for t in np.linspace(0.0, 1.0, 1001):
+            self.assertLessEqual(abs(_sample(kept, values, "LINEAR", t, False)[0] - 60 * _smooth(t)), keys.KEY_MM, t)
+        again = keys.linear(np.array([0.0, 1.0]), rows, "CUBICSPLINE", "translation", 1.0)
+        self.assertEqual((again[0].tobytes(), again[1].tobytes()), (kept.tobytes(), values.tobytes()))
+
+    def test_a_dense_bake_keeps_a_few_of_its_keys(self) -> None:
+        # A swing baked as a dense clip is (250 keys a second, its tangents exact): a line needs few of them.
+        times = np.linspace(0.0, 2.0, 501)
+        rows = np.zeros((len(times), 3, 3))
+        rows[:, 1, 0] = 50 * np.sin(math.pi * times)
+        rows[:, 0, 0] = rows[:, 2, 0] = 50 * math.pi * np.cos(math.pi * times)
+        kept, values = keys.linear(times, rows, "CUBICSPLINE", "translation", 2.0)
+        self.assertLess(len(kept), len(times) * 0.15)
+        for t in np.linspace(0.0, 2.0, 2001):
+            self.assertLessEqual(abs(_sample(kept, values, "LINEAR", t, False)[0] - 50 * math.sin(math.pi * t)),
+                                 keys.KEY_MM + 1e-6, t)
+
+    def test_a_turn_keeps_its_keys_within_a_third_of_a_turn(self) -> None:
+        # Two whole turns at constant speed: a slerp is exact, but no two keys turn more than 120 degrees apart.
+        times = np.linspace(0.0, 2.0, 49)
+        values = np.array([[0.0, 0.0, math.sin(math.pi * t), math.cos(math.pi * t)] for t in times])
+        kept, rows = keys.linear(times, values, "LINEAR", "rotation", 2.0)
+        self.assertLess(len(kept), len(times))
+        for a, b in zip(rows, rows[1:]):
+            self.assertLessEqual(_turn(a, b), math.radians(keys.MOST_TURN_DEGREES) + 1e-9)
+
+    def test_a_scale_is_held_to_the_millimetres_its_part_moves(self) -> None:
+        rows = np.zeros((2, 3, 3))
+        rows[0, 1], rows[1, 1] = (1.0, 1.0, 1.0), (2.0, 2.0, 2.0)
+        near = keys.linear(np.array([0.0, 1.0]), rows, "CUBICSPLINE", "scale", 1.0, reach=1.0)
+        far = keys.linear(np.array([0.0, 1.0]), rows, "CUBICSPLINE", "scale", 1.0, reach=1000.0)
+        self.assertLess(len(near[0]), len(far[0]), "a larger part needs its scale closer")
+
+
 class GlbTest(_Folder):
     def test_a_restart_takes_an_animated_model_from_its_xbf_and_its_glb_is_the_cold_builds(self) -> None:
         from cadgen.engine import export
@@ -336,12 +424,13 @@ class GlbTest(_Folder):
             self.assertEqual((times[0], times[-1]), (0.0, 2.0), "every sampler runs the whole animation")
             found[(names[channel["target"]["node"]], channel["target"]["path"])] = (
                 sampler["interpolation"], times, read(sampler["output"]))
+        # What the bake eases, the GLB keys LINEAR (``export/keys.py``); a STEP stays STEP.
         self.assertEqual({key: value[0] for key, value in found.items()}, {
-            ("lid", "translation"): "CUBICSPLINE", ("lid", "rotation"): "CUBICSPLINE",
+            ("lid", "translation"): "LINEAR", ("lid", "rotation"): "LINEAR",
             ("latch", "translation"): "LINEAR", ("latch", "rotation"): "LINEAR",
             ("knob", "rotation"): "STEP", ("knob", "scale"): "STEP",
-            ("feet/foot_1", "translation"): "CUBICSPLINE", ("feet/foot_1", "scale"): "LINEAR",
-            ("feet/foot_2", "translation"): "CUBICSPLINE", ("body", "scale"): "CUBICSPLINE"})
+            ("feet/foot_1", "translation"): "LINEAR", ("feet/foot_1", "scale"): "LINEAR",
+            ("feet/foot_2", "translation"): "LINEAR", ("body", "scale"): "LINEAR"})
 
         def at(node: str, path: str, t: float) -> np.ndarray:
             interpolation, times, rows = found[(node, path)]
@@ -350,6 +439,9 @@ class GlbTest(_Folder):
         structure = document.Loaded(self.folder / "XBF/channels.xbf").structure()
         instances = {instance["path"].split("/", 1)[1]: instance for instance in structure["instances"]}
         size = math.dist((-45, -29, -4), (46, 29, 36))
+        # The bake's tolerance of the channels, and the keys' of the bake.
+        linear, angular = mechanism.LINEAR_TOLERANCE * size + keys.KEY_MM, mechanism.ANGULAR_TOLERANCE + math.radians(
+            keys.KEY_DEGREES)
         worst = [0.0, 0.0]
         for t in np.linspace(0, 2, 81):
             # The lid by forward kinematics: the hinge eased 0 -> 100 -> 0 degrees.
@@ -372,45 +464,114 @@ class GlbTest(_Folder):
             # The feet: dropped 10 mm in turn, the first shrinking to half over the whole.
             for foot, start in (("feet/foot_1", 0.0), ("feet/foot_2", 0.5)):
                 expected = -4 - 10 * _smooth((t - start) / 0.5)
-                self.assertLess(abs(at(foot, "translation", t)[2] - expected), mechanism.LINEAR_TOLERANCE * size, (foot, t))
+                self.assertLess(abs(at(foot, "translation", t)[2] - expected), linear, (foot, t))
             np.testing.assert_allclose(at("feet/foot_1", "scale", t), [1 - 0.25 * t] * 3, atol=1e-6)
-            self.assertLess(abs(at("body", "scale", t)[0] - (1 + 0.2 * _smooth(t / 2))), 1e-3, t)
-        self.assertLess(worst[0], mechanism.LINEAR_TOLERANCE * size * 1.5, worst)
-        self.assertLess(worst[1], mechanism.ANGULAR_TOLERANCE * 1.5, worst)
+            # The body's scale: within the bake's 1e-3, and the keys' tenth of a millimetre at its farthest corner.
+            self.assertLess(abs(at("body", "scale", t)[0] - (1 + 0.2 * _smooth(t / 2))),
+                            1e-3 + keys.KEY_MM / math.dist((0, 0, 0), (40, 25, 30)), t)
+        self.assertLess(worst[0], mechanism.LINEAR_TOLERANCE * size * 1.5 + keys.KEY_MM, worst)
+        self.assertLess(worst[1], mechanism.ANGULAR_TOLERANCE * 1.5 + math.radians(keys.KEY_DEGREES), worst)
         nodes = {node["name"]: node for node in gltf["nodes"][1:]}
         self.assertNotIn("matrix", nodes["knob"], "an animated node stands by translation and rotation")
 
-    def test_cubicspline_tangents_reproduce_the_curve_under_scipy(self) -> None:
-        """The baked in- and out-tangents, read by scipy's ``CubicHermiteSpline`` over each step (a
-        glTF key has a tangent on each side, scipy one per knot), stay within the tolerance of the
-        eased drop the stagger says, at every hundredth of a second; rotations are compared with
-        glTF's own evaluation above, never scipy's quaternion splines (another convention)."""
-        from scipy.interpolate import CubicHermiteSpline
+    def test_parts_that_move_as_one_share_one_sampler(self) -> None:
+        """Two parts of one reference stand where its motion puts them, the same keys: their channels
+        point at one sampler, written once, and each still plays its part's motion."""
+        self.build("""
+            import build123d as bd
+            from cadgen import glb
+            from cadgen.gltf import animation
 
-        self.channels()
-        gltf, read = _glb(self.folder / "channels.glb")
-        [showcase] = [animation for animation in gltf["animations"] if animation["name"] == "showcase"]
+
+            @glb("arm.glb")
+            def arm():
+                upper = bd.Box(10, 10, 40, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+                lower = bd.Box(6, 6, 20, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX))
+                base = bd.Box(30, 30, 5, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX))
+                upper.label, lower.label, base.label = "upper", "lower", "base"
+                arm = bd.Compound(children=[upper, lower], label="arm")
+                model = bd.Compound(children=[base, arm], label="model")
+                show = animation(model, "lift", duration=2)
+                show.translation("arm", by=(0, 0, 25), interpolation="LINEAR")
+                show.rotation("arm", axis=(0, 0, 1), by=90, start=1, end=2)
+                return model
+        """, "arm")
+        gltf, read = _glb(self.folder / "arm.glb")
         names = [node["name"] for node in gltf["nodes"]]
-        size = math.dist((-45, -29, -4), (46, 29, 36))
-        checked = 0
-        for channel in showcase["channels"]:
-            sampler = showcase["samplers"][channel["sampler"]]
-            if sampler["interpolation"] != "CUBICSPLINE" or channel["target"]["path"] != "translation":
-                continue
-            node = names[channel["target"]["node"]]
-            if not node.startswith("feet/"):
-                continue
-            start = 0.0 if node == "feet/foot_1" else 0.5
-            times = read(sampler["input"])[:, 0]
-            keys = read(sampler["output"]).reshape(len(times), 3, 3)
-            for at in range(len(times) - 1):
-                spline = CubicHermiteSpline(times[at:at + 2], keys[at:at + 2, 1], [keys[at, 2], keys[at + 1, 0]])
-                for t in np.arange(times[at], times[at + 1], 0.01):
-                    expected = np.array([-30 if node == "feet/foot_1" else 30, 0, -4 - 10 * _smooth((t - start) / 0.5)])
-                    self.assertLess(float(np.linalg.norm(spline(t) - expected)),
-                                    mechanism.LINEAR_TOLERANCE * size, (node, t))
-                    checked += 1
-        self.assertGreater(checked, 300)
+        [lift] = gltf["animations"]
+        sampler = {(names[channel["target"]["node"]], channel["target"]["path"]): channel["sampler"]
+                   for channel in lift["channels"]}
+        self.assertEqual(sorted(sampler), [("arm/lower", "rotation"), ("arm/lower", "translation"),
+                                           ("arm/upper", "rotation"), ("arm/upper", "translation")])
+        for path in ("translation", "rotation"):
+            self.assertEqual(sampler[("arm/upper", path)], sampler[("arm/lower", path)], path)
+        self.assertEqual(len(lift["samplers"]), 2, "one sampler per motion, not per part")
+        outputs = [entry["output"] for entry in lift["samplers"]]
+        self.assertEqual(len(set(outputs)), 2)
+        at = {path: lift["samplers"][sampler[("arm/upper", path)]] for path in ("translation", "rotation")}
+        moved = _sample(read(at["translation"]["input"])[:, 0], read(at["translation"]["output"]),
+                        at["translation"]["interpolation"], 2.0, False)
+        np.testing.assert_allclose(moved, [0, 0, 25], atol=1e-3)
+
+    def test_the_glbs_linear_keys_stay_within_a_tenth_of_the_dense_bake_at_240_hz(self) -> None:
+        """A configuration sequence and an animation with a pose, an explode, a stagger and a hide,
+        exported from the xbf: every track the bakes hand the GLB (a spy on ``keys.linear``) and the
+        LINEAR keys written for it, sampled at 240 Hz, stay within ``KEY_MM`` (a scale: at its part's
+        farthest point) and ``KEY_DEGREES``; the hide's STEP keys are the bake's, its jump at the time
+        it names; the same document writes the same bytes."""
+        from unittest import mock
+
+        from cadgen.engine.export import translate
+
+        self.build(FIDELITY, "fidelity")
+        recorded = []
+        real = keys.linear
+
+        def spy(times, rows, interpolation, path, duration, reach=0.0):
+            found = real(times, rows, interpolation, path, duration, reach)
+            recorded.append((np.array(times), np.array(rows), interpolation, path, duration, reach, found))
+            return found
+
+        out = self.folder / "fidelity-again.glb"
+        with mock.patch.object(keys, "linear", spy):
+            translate(self.folder / "XBF/fidelity.xbf", None, out)
+        self.assertEqual(out.read_bytes(), (self.folder / "fidelity.glb").read_bytes(),
+                         "the same document writes the same bytes")
+        self.assertEqual({(entry[2], entry[3]) for entry in recorded},
+                         {("CUBICSPLINE", "translation"), ("CUBICSPLINE", "rotation")})
+        dense = kept = 0  # a sparse eased bake takes more LINEAR keys, a dense one far fewer (``KeysTest``)
+        worst = {"translation": 0.0, "rotation": 0.0}
+        for times, rows, interpolation, path, duration, _reach, (key_times, key_values) in recorded:
+            rotation = path == "rotation"
+            self.assertEqual((key_times[0], key_times[-1]), (times[0], times[-1]), "the first and the last key")
+            self.assertTrue(np.all(np.diff(key_times.astype(np.float32)) > 0), "times rising, as written")
+            for t in np.append(np.arange(0.0, duration, 1 / 240), duration):
+                bake = _sample(times, rows.reshape(-1, rows.shape[-1]), interpolation, t, rotation)
+                got = _sample(key_times, key_values, "LINEAR", t, rotation)
+                worst[path] = max(worst[path], _turn(got, bake) if rotation else float(np.linalg.norm(got - bake)))
+            dense, kept = dense + len(times), kept + len(key_times)
+        self.assertLessEqual(worst["translation"], keys.KEY_MM, worst)
+        self.assertLessEqual(worst["rotation"], math.radians(keys.KEY_DEGREES), worst)
+        self.assertGreater(worst["translation"], 0.0, "the keys are a line's, not the bake's curve")
+        self.assertNotEqual(kept, dense)
+
+        gltf, read = _glb(out)
+        names = [node["name"] for node in gltf["nodes"]]
+        self.assertEqual([animation["name"] for animation in gltf["animations"]], ["open_close", "show"])
+        steps = 0
+        for animation in gltf["animations"]:
+            for channel in animation["channels"]:
+                sampler = animation["samplers"][channel["sampler"]]
+                times = read(sampler["input"])[:, 0]
+                if sampler["interpolation"] == "STEP":
+                    steps += 1
+                    self.assertEqual((names[channel["target"]["node"]], channel["target"]["path"]), ("knob", "scale"))
+                    self.assertEqual(times.tolist(), [0.0, 2.5, 3.0], "the hide keyed at the time it names, exactly")
+                    self.assertEqual(read(sampler["output"])[:, 0].tolist(), [1.0, 0.0, 0.0])
+                else:
+                    self.assertEqual(sampler["interpolation"], "LINEAR")
+                    self.assertEqual(gltf["accessors"][sampler["output"]]["count"], len(times), "a value a key")
+        self.assertEqual(steps, 1)
 
     def test_a_glb_from_the_xbf_is_the_declared_one_and_an_edit_of_an_animation_rewrites_both(self) -> None:
         from cadgen.engine.export import translate

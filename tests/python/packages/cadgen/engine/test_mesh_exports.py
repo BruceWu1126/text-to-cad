@@ -147,6 +147,27 @@ class EveryPairConverts(MeshExportTestCase):
                     with zipfile.ZipFile(out) as archive:
                         self.assertIn('unit="millimeter"', archive.read("3D/3dmodel.model").decode())
 
+    def test_a_glb_indexes_a_mesh_in_16_bits_up_to_65535_vertices_and_in_32_past_them(self) -> None:
+        # 22,000 triangles apart from each other: 66,000 vertices, past what 16 bits index.
+        corners = np.arange(22_000, dtype="<f4")[:, None, None] * np.array([1, 0, 0], "<f4") + np.array(
+            [[0, 0, 0], [0.5, 0, 0], [0, 0.5, 0]], "<f4")
+        rows = np.zeros(22_000, dtype=[("normal", "<f4", 3), ("corners", "<f4", (3, 3)), ("attribute", "<u2")])
+        rows["corners"] = corners
+        many = self.folder / "many.stl"
+        many.write_bytes(b"many".ljust(80, b" ") + struct.pack("<I", len(rows)) + rows.tobytes())
+        for source, kind in ((stl(self.folder / "cube.stl"), 5123), (many, 5125)):
+            out = self.folder / f"{source.stem}.glb"
+            translate(source, None, out)
+            found = glb_json(out)
+            [primitive] = [entry for mesh in found["meshes"] for entry in mesh["primitives"]]
+            self.assertEqual(found["accessors"][primitive["indices"]]["componentType"], kind, source.name)
+            vertices = found["accessors"][primitive["attributes"]["POSITION"]]["count"]
+            self.assertEqual(vertices > 65535, kind == 5125, vertices)
+            again = self.folder / f"{source.stem}-again.stl"
+            translate(out, None, again)
+            self.assertEqual(struct.unpack_from("<I", again.read_bytes(), 80)[0], {5123: 12, 5125: 22_000}[kind],
+                             "every triangle reads back")
+
     def test_a_3mf_in_inches_is_made_millimetres_and_an_unknown_unit_is_refused(self) -> None:
         inches = threemf(self.folder / "inch.3mf", unit="inch", side=10 / 25.4)
         translate(inches, None, self.folder / "inch.stl")

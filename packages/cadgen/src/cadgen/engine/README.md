@@ -1006,7 +1006,8 @@ target and moved over it; a DXF only when its bytes change.
   before it writes: the header's time stamp is `step.WRITTEN_STAMP` (the xbf's date), and the
   colour presentations, which it keeps in a map keyed by shape, are put in the order of the
   shapes they style, so the same document is the same STEP in any process on any day.
-- **GLB**: one mesh per prototype, a node per placement named by its path, a PBR material per
+- **GLB**: one mesh per prototype (indexed in 16 bits up to 65,535 vertices, in 32 past them), a
+  node per placement named by its path, a PBR material per
   look (a paint is a primitive of its own) with an extension for each part of the look past
   metallic-roughness (`KHR_materials_ior`, `_transmission`, `_volume`, `_clearcoat`,
   `_anisotropy`, `_emissive_strength`; **Materials**), every motion of the document an
@@ -1037,20 +1038,41 @@ target and moved over it; a DXF only when its bytes change.
   hoc, never cached, never declared.
 
 **Motions in a GLB.** Each motion (**Configuration sequences**) is baked into a glTF animation of its name:
-CUBICSPLINE translation and rotation channels for each placement it moves, over one key time
-accessor (`export/motion.py`). The keys start at the motion's waypoints and the halfway point
+translation and rotation channels for each placement it moves, baked CUBICSPLINE over one set of
+key times (`export/motion.py`) and written LINEAR (**GLB keys**). The keys start at the motion's waypoints and the halfway point
 between each two; at a key every moving placement is where forward kinematics through the
 mechanism (its couplings included) puts it,
 its in- and out-tangents the one-sided derivatives there, so a step's speed may jump at a
 waypoint. A step is halved while at any eighth of it the Hermite strays from the true forward
 kinematics by more than 1e-3 of the model's size (the diagonal of what the GLB places) in a
 placement's origin or 1e-3 radian in its rotation, at most 4,097 keys. A moved placement's node
-stands by translation and rotation, every other by its matrix; the animation's
+stands by translation and rotation, every other by its matrix; placements whose keys are the
+same bytes (the parts of one link, each its own node) share one sampler, so a link's motion is
+written once however many parts it carries; the animation's
 `extras.cadgen` holds the duration. A clip is the motion once, and a player repeats it. STEP,
 STL and 3MF ignore motions, and neither `export` nor `@glb` takes an argument for them. On the
 corpus's motorbike (2,053 mm across, so a 2.05 mm tolerance), `steer` (a ±20° sweep of the head
 tube and back over 4 s) bakes to 5 keys on 15 placements, within 1.26 mm and 2.1e-4 rad of
 forward kinematics at eight points inside every step.
+
+**GLB keys.** A bake keys a track where its curve needs it: a motion's every placement on the keys
+its hardest one needs, an animation's eased channel CUBICSPLINE, three values a key. The GLB
+writes each track that is not STEP as LINEAR keys, the fewest within `KEY_MM` (0.1 mm) and
+`KEY_DEGREES` (0.1°) of the bake (`export/keys.py`), constants rather than options (law 22): a
+tenth of a millimetre is under a pixel of a 1 m model filling a 4K screen. The bake's curve is
+sampled densely (a CUBICSPLINE step as often as keeps its Hermite within 5% of the tolerance of
+the chord between two samples, so a line that holds the samples holds the curve); from each kept
+key the farthest candidate (a bake key, or a sample of a step its own two keys' line cannot hold)
+whose line, lerped or for a rotation slerped as glTF interpolates LINEAR, holds every sample it
+spans is kept, with the first and last keys, both keys of a jump (two keys under a millionth of
+the clip apart) and two rotation keys never more than 120 degrees apart. A scale is held to the
+millimetres its part moves (its change times the part's farthest point from its origin). A STEP
+track (a hide) is written as baked, its jumps at the times it names. Distinct tracks are worked
+out once, the same document gives the same bytes, and on the corpus's GLBs, their bakes rewritten
+so and read at 240 Hz, every track stays within 0.0995 mm and 0.0997° of its bake while the animation keys shrink to 12-24% of
+the bake's: juno 108.7 MB to 6.9, tom 98.5 to 18.7, w16 83.2 to 38.5, radial 78.9 to 44.2 (with the
+samplers shared, above). A sparsely keyed eased bake (a small model's) can take more LINEAR keys
+than it had CUBICSPLINE ones, each a third the bytes.
 
 **File decorators require `out`.** `@xbf("XBF/arm.xbf")` declares the native document;
 `@step("arm.step")`, `@glb("arm.glb")`, `@stl("arm.stl")`, `@threemf("arm.3mf")`
@@ -1382,7 +1404,10 @@ true curve's one-sided derivatives there, as a motion's are and as the 0.7 clip 
 differences were in the limit. Against that baker, on a hinge eased through 100 degrees, a slide
 eased 60 mm and a constant spin (a 127 mm model), the two curves agree within 0.1 mm at every
 corner of each part, each within its own tolerance of the motion, the new one in 5 to 7 keys a
-path where the old one wrote 6 to 11.
+path where the old one wrote 6 to 11. The parts of one reference move as one body, so their
+channels' keys are the same bytes and share one sampler, as a motion's do. The GLB writes every
+channel but a STEP one as LINEAR keys within a tenth of a millimetre and of a degree of this bake
+(**GLB keys**).
 
 ## Materials
 

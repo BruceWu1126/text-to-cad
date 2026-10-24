@@ -28,7 +28,7 @@ for (const name of ["animation.glb", "motion.glb"]) {
   });
 }
 
-test("the viewer's mixer plays a baked animation's STEP, LINEAR and CUBICSPLINE channels as the baker wrote them", async () => {
+test("the viewer's mixer plays a baked animation's STEP and LINEAR channels as the baker wrote them", async () => {
   const document = await buildGlbDocumentFromBuffer(buffer("animation.glb"));
   const clip = document.clips.find((candidate) => candidate.name === "showcase");
   assert.ok(clip, document.clips.map((candidate) => candidate.name).join(", "));
@@ -46,9 +46,10 @@ test("the viewer's mixer plays a baked animation's STEP, LINEAR and CUBICSPLINE 
   // STEP: the knob holds its first key until 1 s; LINEAR scale: the first foot at 0.875.
   assert.ok(node("knob").quaternion.angleTo(new THREE.Quaternion()) < 1e-6);
   assert.ok(Math.abs(node("feet/foot_1").scale.x - 0.875) < 1e-5, node("feet/foot_1").scale.x);
-  // CUBICSPLINE: the first foot has dropped its 10 mm, eased; the second has not begun.
-  assert.ok(Math.abs(node("feet/foot_1").position.z + 14) < 1e-2, node("feet/foot_1").position.z);
-  assert.ok(Math.abs(node("feet/foot_2").position.z + 4) < 1e-2, node("feet/foot_2").position.z);
+  // Eased, keyed LINEAR within a tenth of a millimetre (cadgen's export/keys.py): the first foot has
+  // dropped its 10 mm; the second has not begun.
+  assert.ok(Math.abs(node("feet/foot_1").position.z + 14) < 0.11, String(node("feet/foot_1").position.z));
+  assert.ok(Math.abs(node("feet/foot_2").position.z + 4) < 0.11, String(node("feet/foot_2").position.z));
 
   at(1.25);
   assert.ok(Math.abs(node("knob").quaternion.angleTo(new THREE.Quaternion()) - Math.PI / 2) < 1e-5);

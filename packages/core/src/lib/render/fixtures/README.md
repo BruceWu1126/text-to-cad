@@ -27,8 +27,9 @@ describes it.
 two small models `tests/python/packages/cadgen/engine/test_animation.py` writes (`CHANNELS` and
 `MOTION`), and that test holds them to what the baker writes now, key for key. `animation.glb`
 carries the motion-free box's `animation()`, `showcase` (2 s): every channel path (translation,
-rotation, scale) under every interpolation (STEP, LINEAR, CUBICSPLINE) and a `pose` through the
-lid's hinge; `motion.glb` a box whose only animation is its motion `open_close`, an AP242
-configuration sequence. `bakedGlbAnimation.test.js` runs the Khronos glTF-Validator over both and
+rotation, scale) authored under every interpolation (STEP, LINEAR, CUBICSPLINE) and a `pose`
+through the lid's hinge, written as the engine writes every GLB's keys, STEP as baked and the rest
+LINEAR within a tenth of a millimetre and of a degree of the bake; `motion.glb` a box whose only
+animation is its motion `open_close`, an AP242 configuration sequence. `bakedGlbAnimation.test.js` runs the Khronos glTF-Validator over both and
 plays them with three.js. When the baker changes, write them again:
 `CADGEN_WRITE_FIXTURES=1 .venv/bin/python -m unittest tests.python.packages.cadgen.engine.test_animation`.

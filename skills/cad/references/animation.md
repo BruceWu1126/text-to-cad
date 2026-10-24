@@ -41,6 +41,9 @@ The rules:
 - **`.hide` is a scale trick.** glTF has no visibility channel, so a hidden part is
   scaled to 0. Use `.scale(parts, to=1, start=t, end=t, interpolation="STEP")` to bring
   it back.
+- **The GLB stores lines.** Every channel but a `STEP` one is written as glTF `LINEAR`
+  keys within 0.1 mm and 0.1° of its curve, so `interpolation` says how a part moves, not
+  which sampler the file holds.
 
 ## Authoring
 

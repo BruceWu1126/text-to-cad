@@ -17,7 +17,8 @@ about a pivot off the part's origin gets as many as its arc needs. A CUBICSPLINE
 out-tangents are the one-sided derivatives of the true curve there -- the old clip baker's rates,
 central differences of its samples, in the limit, and zero where a channel starts or stops eased
 -- so a speed may jump where one channel hands over to the next. Every sampler runs from 0 to the
-duration, so a player's clip is the animation once.
+duration, so a player's clip is the animation once. The GLB writes every channel but a STEP one
+as LINEAR keys within a tenth of a millimetre and of a degree of this bake (``keys.py``).
 """
 
 from __future__ import annotations

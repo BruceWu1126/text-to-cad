@@ -1,7 +1,8 @@
 """GLB: a glTF 2.0 binary of the document.
 
 One mesh per prototype -- its positions and normals one accessor pair, its triangles a
-primitive per look (a painted face's colour or material is a primitive of its own) -- and
+primitive per look (a painted face's colour or material is a primitive of its own), indexed in
+16 bits where the mesh has at most 65,535 vertices and in 32 where it has more -- and
 a node per placement, named by the placement's path, under one root node named by the
 document. A material per look: PBR metallic-roughness, its base colour the part's (or
 the paint's), metallic, roughness and emissive from the part's material, ``BLEND`` where
@@ -17,14 +18,18 @@ root node shows them in glTF's frame, Y up and metres, as cadgen's other GLBs do
 format that carries no normals (an STL's, a 3MF's) is given the viewer's (``mesh.shaded``).
 
 Every configuration sequence of the document is an animation of the same name (``export/motion.py``):
-CUBICSPLINE translation and rotation channels for each placement it moves, over one shared
-key time accessor, its duration in the animation's ``extras`` (``{"cadgen": {"duration":
-seconds}}``). A clip is the sequence once; a player repeats it. After them, the source's
-animations (``animation()``, ``export/animation.py``), each one glTF animation of its name: STEP,
-LINEAR or CUBICSPLINE translation, rotation and scale channels on the nodes its references
+translation and rotation channels for each placement it moves, its duration in the animation's
+``extras`` (``{"cadgen": {"duration": seconds}}``). A clip is the sequence once; a player repeats
+it. After them, the source's animations (``animation()``, ``export/animation.py``), each one glTF
+animation of its name: translation, rotation and scale channels on the nodes its references
 place, their duration in ``extras`` as a configuration sequence's: a build's, or the record of them an
-xbf carries (``animations.record``). A placement anything moves stands by translation and
-rotation, as glTF asks of an animated node; every other one by its matrix.
+xbf carries (``animations.record``). Every channel is written LINEAR -- the fewest keys within a
+tenth of a millimetre and of a degree of its bake (``export/keys.py``) -- but a STEP one (a hide),
+which is written as baked. A placement anything moves stands by translation and
+rotation, as glTF asks of an animated node; every other one by its matrix. Channels whose keys
+are the same bytes (the parts of one link, or of one reference, that stand where their motion
+puts them) point at one sampler, and samplers with the same keys at one accessor: each motion is
+written once however many parts it carries, and every part keeps its own node and name.
 """
 
 from __future__ import annotations
@@ -116,12 +121,16 @@ def write(view: Any, path: Path) -> None:
                 spans["tangents"] = add(np.ascontiguousarray(tangents(mesh.normals), "<f4"), 34962, "VEC4", 5126)
             attributes["TANGENT"] = spans["tangents"]
         thickness = _thickness(mesh)
+        # A mesh of at most 65,535 vertices is indexed in 16 bits (core glTF: no extension, and its
+        # largest index, 65,534, is short of the primitive restart value), a larger one in 32.
+        narrow = accessors[positions]["count"] <= 65535
         primitives = []
         for look, indices in looks:
             span = indices.tobytes()
             accessor = spans.get(span)
             if accessor is None:
-                accessor = spans[span] = add(np.ascontiguousarray(indices, "<u4"), 34963, "SCALAR", 5125)
+                accessor = spans[span] = add(np.ascontiguousarray(indices, "<u2" if narrow else "<u4"), 34963,
+                                             "SCALAR", 5123 if narrow else 5125)
             primitives.append({"attributes": dict(attributes), "indices": accessor,
                                "material": material(look, thickness)})
         gltf_meshes.append({"name": prototype["name"], "primitives": primitives})
@@ -246,6 +255,7 @@ def _animations(view: Any, held: dict[int, Any], shown: list[Any], node_of: dict
     if not node_of or not (motions or getattr(view.source, "animations", None)):
         return []
     from cadgen.engine.export.animation import bake
+    from cadgen.engine.export.keys import linear
     from cadgen.engine.export.motion import clips, quaternion
 
     size = _size(held, shown)
@@ -260,43 +270,78 @@ def _animations(view: Any, held: dict[int, Any], shown: list[Any], node_of: dict
         node.pop("matrix")
         node["translation"] = [float(value) for value in matrix[:3, 3]]
         node["rotation"] = [float(value) for value in quaternion(matrix)]
-    inputs: dict[bytes, int] = {}
+    # A part's motion is every part's that moves with it: the parts of one link, or of one reference, each
+    # its own node, stand where their motion puts them, so their channels' keys are the same bytes. Those
+    # channels share one sampler, and every sampler with the same keys one key accessor, so each motion is
+    # written once however many parts it carries.
+    data: dict[tuple, int] = {}
 
-    def times_of(times: np.ndarray) -> int:
-        data = np.ascontiguousarray(times, "<f4")
-        found = inputs.get(data.tobytes())
+    def accessor(rows: np.ndarray, kind: str) -> int:
+        array = np.ascontiguousarray(rows, "<f4")
+        key = (kind, array.tobytes())
+        found = data.get(key)
         if found is None:
-            found = inputs[data.tobytes()] = add(data, None, "SCALAR", 5126)
-            accessors[found]["min"] = [float(data[0])]
-            accessors[found]["max"] = [float(data[-1])]
+            found = data[key] = add(array, None, kind, 5126)
+            if kind == "SCALAR":
+                accessors[found]["min"] = [float(array[0])]
+                accessors[found]["max"] = [float(array[-1])]
         return found
 
+    # Every track but a STEP one is written as the fewest LINEAR keys within KEY_MM and KEY_DEGREES of
+    # its bake (``export/keys.py``), each distinct track worked out once; a scale is held to the
+    # millimetres its part moves, by the part's reach.
+    placed_at = {placed.instance: placed for placed in shown}
+    reaches: dict[int, float] = {}
+    written: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
+
+    def reach(index: int) -> float:
+        prototype = placed_at[index].prototype
+        if prototype not in reaches:
+            points = np.asarray(held[prototype].positions, dtype=float).reshape(-1, 3)
+            reaches[prototype] = float(np.max(np.linalg.norm(points, axis=1))) if len(points) else 0.0
+        return reaches[prototype]
+
+    def keyed(index: int, path: str, interpolation: str, times: np.ndarray, rows: np.ndarray,
+              duration: float) -> tuple[str, np.ndarray, np.ndarray]:
+        if interpolation == "STEP":
+            return interpolation, times, rows
+        far = reach(index) if path == "scale" else 0.0
+        key = (path, interpolation, duration, far, np.asarray(times, dtype=float).tobytes(),
+               np.asarray(rows, dtype=float).tobytes())
+        if key not in written:
+            written[key] = linear(times, rows, interpolation, path, duration, far)
+        return "LINEAR", *written[key]
+
     found = []
+
+    def animation(name: str, duration: float, tracks: list[tuple[int, str, str, np.ndarray, np.ndarray]]) -> None:
+        samplers: list[dict] = []
+        channels: list[dict] = []
+        shared: dict[tuple, int] = {}
+        for index, path, interpolation, times, rows in tracks:
+            interpolation, times, rows = keyed(index, path, interpolation, times, rows, duration)
+            kind = "VEC4" if path == "rotation" else "VEC3"
+            entry = {"input": accessor(times, "SCALAR"), "interpolation": interpolation,
+                     "output": accessor(rows.reshape(-1, rows.shape[-1]), kind)}
+            key = (entry["input"], interpolation, entry["output"])
+            if key not in shared:
+                shared[key] = len(samplers)
+                samplers.append(entry)
+            channels.append({"sampler": shared[key], "target": {"node": node_of[index], "path": path}})
+        found.append({"name": name, "channels": channels, "samplers": samplers,
+                      "extras": {"cadgen": {"duration": duration}}})
+
     for clip in baked:
-        if not clip.instances:
-            continue
-        times = times_of(clip.times)
-        samplers, channels = [], []
-        for index, translations, rotations in zip(clip.instances, clip.translations, clip.rotations):
-            for path, rows, kind in (("translation", translations, "VEC3"), ("rotation", rotations, "VEC4")):
-                values = add(np.ascontiguousarray(rows.reshape(-1, rows.shape[-1]), "<f4"), None, kind, 5126)
-                samplers.append({"input": times, "interpolation": "CUBICSPLINE", "output": values})
-                channels.append({"sampler": len(samplers) - 1, "target": {"node": node_of[index], "path": path}})
-        found.append({"name": clip.name, "channels": channels, "samplers": samplers,
-                      "extras": {"cadgen": {"duration": clip.duration}}})
-    for animation in animations:
-        if not animation.channels:
-            continue
-        samplers, channels = [], []
-        for channel in animation.channels:
-            rows = channel.values
-            values = add(np.ascontiguousarray(rows.reshape(-1, rows.shape[-1]), "<f4"), None,
-                         "VEC4" if channel.path == "rotation" else "VEC3", 5126)
-            samplers.append({"input": times_of(channel.times), "interpolation": channel.interpolation, "output": values})
-            channels.append({"sampler": len(samplers) - 1, "target": {"node": node_of[channel.instance],
-                                                                      "path": channel.path}})
-        found.append({"name": animation.name, "channels": channels, "samplers": samplers,
-                      "extras": {"cadgen": {"duration": animation.duration}}})
+        if clip.instances:
+            animation(clip.name, clip.duration, [
+                (index, path, "CUBICSPLINE", clip.times, rows)
+                for index, translations, rotations in zip(clip.instances, clip.translations, clip.rotations)
+                for path, rows in (("translation", translations), ("rotation", rotations))])
+    for baked_animation in animations:
+        if baked_animation.channels:
+            animation(baked_animation.name, baked_animation.duration, [
+                (channel.instance, channel.path, channel.interpolation, channel.times, channel.values)
+                for channel in baked_animation.channels])
     return found
 
 
