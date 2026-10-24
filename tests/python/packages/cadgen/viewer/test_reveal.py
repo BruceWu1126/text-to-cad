@@ -42,6 +42,15 @@ class RevealTests(unittest.TestCase):
             reveal_path(target)
             self.assertEqual(spawn.call_args.args[0], [str(Path('C:\\Windows') / 'explorer.exe'), '/select,' + str(self.target.resolve())])
 
+    def test_a_name_explorer_would_split_at_its_comma_opens_its_folder_through_the_shell(self):
+        named = Path(self.server.root, 'part.step,other.step')
+        named.write_text('fixture', encoding='utf-8')
+        with mock.patch('cadgen.viewer.reveal.sys.platform', 'win32'), mock.patch('cadgen.viewer.reveal.subprocess.Popen') as spawn, \
+                mock.patch('cadgen.viewer.reveal.os.startfile', create=True) as shell:
+            reveal_path(str(named))
+        spawn.assert_not_called()
+        shell.assert_called_once_with(str(named.resolve().parent))
+
     def test_rejects_relative_missing_and_invalid_paths(self):
         with mock.patch('cadgen.viewer.reveal.subprocess.run') as run:
             for path in (self.target.name, None, 1):

@@ -21,6 +21,12 @@ def reveal_path(path) -> None:
     if sys.platform == "darwin":
         subprocess.run(["/usr/bin/open", "-R", str(target)], check=True, capture_output=True, timeout=10)
     elif sys.platform == "win32":
+        if "," in str(target):
+            # Explorer reads its command line as comma-separated switches, so a name with a comma
+            # would be read as more than one: its folder is opened by the shell instead, which takes
+            # the path whole.
+            os.startfile(str(target if target.is_dir() else target.parent))  # type: ignore[attr-defined]
+            return
         # Windows' own Explorer, by its path: never an explorer.exe in the working folder.
         explorer = Path(os.environ.get("SystemRoot") or os.environ.get("WINDIR") or "C:\\Windows") / "explorer.exe"
         subprocess.Popen([str(explorer), f"/select,{target}"], close_fds=True)
