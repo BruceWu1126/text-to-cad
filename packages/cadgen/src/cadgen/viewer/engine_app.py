@@ -165,6 +165,8 @@ class EngineApp:
         from .scanner import VIEWER_EXTENSIONS, extension_of
 
         if is_id(name):
+            if not self.server.holds(name):
+                self.server.revive(name)  # a document the engine's cache holds, after a restart
             if not (self.server.holds(name) or self.server.file_of(name)):
                 raise ValueError(f'no document {name} is held')
             return {'id': name, 'file': self.server.file_of(name)}

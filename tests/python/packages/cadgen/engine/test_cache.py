@@ -259,6 +259,11 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(self.cli("stop").returncode, 0)
         self.assertEqual(self.record(ident)["cache"]["revision"], self.record(ident)["revision"])
         self.assertTrue(self.file(ident).is_file())
+        # The next engine's viewer opens it by its id, as it held it.
+        launched = engine_daemon.run([sys.executable, "-m", "cadgen.viewer", "--json", "--api-only", ident],
+                                     cwd=self.project, env=self.env)
+        self.assertEqual(launched.returncode, 0, launched.stderr)
+        self.assertEqual([row["id"] for row in json.loads(launched.stdout)["documents"]], [ident])
 
     def test_past_its_cap_the_least_recently_used_goes_and_nothing_else_in_the_folder_is_touched(self) -> None:
         foreign = self.cache / "objects" / "ab" / "0.7-object"
