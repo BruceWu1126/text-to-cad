@@ -37,6 +37,51 @@ def initialize_params(params):
     return params
 
 
+class Holder:
+    """This server's hold on the engine (``cadgen.engine.client.hold``): taken as the server starts,
+    starting the engine when none runs, and kept while the host runs, so a shell the host runs in a
+    sandbox that cannot start an engine always finds one. The engine still leaves on its idle
+    timeout once the host has quit and this process with it. An engine that goes while held (``cadgen
+    stop``, a crash) is held again at the host's next request, never at once: a stop is obeyed."""
+
+    def __init__(self):
+        self.wanted = threading.Event()
+        self.tried = threading.Event()  # the first hold taken, or failed
+        self.holding = False
+        self.thread = threading.Thread(target=self._run, name='cadgen-hold', daemon=True)
+
+    def start(self):
+        self.wanted.set()
+        self.thread.start()
+
+    def want(self):
+        if not self.holding:
+            self.wanted.set()
+
+    def _run(self):
+        from cadgen.engine.client import hold
+        while True:
+            self.wanted.wait()
+            self.wanted.clear()
+            try:
+                connection = hold()
+            except (ConnectionError, OSError, ValueError) as error:
+                LOG.info('could not hold the engine: %s', error)
+                self.tried.set()
+                continue
+            self.holding = True
+            self.tried.set()
+            try:
+                with connection:
+                    while connection.reader.read(4096):
+                        pass  # until the engine goes
+            except OSError:
+                pass
+            finally:
+                self.holding = False
+            LOG.info('the engine this server held has stopped')
+
+
 class Proxy:
     """One host connection's engine session. The host initializes once, but the engine's session
     can end under it (the engine restarted, or the session's idle hour passed): the shim then opens
@@ -44,8 +89,9 @@ class Proxy:
     reconnect. Only a request the engine never took is sent again: one it refused for an unknown
     session, or one whose connection was refused."""
 
-    def __init__(self, client=None):
+    def __init__(self, client=None, holder=None):
         self.client = client or EngineClient()
+        self.holder = holder
         self.session = None
         self.protocol = None
         self.initialize = None  # the host's initialize, as the engine was sent it
@@ -53,13 +99,15 @@ class Proxy:
         self.lock = threading.Lock()
 
     def _send(self, message, session, *, fresh=False):
+        if self.holder is not None:
+            self.holder.want()
         headers = {'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream'}
         if session:
             headers['Mcp-Session-Id'], headers['MCP-Protocol-Version'] = session
         return self.client.call('POST', '/mcp', json.dumps(message).encode('utf-8'), headers, fresh=fresh)
 
     def _open(self, request_id, params):
-        # The host's initialize goes only to the endpoint the engine's socket names now, never to
+        # The host's initialize goes only to the endpoint the engine's door names now, never to
         # one held from an earlier call, which another process may have taken since.
         status, reply_headers, data = self._send({'jsonrpc': '2.0', 'id': request_id, 'method': 'initialize',
                                                   'params': params}, None, fresh=True)
@@ -152,11 +200,15 @@ def serve(argv=None):
     from cadgen._internal.channel import remember
     remembering = threading.Thread(target=remember, daemon=True)
     remembering.start()
-    proxy = Proxy()
+    holder = Holder()
+    holder.start()  # the engine up and held from the start, not from the first card
+    proxy = Proxy(holder=holder)
     connection = Connection(requests, output, proxy.handle, workers=64, notification=proxy.notify)
     try:
         connection.serve()
     finally:
         proxy.close()
         remembering.join(1)
+        # An engine this server is starting is up before it leaves, never half started after it.
+        holder.tried.wait(60)
     return 0
