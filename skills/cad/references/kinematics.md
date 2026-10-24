@@ -52,7 +52,7 @@ import build123d as bd
 from cadgen import model
 from cadgen.ap242 import configuration_sequence, mechanism_state
 
-ELBOW = bd.Axis((40, 0, 20), (0, -1, 0))   # +angle lifts the arm
+ELBOW = ((40, 0, 20), (0, -1, 0))   # the elbow's origin and direction: +angle lifts the arm
 
 
 @model
@@ -60,8 +60,9 @@ def hinge():
     base = bd.Box(100, 60, 20, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
     arm = bd.Pos(40, 0, 20) * bd.Box(120, 20, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.MIN))
     base.label, arm.label = "base", "arm"
-    bd.RevoluteJoint("elbow", base, axis=ELBOW, angular_range=(-10, 120))
-    bd.RigidJoint("elbow", arm, bd.Plane(origin=ELBOW.position, z_dir=ELBOW.direction).location)
+    elbow = bd.Axis(*ELBOW)
+    bd.RevoluteJoint("elbow", base, axis=elbow, angular_range=(-10, 120))
+    bd.RigidJoint("elbow", arm, bd.Plane(origin=elbow.position, z_dir=elbow.direction).location)
     base.joints["elbow"].connect_to(arm.joints["elbow"], angle=30)   # as built: elbow 30
     assembly = bd.Compound(children=[base, arm], label="hinge")
     mechanism_state(assembly, "closed", elbow=0)

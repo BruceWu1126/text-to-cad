@@ -276,13 +276,14 @@ def arm():
 from cadgen import model
 from cadgen.ap242 import mechanism_state, posed
 
-ELBOW = bd.Axis((80, 0, 0), (0, 0, 1))
+ELBOW = ((80, 0, 0), (0, 0, 1))                 # numbers at module level; the Axis in the body
 
 @model
 def arm():
     ...
-    bd.RevoluteJoint("elbow", upper_arm, axis=ELBOW, angular_range=(0, 150))
-    bd.RigidJoint("elbow", forearm, bd.Plane(origin=ELBOW.position, z_dir=ELBOW.direction).location)
+    elbow = bd.Axis(*ELBOW)
+    bd.RevoluteJoint("elbow", upper_arm, axis=elbow, angular_range=(0, 150))
+    bd.RigidJoint("elbow", forearm, bd.Plane(origin=elbow.position, z_dir=elbow.direction).location)
     upper_arm.joints["elbow"].connect_to(forearm.joints["elbow"], angle=0)
     assembly = bd.Compound(children=[upper_arm, forearm], label="arm")
     return mechanism_state(assembly, "bent", elbow=60)
