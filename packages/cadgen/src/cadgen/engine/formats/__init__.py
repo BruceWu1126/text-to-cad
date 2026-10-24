@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import numpy as np
 
 if TYPE_CHECKING:  # a reader's module loads no kernel until it reads (the viewer resolves a robot's meshes here)
-    from cadgen.engine.mesh import Mesh
+    from cadgen.engine.mesh_format import Mesh
 
 __all__ = ["DRAWING", "Foreign", "FormatError", "KINDS", "MESHES", "Part", "Placed", "ROBOTS", "assemble", "files_of",
            "read", "stale"]

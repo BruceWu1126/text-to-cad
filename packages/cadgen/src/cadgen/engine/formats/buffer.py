@@ -30,7 +30,7 @@ from typing import Any
 
 import numpy as np
 
-from cadgen.engine.mesh import BOUNDARY, FEATURE, NONMANIFOLD, Mesh
+from cadgen.engine.mesh_format import BOUNDARY, FEATURE, NONMANIFOLD, Mesh
 
 __all__ = ["CREASE", "CREASED_MAX", "EDGE_ANGLE", "buffer", "creased_normals", "feature_edges"]
 
