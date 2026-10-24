@@ -640,6 +640,8 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
     if ref is None and isinstance(path, Path) and query == "closure":
         from cadgen.engine import previous
 
+        if path.suffix.lower() in (".step", ".stp"):
+            raise EngineError(_no_closure(path))
         writer, found = previous.scan(path)
         if found is None:
             raise EngineError(f"{path.name} holds no build closure"
@@ -693,6 +695,13 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
                       "key": prototype["key"], "kind": hit.kind, "ordinal": hit.ordinal, "name": hit.name,
                       **refs.placed_facts(facts, matrix)})
     return found[0] if len(found) == 1 else found
+
+
+def _no_closure(path: Path) -> str:
+    """Why a STEP holds no build closure: the format carries none (an xbf does, law 1), whoever wrote
+    it -- cadgen's own export among them -- and what to inspect instead."""
+    return (f"{path.name} holds no build closure: a STEP file carries none, only an .xbf does; inspect the model's "
+            f"document by its id for its closure, or name a ref in the file (cadgen inspect {path.name} REF)")
 
 
 def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], Any], ident: str) -> dict[str, Any]:

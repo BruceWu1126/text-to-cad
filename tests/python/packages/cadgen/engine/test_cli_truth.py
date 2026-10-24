@@ -129,6 +129,20 @@ class VerbsTest(Engine):
         self.assertEqual(lines[-2:], ["AssertionError: blade count must be positive", "failed stator.py::stator"])
         self.assertEqual(done.stderr.count("Traceback"), 1, done.stderr)
 
+    def test_a_step_cadgen_exported_holds_no_closure_because_the_format_carries_none(self) -> None:
+        ident = self.built("hub")
+        self.assertEqual(self.cli("export", ident, str(self.folder / "hub-out.step")).returncode, 0)
+        closure = self.cli("inspect", "hub-out.step", "--query", "closure")
+        self.assertEqual(closure.returncode, 1)
+        self.assertEqual(closure.stderr, "cadgen inspect: hub-out.step holds no build closure: a STEP file carries none, "
+                                         "only an .xbf does; inspect the model's document by its id for its closure, or "
+                                         "name a ref in the file (cadgen inspect hub-out.step REF)\n".replace(
+                                             "cadgen inspect:", "python -m cadgen.engine inspect:"))
+        summary = self.cli("inspect", "hub-out.step")
+        self.assertEqual(summary.returncode, 0, summary.stderr)
+        self.assertEqual(summary.stdout.splitlines()[-1], "closure     none: a STEP file carries none, only an .xbf "
+                                                          "does (a model's document, inspected by its id, has one)")
+
 
 if __name__ == "__main__":
     unittest.main()

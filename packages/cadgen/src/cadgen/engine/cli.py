@@ -373,7 +373,11 @@ def _inspect(args: argparse.Namespace, prog: str) -> int:
     told_state(args.document, "inspecting")
     if query == "summary" and not args.json:
         print(summary_text(found["summary"]))
-        if found["closure"] is None:
+        path = Path(str(found["summary"]["state"].get("path") or ""))
+        if found["closure"] is None and path.suffix.lower() in (".step", ".stp"):
+            print("closure     none: a STEP file carries none, only an .xbf does (a model's document, inspected by its "
+                  "id, has one)")
+        elif found["closure"] is None:
             print("closure     none: no cadgen build wrote this document")
         else:
             print("closure")
