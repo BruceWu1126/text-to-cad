@@ -179,7 +179,10 @@ def bundle_sources(model: Any, ident: str, cwd: Path) -> dict[str, bytes]:
             f'`python model.py` builds it again, as document {ident}."""',
             "import cadgen as _cadgen"]
     if any(name.startswith("modules/") for name in files):
+        # The bundle is in cadgen's state folder, which only the registry writes: the run imports
+        # its modules without caching their bytecode beside them (``modules/__pycache__``).
         text += ["import pathlib as _cadgen_pathlib", "import sys as _cadgen_sys",
+                 "_cadgen_sys.dont_write_bytecode = True",
                  "_cadgen_modules = str(_cadgen_pathlib.Path(__file__).resolve().parent / 'modules')",
                  "if _cadgen_modules not in _cadgen_sys.path:",
                  "    _cadgen_sys.path.insert(0, _cadgen_modules)"]

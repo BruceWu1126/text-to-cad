@@ -187,7 +187,10 @@ class RegistryDaemonTest(unittest.TestCase):
     def test_a_build_writes_its_record_alone_and_a_restart_knows_it_by_its_command(self) -> None:
         project = self.project("pointer", {"parts.py": PARTS,
                                            "caller.py": "import parts\n\nparts.cube()\nparts.scratch()\n"})
-        before = sorted(os.listdir(project))
+        def listed() -> list[str]:  # the interpreter's own bytecode cache of parts.py is not cadgen's
+            return sorted(name for name in os.listdir(project) if name != "__pycache__")
+
+        before = listed()
         done = self.run_python("caller.py", cwd=project)
         self.assertEqual(done.returncode, 0, done.stderr)
         cube, scratch = model_id(project / "parts.py", "cube"), model_id(project / "parts.py", "scratch")
@@ -196,7 +199,7 @@ class RegistryDaemonTest(unittest.TestCase):
                          ("pointer", "parts.py", ["python", "caller.py"], project))
         self.assertEqual(sorted(os.listdir(self.state / "documents" / cube)), ["document.json"], "it points: no geometry")
         self.assertNotIn(scratch, self.records(), "a memory document has no record")
-        self.assertEqual(sorted(os.listdir(project)), before, "nothing beside the script")
+        self.assertEqual(listed(), before, "nothing beside the script")
         written = (self.state / "documents" / cube / "document.json").stat().st_mtime_ns
         again = self.run_python("caller.py", cwd=project)
         self.assertEqual(again.returncode, 0, again.stderr)
@@ -246,6 +249,9 @@ class RegistryDaemonTest(unittest.TestCase):
         rerun = self.run_python(str(bundle / "model.py"), cwd=self.folder)
         self.assertEqual(rerun.returncode, 0, rerun.stderr)
         self.assertIn(f"id: {ids[0]}", rerun.stdout)
+        cached = sorted(str(path.relative_to(bundle)) for path in bundle.rglob("*")
+                        if path.name == "__pycache__" or path.suffix == ".pyc")
+        self.assertEqual(cached, [], "no bytecode in the bundle, from the copy or its rerun")
         (project / "depth.moved").rename(project / "depth.txt")
         # With id=: both runs are that one document, upserted.
         chosen = "6f1c0c6e-2b4b-4d8e-9a43-0c2a5d7e9b11"
