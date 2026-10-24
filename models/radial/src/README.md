@@ -11,11 +11,11 @@ script, `radial.py`, holds one model:
 
 Build from this folder: `python radial.py`. The model declares its xbf (`@xbf`), this
 corpus's example of a slow model's result kept across runs and engine restarts: a cold
-build takes most of an hour (54 min on 2026-10-23, load 10-35), and four of its bodies
-(the engine's, `barrels`, `cam` and `propeller`) run on every run, OCCT called past
-build123d, a scipy interpolator held in a module and a module held as a value keeping
-them from being replayed (the report's `retention` names each), 34 s a no-op. A run
-whose closure the xbf holds takes the file instead: 0.2 s.
+build takes most of an hour (52 min on 2026-10-24). Every body replays (20: the root, the
+18 systems and the propeller's blade, `lib/propeller.py`'s `blade_proto`), so a no-op
+without the file is 5.6 s, nearly all of it the `running` motion sampled again (`collect`,
+5.0 s); a run whose closure the xbf holds takes the file instead: 0.2 s, and after an
+engine restart the file spares the cold build.
 
 ```
 python radial.py
@@ -39,21 +39,17 @@ in occurrence (and explode) order:
     nose  reduction  propeller  blower  intake  accessory  ignition  exhaust  mount
 
 Each is `lib/<system>.py`'s `build()`. An edit that does not reach a system's code
-replays it from the worker's memory, so an edit costs its system and the root -- and
-three more: `barrels`, `cam` and `propeller` run calls the memo cannot key (132 of
-them in the barrels: shapes made past build123d's operations, and what is made of
-them), so they never replay and run again, every call they can key a hit, whenever the
-root does.
+replays it from the worker's memory, so an edit costs its system and the root (measured
+2026-10-24: an edit of `lib/nose.py` ran `nose` and the root, 42 s, every kernel call a
+hit, and replayed the other 18 bodies). The propeller blade is OCCT's own construction
+(a hand-interpolated B-spline surface, sewn): `blade_proto` is a `@memo` function
+returning the solid as OCCT made it, so the call keys it.
 
 Measured on 2026-10-22 (one machine, its load 4-17 from other work): cold 3,195 s
 (53 min; 19 bodies, 28,105 kernel calls; the xbf 70 MB: 473 parts in 2,400 placements,
 122 pairs). A no-op takes 0.4 s and rewrites nothing. An edit to the mount ring's tube
-radius (`lib/mount.py`, 14 -> 14.5 mm) runs `mount`, the root and the three above, and
-replays the other 14 stages: 48.8 s. Reverting it takes 46.7 s and writes the same bytes
-on every revert, but not the cold build's: the warm re-runs of `barrels` and
-`propeller` write other bytes than their cold runs (alone in a model each, the
-barrels' document is 569 bytes longer, with the same prototypes, names, keys,
-placements and closure), where `cam`'s keep theirs. An engine gap, not a port choice.
+radius (`lib/mount.py`, 14 -> 14.5 mm) then ran `mount`, the root and the three bodies
+that could not replay before 2026-10-24 (`barrels`, `cam`, `propeller`), 48.8 s.
 
 - **Materials.** Every part has one of the palette's colours, and its system gives it
   the finish that colour names: `lib/palette.py`'s `FINISHES`, a catalogue material

@@ -224,10 +224,8 @@ def mount():
 
 
 # Declares its xbf, the corpus's example of a slow model's result kept across runs and
-# engine restarts: a cold build takes most of an hour, and four of its bodies run on every
-# run (OCCT called past build123d, a scipy interpolator in a module, a module held as a
-# value: each named in the report's retention), so a run whose closure the xbf holds takes
-# it instead of running them.
+# engine restarts: a cold build takes most of an hour. Every body replays; a no-op without
+# the file still samples the running motion again (5 s), which a run that takes it skips.
 @xbf(out="../XBF/radial.xbf")
 def radial():
     systems = [

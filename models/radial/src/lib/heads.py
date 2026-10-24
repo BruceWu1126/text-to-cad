@@ -1085,8 +1085,8 @@ def _step_roundtrip_ok(shape, tol=0.5):
         return False
     reader.TransferRoots()
     a, b = shape.bounding_box(), bd.BoundBox.from_topo_ds(reader.OneShape(), tolerance=1e-6, optimal=True)
-    return all(abs(getattr(getattr(a, m), c) - getattr(getattr(b, m), c)) <= tol
-               for m in ("min", "max") for c in "XYZ")
+    corners = lambda box: (box.min.X, box.min.Y, box.min.Z, box.max.X, box.max.Y, box.max.Z)  # noqa: E731
+    return all(abs(p - q) <= tol for p, q in zip(corners(a), corners(b)))
 
 
 def _sane_piece(r, shape, allow_bigger=False):

@@ -48,7 +48,7 @@ project delivers them and because something outside the model reads them:
 | `juno`, `lyra` (every link model) | `3MF/<link>.3mf` | `src/exports.py` | the URDFs reference them |
 | `tom` (`rev3_parts.py`) | `STEP/imported/parts/<occurrence>.xbf` | `export(part, path)` in its `__main__` | the xbf handed to another model: Tom rev3's parts, converted once from the 354 MB vendor STEP and read by the `tom2` stage with `read_xbf` |
 | `examples` (`electronics_enclosure_base_drawing`) | `PDF/electronics_enclosure_base_drawing.pdf` | `@eng_drawing` | an engineering drawing is its PDF |
-| `radial` | `XBF/radial.xbf` | `@xbf` | the slow model's result kept across runs and engine restarts: a cold build takes most of an hour, and four of its bodies cannot be replayed, so a no-op takes the file (0.2 s) instead of running them (34 s) |
+| `radial` | `XBF/radial.xbf` | `@xbf` | the slow model's result kept across runs and engine restarts: a cold build takes most of an hour; every body replays, and a no-op takes the file (0.2 s) instead of sampling the running motion again (5.6 s without it) |
 
 ## Build and snapshot
 
@@ -172,7 +172,7 @@ resident memory during the cold build.
 | `f1` | 1 | 833 / 853 | 492 s (2.3 GB after) | 1.2 s |
 | `f14d` | 1 | 903 / 2,392 | 689 s (peak 17.2 GB, 2.4 GB after) | 1.0 s |
 | `w16` | 1 | 794 / 2,575 | 927 s (peak 3.9 GB) | 5.9 s |
-| `radial` | 1 | 473 / 2,400 | 3,238 s (peak 6.0 GB) | 2.8 s, its xbf taken (34 s without) |
+| `radial` | 1 | 473 / 2,400 | 3,238 s (peak 6.0 GB) | 2.9 s, its xbf taken (8.3 s without, every body replayed) |
 
 What a no-op still spends, by the engine's own report: `juno`, `lyra`, `w16`, `moonwatch`
 and `tom` sample their motions' functions of time again on every run (`collect`: 1.6 s of
