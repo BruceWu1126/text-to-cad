@@ -78,7 +78,7 @@
       "targets": ["hypercar.py"],
       "xbf": "XBF/hypercar.xbf",
       "edit": {"file": "src/lib/hinge.py", "from": "LOWER_ARM = [(-34.0, 22.0),", "to": "LOWER_ARM = [(-34.0, 23.0),"},
-      "note": "the old benchmark's edit, LOWER_ARM's first point 22 -> 23 (src/README.md); declares its GLB (the doors clip) beside the xbf"
+      "note": "the old benchmark's edit, LOWER_ARM's first point 22 -> 23 (src/README.md); since the corpus migration a plain @model that declares no GLB (its clips ride the document)"
     },
     {
       "name": "f1",
@@ -87,7 +87,7 @@
       "targets": ["f1.py"],
       "xbf": "XBF/f1.xbf",
       "edit": {"file": "src/lib/front_wing.py", "from": "_ACCENT_FRAC = 0.07", "to": "_ACCENT_FRAC = 0.075"},
-      "note": "the edit src/README.md measures; declares its GLB (the drs and steering clips) beside the xbf"
+      "note": "the edit src/README.md measures; since the corpus migration a plain @model that declares no GLB (its clips ride the document)"
     }
   ]
 }
