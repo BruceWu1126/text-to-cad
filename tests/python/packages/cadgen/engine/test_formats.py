@@ -959,7 +959,8 @@ class DaemonFileTest(unittest.TestCase):
         self.assertNotEqual((self.folder / "changed.png").read_bytes(), (self.folder / "first.png").read_bytes())
         self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["changed.png", "first.png", "part.stl", "warm.png"])
         # The daemon's socket (on Windows the port file standing in for it) and its lock, nothing else.
-        self.assertEqual({path.suffix for path in self.state.iterdir()}, {".port" if os.name == "nt" else ".sock", ".lock"})
+        self.assertEqual({path.suffix or path.name for path in self.state.iterdir()},
+                         {".port", ".lock"} if os.name == "nt" else {".door", ".lock", "clients"})
 
 
 if __name__ == "__main__":

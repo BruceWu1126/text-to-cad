@@ -9,9 +9,9 @@ from cadgen.engine.client import request
 
 
 class EngineClient:
-    """The engine's loopback endpoint as its Unix socket last named it. Only the engine can own that
-    socket (``daemon.folder_refusal``), while a loopback port is anyone's once the engine has let it
-    go, so the endpoint is read from the socket again whenever the one held may be stale: after any
+    """The engine's loopback endpoint as its door last named it. Only the engine can own that
+    door (``daemon.folder_refusal``), while a loopback port is anyone's once the engine has let it
+    go, so the endpoint is read from the door again whenever the one held may be stale: after any
     answer that is not a success, after a connection error, and for every call that asks for a
     ``fresh`` endpoint (an MCP ``initialize``)."""
 
@@ -20,7 +20,7 @@ class EngineClient:
         self.endpoint = None
 
     def connect(self, *, fresh=False):
-        """The endpoint held, or -- when there is none, or ``fresh`` -- the one the engine's socket
+        """The endpoint held, or -- when there is none, or ``fresh`` -- the one the engine's door
         names now."""
         with self.lock:
             if self.endpoint is None or fresh:
@@ -44,7 +44,7 @@ class EngineClient:
     def call(self, method, path, body=b'', headers=None, *, fresh=False):
         # An engine restarted since the endpoint was read refuses its old token (same --port) or
         # its old port: either is refused before any route runs, so it is sent once more, to the
-        # endpoint the socket names now.
+        # endpoint the door names now.
         endpoint = self.connect(fresh=fresh)
         for attempt in (1, 2):
             parsed = urlsplit(endpoint['url'])
@@ -66,7 +66,7 @@ class EngineClient:
             finally:
                 conn.close()
             if not 200 <= answer[0] < 300:
-                self._forget(endpoint)  # the next call asks the socket where the engine listens
+                self._forget(endpoint)  # the next call asks the door where the engine listens
                 if attempt == 1 and answer[0] == 403 and b'engine token required' in answer[2]:
                     endpoint = self.connect(fresh=True)
                     continue

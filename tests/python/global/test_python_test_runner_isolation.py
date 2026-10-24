@@ -24,14 +24,14 @@ spec.loader.exec_module(runner)
 
 def _stand_in(calls: list, *, child_error: Exception | None = None, leaves_a_daemon: bool = False):
     """subprocess.run for the runner: a file's interpreter runs (or raises ``child_error``), and
-    leaves a daemon's socket in its engine directory when ``leaves_a_daemon``; a stop is recorded."""
+    leaves a daemon's door in its engine directory when ``leaves_a_daemon``; a stop is recorded."""
     def run(argv, *, env, **kwargs):
         calls.append((list(argv), dict(env)))
         stopping = argv[1:3] == ["-P", "-c"]
         if not stopping:
             if leaves_a_daemon:
                 Path(env["CADGEN_ENGINE_DIR"]).mkdir(parents=True, exist_ok=True)
-                Path(env["CADGEN_ENGINE_DIR"], "0123456789ab.sock").write_text("", encoding="utf-8")
+                Path(env["CADGEN_ENGINE_DIR"], "0123456789ab.door").write_text("", encoding="utf-8")
             if child_error is not None:
                 raise child_error
         return subprocess.CompletedProcess(argv, 0, "", "")

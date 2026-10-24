@@ -605,9 +605,6 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
     ``query="geometry"`` requires a ref, and ``query="closure"`` accepts none.
     ``query="summary"`` (``cadgen inspect DOC`` with no ref) is ``{"summary", "closure"}``:
     what the document holds at a glance (``_summary``), and its closure, as the engine holds it."""
-    import urllib.error
-    import urllib.request
-
     from cadgen.engine import refs
     from cadgen.engine.cli import weighed
 
@@ -646,21 +643,18 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
         return json.loads(found)
     if ref is not None:
         refs.parse(ref)  # refuse invalid refs before serving
-    answer = _ask({"op": "serve", "path": str(path)})
-    base = answer["url"].rsplit("/", 1)[0]
-    ident = answer["doc"]
+    ident = _ask({"op": "serve", "path": str(path)})["doc"]
 
     def get(route: str) -> Any:
+        # Read through the engine's door, never its loopback port: a sandboxed shell has the one.
+        read = _ask({"op": "read", "route": f"/api/doc/{ident}{route}"})
+        if 200 <= read["status"] < 300:
+            return json.loads(read["body"])
         try:
-            with urllib.request.urlopen(urllib.request.Request(f"{base}/api/doc/{ident}{route}",
-                    headers={"Authorization": "Bearer " + answer.get("token", "")}), timeout=300) as response:  # noqa: S310
-                return json.loads(response.read())
-        except urllib.error.HTTPError as error:
-            try:
-                said = json.loads(error.read()).get("error")
-            except ValueError:
-                said = None
-            raise refs.RefError(said or str(error)) from None
+            said = json.loads(read["body"]).get("error")
+        except ValueError:
+            said = None
+        raise refs.RefError(said or f"HTTP {read['status']}")
 
     structure = get("")
     if query == "summary":

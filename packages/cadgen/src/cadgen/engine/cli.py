@@ -132,12 +132,14 @@ def answered(runner: Callable[[argparse.Namespace, str], int], args: argparse.Na
     as_json = bool(getattr(args, "json", False))
     try:
         return runner(args, prog)
-    except Failed as failure:
+    except (Failed, ConnectionError) as failure:
+        # ``ConnectionError``: the engine not reached (none runs and none can start: a sandbox, a
+        # folder refused), said in its one line, never as a crash.
         if as_json:
             print(json.dumps({"ok": False, "error": str(failure)}, separators=(",", ":")))
             return 1
         print(f"{prog}: {failure}", file=sys.stderr)
-        return failure.status
+        return getattr(failure, "status", 1)
     except Exception as error:
         if as_json:
             print(json.dumps({"ok": False, "error": f"{type(error).__name__}: {error}"}, separators=(",", ":")))
@@ -438,9 +440,9 @@ def _told_swept(swept: dict[str, list[str]]) -> None:
     stale files it removed, and a server of an older protocol, which ``stop`` stops."""
     for path in swept["removed"]:
         print(f"removed stale engine file {path}", file=sys.stderr)
-    from cadgen.engine.daemon import socket_path, port_path, WINDOWS
+    from cadgen.engine.daemon import address
 
-    current = str(port_path() if WINDOWS else socket_path())
+    current = str(address())
     for address in swept["running"]:
         if address != current:
             print(f"an engine server of an older cadgen runs at {address}; cadgen stop stops it", file=sys.stderr)
@@ -509,7 +511,9 @@ def status_text(answer: dict[str, Any]) -> str:
     cap = answer.get("rssCapMb")
     lines = [" · ".join([f"engine server {answer.get('pid')}, up {_span(answer.get('up'))}",
                          f"workers {len(workers)}/{answer.get('cap')}",
-                         f"idle timeout {_span(answer.get('idleTimeout'))}",
+                         f"idle timeout {_span(answer.get('idleTimeout'))}"
+                         + (f", held by {answer['holders']} app server{'' if answer['holders'] == 1 else 's'}"
+                            if answer.get("holders") else ""),
                          f"RSS cap {_gb(cap)}" if cap else "no RSS cap"])]
     names = [Path(str(worker["script"])).name for worker in workers]
     width = max((len(name) for name in names), default=0)

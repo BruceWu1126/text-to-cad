@@ -606,8 +606,8 @@ class Bench:
         return row
 
     def daemon(self, model: Model) -> list[int]:
-        """The pid of the model's own engine daemon, if one is serving its socket."""
-        done, _wall = self.run(model, ["-c", "from cadgen.engine.daemon import socket_path; print(socket_path())"], 60)
+        """The pid of the model's own engine daemon, if one holds its door open."""
+        done, _wall = self.run(model, ["-c", "from cadgen.engine.daemon import address; print(address())"], 60)
         path = done.stdout.strip() if done is not None and done.returncode == 0 else ""
         if not path or not os.path.exists(path):
             return []

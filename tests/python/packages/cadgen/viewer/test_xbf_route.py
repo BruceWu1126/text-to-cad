@@ -88,7 +88,7 @@ class XbfRouteTest(unittest.TestCase):
         subprocess.run([sys.executable, "-m", "cadgen.engine", "stop"], env={**os.environ, "PYTHONPATH": str(SRC)},
                        capture_output=True, timeout=120)
         deadline = time.monotonic() + 20
-        while any(cls.state.glob("*.sock")) and time.monotonic() < deadline:
+        while any(cls.state.glob("*.door")) and time.monotonic() < deadline:
             time.sleep(0.05)
         for name, value in cls.saved.items():
             if value is None:

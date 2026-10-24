@@ -132,11 +132,11 @@ posed(arm().shape, "folded")`.
    no git); names remain the per-element tie to code (**Build closure**).
 2. **Only requested files to disk.** The engine writes the files a model declares -- the xbf
    and the exports its decorators name, nothing beside them -- and the operating
-   system's coordination for its warm process: a socket and a lock in
-   a folder only the user can make (`daemon.default_state_dir`): `cadgen-engine` in
-   `$XDG_RUNTIME_DIR`, else in a `$TMPDIR` that is the user's own (macOS's), else
-   `/tmp/cadgen-<uid>`; on Windows in the temporary folder (a socket path past the Unix limit
-   lives in the user's own `/tmp/cadgen-<uid>` instead) -- and, in the user's state folder its host names,
+   system's coordination for its warm process: its door (a named pipe; on Windows a port file), a
+   lock and the pipes of the connections being opened (**The door**), in a folder only the user
+   can make (`daemon.default_state_dir`): `cadgen-engine` in `$XDG_RUNTIME_DIR`, else in a
+   `$TMPDIR` that is the user's own (macOS's), else `/tmp/cadgen-<uid>`; on Windows in the
+   temporary folder -- and, in the user's state folder its host names,
    the registry: one record per document it has built, been handed or a page opened, pointing at
    its script or file (**Document lifetime**); never geometry and never source. In the cache folder its host names (the platform's: `~/.cache/cadgen`) it
    keeps, under `documents/` alone, each model document's bytes as it last built them (**The
@@ -311,7 +311,7 @@ its warm worker. The per-worker memory cap remains enforced after each build, wa
 or not. A retired worker's documents stay served: the daemon takes them from it first, and
 holds them under one memory budget that never evicts a watched one (**Document lifetime**).
 
-The installation's private socket supplies its HTTP token. Page URLs exchange it
+The installation's door (**The door**) supplies its HTTP token. Page URLs exchange it
 for a same-site cookie; programmatic clients use Bearer authentication. All routes
 retain the application's Host and cross-site mutation checks. Explicit host/port
 requests must match an existing listener. A second installed version has a different
@@ -342,7 +342,8 @@ Page protocol 9 requires the capability, on `cad_http` and on the page's own `ca
 for the removed telemetry tool. Sidebar views alone are shared through
 an in-memory registry; thread views remain session-local. The host's stdio process
 proxies JSON-RPC and owns no page, tool implementation, catalog or view state.
-Active HTTP calls keep the daemon alive; quiet MCP sessions expire after an hour.
+Active HTTP calls keep the daemon alive; quiet MCP sessions expire after an hour. The host's
+stdio process holds the engine from its start while the host runs (**The door**).
 A card's `cad_sync` renews its served document's warm-worker lease.
 
 The viewer launcher owns no server, reload watcher or process-reuse probe. It
@@ -374,7 +375,8 @@ only, and a file's id is derived again from its path after a restart.
 | `snapshot.py` | `cadgen snapshot`: one dispatcher by suffix -- a document, a mesh file, a robot or a DXF drawn by OCCT (`render/`) into a PNG; a script's model drawn from its worker's memory |
 | `formats/` | the files the stills draw that are not documents, each read into a structure and part buffers: STL (numpy), 3MF (zip + XML), GLB (OCCT's glTF reader, textures and all; and numpy's, for a conversion: `gltf`), URDF/SDF/SRDF (XML, the viewer's forward kinematics), DXF (group codes, flattened as the viewer's pane draws it) |
 | `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document and per file (`service.py`); the scene (`occt.py`); a DXF drawn in the 2D look (`drawing.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
-| `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, at most one per core alive (`Pool`), connect-or-start; a worker's memory cap |
+| `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, at most one per core alive (`Pool`), connect-or-start, a hold; a worker's memory cap |
+| `door.py` | how a client reaches the daemon on POSIX: the door, a named pipe, and a pair of pipes per connection (**The door**) |
 | `progress.py` | where a build is: the engine's stages heard where they begin, each body a model's body runs by name, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
 | `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads, staleness (`changes`) and the LRU bound (`Cache`) |
@@ -463,7 +465,7 @@ header is always `01/01/2000` (`document.WRITTEN_DATE`, put over the driver's in
 place), so two cold builds of the same code are the same bytes on any day.
 If a body raises, the error is reported with the model's frames and the
 previous files stay. Builds run in the daemon's warm workers, at most one per core alive
-(**The engine server and its workers**). `CADGEN_ENGINE_DIR` moves its socket and lock; the client and the server resolve it alike (`daemon.state_dir`: a `..`, a symlink or a trailing slash names the same folder). On POSIX the folder must be the user's own and closed to writing by anyone else (`daemon.folder_refusal`): whoever owns or can write the folder could take the socket's place, so a client refuses to connect or start there and the daemon refuses to lock there, saying why.
+(**The engine server and its workers**). `CADGEN_ENGINE_DIR` moves its door and lock; the client and the server resolve it alike (`daemon.state_dir`: a `..`, a symlink or a trailing slash names the same folder). On POSIX the folder must be the user's own and closed to writing by anyone else (`daemon.folder_refusal`): whoever owns or can write the folder could take the door's place, so a client refuses to connect or start there and the daemon refuses to lock there, saying why.
 `CADGEN_ENGINE_MEMORY_MB` sets the server's memory budget, and `CADGEN_ENGINE_CACHE_GB` the
 document cache's size (`0`: no cache; `CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, is the tests'
 seam) (**Document lifetime**).
@@ -534,7 +536,7 @@ which also avoids pybind11's unmatched profile events on Python 3.12 and later.
 One engine server per installation (`daemon.py`: a daemon, which `cadgen server` runs in the
 foreground), started on demand by the first command that needs
 it and gone after an idle hour (`CADGEN_ENGINE_IDLE` seconds; a page waiting on a served
-document keeps it). It holds a pool of warm workers, one per model script (and one for the documents no
+document keeps it, and so does a hold: **The door**). It holds a pool of warm workers, one per model script (and one for the documents no
 worker built), each a process whose memo lives as long as
 it does. Its rules are a standard pool's, and nothing else: no admission guess, no refusal;
 the operating system does the rest. (What the daemon itself holds, the documents and their
@@ -633,6 +635,64 @@ lifetime**), and a held one where it is held: in memory, on disk (the cache), or
 `cache` line is the cache folder, the documents and bytes in it against its cap, the files evicted
 for room and the last save that failed. `--json` lists the documents as `models`, the cache as
 `cache`, and `serving.documents` the files served, each `held` or `evicted`, with the bytes it holds.
+
+## The door
+
+A client reaches the daemon on POSIX through named pipes in the engine's folder, never a socket
+([door.py](door.py)): agents run commands in sandboxes that refuse every socket, local ones too
+(macOS Seatbelt, deny by default, answers `EPERM` to a Unix socket's connect and to a loopback
+port's bind), while they let a command make and open files in its temporary folder, where the
+engine's folder is, FIFOs among them. Windows keeps its loopback port and port file, the token
+shown first (`daemon._admitted`).
+
+- **The door.** The daemon makes one FIFO beside its lock, `<tag>.door` (`daemon.door_path`), and
+  holds it open for reading, and for writing too, so it never reads as closed. A door nobody reads
+  refuses a writer's open (`ENXIO`): that is "no engine", and what `stop`, `status` and `wait_gone`
+  ask (`door.answering`), opening and closing it with nothing written. No process is signalled
+  or probed: the sandbox refuses `kill` on a process outside it.
+- **A connection.** A client makes a pair of FIFOs in `clients/`, named by a random id (`<id>.up`,
+  `<id>.down`), opens each for reading and writing (never blocking, never reading as closed before
+  the daemon has opened it), and writes one hello into the door: its id and a newline, far below
+  `PIPE_BUF` (512 bytes on macOS), so hellos written at once never interleave. The daemon reads the
+  door in one thread and answers each hello in a thread of its own: it opens the pair without
+  blocking or following a link, refuses either end unless it is a FIFO of its own user's, and
+  greets on `down`. The client then opens each pipe again for its one direction, lets the
+  read-write ends go and unlinks the pair's names. From there the connection is the request and
+  answer lines a socket carried, through the same code (`daemon._serve`): every verb is untouched.
+  Either side leaving is the other's end of file; the daemon ignores `SIGPIPE`, so a client gone
+  mid-answer is a write's `BrokenPipeError`.
+- **Leftovers.** A client killed before its greeting leaves its pair: the daemon sweeps pairs no
+  connection of its own holds once they are two minutes old, looking at their names and ages
+  alone, never opening one, so a sweep never waits. A stopping daemon takes its door away first:
+  a client waiting on a greeting it will never send sees the door go and stops waiting.
+- **Reads.** What a client used to ask of the loopback port, `inspect`'s document reads, goes
+  through the door too (`{"op": "read"}`, `serve.Server.read`, answered in process), so a
+  sandboxed shell needs no socket at all. The HTTP listener serves pages, the CAD app and the
+  stdio MCP peer, which run outside any shell's sandbox.
+- **Trust.** The door changes no boundary: the engine's folder is the user's own and closed to
+  everyone else (`daemon.folder_refusal`), `clients/` is made `0700`, and every pipe is `0600`, so
+  the daemon serves whoever can make files in that folder: its owner, as the socket did. It
+  carries the HTTP token to that owner (`{"op": "http"}`), and the HTTP side's token, cookie and
+  app-capability rules are as they were.
+
+**Starting the engine.** Outside a sandbox a client starts the daemon as before and waits for its
+door. Inside one, a daemon could make its door but never bind its HTTP port, and every build
+serves its document: so it starts none. A shell that says it is sandboxed without network (a
+variable the distribution names, `client.SANDBOXES`) and finds no door is refused at once, in one line:
+no engine runs and this shell's sandbox cannot start one; open a CAD card (the plugin's server
+starts the engine) or run `cadgen server` outside the sandbox (`client.SANDBOXED`). A daemon
+started where it may not bind a loopback port (`daemon._can_listen`, before it makes its door) or
+take its lock writes why beside its lock (`<tag>.failed`, `daemon.failure_path`) and exits 1;
+the client that started it says that reason at once, never after a timeout.
+
+**A hold.** `cadgen mcp`, the stdio peer an agent host starts, connects to the engine as it starts
+(starting it when none runs) and holds it (`client.hold`, `{"op": "hold"}`: a connection the
+daemon answers and keeps until its client goes) for as long as the host runs it. While any hold
+is open the engine does not stop for idleness; once the last goes, the idle time counts from
+then, so the engine leaves on its timeout after the host has quit. So a sandboxed shell an agent
+host runs finds an engine whenever the host runs. An engine that goes while
+held (`cadgen stop`, a crash) is held again at the host's next request, never at once: a stop is
+obeyed. `cadgen status` says how many hold it (`holders`).
 
 ## Document lifetime
 
@@ -808,13 +868,15 @@ Asked of the server, a document it does not hold is a refusal (`serve.NotHeld`):
 its type, state and command with its words (`daemon.refused`) and the caller raises it as that
 type (`api._failed`), so `cadgen inspect`, `export`, `snapshot` and `serve` of such an id exit 2.
 
-`cadgen stop` stops every server of the installation, whatever protocol it speaks: the socket and
+`cadgen stop` stops every server of the installation, whatever protocol it speaks: the door and
 lock names carry the protocol (`daemon._tag`), and `daemon.endpoints()` lists this one's and each
-older one's, so a cadgen that bumps `PROTOCOL` still stops the server an earlier one started. Both
-`stop` and `status` remove the socket and lock of a dead server (nothing answers and nobody holds
-its lock) and say so on stderr; `status` names an older protocol's live server, which `stop` stops.
-`stop` prints a line per server it stopped (`stopped the engine server at SOCKET`), or `no engine
-server is running`; `--json` prints `{"ok": true, "stopped": [SOCKET, ...]}` instead.
+older one's, so a cadgen that bumps `PROTOCOL` still stops the server an earlier one started (from
+protocol 3, the first with a door: an earlier one listened on a Unix socket, which nothing reaches
+now, and leaves on its idle timeout). Both `stop` and `status` remove the door and lock of a dead
+server (nothing reads the door and nobody holds its lock) and say so on stderr; `status` names an
+older protocol's live server, which `stop` stops. `stop` prints a line per server it stopped
+(`stopped the engine server at DOOR`), or `no engine server is running`; `--json` prints
+`{"ok": true, "stopped": [DOOR, ...]}` instead.
 
 ## Progress
 
