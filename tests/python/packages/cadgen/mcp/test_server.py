@@ -29,6 +29,8 @@ from cadgen.mcp.ui import AppPage
 
 CODEX = {"name": "codex-mcp-client", "title": "Codex", "version": "0.159.0"}
 CLAUDE = {"name": "claude-ai", "version": "0.1.0"}
+# What `codex exec` 0.163 sent with a tool call (measured), less its ids: the turn renders no app.
+CODEX_EXEC_TURN = {"x-codex-turn-metadata": {"thread_source": "user", "turn_trigger": "exec", "sandbox": "seatbelt"}}
 RENDERS_APPS = {"extensions": {"io.modelcontextprotocol/ui": {"mimeTypes": ["text/html;profile=mcp-app"]}}}
 OTHER_HOST = {"name": "some-desktop-app", "version": "0.1.0"}
 DECLARES_TABS = {"extensions": {**RENDERS_APPS["extensions"], "dev.texttocad/tabs": {"entrypoints": ["global", "thread", "file"]}}}
@@ -89,7 +91,18 @@ class _Session(unittest.TestCase):
         page = self.tmp / "app"
         page.mkdir()
         (page / "index.html").write_text("<!doctype html><title>CAD</title>", encoding="utf-8")
-        self.server = Server(page=AppPage(page), recents=RecentStore(self.tmp / "state"), viewer_url=self.viewer_url)
+        # What the server opens in a browser, recorded and never opened: through the redirect file
+        # (``browser_open``) in this test's own engine folder, on a machine with a display.
+        self.opened: list[str] = []
+        engine = self.tmp / "opener"
+        engine.mkdir(mode=0o700)
+        from cadgen.viewer import browser_open
+        for patched in (mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(engine)}),
+                        mock.patch.object(browser_open, "display_refusal", return_value=None)):
+            patched.start()
+            self.addCleanup(patched.stop)
+        self.server = Server(page=AppPage(page), recents=RecentStore(self.tmp / "state"), viewer_url=self.viewer_url,
+                             browser_opener=lambda target: self.opened.append(target) or True)
         self.initialized = self.server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": self.offered,
                                                              "clientInfo": self.client}), None)
 
@@ -504,6 +517,10 @@ class InlineServerTest(_Session):
     client = CLAUDE
     offered = RENDERS_APPS
 
+    def test_a_host_that_renders_apps_never_has_a_browser_opened(self) -> None:
+        self.assertIn("launch", self.call("cad_show", {"path": self.bracket}, CODEX_EXEC_TURN)["structuredContent"])
+        self.assertEqual(self.opened, [])
+
     def test_an_inline_host_shows_models_with_one_tool_and_is_told_so(self) -> None:
         tools = {tool["name"]: tool for tool in self.server.handle("tools/list", {}, None)["tools"]}
         agent = {name for name, tool in tools.items() if tool.get("_meta", {}).get("ui", {}).get("visibility") != ["app"]}
@@ -698,17 +715,42 @@ class TextServerTest(_Session):
                                          "headers": {"x-cadgen-app": self.server._app_token}})
         self.assertTrue(refused["isError"])
 
-    def test_cad_show_links_the_model_in_this_machines_viewer(self) -> None:
+    def test_cad_show_opens_the_model_in_the_browser_and_says_so_with_its_url(self) -> None:
         tools = self.server.handle("tools/list", {}, None)["tools"]
         self.assertEqual([(tool["name"], "_meta" in tool) for tool in tools], [("cad_show", False), ("cad_http", False)] + [(name, False) for name in START])
         self.assertIn("cannot show CAD views", self.initialized["instructions"])
+        told = []
+        self.server._browser_opened = told.append
         shown = self.call("cad_show", {"path": self.bracket})
         # Text alone: Claude Code shows a result's structured content in place of its text.
         self.assertNotIn("structuredContent", shown)
-        self.assertIn("http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab", shown["content"][0]["text"])
-        self.assertNotIn("Showing", shown["content"][0]["text"])
+        self.assertEqual(shown["content"][0]["text"],
+                         "bracket.stl opened in your browser at http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab; "
+                         "the page follows the model.\nThis app shows no CAD view itself: give the user this URL. The page "
+                         "refreshes when the model changes, so show a model once, not after every rebuild.")
+        # Opened once, through a redirect file (the page's token is on no command line), and the engine told.
+        (target,) = self.opened
+        self.assertTrue(target.startswith("file:"), target)
+        self.assertEqual(told, [self.bracket])
         # The Viewer adds the model to the library once it shows it; a link alone adds nothing.
         self.assertEqual(self.server.recents.list(), [])
+
+    def test_a_model_a_browser_page_shows_already_is_not_opened_again(self) -> None:
+        self.server._in_browser = lambda model: model == self.bracket
+        shown = self.call("cad_show", {"path": self.bracket})["content"][0]["text"]
+        self.assertTrue(shown.startswith("bracket.stl is already open in your browser at "
+                                         "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab; nothing was opened."), shown)
+        self.assertIn("give the user this URL", shown)
+        self.assertEqual(self.opened, [])
+
+    def test_where_no_browser_opens_the_answer_is_the_url(self) -> None:
+        from cadgen.viewer import browser_open
+
+        with mock.patch.object(browser_open, "display_refusal", return_value="there is no display to open a browser on"):
+            shown = self.call("cad_show", {"path": self.bracket})["content"][0]["text"]
+        self.assertTrue(shown.startswith("No browser can be opened from here (there is no display to open a browser on); "
+                                         "bracket.stl's page is http://127.0.0.1:3245/"), shown)
+        self.assertEqual(self.opened, [])
 
     def test_a_text_client_reaches_no_page_tool(self) -> None:
         # No page answers a card or reaches the viewer's routes here, so neither does the agent.
@@ -741,6 +783,46 @@ class TextServerTest(_Session):
             server = Server(page=AppPage(self.tmp / "app"), recents=RecentStore(self.tmp / "other"))
             server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": self.client}), None)
         self.assertIn("ui", {tool["name"]: tool for tool in server.handle("tools/list", {}, None)["tools"]}["cad_show"]["_meta"])
+
+
+class CodexExecTest(_Session):
+    """`codex exec` greets the server as the Codex app does, and renders no app: each call's turn
+    metadata says so (``turn_trigger: exec``), and that call's cad_open and cad_show claim no tab."""
+
+    client = CODEX
+    viewer_url = staticmethod(lambda model=None: "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab?token=t")
+    EXEC = CODEX_EXEC_TURN
+    # The Codex app's own turn (its app server's, measured): no trigger.
+    APP = {"x-codex-turn-metadata": {"sandbox": "seatbelt"}}
+
+    def test_an_exec_turn_opens_the_browser_once_and_never_claims_a_tab(self) -> None:
+        pages: set[str] = set()
+        self.server._in_browser = lambda model: model in pages
+        self.server._browser_opened = pages.add
+        opened = self.call("cad_open", {"path": self.bracket}, self.EXEC)
+        self.assertNotIn("structuredContent", opened)
+        self.assertNotIn("_meta", opened)
+        text = opened["content"][0]["text"]
+        self.assertTrue(text.startswith("bracket.stl opened in your browser at http://127.0.0.1:3245/"), text)
+        self.assertNotIn("tab", text)
+        self.assertEqual(len(self.opened), 1)
+        # The next turn (`codex exec resume`, a new server process: the engine still knows the page).
+        again = Server(page=self.server.page, recents=self.server.recents, viewer_url=self.viewer_url,
+                       browser_opener=lambda target: self.opened.append(target) or True,
+                       in_browser=lambda model: model in pages)
+        again.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": CODEX}), None)
+        shown = again.handle("tools/call", {"name": "cad_show", "arguments": {"path": self.bracket}},
+                             RequestContext(1, {"threadId": "t", **self.EXEC}))["content"][0]["text"]
+        self.assertTrue(shown.startswith("bracket.stl is already open in your browser at http://127.0.0.1:3245/"), shown)
+        self.assertEqual(len(self.opened), 1)
+
+    def test_the_codex_apps_own_turns_keep_their_tabs_and_open_no_browser(self) -> None:
+        opened = self.call("cad_open", {"path": self.bracket}, self.APP)
+        self.assertEqual(opened["content"][0]["text"],
+                         f"{self.bracket} is open in a new CAD tab. From now on, use cad_show to show models in it.")
+        self.assertEqual(opened["structuredContent"]["launch"]["model"], self.bracket)
+        self.assertIn("No CAD viewer is open", self.call("cad_show", {"path": self.loose}, self.APP)["content"][0]["text"])
+        self.assertEqual(self.opened, [])
 
 
 class LocalPathTest(unittest.TestCase):

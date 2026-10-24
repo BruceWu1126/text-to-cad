@@ -326,12 +326,13 @@ class LifetimeDaemonTest(unittest.TestCase):
         self.assertIn("done", answer, answer)
         self.assertGreater(out.stat().st_size, 0)
         self.assertGreater(out.with_suffix(".step").stat().st_size, 0)
-        inspected = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "inspect", ident],
+        inspected = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "inspect", ident, "--json"],
                                       cwd=self.folder, env=self.env)
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
-        self.assertIn("source", json.loads(inspected.stdout), "its closure, from the held document")
-        self.assertEqual([Path(w["script"]).name for w in self.ask({"op": "status"})["workers"]], ["documents"],
-                         "the documents worker read the held bytes: no worker of its script started")
+        self.assertIn("source", json.loads(inspected.stdout)["closure"], "its closure, from the held document")
+        # The documents worker read the held bytes (it may have idled out since: its idle is a second).
+        self.assertNotIn("bracket.py", [Path(w["script"]).name for w in self.ask({"op": "status"})["workers"]],
+                         "no worker of its script started")
         self.assertFalse((self.folder / "bracket.ran").exists(), "nothing ran the script")
         # Its author's run builds it again: the same id, a new generation (a token, never a count).
         first = self.row(ident)["version"]
@@ -354,9 +355,9 @@ class LifetimeDaemonTest(unittest.TestCase):
                                      cwd=self.folder, env=env)
         self.assertEqual(exported.returncode, 0, exported.stderr)
         self.assertGreater(out.stat().st_size, 0)
-        inspected = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "inspect", plate], cwd=self.folder, env=env)
+        inspected = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "inspect", plate, "--json"], cwd=self.folder, env=env)
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
-        self.assertEqual(json.loads(inspected.stdout)["source"]["function"], "plate")
+        self.assertEqual(json.loads(inspected.stdout)["closure"]["source"]["function"], "plate")
         programs = {ident: self.ask({"op": "model_info", "id": ident})["model"]["program"] for ident in (plate, assembly)}
         self.assertEqual(programs, {plate: str(self.folder / "assembly.py"), assembly: str(self.folder / "assembly.py")},
                          "the parent's program builds both again")

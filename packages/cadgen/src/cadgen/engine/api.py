@@ -31,6 +31,7 @@ from __future__ import annotations
 import base64
 import functools
 import json
+import math
 import os
 import re
 import sys
@@ -601,7 +602,9 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
     key, read from the file alone. A ref that names nothing, or several things, is refused by
     name (``refs.RefError``). No query builds a missing model or writes its declared
     outputs. ``query="build"`` returns file metadata/closure or live build metadata;
-    ``query="geometry"`` requires a ref, and ``query="closure"`` accepts none."""
+    ``query="geometry"`` requires a ref, and ``query="closure"`` accepts none.
+    ``query="summary"`` (``cadgen inspect DOC`` with no ref) is ``{"summary", "closure"}``:
+    what the document holds at a glance (``_summary``), and its closure, as the engine holds it."""
     import urllib.error
     import urllib.request
 
@@ -616,8 +619,8 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
         raise EngineError("source reference and ref disagree")
     ref = ref if ref is not None else embedded_ref
     query = query or ("geometry" if ref is not None else "closure")
-    if query not in ("closure", "geometry", "build"):
-        raise EngineError("query is closure, geometry or build")
+    if query not in ("closure", "geometry", "build", "summary"):
+        raise EngineError("query is closure, geometry, build or summary")
     if (query == "geometry") != (ref is not None):
         raise EngineError("only a geometry query requires a reference")
     path = _document(source, "inspect", named)
@@ -633,7 +636,7 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
         _writer, closure = previous.scan(path)
         return {"file": {"path": str(path), "bytes": stat.st_size, "modifiedAt": stat.st_mtime},
                 "live": None, "closure": json.loads(closure) if closure else None}
-    if ref is None and isinstance(path, Path):
+    if ref is None and isinstance(path, Path) and query == "closure":
         from cadgen.engine import previous
 
         writer, found = previous.scan(path)
@@ -660,6 +663,11 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
             raise refs.RefError(said or str(error)) from None
 
     structure = get("")
+    if query == "summary":
+        closure = structure.get("closure")
+        if closure and structure.get("stale"):
+            closure = {**closure, "stale": structure["stale"]}
+        return {"summary": _summary(structure, path, get, ident), "closure": closure}
     if ref is None:
         if not structure.get("closure"):
             raise EngineError(f"{source} holds no build closure")
@@ -684,6 +692,74 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
                       "key": prototype["key"], "kind": hit.kind, "ordinal": hit.ordinal, "name": hit.name,
                       **refs.placed_facts(facts, matrix)})
     return found[0] if len(found) == 1 else found
+
+
+def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], Any], ident: str) -> dict[str, Any]:
+    """What a served document holds, at a glance (``cadgen inspect DOC``): its name and id; its
+    state -- a model's (``live``, ``held``, ...: ``ModelDocuments.state``), where the engine holds
+    it, whether its cache has it and whether its code changed since (``stale``), or ``file`` for a
+    file's document; its parts (occurrences, distinct parts, the root's name); its bounds and volume,
+    each part's (``.../volume``, measured by the engine) placed where its occurrences stand; its
+    materials and their masses, where any part has one; its joints, mechanism states, configuration
+    sequences and animations; and a model's declared files. Nothing is built."""
+    from cadgen.engine.refs import placed_facts
+
+    model = None
+    if not isinstance(path, Path):
+        from cadgen.engine.client import request
+
+        answer = request({"op": "model_info", "id": str(path)}, start=False) or {}
+        model = answer.get("model")
+    if model is not None:
+        state = {"state": model.get("state"), "held": model.get("held"), "cached": bool(model.get("cached")),
+                 "stale": (model.get("stale") or structure.get("stale") or {}).get("text"),
+                 "builtAt": model.get("builtAt"), "script": (model.get("source") or {}).get("script")}
+    else:
+        state = {"state": "file", "path": str(path) if isinstance(path, Path) else structure.get("path")}
+    prototypes, instances = structure.get("prototypes") or [], structure.get("instances") or []
+    measured: dict[str, dict[str, Any]] = {}
+    for prototype in prototypes:
+        measured[prototype["key"]] = get(f"/part/{prototype['key']}/volume")
+    low, high, volume = [math.inf] * 3, [-math.inf] * 3, 0.0
+    materials: dict[str, dict[str, Any]] = {}
+    unweighed: list[str] = []
+    for instance in instances:
+        prototype = prototypes[instance["prototype"]]
+        facts = measured[prototype["key"]]
+        volume += facts.get("volume") or 0.0
+        if facts.get("box"):
+            box = placed_facts({"box": facts["box"]}, instance["matrix"])["box"]
+            low = [min(a, b) for a, b in zip(low, box["min"])]
+            high = [max(a, b) for a, b in zip(high, box["max"])]
+        material = prototype.get("material")
+        if not material:
+            unweighed.append(instance["path"])
+            continue
+        row = materials.setdefault(material["name"], {"name": material["name"], "density": material.get("density"),
+                                                      "parts": [], "mass": None})
+        row["parts"].append(instance["path"])
+        if material.get("density") is not None:
+            row["mass"] = (row["mass"] or 0.0) + (facts.get("volume") or 0.0) * 1e-9 * material["density"]
+    bounds = None if low[0] == math.inf else {"min": low, "max": high, "size": [b - a for a, b in zip(low, high)]}
+    kinematics = structure.get("kinematics") or {}
+    built = kinematics.get("asBuilt") or {}
+    joints = [{"name": pair.get("label"), "type": pair.get("type"), "range": pair.get("limits"),
+               "units": pair.get("units"), "asBuilt": built.get(pair.get("label"))}
+              for pair in kinematics.get("pairs") or []]
+    weighed = [row["mass"] for row in materials.values() if row["mass"] is not None]
+    return {
+        "name": structure.get("name"), "id": ident, "state": state,
+        "parts": {"occurrences": len(instances), "distinct": len(prototypes), "root": (structure.get("tree") or {}).get("name")},
+        "bounds": bounds, "volume": volume,
+        "materials": list(materials.values()), "mass": sum(weighed) if weighed else None,
+        "unweighed": unweighed if materials else [],
+        "joints": joints,
+        "states": [{"name": name, "values": values} for name, values in (kinematics.get("configurations") or {}).items()],
+        "sequences": [{"name": name, "duration": motion.get("duration")}
+                      for name, motion in (kinematics.get("motions") or {}).items()],
+        "animations": structure.get("animations") or [],
+        "files": list((model or {}).get("files") or []),
+    }
 
 
 def status() -> dict[str, Any] | None:

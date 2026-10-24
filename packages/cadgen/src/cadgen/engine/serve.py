@@ -109,6 +109,8 @@ POSE_BODY_LIMIT = 64 << 10
 POSES_HELD = 1024
 # A page remains connected between successive version reads, including a suspended poll.
 LIVE = 90.0
+# How long a browser opened on a document's page counts as showing it before the page reads it.
+PAGE_OPENING = 30.0
 # A file this engine did not write, read by a reader process (the module docstring).
 FOREIGN = (".step", ".stp")
 # How many STEP reads are held by their bytes: a read a served document holds stays in memory
@@ -663,6 +665,9 @@ class Server:
         self.watch_lock = threading.Lock()
         self.watchers: dict[str, int] = {}
         self.synced: dict[str, float] = {}
+        # Per document, when a browser page last read its version, and when one was opened on it.
+        self.paged: dict[str, float] = {}
+        self.opening: dict[str, float] = {}
         self.generation = 0
         self.topologies: "OrderedDict[str, Any]" = OrderedDict()
         self.topology_lock = threading.Lock()
@@ -1251,12 +1256,15 @@ class Server:
         with self.load_lock:
             return dict(self.builds.get(ident) or {"building": None, "failed": None, "progress": 0})
 
-    def wait(self, ident: str, after: str | None, seconds: float, progress: int | None = None) -> Served:
+    def wait(self, ident: str, after: str | None, seconds: float, progress: int | None = None, *,
+             page: bool = False) -> Served:
         """The document once its version is not ``after``, or its build's ``progress`` count is
-        not ``progress`` (when given), or after ``seconds``."""
+        not ``progress`` (when given), or after ``seconds``. ``page``: a browser page asks."""
         with self.watch_lock:
             self.watchers[ident] = self.watchers.get(ident, 0) + 1
             self.synced[ident] = time.monotonic()
+            if page:
+                self.paged[ident] = self.synced[ident]
         try:
             return self._wait(ident, after, seconds, progress)
         finally:
@@ -1267,7 +1275,33 @@ class Server:
                 else:
                     del self.watchers[ident]
                 self.synced[ident] = time.monotonic()
+                if page:
+                    self.paged[ident] = self.synced[ident]
             self.touch()
+
+    def page_opening(self, document: str) -> None:
+        """A browser was opened on ``document``'s page (its id or path): it counts as shown there
+        for ``PAGE_OPENING`` seconds, until the page reads it."""
+        try:
+            ident = document_id(document)
+        except (OSError, ValueError):
+            return
+        with self.watch_lock:
+            self.opening[ident] = time.monotonic()
+
+    def in_page(self, document: str) -> bool:
+        """Whether a browser page shows ``document`` (its id or path) now: it read the document's
+        version within ``LIVE`` seconds, or a browser was opened on it within ``PAGE_OPENING``. An MCP
+        app's view is not a browser page (``Server.sync``)."""
+        try:
+            ident = document_id(document)
+        except (OSError, ValueError):
+            return False
+        now = time.monotonic()
+        with self.watch_lock:
+            self.paged = {key: at for key, at in self.paged.items() if now - at < LIVE}
+            self.opening = {key: at for key, at in self.opening.items() if now - at < PAGE_OPENING}
+            return ident in self.paged or ident in self.opening
 
     def sync(self, document: str) -> None:
         """A connected app's heartbeat (its document's id, path or address), even when its
@@ -1423,7 +1457,8 @@ class Server:
                         raise ValueError("wait is a number of seconds")
                     seconds = min(max(seconds, 0.0), WAIT_LIMIT)
                     given = (query.get("progress") or [""])[0]
-                    doc = self.wait(ident, after, seconds, int(given) if given.isdigit() else None)
+                    doc = self.wait(ident, after, seconds, int(given) if given.isdigit() else None,
+                                    page=bool(getattr(handler, "page", False)))
                     build = self.build_of(ident)
                     return self.json(handler, {"version": doc.version, "patch": doc.patch, **build})
                 doc = self.document(ident)

@@ -494,7 +494,11 @@ class Topology:
 
     def volume(self) -> dict[str, Any]:
         """The part's volume in cubic millimetres, of its solids (``BRepGProp``), and how many it
-        has: a part of faces or wires alone has none, and no volume to weigh."""
+        has: a part of faces or wires alone has none, and no volume to weigh. With them its box in
+        its own frame (``{"min", "max"}``, None for an empty part), which ``cadgen inspect``
+        places where each occurrence stands for the document's bounds."""
+        from OCP.Bnd import Bnd_Box
+        from OCP.BRepBndLib import BRepBndLib
         from OCP.BRepGProp import BRepGProp
         from OCP.GProp import GProp_GProps
         from OCP.TopAbs import TopAbs_SOLID
@@ -508,7 +512,11 @@ class Topology:
             props = GProp_GProps()
             BRepGProp.VolumeProperties_s(solids.FindKey(at), props)
             total += abs(props.Mass())
-        return {"volume": total, "solids": solids.Extent()}
+        box = Bnd_Box()
+        BRepBndLib.AddOptimal_s(self.shape, box, True, False)
+        bounds = list(box.Get()) if not box.IsVoid() else None
+        return {"volume": total, "solids": solids.Extent(),
+                "box": None if bounds is None else {"min": bounds[:3], "max": bounds[3:]}}
 
 
 # --- extraction ----------------------------------------------------------------------------

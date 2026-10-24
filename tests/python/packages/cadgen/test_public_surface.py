@@ -72,7 +72,7 @@ ADAPTERS: dict[str, frozenset[str]] = {
     "export": frozenset({"source", "destinations", "json"}),
     "snapshot": SNAPSHOT,
     "serve": frozenset({"document", "port", "three"}),
-    "inspect": frozenset({"document", "ref", "query"}),
+    "inspect": frozenset({"document", "ref", "query", "json"}),
     "status": frozenset({"json"}),
     "stop": frozenset({"json"}),
     "server": frozenset(),

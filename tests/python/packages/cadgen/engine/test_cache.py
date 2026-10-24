@@ -180,10 +180,11 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(self.cli("stop").returncode, 0)
         (self.project / "cube.ran").unlink()
 
-        inspected = self.cli("inspect", ident)  # starts the engine afresh
+        inspected = self.cli("inspect", ident, "--json")  # starts the engine afresh
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
-        self.assertEqual(json.loads(inspected.stdout)["source"]["function"], "cube")
-        self.assertNotIn("stale", json.loads(inspected.stdout))
+        self.assertEqual(json.loads(inspected.stdout)["closure"]["source"]["function"], "cube")
+        self.assertNotIn("stale", json.loads(inspected.stdout)["closure"])
+        self.assertEqual(json.loads(inspected.stdout)["summary"]["state"]["state"], "held")
         cold = {kind: self.folder / f"cold.{kind}" for kind in ("xbf", "glb")}
         exported = self.cli("export", ident, *map(str, cold.values()))
         self.assertEqual(exported.returncode, 0, exported.stderr)
@@ -216,6 +217,8 @@ class CacheTest(unittest.TestCase):
         inspected = self.cli("inspect", ident)
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
         self.assertIn(f"the code changed since this was built (cube.py changed); run `{command}`", inspected.stderr)
+        self.assertIn("the code changed since this was built", inspected.stdout.splitlines()[1])
+        inspected = self.cli("inspect", ident, "--query", "closure")
         self.assertEqual(json.loads(inspected.stdout)["stale"]["rebuild"], command)
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.engine)}):
             self.assertIn("the code changed since this was built", _say_not_held(ident))
@@ -327,7 +330,7 @@ class CacheTest(unittest.TestCase):
             seen["state"] = self.ask({"op": "state", "id": ident})
             out = self.folder / f"{tag}.xbf"
             seen["export"] = (self.cli("export", ident, str(out)).returncode, out.read_bytes())
-            seen["inspect"] = self.cli("inspect", ident).stdout
+            seen["inspect"] = self.cli("inspect", ident, "--query", "closure").stdout
             listed = self.ask({"op": "status"})
             seen["models"] = [(row["state"], row.get("held")) for row in listed["models"]]
             failures = listed["cache"]["failures"]

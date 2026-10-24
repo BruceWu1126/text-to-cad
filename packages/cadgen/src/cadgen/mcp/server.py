@@ -30,9 +30,14 @@ Hosts present views in one of three ways, told apart at initialize:
   ``cad_show`` returned: one session may serve many chats, and no host says which.
 - *Text* (a client that renders no MCP Apps, so does not advertise the
   ``io.modelcontextprotocol/ui`` extension: Grok, Zed, Gemini CLI, Claude Code in a
-  terminal, ...). ``cad_show`` shows models, and it answers with a link to the
-  model in the CAD Viewer (``browser.py``), the one this machine runs, started
-  if none is; nothing opens a browser.
+  terminal, ...). ``cad_show`` opens the model's page in the CAD Viewer
+  (``browser.py``), the one this machine runs, started if none is, in the person's
+  browser -- unless a browser page reads that document already -- and answers with its URL.
+
+Codex declares nothing at initialize, headless or not: ``codex exec`` greets the server as the
+Codex app does (``codex-mcp-client``) and renders no app. Each of its calls says so instead, in its
+turn's metadata (``x-codex-turn-metadata.turn_trigger: exec``): such a call's ``cad_open`` and
+``cad_show`` do what a text client's ``cad_show`` does, and claim no tab.
 
 ``CADGEN_MCP_PRESENTATION=inline|text`` settles a non-Codex client that renders MCP
 Apps without advertising them (the reference host, ``basic-host``, is one).
@@ -82,6 +87,10 @@ FORMATS = "STEP, XBF, STL, GLB, 3MF, DXF, URDF, SDF"
 _UI_EXTENSION = "io.modelcontextprotocol/ui"
 _TABS_EXTENSION = "dev.texttocad/tabs"
 _TAB_ENTRYPOINTS = frozenset({"global", "thread", "file"})
+# Where a Codex call says its turn renders no app: ``codex exec`` (and its ``resume``) runs the turn
+# headless, though its initialize is the Codex app's (see the module docstring).
+_CODEX_TURN = "x-codex-turn-metadata"
+_HEADLESS_TRIGGERS = frozenset({"exec"})
 # How long a call that reads a view waits for one the agent just opened (a tab from cad_open, a card
 # from an inline cad_show) to sync for the first time: the host loads the page, then the page its
 # model. An agent reads a view right after it opened it.
@@ -109,8 +118,9 @@ INLINE_INSTRUCTIONS = (
 
 TEXT_INSTRUCTIONS = (
     f"CAD opens local CAD models ({FORMATS}) in the CAD Viewer in the user's browser: "
-    "this app cannot show CAD views itself. Call cad_show with a model's absolute path to get its link and share it. "
-    "The Viewer refreshes when the file changes, so share a model's link once, not after every rebuild."
+    "this app cannot show CAD views itself. Call cad_show with a model's absolute path: it opens the model's page "
+    "in the user's browser, or says it is open already, and answers with its URL; give the user that URL. "
+    "The page follows the model, so show a model once, not after every rebuild."
 )
 
 _ICON_SVG = (
@@ -219,6 +229,12 @@ def _presentation(client: dict[str, Any], offered: dict[str, Any]) -> str:
     return "inline" if isinstance(ui, dict) and MIME in (ui.get("mimeTypes") or []) else "text"
 
 
+def _headless(meta: dict[str, Any]) -> bool:
+    """Whether a Codex call comes from a turn that renders no app (``codex exec``)."""
+    turn = meta.get(_CODEX_TURN) if isinstance(meta, dict) else None
+    return isinstance(turn, dict) and turn.get("turn_trigger") in _HEADLESS_TRIGGERS
+
+
 def _text(text: str, structured: dict[str, Any] | None = None, *, error: bool = False) -> dict[str, Any]:
     result: dict[str, Any] = {"content": [{"type": "text", "text": text}]}
     if structured is not None:
@@ -254,7 +270,8 @@ def local_path(value: str, *, windows: bool = os.name == "nt") -> str:
 
 class Server:
     def __init__(self, *, page: AppPage | None = None, recents=None, tunnel=None, viewer_url=None, browser_opener=None,
-                 sidebar_views=None, analytics=None, sync_document=lambda path: None, warm=lambda: None) -> None:
+                 sidebar_views=None, analytics=None, sync_document=lambda path: None, warm=lambda: None,
+                 in_browser=lambda model: False, browser_opened=lambda model: None) -> None:
         self.page = page or AppPage()
         self.sync_document = sync_document
         self.warm = warm  # the engine's meshing pool, started when a view is launched (``Server.warm``)
@@ -270,6 +287,10 @@ class Server:
         self.text = False
         self._viewer_url = viewer_url
         self._browser_opener = browser_opener  # what opens a page's redirect file: ``webbrowser.open``
+        # Whether a browser page reads a document now (the engine's ``Server.in_page``), and telling
+        # the engine one is opening (``Server.page_opening``): a host with no app opens each once.
+        self._in_browser = in_browser
+        self._browser_opened = browser_opened
         self._order = itertools.count(1)
         self._analytics = analytics
         self._app_token = secrets.token_urlsafe(32)
@@ -455,9 +476,10 @@ class Server:
         """No page to open or read: cad_show hands over a link to the model in the CAD Viewer."""
         return [
             {"name": "cad_show", "title": "Show in CAD", "icons": [ICON], "annotations": _READ_ONLY,
-             "description": (f"Get a link that opens a local CAD model ({FORMATS}) in the CAD "
-                             "Viewer in the user's browser; this app cannot show CAD views itself. The Viewer refreshes "
-                             "when the file changes, so share a model's link once, not after every rebuild."),
+             "description": (f"Open a local CAD model ({FORMATS}) in the CAD Viewer in the user's browser, "
+                             "unless its page is open there already; this app cannot show CAD views itself. Answers "
+                             "with the page's URL: give it to the user. The page refreshes when the model changes, "
+                             "so show a model once, not after every rebuild."),
              "inputSchema": _object({"path": _PATH}, ["path"])},
             _HTTP_TOOL,
         ]
@@ -600,8 +622,14 @@ class Server:
         # The host's own file tree is this surface's navigation: the page shows the file alone.
         return _text(f"{os.path.basename(model)} is open in CAD.", {"launch": self._launch(model, surface="file")})
 
+    def _no_app(self, context: RequestContext) -> bool:
+        """Whether this call's host renders no app: a text client, or a headless Codex turn."""
+        return self.text or (self.tabs and _headless(context.meta))
+
     def _tool_cad_open(self, arguments, context):
         model = self._model_path(arguments.get("path"))
+        if self._no_app(context):
+            return self._show_in_browser(model)
         launch = self._launch(model, surface="agent")
         self._opened = time.monotonic()
         return _text(f"{model} is open in a new CAD tab. From now on, use cad_show to show models in it.", {"launch": launch})
@@ -637,7 +665,7 @@ class Server:
         return shown
 
     def _show(self, arguments, context):
-        if self.text:
+        if self._no_app(context):
             return self._show_in_browser(self._model_path(arguments.get("path")))
         if not self.tabs:
             launch = self._mounted(self._launch(self._model_path(arguments.get("path")), surface="inline"))
@@ -723,15 +751,25 @@ class Server:
         if cannot is not None:
             return refused(503, cannot)
         try:
-            import webbrowser
-
-            browser_open.open_page(self._browser_url(model or None), opener=self._browser_opener or webbrowser.open)
+            self._open_page(self._browser_url(model or None))
         except (ViewerUnavailable, browser_open.CannotOpen) as failure:
             return refused(503, str(failure))
         return _result(200, json_type, b'{"opened":true}')
 
+    def _open_page(self, url: str) -> None:
+        """Open ``url`` in the person's browser through an owner-only redirect file
+        (``browser_open``); ``CannotOpen`` in words where no browser can be opened here."""
+        import webbrowser
+
+        from cadgen.viewer import browser_open
+
+        browser_open.open_page(url, opener=self._browser_opener or webbrowser.open)
+
     def _show_in_browser(self, model: str) -> dict[str, Any]:
-        """The model's link in the CAD Viewer this machine runs, started if none is."""
+        """A host with no app: the model's page in the CAD Viewer this machine runs, started if none
+        is, opened in the person's browser unless a browser page reads that document already; the
+        answer says which, with the page's URL for the agent to give the person."""
+        from cadgen.viewer.browser_open import CannotOpen
         from .browser import ViewerUnavailable
 
         self._model = model
@@ -742,10 +780,21 @@ class Server:
                              f"`cadgen viewer --host 127.0.0.1 --json {model}` and open the url it prints.",
                              "no_viewer") from failure
         self.warm()  # the browser page's first document meshes on a pool already starting
+        name = os.path.basename(model)
+        if self._in_browser(model):
+            said = f"{name} is already open in your browser at {link}; nothing was opened."
+        else:
+            try:
+                self._open_page(link)
+            except CannotOpen as failure:
+                said = f"No browser can be opened from here ({failure}); {name}'s page is {link}."
+            else:
+                self._browser_opened(model)
+                said = f"{name} opened in your browser at {link}; the page follows the model."
         # Text alone: an app that shows a result's structured content shows it in place of the text
         # (Claude Code does), and the agent would get neither this guidance nor the update line.
-        return self._told(_text(f"This app cannot show CAD views, so {os.path.basename(model)} is in the CAD Viewer: {link}\n"
-                                "The Viewer refreshes when the file changes: share this link once, not after every rebuild."))
+        return self._told(_text(f"{said}\nThis app shows no CAD view itself: give the user this URL. The page refreshes "
+                                "when the model changes, so show a model once, not after every rebuild."))
 
     def _told(self, result: dict[str, Any]) -> dict[str, Any]:
         """A text-only app has no card for the update notice (``cadgen/updates.py``): this process's

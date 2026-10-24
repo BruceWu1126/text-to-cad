@@ -8,7 +8,7 @@ ordinary Python scripts call decorated models explicitly.
         [--size-profile P] [--json]
     cadgen serve DOC [--port N] [--three DIR]
     cadgen status [--json] | stop [--json] | server
-    cadgen inspect DOC [REF]                           a document's build closure, or what a ref names (``refs``)
+    cadgen inspect DOC [REF]                           what a document holds and its build closure, or what a ref names (``refs``)
 
 SRC and DOC are an on-disk CAD file's path or a document's id (``ids``): a model's id is what
 ``python SCRIPT.py`` prints for it. A script is never a source: no verb imports or builds one.
@@ -62,15 +62,20 @@ def _no_arguments(_parser: argparse.ArgumentParser) -> None:
 
 
 def _inspect_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--query", choices=("closure", "geometry", "build"),
-                        help="inspect closure, geometry (requires REF), or build metadata; never builds a model")
+    parser.add_argument("--query", choices=("summary", "closure", "geometry", "build"),
+                        help="inspect a summary and the closure (the default without REF), the closure alone, "
+                             "geometry (requires REF), or build metadata; never builds a model")
+    parser.add_argument("--json", action="store_true",
+                        help="without REF, the summary and the closure as one JSON object (a REF's answer is JSON)")
     parser.add_argument("document", help="an .xbf, a STEP, or a document id")
     parser.add_argument("ref", nargs="?", help="[FILE#][OWNER/]ELEMENT or [FILE#]OWNER (cadgen.engine.refs): OWNER a "
                                                "part's or an assembly's label, or its occurrence path (hand/finger.2); "
                                                "ELEMENT an element name (f:..., e:..., v:...) or face N (edge, vertex). "
                                                "An element answers what the kernel measures of it, placed where its "
                                                "occurrence stands, and what made it; a part or an assembly its volume "
-                                               "and mass. Without it: the build closure")
+                                               "and mass. Without it: what the document holds (its state, parts, "
+                                               "bounds, volume, materials, joints, states, sequences, animations and "
+                                               "declared files), then its build closure")
 
 
 def _snapshot_arguments(parser: argparse.ArgumentParser) -> None:
@@ -310,17 +315,100 @@ def inspect_main(argv: list[str] | None = None, prog: str = "cadgen inspect") ->
 def _inspect(args: argparse.Namespace, prog: str) -> int:
     from cadgen.engine import api
 
+    query = args.query or (None if args.ref is not None or "#" in str(args.document) else "summary")
     try:
-        found = api.inspect(args.document, args.ref, query=args.query)
+        found = api.inspect(args.document, args.ref, query=query)
     except ValueError as error:
         raise Failed(str(error), 2) from None
     except api.EngineError as error:
         raise Failed(str(error)) from None
-    print(json.dumps(found, indent=2))
+    if query == "summary" and not args.json:
+        print(summary_text(found["summary"]))
+        if found["closure"] is None:
+            print("closure     none: no cadgen build wrote this document")
+        else:
+            print("closure")
+            print(json.dumps(found["closure"], indent=2))
+    else:
+        print(json.dumps(found, indent=2))
+    if query == "summary":
+        found = found["closure"] or {}
     stale = found.get("stale") or ((found.get("live") or {}).get("stale")) if isinstance(found, dict) else None
     if stale:  # the last built state, said beside the answer: nothing reran
         print(stale["text"], file=sys.stderr)
     return 0
+
+
+def _number(value: float) -> str:
+    """A measure at a glance: four significant figures below a thousand, whole above, never an exponent."""
+    return f"{value:.4g}" if abs(value) < 1000 else f"{value:,.0f}"
+
+
+def summary_text(summary: dict[str, Any]) -> str:
+    """``cadgen inspect DOC``'s first screen (``api._summary``): a line per fact the document
+    holds, its lists one item per line under it; a fact it has none of says so."""
+    import time
+
+    lines = [f"{summary['name']}  {summary['id']}"]
+    state = summary["state"]
+    if state["state"] == "file":
+        said = f"file {state.get('path')}"
+    else:
+        said = state["state"]
+        if state.get("held"):
+            said += f" (in {state['held']})"
+        said += ", cached" if state.get("cached") else ", not cached"
+        if state.get("builtAt"):
+            said += f", built {_span(time.time() - state['builtAt'])} ago"
+        said += f"; stale: {state['stale']}" if state.get("stale") else ""
+    lines.append(f"state       {said}")
+    parts = summary["parts"]
+    lines.append(f"parts       {parts['occurrences']} in {parts['root']}"
+                 + (f" ({parts['distinct']} distinct)" if parts["distinct"] != parts["occurrences"] else ""))
+    bounds = summary.get("bounds")
+    if bounds:
+        size = " x ".join(_number(value) for value in bounds["size"])
+        corner = ", ".join(_number(value) for value in bounds["min"])
+        lines.append(f"bounds      {size} mm, from ({corner})")
+    else:
+        lines.append("bounds      none: no geometry")
+    lines.append(f"volume      {_number(summary['volume'])} mm^3")
+    if summary["materials"]:
+        mass = summary.get("mass")
+        lines.append("materials" + (f"   {_number(mass)} kg in all" if mass is not None else ""))
+        for row in summary["materials"]:
+            weight = f"{_number(row['mass'])} kg" if row["mass"] is not None else "no density"
+            lines.append(f"  {row['name']}: {weight}, {', '.join(row['parts'])}")
+        if summary["unweighed"]:
+            lines.append(f"  no material: {', '.join(summary['unweighed'])}")
+    else:
+        lines.append("materials   none set")
+
+    def listed(title: str, rows: list[str]) -> None:
+        if not rows:
+            lines.append(f"{title:<12}none")
+            return
+        lines.append(title)
+        lines.extend(f"  {row}" for row in rows)
+
+    def joint(row: dict[str, Any]) -> str:
+        units = row.get("units") or []
+        ranges = []
+        for at, limits in enumerate(row.get("range") or []):
+            unit = units[at] if at < len(units) else ""
+            ranges.append("free" if not limits else f"{_number(limits[0])} to {_number(limits[1])} {unit}".rstrip())
+        built = row.get("asBuilt")
+        as_built = "" if built is None else f", as built {built if isinstance(built, (list, dict)) else _number(built)}"
+        return f"{row['name']}  {row['type']}  {'; '.join(ranges) or 'no range'}{as_built}"
+
+    listed("joints", [joint(row) for row in summary["joints"]])
+    listed("states", [f"{row['name']}  " + ", ".join(f"{name} {_number(value) if isinstance(value, (int, float)) else value}"
+                                                       for name, value in row["values"].items())
+                      for row in summary["states"]])
+    listed("sequences", [f"{row['name']}  {_number(row['duration'])} s" for row in summary["sequences"]])
+    listed("animations", [f"{row['name']}  {_number(row['duration'])} s" for row in summary["animations"]])
+    listed("files", summary["files"])
+    return "\n".join(lines)
 
 
 def _server(_args: argparse.Namespace, _prog: str) -> int:
