@@ -94,6 +94,8 @@ class EnginePortTest(unittest.TestCase):
         holder = socket.socket()
         self.addCleanup(holder.close)
         if not listening(3245):
+            if os.name != "nt":  # past the TIME_WAIT an engine that was just there leaves
+                holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             holder.bind(("127.0.0.1", 3245))  # a plain listener: another program's
             holder.listen(1)
         first = self.launch()

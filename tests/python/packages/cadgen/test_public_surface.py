@@ -75,7 +75,7 @@ ADAPTERS: dict[str, frozenset[str]] = {
     "inspect": frozenset({"document", "ref", "query", "json"}),
     "status": frozenset({"json"}),
     "stop": frozenset({"json"}),
-    "server": frozenset(),
+    "server": frozenset({"port", "rotate_token"}),
 }
 
 # Commands that own their parser outright and mirror no function.

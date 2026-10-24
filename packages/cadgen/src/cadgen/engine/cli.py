@@ -576,13 +576,16 @@ def _gb(megabytes: Any) -> str:
 
 
 def _port(serving: dict[str, Any]) -> str:
-    """Where the served port came from, in words: the default, or why it is another."""
+    """Where the served port came from, in words -- the default, or why it is another -- as the
+    serving line's parenthesis; nothing for an answer that does not say."""
     port, default = serving.get("port"), serving.get("defaultPort")
+    if port is None or default is None:
+        return ""
     if port == default:
-        return "the default port"
-    return {"--port": "the port --port named", "CADGEN_ENGINE_PORT": "the port CADGEN_ENGINE_PORT names",
+        return " (the default port)"
+    return " (" + {"--port": "the port --port named", "CADGEN_ENGINE_PORT": "the port CADGEN_ENGINE_PORT names",
             "remembered": f"not the default {default}: the port this installation took when it was held, kept"
-            }.get(serving.get("portSource") or "", f"not the default {default}")
+            }.get(serving.get("portSource") or "", f"not the default {default}") + ")"
 
 
 def status_text(answer: dict[str, Any]) -> str:
@@ -630,7 +633,7 @@ def status_text(answer: dict[str, Any]) -> str:
         renders = len(answer.get("renders") or [])
         memory = serving.get("memory") or {}
         held = (memory.get("documents") or 0) + (memory.get("meshes") or 0)
-        lines.append(f"serving {serving['url']} ({_port(serving)}): {opened} document{'' if opened == 1 else 's'} opened by a page or a command"
+        lines.append(f"serving {serving['url']}{_port(serving)}: {opened} document{'' if opened == 1 else 's'} opened by a page or a command"
                      + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else "")
                      + (f" · {_gb(held / 2**20)} of {_gb(memory['budget'] / 2**20)} held" if memory.get("budget") else ""))
     cache = answer.get("cache") or {}
