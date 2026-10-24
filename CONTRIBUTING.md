@@ -139,7 +139,8 @@ Every build, export and snapshot runs in cadgen's engine server, a daemon: one p
 installation (the interpreter and the engine folder it runs), started by the first
 command that needs it and gone after an idle hour, so a worktree's checkout gets a
 daemon of its own. Its door, a named pipe (on Windows, a port file), and lock live in `cadgen-engine`
-in `$XDG_RUNTIME_DIR`, else in a per-user `$TMPDIR` (macOS's), else in `/tmp/cadgen-<uid>`
+in `$XDG_RUNTIME_DIR`, else in the per-user temporary folder (on macOS the system's
+`/var/folders/...` one, whatever `$TMPDIR` a sandbox sets; else a per-user `$TMPDIR`), else in `/tmp/cadgen-<uid>`
 (Windows: the temporary folder); `CADGEN_ENGINE_DIR` moves them, which gives a
 test, a benchmark or an experiment a daemon to itself. `cadgen status` lists its
 workers, one per model script, each with its memo, and what each is building;

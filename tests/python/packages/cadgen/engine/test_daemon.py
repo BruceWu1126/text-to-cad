@@ -497,6 +497,14 @@ class DefaultEngineFolderTest(unittest.TestCase):
         self.system = system
         self.assertEqual(self.folder(), Path(os.path.realpath(os.path.join(system, "cadgen-engine"))))
 
+    @unittest.skipUnless(sys.platform == "darwin", "macOS names its per-user temporary folder")
+    def test_macos_keeps_the_system_folder_when_a_sandbox_sets_its_own_tmpdir(self) -> None:
+        from cadgen.engine import daemon
+
+        self.system = daemon._darwin_temp()
+        self.assertEqual(self.folder(TMPDIR=str(self.private("sandbox"))),
+                         Path(os.path.realpath(os.path.join(self.system, "cadgen-engine"))))
+
     def test_a_temporary_folder_another_user_owns_is_passed_over(self) -> None:
         from unittest import mock
 

@@ -137,8 +137,10 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
    and the exports its decorators name, nothing beside them -- and the operating
    system's coordination for its warm process: its door (a named pipe; on Windows a port file), a
    lock and the pipes of the connections being opened (**The door**), in a folder only the user
-   can make (`daemon.default_state_dir`): `cadgen-engine` in `$XDG_RUNTIME_DIR`, else in a
-   `$TMPDIR` that is the user's own (macOS's), else `/tmp/cadgen-<uid>`; on Windows in the
+   can make (`daemon.default_state_dir`): `cadgen-engine` in `$XDG_RUNTIME_DIR`, else in the
+   user's own temporary folder (on macOS the one the system names, `/var/folders/...`, whatever
+   `$TMPDIR` a sandbox sets, so a sandboxed client finds the engine started outside; elsewhere
+   `$TMPDIR`), else `/tmp/cadgen-<uid>`; on Windows in the
    temporary folder -- and, in the user's state folder its host names,
    the registry: one record per document it has built, been handed or a page opened, pointing at
    its script or file (**Document lifetime**); never geometry and never source. In the cache folder its host names (the platform's: `~/.cache/cadgen`) it
