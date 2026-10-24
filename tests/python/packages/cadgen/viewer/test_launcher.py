@@ -119,6 +119,14 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(status, 302)
         self.assertIn('HttpOnly', headers['set-cookie'])
         self.assertNotIn(launch['token'], headers['location'])
+        # Arrived from another origin (the browser opened on the launcher's redirect file): the
+        # cookie, and a page of this origin that navigates on, so the browser sends the cookie.
+        status, headers, body = self.get(launch, urlsplit(launch['url']).path+'?token='+launch['token'],
+                                         token=False, headers={'Sec-Fetch-Site': 'cross-site'})
+        self.assertEqual(status, 200)
+        self.assertIn(launch['token'], headers['set-cookie'])
+        self.assertIn(b'http-equiv="refresh" content="0;url=/"', body)
+        self.assertNotIn(launch['token'].encode(), body)
         # A cookie from an engine that held this port before (restarted with --port) never
         # outranks the launch URL's token, and a token that is not ASCII is refused, not a crash.
         stale = {'Cookie': f"cadgen-engine-{launch['port']}=stale"}
