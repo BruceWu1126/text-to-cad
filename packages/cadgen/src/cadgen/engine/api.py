@@ -598,7 +598,7 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
     measures of it -- its points placed where its occurrence stands, in the document's frame --
     with its canonical ``ref``, its occurrence's ``path`` and ``made_by``; a part or an assembly
     its volume and its mass: each part's volume times its material's density, summed
-    (``cli.weighed``). One answer per selector (a list for several). Without ``ref``, the build
+    (``cli.weighed``), its world bounds and a part's placement (``_placed``). One answer per selector (a list for several). Without ``ref``, the build
     closure the xbf holds (``previous``): its engine, libraries, source, modules, inputs and
     key, read from the file alone. A ref that names nothing, or several things, is refused by
     name (``refs.RefError``). No query builds a missing model or writes its declared
@@ -678,12 +678,14 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
         return {**structure["closure"], "stale": structure["stale"]} if structure.get("stale") else structure["closure"]
     found: list[Facts] = []
     volumes: dict[str, float] = {}
+    boxes: dict[str, Any] = {}
     for hit in refs.resolve_structure(structure, ref, path):
         if hit.kind is None:
             for key in sorted({structure["prototypes"][node.payload["prototype"]]["key"] for node in hit.node.parts()}):
                 if key not in volumes:
-                    volumes[key] = get(f"/part/{key}/volume")["volume"]
-            found.append(weighed(structure, hit, volumes))
+                    measured = get(f"/part/{key}/volume")
+                    volumes[key], boxes[key] = measured["volume"], measured.get("box")
+            found.append({**weighed(structure, hit, volumes), **_placed(structure, hit, boxes)})
             continue
         prototype = structure["prototypes"][hit.node.payload["prototype"]]
         matrix = structure["instances"][hit.node.payload["instance"]]["matrix"]
@@ -695,6 +697,33 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
                       "key": prototype["key"], "kind": hit.kind, "ordinal": hit.ordinal, "name": hit.name,
                       **refs.placed_facts(facts, matrix)})
     return found[0] if len(found) == 1 else found
+
+
+def _placed(structure: dict[str, Any], hit: Any, boxes: dict[str, Any]) -> dict[str, Any]:
+    """Where the occurrence a ref names stands, in the document's frame: its world ``bounds`` (each
+    part's box, as the engine measured it, placed where its occurrence stands; None with no
+    geometry), and for a part its ``placement`` -- the origin and axes of its instance's matrix, as
+    the structure holds it (an assembly's own placement the structure does not hold). Nothing is built or measured again."""
+    from cadgen.engine.refs import placed_facts
+
+    def clean(values: list[float]) -> list[float]:
+        return [round(value, 9) + 0.0 for value in values]
+
+    low, high = [math.inf] * 3, [-math.inf] * 3
+    nodes = hit.node.parts()
+    for node in nodes:
+        instance = structure["instances"][node.payload["instance"]]
+        box = boxes.get(structure["prototypes"][instance["prototype"]]["key"])
+        if box:
+            box = placed_facts({"box": box}, instance["matrix"])["box"]
+            low = [min(a, b) for a, b in zip(low, box["min"])]
+            high = [max(a, b) for a, b in zip(high, box["max"])]
+    found: dict[str, Any] = {"bounds": None if low[0] == math.inf else
+                             {"min": clean(low), "max": clean(high), "size": clean([b - a for a, b in zip(low, high)])}}
+    if hit.node.part:
+        m = structure["instances"][hit.node.payload["instance"]]["matrix"]
+        found["placement"] = {"origin": clean(m[12:15]), "x": clean(m[0:3]), "y": clean(m[4:7]), "z": clean(m[8:11])}
+    return found
 
 
 def _no_closure(path: Path) -> str:

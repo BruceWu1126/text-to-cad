@@ -72,8 +72,8 @@ def _inspect_arguments(parser: argparse.ArgumentParser) -> None:
                                                "part's or an assembly's label, or its occurrence path (hand/finger.2); "
                                                "ELEMENT an element name (f:..., e:..., v:...) or face N (edge, vertex). "
                                                "An element answers what the kernel measures of it, placed where its "
-                                               "occurrence stands, and what made it; a part or an assembly its volume "
-                                               "and mass. Without it: what the document holds (its state, parts, "
+                                               "occurrence stands, and what made it; a part or an assembly its volume, "
+                                               "mass and world bounds, a part its placement. Without it: what the document holds (its state, parts, "
                                                "bounds, volume, materials, joints, states, sequences, animations and "
                                                "declared files), then its build closure")
 

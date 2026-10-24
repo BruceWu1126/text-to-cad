@@ -4,6 +4,7 @@ by every verb that reads it, and by ``status`` in a word; the verbs go on."""
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -142,6 +143,32 @@ class VerbsTest(Engine):
         self.assertEqual(summary.returncode, 0, summary.stderr)
         self.assertEqual(summary.stdout.splitlines()[-1], "closure     none: a STEP file carries none, only an .xbf "
                                                           "does (a model's document, inspected by its id, has one)")
+
+    def test_a_part_ref_answers_where_the_part_stands_and_its_world_bounds(self) -> None:
+        (self.folder / "arm.py").write_text(textwrap.dedent("""
+            import build123d as bd
+            from cadgen import model
+
+
+            @model
+            def arm():
+                part = bd.Pos(30, 5, 0) * bd.Rot(0, 0, 90) * bd.Box(4, 8, 2)
+                part.label = "link"
+                return bd.Compound(children=[part], label="arm")
+
+
+            if __name__ == "__main__":
+                arm()
+            """), encoding="utf-8")
+        done = self.run_("arm.py")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        ident = next(line.split()[1] for line in done.stdout.splitlines() if line.strip().startswith("id:"))
+        shown = self.cli("inspect", ident, "arm/link")
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        found = json.loads(shown.stdout)
+        self.assertEqual(found["placement"], {"origin": [30.0, 5.0, 0.0], "x": [0.0, 1.0, 0.0], "y": [-1.0, 0.0, 0.0],
+                                              "z": [0.0, 0.0, 1.0]})
+        self.assertEqual(found["bounds"], {"min": [26.0, 3.0, -1.0], "max": [34.0, 7.0, 1.0], "size": [8.0, 4.0, 2.0]})
 
 
 if __name__ == "__main__":

@@ -395,7 +395,8 @@ cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
                                              every picture a Quick Edit packet (or a job file) names
 cadgen serve DOC [--port N] [--three DIR]
 cadgen inspect DOC [REF] [--json]              what the document holds, then its build closure; with REF (**References**): an element's facts and
-                                             what made it, or a part's or an assembly's volume and mass
+                                             what made it, or a part's or an assembly's volume, mass and
+                                             world bounds (a part's placement too)
 cadgen status [--json] | stop [--json] | server
 ```
 
@@ -1928,7 +1929,9 @@ A ref resolves inside the engine, for `inspect` and the viewer, never in a model
 `cadgen inspect DOC REF` (`cadgen.inspect(source, ref)`) answers what it names, placed where its
 occurrence stands -- an element's kind, ordinal, name and canonical ref, the kernel's facts of it,
 and `made_by`, the feature and the function, file and line of the call that made it; a part's or
-an assembly's volume and mass. A model that changes what a person picked reads that answer and
+an assembly's volume and mass, and its world `bounds` (each part's measured box placed where it
+stands), with a part's `placement`: the origin and the x, y and z axes of its instance's matrix.
+Nothing is built or measured again for them. A model that changes what a person picked reads that answer and
 edits the code `made_by` names, or selects the element from the live shape with build123d
 (`base.faces().sort_by(bd.Axis.Z)[-1]`); a check reads the document with `read_xbf` and walks its
 tree by labels.
