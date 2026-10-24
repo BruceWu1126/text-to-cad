@@ -2,8 +2,8 @@
 configurations as AP242's interpolated configuration sequences -- waypoints, a sweep, or a
 function's samples, each segment's interpolation linear or synchronous -- read back whole,
 patched by a warm build to the cold build's bytes; the removed ``loop`` and ``spline`` refused by
-name; and a GLB export baking each motion into a finite glTF clip whose curves stay within the
-tolerance of forward kinematics."""
+name; and a GLB export baking each motion into a finite glTF clip whose LINEAR keys stay within the
+tolerance of forward kinematics, and the keys' of the bake."""
 
 from __future__ import annotations
 
@@ -21,8 +21,9 @@ from typing import Any
 
 import numpy as np
 
-from cadgen.engine import document, mechanism
 from cadgen.engine import build as engine_build
+from cadgen.engine import document, mechanism
+from cadgen.engine.export.keys import KEY_DEGREES, KEY_MM
 
 ARM = """
 import math
@@ -359,14 +360,16 @@ def _glb(path: Path) -> tuple[dict, Any]:
     return gltf, read
 
 
-def _cubic(times: np.ndarray, rows: np.ndarray, t: float) -> np.ndarray:
-    """glTF's CUBICSPLINE at ``t``, as a viewer evaluates it: rows of (in-tangent, value, out-tangent)."""
-    keys = rows.reshape(len(times), 3, -1)
+def _linear(times: np.ndarray, rows: np.ndarray, t: float, rotation: bool) -> np.ndarray:
+    """glTF's LINEAR at ``t``, as a viewer evaluates it: a lerp, a rotation's slerp."""
     at = max(0, min(int(np.searchsorted(times, t, side="right")) - 1, len(times) - 2))
-    span = times[at + 1] - times[at]
-    s = (t - times[at]) / span
-    return ((2 * s ** 3 - 3 * s ** 2 + 1) * keys[at, 1] + span * (s ** 3 - 2 * s ** 2 + s) * keys[at, 2]
-            + (-2 * s ** 3 + 3 * s ** 2) * keys[at + 1, 1] + span * (s ** 3 - s ** 2) * keys[at + 1, 0])
+    s = min(1.0, max(0.0, (t - times[at]) / (times[at + 1] - times[at])))
+    a, b = rows[at], rows[at + 1]
+    if not rotation:
+        return a + s * (b - a)
+    b = -b if float(np.dot(a, b)) < 0 else b
+    theta = math.acos(min(1.0, float(np.dot(a, b))))
+    return a if theta < 1e-9 else (math.sin((1 - s) * theta) * a + math.sin(s * theta) * b) / math.sin(theta)
 
 
 def _rotation(q: np.ndarray) -> np.ndarray:
@@ -376,10 +379,10 @@ def _rotation(q: np.ndarray) -> np.ndarray:
                      [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
 
 
-def deviations(glb: Path, structure: dict, between: int = 9) -> dict[str, tuple[int, float, float]]:
-    """Each clip of ``glb`` sampled at ``between - 1`` times inside every step between two of
-    its keys, against forward kinematics through the document's mechanism at those times:
-    its key count, its worst origin (mm) and its worst rotation (radians) apart."""
+def deviations(glb: Path, structure: dict, rate: int = 240) -> dict[str, tuple[int, float, float]]:
+    """Each clip of ``glb`` sampled ``rate`` times a second, against forward kinematics through
+    the document's mechanism at those times: its most keys on a channel, its worst origin (mm) and
+    its worst rotation (radians) apart."""
     gltf, read = _glb(glb)
     kinematics = structure["kinematics"]
     instances = {instance["path"]: at for at, instance in enumerate(structure["instances"])}
@@ -387,26 +390,29 @@ def deviations(glb: Path, structure: dict, between: int = 9) -> dict[str, tuple[
     found = {}
     for animation in gltf["animations"]:
         timeline = mechanism.Timeline(kinematics, animation["name"])
-        times = read(animation["samplers"][0]["input"])[:, 0]
+        duration = animation["extras"]["cadgen"]["duration"]
         truths = {}
         worst = [0.0, 0.0]
+        most = 0
         for channel in animation["channels"]:
             node = gltf["nodes"][channel["target"]["node"]]
             index = instances[f"{root}/{node['name']}"]
-            rows = read(animation["samplers"][channel["sampler"]]["output"])
-            for a, b in zip(times, times[1:]):
-                for step in range(1, between):
-                    t = float(a + (b - a) * step / between)
-                    if t not in truths:
-                        truths[t] = mechanism.posed_instances(structure, timeline.values(t))
-                    truth = np.array(truths[t][index]).reshape(4, 4).T
-                    got = _cubic(times, rows, t)
-                    if channel["target"]["path"] == "translation":
-                        worst[0] = max(worst[0], float(np.linalg.norm(got - truth[:3, 3])))
-                    else:
-                        turned = _rotation(got).T @ truth[:3, :3]
-                        worst[1] = max(worst[1], math.acos(max(-1.0, min(1.0, (np.trace(turned) - 1) / 2))))
-        found[animation["name"]] = (len(times), worst[0], worst[1])
+            sampler = animation["samplers"][channel["sampler"]]
+            times = read(sampler["input"])[:, 0]
+            rows = read(sampler["output"])
+            most = max(most, len(times))
+            for t in np.append(np.arange(0.0, duration, 1 / rate), duration):
+                t = float(t)
+                if t not in truths:
+                    truths[t] = mechanism.posed_instances(structure, timeline.values(t))
+                truth = np.array(truths[t][index]).reshape(4, 4).T
+                got = _linear(times, rows, t, channel["target"]["path"] == "rotation")
+                if channel["target"]["path"] == "translation":
+                    worst[0] = max(worst[0], float(np.linalg.norm(got - truth[:3, 3])))
+                else:
+                    turned = _rotation(got).T @ truth[:3, :3]
+                    worst[1] = max(worst[1], math.acos(max(-1.0, min(1.0, (np.trace(turned) - 1) / 2))))
+        found[animation["name"]] = (most, worst[0], worst[1])
     return found
 
 
@@ -427,17 +433,16 @@ class GlbTest(_Folder):
             self.assertEqual(len(nodes[name]["rotation"]), 4)
         for animation in gltf["animations"]:
             self.assertEqual(len(animation["channels"]), 4, "translation and rotation of the link and the tip")
-            first = animation["samplers"][0]["input"]
-            keys = gltf["accessors"][first]["count"]
             for channel in animation["channels"]:
                 sampler = animation["samplers"][channel["sampler"]]
-                self.assertEqual((sampler["interpolation"], sampler["input"]), ("CUBICSPLINE", first))
+                self.assertEqual(sampler["interpolation"], "LINEAR", "the bake's keys, thinned to lines (export/keys.py)")
                 output = gltf["accessors"][sampler["output"]]
-                self.assertEqual(output["count"], 3 * keys, "in-tangent, value, out-tangent per key")
+                self.assertEqual(output["count"], gltf["accessors"][sampler["input"]]["count"], "a value per key")
                 self.assertEqual(output["type"], {"translation": "VEC3", "rotation": "VEC4"}[channel["target"]["path"]])
-            times = read(first)[:, 0]
-            self.assertTrue(np.all(np.diff(times) > 0))
-            self.assertEqual(gltf["accessors"][first]["min"][0], 0.0)
+                times = read(sampler["input"])[:, 0]
+                self.assertTrue(np.all(np.diff(times) > 0))
+                self.assertEqual(gltf["accessors"][sampler["input"]]["min"][0], 0.0)
+                self.assertAlmostEqual(float(times[-1]), animation["extras"]["cadgen"]["duration"], places=5)
         extras = {animation["name"]: animation["extras"]["cadgen"] for animation in gltf["animations"]}
         self.assertEqual(extras, {"lift": {"duration": 3.0}, "nod": {"duration": 6.0}, "wave": {"duration": 2.0}})
         self.assertAlmostEqual(read(gltf["animations"][2]["samplers"][0]["input"])[-1, 0], 2.0, places=5,
@@ -446,9 +451,10 @@ class GlbTest(_Folder):
         found = deviations(out, structure)
         for name, (keys, linear, angular) in found.items():
             self.assertLess(keys, 200, name)
-            # Within the tolerance at the bake's checks; between them, within half as much again.
-            self.assertLess(linear, mechanism.LINEAR_TOLERANCE * size * 1.5, (name, found))
-            self.assertLess(angular, mechanism.ANGULAR_TOLERANCE * 1.5, (name, found))
+            # Within the bake's tolerance at its checks, half as much again between them, and the keys'
+            # tenth of a millimetre and of a degree of the bake.
+            self.assertLess(linear, mechanism.LINEAR_TOLERANCE * size * 1.5 + KEY_MM, (name, found))
+            self.assertLess(angular, mechanism.ANGULAR_TOLERANCE * 1.5 + math.radians(KEY_DEGREES), (name, found))
         self.assertLess(found["wave"][0], found["nod"][0], "few keys where the motion is simple")
         again = self.folder / "again.glb"
         translate(self.xbf, None, again)

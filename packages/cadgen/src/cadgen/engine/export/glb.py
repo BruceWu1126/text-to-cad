@@ -17,13 +17,14 @@ root node shows them in glTF's frame, Y up and metres, as cadgen's other GLBs do
 format that carries no normals (an STL's, a 3MF's) is given the viewer's (``mesh.shaded``).
 
 Every configuration sequence of the document is an animation of the same name (``export/motion.py``):
-CUBICSPLINE translation and rotation channels for each placement it moves, over one shared
-key time accessor, its duration in the animation's ``extras`` (``{"cadgen": {"duration":
-seconds}}``). A clip is the sequence once; a player repeats it. After them, the source's
-animations (``animation()``, ``export/animation.py``), each one glTF animation of its name: STEP,
-LINEAR or CUBICSPLINE translation, rotation and scale channels on the nodes its references
+translation and rotation channels for each placement it moves, its duration in the animation's
+``extras`` (``{"cadgen": {"duration": seconds}}``). A clip is the sequence once; a player repeats
+it. After them, the source's animations (``animation()``, ``export/animation.py``), each one glTF
+animation of its name: translation, rotation and scale channels on the nodes its references
 place, their duration in ``extras`` as a configuration sequence's: a build's, or the record of them an
-xbf carries (``animations.record``). A placement anything moves stands by translation and
+xbf carries (``animations.record``). Every channel is written LINEAR -- the fewest keys within a
+tenth of a millimetre and of a degree of its bake (``export/keys.py``) -- but a STEP one (a hide),
+which is written as baked. A placement anything moves stands by translation and
 rotation, as glTF asks of an animated node; every other one by its matrix. Channels whose keys
 are the same bytes (the parts of one link, or of one reference, that stand where their motion
 puts them) point at one sampler, and samplers with the same keys at one accessor: each motion is
@@ -249,6 +250,7 @@ def _animations(view: Any, held: dict[int, Any], shown: list[Any], node_of: dict
     if not node_of or not (motions or getattr(view.source, "animations", None)):
         return []
     from cadgen.engine.export.animation import bake
+    from cadgen.engine.export.keys import linear
     from cadgen.engine.export.motion import clips, quaternion
 
     size = _size(held, shown)
@@ -280,21 +282,47 @@ def _animations(view: Any, held: dict[int, Any], shown: list[Any], node_of: dict
                 accessors[found]["max"] = [float(array[-1])]
         return found
 
+    # Every track but a STEP one is written as the fewest LINEAR keys within KEY_MM and KEY_DEGREES of
+    # its bake (``export/keys.py``), each distinct track worked out once; a scale is held to the
+    # millimetres its part moves, by the part's reach.
+    placed_at = {placed.instance: placed for placed in shown}
+    reaches: dict[int, float] = {}
+    written: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
+
+    def reach(index: int) -> float:
+        prototype = placed_at[index].prototype
+        if prototype not in reaches:
+            points = np.asarray(held[prototype].positions, dtype=float).reshape(-1, 3)
+            reaches[prototype] = float(np.max(np.linalg.norm(points, axis=1))) if len(points) else 0.0
+        return reaches[prototype]
+
+    def keyed(index: int, path: str, interpolation: str, times: np.ndarray, rows: np.ndarray,
+              duration: float) -> tuple[str, np.ndarray, np.ndarray]:
+        if interpolation == "STEP":
+            return interpolation, times, rows
+        far = reach(index) if path == "scale" else 0.0
+        key = (path, interpolation, duration, far, np.asarray(times, dtype=float).tobytes(),
+               np.asarray(rows, dtype=float).tobytes())
+        if key not in written:
+            written[key] = linear(times, rows, interpolation, path, duration, far)
+        return "LINEAR", *written[key]
+
     found = []
 
     def animation(name: str, duration: float, tracks: list[tuple[int, str, str, np.ndarray, np.ndarray]]) -> None:
         samplers: list[dict] = []
         channels: list[dict] = []
-        held: dict[tuple, int] = {}
+        shared: dict[tuple, int] = {}
         for index, path, interpolation, times, rows in tracks:
+            interpolation, times, rows = keyed(index, path, interpolation, times, rows, duration)
             kind = "VEC4" if path == "rotation" else "VEC3"
             entry = {"input": accessor(times, "SCALAR"), "interpolation": interpolation,
                      "output": accessor(rows.reshape(-1, rows.shape[-1]), kind)}
             key = (entry["input"], interpolation, entry["output"])
-            if key not in held:
-                held[key] = len(samplers)
+            if key not in shared:
+                shared[key] = len(samplers)
                 samplers.append(entry)
-            channels.append({"sampler": held[key], "target": {"node": node_of[index], "path": path}})
+            channels.append({"sampler": shared[key], "target": {"node": node_of[index], "path": path}})
         found.append({"name": name, "channels": channels, "samplers": samplers,
                       "extras": {"cadgen": {"duration": duration}}})
 

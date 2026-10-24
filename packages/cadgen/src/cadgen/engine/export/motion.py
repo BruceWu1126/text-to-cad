@@ -10,7 +10,8 @@ sequence; a step is halved while, at any eighth of it, a placement's interpolate
 from the true FK by more than ``LINEAR_TOLERANCE`` of the model's size (the diagonal of what
 the view places) or its rotation by more than ``ANGULAR_TOLERANCE`` radians. Few keys where
 the sequence is smooth, more where it is not. A placement the sequence does not move has no
-channel.
+channel. The GLB writes each placement's tracks as LINEAR keys within a tenth of a millimetre and
+of a degree of this bake (``keys.py``).
 """
 
 from __future__ import annotations
