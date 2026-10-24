@@ -3,22 +3,26 @@
 Only metadata lives here: a document's structure and shape bytes are the server's
 (``serve.Server``). Opening a document asks its worker for them; registration never meshes or
 materializes an unviewed model. A document outlives its worker: before the pool retires a worker,
-the daemon takes from it every ``pointer`` and ``copy`` document of it the server does not hold yet
+the daemon takes from it every ``pointer`` document of it the server does not hold yet
 (``drain``), and the record stays with no worker (``held``) until memory evicts its bytes
-(``evicted``). A ``memory`` document goes with its worker (``expired``). A document held nowhere
-is never built here: whoever asks for it is told the command that builds it again (``missing``),
-and the engine runs nothing. The book is process memory.
+(``evicted``). A ``memory`` document goes with its worker (``expired``). A ``shape`` document, a
+shape a program handed over (``hand_over``), has no worker from the start: it is held as a drained
+document is, and no command builds it again. A document held nowhere is never built here: whoever
+asks for it is told the command that builds it again (``missing``), and the engine runs nothing.
+The book is process memory.
 
-What outlives the process is the registry's (``registry``): each ``pointer`` and ``copy`` document
-built is recorded there as it is registered (``record``), synchronously, so after a restart its id
-is known -- ``evicted``, with the command that builds it again, or ``detached`` once its script is
-gone -- and nothing is run to bring it back. A ``memory`` document has no record. A served
+What outlives the process is the registry's (``registry``): each ``pointer`` and ``shape`` document
+is recorded there as it is registered (``record``, ``hand_over``), synchronously, so after a restart
+its id is known -- ``evicted``, with the command that builds it again (none for a shape), or
+``detached`` once its script is gone -- and nothing is run to bring it back. A ``memory`` document
+has no record. A ``key=`` claims its id for one declaration: another declaration's build or hand-over
+of that key is refused, naming the one that holds it (``claimed``). A served
 document's generation (``version``, what a page shows and the viewer's export compares) is a token
 of its build's own, never a counter that starts again, so an id and a generation never name two
 documents across a restart; its record's ``revision`` is its build closure's key (``revision``), the
 same for the same code, so a build that changed nothing rewrites no record.
 
-What a restart opens at once is the cache's (``cache``): each ``pointer`` and ``copy`` document's
+What a restart opens at once is the cache's (``cache``): each ``pointer`` and ``shape`` document's
 bytes, saved in its registry folder once it has been idle (and at its drain, and at shutdown). A
 document with a cache file is ``held`` -- the engine answers it without a worker -- in memory, on
 disk, or both (``where``): after a restart its id is taken up (``adopt``) from its record the first
@@ -83,8 +87,9 @@ class Models:
                 version = secrets.token_hex(8)  # this build's generation: a rebuild is a new one
                 recorded = revision(report)
                 try:
-                    copied = self.record(report, program, answer.get("copy"), recorded)
-                except Exception as error:  # noqa: BLE001 - a copy's inputs that moved: the build fails, loudly
+                    self.claimed(ident, source, report.get("key"))
+                    self.record(report, program, recorded)
+                except ValueError as error:  # a key another declaration holds: the build is refused, by name
                     report["ok"], report["error"] = False, f"{source['name']}: {error}"
                     root["ok"] = False
                     root.setdefault("error", report["error"])
@@ -93,7 +98,7 @@ class Models:
                     old = self.records.get(ident) or self.expired.pop(ident, None)
                     self.records[ident] = {"id": ident, "source": source, "worker": worker,
                                            "program": program or (old or {}).get("program") or source["script"],
-                                           "store": "copy" if copied else report.get("store") or "pointer",
+                                           "store": report.get("store") or "pointer",
                                            "builtAt": time.time(), "version": version,
                                            "files": list(report.get("files") or {}), "revision": recorded,
                                            "read": [] if report.get("store") == "memory" else
@@ -111,66 +116,56 @@ class Models:
 
         return registry.current()
 
-    def bundle(self, copying: dict[str, Any]) -> str:
-        """A copied model's bundle written in its registry folder (``copies``): its ``model.py``."""
-        from cadgen.engine.ids import is_id
+    def claimed(self, ident: str, source: dict[str, Any], key: str | None) -> None:
+        """``key`` (the id ``ident`` its declaration gives) taken by ``source``'s declaration
+        (``script::name``); refused, naming the other, while another declaration whose script (or a
+        shape's scope) is still there holds it -- in this process's book or in the registry. A
+        declaration whose script is gone (moved) gives its key up. Nothing for a derived id: its
+        declaration is in it."""
+        if not key:
+            return
+        from cadgen.engine import registry as registering
+        from cadgen.engine.ids import canonical
 
-        held = self.registry()
-        if held is None:
-            raise ValueError("this engine has no state folder to keep a copy in: save this as a file")
-        ident = str(copying.get("id"))
-        if not is_id(ident):
-            raise ValueError(f"{ident!r} is not a document id")
-        files = {name: base64.b64decode(data) for name, data in (copying.get("files") or {}).items()}
-        return str(held.write_bundle(ident, files) / "model.py")
+        mine = f"{canonical(source['script'])}::{source['name']}"
+        with self.lock:
+            row = self.records.get(ident)
+        other = None
+        if row is not None:
+            other = (row["source"]["script"], row["source"]["name"])
+        else:
+            held = self.registry()
+            record = held.get(ident) if held is not None else None
+            if record is not None and record.get("kind") == "model":
+                other = (str(registering.home(held, record)), record.get("entry") or "")
+        if other is None or not os.path.exists(other[0]):
+            return
+        theirs = f"{canonical(other[0])}::{other[1]}"
+        if theirs != mine:
+            raise ValueError(f"key {key!r} is claimed by {theirs}, so {mine} cannot take it: one key names one "
+                             "document; give one of them another key")
 
-    def serving(self, script: str) -> dict[str, Any]:
-        """What the worker building ``script`` reads in place of what it names: for a copied
-        document's own ``model.py``, each file its first build read, from its copy (``copies.serving``),
-        a relative path against the folder that build ran in."""
-        held = self.registry()
-        ident = held.bundle_of(script) if held is not None and script else None
-        record = held.get(ident) if ident else None
-        if record is None or not record.get("copied"):
-            return {}
-        folder = held.folder(ident)
-        return {"copied": {original: os.path.normpath(folder / inside) for original, inside in record["copied"].items()},
-                "origin": (record.get("origin") or {}).get("cwd")}
-
-    def record(self, report: dict[str, Any], program: str | None, copying: dict[str, Any] | None,
-               recorded: str) -> bool:
-        """The registry's record of a document a build made (``registry``), written when it changed; a
-        copy's inputs copied into its bundle first (``copies.copy_inputs``). Nothing for a ``memory``
-        document, or with no registry. Whether the document is a copy."""
+    def record(self, report: dict[str, Any], program: str | None, recorded: str) -> None:
+        """The registry's record of a document a build made (``registry``), written when it changed.
+        Nothing for a ``memory`` document, or with no registry."""
         from cadgen.engine import registry as registering
 
         held = self.registry()
         if held is None or report.get("store") == "memory":
-            return False
+            return
         ident, source = report["id"], report["source"]
         script = Path(source["script"])
-        bundle = held.bundle_of(script)
-        if bundle is not None and bundle != ident:
-            return False  # a model of a copy's model.py that is not the copy: part of the copy's build
         closure = report.get("closure") or {}
         old = held.get(ident) or {}
-        copied = bundle is not None
-        if copied:
-            from cadgen.engine.copies import copy_inputs
-
-            inputs = copy_inputs(held, ident, closure, dict(old.get("copied") or {}))
-            held.prune_inputs(ident, {Path(inside).parts[1] for inside in inputs.values()})
-            root, home, run = ".", "model.py", ["python", "model.py"]
-        else:
-            main = Path(program or script)
-            root = os.path.commonpath([str(script.parent), str(main.parent)]) if script.anchor == main.anchor else str(script.parent)
-            home, run = registering.relative(script, root), ["python", registering.relative(main, root)]
-        base = held.folder(ident) if copied else Path(root)
+        main = Path(program or script)
+        root = os.path.commonpath([str(script.parent), str(main.parent)]) if script.anchor == main.anchor else str(script.parent)
+        home, run = registering.relative(script, root), ["python", registering.relative(main, root)]
+        base = Path(root)
         rows = [[row[0], *([registering.relative(row[1], base)] if row[0] in ("file", "read") else
                            [row[1], registering.relative(row[2], base) if row[2] else None, row[3]]), row[-1]]
                 for row in closure.get("inputs") or []]
         found: dict[str, Any] = {
-            "id": ident, "kind": "model", "store": "copy" if copied else "pointer", "root": root, "home": home,
+            "id": ident, "kind": "model", "store": "pointer", "root": root, "home": home,
             "entry": source["name"], "label": source["name"], "run": run,
             "revision": recorded,
             "built": old["built"] if old.get("revision") == recorded and old.get("built") else time.time(),
@@ -178,15 +173,86 @@ class Models:
                         "modules": [[registering.relative(path, base), digest] for path, digest in closure.get("modules") or []],
                         "inputs": rows},
             "runtime": runtime()}
-        if copied:
-            found["copied"] = inputs
-            found["origin"] = old.get("origin") or ({"file": copying.get("source"), "cwd": copying.get("origin")}
-                                                    if copying else None)
+        if report.get("key"):
+            found["key"] = report["key"]
         for key in ("opened", "pinned", "preview", "cache"):  # the home's and the cache's, kept across builds
             if key in old:
                 found[key] = old[key]
         held.put(found)
-        return copied
+
+    def hand_over(self, request: dict[str, Any]) -> dict[str, Any]:
+        """A shape a program handed over (``api.hand_over``): its document's bytes read through the
+        documents worker -- checked, and made the structure the server serves -- then held as a
+        drained document is (``server.keep``, and the cache), its page registered, and recorded with
+        ``store: "shape"``: a program the engine did not run showed it, so nothing builds it again
+        (``run`` empty). Refused (``ValueError``) for a key another declaration holds, or bytes that
+        are no document. The answer carries its page."""
+        import hashlib
+
+        from cadgen.engine import registry as registering
+        from cadgen.engine.ids import is_id
+
+        ident, name, scope = str(request.get("id")), str(request.get("name")), str(request.get("scope"))
+        if not is_id(ident):
+            raise ValueError(f"{ident!r} is not a document id")
+        source = {"script": scope, "name": name}
+        self.claimed(ident, source, request.get("key"))
+        data = base64.b64decode(request.get("xbf") or "")
+        replies: list[dict[str, Any]] = []
+        self.daemon._call({"source": {"document": ident, "held": ident}, "cwd": request.get("cwd")},
+                          {"id": 1, "op": "result", "document": True, "name": name}, replies.append, data)
+        answer = next((row for row in reversed(replies) if "done" in row or "failed" in row), {})
+        if "done" not in answer:
+            raise ValueError(f"{name}: the shape handed over is no document: {answer.get('failed')}")
+        payload = base64.b64decode(answer.get("payload", ""))
+        done = answer["done"]
+        shapes, at = {}, 0
+        for key, size in done["shapes"]:
+            shapes[key] = payload[at:at + size]
+            at += size
+        from cadgen.engine.export.viewer import fingerprint
+
+        version = secrets.token_hex(8)
+        recorded = "h" + hashlib.blake2b(data, digest_size=16).hexdigest()
+        structure = {**done["structure"], "exportRevision": fingerprint(done["structure"]), "path": ident,
+                     "id": ident, "closure": None, "version": version}
+        program = request.get("program")
+        with self.lock:
+            self.expired.pop(ident, None)
+            old = self.records.get(ident)
+            self.records[ident] = {"id": ident, "source": source, "worker": None, "program": program,
+                                   "store": "shape", "builtAt": time.time(), "version": version, "files": [],
+                                   "revision": recorded, "read": []}
+        if old is not None and old.get("worker") is not None and self.daemon.builders.get(ident) is old["worker"]:
+            del self.daemon.builders[ident]
+        held = self.registry()
+        if held is not None:
+            root = scope if os.path.isdir(scope) else str(Path(scope).parent)
+            previous = held.get(ident) or {}
+            found: dict[str, Any] = {
+                "id": ident, "kind": "model", "store": "shape", "root": root,
+                "home": registering.relative(scope, root), "entry": name, "label": name, "run": [],
+                "shown": self.shown(program), "revision": recorded,
+                "built": previous["built"] if previous.get("revision") == recorded and previous.get("built")
+                else time.time(), "runtime": runtime()}
+            if request.get("key"):
+                found["key"] = request["key"]
+            for key in ("opened", "pinned", "preview", "cache"):
+                if key in previous:
+                    found[key] = previous[key]
+            held.put(found)
+        server = self.register_page(ident)
+        server.keep(ident, structure, shapes, version, data)
+        self.cache.keep(ident, recorded, data)
+        self.cache.touch(ident)
+        return {"done": {"id": ident, "url": self.url(server, ident)}}
+
+    @staticmethod
+    def shown(program: str | None) -> str:
+        """What a shape's record says of where it came from: the program, which the engine did not run."""
+        return (f"handed over by {program}, a program the engine did not run: no command builds it again"
+                if program else "handed over from a Python session the engine did not run: no command builds it "
+                                "again")
 
     @staticmethod
     def url(server: Any, ident: str) -> str:
@@ -248,6 +314,9 @@ class Models:
             return self.recorded(ident)
         command = self.command(ident)
         name = found["source"]["name"]
+        if found.get("store") == "shape":
+            return {"error": f"{name} ({ident}) is no longer held: it was {self.shown(found.get('program'))}; run "
+                             "that program again to hand it over again", "state": "evicted", "rebuild": None}
         if gone is None and not Path(found["source"]["script"]).is_file():
             return {"error": f"{name} ({ident}) is detached: {found['source']['script']} is gone, and nothing "
                              "builds it again; remove it from the home", "state": "detached", "rebuild": None}
@@ -267,6 +336,8 @@ class Models:
         if found is None:
             known = self.recorded(ident)
             return known["rebuild"] if known is not None else None
+        if found.get("store") == "shape":
+            return None  # handed over by a program the engine did not run: nothing builds it again
         return f"python {shlex.quote(str(found.get('program') or found['source']['script']))}"
 
     def recorded(self, ident: str) -> dict[str, Any] | None:
@@ -280,6 +351,9 @@ class Models:
         if found is None or found.get("kind") != "model":
             return None
         name = found.get("label") or found.get("entry") or ident
+        if found.get("store") == "shape":
+            return {"error": f"{name} ({ident}) is no longer held: it was {found.get('shown') or self.shown(None)}; "
+                             "run that program again to hand it over again", "state": "evicted", "rebuild": None}
         if registering.detached(held, found):
             return {"error": f"{name} ({ident}) is detached: {registering.home(held, found)} is gone, and nothing "
                              "builds it again; remove it from the home", "state": "detached", "rebuild": None}
@@ -303,7 +377,7 @@ class Models:
         return NotHeld(found["error"], found["state"], found["rebuild"])
 
     def drain(self, worker: Any) -> None:
-        """Before ``worker`` is retired: every ``pointer`` and ``copy`` document of it the server does not hold
+        """Before ``worker`` is retired: every ``pointer`` document of it the server does not hold
         whole at its version is taken from it -- its ``result``, never meshed, with the whole
         document as xbf bytes (``document.to_bytes``, its animations' record with it) -- so it outlives
         the worker and answers every verb as an on-disk xbf does, and a GLB of it as the build's GLB. A
@@ -453,6 +527,8 @@ class Models:
             return "expired"
         if self.where(ident):
             return "held"
+        if record["store"] == "shape":
+            return "evicted"  # nothing builds it again, and nothing of it goes missing
         return "evicted" if Path(record["source"]["script"]).is_file() else "detached"
 
     # --- the cache (``cache``) ----------------------------------------------------------------
