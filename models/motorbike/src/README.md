@@ -1,8 +1,8 @@
 # motorbike models
 
-`motorbike.py` is the one model (`@xbf`, into `../XBF/motorbike.xbf`). Every other
+`motorbike.py` is the one model (`@model`; a run writes nothing). Every other
 `.py` directly under `src/` is one part of it: a plain function the assembly
-composes by CALLING it (`frame()`, `seat()`, …). The bike is one body and one xbf; a
+composes by CALLING it (`frame()`, `seat()`, …). The bike is one body and one document; a
 part called twice is one prototype placed twice. No part is a `@memo`: the kernel
 memo already caches their kernel calls and a marker per part saved under 0.1 s of
 an edit (see "When to use `@memo`" in `models/README.md`). Shared code lives in
@@ -10,7 +10,7 @@ an edit (see "When to use `@memo`" in `models/README.md`). Shared code lives in
 
 | Script               | What it is                | Description                                              |
 |----------------------|---------------------------|----------------------------------------------------------|
-| motorbike.py         | XBF/motorbike.xbf         | Full assembly: 23 occurrences of 21 parts, build123d joints |
+| motorbike.py         | the model                 | Full assembly: 23 occurrences of 21 parts, build123d joints |
 | frame.py             | part                     | Welded underbone frame + steel floor pan (the fixed root) |
 | center_stand.py      | part                     | Center stand, folded-up pose under the floor pan          |
 | front_fork.py        | part                     | Telescopic fork + chrome axle on the steering axis        |
@@ -124,5 +124,5 @@ carries each old mate now (`steering` is `head_tube_axis`, `engine_swing`
 
 One motion is in the model's code: `steer`, `head_tube_axis` from -20 to 20 degrees
 over 2 s and back over 2 s, as out-and-back waypoints (a motion has no loop or
-pingpong; a player repeats it). The xbf keeps it as a definition; `cadgen export
-../XBF/motorbike.xbf bike.glb` bakes it into a glTF clip named `steer`.
+pingpong; a player repeats it). The document keeps it as a definition; `cadgen export
+<id> GLB/motorbike.glb` bakes it into a glTF clip named `steer`.

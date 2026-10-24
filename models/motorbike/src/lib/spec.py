@@ -28,7 +28,7 @@ Modeling rules (repo memory):
 
 from math import cos, sin, radians
 
-from cadgen.engine import Material, materials
+from cadgen import Material, materials
 
 # ---------------------------------------------------------------------------
 # Palette (linear RGBA). Theme does not override source colors.
