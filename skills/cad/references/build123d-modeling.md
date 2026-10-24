@@ -140,6 +140,9 @@ handles placement itself.
 - **2D algebra:** a `ShapeList` takes part in Python list operations, which may
   concatenate instead of fusing. Mirroring sampled points can flip wire winding
   and face normals, and an empty intersection used as a cut removes nothing.
+- **A Boolean that removes everything** returns an empty `Compound` (`&` returns None),
+  and placing that (`bd.Pos(...) * empty`) returns a plain empty `list`, so the next line
+  fails with `'list' object has no attribute 'label'`: the cut before it consumed the part.
 - **Dense periodic splines:** OCP 7.9 has failed taper, inward offset and
   coincident-face fusion on some densely sampled profiles; a simpler
   representation or an explicitly constructed offset works around it.
