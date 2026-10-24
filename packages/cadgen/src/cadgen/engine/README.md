@@ -872,14 +872,24 @@ decorator and no build flag draws one.
 
 ### Viewer exports
 
-The browser's Export action translates a displayed STEP, XBF or held model through
-`export/viewer.py` and the same worker writer. It pins the displayed revision and
-checks it in the worker. A live source must still be held: this path never executes
-source or rebuilds a model. Scope is the whole model or one canonical part/assembly
-reference; position is authored or an explicit joint-value map. Clip, visibility and
-explode are not geometry inputs. DXF requires a planar drawing; XBF refuses a pose.
-An existing whole XBF uses a separate original-byte download. A mesh file's formats are the
-other two mesh kinds and nothing else. There is no source bundle in this interface.
+The browser's Export action writes the displayed document as its code built it (law 22),
+through `export/viewer.py` and the same worker writer as `cadgen export`. Its source is the
+displayed document and revision, nothing else (`viewer.exports.specification`: `{doc,
+revision}`); no part, no pose, and nothing of the view -- selection, visibility, Clip, Explode,
+Preview -- is an input. A posed or partial file is a function in the model's code.
+
+- **A file the engine serves** (a STEP or an xbf) is read where a file's export runs, at the
+  version shown: its `mtime_ns-size`, checked again in the worker before anything is written.
+- **A held model** (by its id) is read from the worker that holds it, or from the whole
+  document the server took when that worker went (**Document lifetime**), at the revision shown
+  and its structure's digest; it is never built again, and one no longer held is refused.
+- **A mesh file** (GLB, STL, 3MF) is named by its path at the bytes shown (the catalog's hash of
+  them), checked before the job and, by its `mtime_ns-size`, again in the worker.
+
+The formats offered are a document's STEP, GLB, STL and 3MF, DXF where it is planar, and an xbf
+but of an engine-written xbf, which offers its original bytes instead (a separate download); a
+mesh file's are the other two mesh kinds and nothing else. A changed source is refused, saying
+to open Export again. There is no source bundle in this interface.
 
 The enclosing distribution owns the HTTP queue, the browser download and temporary
 artifact lifetime; the standalone engine owns inspection, revision validation and
