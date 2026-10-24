@@ -169,7 +169,7 @@ class PublishGate(unittest.TestCase):
         self.assertEqual(minting, ["pypi"])
         self.assertRegex(JOBS["pypi"], re.compile(r"^    environment: release$", re.M))
         self.assertNotRegex(WORKFLOW, re.compile(r"^permissions:(?:\n  .*)*\n  id-token", re.M), "no workflow-wide token")
-        pypi = condition("release")
+        pypi = condition("pypi")
         self.assertTrue(evaluate(pypi, {"publish": "success"}, {"is_main": "true"}))
         self.assertFalse(evaluate(pypi, {"publish": "success"}, {"is_main": "true"}, ref="refs/heads/build-test"))
         self.assertFalse(evaluate(pypi, {"publish": "success"}, {"is_main": "false"}))
