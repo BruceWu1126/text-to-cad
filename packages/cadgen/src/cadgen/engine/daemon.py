@@ -1239,6 +1239,7 @@ class Daemon:
                                                              "documents": self.server.listing(every=True),
                                                              "memory": self.server.memory()},
                 "models": self.models.listing(every=True),
+                "cache": self.models.cache.status(),
                 "renders": [] if self.renders is None else self.renders.status(),
                 "sessions": (self.server.http.app.sessions() if self.server is not None
                              and hasattr(self.server.http, "app") else [])}

@@ -396,6 +396,15 @@ def _span(seconds: Any) -> str:
     return f"{hours}h{minutes:02d}m" if minutes else f"{hours}h"
 
 
+def _bytes(count: Any) -> str:
+    """A size at a glance: ``8.6 KB``, ``12.4 MB``, ``1.2 GB``."""
+    count = float(count or 0)
+    for unit, scale in (("GB", 2**30), ("MB", 2**20), ("KB", 2**10)):
+        if count >= scale:
+            return f"{count / scale:.1f} {unit}"
+    return f"{int(count)} B"
+
+
 def _gb(megabytes: Any) -> str:
     return "-" if megabytes is None else f"{float(megabytes) / 1024:.1f} GB"
 
@@ -446,6 +455,16 @@ def status_text(answer: dict[str, Any]) -> str:
         lines.append(f"serving {serving['url']}: {opened} document{'' if opened == 1 else 's'} opened by a page or a command"
                      + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else "")
                      + (f" · {_gb(held / 2**20)} of {_gb(memory['budget'] / 2**20)} held" if memory.get("budget") else ""))
+    cache = answer.get("cache") or {}
+    if cache.get("enabled"):
+        failures = cache.get("failures") or []
+        lines.append(f"cache {cache.get('root')}: {cache.get('documents', 0)} document"
+                     f"{'' if cache.get('documents') == 1 else 's'} · {_bytes(cache.get('bytes'))} of "
+                     f"{_bytes(cache.get('capBytes'))}"
+                     + (f" · {cache['evictions']} evicted" if cache.get("evictions") else "")
+                     + (f" · last save failed: {failures[0]['error']}" if failures else ""))
+    elif cache:
+        lines.append("cache off (CADGEN_ENGINE_CACHE_GB=0)" if not cache.get("capBytes") else "cache off: no cache folder")
     models = answer.get("models") or []
     if models:
         # Each model document, its state, and for one not held the command that builds it again.
