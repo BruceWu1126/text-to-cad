@@ -611,9 +611,8 @@ class GlbTest(_Folder):
 
         from cadgen.engine import api
         from cadgen.engine.export import translate
-        from cadgen.engine.model import Model
 
-        for function in (translate, api.export, Model.export):
+        for function in (translate, api.export, api.Document.export):
             self.assertNotIn("animate", inspect.signature(function).parameters, function)
         import contextlib
         import io

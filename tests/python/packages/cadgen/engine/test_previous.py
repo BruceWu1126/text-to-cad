@@ -45,11 +45,11 @@ def cap():
 
 @xbf("XBF/kit.xbf")
 def kit():
-    left = peg().moved(bd.Location((10, 0, 0)))
-    right = peg().moved(bd.Location((-10, 0, 0)))
+    left = peg().shape.moved(bd.Location((10, 0, 0)))
+    right = peg().shape.moved(bd.Location((-10, 0, 0)))
     plate = bd.Box({plate}, 30, json.loads((HERE / "kit.json").read_text())["thickness"])
     plate.label = "plate"
-    return bd.Compound(children=[left, right, cap().moved(bd.Location((0, 0, 8))), plate], label="kit")
+    return bd.Compound(children=[left, right, cap().shape.moved(bd.Location((0, 0, 8))), plate], label="kit")
 """
 
 

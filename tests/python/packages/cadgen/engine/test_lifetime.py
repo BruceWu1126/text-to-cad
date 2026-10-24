@@ -245,7 +245,7 @@ from part import plate
 
 @model
 def assembly():
-    return bd.Compound(children=[plate(), plate().moved(bd.Pos(10, 0, 0))], label="assembly")
+    return bd.Compound(children=[plate().shape, plate().shape.moved(bd.Pos(10, 0, 0))], label="assembly")
 
 
 if __name__ == "__main__":

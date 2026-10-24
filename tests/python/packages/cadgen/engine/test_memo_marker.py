@@ -294,7 +294,7 @@ class MemoTest(MemoCase):
         self.addCleanup(os.chdir, here)
         # A model calling the model: a verifying build of it runs the called model's bodies again too.
         self.write("caller.py", "from cadgen.engine import xbf\nfrom root import root\n\n\n"
-                                "@xbf(\"XBF/caller.xbf\")\ndef caller():\n    return root()\n")
+                                "@xbf(\"XBF/caller.xbf\")\ndef caller():\n    return root().shape\n")
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             report = api.build_script(self.folder / "caller.py", ["caller"], verify=True, daemon=False)
         self.assertTrue(report.ok, report.models)

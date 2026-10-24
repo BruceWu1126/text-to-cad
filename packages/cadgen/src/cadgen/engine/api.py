@@ -10,8 +10,10 @@
 
 Every one goes through the daemon (``client``), so the warm worker of the script or of the
 document does the work and keeps what it made in memory for the next call. No verb builds
-source text: a script's models build when called by the script (``python model.py``), or from
-Python by ``Model.build()`` (``build_script``), a ``Report``. A build writes the model as its
+source text: a script's models build when called by the script (``python model.py``), each call
+returning the document's handle (``Document``), or from Python by ``Model.build()`` (``build_script``,
+the debug seam), a ``Report``. ``hand_over`` makes a document of a shape a program holds
+(``model(shape, name=...)``). Each verb takes a handle, a document id or a file path. A build writes the model as its
 joints place it, and ``export`` writes that document as it is: a posed or partial file is a
 function in the model's code. A picture, and the state a mechanism is drawn in, are
 ``snapshot``'s, never cached.
@@ -39,7 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, TypeVar, cast
 
-__all__ = ["Built", "Drawn", "EngineError", "Facts", "Report", "Served", "Written", "export",
+__all__ = ["Document", "Drawn", "EngineError", "Facts", "Report", "Served", "Written", "export", "hand_over",
            "observers", "serve", "server", "snapshot", "status", "stop", "inspect"]
 
 class EngineError(RuntimeError):
@@ -109,17 +111,45 @@ class Served:
 Facts = dict
 
 
-@dataclass
-class Built:
-    """A script's model a worker built (``Model.shape``, ``Model.document``): its report, its
-    files, and -- asked of the worker that built it, which holds them -- its document and its
-    shape."""
+_UNSET: Any = object()
 
-    name: str
-    script: Path
-    report: dict[str, Any]
-    cwd: Path
-    _document: Any = field(default=None, repr=False)
+
+class Document:
+    """A document's handle: what a model call returns, never a bare shape and never a report.
+
+    ``id`` and ``url`` (its page, where the engine serves it; None for a child inside the body that
+    builds it, which has no page yet), ``name``, ``shape`` and the verbs ``export(*paths)`` and
+    ``snapshot(out, **picture_options)``, which are ``export(handle, ...)`` and ``snapshot(handle,
+    ...)``. ``shape`` is the built result as a build123d compound tree -- every assembly a
+    ``Compound`` of its components, every part placed, named, coloured and given its material as the
+    document has them -- transferred into this process from the engine that holds the document,
+    and the kernel loaded, on its first access, never before. A child's handle, inside the body that
+    calls it, holds the result itself: ``.shape`` is the shape this process made. A shape handed
+    over (``hand_over``) holds the shape it was given. ``report`` is the build's report of it."""
+
+    def __init__(self, name: str, script: Path, report: dict[str, Any], cwd: Path, *, shape: Any = _UNSET,
+                 inside: bool = False) -> None:
+        self.name = name
+        self.script = Path(script)
+        self.report = report
+        self.cwd = Path(cwd)
+        self._shape = shape
+        self._inside = inside
+
+    @classmethod
+    def inside(cls, model: Any, shape: Any) -> "Document":
+        """A child's handle inside the build that runs it: its id, and its result in this process."""
+        report = {"ok": True, "id": model.id, "source": {"script": str(model.script), "name": model.name},
+                  "store": model.store}
+        return cls(model.name, model.script, report, Path.cwd(), shape=shape, inside=True)
+
+    @property
+    def id(self) -> str:
+        return str(self.report["id"])
+
+    @property
+    def url(self) -> str | None:
+        return self.report.get("url")
 
     @property
     def ok(self) -> bool:
@@ -130,33 +160,123 @@ class Built:
         """Every file the build wrote or kept: the model's, then each child model's."""
         return _files(self.report)
 
-    @property
-    def document(self) -> Any:
-        """The built document, read-only: an ``export.Source`` -- its ``structure`` (names,
-        colours, materials, element names, placements, mechanism) and each part's shape --
-        as the worker that built it holds it. ``export(...)`` writes it."""
-        if self._document is None:
-            from cadgen.engine.export import Source
-
-            answer = _ask({"op": "result", "script": str(self.script), "name": self.name, "cwd": str(self.cwd)})
-            payload = base64.b64decode(answer.get("payload") or "")
-            done = answer["done"]
-            shapes, at = {}, 0
-            for key, size in done["shapes"]:
-                shapes[key] = payload[at:at + size]
-                at += size
-            self._document = Source(done["structure"], shapes, live=False)
-        return self._document
+    def __repr__(self) -> str:
+        return f"<document {self.name} {self.id}>"
 
     @property
     def shape(self) -> Any:
-        """The built result as a build123d compound tree: every assembly a ``Compound`` of
-        its components, every part placed, named, coloured and given its material as the
-        document has them."""
-        return self.document.shape()
+        if self._shape is _UNSET:
+            self._shape = self._transferred().shape()
+        return self._shape
+
+    def _transferred(self) -> Any:
+        """The document as the engine holds it, asked by its id (``result``): its structure and each
+        part's shape bytes, as an ``export.Source`` of this process. Nothing is built."""
+        from cadgen.engine.export import Source
+
+        answer = _ask({"op": "result", "id": self.id, "cwd": str(self.cwd)})
+        payload = base64.b64decode(answer.get("payload") or "")
+        done = answer["done"]
+        shapes, at = {}, 0
+        for key, size in done["shapes"]:
+            shapes[key] = payload[at:at + size]
+            at += size
+        return Source(done["structure"], shapes, live=False)
+
+    def _outside(self, verb: str) -> None:
+        if self._inside:
+            raise TypeError(f"{verb} of {self.name}: the body that calls it is building it; {verb} the "
+                            "document the model call returns, once the build is done")
 
     def export(self, *destinations: Any) -> list[Written]:
+        """``export(handle, *destinations)``: the document written to each destination."""
+        self._outside("export")
         return export(self, *destinations)
+
+    def snapshot(self, out: Any, *, display: Any = None, camera: Any = None, grid: bool = False,
+                 preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
+                 size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
+                 measurements: Any = None) -> Drawn:
+        """``snapshot(handle, out, ...)``: the document drawn into ``out`` (a ``.png``); every option is
+        the ``snapshot`` verb's, about the picture (law 22)."""
+        self._outside("snapshot")
+        return cast(Drawn, snapshot(self, out, display=display, camera=camera, grid=grid, preview=preview,
+                                    pose=pose, width=width, height=height, size_profile=size_profile, daemon=daemon,
+                                    annotation=annotation, measurements=measurements))
+
+
+def _handed_bytes(shape: Any, name: str, animations: Any) -> bytes:
+    """A shape handed over as the bytes of its document (``document.to_bytes``), made in this
+    process: its parts, names, colours, materials, placements and the declarations on it -- joints,
+    mechanism states, sequences, couplings -- and its animations (``animations=``: the ``animation()``
+    builders, each on the shape or a shape below it)."""
+    import build123d as bd
+
+    from cadgen.engine import document
+    from cadgen.engine.animations import ANIMATIONS, Animation
+
+    if not isinstance(shape, bd.Shape):
+        raise TypeError(f"model() takes a function to declare, or a build123d shape and its name=; "
+                        f"not {type(shape).__name__}")
+    if shape.__dict__.get("_wrapped") is None:
+        raise ValueError(f"model(shape, name={name!r}): the shape is empty")
+    given = list(animations or [])
+    if given:
+        below: list[Any] = []
+        stack = [shape]
+        while stack:
+            node = stack.pop()
+            below.append(node)
+            stack.extend(getattr(node, "children", None) or ())
+        for found in given:
+            if not isinstance(found, Animation):
+                raise TypeError(f"animations= takes animation() builders, not {type(found).__name__}")
+            if not any(node is found.assembly for node in below) or \
+                    found.name not in (found.assembly.__dict__.get(ANIMATIONS) or {}):
+                raise ValueError(f"animation {found.name!r} is on no shape of {name!r}: make it on the shape handed "
+                                 "over, or on a part of it")
+    tree = document.collect(shape, name)
+    for part in tree.parts:
+        part.shape = document.direct(part.shape)
+        part.key = document.geometry_key(part.shape)
+    document.merge(tree)
+    doc = document.to_xcaf(tree, document.Kept())
+    return document.to_bytes(doc, [part.shape for part in tree.parts])
+
+
+def hand_over(shape: Any, name: Any, *, key: str | None = None, animations: Any = None, frame: Any = None) -> Document:
+    """``model(shape, name=...)``: a document made of a shape this program holds -- from a script or a
+    REPL, no function, no body -- handed to the engine, which holds it as a drained document is (in
+    memory, and in its cache), serves its page and exports it, and records that a program it did not
+    run showed it: there is no command that builds it again. Its id is ``ids.derived_id`` of the
+    calling script (``frame``'s file), or the working folder where there is none, and ``name``; or
+    ``ids.key_id`` of ``key``. The handle's ``shape`` is ``shape`` itself."""
+    from cadgen.engine import model as declaring
+    from cadgen.engine.ids import canonical, check_key, derived_id, key_id
+
+    if getattr(declaring._CONTEXT, "build", None) is not None:
+        raise TypeError("model(shape, name=...) hands a shape over from a script or a REPL; a model's body returns "
+                        "its shape, and calls its children")
+    if name is None:
+        raise TypeError("model(shape, name=...): a shape handed over takes its document's name")
+    if not isinstance(name, str) or not name or name != name.strip():
+        raise ValueError(f"name is a readable name, not {name!r}")
+    filename = frame.f_code.co_filename if frame is not None else ""
+    scope = canonical(filename if filename and os.path.isfile(filename) else os.getcwd())
+    if key is not None:
+        declaring.claim(check_key(key), f"{scope}::{name}")
+    ident = key_id(key) if key is not None else derived_id(scope, name)
+    data = _handed_bytes(shape, name, animations)
+    answer = _ask({"op": "shape", "id": ident, "name": name, "scope": scope, "key": key, "program": _program(),
+                   "cwd": os.getcwd(), "xbf": base64.b64encode(data).decode("ascii")})
+    report = {"ok": True, "model": name, "id": ident, "url": (answer.get("done") or {}).get("url"),
+              "source": {"script": scope, "name": name}, "store": "shape", "key": key, "bytes": len(data)}
+    if frame is not None and frame.f_globals.get("__name__") == "__main__":
+        print(f"{name}: handed over ({len(data) / 1e6:.1f} MB)")
+        print(f"  id: {ident}")
+        if report["url"]:
+            print(f"  view: {report['url']}")
+    return Document(name, Path(scope), report, Path.cwd(), shape=shape)
 
 
 # --- reaching the daemon ---------------------------------------------------------------------
@@ -222,9 +342,9 @@ def _run() -> str:
     return _RUN[0]
 
 
-def _built(script: Path | None, functions: list[str] | None, *, verify: bool = False, profile: bool = False,
+def _built(script: Path, functions: list[str] | None, *, verify: bool = False, profile: bool = False,
            log: Callable[[str], None] | None = None, daemon: bool = True,
-           progress: Any = None, copy: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], Any, float]:
+           progress: Any = None) -> tuple[list[dict[str, Any]], Any, float]:
     """One build of a script's models in the warm worker that holds it, or in this process: its reports, whether the worker was started for it, and its wall time. Where
     the build is goes, frame by frame, to ``progress`` (``progress.py``): by default a bar on
     stderr when it is a terminal and nowhere when it is not; ``False`` nowhere; a callable takes
@@ -257,10 +377,8 @@ def _built(script: Path | None, functions: list[str] | None, *, verify: bool = F
             def relay(message: dict[str, Any]) -> None:
                 shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")
 
-            order = {"op": "build", "script": None if script is None else str(script), "functions": functions,
+            order = {"op": "build", "script": str(script), "functions": functions,
                      "cwd": str(cwd), "verify": verify, "profile": profile, "run": _run(), "program": _program()}
-            if copy is not None:
-                order["copy"] = copy  # the daemon writes the bundle, and builds its model.py
             answer = _ask(order, relay, frames)
             reports, fresh = answer["done"], answer.get("worker", {}).get("fresh")
     finally:
@@ -281,43 +399,18 @@ def build_script(script: Path, functions: list[str] | None = None, *, verify: bo
     return Report(reports, round(wall, 4), fresh)
 
 
-def build_copy(model: Any, *, verify: bool = False, profile: bool = False, log: Callable[[str], None] | None = None,
-               daemon: bool = True, progress: Any = None) -> Report:
-    """A copied model (``store="copy"``) built: its bundle -- ``model.py`` and the modules its code
-    reaches (``copies.bundle_sources``) -- sent to the daemon, which writes it in the model's registry
-    folder and builds it there, in a worker, as ``python model.py`` would; after the build it copies
-    every file the build read (``copies.copy_inputs``). Only through the engine: ``daemon=False`` is
-    refused, as a copy has no folder of its own without it."""
-    from cadgen.engine.copies import bundle_sources
-
-    if not daemon:
-        raise ValueError(f"model {model.name!r} is a copy (store='copy'): it builds in the engine, not with daemon=False")
-    cwd = Path.cwd()
-    files = bundle_sources(model, model.id, cwd)
-    copy = {"id": model.id, "name": model.name, "source": model.function.__code__.co_filename, "origin": str(cwd),
-            "files": {name: base64.b64encode(data).decode("ascii") for name, data in files.items()}}
-    reports, fresh, wall = _built(None, [model.name], verify=verify, log=log, daemon=True, progress=progress,
-                                  profile=profile, copy=copy)
-    return Report(reports, round(wall, 4), fresh)
-
-
 def _source(source: Any) -> dict[str, Any]:
-    """What an export or a snapshot reads: a ``Model`` this Python program names (or the
-    ``Built`` handle of one), a document's id (``{"id"}``: the document the engine holds, read
-    as it is and never built), or an on-disk document's or mesh file's path."""
+    """What an export or a snapshot reads: a document's handle (``Document``) or its id (``{"id"}``:
+    the document the engine holds, read as it is and never built), a ``Model`` this Python program
+    names (built first), or an on-disk document's or mesh file's path."""
     from cadgen.engine.export import MESHES, SOURCES, ExportRefused
     from cadgen.engine.ids import is_id
     from cadgen.engine.model import Model
 
     if isinstance(source, Model):
-        if source.store == "copy":
-            built = source.build()  # built from its bundle, then read by its id, as the engine holds it
-            if not built.ok:
-                raise EngineError(next(row.get("error", "model failed") for row in built.models if not row.get("ok")))
-            return {"id": source.id}
         return {"script": str(source.script), "function": source.name}
-    if isinstance(source, Built):
-        return {"function": source.name, "script": str(source.script)}
+    if isinstance(source, Document):
+        return {"id": source.id}
     text = os.fspath(source)
     if is_id(text):
         return {"id": text}
@@ -335,8 +428,8 @@ def export(source: Any, *destinations: Any,
            progress: Callable[[dict], None] | None = None) -> list[Written]:
     """Write a document to each destination, its kind from its suffix (``.xbf``, ``.step``,
     ``.glb``, ``.stl``, ``.3mf``, and ``.dxf`` of a planar document): the document of an
-    ``.xbf``, of a ``.step`` read into one, of a document id (the one the engine holds, never
-    built), or of a ``Model`` (built first: this program's own call); or a mesh file (``.glb``,
+    ``.xbf``, of a ``.step`` read into one, of a handle (``Document``) or a document id (the one the
+    engine holds, never built), or of a ``Model`` (built first: this program's own call); or a mesh file (``.glb``,
     ``.stl``, ``.3mf``) to the other two mesh kinds, each file holding what its format carries,
     with no CAD kernel loaded (a mesh has no B-rep: no xbf, STEP or DXF is made from one). Several
     destinations read the document once. The file holds what the code built: no option selects a part or a state
@@ -357,7 +450,7 @@ def export(source: Any, *destinations: Any,
             why = refused(spec["path"], destination)
             if why:
                 raise ExportRefused(why)
-    cwd = str(source.cwd) if isinstance(source, Built) else os.getcwd()
+    cwd = str(source.cwd) if isinstance(source, Document) else os.getcwd()
     shown = log or (lambda _text: None)
     order = {"op": "export", "source": spec, "destinations": [str(path) for path in resolved], "cwd": cwd}
     done = _exported(order, spec, shown, daemon, progress)
@@ -429,7 +522,7 @@ def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, 
     from cadgen.engine.ids import is_id
     from cadgen.engine.model import Model
 
-    if isinstance(source, (Model, Built)) or is_id(os.fspath(source)):
+    if isinstance(source, (Model, Document)) or is_id(os.fspath(source)):
         if out.suffix.lower() != ".png":
             raise drawing.SnapshotRefused(f"a snapshot is a .png; {out.name} is not one")
         spec = _source(source)
@@ -442,7 +535,7 @@ def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, 
                 "height": height, "size_profile": size_profile, "annotation": annotation,
                 "measurements": drawing.parse_measurements(measurements)}
         order = {"op": "export", "source": spec, "destinations": [], "draw": draw,
-                 "cwd": str(source.cwd) if isinstance(source, Built) else os.getcwd()}
+                 "cwd": str(source.cwd) if isinstance(source, Document) else os.getcwd()}
         found = _exported(order, spec, lambda _text: None, daemon)["drawn"]
         return Drawn(out, found["width"], found["height"], found)
     shown, framed, size = drawing.options(display, camera, grid, width, height, size_profile)
@@ -740,7 +833,7 @@ def _facts(verb: str, args: tuple, kwargs: dict[str, Any], heard: dict[str, Any]
 def _kind(source: Any) -> str:
     from cadgen.engine.model import Model
 
-    if isinstance(source, (Model, Built)):
+    if isinstance(source, (Model, Document)):
         return "model"
     from cadgen.engine.ids import is_id
 

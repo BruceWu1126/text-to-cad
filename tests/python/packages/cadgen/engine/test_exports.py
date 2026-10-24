@@ -51,7 +51,7 @@ def board():
     plate = paint(plate, plate.faces().sort_by(bd.Axis.Z)[0], materials.steel)
     plate.material = materials.aluminium
     plate.label = "plate"
-    pegs = [peg().moved(bd.Location((x, 0, 0))) for x in (-10, 0, 10)]
+    pegs = [peg().shape.moved(bd.Location((x, 0, 0))) for x in (-10, 0, 10)]
     for index, placed in enumerate(pegs):
         placed.label = f"peg{{index}}"
     rack = bd.Compound(children=pegs, label="rack").moved(bd.Location((0, 0, {lift})))
@@ -133,7 +133,7 @@ def hinges():
 
 @xbf("XBF/hinges_open.xbf")
 def hinges_open():
-    return posed(hinges(), "open")
+    return posed(hinges().shape, "open")
 """
 
 

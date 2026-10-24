@@ -205,7 +205,7 @@ from index_finger import index_finger
 
 @xbf("XBF/posed_finger.xbf")
 def posed_finger():
-    return posed(index_finger(), {pose})
+    return posed(index_finger().shape, {pose})
 """
 
 

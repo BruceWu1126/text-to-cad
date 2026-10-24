@@ -1,35 +1,42 @@
 """Models: the decorators, a model's identity, and what calling one does.
 
-A model is a parameterless function that returns a build123d shape, decorated with
-``@xbf`` and any of the derived-file decorators ``@step``, ``@glb``, ``@stl``, ``@threemf``
-and ``@dxf`` (the drawing of a planar result: a sketch, a face, wires or edges). Its
-identity is ``script.py::function``. Every file decorator requires its output path:
-``@xbf("XBF/part.xbf")`` or ``@step(out="part.step")``. Relative paths are relative
-to the script. Bare ``@model`` declares a document with no file. Everything else is the model's code: its material, colours, joints, the pose
-its joints are connected at (the pose every file shows), its mechanism states, couplings and
-configuration sequences (``mechanism_state``, ``gear_pair`` and its siblings,
-``configuration_sequence``). A picture is the ``snapshot`` verb's, never a declaration. The outputs are kept in the order the decorators are written, top to
-bottom, and the xbf, when declared, is always written first.
+A model is a parameterless function that returns a build123d shape. It becomes a document
+through exactly one of two declarations: bare ``@model`` (a document with no file), or one or
+more file decorators -- ``@xbf``, ``@step``, ``@glb``, ``@stl``, ``@threemf`` and ``@dxf`` (the
+drawing of a planar result: a sketch, a face, wires or edges) -- a document with those files;
+``@model`` stacked with a file decorator is refused. Its identity is ``script.py::function``: the
+function's name is the model's name, and renaming the function renames it. Every file decorator
+requires its output path: ``@xbf("XBF/part.xbf")`` or ``@step(out="part.step")``. Relative paths
+are relative to the script. Everything else is the model's code: its material, colours, joints,
+the pose its joints are connected at (the pose every file shows), its mechanism states, couplings
+and configuration sequences (``mechanism_state``, ``gear_pair`` and its siblings,
+``configuration_sequence``). A picture is the ``snapshot`` verb's, never a declaration. The outputs
+are kept in the order the decorators are written, top to bottom, and the xbf, when declared, is
+always written first.
 
-The decorated function is a ``Model``: ``.build()``, ``.export(*destinations)``,
-``.snapshot(out)`` and ``.document`` run the engine's verbs on it, through the daemon.
-Decoration only declares: imports and definitions never build or exit the caller.
-An explicit model call asks the daemon to build that model, then returns its shape.
-The script's own Python control flow, including its main block, selects calls.
+The decorated function is a ``Model``: the function, its id (``.id``: ``ids.model_id`` of its
+script and function, or ``ids.key_id`` of the ``key=`` its declaration gives) and the debug seam
+``.build(verify=, profile=)``. Decoration only declares: imports and definitions never build or
+exit the caller. A call builds the model through the engine and returns its document's handle
+(``api.Document``: ``.id``, ``.url``, ``.name``, ``.shape``, ``.export``, ``.snapshot``), never a
+bare shape. The script's own Python control flow, including its main block, selects calls.
 
-Called inside a build, a model is a child: its body runs in the same run, with the
-same memo, and its result is a sub-assembly of whatever the caller makes of it,
-labelled with the child's function name when its body gave it no label. A model is
-a pure function of its source, so a second call in one build hands back a new
-placement of the same result -- new objects sharing the first call's geometry --
-rather than running the body again: a child used four times is one prototype placed
-four times. A child writes the files it declares, as a target does: once a build, from
-its own document (``BuildContext.children``, ``build``). Called outside a build, a model asks its warm worker to build it.
+Called inside a build, a model is a child: its body runs in the same run, with the same memo,
+and the call returns the child document's handle, whose ``.shape`` is the result in this process:
+a sub-assembly of whatever the caller makes of it, labelled with the child's function name when
+its body gave it no label. A model is a pure function of its source, so a second call in one
+build hands back a new placement of the same result -- new objects sharing the first call's
+geometry -- rather than running the body again: a child used four times is one prototype placed
+four times. A child writes the files it declares, as a target does: once a build, from its own
+document (``BuildContext.children``, ``build``). Called outside a build, a model asks its warm
+worker to build it.
+
+``model(shape, name=...)`` hands a shape over from a script or a REPL: no function, no body to
+run again (``api.hand_over``).
 """
 
 from __future__ import annotations
 
-import dis
 import functools
 import sys
 import inspect
@@ -39,7 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from cadgen.engine.ids import canonical, model_id
+from cadgen.engine.ids import canonical, check_key, key_id, model_id
 
 __all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration_sequence", "dxf", "glb", "mechanism_state", "memo",
            "model", "paint", "read_step", "read_xbf", "step", "stl", "threemf", "xbf", "models_in"]
@@ -85,52 +92,6 @@ def check_output(kind: str, out: Any, where: str) -> None:
         raise ValueError(f"{where}: the file must end in {' or '.join(_ACCEPTED[kind])}, not {os.fspath(out)!r}")
 
 
-def _caller_discards_model_result() -> bool:
-    """Whether this wrapper's real-file ``__main__`` caller immediately POP_TOPs.
-
-    This is deliberately a one-way proof: every observer, unfamiliar runtime,
-    synthetic module and bytecode uncertainty keeps the historical materialized
-    return. The caller is two frames above this helper (helper -> model wrapper
-    -> call site).
-    """
-    if sys.implementation.name != "cpython":
-        return False
-    if sys.gettrace() is not None or sys.getprofile() is not None:
-        return False
-    monitoring = getattr(sys, "monitoring", None)
-    if monitoring is not None:
-        try:
-            if any(monitoring.get_tool(tool_id) is not None for tool_id in range(6)):
-                return False
-        except Exception:
-            return False
-    try:
-        caller = sys._getframe(2)
-        if caller.f_trace is not None:
-            return False
-        if caller.f_code.co_name != "<module>" or caller.f_globals.get("__name__") != "__main__":
-            return False
-        main_module = sys.modules.get("__main__")
-        if main_module is None or caller.f_globals is not vars(main_module):
-            return False
-        filename = Path(caller.f_code.co_filename)
-        declared_filename = Path(str(caller.f_globals.get("__file__", "")))
-        if (
-            filename.suffix.lower() != ".py"
-            or not filename.is_file()
-            or declared_filename.resolve() != filename.resolve()
-        ):
-            return False
-        following = next(
-            (instruction for instruction in dis.get_instructions(caller.f_code)
-             if instruction.offset > caller.f_lasti),
-            None,
-        )
-        return following is not None and following.opname == "POP_TOP"
-    except Exception:
-        return False
-
-
 class Model:
     """A decorated function: the body, the script it lives in, the outputs it declares."""
 
@@ -144,55 +105,51 @@ class Model:
         functools.update_wrapper(self, function)
         self.function = function
         self.name = function.__name__
-        # Where its document is kept (``STORES``), by where its source is (``store_of``): its file
-        # on disk, ``pointer``; else the source Python holds (a notebook cell), ``copy``.
         filename = function.__code__.co_filename
-        self.saved = os.path.isfile(filename)
-        self.store = "pointer" if self.saved else "copy"
-        if not self.saved:
-            try:
-                inspect.getsource(function)
-            except (OSError, TypeError):
-                raise ValueError(f"model {self.name!r} is defined in {filename}, which keeps no source to build "
-                                 "it from: save this as a file") from None
-        self.script = Path(canonical(filename)) if self.saved else Path(filename)
+        if not os.path.isfile(filename):
+            raise ValueError(f"model {self.name!r} is defined in {filename}, no saved .py file: a function becomes a "
+                             "document from the file it is in. Where the code is in no file (a notebook cell, a "
+                             f"REPL), build the shape and hand it over: model(shape, name={self.name!r})")
+        self.script = Path(canonical(filename))
         self.outputs: list[Output] = []
+        # Where its document is kept (``STORES``): ``pointer``, or ``memory`` when its declaration asks.
+        self.store = "pointer"
         self._store_given: str | None = None
-        self._id: str | None = None  # ``@model(id=...)``: a copied document's, chosen by its author
+        # The ``key=`` its declaration gives (``ids.key_id``), else None: its id is derived.
+        self.key: str | None = None
+        self._bare = False  # declared by ``@model``
         self.__xbf_model__ = True
         _MODELS[f"{self.script}::{self.name}"] = self
 
     @property
     def id(self) -> str:
-        """This model's document id, worked out here, never asked of the engine: from its script
-        and function (``ids.model_id``), the same in any process that knows both; the one its author
-        gave (``@model(id=...)``); or, for a copy given none, a new one for this definition."""
-        if self._id is None and self.store == "copy":
-            import uuid
+        """This model's document id, worked out here, never asked of the engine: ``ids.key_id`` of
+        its ``key=``, else ``ids.model_id`` of its script and function -- the same in any process
+        that knows them."""
+        return key_id(self.key) if self.key is not None else model_id(self.script, self.name)
 
-            self._id = str(uuid.uuid4())
-        return self._id if self._id is not None else model_id(self.script, self.name)
+    def declared(self, by: str) -> "Model":
+        """One declaration more on this function: ``model`` (bare ``@model``) or a file kind. A
+        function becomes a document through ``@model`` or through its file decorators, never both."""
+        kinds = [output.kind for output in self.outputs] if by == "model" else [by] if self._bare else []
+        if kinds:
+            raise TypeError(f"model {self.name!r} is declared by @model and @{kinds[0]}: a function becomes a "
+                            "document through @model (a document with no file) or through its file decorators "
+                            f"(a document with those files), never both; drop @model")
+        if by == "model":
+            self._bare = True
+        return self
 
-    def identified(self, ident: Any) -> "Model":
-        """The id ``@model(id=...)`` gives: a UUID, its author's, which a later run's document of the
-        same id replaces (an upsert). Only a copied document takes one (``store="copy"``, or a copy's
-        own ``model.py``) and a ``memory`` one: a model in a saved file has the id of its script and
-        function."""
-        if ident is None:
+    def keyed(self, key: Any) -> "Model":
+        """The ``key=`` a declaration gives: its id becomes ``ids.key_id(key)``, global; one key per
+        model, and in this process one declaration per key (``claim``)."""
+        if key is None:
             return self
-        import uuid
-
-        try:
-            found = str(uuid.UUID(str(ident)))
-        except ValueError:
-            raise ValueError(f"id is a UUID, not {ident!r}") from None
-        self._id = found
-        return self._checked()
-
-    def _checked(self) -> "Model":
-        if self._id is not None and self.store == "pointer" and not _in_bundle(self.script):
-            raise ValueError(f"model {self.name!r} is in a saved file: its id is its script's and function's, and "
-                             "takes no id=; id= names a copied document (store='copy')")
+        check_key(key)
+        if self.key is not None and self.key != key:
+            raise TypeError(f"model {self.name!r} declares two keys, {self.key!r} and {key!r}")
+        claim(key, self.address)
+        self.key = key
         return self
 
     @property
@@ -228,30 +185,18 @@ class Model:
             _reported(built.models, built.wall, built.fresh, False)
         if not built.ok:
             raise api.EngineError(next(row.get("error", "model failed") for row in built.models if not row.get("ok")))
-        if _caller_discards_model_result():
-            return None
-        return api.Built(self.name, self.built_from(built.models[0]), built.models[0], Path.cwd()).shape
-
-    def built_from(self, report: dict[str, Any]) -> Path:
-        """The script a build of this model ran: its own, or a copy's ``model.py`` (its report's)."""
-        found = (report.get("source") or {}).get("script")
-        return Path(found) if found else self.script
+        return api.Document(self.name, self.script, built.models[0], Path.cwd())
 
     def stored(self, store: str | None) -> "Model":
-        """The store a decorator gives (``store=``), checked against where the source is: one store
-        per model; ``pointer`` and ``memory`` need a saved file, ``copy`` the source Python holds or
-        a saved file."""
+        """The store a decorator gives (``store=``): one store per model (``STORES``)."""
         if store is None:
             return self
         if store not in STORES:
             raise ValueError(f"store is one of {', '.join(map(repr, STORES))}, not {store!r}")
         if self._store_given is not None and self._store_given != store:
             raise TypeError(f"model {self.name!r} declares two stores, {self._store_given!r} and {store!r}")
-        if store != "copy" and not self.saved:
-            raise ValueError(f"store={store!r} needs the model in a saved .py file; {self.name!r} is defined in "
-                             f"{self.function.__code__.co_filename}")
         self.store = self._store_given = store
-        return self._checked()
+        return self
 
     def _path(self, kind: str, out: Any) -> Path:
         if out is None:
@@ -283,48 +228,7 @@ class Model:
         the actual build call without forcing cache misses (engine README, Profiling)."""
         from cadgen.engine import api
 
-        if self.store == "copy":
-            return api.build_copy(self, verify=verify, profile=profile, log=log, daemon=daemon)
         return api.build_script(self.script, [self.name], verify=verify, profile=profile, log=log, daemon=daemon)
-
-    def export(self, *destinations: Any) -> Any:
-        """Build this model, then write its document to each destination (by suffix)."""
-        from cadgen.engine import api
-
-        return api.export(self, *destinations)
-
-    def snapshot(self, out: Any, *, display: Any = None, camera: Any = None, grid: bool = False,
-                 preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
-                 size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
-                 measurements: Any = None) -> Any:
-        """Build this model, then draw its document, from the worker's memory, into ``out``
-        (a ``.png``) as the viewer does; every option is the ``snapshot`` verb's, about the picture
-        (law 22)."""
-        from cadgen.engine import api
-
-        return api.snapshot(self, out, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
-                            width=width, height=height, size_profile=size_profile, daemon=daemon,
-                            annotation=annotation, measurements=measurements)
-
-    @property
-    def document(self) -> Any:
-        """The last built document: from its declared XBF, or the live worker for a bare model."""
-        from cadgen.engine import document
-
-        found = next((target.path for target in self.plan() if target.kind == "xbf"), None)
-        if found is None:
-            from cadgen.engine.api import Built
-
-            if self.store == "copy":
-                from cadgen.engine import registry
-
-                held = registry.current()
-                script = held.folder(self.id) / "model.py" if held is not None else self.script
-                return Built(self.name, script, {}, Path.cwd()).document
-            return Built(self.name, self.script, {}, Path.cwd()).document
-        if not found.is_file():
-            raise FileNotFoundError(f"model {self.identity} is not built yet: {found} is missing (.build() it)")
-        return document.load(found)
 
 
 def _normalized(path: Path) -> str:
@@ -389,53 +293,88 @@ def as_package_module(main: Any) -> None:
 
 
 # Where a model's document is kept: ``pointer``, a model in a saved file, which the engine's registry
-# points at and knows the program that builds it again; ``copy``, a model whose source is in no
-# saved file (a notebook cell), its source and the files its build read copied into its registry
-# folder (``copies``); ``memory``, kept in its worker's memory only, gone when the worker is.
-STORES = ("pointer", "copy", "memory")
+# points at and knows the program that builds it again; ``memory``, kept in its worker's memory only,
+# gone when the worker is. A shape handed over (``model(shape, name=...)``) is a third, ``shape``: its
+# document is the bytes handed over, held and cached as a drained document is, with nothing to run.
+STORES = ("pointer", "memory")
+
+# Each key a declaration in this process gives, and the declaration (``script::function``, or a
+# shape's ``scope::name``) that gave it: one key names one document. A build forgets them before
+# it loads the script, as it forgets the models (``_MODELS``).
+_KEYS: dict[str, str] = {}
 
 
-def _in_bundle(script: Path) -> bool:
-    """Whether ``script`` is a copied document's own ``model.py`` (in the registry's folder of it)."""
-    from cadgen.engine import registry
+def claim(key: str, declaration: str) -> None:
+    """``declaration`` takes ``key``; refused, naming the other, when another declaration of this
+    process has it (the engine refuses one its records hold: ``models.Models.claimed``)."""
+    other = _KEYS.setdefault(key, declaration)
+    if other != declaration:
+        raise ValueError(f"key {key!r} is claimed by two declarations, {other} and {declaration}: one key names "
+                         "one document; give one of them another key")
 
-    held = registry.current()
-    return held is not None and held.bundle_of(script) is not None
+
+def _no_shape_options(name: Any, animations: Any) -> None:
+    if name is not None:
+        raise TypeError("a model decorator takes no name=: the function's name is the model's name (rename the "
+                        "function to rename it); name= names a shape handed over, model(shape, name=...)")
+    if animations is not None:
+        raise TypeError("a model decorator takes no animations=: a model's body declares its animations "
+                        "(animation(...)); animations= goes with a shape handed over, model(shape, name=...)")
 
 
-def model(function: Any = None, /, *, store: str | None = None, id: str | None = None) -> Any:  # noqa: A002
-    """Declare a model without an output file. A call builds its document. ``@model(store=...)``
-    says where its document is kept (``STORES``): by default ``pointer`` for a model in a saved
-    file, ``copy`` for one whose source only Python holds (a notebook cell). ``@model(id=...)``
-    gives a copied document its id, a UUID its author chooses: a later run's replaces it."""
-    if function is None:
+def model(target: Any = None, /, *, store: str | None = None, key: str | None = None, name: str | None = None,
+          animations: Any = None) -> Any:
+    """Declare a model without an output file: ``@model``, or ``@model(store="memory")`` for a
+    document kept in its worker's memory only, ``@model(key="arm")`` for an id of its key's
+    (``ids.key_id``). A call builds its document. ``model(shape, name="arm")`` instead hands a shape
+    over: a document made of it, held by the engine as a built one is, its handle returned
+    (``api.hand_over``); ``key=`` and ``animations=[...]`` (the ``animation()`` builders of the GLB's
+    choreography) go with it."""
+    if target is None:
+        _no_shape_options(name, animations)
         if store is not None and store not in STORES:
             raise ValueError(f"store is one of {', '.join(map(repr, STORES))}, not {store!r}")
-        return lambda target: model(target, store=store, id=id)
-    return (function if isinstance(function, Model) else Model(function)).stored(store).identified(id)
+        if key is not None:
+            check_key(key)
+        return lambda function: model(function, store=store, key=key)
+    if isinstance(target, Model) or inspect.isfunction(target):
+        _no_shape_options(name, animations)
+        found = target if isinstance(target, Model) else Model(target)
+        return found.declared("model").stored(store).keyed(key)
+    if store is not None:
+        raise TypeError("a shape handed over takes no store=: its document is the shape's, held by the engine")
+    from cadgen.engine import api
+
+    caller = sys._getframe(1)
+    while caller.f_back is not None and caller.f_code.co_filename == __file__:
+        caller = caller.f_back  # ``cadgen.model(...)``: the module's own ``__call__`` is not the caller
+    return api.hand_over(target, name, key=key, animations=animations, frame=caller)
 
 
 def _decorator(kind: str) -> Callable[..., Any]:
-    def decorate(out: Any, *, store: str | None = None) -> Any:
+    def decorate(out: Any, *, store: str | None = None, key: str | None = None) -> Any:
         if out is None:
             raise TypeError(f"@{kind} requires an output path")
         check_output(kind, out, f"@{kind}(out=...)")
         if store is not None and store not in STORES:
             raise ValueError(f"store is one of {', '.join(map(repr, STORES))}, not {store!r}")
+        if key is not None:
+            check_key(key)
 
         def apply(target: Any) -> Model:
             model = target if isinstance(target, Model) else Model(target)
+            model.declared(kind)
             if any(output.kind == kind for output in model.outputs):
                 raise TypeError(f"model {model.name!r} declares @{kind} twice")
             model.outputs.insert(0, Output(kind, os.fspath(out)))
-            return model.stored(store)
+            return model.stored(store).keyed(key)
 
         return apply
 
     decorate.__name__ = kind
     decorate.__qualname__ = kind
     decorate.__doc__ = (f"Declare an explicit output: @{kind}(out='path{SUFFIXES[kind]}'), where its "
-                        "document is kept with store= (pointer, copy or memory). "
+                        "document is kept with store= (pointer or memory), its id given by key=. "
                         "The output path is required; decoration builds nothing.")
     return decorate
 
@@ -655,9 +594,6 @@ def read_step(path: Any) -> Any:
 
     from cadgen.engine.reader import refuse_written
 
-    from cadgen.engine.copies import copied_path
-
-    path = copied_path(path)  # a copied document's rerun reads the copy (``copies.serving``)
     # Before the memo: a read of a file this build writes is refused, whether or not the memo holds it.
     refuse_written(path, "read_step")
     return _READ_STEP(os.fspath(path))
@@ -689,9 +625,6 @@ def read_xbf(path: Any) -> Any:
 
     from cadgen.engine.reader import refuse_written
 
-    from cadgen.engine.copies import copied_path
-
-    path = copied_path(path)  # a copied document's rerun reads the copy (``copies.serving``)
     refuse_written(path, "read_xbf")  # before the memo, as read_step's
     return _READ_XBF(os.fspath(path))
 
@@ -892,7 +825,10 @@ class BuildContext:
             self.results[key] = (made, instance(made))
         if not made.__dict__.get("label"):
             made.label = model.name
-        return made
+        from cadgen.engine.api import Document
+
+        # The child's document, whose shape is this process's result: the caller composes ``.shape``.
+        return Document.inside(model, made)
 
     def children(self, model: Model, run: Any, before: set[str]) -> list[tuple[Model, Any]]:
         """The models that ran as children in ``model``'s run, each once, in the order they

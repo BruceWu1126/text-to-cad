@@ -37,8 +37,8 @@ def post():
 
 @xbf("XBF/rack.xbf")
 def rack():
-    left = post()
-    right = post().moved(bd.Location((20, 0, 0)))
+    left = post().shape
+    right = post().shape.moved(bd.Location((20, 0, 0)))
     right.label = "right"
     return bd.Compound(children=[left, right, bd.Pos(10, 0, -6) * bd.Box(30, 6, 2)], label="rack")
 """

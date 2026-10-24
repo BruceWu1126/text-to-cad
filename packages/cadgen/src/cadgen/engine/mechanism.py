@@ -541,7 +541,7 @@ def posed(assembly: Any, state: Any) -> Any:
     applied to that link's parts. The copy shares the geometry, and keeps the joints, couplings,
     mechanism states and configuration sequences, the asked values its as-built state. An unknown
     state, joint or coupling, or a value out of range, is refused by name (``resolve``). A posed
-    file is this, a function in the model's code: ``return posed(arm(), "folded")``."""
+    file is this, a function in the model's code: ``return posed(arm().shape, "folded")``."""
     from collections.abc import Mapping
 
     import build123d as bd
@@ -554,7 +554,8 @@ def posed(assembly: Any, state: Any) -> Any:
     from cadgen.engine.model import instance
 
     if not isinstance(assembly, bd.Shape):
-        raise TypeError(f"posed() takes the assembly whose joints it sets, not {type(assembly).__name__}")
+        hint = ": a model call returns its document, whose .shape is the assembly" if hasattr(assembly, "shape") else ""
+        raise TypeError(f"posed() takes the assembly whose joints it sets, not {type(assembly).__name__}{hint}")
     if isinstance(state, Mapping):
         pose: Any = dict(state)
     elif isinstance(state, str):

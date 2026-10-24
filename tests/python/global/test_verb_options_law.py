@@ -2,10 +2,12 @@
 
 `export` converts a document into files: a document in, destinations out. What a file holds
 -- its parts, their placement, colours and motion -- is what the code built, so neither the
-command, the root function nor `Model.export` takes an option that selects a part or a state.
-A posed or partial file is a function in the model's code (`cadgen.ap242.posed`, a part's own
-model). This pins the surface where such an option would come back: the parser `cadgen export`
-runs and the two Python signatures. Nothing here needs the CAD kernel.
+command, the root function nor a document's handle (`Document.export`, what a model call returns)
+takes an option that selects a part or a state. A posed or partial file is a function in the
+model's code (`cadgen.ap242.posed`, a part's own model). This pins the surface where such an option
+would come back: the parser `cadgen export` runs and the Python signatures. The verbs moved from
+the decorated function (`Model`) to the handle deliberately: the function is the declaration and
+its id; the document a call returns is what a verb reads. Nothing here needs the CAD kernel.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ add_repo_path("packages/cadgen/src")
 
 import cadgen  # noqa: E402
 from cadgen.cli.export import build_parser  # noqa: E402
+from cadgen.engine.api import Document  # noqa: E402
 from cadgen.engine.model import Model  # noqa: E402
 
 LAW = ("law 22 (packages/cadgen/README.md): \"A verb's option is about the picture or the path, never the "
@@ -46,28 +49,30 @@ class ExportTakesADocumentAndDestinations(unittest.TestCase):
             ("progress", inspect.Parameter.KEYWORD_ONLY, None),
         ], f"cadgen.export is (source, *destinations, log=None, daemon=True, progress=None); {LAW}")
 
-    def test_a_model_exports_itself_to_destinations_alone(self) -> None:
-        parameters = inspect.signature(Model.export).parameters.values()
+    def test_a_handle_exports_its_document_to_destinations_alone(self) -> None:
+        parameters = inspect.signature(Document.export).parameters.values()
         self.assertEqual([(p.name, p.kind) for p in parameters], [
             ("self", inspect.Parameter.POSITIONAL_OR_KEYWORD),
             ("destinations", inspect.Parameter.VAR_POSITIONAL),
-        ], f"Model.export is (*destinations); {LAW}")
+        ], f"Document.export is (*destinations); {LAW}")
+        self.assertFalse(hasattr(Model, "export") or hasattr(Model, "snapshot"),
+                         "the decorated function declares; the handle a call returns is what a verb reads")
 
 
 class SnapshotTakesThePictureAlone(unittest.TestCase):
     PICTURE = ("display", "camera", "grid", "preview", "pose", "width", "height", "size_profile", "daemon",
                "annotation", "measurements")
 
-    def test_a_model_s_snapshot_takes_the_verb_s_picture_options_by_name(self) -> None:
+    def test_a_handle_s_snapshot_takes_the_verb_s_picture_options_by_name(self) -> None:
         verb = inspect.signature(cadgen.snapshot).parameters
-        parameters = list(inspect.signature(Model.snapshot).parameters.values())
+        parameters = list(inspect.signature(Document.snapshot).parameters.values())
         self.assertEqual([(p.name, p.kind) for p in parameters[:2]], [
             ("self", inspect.Parameter.POSITIONAL_OR_KEYWORD), ("out", inspect.Parameter.POSITIONAL_OR_KEYWORD)])
         self.assertEqual([(p.name, p.kind, p.default) for p in parameters[2:]],
                          [(name, inspect.Parameter.KEYWORD_ONLY, verb[name].default) for name in self.PICTURE],
-                         f"Model.snapshot(out, ...) spells out the snapshot verb's options, each about the picture; {LAW}")
+                         f"Document.snapshot(out, ...) spells out the snapshot verb's options, each about the picture; {LAW}")
         self.assertEqual(set(verb) - {"source", "out", "job"}, set(self.PICTURE),
-                         "the verb takes no option Model.snapshot leaves out but its job")
+                         "the verb takes no option Document.snapshot leaves out but its job")
 
 
 if __name__ == "__main__":

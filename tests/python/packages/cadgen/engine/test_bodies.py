@@ -74,16 +74,16 @@ HOLE = {hole}
 @xbf("XBF/root.xbf")
 def root():
     before = bd.Box(1, 1, 1)
-    one = left()
-    two = left().moved(bd.Location((0, 20, 0)))
+    one = left().shape
+    two = left().shape.moved(bd.Location((0, 20, 0)))
     two.label = "two"
-    plate = left().moved(bd.Location((0, 40, 0))) - bd.Pos(3, 40, 0) * bd.Cylinder(HOLE, 10)
+    plate = left().shape.moved(bd.Location((0, 40, 0))) - bd.Pos(3, 40, 0) * bd.Cylinder(HOLE, 10)
     plate.label = "plate"
     after = bd.Box(1, 1, 1).moved(bd.Location((0, -20, 0)))
     after.label = "after"
     before.label = "before"
-    return bd.Compound(children=[one, two, plate, right().moved(bd.Location((40, 0, 0))),
-                                 bought().moved(bd.Location((-40, 0, 0))), before, after], label="root")
+    return bd.Compound(children=[one, two, plate, right().shape.moved(bd.Location((40, 0, 0))),
+                                 bought().shape.moved(bd.Location((-40, 0, 0))), before, after], label="root")
 """
 
 
@@ -290,7 +290,7 @@ from spacer import spacer
 
 @xbf("XBF/assembly.xbf")
 def assembly():
-    return bd.Compound(children=[bracket(), spacer().moved(bd.Location((30, 0, 0)))], label="assembly")
+    return bd.Compound(children=[bracket().shape, spacer().shape.moved(bd.Location((30, 0, 0)))], label="assembly")
 """
 
 
@@ -394,7 +394,7 @@ def reader():
 
 @xbf("XBF/holder.xbf")
 def holder():
-    return bd.Compound(children=[reader(), bd.Pos(GAP, 0, 0) * bd.Box(1, 1, 1)])
+    return bd.Compound(children=[reader().shape, bd.Pos(GAP, 0, 0) * bd.Box(1, 1, 1)])
 
 
 @xbf("XBF/writer.xbf")

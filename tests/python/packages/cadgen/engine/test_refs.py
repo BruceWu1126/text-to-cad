@@ -124,7 +124,7 @@ class ReadAndPlaceTest(_Folder):
 
             @xbf("XBF/rack.xbf")
             def rack():
-                first, second = peg(), peg().moved(bd.Location((10, 0, 0)))
+                first, second = peg().shape, peg().shape.moved(bd.Location((10, 0, 0)))
                 if abs(second.volume - first.volume) > 1e-6:
                     raise ValueError(f"the second placement measures {second.volume}, not {first.volume}")
                 return bd.Compound(children=[first, second], label="rack")
