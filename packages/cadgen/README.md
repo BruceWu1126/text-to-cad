@@ -64,8 +64,9 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
 2. **Only requested files to disk.** The engine writes the files a model declares -- the xbf and the exports
    its decorators name, nothing beside them -- and the operating system's coordination for its
    warm process: a door (a named pipe; on Windows a port file), a lock and its connections' pipes, in
-   a folder only the user can make: `cadgen-engine` in `$XDG_RUNTIME_DIR`, else in a `$TMPDIR` that
-   is the user's own, else `/tmp/cadgen-<uid>` -- and cadgen's own
+   a folder only the user can make: `cadgen-engine` in `$XDG_RUNTIME_DIR`, else in the user's own
+   temporary folder (on macOS the one the system names, whatever `$TMPDIR` a sandbox sets; else
+   `$TMPDIR`), else `/tmp/cadgen-<uid>` -- and cadgen's own
    state in the user's state folder: settings, Recents' small previews, and the registry of the
    documents it has built, been handed or opened, one record each that points at its script or
    file; never geometry and never source. In the

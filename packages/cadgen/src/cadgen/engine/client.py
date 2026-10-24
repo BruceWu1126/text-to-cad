@@ -75,6 +75,18 @@ def _denied(cause: str) -> ConnectionError:
                            "it does: run this command outside it, or with the sandbox's permission")
 
 
+def _lock(path: Path | None = None) -> Any:
+    """``daemon.lock`` taken by a client (to see a daemon gone, or its files dead): a folder refused
+    (``daemon.folder_refusal``) or denied by the system said in one line, as ``connect`` says it."""
+    try:
+        return _daemon.lock(path)
+    except PermissionError as error:
+        if error.errno is None:  # ``folder_refusal``'s words
+            raise ConnectionError(str(error)) from None
+        raise _denied(f"taking the lock in the engine's folder {_daemon.state_dir()}: "
+                      f"{error.strerror or error}") from None
+
+
 def _not_started(code: int) -> ConnectionError:
     """A daemon that exited at once, failing (``daemon.main``): the reason its note gives."""
     try:
@@ -181,7 +193,7 @@ def wait_gone(timeout: float = 60.0, endpoint: _daemon.Endpoint | None = None) -
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if not _answering(endpoint.address if endpoint else _daemon.address()):
-            held = _daemon.lock(endpoint.lock if endpoint else None)
+            held = _lock(endpoint.lock if endpoint else None)
             if held is not None:
                 held.close()
                 return True
@@ -273,7 +285,7 @@ def _remove_dead(endpoint: _daemon.Endpoint) -> list[str]:
     present = [path for path in (endpoint.address, endpoint.lock) if path.exists() or path.is_symlink()]
     if not present or _daemon.folder_refusal(endpoint.lock.parent) is not None:
         return []  # nothing, or a folder another can change: none of it this user's daemon's to remove
-    held = _daemon.lock(endpoint.lock)
+    held = _lock(endpoint.lock)
     if held is None:
         return []  # a daemon holds it: starting, stopping or running
     removed: list[str] = []

@@ -302,6 +302,7 @@ class ClientGoneTest(unittest.TestCase):
         worker = object.__new__(Worker)  # its pipes stood in for: no process
         worker.process = SimpleNamespace(stdout=io.BytesIO(stdout), stderr=io.BytesIO(stderr))
         worker.answers, worker.asked, worker.progress, worker.touched = queue.Queue(), {}, None, set()
+        worker.followers = []
         worker.on_progress = worker.on_patch = lambda *_args: None
         worker.on_settled = lambda *_args: None
 
@@ -452,6 +453,24 @@ class EngineFolderTest(unittest.TestCase):
                 with self.assertRaisesRegex(PermissionError, "belongs to another user"):
                     daemon.lock()
 
+    @unittest.skipIf(os.name == "nt" or os.geteuid() == 0, "a folder's mode binds a POSIX user who is not root")
+    def test_a_folder_the_system_denies_is_one_line_from_status_and_stop(self) -> None:
+        import io
+        from unittest import mock
+
+        from cadgen.engine import cli, daemon
+
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.engine)}):
+            os.mkfifo(daemon.door_path(), 0o600)  # a dead daemon's door: status sweeps it, taking the lock
+            os.chmod(self.engine, 0o500)
+            self.addCleanup(os.chmod, self.engine, 0o700)
+            for verb in ("status", "stop"):
+                with mock.patch("sys.stderr", new_callable=io.StringIO) as said, mock.patch("sys.stdout"):
+                    self.assertEqual(cli.run(verb, []), 1)
+                self.assertRegex(said.getvalue(), rf"^cadgen {verb}: the system denies cadgen's local engine "
+                                 r"\(taking the lock in the engine's folder .+: Permission denied\); .+ "
+                                 r"run this command outside it, or with the sandbox's permission\n$")
+
 
 @unittest.skipIf(os.name == "nt", "the per-user folders are POSIX's")
 class DefaultEngineFolderTest(unittest.TestCase):
@@ -497,6 +516,14 @@ class DefaultEngineFolderTest(unittest.TestCase):
         self.assertTrue(system and system.startswith("/var/folders/"), system)
         self.system = system
         self.assertEqual(self.folder(), Path(os.path.realpath(os.path.join(system, "cadgen-engine"))))
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS names its per-user temporary folder")
+    def test_macos_keeps_the_system_folder_when_a_sandbox_sets_its_own_tmpdir(self) -> None:
+        from cadgen.engine import daemon
+
+        self.system = daemon._darwin_temp()
+        self.assertEqual(self.folder(TMPDIR=str(self.private("sandbox"))),
+                         Path(os.path.realpath(os.path.join(self.system, "cadgen-engine"))))
 
     def test_a_temporary_folder_another_user_owns_is_passed_over(self) -> None:
         from unittest import mock
@@ -1263,6 +1290,53 @@ if __name__ == '__main__':
         done = self.run_script("block.py")
         self.assertEqual(done.returncode, 1)
         self.assertIn("RuntimeError: no", done.stderr)
+
+    def test_a_rerun_behind_its_script_s_running_build_says_it_waits_and_replays_it(self) -> None:
+        # A client its shell's time limit killed leaves its build running; the same command again
+        # waits for that build, says so at once, and replays it. Nothing is cancelled.
+        from cadgen.engine import client
+
+        gate = self.folder / "gate"
+        (self.folder / "turbine.py").write_text(textwrap.dedent(f"""
+            import os, time
+            import build123d as bd
+            from cadgen.engine import model
+
+
+            @model
+            def turbine():
+                while not os.path.exists({str(gate)!r}):  # held until the test lets it go
+                    time.sleep(0.01)
+                return bd.Box(2, 2, 2) - bd.Cylinder(0.5, 3)
+
+            if __name__ == "__main__":
+                turbine()
+            """), encoding="utf-8")
+
+        def status() -> dict:
+            with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)}):
+                return client.request({"op": "status"}, start=False) or {}
+
+        def until(condition) -> None:
+            deadline = time.monotonic() + 60
+            while not condition():
+                self.assertLess(time.monotonic(), deadline, "the engine never got there")
+                time.sleep(0.05)
+
+        first = subprocess.Popen([sys.executable, "turbine.py"], cwd=self.folder, env=self.env,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        until(lambda: any(worker["busy"] for worker in status().get("workers", [])))
+        first.kill()
+        first.wait()
+        second = subprocess.Popen([sys.executable, "turbine.py"], cwd=self.folder, env=self.env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        until(lambda: status().get("waiting") == 1)
+        gate.touch()
+        out, err = engine_daemon.communicate(second, self.env)
+        self.assertEqual(second.returncode, 0, err)
+        self.assertRegex(err, r"(?m)^waiting for the build of turbine\.py started \d+ s ago$")
+        self.assertRegex(out, r"(?m)^built turbine\.py::turbine warm in .*bodies 1 replayed; .*"
+                         r"replayed the build of turbine\.py it waited \d+s for$")
 
     def test_running_a_model_script_asks_the_daemon_to_build_it(self) -> None:
         # A script runs like Python and takes no options (law 11): every model it defines writes

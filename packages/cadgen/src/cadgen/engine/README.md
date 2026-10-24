@@ -137,8 +137,10 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
    and the exports its decorators name, nothing beside them -- and the operating
    system's coordination for its warm process: its door (a named pipe; on Windows a port file), a
    lock and the pipes of the connections being opened (**The door**), in a folder only the user
-   can make (`daemon.default_state_dir`): `cadgen-engine` in `$XDG_RUNTIME_DIR`, else in a
-   `$TMPDIR` that is the user's own (macOS's), else `/tmp/cadgen-<uid>`; on Windows in the
+   can make (`daemon.default_state_dir`): `cadgen-engine` in `$XDG_RUNTIME_DIR`, else in the
+   user's own temporary folder (on macOS the one the system names, `/var/folders/...`, whatever
+   `$TMPDIR` a sandbox sets, so a sandboxed client finds the engine started outside; elsewhere
+   `$TMPDIR`), else `/tmp/cadgen-<uid>`; on Windows in the
    temporary folder -- and, in the user's state folder its host names,
    the registry: one record per document it has built, been handed or a page opened, pointing at
    its script or file (**Document lifetime**); never geometry and never source. In the cache folder its host names (the platform's: `~/.cache/cadgen`) it
@@ -970,7 +972,13 @@ the daemon:
   phase finished a line with its time, the one in flight repainted in place -- and nothing when
   it is not (`progress.Bar`; `api.build_script(progress=)` takes the frames instead, `False` none);
 - keeps a busy worker's last, which `cadgen status` shows (**The engine server and its workers**);
-- wakes the pages waiting on a served document among the frame's `outputs` (below).
+- wakes the pages waiting on a served document among the frame's `outputs` (below);
+- sends it on to a build request queued behind it, one of the same script (`Daemon.behind`): a
+  rerun after its client was killed (a shell's time limit) waits for the build that client left
+  running, nothing cancelled. Its client says so on stderr at once ("waiting for the build of
+  turbine.py started 21 s ago"), the frames follow as its own build's would, and its report's
+  `waited` (`{"script", "ago", "seconds"}`) ends its line: "replayed the build of turbine.py it
+  waited 206s for".
 
 Each model's report holds its last frame (`progress`), so a failed build
 says where it was; a worker that dies during a build fails it with where it was in the words.
