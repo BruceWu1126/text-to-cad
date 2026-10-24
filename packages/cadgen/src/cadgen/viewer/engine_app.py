@@ -8,6 +8,7 @@ naming a document by query (``?doc=``, ``?file=``), is answered with the home.
 """
 from __future__ import annotations
 
+import html
 import io
 import os
 import secrets
@@ -30,6 +31,14 @@ LINK_GONE_PAGE = (
     '<p>Its engine was restarted or stopped. Open the viewer again, from your agent or with '
     '<code>cadgen viewer</code>, for a fresh link.</p></body></html>\n'
 ).encode('utf-8')
+
+def bounce_page(location):
+    """A page of this origin that navigates to ``location`` (a path of it), with no script."""
+    target = html.escape(location, quote=True)
+    return ('<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">'
+            f'<meta http-equiv="refresh" content="0;url={target}"><title>CAD</title></head>'
+            f'<body><a href="{target}">Open the CAD Viewer</a></body></html>\n').encode('utf-8')
+
 
 class DocumentResponse:
     """Adapt the engine's socket-shaped writer to the application's response, in process."""
@@ -203,11 +212,20 @@ class EngineApp:
                 saved = value.strip().strip('"')
         # Any one credential suffices: a cookie left by an engine that held this port before
         # must not outrank the token of the URL a launch just printed.
-        supplied = (bearer, saved, request.query.get('token', ''))
         expected = self.token.encode()
-        if not any(secrets.compare_digest(str(value).encode('utf-8', 'surrogateescape'), expected)
-                   for value in supplied if value):
+
+        def matches(value):
+            return bool(value) and secrets.compare_digest(str(value).encode('utf-8', 'surrogateescape'), expected)
+
+        named = matches(bearer) or matches(request.query.get('token', ''))
+        if not named and not matches(saved):
             return self._refused(request, response)
+        if not named and request.header('sec-fetch-site') not in ('', 'same-origin', 'none'):
+            # The cookie is sent to every port of this host, so a request it alone admits must come
+            # from this engine's own pages (or be typed or opened by the person): the browser says
+            # so in Sec-Fetch-Site, which a page cannot set. One without the header is a client's
+            # that is not a browser, and is admitted as before.
+            return response.send_json(403, {'error': 'cross-origin request refused'})
         with self.lock:
             self.active_requests += 1
         self.server.touch()
@@ -223,9 +241,16 @@ class EngineApp:
         if request.query.get('token') == self.token and request.method == 'GET':
             query = {k: v for k, v in request.query if k != 'token'}
             location = request.path + ('?' + urlencode(query) if query else '')
-            return response.send_bytes(302, b'', '', [('location', location),
-                ('set-cookie', f'{cookie_name}={self.token}; Path=/; HttpOnly; SameSite=Strict'),
-                ('referrer-policy', 'no-referrer')])
+            cookie = ('set-cookie', f'{cookie_name}={self.token}; Path=/; HttpOnly; SameSite=Strict')
+            if request.header('sec-fetch-site') in ('', 'none', 'same-origin'):
+                return response.send_bytes(302, b'', '', [('location', location), cookie,
+                                                          ('referrer-policy', 'no-referrer')])
+            # Arrived from another origin (the browser opened on a redirect file, ``browser_open``): a
+            # redirect would carry that origin on, and the browser would hold back the SameSite=Strict
+            # cookie it was just given. The page's own navigation is this origin's, so it is sent.
+            return response.send_bytes(200, bounce_page(location), 'text/html; charset=utf-8', [cookie,
+                ('referrer-policy', 'no-referrer'), ('cache-control', 'no-store'),
+                ('content-security-policy', "default-src 'none'; frame-ancestors 'self'")])
         if request.path == '/mcp' and self.session_factory is not None:
             return self.mcp().handle(request, response)
         if request.method == 'GET' and (request.path.startswith('/s/') or request.path == '/s'
@@ -247,7 +272,8 @@ class EngineApp:
         if navigation:
             return response.send_bytes(403, LINK_GONE_PAGE, 'text/html; charset=utf-8',
                                        [('referrer-policy', 'no-referrer'),
-                                        ('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'")])
+                                        ('content-security-policy',
+                                         "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'")])
         return response.send_json(403, {'error': 'engine token required'})
 
     def mcp(self):

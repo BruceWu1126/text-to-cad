@@ -141,10 +141,11 @@ class RawFilesAreNeverPages(SecurityTestCase):
         status, headers, _ = self.fixture.asset(self.fixture.path("robot.urdf"))
         self.assertEqual((status, headers["content-type"]), (200, "application/xml; charset=utf-8"))
         self.assertEqual((headers["x-content-type-options"], headers["content-security-policy"]), sandbox)
-        # The viewer's own page is the app, never sandboxed.
+        # The viewer's own page is the app, never sandboxed: framed by its own origin alone.
         status, headers, _ = self.fixture.request("GET", "/")
         self.assertEqual(status, 200)
-        self.assertNotIn("content-security-policy", {name.lower() for name in headers})
+        self.assertEqual({name.lower(): value for name, value in headers.items()}["content-security-policy"],
+                         "frame-ancestors 'self'")
 
 
 class FilesByAbsolutePath(SecurityTestCase):

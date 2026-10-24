@@ -173,6 +173,9 @@ _APP_TOKEN_SCHEMA = {"type": "string", "description": "The view's capability, fr
 # The card's Open in browser: the web viewer's page of what it shows (``_browser_page``), a route of
 # the app's alone -- an agent's or a text client's request never reaches it.
 _BROWSER_ROUTE = "/__cad/browser"
+# The card's Open in browser where the host opens no link: this process opens the page itself
+# (``_open_in_browser``), app-only like the route above.
+_BROWSER_OPEN_ROUTE = "/__cad/browser/open"
 _HTTP_TOOL = {
     "name": "cad_http", "title": "CAD HTTP request", "icons": [ICON],
     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
@@ -248,7 +251,7 @@ def local_path(value: str, *, windows: bool = os.name == "nt") -> str:
 
 
 class Server:
-    def __init__(self, *, page: AppPage | None = None, recents=None, tunnel=None, viewer_url=None,
+    def __init__(self, *, page: AppPage | None = None, recents=None, tunnel=None, viewer_url=None, browser_opener=None,
                  sidebar_views=None, analytics=None, sync_document=lambda path: None, warm=lambda: None) -> None:
         self.page = page or AppPage()
         self.sync_document = sync_document
@@ -264,6 +267,7 @@ class Server:
         self.tabs = False  # decided at initialize: see the module docstring
         self.text = False
         self._viewer_url = viewer_url
+        self._browser_opener = browser_opener  # what opens a page's redirect file: ``webbrowser.open``
         self._order = itertools.count(1)
         self._analytics = analytics
         self._app_token = secrets.token_urlsafe(32)
@@ -681,6 +685,42 @@ class Server:
             return _result(503, json_type, json.dumps({"error": str(failure)}).encode("utf-8"))
         return _result(200, json_type, json.dumps({"url": link}).encode("utf-8"))
 
+    def _open_in_browser(self, method: str, body: bytes) -> dict[str, Any]:
+        """``POST /__cad/browser/open`` with ``{"model": <path or id> | null}``, the card's Open in
+        browser: this process opens the web viewer's page of that document (the home's with none) in
+        the person's browser, through an owner-only redirect file so the page's token is on no
+        command line (``browser_open``). ``{"opened": true}``, or 503 in words where no page or no
+        browser can be opened here (no display, a remote shell), when the card asks its host to
+        open the page instead. The request names a document, never a URL."""
+        from cadgen.viewer import browser_open
+        from .browser import ViewerUnavailable
+        from .tunnel import _result
+
+        json_type = {"content-type": "application/json"}
+
+        def refused(status: int, error: str) -> dict[str, Any]:
+            return _result(status, json_type, json.dumps({"error": error}).encode("utf-8"))
+
+        if method.upper() != "POST":
+            return _result(405, {"allow": "POST"}, b"")
+        try:
+            asked = json.loads(body or b"{}")
+        except ValueError:
+            return refused(400, "the body is not JSON")
+        model = asked.get("model") if isinstance(asked, dict) else None
+        if model is not None and not isinstance(model, str):
+            return refused(400, "model is a path or a document id")
+        cannot = browser_open.display_refusal()  # said before a page is asked of the engine
+        if cannot is not None:
+            return refused(503, cannot)
+        try:
+            import webbrowser
+
+            browser_open.open_page(self._browser_url(model or None), opener=self._browser_opener or webbrowser.open)
+        except (ViewerUnavailable, browser_open.CannotOpen) as failure:
+            return refused(503, str(failure))
+        return _result(200, json_type, b'{"opened":true}')
+
     def _show_in_browser(self, model: str) -> dict[str, Any]:
         """The model's link in the CAD Viewer this machine runs, started if none is."""
         from .browser import ViewerUnavailable
@@ -876,6 +916,8 @@ class Server:
 
         if app and url_norm.request_pathname(url) == _BROWSER_ROUTE:
             return _data(self._browser_page(method, url))
+        if app and url_norm.request_pathname(url) == _BROWSER_OPEN_ROUTE:
+            return _data(self._open_in_browser(method, body))
         reply = self.tunnel.serve(method=method, url=url, headers=headers, body=body, agent=not app)
         if app:
             return _data(reply)

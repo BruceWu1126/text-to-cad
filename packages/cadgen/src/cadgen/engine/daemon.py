@@ -23,8 +23,8 @@ first picture, sent every version the document is patched to, gone with the daem
 the workers' idle time, and held to their memory cap; render processes are not workers, and
 do not count toward the cap.
 
-Its only files are the operating system's coordination: a Unix socket and a lock in
-``tempfile.gettempdir()/cadgen-engine`` (a socket path past the Unix limit: in ``/tmp/cadgen-<uid>``,
+Its only files are the operating system's coordination: a Unix socket and a lock in its own folder,
+``state_dir`` (a socket path past the Unix limit: in ``/tmp/cadgen-<uid>``,
 ``socket_path``; on Windows, a localhost TCP port and a token, in a port file there). Requests are one JSON object per line on a connection; answers
 are JSON lines, the last of which carries ``done``, ``failed`` or ``ok``. Before it, a build
 sends its caller its ``{"log"}`` lines and its ``{"progress"}`` frames as its worker sends them
@@ -88,13 +88,52 @@ def worker_idle(idle: float) -> float:
 
 
 def state_dir() -> Path:
-    """Where the daemon's socket and lock live: ``tempfile.gettempdir()/cadgen-engine``,
-    or ``CADGEN_ENGINE_DIR``. Resolved once, here, for the client and the server alike
-    (``os.path.realpath``): a ``..``, a symlink or a trailing slash in either spelling names
-    the same socket, lock and port file."""
+    """Where the daemon's socket and lock live: ``CADGEN_ENGINE_DIR``, else ``default_state_dir``.
+    Resolved once, here, for the client and the server alike (``os.path.realpath``): a ``..``, a
+    symlink or a trailing slash in either spelling names the same socket, lock and port file."""
     override = os.environ.get("CADGEN_ENGINE_DIR")
-    folder = override if override else os.path.join(tempfile.gettempdir(), "cadgen-engine")
-    return Path(os.path.realpath(folder))
+    return Path(os.path.realpath(override if override else default_state_dir()))
+
+
+def default_state_dir() -> str:
+    """The engine's folder when ``CADGEN_ENGINE_DIR`` names none, in a place no other user can make
+    it first: ``$XDG_RUNTIME_DIR/cadgen-engine`` (Linux's per-session folder), else
+    ``$TMPDIR/cadgen-engine`` when that temporary folder is this user's alone (macOS's
+    ``/var/folders/...`` is, and a host that starts cadgen without ``TMPDIR`` gets the same folder
+    from the system: ``_darwin_temp``), else ``/tmp/cadgen-<uid>``, which ``folder_refusal`` still
+    checks. On Windows the temporary folder is the user's own: ``cadgen-engine`` in it."""
+    if WINDOWS:
+        return os.path.join(tempfile.gettempdir(), "cadgen-engine")
+    for parent in (os.environ.get("XDG_RUNTIME_DIR"), os.environ.get("TMPDIR") or _darwin_temp()):
+        if parent and os.path.isabs(parent) and _users_own(parent):
+            return os.path.join(parent, "cadgen-engine")
+    return f"/tmp/cadgen-{os.getuid()}"
+
+
+def _darwin_temp() -> str | None:
+    """macOS's per-user temporary folder as the system names it (``_CS_DARWIN_USER_TEMP_DIR``), what
+    ``TMPDIR`` holds in a login session; None elsewhere or when it cannot be asked."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        import ctypes
+
+        buffer = ctypes.create_string_buffer(1024)
+        size = ctypes.CDLL(None, use_errno=True).confstr(65537, buffer, len(buffer))  # _CS_DARWIN_USER_TEMP_DIR
+    except (OSError, AttributeError):
+        return None
+    return os.fsdecode(buffer.value) if 0 < size <= len(buffer) else None
+
+
+def _users_own(folder: str) -> bool:
+    """Whether ``folder`` is a folder of this user's that no one else can write to."""
+    import stat
+
+    try:
+        found = os.stat(folder)
+    except OSError:
+        return False
+    return stat.S_ISDIR(found.st_mode) and found.st_uid == os.getuid() and not found.st_mode & 0o022
 
 
 def _tag(protocol: int | None = None) -> str:

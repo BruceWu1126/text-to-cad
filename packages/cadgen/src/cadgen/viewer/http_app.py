@@ -179,6 +179,8 @@ def catalog_revision(entries) -> str:
 # header in reach -- and ``nosniff`` keeps a browser from reading it as anything but its type. The
 # viewer's renderers fetch these bytes, and neither header applies to a fetch.
 RAW_FILE_HEADERS = (("x-content-type-options", "nosniff"), ("content-security-policy", "default-src 'none'; sandbox"))
+# Every page the server answers may be framed by its own origin alone.
+PAGE_HEADERS = (("content-security-policy", "frame-ancestors 'self'"),)
 
 
 def _working_folder() -> str:
@@ -378,7 +380,8 @@ class CadApp:
             return False
         if not os.path.isfile(file_path):
             return False
-        response.stream_file(file_path, stat_result, content_type or "")
+        page = (content_type or "").startswith("text/html")
+        response.stream_file(file_path, stat_result, content_type or "", PAGE_HEADERS if page else ())
         return True
 
     def _serve_dist(self, request, response) -> None:

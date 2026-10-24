@@ -184,8 +184,8 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   that serves them (`/__cad/api/...`) -- the
   library and its pictures, Open (`/__cad/pick`), Reveal, the person's analytics
   answer and language, the update check. One route is the server's own, not the
-  viewer's: `/__cad/browser`, the web viewer's page of what the view shows, for Open
-  in browser. Only the clipboard stays the host's: a
+  viewer's: `/__cad/browser`, the web viewer's page of what the view shows, and
+  `/__cad/browser/open`, which opens that page in the person's browser, for Open in browser. Only the clipboard stays the host's: a
   view copies through its frame. `cad_sync` and `cad_capture_reply` remain app-only
   and are absent in text-only hosts. `cad_http` is shared with agents: without
   an app capability, only telemetry status and opt-out are authorized. Every
@@ -286,8 +286,13 @@ frames, so there is nothing to keep its record under. `App.tsx` frames it (full 
 an inline card whose height the host is told; its Full size is the last of the navbar's
 own controls before the view's). Last in the navbar, in every presentation, Open in browser
 opens the web viewer's page of what the view shows — the document's, `/<id>` with the
-viewer token, or the home's — through `ui/open-link`: the card asks the server for it
-(`GET /__cad/browser`, a `cad_http` route of the app's alone, answered by the same
+viewer token, or the home's. The server opens it itself, on this computer: a press posts
+the document the card shows (its path or id, never a URL) to `POST /__cad/browser/open`, a
+`cad_http` route of the app's alone, and the server opens the browser on an owner-only
+redirect file, so the token is on no command line (a host need not follow a link to a
+loopback page, and Codex does not). Only where the server can open no browser (503: no
+display, a remote shell) does the card open the page through `ui/open-link`. The card asks
+the server for the page (`GET /__cad/browser`, app-only too, answered by the same
 `browser.viewer_url` a text-only host's `cad_show` links) whenever what it shows changes,
 and draws no button where the engine gives no page. In a tab, Codex's composer floats over the page, and the
 home's list scrolls clear of it (`--cad-host-bottom-inset`). The cube sits at bottom-left

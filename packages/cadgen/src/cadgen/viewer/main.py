@@ -67,5 +67,10 @@ def main(argv=None, *, prog=DEFAULT_PROG):
         for url in [document['url'] for document in answer.get('documents') or []] or [answer['url']]:
             print(url, flush=True)
     if not options['json'] and not options['no_open'] and not options['api_only']:
-        webbrowser.open(answer['url'])
+        from .browser_open import CannotOpen, open_page
+
+        try:
+            open_page(answer['url'], opener=webbrowser.open)  # a file of a redirect: no token in argv
+        except CannotOpen as error:
+            print(f'CAD Viewer: could not open a browser ({error}); open the URL above', file=sys.stderr)
     return 0

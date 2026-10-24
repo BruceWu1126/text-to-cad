@@ -259,6 +259,23 @@ it("a view keeps its own history of files, as a browser's tab does: the agent's 
   expect(viewer.props!.history).toBeUndefined();
 });
 
+it("Open in browser has the server open the page of what the view shows from this computer, and asks the host only where the server can open no browser", async () => {
+  const { bridge, server } = host({ displayMode: 'fullscreen' });
+  server.answers['/__cad/browser'] = (_body, url) => ({ url: `http://127.0.0.1:3245/${url.searchParams.get('model') ? 'id-a' : ''}?token=t` });
+  let display = true;
+  server.answers['/__cad/browser/open'] = () => display ? { opened: true } : new Status(503, { error: 'there is no display to open a browser on' });
+  render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 9, page: 'viewer', model: '/work/a b.step' }} />);
+  const button = await screen.findByRole('button', { name: 'Open in browser' });
+  act(() => button.click());
+  await waitFor(() => expect(server.asked('/__cad/browser/open')).toEqual([{ model: '/work/a b.step' }]));
+  // The request names the document, never a URL; the server opened it, so the host is asked nothing.
+  display = false;
+  act(() => button.click());
+  await waitFor(() => expect(bridge.request).toHaveBeenCalledWith('ui/open-link', { url: 'http://127.0.0.1:3245/id-a?token=t' }));
+  expect(server.asked('/__cad/browser/open')).toHaveLength(2);
+  expect(bridge.request.mock.calls.filter(([method]) => method === 'ui/open-link')).toHaveLength(1);
+});
+
 it("Open in browser, the navbar's last control, opens the web viewer's page of what the view shows now through the host, and is absent where the engine gives none", async () => {
   const { bridge, server } = host({ displayMode: 'fullscreen' });
   const replies: ((reply: { events: unknown[] }) => void)[] = [];
@@ -268,6 +285,8 @@ it("Open in browser, the navbar's last control, opens the web viewer's page of w
   });
   // The engine's page of each document (`/<id>`, its viewer token in the URL) and its home; none for one it cannot give.
   const ids: Record<string, string> = { '/work/a b.step': 'id-a', '/work/b.step': 'id-b' };
+  // A computer whose server can open no browser: every press is the host's to open.
+  server.answers['/__cad/browser/open'] = () => new Status(503, { error: 'there is no display to open a browser on' });
   server.answers['/__cad/browser'] = (_body, url) => {
     const model = url.searchParams.get('model');
     if (model && !ids[model]) return new Status(503, { error: 'CAD Viewer client is not built' });

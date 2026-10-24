@@ -52,15 +52,17 @@ class Proxy:
         self.initialized = False  # whether the host said notifications/initialized
         self.lock = threading.Lock()
 
-    def _send(self, message, session):
+    def _send(self, message, session, *, fresh=False):
         headers = {'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream'}
         if session:
             headers['Mcp-Session-Id'], headers['MCP-Protocol-Version'] = session
-        return self.client.call('POST', '/mcp', json.dumps(message).encode('utf-8'), headers)
+        return self.client.call('POST', '/mcp', json.dumps(message).encode('utf-8'), headers, fresh=fresh)
 
     def _open(self, request_id, params):
+        # The host's initialize goes only to the endpoint the engine's socket names now, never to
+        # one held from an earlier call, which another process may have taken since.
         status, reply_headers, data = self._send({'jsonrpc': '2.0', 'id': request_id, 'method': 'initialize',
-                                                  'params': params}, None)
+                                                  'params': params}, None, fresh=True)
         answer = self._answer(status, data)
         headers = {name.lower(): value for name, value in reply_headers.items()}
         session = (headers['mcp-session-id'], answer['result']['protocolVersion'])

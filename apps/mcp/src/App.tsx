@@ -120,8 +120,24 @@ function useBrowserPage(tunnel: typeof fetch, model: string | null) {
 }
 
 /**
- * The view's page in the person's browser, opened through the host as every link is: the last of
- * the navbar's controls, over every file and on the home.
+ * Open the web viewer's page of `model` (the home's with none) in the person's browser. The server
+ * opens it itself, from this computer (`POST /__cad/browser/open`, the app's alone: a host may not
+ * follow a link to a loopback page, and Codex does not); only where it can open no browser (503: no
+ * display, a remote shell) is the host asked to open the page as it opens every link.
+ */
+async function openBrowserPage(tunnel: typeof fetch, model: string | null, page: () => Promise<string | null>,
+  openLink: (url: string) => void) {
+  const response = await tunnel(`${TUNNEL_ORIGIN}/__cad/browser/open`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }),
+  }).catch(() => null);
+  if (response?.status !== 503) return;
+  const url = await page();
+  if (url) openLink(url);
+}
+
+/**
+ * The view's page in the person's browser, opened by the server on this computer, else through the
+ * host (`openBrowserPage`): the last of the navbar's controls, over every file and on the home.
  */
 function OpenInBrowserButton({ open }: { open: () => void }) {
   const { t } = useI18n();
@@ -265,7 +281,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   const links = useMemo(() => viewerLinks({ version, build: BUILD, open: url => bridge.request('ui/open-link', { url }).then(() => {}) }),
     [bridge]);
   const browser = useBrowserPage(tunnel, showingModel);
-  const openInBrowser = () => void browser.page().then(url => { if (url) openLink(url); });
+  const openInBrowser = () => void openBrowserPage(tunnel, showingModel, browser.page, openLink);
   const { launch } = showing;
   if (superseded) {
     return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer}><Superseded still={still} /></Frame>;

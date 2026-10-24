@@ -119,6 +119,14 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(status, 302)
         self.assertIn('HttpOnly', headers['set-cookie'])
         self.assertNotIn(launch['token'], headers['location'])
+        # Arrived from another origin (the browser opened on the launcher's redirect file): the
+        # cookie, and a page of this origin that navigates on, so the browser sends the cookie.
+        status, headers, body = self.get(launch, urlsplit(launch['url']).path+'?token='+launch['token'],
+                                         token=False, headers={'Sec-Fetch-Site': 'cross-site'})
+        self.assertEqual(status, 200)
+        self.assertIn(launch['token'], headers['set-cookie'])
+        self.assertIn(b'http-equiv="refresh" content="0;url=/"', body)
+        self.assertNotIn(launch['token'].encode(), body)
         # A cookie from an engine that held this port before (restarted with --port) never
         # outranks the launch URL's token, and a token that is not ASCII is refused, not a crash.
         stale = {'Cookie': f"cadgen-engine-{launch['port']}=stale"}
@@ -133,6 +141,22 @@ class LauncherTest(unittest.TestCase):
             status, _, _ = self.get(launch, '/__cad/server', token=False, headers={'Cookie': header})
             self.assertEqual(status, 200, header)
         self.assertEqual(self.get(launch, '/__cad/server?token=%C3%A9', token=False)[0], 403)
+        # The cookie reaches every port of this host, so it admits only what the browser says came
+        # from this origin or from the person (or from a client that is not a browser); a token in
+        # the header or the URL is admitted from anywhere.
+        cookie = {'Cookie': f"cadgen-engine-{launch['port']}={launch['token']}"}
+        for site, expected in (('same-origin', 200), ('none', 200), ('same-site', 403), ('cross-site', 403)):
+            status, _, body = self.get(launch, '/__cad/server', token=False,
+                                       headers={**cookie, 'Sec-Fetch-Site': site})
+            self.assertEqual(status, expected, site)
+            self.assertEqual(self.get(launch, '/__cad/server', headers={'Sec-Fetch-Site': site})[0], 200, site)
+        self.assertIn(b'cross-origin request refused', self.get(
+            launch, '/', token=False, headers={**cookie, 'Sec-Fetch-Site': 'same-site'})[2])
+        # Every page may be framed by its own origin alone: the client's, and the link-gone page.
+        for route in ('/', urlsplit(launch['url']).path):
+            self.assertEqual(self.get(launch, route)[1].get('content-security-policy'), "frame-ancestors 'self'")
+        self.assertIn("frame-ancestors 'self'", self.get(launch, '/', token=False,
+                      headers={'Sec-Fetch-Dest': 'document'})[1]['content-security-policy'])
         conn = http.client.HTTPConnection('127.0.0.1', launch['port'], timeout=10)
         try:
             conn.request('POST', '/__cad/recents', body=b'{}', headers={'Authorization': 'Bearer '+launch['token']})

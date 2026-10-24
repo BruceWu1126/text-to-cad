@@ -378,6 +378,83 @@ class EngineFolderTest(unittest.TestCase):
                     daemon.lock()
 
 
+@unittest.skipIf(os.name == "nt", "the per-user folders are POSIX's")
+class DefaultEngineFolderTest(unittest.TestCase):
+    """With no ``CADGEN_ENGINE_DIR``, the engine's folder is one no other user can make first."""
+
+    def setUp(self) -> None:
+        self.base = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp")).resolve()
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.system: str | None = None  # what macOS names when TMPDIR is unset: nothing, here
+
+    def folder(self, **env: str) -> Path:
+        from unittest import mock
+
+        from cadgen.engine import daemon
+
+        cleared = {key: value for key, value in os.environ.items()
+                   if key not in ("CADGEN_ENGINE_DIR", "XDG_RUNTIME_DIR", "TMPDIR")}
+        with mock.patch.dict(os.environ, {**cleared, **env}, clear=True), \
+                mock.patch.object(daemon, "_darwin_temp", return_value=self.system):
+            return daemon.state_dir()
+
+    def private(self, name: str, mode: int = 0o700) -> Path:
+        folder = self.base / name
+        folder.mkdir()
+        os.chmod(folder, mode)
+        return folder
+
+    def test_the_runtime_folder_then_a_private_temporary_folder_then_tmp_by_uid(self) -> None:
+        runtime, own = self.private("run"), self.private("T")
+        self.assertEqual(self.folder(XDG_RUNTIME_DIR=str(runtime), TMPDIR=str(own)), runtime / "cadgen-engine")
+        self.assertEqual(self.folder(TMPDIR=f"{own}/"), own / "cadgen-engine")
+        fallback = Path(os.path.realpath(f"/tmp/cadgen-{os.getuid()}"))
+        self.assertEqual(self.folder(), fallback)
+        shared = self.private("shared", 0o1777)
+        self.assertEqual(self.folder(TMPDIR=str(shared), XDG_RUNTIME_DIR=str(self.base / "missing")), fallback)
+        self.assertEqual(self.folder(TMPDIR="relative"), fallback)
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS names its per-user temporary folder")
+    def test_macos_without_tmpdir_finds_the_folder_a_login_session_names(self) -> None:
+        from cadgen.engine import daemon
+
+        system = daemon._darwin_temp()
+        self.assertTrue(system and system.startswith("/var/folders/"), system)
+        self.system = system
+        self.assertEqual(self.folder(), Path(os.path.realpath(os.path.join(system, "cadgen-engine"))))
+
+    def test_a_temporary_folder_another_user_owns_is_passed_over(self) -> None:
+        from unittest import mock
+
+        own = self.private("T")
+        real = os.stat
+
+        def foreign(path, *args, **kwargs):
+            found = real(path, *args, **kwargs)
+            if os.fspath(path) == str(own):
+                return os.stat_result((found.st_mode, found.st_ino, found.st_dev, found.st_nlink,
+                                       os.getuid() + 1, found.st_gid, found.st_size, 0, 0, 0))
+            return found
+
+        with mock.patch.object(os, "stat", side_effect=foreign):
+            self.assertEqual(self.folder(TMPDIR=str(own)), Path(os.path.realpath(f"/tmp/cadgen-{os.getuid()}")))
+
+    def test_a_long_temporary_folder_names_its_socket_by_digest_in_the_users_own_tmp_folder(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine import daemon
+
+        own = self.private("T" + "-long" * 20)
+        cleared = {key: value for key, value in os.environ.items() if key != "CADGEN_ENGINE_DIR"}
+        with mock.patch.dict(os.environ, {**cleared, "TMPDIR": str(own)}, clear=True):
+            os.environ.pop("XDG_RUNTIME_DIR", None)
+            self.assertEqual(daemon.state_dir(), own / "cadgen-engine")
+            sock = daemon.socket_path()
+            self.assertLess(len(os.fsencode(sock)), daemon.SOCKET_PATH_LIMIT)
+            self.assertEqual(sock.parent, Path("/tmp") / f"cadgen-{os.getuid()}")
+            self.assertTrue(daemon.socket_folder_ok(sock))
+
+
 class WindowsTokenFirstTest(unittest.TestCase):
     """On Windows the daemon listens on loopback TCP, which any local user can reach: a connection
     shows its token in its first bytes (the client puts it first), and one that does not is refused
