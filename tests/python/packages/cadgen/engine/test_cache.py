@@ -216,7 +216,8 @@ class CacheTest(unittest.TestCase):
         self.assertIn("the code changed since this was built", structure["stale"]["text"])
         inspected = self.cli("inspect", ident)
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
-        self.assertIn(f"the code changed since this was built (cube.py changed); run `{command}`", inspected.stderr)
+        self.assertIn(f"inspecting the build of cube from before cube.py changed; run `{command}` to update it",
+                      inspected.stderr)
         self.assertIn("the code changed since this was built", inspected.stdout.splitlines()[1])
         inspected = self.cli("inspect", ident, "--query", "closure")
         self.assertEqual(json.loads(inspected.stdout)["stale"]["rebuild"], command)

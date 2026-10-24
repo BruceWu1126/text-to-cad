@@ -480,7 +480,8 @@ class Models:
 
     def listing(self, every: bool = False) -> list[dict[str, Any]]:
         """The model documents (``every``: those with declared files too, and the expired), each with
-        its ``state`` (``STATES``) and, for one not held, the command that builds it again."""
+        its ``state`` (``STATES``), for one held whose code changed since its build what changed
+        (``stale``, ``every`` only: ``status``'s), and for one not held the command that builds it again."""
         self.prune()
         for ident in self.cache.documents():  # what the cache holds, listed after a restart too
             self.adopt(ident)
@@ -495,6 +496,9 @@ class Models:
                          "store": row["store"], "state": self.state(ident)}
                 if entry["state"] == "held":
                     entry["held"] = self.where(ident)
+                    stale = self.stale(ident) if every else None  # ``status``'s, never a page's polls
+                    if stale:  # its code changed since: what changed, and the command
+                        entry["stale"] = {"changes": stale["changes"], "rebuild": stale["rebuild"]}
                 lost = self.rebuild(ident) if entry["state"] in ("evicted", "expired", "detached") else None
                 if lost is not None and lost["rebuild"]:
                     entry["rebuild"] = lost["rebuild"]

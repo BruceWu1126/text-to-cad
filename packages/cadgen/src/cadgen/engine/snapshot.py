@@ -1110,7 +1110,7 @@ def _run_held(args: argparse.Namespace, prog: str) -> int:
     """``cadgen snapshot ID OUT.png``: the document the engine holds of that id, drawn from the
     memory of the worker holding it (``api.snapshot``); nothing is built."""
     from cadgen.engine import api
-    from cadgen.engine.cli import Failed, _shown
+    from cadgen.engine.cli import Failed, _shown, told_state
 
     try:
         drawn = api.snapshot(args.document, args.out, display=args.display, camera=args.camera, grid=args.grid,
@@ -1121,6 +1121,7 @@ def _run_held(args: argparse.Namespace, prog: str) -> int:
         raise Failed(str(error), 2) from None
     except api.EngineError as error:
         raise Failed(str(error)) from None
+    told_state(args.document, "drawing")
     if args.json:
         print(json.dumps(drawn.report))
     else:

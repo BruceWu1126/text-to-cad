@@ -225,6 +225,45 @@ def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as
     return 1 if failed else 0
 
 
+def told_state(source: Any, doing: str) -> None:
+    """A model document read by its id, said once on stderr once a verb has read it, when it is not
+    what its code makes now: its last run failed, so the previous good build is read, or its code
+    changed since it was built (``stale``). Both from what the engine reports of it (``model_info``);
+    the verb goes on: a notice, never a refusal, and nothing reruns."""
+    from cadgen.engine.ids import is_id
+
+    ident = os.fspath(source).partition("#")[0]
+    if not is_id(ident):
+        return
+    from cadgen.engine.client import request
+
+    try:
+        model = (request({"op": "model_info", "id": ident}, start=False) or {}).get("model")
+    except (OSError, ValueError):
+        return
+    words = state_notice(model, doing) if isinstance(model, dict) else None
+    if words:
+        print(words, file=sys.stderr)
+
+
+def state_notice(model: dict[str, Any], doing: str) -> str | None:
+    """The words ``told_state`` says of a model document (``model_info``'s record), or None when it
+    is what its code makes now."""
+    import shlex
+
+    name = (model.get("source") or {}).get("name") or model.get("id")
+    if model.get("state") == "failed":
+        program = model.get("program") or (model.get("source") or {}).get("script")
+        fix = f"; fix it and run `python {shlex.quote(str(program))}` to update it" if program else ""
+        return f"the last run of {name} failed; {doing} its previous good build{fix}"
+    stale = model.get("stale")
+    if stale:
+        changed = " and ".join(text.replace(" is missing", " went missing") for text in stale.get("changes") or [])
+        return (f"{doing} the build of {name} from before {changed or 'its code changed'}; "
+                f"run `{stale['rebuild']}` to update it")
+    return None
+
+
 def _log(text: str) -> None:
     print(text, file=sys.stderr)
 
@@ -244,6 +283,7 @@ def _export(args: argparse.Namespace, prog: str) -> int:
         raise Failed(str(error), 2) from None
     except api.EngineError as error:
         raise Failed(str(error)) from None
+    told_state(args.source, "exporting")
     if args.json:
         print(json.dumps({"ok": True, "source": str(key(args.source)),
                           "files": [{"path": str(row.path), "kind": row.kind, "bytes": row.bytes, "seconds": row.seconds}
@@ -322,6 +362,7 @@ def _inspect(args: argparse.Namespace, prog: str) -> int:
         raise Failed(str(error), 2) from None
     except api.EngineError as error:
         raise Failed(str(error)) from None
+    told_state(args.document, "inspecting")
     if query == "summary" and not args.json:
         print(summary_text(found["summary"]))
         if found["closure"] is None:
@@ -331,11 +372,6 @@ def _inspect(args: argparse.Namespace, prog: str) -> int:
             print(json.dumps(found["closure"], indent=2))
     else:
         print(json.dumps(found, indent=2))
-    if query == "summary":
-        found = found["closure"] or {}
-    stale = found.get("stale") or ((found.get("live") or {}).get("stale")) if isinstance(found, dict) else None
-    if stale:  # the last built state, said beside the answer: nothing reran
-        print(stale["text"], file=sys.stderr)
     return 0
 
 
@@ -564,6 +600,10 @@ def status_text(answer: dict[str, Any]) -> str:
                 line += f"  {row['held']}"  # where: memory, disk (the cache), or both
             if row.get("rebuild"):
                 line += f"  run `{row['rebuild']}`" + (" (kept in memory only)" if row.get("store") == "memory" else "")
+            if row.get("state") == "failed":
+                line += "  serving its previous good build"
+            elif row.get("stale"):
+                line += f"  stale: run `{row['stale']['rebuild']}`"
             lines.append(line)
     return "\n".join(lines)
 

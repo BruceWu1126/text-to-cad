@@ -721,11 +721,17 @@ record says, is not cached.
 
 **Staleness.** `read` is what the build read, with digests: the script and each module its model
 reached (each file's bytes, SHA-256, as the build answered) and each file its bodies read (the
-closure's own digests). On a page's open, `cadgen inspect` and `cad_show` of a document no worker
+closure's own digests). On a page's open, a verb's read and `cad_show` of a document no worker
 holds, the engine compares them with the files now (`Models.stale`): unchanged, the page shows the
 current model; changed, it shows the last built state, with a badge -- "The code changed since this
-was built" and the rebuild command -- and `inspect` says the same words (`stale` in its answer, the
-sentence on stderr). Nothing reruns. A font is named by a family, not checked.
+was built" and the rebuild command -- and `inspect` answers `stale`. Nothing reruns. Every verb
+that reads a document by its id (`export`, `snapshot`, `inspect`, with a ref or without) says once
+on stderr what it reads when that is not what the code makes now (`cli.told_state`, from
+`model_info`): "exporting the build of turbine from before turbine.py changed; run `python
+…/turbine.py` to update it", or, for a document whose last run failed, "the last run of turbine
+failed; exporting its previous good build; fix it and run `python …/turbine.py` to update it". It
+goes on: a notice, never a refusal. `cadgen status` ends such a document's line with the word: stale
+and the command, or "serving its previous good build". A font is named by a family, not checked.
 
 **The bound.** Past `CADGEN_ENGINE_CACHE_GB` (default 4 GB; `0`: no cache at all), the least
 recently used cache files go down to 80 % of it, as 0.7's store did, never one a live worker holds
