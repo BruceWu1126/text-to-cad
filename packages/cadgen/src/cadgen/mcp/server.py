@@ -15,9 +15,9 @@ Reveal, the person's analytics answer and language, the update check -- it reach
 through ``cad_http``, the viewer's own HTTP routes. No call is held open
 (``views.py``). Agents name models by absolute path only.
 
-Hosts present views in one of three ways, told apart at initialize:
+Hosts present views in one of three ways, told apart at initialize (``host.py``):
 
-- *Tabs* (Codex, and any host that declares the ``dev.texttocad/tabs`` client
+- *Tabs* (the Codex app, and any host that declares the ``dev.texttocad/tabs`` client
   extension with the ``global``, ``thread`` and ``file`` entrypoints). The host
   presents CAD as a sidebar page, a tab per thread and a file handler. The agent
   opens a tab once (``cad_open``) and then drives it (``cad_show``). A host that
@@ -34,10 +34,16 @@ Hosts present views in one of three ways, told apart at initialize:
   (``browser.py``), the one this machine runs, started if none is, in the person's
   browser -- unless a browser page reads that document already -- and answers with its URL.
 
-Codex declares nothing at initialize, headless or not: ``codex exec`` greets the server as the
-Codex app does (``codex-mcp-client``) and renders no app. Each of its calls says so instead, in its
-turn's metadata (``x-codex-turn-metadata.turn_trigger: exec``): such a call's ``cad_open`` and
-``cad_show`` do what a text client's ``cad_show`` does, and claim no tab.
+Codex declares nothing at initialize, headless or not: ``codex exec`` and its terminal UI greet the
+server as the Codex app does (``codex-mcp-client``) and render no app. So whether a tab opened is
+claimed only on evidence, never on that name (``host.py``): a declared extension; a view that reached
+this server (only a host that shows cards draws one); a call whose turn says ``exec``; the host the
+shim found among its parent processes (``codex exec`` and the terminal UI are text hosts, the app's
+``codex app-server`` shows tabs). A host that shows none has ``cad_open`` and ``cad_show`` do what a
+text client's ``cad_show`` does. Where nothing says yet (the name alone), ``cad_open`` claims no tab:
+it says the tab opens with its answer where the host shows CAD tabs, and gives the page's URL for
+the user otherwise; a ``cad_show`` after it waits for that tab, and a tab that never comes is
+evidence that this host shows none.
 
 ``CADGEN_MCP_PRESENTATION=inline|text`` settles a non-Codex client that renders MCP
 Apps without advertising them (the reference host, ``basic-host``, is one).
@@ -61,6 +67,7 @@ from urllib.parse import unquote, urlparse
 
 from cadgen.viewer.scanner import VIEWER_EXTENSIONS
 
+from . import host
 from .protocol import INVALID_PARAMS, METHOD_NOT_FOUND, RequestContext, RpcError
 from .ui import MIME, RESOURCE_META, AppPage
 from .sidebar import SidebarView
@@ -81,16 +88,6 @@ EXTENSIONS = sorted(VIEWER_EXTENSIONS)
 # The formats every surface opens, as the agent is told them: a cadgen engine document (XBF) among them.
 FORMATS = "STEP, XBF, STL, GLB, 3MF, DXF, URDF, SDF"
 
-# Clients that present CAD as tabs (see the module docstring): Codex by name, since it declares nothing,
-# and any client that declares every entrypoint CAD uses under cadgen's own extension. Every other
-# client is shown views inline, or told where the Viewer has them when it renders no MCP Apps.
-_UI_EXTENSION = "io.modelcontextprotocol/ui"
-_TABS_EXTENSION = "dev.texttocad/tabs"
-_TAB_ENTRYPOINTS = frozenset({"global", "thread", "file"})
-# Where a Codex call says its turn renders no app: ``codex exec`` (and its ``resume``) runs the turn
-# headless, though its initialize is the Codex app's (see the module docstring).
-_CODEX_TURN = "x-codex-turn-metadata"
-_HEADLESS_TRIGGERS = frozenset({"exec"})
 # How long a call that reads a view waits for one the agent just opened (a tab from cad_open, a card
 # from an inline cad_show) to sync for the first time: the host loads the page, then the page its
 # model. An agent reads a view right after it opened it.
@@ -222,23 +219,6 @@ def _stamped(launch: dict[str, Any]) -> dict[str, Any]:
     return launch
 
 
-def _presentation(client: dict[str, Any], offered: dict[str, Any]) -> str:
-    """``tabs``, ``inline`` or ``text``: how this client shows views (see the module docstring)."""
-    extensions = offered.get("extensions") if isinstance(offered.get("extensions"), dict) else {}
-    declared = extensions.get(_TABS_EXTENSION)
-    entrypoints = declared.get("entrypoints") if isinstance(declared, dict) else None
-    if isinstance(entrypoints, list) and _TAB_ENTRYPOINTS <= set(entrypoints):
-        return "tabs"
-    ui = extensions.get(_UI_EXTENSION)
-    return "inline" if isinstance(ui, dict) and MIME in (ui.get("mimeTypes") or []) else "text"
-
-
-def _headless(meta: dict[str, Any]) -> bool:
-    """Whether a Codex call comes from a turn that renders no app (``codex exec``)."""
-    turn = meta.get(_CODEX_TURN) if isinstance(meta, dict) else None
-    return isinstance(turn, dict) and turn.get("turn_trigger") in _HEADLESS_TRIGGERS
-
-
 def _text(text: str, structured: dict[str, Any] | None = None, *, error: bool = False) -> dict[str, Any]:
     result: dict[str, Any] = {"content": [{"type": "text", "text": text}]}
     if structured is not None:
@@ -289,6 +269,12 @@ class Server:
         self.operations = Operations()
         self.tabs = False  # decided at initialize: see the module docstring
         self.text = False
+        # Whether this host shows CAD cards (``host.presentation``): True, False, or None while nothing
+        # says; ``_declared`` where the host said so itself, which nothing after overrules; and
+        # ``_contacted`` once a view reached this server, which only a host that draws them does.
+        self.renders: bool | None = None
+        self._declared = False
+        self._contacted = False
         self._viewer_url = viewer_url
         self._browser_opener = browser_opener  # what opens a page's redirect file: ``webbrowser.open``
         # Whether a browser page reads a document now (the engine's ``Server.in_page``), and telling
@@ -299,9 +285,11 @@ class Server:
         self._analytics = analytics
         self._app_token = secrets.token_urlsafe(32)
         self._update_told = False
-        # Inline views this server named that have not synced yet, oldest first; when cad_open last opened a tab.
+        # Inline views this server named that have not synced yet, oldest first; when cad_open last opened a tab,
+        # and a model cad_show sent it before it opened, shown once it does.
         self._mounting: dict[str, None] = {}
         self._opened: float | None = None
+        self._pending: str | None = None
 
     # -- lazily built parts ----------------------------------------------------
 
@@ -387,14 +375,17 @@ class Server:
 
         client = params.get("clientInfo") if isinstance(params.get("clientInfo"), dict) else {}
         offered = params.get("capabilities") if isinstance(params.get("capabilities"), dict) else {}
-        presentation = _presentation(client, offered)
+        meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
+        transport = meta.get("dev.texttocad/transport") if isinstance(meta.get("dev.texttocad/transport"), dict) else {}
+        presentation, self.renders, why = host.presentation(client, offered, transport.get("launcher"))
+        self._declared = why.startswith("declared")
         self.tabs, self.text = presentation == "tabs", presentation == "text"
         if presentation == "inline":
             self.page = self.page.presenting("inline")
         self._tools = None
         extensions = sorted(offered["extensions"]) if isinstance(offered.get("extensions"), dict) else []
-        LOG.info("client %s %s: %s views (extensions: %s)", client.get("name"), client.get("version"), presentation,
-                 ", ".join(extensions) or "none")
+        LOG.info("client %s %s: %s views, %s (extensions: %s)", client.get("name"), client.get("version"), presentation,
+                 why, ", ".join(extensions) or "none")
         self.analytics.started(client=client, presentation=presentation)
         capabilities: dict[str, Any] = {"tools": {"listChanged": False}, "resources": {"listChanged": False}}
         requested = params.get("protocolVersion")
@@ -627,17 +618,48 @@ class Server:
         # The host's own file tree is this surface's navigation: the page shows the file alone.
         return _text(f"{os.path.basename(model)} is open in CAD.", {"launch": self._launch(model, surface="file")})
 
+    def _cards(self, context: RequestContext) -> bool | None:
+        """Whether this call's host shows CAD views: True, False, or None where nothing says yet. The
+        evidence, strongest first (``host.py``): the host's own declaration; a view that reached this
+        server; the call's turn (``codex exec``); the host that launched the shim, or a tab cad_open
+        launched that never came."""
+        if self.text:
+            return False
+        if self._declared or self._contacted:
+            return True
+        if self.tabs and host.headless(context.meta):
+            return False
+        return self.renders
+
     def _no_app(self, context: RequestContext) -> bool:
-        """Whether this call's host renders no app: a text client, or a headless Codex turn."""
-        return self.text or (self.tabs and _headless(context.meta))
+        """Whether this call's host shows no app: a text client, or one the evidence says shows none."""
+        return self._cards(context) is False
+
+    def _contact(self) -> None:
+        """A view reached this server: its host draws them, whatever it said at initialize."""
+        if not self._contacted:
+            self._contacted = True
+            LOG.info("a view reached this server: its host shows CAD views")
 
     def _tool_cad_open(self, arguments, context):
         model = self._model_path(arguments.get("path"))
-        if self._no_app(context):
+        cards = self._cards(context)
+        if cards is False:
             return self._show_in_browser(model)
         launch = self._launch(model, surface="agent")
         self._opened = time.monotonic()
-        return _text(f"{model} is open in a new CAD tab. From now on, use cad_show to show models in it.", {"launch": launch})
+        if cards:
+            return _text(f"{model} is open in a new CAD tab. From now on, use cad_show to show models in it.", {"launch": launch})
+        # Nothing says whether this host shows tabs: words true either way, and the next call finds out.
+        from .browser import ViewerUnavailable
+
+        try:
+            elsewhere = f"the user can see it in their browser at {self._browser_url(model)}: give them this URL"
+        except ViewerUnavailable:
+            elsewhere = "nothing opened"
+        return _text(f"Where this app shows CAD tabs, {model} opens in a new CAD tab with this answer; where it shows "
+                     f"none, {elsewhere}. Do not tell the user a tab opened. Use cad_show next: it says where a model went.",
+                     {"launch": launch})
 
     # the agent's tools ----------------------------------------------------------
 
@@ -679,7 +701,22 @@ class Server:
         # A model shown goes beside this thread: Codex keeps the sidebar page running while the
         # person is in a thread, so a model sent there lands where nobody is looking. The sidebar
         # takes one only when the agent names its view.
-        view = self._target(context, arguments.get("view"), needs_model=False, sidebar=bool(arguments.get("view")))
+        def target() -> Any:
+            return self._target(context, arguments.get("view"), needs_model=False, sidebar=bool(arguments.get("view")))
+
+        view = target()
+        if view is None and self._opened is not None and time.monotonic() - self._opened < _OPENED_WITHIN:
+            # The tab cad_open just launched: the host creates it only once that answer arrives.
+            view = self.views.wait(target, timeout=OPENING_SECONDS)
+            if view is None and self._cards(context) is None:
+                # No tab came: this host shows none (a later view says otherwise).
+                self.renders = False
+                LOG.info("the tab cad_open launched never came: its host shows no CAD views")
+                return self._show_in_browser(model)
+            if view is None:
+                self._pending = model
+                return _text(f"The CAD tab cad_open opened is still opening; it shows {model} once it opens.",
+                             {"delivered": 0, "opening": True})
         if view is None:
             self._model = model
             LOG.info("cad_show: no viewer for thread %s in process %d; live here: %s", context.meta.get("threadId") or "none",
@@ -845,6 +882,8 @@ class Server:
 
     def _tool_cad_screenshot(self, arguments, context):
         deadline = time.monotonic() + CAPTURE_SECONDS
+        if self._no_app(context):
+            raise ToolFailed("This app shows no CAD view to capture: render one headless with `cadgen snapshot`.", "no_view")
         if self.tabs:
             view = self._target(context, arguments.get("view"), needs_model=True)
             if view is None and self._opened is not None and time.monotonic() - self._opened < _OPENED_WITHIN:
@@ -898,9 +937,16 @@ class Server:
         if not isinstance(view_id, str) or not view_id or not isinstance(surface, str):
             raise RpcError(INVALID_PARAMS, "view and surface are required")
         thread_id = context.meta.get("threadId")
-        if view_id not in self.views:
+        self._contact()
+        first = view_id not in self.views
+        if first:
             LOG.info("view %s (%s) syncs here, thread %s, process %d", view_id, surface, thread_id or "none", os.getpid())
         self.views.register(view_id, surface=surface, thread_id=thread_id, model=arguments.get("model"))
+        if first and surface == "agent" and self._pending is not None:
+            # What cad_show sent the tab cad_open launched while it was still opening.
+            model, self._pending = self._pending, None
+            if model != arguments.get("model"):
+                self.views.post([view_id], {"type": "show", "launch": self._launch(model)})
         return view_id
 
     def _tool_cad_sync(self, arguments, context):
@@ -970,6 +1016,8 @@ class Server:
         headers = {name.lower(): str(value) for name, value in headers.items()}
         token = headers.pop(_APP_TOKEN_HEADER, "")
         app = not self.text and secrets.compare_digest(token.encode("utf-8"), self._app_token.encode("utf-8"))
+        if app:
+            self._contact()
         if token and not app:
             # A view opened in an earlier session (the engine restarted under its host) holds that one's.
             raise ToolFailed("This CAD view was opened before CAD restarted: close it and open CAD again.", "bad_request")

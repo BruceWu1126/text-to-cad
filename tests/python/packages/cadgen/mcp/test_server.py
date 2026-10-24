@@ -31,6 +31,9 @@ CODEX = {"name": "codex-mcp-client", "title": "Codex", "version": "0.159.0"}
 CLAUDE = {"name": "claude-ai", "version": "0.1.0"}
 # What `codex exec` 0.163 sent with a tool call (measured), less its ids: the turn renders no app.
 CODEX_EXEC_TURN = {"x-codex-turn-metadata": {"thread_source": "user", "turn_trigger": "exec", "sandbox": "seatbelt"}}
+# The host the shim found among its parents (``host.launcher``): the Codex app's app server, and `codex exec`.
+CODEX_APP = {"host": "codex app-server", "renders": True, "command": "codex -c features.code_mode_host=true app-server"}
+CODEX_EXEC = {"host": "codex exec", "renders": False, "command": "codex exec --skip-git-repo-check"}
 RENDERS_APPS = {"extensions": {"io.modelcontextprotocol/ui": {"mimeTypes": ["text/html;profile=mcp-app"]}}}
 OTHER_HOST = {"name": "some-desktop-app", "version": "0.1.0"}
 DECLARES_TABS = {"extensions": {**RENDERS_APPS["extensions"], "dev.texttocad/tabs": {"entrypoints": ["global", "thread", "file"]}}}
@@ -76,6 +79,7 @@ class _Session(unittest.TestCase):
 
     client = CODEX
     offered: dict = {}
+    launcher: dict | None = None
     viewer_url = None
 
     def setUp(self) -> None:
@@ -104,7 +108,7 @@ class _Session(unittest.TestCase):
         self.server = Server(page=AppPage(page), recents=RecentStore(self.tmp / "state"), viewer_url=self.viewer_url,
                              browser_opener=lambda target: self.opened.append(target) or True)
         self.initialized = self.server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": self.offered,
-                                                             "clientInfo": self.client}), None)
+                                                             "clientInfo": self.client}, self.launcher), None)
 
     def call(self, name: str, arguments: dict | None = None, meta: dict | None = None) -> dict:
         context = RequestContext(1, {"threadId": "t", **(meta or {})})
@@ -159,8 +163,23 @@ class _Session(unittest.TestCase):
         return loading
 
 
+    def syncs_later(self, view: str, surface: str, model: str, *, after: float = 0.2) -> threading.Thread:
+        """A tab the host is still loading: its first sync comes ``after`` seconds from now."""
+
+        def load() -> None:
+            time.sleep(after)
+            self.call("cad_sync", {"view": view, "surface": surface, "model": model})
+
+        loading = threading.Thread(target=load, daemon=True)
+        loading.start()
+        self.addCleanup(loading.join, 5)
+        return loading
+
+
 class TabServerTest(_Session):
     """Codex: tab surfaces the agent opens once and then drives."""
+
+    launcher = CODEX_APP
 
     def test_http_app_authority_is_in_ui_metadata_and_scoped_to_its_session(self) -> None:
         launch = self.call("cad_tab")
@@ -415,13 +434,16 @@ class SidebarAcrossThreadsTest(_Session):
     person is in a thread, so a model sent there lands where nobody is looking (the bug in 0.7.12:
     "open the tom2.step model" reported it shown, and no tab opened). Only a named view reaches it."""
 
+    launcher = CODEX_APP
+
     def setUp(self) -> None:
         super().setUp()
         # The sidebar's own process: another server over the same state directory.
         from cadgen.mcp.sidebar import SidebarViews
         self.sidebar = Server(page=AppPage(self.tmp / "app"), recents=RecentStore(self.tmp / "state"),
                               sidebar_views=SidebarViews(self.server.sidebar_views.registry))
-        self.sidebar.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": CODEX}), None)
+        self.sidebar.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": CODEX},
+                                                            CODEX_APP), None)
         self.model = self.bracket
 
     def on_sidebar(self, name: str, arguments: dict) -> dict:
@@ -797,14 +819,23 @@ class TextServerTest(_Session):
 
 
 class CodexExecTest(_Session):
-    """`codex exec` greets the server as the Codex app does, and renders no app: each call's turn
-    metadata says so (``turn_trigger: exec``), and that call's cad_open and cad_show claim no tab."""
+    """`codex exec` greets the server as the Codex app does, and renders no app. Its launcher says so
+    (the shim's parent process is `codex exec`), and on 0.163 each call's turn metadata does too
+    (``turn_trigger: exec``): its cad_open and cad_show claim no tab."""
 
     client = CODEX
+    launcher = CODEX_APP
     viewer_url = staticmethod(lambda model=None: "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab?token=t")
     EXEC = CODEX_EXEC_TURN
     # The Codex app's own turn (its app server's, measured): no trigger.
     APP = {"x-codex-turn-metadata": {"sandbox": "seatbelt"}}
+
+    def greet(self, launcher: dict | None, **kwargs) -> Server:
+        server = Server(page=self.server.page, recents=self.server.recents, viewer_url=self.viewer_url,
+                        browser_opener=lambda target: self.opened.append(target) or True, **kwargs)
+        server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": CODEX},
+                                                      launcher), None)
+        return server
 
     def test_an_exec_turn_opens_the_browser_once_and_never_claims_a_tab(self) -> None:
         pages: set[str] = set()
@@ -818,13 +849,19 @@ class CodexExecTest(_Session):
         self.assertNotIn("tab", text)
         self.assertEqual(len(self.opened), 1)
         # The next turn (`codex exec resume`, a new server process: the engine still knows the page).
-        again = Server(page=self.server.page, recents=self.server.recents, viewer_url=self.viewer_url,
-                       browser_opener=lambda target: self.opened.append(target) or True,
-                       in_browser=lambda model: model in pages)
-        again.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": CODEX}), None)
+        again = self.greet(None, in_browser=lambda model: model in pages)
         shown = again.handle("tools/call", {"name": "cad_show", "arguments": {"path": self.bracket}},
                              RequestContext(1, {"threadId": "t", **self.EXEC}))["content"][0]["text"]
         self.assertTrue(shown.startswith("bracket.stl is already open in your browser at http://127.0.0.1:3245/"), shown)
+        self.assertEqual(len(self.opened), 1)
+
+    def test_a_server_codex_exec_launched_is_a_text_server_whatever_its_calls_say(self) -> None:
+        # codex-cli 0.153 sends no turn metadata: the launcher alone says it.
+        server = self.greet(CODEX_EXEC)
+        self.assertEqual([tool["name"] for tool in server.handle("tools/list", {}, None)["tools"]][:2], ["cad_show", "cad_http"])
+        shown = server.handle("tools/call", {"name": "cad_show", "arguments": {"path": self.bracket}},
+                              RequestContext(1, {"threadId": "t"}))["content"][0]["text"]
+        self.assertTrue(shown.startswith("bracket.stl opened in your browser at http://127.0.0.1:3245/"), shown)
         self.assertEqual(len(self.opened), 1)
 
     def test_the_codex_apps_own_turns_keep_their_tabs_and_open_no_browser(self) -> None:
@@ -832,7 +869,54 @@ class CodexExecTest(_Session):
         self.assertEqual(opened["content"][0]["text"],
                          f"{self.bracket} is open in a new CAD tab. From now on, use cad_show to show models in it.")
         self.assertEqual(opened["structuredContent"]["launch"]["model"], self.bracket)
-        self.assertIn("No CAD viewer is open", self.call("cad_show", {"path": self.loose}, self.APP)["content"][0]["text"])
+        # A show in the same turn goes to the tab cad_open launched, which the host is still opening.
+        self.syncs_later("tab-1", "agent", self.bracket)
+        self.assertEqual(self.call("cad_show", {"path": self.loose}, self.APP)["content"][0]["text"], f"Showing {self.loose} in CAD.")
+        events = self.call("cad_sync", {"view": "tab-1", "surface": "agent", "model": self.bracket})["structuredContent"]["events"]
+        self.assertEqual([(event["type"], event["launch"]["model"]) for event in events], [("show", self.loose)])
+        self.assertEqual(self.opened, [])
+
+    def test_a_tab_still_opening_is_said_so_and_shown_the_model_once_it_opens(self) -> None:
+        self.call("cad_open", {"path": self.bracket}, self.APP)
+        with mock.patch("cadgen.mcp.server.OPENING_SECONDS", 0.1):
+            shown = self.call("cad_show", {"path": self.loose}, self.APP)
+        self.assertEqual(shown["content"][0]["text"], f"The CAD tab cad_open opened is still opening; it shows {self.loose} once it opens.")
+        self.assertNotIn("No CAD viewer", shown["content"][0]["text"])
+        events = self.call("cad_sync", {"view": "tab-1", "surface": "agent", "model": self.bracket})["structuredContent"]["events"]
+        self.assertEqual([(event["type"], event["launch"]["model"]) for event in events], [("show", self.loose)])
+        self.assertEqual(self.opened, [])
+
+
+class UnconfirmedCodexTest(_Session):
+    """A Codex client nothing else speaks for (its launcher unknown, no turn metadata): its name gives it
+    Codex's catalog, never the claim that a tab opened. The next call decides from evidence."""
+
+    client = CODEX
+    viewer_url = staticmethod(lambda model=None: "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab?token=t")
+
+    def test_cad_open_says_where_the_model_is_either_way_and_opens_no_browser(self) -> None:
+        opened = self.call("cad_open", {"path": self.bracket})
+        self.assertEqual(opened["content"][0]["text"],
+                         f"Where this app shows CAD tabs, {self.bracket} opens in a new CAD tab with this answer; where it "
+                         "shows none, the user can see it in their browser at http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-"
+                         "0123456789ab?token=t: give them this URL. Do not tell the user a tab opened. Use cad_show next: "
+                         "it says where a model went.")
+        self.assertEqual(opened["structuredContent"]["launch"]["model"], self.bracket)
+        self.assertEqual(self.opened, [])
+
+    def test_a_tab_that_never_comes_means_this_host_shows_none(self) -> None:
+        self.call("cad_open", {"path": self.bracket})
+        with mock.patch("cadgen.mcp.server.OPENING_SECONDS", 0.1):
+            shown = self.call("cad_show", {"path": self.bracket})["content"][0]["text"]
+        self.assertTrue(shown.startswith("bracket.stl opened in your browser at http://127.0.0.1:3245/"), shown)
+        self.assertEqual(len(self.opened), 1)
+        self.assertNotIn("tab", self.call("cad_open", {"path": self.loose})["content"][0]["text"])
+
+    def test_a_view_reaching_the_server_proves_tabs_over_a_turn_that_says_exec(self) -> None:
+        self.call("cad_open", {"path": self.bracket})
+        self.syncs_later("tab-1", "agent", self.bracket)
+        self.assertEqual(self.call("cad_show", {"path": self.loose})["content"][0]["text"], f"Showing {self.loose} in CAD.")
+        self.assertIn("in a new CAD tab. From now on", self.call("cad_open", {"path": self.loose}, CODEX_EXEC_TURN)["content"][0]["text"])
         self.assertEqual(self.opened, [])
 
 

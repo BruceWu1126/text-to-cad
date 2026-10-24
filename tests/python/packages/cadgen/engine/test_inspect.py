@@ -89,7 +89,7 @@ class SummaryTest(unittest.TestCase):
             "sequences",
             "  cycle  2.5 s",
             "animations  none",
-            "files       none",
+            "declared files none",
             "closure",
         ])
         self.assertEqual(json.loads("\n".join(lines[17:]))["source"]["function"], "hinge")

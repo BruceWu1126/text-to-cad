@@ -453,7 +453,7 @@ def summary_text(summary: dict[str, Any]) -> str:
 
     def listed(title: str, rows: list[str]) -> None:
         if not rows:
-            lines.append(f"{title:<12}none")
+            lines.append(f"{title:<11} none")
             return
         lines.append(title)
         lines.extend(f"  {row}" for row in rows)
@@ -474,7 +474,8 @@ def summary_text(summary: dict[str, Any]) -> str:
                       for row in summary["states"]])
     listed("sequences", [f"{row['name']}  {_number(row['duration'])} s" for row in summary["sequences"]])
     listed("animations", [f"{row['name']}  {_number(row['duration'])} s" for row in summary["animations"]])
-    listed("files", summary["files"])
+    # The files the model's decorators declare, not what an export wrote beside it.
+    listed("declared files", summary["files"])
     return "\n".join(lines)
 
 

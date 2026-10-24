@@ -202,7 +202,7 @@ states
 sequences
   cycle  5 s
 animations  none
-files       none
+declared files none
 closure
 { ...its script and function, the modules it reaches and the files it read, each by its digest... }
 ```

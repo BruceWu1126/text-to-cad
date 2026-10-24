@@ -22,7 +22,8 @@ from pathlib import Path
 
 from cadgen.assets import checkout_root, runtime_build_hint, runtime_root
 
-MIME = "text/html;profile=mcp-app"
+from .host import MIME  # the page's type, which a host that renders MCP Apps lists
+
 _PREFIX, _SUFFIX = "ui://cad/", "/app.html"
 
 # What the page needs from its sandbox: blob workers and modules (the bundle

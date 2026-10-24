@@ -295,7 +295,8 @@ src/cadgen/
                          #   payload (drawings), a robot's (robots), Quick Edit's packets
                          #   (prompt_files)
   mcp/                   # stateless stdio proxy (shim), engine sessions (http), tools and
-                         #   launches (server), open views (views), the viewer routes
+                         #   launches (server), which host started the shim and how it
+                         #   presents CAD (host), open views (views), the viewer routes
                          #   in-process (tunnel), roots, the page (ui), and the CAD Viewer
                          #   link for a host that renders no MCP Apps (browser)
   urdf.py, sdf.py,       # the robot validators: one public namespace per format, its
