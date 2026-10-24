@@ -252,15 +252,14 @@ def hand_over(shape: Any, name: Any, *, key: str | None = None, animations: Any 
     calling script (``frame``'s file), or the working folder where there is none, and ``name``; or
     ``ids.key_id`` of ``key``. The handle's ``shape`` is ``shape`` itself."""
     from cadgen.engine import model as declaring
-    from cadgen.engine.ids import canonical, check_key, derived_id, key_id
+    from cadgen.engine.ids import canonical, check_key, check_name, derived_id, key_id
 
     if getattr(declaring._CONTEXT, "build", None) is not None:
         raise TypeError("model(shape, name=...) hands a shape over from a script or a REPL; a model's body returns "
                         "its shape, and calls its children")
     if name is None:
         raise TypeError("model(shape, name=...): a shape handed over takes its document's name")
-    if not isinstance(name, str) or not name or name != name.strip():
-        raise ValueError(f"name is a readable name, not {name!r}")
+    check_name(name)
     filename = frame.f_code.co_filename if frame is not None else ""
     scope = canonical(filename if filename and os.path.isfile(filename) else os.getcwd())
     if key is not None:

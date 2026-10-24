@@ -29,7 +29,7 @@ import sys
 import uuid
 from typing import Any
 
-__all__ = ["NAMESPACE", "canonical", "check_key", "derived_id", "file_id", "is_id", "key_id", "model_id"]
+__all__ = ["NAMESPACE", "canonical", "check_key", "check_name", "derived_id", "file_id", "is_id", "key_id", "model_id"]
 
 # cadgen's namespace for derived ids: written once, never changed.
 NAMESPACE = uuid.UUID("ad198b15-841c-4d1f-81be-6aa78d2737c0")
@@ -112,12 +112,20 @@ def model_id(script: str | os.PathLike, function: str) -> str:
     return derived_id(script, function)
 
 
+def check_name(name: object, what: str = "name") -> str:
+    """A document's name (a shape's ``name=``) or a ``key=`` as a declaration gives it: readable -- a
+    non-empty string with no surrounding space and no control character -- and with no ``::``, the
+    formula's separator, so that no scope and name spell another's; else refused by name."""
+    if not isinstance(name, str) or not name or name != name.strip() or any(ord(c) < 32 for c in name):
+        raise ValueError(f"{what} is a readable name (no surrounding space, no control character), not {name!r}")
+    if "::" in name:
+        raise ValueError(f"{what} {name!r} holds '::', which separates a scope from a name in an id: drop it")
+    return name
+
+
 def check_key(key: object) -> str:
-    """A ``key=`` as a declaration gives it: readable -- a non-empty string with no surrounding space
-    and no control character -- else refused by name."""
-    if not isinstance(key, str) or not key or key != key.strip() or any(ord(c) < 32 for c in key):
-        raise ValueError(f"key is a readable name (no surrounding space, no control character), not {key!r}")
-    return key
+    """A ``key=`` as a declaration gives it (``check_name``)."""
+    return check_name(key, "key")
 
 
 def key_id(key: str) -> str:

@@ -86,6 +86,15 @@ class IdsTest(unittest.TestCase):
         for bad in ("", " arm", "arm\n", 7):
             with self.subTest(key=bad), self.assertRaises(ValueError):
                 key_id(bad)  # type: ignore[arg-type]
+        # '::' separates a scope from a name: a key or a shape's name holding it could spell another's id.
+        with self.assertRaisesRegex(ValueError, "key 'arm::left' holds '::'"):
+            key_id("arm::left")
+        with self.assertRaisesRegex(ValueError, "key 'x::y' holds '::'"):
+            declaring.model(key="x::y")
+        with self.assertRaisesRegex(ValueError, "key 'x::y' holds '::'"):
+            declaring.xbf("XBF/a.xbf", key="x::y")
+        with self.assertRaisesRegex(ValueError, "name 'plate::' holds '::'"):
+            declaring.model(object(), name="plate::")  # refused before anything is made or sent
         import importlib.util
 
         def load(name: str, text: str):

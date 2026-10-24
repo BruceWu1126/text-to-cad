@@ -181,7 +181,8 @@ posed(arm().shape, "folded")`.
    it is given. The same in every process, worked out without asking the engine. `key="..."` on
    `@model`, a file decorator or `model(shape, ...)` replaces it with `uuid5(NAMESPACE, "key::" +
    key)` (`ids.key_id`): global and readable, and refused, naming the other, when another
-   declaration claims the key in this process or in the engine's records. The store rule: a
+   declaration claims the key in this process or in the engine's records. A key or a shape's name
+   holding `::`, the formula's separator, is refused at declaration. The store rule: a
    function in a file is a `pointer` (the registry points at its script), `store="memory"` a
    throwaway (nothing is recorded), and a shape is handed over (`shape`: its bytes held and cached,
    nothing to run again). A function in no file is refused: hand its shape over. File
