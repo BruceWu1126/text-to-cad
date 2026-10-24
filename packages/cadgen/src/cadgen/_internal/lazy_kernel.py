@@ -49,7 +49,12 @@ class KernelModule(types.ModuleType):
         with _SWAP:
             if type(self) is KernelModule:  # by type(): reading ``__class__`` would come back here
                 self.__class__ = importlib.util._LazyModule  # noqa: SLF001
-        return getattr(self, attr)
+        try:
+            return getattr(self, attr)
+        except AttributeError as error:
+            # A name the module lacks is the asker's mistake, raised from here as Python raises it,
+            # never as a failure of this frame's own (``analytics.signature``).
+            raise error.with_traceback(None) from None
 
     def __delattr__(self, attr: str) -> None:
         self.__getattribute__(attr)
