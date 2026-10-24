@@ -15,7 +15,7 @@ warm, and times every step:
 
 ```sh
 .venv/bin/python scripts/bench/corpus_bench.py --dry-run         # the config and the interpreter, checked
-.venv/bin/python scripts/bench/corpus_bench.py --max-load 8      # every model
+.venv/bin/python scripts/bench/corpus_bench.py --max-load 16     # every model; each step waits for load <= 16 and no other busy cadgen build
 .venv/bin/python scripts/bench/corpus_bench.py --model tom       # one; repeat --model for more
 ```
 
@@ -32,7 +32,10 @@ interpreter imports this checkout's cadgen (`--cadgen-src`; not the venv's
 editable install), and runs nothing.
 
 Each model is copied into the batch's folder without its `XBF/` (an APFS clone on
-macOS), so the checkout is never written, and built on an engine daemon of its own
+macOS), so the checkout is never written. In the copy, the model its `xbf` stem names
+declares that document (`@xbf(out=...)` above its `@model`), so each build saves it and
+a restart takes it, as the old engine reloaded its store after a restart: the restart
+row compares like with like. It is built on an engine daemon of its own
 (`CADGEN_ENGINE_DIR`: a folder per model under `--engine-dir`, emptied first;
 telemetry off), step by step:
 
@@ -40,13 +43,13 @@ telemetry off), step by step:
 - `noop`: the same build, warm;
 - `edit`: the configured edit, built;
 - `revert`: the file's original bytes, built;
-- `restart`: the daemon stopped and the unchanged model built again (cold: a model
-  that declares no xbf has no cache across a restart);
-- `export`, `serve`, `mesh-cold`, `mesh-warm`, `structure`: the document saved to the
-  model's `xbf` path (`cadgen export <id>`, for a model that declares none), served
-  (`cadgen serve`), every part meshed on the server's pool (`POST
-  /api/doc/<id>/mesh`), again with its meshes dropped, and the structure a page
-  reads first;
+- `restart`: the daemon stopped and the unchanged model built again, its xbf taken;
+- `restart-cold`: the daemon stopped and the xbf deleted, the model built again: a
+  restart with nothing to take;
+- `serve`, `mesh-cold`, `mesh-warm`, `structure`: the document served (`cadgen
+  serve`), every part meshed on the server's pool (`POST /api/doc/<id>/mesh`), again
+  with its meshes dropped, and the structure a page reads first (`export`, the
+  document saved by `cadgen export <id>`, only when a build left none);
 - `snapshot-first`, `snapshot`: `cadgen snapshot --json` of the document, twice.
 
 A build runs as `python script.py` asks for it (`cadgen.engine.api.build_script`)
@@ -73,8 +76,9 @@ model. `--keep` keeps the work copies.
 
 The new side is the median of each model's `cold`, `noop` and `edit` walls over
 the batches given, and its xbf's size and write time. The old side is
-`old-engine-numbers.json`, kept by hand: what cadgen `main` measured before the xbf
-engine (2026-10-19, on the maintainer's machine, at load 7–10), each a range of
+`old-engine-numbers.json`, kept by hand: what #568's store engine measured before the
+xbf engine (2026-10-19, at 830f3ae86, a 0.8.0 branch with main through 0.7.24 merged, not
+a main release; on the maintainer's machine, at load 7–10), each a range of
 seconds or the STEP's size, with the note it was recorded in and the words that say
 it. Nothing here runs the old engine. tom, hypercar and juno have numbers; every
 other model, and every measure missing, says "no old number; rebuild on main to

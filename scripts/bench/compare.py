@@ -10,7 +10,7 @@ The new side is ``corpus_bench.py``'s rows, per model: the median wall of its ``
 and ``edit`` builds over every batch given (a failed step counts for nothing), and its document:
 the xbf's size and the seconds its cold build took to write it. The old side is
 ``old-engine-numbers.json`` beside this script (``--old`` for another), kept by hand: the old
-engine's (cadgen main before the xbf engine) cold, no-op and edit, each a range of seconds, and
+engine's (#568's store engine before the xbf engine, not a main release) cold, no-op and edit, each a range of seconds, and
 the STEP its model wrote, each number with the note it was recorded in (``source``) and the words
 that say it (``line``). Nothing here runs the old engine: a model or a measure with no old number
 says "no old number; rebuild on main to fill", and filling one is a build on main, recorded in
@@ -174,7 +174,7 @@ def table(old: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         number = sources.setdefault((entry["source"], entry["line"]), len(sources) + 1)
         return f" [{number}]"
 
-    lines = ["| model | measure | main (old engine) | xbf engine | speedup |", "|---|---|---|---|---|"]
+    lines = ["| model | measure | old engine (#568 store) | xbf engine | speedup |", "|---|---|---|---|---|"]
     for model in [*new, *(name for name in recorded if name not in new)]:
         mine, theirs = new.get(model), recorded.get(model) or {}
         if not theirs:
