@@ -394,7 +394,7 @@ cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera 
 cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
                                              every picture a Quick Edit packet (or a job file) names
 cadgen serve DOC [--port N] [--three DIR]
-cadgen inspect DOC [REF]                       the build closure; with REF (**References**): an element's facts and
+cadgen inspect DOC [REF] [--json]              what the document holds, then its build closure; with REF (**References**): an element's facts and
                                              what made it, or a part's or an assembly's volume and mass
 cadgen status [--json] | stop [--json] | server
 ```
@@ -1737,7 +1737,12 @@ weighs: each part's volume, measured on its solids (`.../part/<key>/volume`), ti
 density, summed -- `{ref, parts, volume (mm³), mass (kg, null when no part has a material),
 unweighed (the parts without one, by path)}`, and for one part its path, material and density.
 A ref of several selectors answers a list. A ref that names nothing, or several things where
-it names one, is refused by name (exit 2).
+it names one, is refused by name (exit 2). Without a REF it serves the document the same way and
+summarises it before its closure (`api._summary`, `query="summary"`): its state (`model_info`'s, with
+`cached` when the engine's cache holds it at its revision; `file` for a file's document), its parts,
+its bounds (each part's box beside its volume, `.../volume`, placed where its occurrences stand), its
+volume, its materials and their masses, its joints, mechanism states, configuration sequences and
+animations (the structure's `animations`: each name and duration), and a model's declared files.
 
 ## Wire format
 

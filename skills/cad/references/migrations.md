@@ -104,7 +104,7 @@ cadgen export "$ID" STEP/bracket.step     # the file, when asked
 | snapshot `--mode list` | none: list parts from the model's tree (`[p.label for p in kit().shape.leaves]`) |
 | snapshot `--focus`, `--hide` | `--display '{"isolated": ["lid"]}'`, `--display '{"hidden": ["lid"]}'` (part refs) |
 | a `--job` file's `kinematics`, a STEP job's `selection`, `animation`, `video`, `quality`, `mode`, `output.viewLabels` | a job's pose is `jointValues`; hidden and isolated parts are its `display.hidden` and `display.isolated` |
-| `cadgen store why`, `store where`, `store forget`, `store gc`, `store info` | none: no store. `cadgen inspect <id>` prints what a document was built from, `cadgen inspect <id> REF` what made an element |
+| `cadgen store why`, `store where`, `store forget`, `store gc`, `store info` | none: no store. `cadgen inspect <id>` prints what a document holds and what it was built from, `cadgen inspect <id> REF` what made an element |
 | `cadgen daemon status` | `cadgen status` |
 | `cadgen daemon` | `cadgen server` (runs the engine in this process; rarely needed) |
 | `cadgen viewer --detach`, `--new`, `cadgen viewer stop`, `cadgen viewer list` | `cadgen viewer [FILE ...]`: ensures the one engine, prints each page, exits; `cadgen stop` stops the engine |

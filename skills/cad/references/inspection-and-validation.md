@@ -178,9 +178,39 @@ The bore's wall is face 1 of the cylinder `hole`, modified by the cut whose resu
 `body` took. `made_by` comes from the worker that built the document, while it lives:
 it is `null` once that worker has retired (run the script again for it) and for a file
 no worker built. A ref of several selectors answers a list; one
-that names nothing is refused (exit 2). Without a REF, `cadgen inspect DOC` prints what
-the document was built from: its script and function, the modules it reaches and the
-files it read, each by its digest.
+that names nothing is refused (exit 2).
+
+Without a REF, `cadgen inspect DOC` prints what the document holds, one screen, then what
+it was built from. Read it for the names a ref, a pose or a snapshot takes, rather than
+guessing them:
+
+```text
+$ cadgen inspect "$ID"
+hinge  fb5d7d22-372e-5e1e-a44b-a2aebf954533
+state       live, cached, built 12s ago
+parts       2 in hinge
+bounds      193.9 x 60 x 88.66 mm, from (-50, -30, 0)
+volume      144,000 mm^3
+materials   0.324 kg in all
+  Aluminum 6061-T6: 0.324 kg, hinge/base
+  no material: hinge/arm
+joints
+  elbow  revolute  -10 to 120 deg, as built 30
+states
+  closed  elbow 0
+  open  elbow 90
+sequences
+  cycle  5 s
+animations  none
+files       none
+closure
+{ ...its script and function, the modules it reaches and the files it read, each by its digest... }
+```
+
+The state is the engine's: `live` (a worker holds it), `held` (the engine holds it, no
+worker), whether its cache has it on disk, and whether its code changed since it was
+built. `--json` prints the same as `{"summary", "closure"}`, and `--query closure` the
+closure alone. Nothing is built.
 
 ## Measurements
 

@@ -26,7 +26,7 @@ python arm.py                                 # builds it in the engine's warm w
 cadgen export XBF/arm.xbf arm.glb arm.stl     # more translations of the document it wrote
 cadgen snapshot XBF/arm.xbf arm.png           # a still of it, drawn by OCCT
 cadgen serve XBF/arm.xbf                      # the document on a local page
-cadgen inspect XBF/arm.xbf                      # its build closure
+cadgen inspect XBF/arm.xbf                    # what it holds, then its build closure
 ```
 
 **PURPOSE** — the engine and its command surface: models built in a warm worker whose memo
@@ -258,7 +258,10 @@ before starting. An agent's explicit host path is a different destination contra
 documents the engine holds by id. They never execute source to obtain a missing model or write
 its declared outputs. An unbuilt, evicted or expired model requires an explicit build: one
 the engine built before names the command (`python` and the program that built it). With no reference,
-inspection returns the build closure; with a reference it returns geometry facts.
+`cadgen inspect` prints what the document holds -- its state, parts, bounds, volume, materials,
+joints, states, sequences, animations and declared files -- then its build closure (`--json`:
+both as data; `--query closure`, and `cadgen.inspect()` with no reference, the closure alone);
+with a reference it returns geometry facts.
 `query="build"` (`--query build`) returns saved-file metadata and closure or live
 build metadata. File metadata does not imply a live worker. `where` is retired.
 

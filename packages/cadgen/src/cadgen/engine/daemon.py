@@ -1028,6 +1028,8 @@ class Daemon:
                 model = {key: record.get(key) for key in ("id", "source", "program", "builtAt", "version", "files",
                                                           "store")}
                 model["state"] = self.models.state(ident)
+                # On disk in the engine's cache, at its revision: a restart reopens it as last built.
+                model["cached"] = (self.models.where(ident) or "").endswith("disk")
                 if model["state"] == "held":
                     model["held"] = self.models.where(ident)
                     stale = self.models.stale(ident)

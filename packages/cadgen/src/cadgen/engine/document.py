@@ -1420,6 +1420,9 @@ class Loaded:
 
             found["kinematics"] = mechanism.block(self.mechanism, self.instance_paths,
                                                   lambda path: _matrix(self.worlds[path]))
+        animated = _animations_listed(self.animations)
+        if animated:
+            found["animations"] = animated
         return found
 
     def root_label(self) -> Any:
@@ -1537,7 +1540,16 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
 
         found["kinematics"] = mechanism.block(tree.mechanism, paths,
                                               lambda at: _matrix(mechanism._occurrence(tree, at)[0]))
+    animated = _animations_listed(tree.animations)
+    if animated:
+        found["animations"] = animated
     return found
+
+
+def _animations_listed(resolved: Any) -> list[dict[str, Any]]:
+    """A document's animations (``animations.harvest``, by name) as its structure lists them: each
+    its name and duration, in the build's order; the tracks stay the GLB's."""
+    return [{"name": item.name, "duration": item.duration} for item in (resolved or {}).values()]
 
 
 def _read(path: Path) -> Any:
