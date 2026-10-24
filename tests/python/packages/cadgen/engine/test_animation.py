@@ -1,6 +1,6 @@
 """Animations (``animation()``): a GLB's own channels, authored in a model's body, refused by name
-where they name nothing or collide, never written into the document, and baked into the GLB the
-model declares -- STEP, LINEAR and CUBICSPLINE samplers on translation, rotation and scale,
+where they name nothing or collide, recorded in the xbf beside its closure, and baked into the GLB
+the model declares -- and into a GLB of its xbf, the same bytes -- STEP, LINEAR and CUBICSPLINE samplers on translation, rotation and scale,
 ``pose`` through the mechanism's forward kinematics -- within the tolerance of what the channels
 say, their CUBICSPLINE tangents reproducing the curve under an independent Hermite (scipy's).
 
@@ -235,7 +235,7 @@ class HarvestTest(_Folder):
                                            '    return configuration_sequence(box'), "motion_box", ok=False)
         self.assertIn("animation 'open_close' has the name of a configuration sequence of the mechanism", report["error"])
 
-    def test_the_document_is_the_same_bytes_with_an_animation_or_without(self) -> None:
+    def test_the_document_differs_by_its_animations_record_alone(self) -> None:
         import build123d as bd
 
         from cadgen.gltf import animation
@@ -248,18 +248,27 @@ class HarvestTest(_Folder):
                 animation(assembly, "slide", duration=1).translation("arm", by=(30, 0, 0)).hide("base", at=1)
             return assembly
 
-        written = []
+        from OCP.Standard import Standard_GUID
+
+        written, loaded, trees = [], [], []
         for animated in (False, True):
             tree = document.collect(shape(animated), "pair")
             self.assertEqual(tree.animations is not None, animated)
             path = self.folder / f"pair-{animated}.xbf"
             document.save(document.to_xcaf(tree, document.Kept()), path, compare=False)
-            written.append(path.read_bytes())
-        self.assertEqual(written[0], written[1], "the xbf holds no animation")
+            loaded.append(document.Loaded(path))
+            trees.append(tree)
+            # The same document with its record forgotten: what remains is the plain one's bytes.
+            doc = document.to_xcaf(tree, document.Kept())
+            doc.Main().ForgetAttribute(Standard_GUID(document.ANIMATIONS_GUID))
+            written.append(document.to_bytes(doc))
+        self.assertEqual(written[0], written[1], "the record is all an animation adds to the document")
+        self.assertIsNone(loaded[0].animations)
+        self.assertEqual(loaded[1].animations, trees[1].animations, "the compiled tracks, as the harvest made them")
 
 
 class GlbTest(_Folder):
-    def test_a_restart_runs_an_animated_model_rather_than_taking_its_xbf(self) -> None:
+    def test_a_restart_takes_an_animated_model_from_its_xbf_and_its_glb_is_the_cold_builds(self) -> None:
         from cadgen.engine import export
         from cadgen.engine.kernel import memo
 
@@ -279,13 +288,13 @@ class GlbTest(_Folder):
                 return assembly
         """
         self.build(source, "pair")
-        self.assertEqual(document.Loaded(self.folder / "XBF/pair.xbf").closure["animations"], 1)
+        self.assertNotIn("animations", document.Loaded(self.folder / "XBF/pair.xbf").closure, "the record is its own")
         memo.clear()  # a fresh worker: no memo, no document in memory
         engine_build._WRITTEN.clear()
         engine_build._PARTS.clear()
         again = self.build(source, "pair")
-        self.assertEqual((again["cache"]["used"], again["cache"]["reason"]), (False, "its animations live in no file"),
-                         "a document taken from its file would export a GLB without them")
+        self.assertTrue(again["cache"]["used"], again["cache"])
+        self.assertEqual(again["memo"]["bodies_run"], 0, "taken from its file: nothing ran")
         out = self.folder / "again.glb"
         export.translate(engine_build.held(self.folder / "model.py", "pair"), None, out)
         self.assertEqual([clip["name"] for clip in _glb(out)[0]["animations"]], ["slide"])
@@ -381,7 +390,7 @@ class GlbTest(_Folder):
                     checked += 1
         self.assertGreater(checked, 300)
 
-    def test_a_glb_from_the_xbf_alone_carries_the_motions_only_and_an_edit_of_one_rewrites_the_glb(self) -> None:
+    def test_a_glb_from_the_xbf_is_the_declared_one_and_an_edit_of_an_animation_rewrites_both(self) -> None:
         from cadgen.engine.export import translate
 
         self.build(MOTION.replace("    return configuration_sequence(box", "    from cadgen.gltf import animation\n"
@@ -391,13 +400,39 @@ class GlbTest(_Folder):
         self.assertEqual([animation["name"] for animation in declared["animations"]], ["open_close", "drop"])
         again = self.folder / "again.glb"
         translate(self.folder / "XBF/motion.xbf", None, again)
-        self.assertEqual([animation["name"] for animation in _glb(again)[0]["animations"]], ["open_close"])
+        self.assertEqual(again.read_bytes(), (self.folder / "motion.glb").read_bytes(),
+                         "the sequence and the animation, from the xbf's record")
         before = (self.folder / "motion.glb").read_bytes()
         report = self.build(MOTION.replace("    return configuration_sequence(box", "    from cadgen.gltf import animation\n"
                                            "    animation(box, 'drop', duration=1).translation('lid', by=(0, 0, 9))\n"
                                            "    return configuration_sequence(box"), "motion_box")
         self.assertTrue(report["files"][str(self.folder / "motion.glb")]["written"])
+        self.assertTrue(report["files"][str(self.folder / "XBF/motion.xbf")]["written"], "its record moved")
         self.assertNotEqual((self.folder / "motion.glb").read_bytes(), before)
+
+    def test_a_parent_that_reads_a_childs_xbf_has_none_of_its_animations(self) -> None:
+        self.build(MOTION.replace("    return configuration_sequence(box", "    from cadgen.gltf import animation\n"
+                                  "    animation(box, 'drop', duration=1).translation('lid', by=(0, 0, 5))\n"
+                                  "    return configuration_sequence(box"), "motion_box")
+        self.assertEqual(sorted(document.Loaded(self.folder / "XBF/motion.xbf").animations), ["drop"])
+        self.build(f"""
+            import build123d as bd
+            from cadgen import glb, read_xbf
+            from cadgen.gltf import animation
+
+
+            @glb("shelf.glb")
+            def shelf():
+                box = read_xbf({str(self.folder / "XBF/motion.xbf")!r})
+                box.label = "box"
+                board = bd.Box(200, 100, 5)
+                board.label = "board"
+                shelf = bd.Compound(children=[board, box], label="shelf")
+                animation(shelf, "lift", duration=1).translation("board", by=(0, 0, 9))
+                return shelf
+        """, "shelf", stem="shelf")
+        self.assertEqual([clip["name"] for clip in _glb(self.folder / "shelf.glb")[0]["animations"]], ["lift"],
+                         "its own animation alone: read_xbf imports a part, never the child's record")
 
 
 class FixturesTest(_Folder):
