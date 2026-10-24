@@ -39,8 +39,16 @@ def _connect(address: Path | None = None) -> socket.socket | None:
         return None
 
 
+# Switches that govern only the process they are set in -- ``DO_NOT_TRACK`` and
+# ``CADGEN_TELEMETRY`` (the distribution's ``cadgen.analytics.ENVIRONMENT``). The daemon serves
+# every later client, so it is one of the "processes started for others" that go by the
+# person's saved choice, never by the switch of whichever client happened to start it. The
+# engine imports nothing of cadgen (law 3), so it carries the names here rather than importing them.
+_PER_PROCESS_TELEMETRY = ("DO_NOT_TRACK", "CADGEN_TELEMETRY")
+
+
 def _start() -> None:
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items() if name not in _PER_PROCESS_TELEMETRY}
     root = _daemon.engine_root()
     path = env.get("PYTHONPATH", "")
     if root not in path.split(os.pathsep):

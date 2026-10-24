@@ -294,6 +294,31 @@ class ConnectTest(unittest.TestCase):
         self.assertEqual([w for w in caught if issubclass(w.category, ResourceWarning)], [])
 
 
+class DaemonEnvironmentTest(unittest.TestCase):
+    """The daemon serves every later client, so the client that starts it does not hand it a
+    per-process telemetry switch: those are the person's saved choice's to decide."""
+
+    def test_the_started_daemon_does_not_inherit_the_telemetry_switches(self) -> None:
+        from unittest import mock
+
+        from cadgen import analytics
+        from cadgen.engine import client
+
+        self.assertEqual(set(client._PER_PROCESS_TELEMETRY), set(analytics.ENVIRONMENT),
+                         "the engine's copy of the per-process switches must match cadgen.analytics")
+        captured = {}
+
+        class FakePopen:
+            def __init__(self, _argv, **kwargs):
+                captured.update(kwargs.get("env") or {})
+
+        with mock.patch.dict(os.environ, {"DO_NOT_TRACK": "1", "CADGEN_TELEMETRY": "1", "PATH": os.environ.get("PATH", "")}), \
+                mock.patch.object(client.subprocess, "Popen", FakePopen):
+            client._start()
+        self.assertNotIn("DO_NOT_TRACK", captured)
+        self.assertNotIn("CADGEN_TELEMETRY", captured)
+
+
 class SweepTest(unittest.TestCase):
     """``cadgen stop`` reaches every server of the installation, whatever protocol it speaks, and
     ``stop`` and ``status`` take away the files of a dead one."""
