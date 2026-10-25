@@ -324,7 +324,13 @@ The installation's door (**The door**) supplies its HTTP token. Page URLs exchan
 for a same-site cookie; programmatic clients use Bearer authentication. All routes
 retain the application's Host and cross-site mutation checks. Explicit host/port
 requests must match an existing listener. A second installed version has a different
-installation identity and therefore a different engine.
+installation identity and therefore a different engine -- in another environment, and in the same
+one too: the door, lock and port file are named for the environment, the interpreter, the engine's
+folder, the protocol and the version the installation runs as (`daemon._tag`: `CADGEN_INSTALLATION_VERSION`,
+else its release). So an upgrade into one environment (`pip install -U`, `uv tool upgrade`, a
+development install made again) starts its own engine, never dials the old one still running there,
+and retires that one when nothing uses it (**An upgrade converges**). What outlives an upgrade in an
+environment -- the port it rolled to -- is keyed by the environment alone.
 
 **A link outlives its engine.** The port is the installation's and the page token the user's, not
 one engine's (`daemon.bind`). A port named -- `--port` (`cadgen server --port`, or a `serve`/`viewer`

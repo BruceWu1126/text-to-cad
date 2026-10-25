@@ -298,7 +298,8 @@ class Registry:
         self.state.write(TOKEN, (token + "\n").encode("ascii"), mode=0o600)
 
     def engine(self, installation: str) -> dict[str, Any]:
-        """The engine record of ``installation`` (``daemon._tag``): the ``port`` (int) it rolled to
+        """The engine record of ``installation`` (``daemon._tag(versioned=False)``: its environment, so it
+        outlives an upgrade there): the ``port`` (int) it rolled to
         from a held default, where it has one; ``{}`` with none, or one this schema does not read."""
         data = self.state.read(f"{ENGINES}/{installation}.json")
         try:
