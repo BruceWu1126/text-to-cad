@@ -205,9 +205,12 @@ def wait_gone(timeout: float = 60.0, endpoint: _daemon.Endpoint | None = None) -
     """Wait until the daemon (by default this protocol's) is gone: its door no longer answers
     and its lock, held until its workers have stopped, is free."""
     deadline = time.monotonic() + timeout
+    lock = endpoint.lock if endpoint else _daemon.lock_path()
     while time.monotonic() < deadline:
         if not _answering(endpoint.address if endpoint else _daemon.address()):
-            held = _lock(endpoint.lock if endpoint else None)
+            if not lock.exists():
+                return True  # it removed its lock as it let it go (``daemon.let_go``)
+            held = _lock(lock)
             if held is not None:
                 held.close()
                 return True
@@ -296,7 +299,7 @@ def sweep(*, stop: bool) -> dict[str, list[str]]:
             if not wait_gone(endpoint=endpoint):
                 raise ConnectionError(f"the engine server at {endpoint.address} did not exit")
             found["stopped"].append(str(endpoint.address))
-            _remove_dead(endpoint)  # the lock file a stopped daemon leaves is part of its stop, not stale
+            _remove_dead(endpoint)  # what an engine from before engines removed their own files left: its stop's
             continue
         found["removed"] += _remove_dead(endpoint)
     return found

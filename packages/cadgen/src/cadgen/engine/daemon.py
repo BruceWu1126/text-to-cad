@@ -44,7 +44,8 @@ workers' memory cap; render processes are not workers, and do not count toward t
 Its only files are the operating system's coordination, in its own folder, ``state_dir``: a lock,
 and on POSIX its door, a named pipe (``door_path``), and the pipes of the connections being opened
 (``door``: no socket, so a sandbox that refuses sockets still reaches it); on Windows a localhost
-TCP port and a token, in a port file there. Requests are one JSON object per line on a connection; answers
+TCP port and a token, in a port file there. It removes them as it stops (``let_go``), and a daemon
+starting removes those of every engine that died without (``sweep_dead``). Requests are one JSON object per line on a connection; answers
 are JSON lines, the last of which carries ``done``, ``failed`` or ``ok``. Before it, a build
 sends its caller its ``{"log"}`` lines and its ``{"progress"}`` frames as its worker sends them
 (``progress.py``); the daemon keeps each busy worker's last frame for ``status``, and wakes the
@@ -76,7 +77,8 @@ from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.ids import canonical, file_id, is_id
 
 __all__ = ["DEFAULT_PORT", "Endpoint", "Pool", "PortHeld", "address", "door_path", "endpoints",
-           "failure_path", "lock", "lock_path", "main", "port_holder", "state_dir", "worker_cap"]
+           "failure_path", "let_go", "lock", "lock_path", "main", "port_holder", "state_dir", "sweep_dead",
+           "worker_cap"]
 
 HTTP_FACTORY = None  # optional application supplied by the enclosing distribution
 
@@ -2457,25 +2459,174 @@ def _can_listen() -> None:
 
 def lock(path: Path | None = None) -> Any:
     """The daemon's lock (or another protocol's, at ``path``), held for its life; None when
-    another daemon holds it."""
+    another daemon holds it. A lock file is removed by whoever holds it (``let_go``, ``sweep_dead``),
+    so a lock taken on a file whose name has gone, or names another file now, is no lock: it is let
+    go and the file the name names now is taken instead (``_names``)."""
     state_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
     refusal = folder_refusal(state_dir())
     if refusal is not None:
         raise PermissionError(refusal)
-    handle = open(path or lock_path(), "a+")
+    path = path or lock_path()
+    while True:
+        handle = open(path, "a+")
+        try:
+            if WINDOWS:
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            gone = not _names(handle, path)  # its holder removed it as this opened it: open it again
+            handle.close()
+            if gone:
+                continue
+            return None
+        if _names(handle, path):
+            return handle
+        handle.close()  # taken as its last holder removed it: the name is another file's, or none
+
+
+def _names(handle: Any, path: Path) -> bool:
+    """Whether ``path`` still names the file ``handle`` holds open. On Windows an open file is never
+    removed, so it does."""
+    if WINDOWS:
+        return True
     try:
-        if WINDOWS:
-            import msvcrt
-
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        held, named = os.fstat(handle.fileno()), os.lstat(path)
     except OSError:
-        handle.close()
-        return None
-    return handle
+        return False
+    return (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino)
+
+
+def let_go(held: Any, *, failed: bool = False) -> None:
+    """This daemon's files gone as it lets go of its lock: its port file and, unless it ``failed``
+    (its client reads why there), its failure note, then the lock file itself -- on POSIX removed
+    while it is still held, so no daemon starting meanwhile can take a lock on a file that is gone
+    (``lock`` takes the one the name names); on Windows, where a file open is never removed,
+    once it is let go. The door is gone already (``Door.close``)."""
+    for path in (port_path(), *(() if failed else (failure_path(),))):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    _drop_lock(held, lock_path())
+
+
+def _drop_lock(held: Any, path: Path) -> None:
+    """The lock ``held`` (on ``path``) let go, and its file removed (see ``let_go``)."""
+    if not WINDOWS and _names(held, path):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    held.close()
+    if WINDOWS:
+        try:
+            path.unlink()
+        except OSError:
+            pass  # another opened it meanwhile: its file now
+
+
+# A file of one engine in the engine folder: its tag (``_tag``; an early engine's socket under a
+# longer name) and what it is -- its lock, its door, its port file (Windows' address, or an early
+# engine's), its failure note, a port file being written, an early engine's socket.
+_ENGINE_FILE = re.compile(r"(?P<tag>[0-9a-f]{12}|[0-9a-f]{16})\.(?P<kind>lock|door|port|failed|tmp|sock)")
+# How long a dead engine's failure note (and a port file it was writing) stays: the client that
+# started it reads the note as the engine exits (``client._not_started``).
+NOTE_KEPT_SECONDS = 120.0
+
+
+def sweep_dead(folder: Path | None = None, now: float | None = None) -> list[str]:
+    """The files in the engine folder of every engine that is dead, removed, as a daemon starts: an
+    engine killed, or one before engines removed their own files (``let_go``). An engine is dead
+    when its lock is free (taken here while its files go, so none starts between) and nothing
+    answers at its door, port file or socket; without a lock file, when nothing answers there. A
+    live engine's files are never touched, nor this daemon's, nor a failure note or a port file
+    being written younger than ``NOTE_KEPT_SECONDS``. Its folder's other files (``clients/``, a
+    browser's redirect page) are not an engine's. The paths removed."""
+    folder = folder or state_dir()
+    now = time.time() if now is None else now
+    if folder_refusal(folder) is not None:
+        return []  # a folder another can change: nothing in it is this user's daemon's to remove
+    engines: dict[str, dict[str, Path]] = {}
+    try:
+        entries = list(os.scandir(folder))
+    except OSError:
+        return []
+    for entry in entries:
+        found = _ENGINE_FILE.fullmatch(entry.name)
+        if found is not None:
+            engines.setdefault(found["tag"], {})[found["kind"]] = Path(entry.path)
+    removed: list[str] = []
+    for tag, files in sorted(engines.items()):
+        if tag == _tag():
+            continue  # this daemon's: it holds the lock
+        held = None
+        if "lock" in files:
+            try:
+                held = lock(files["lock"])
+            except OSError:
+                continue
+            if held is None:
+                continue  # its engine holds it: starting, running or stopping
+        try:
+            if _live(files):
+                continue
+            for kind, path in sorted(files.items()):
+                if kind == "lock" or (kind in ("failed", "tmp") and _younger(path, now)):
+                    continue
+                try:
+                    path.unlink()
+                    removed.append(str(path))
+                except OSError:
+                    pass
+        finally:
+            if held is not None:
+                there = files["lock"].exists()
+                _drop_lock(held, files["lock"])
+                if there and not files["lock"].exists():
+                    removed.append(str(files["lock"]))
+    return removed
+
+
+def _live(files: dict[str, Path]) -> bool:
+    """Whether an engine answers at any of ``files``: its door takes a writer, its port a
+    connection (Windows), its socket a connection (an early engine's)."""
+    from cadgen.engine import client
+
+    if "door" in files and not WINDOWS and client._answering(files["door"]):
+        return True
+    if "port" in files and WINDOWS and client._answering(files["port"]):
+        return True
+    if "sock" in files and not WINDOWS:
+        return any(_listened(files["sock"]) for _ in range(2))  # refused twice: a full backlog refuses too
+    return False
+
+
+def _listened(path: Path) -> bool:
+    """Whether a connection to the socket at ``path`` is not refused (an early engine's)."""
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe.settimeout(0.5)
+    try:
+        probe.connect(str(path))
+    except (ConnectionRefusedError, FileNotFoundError):
+        time.sleep(0.1)
+        return False  # nobody listens: a dead engine's
+    except OSError:
+        return True  # refused by the system, or too long a name: not this sweep's to judge
+    finally:
+        probe.close()
+    return True
+
+
+def _younger(path: Path, now: float) -> bool:
+    try:
+        return now - os.lstat(path).st_mtime < NOTE_KEPT_SECONDS
+    except OSError:
+        return False
 
 
 def _identity(path: Path) -> tuple[int, int] | None:
@@ -2525,14 +2676,14 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
         if others:
             print("cadgen: another installation's engine server is running, serving with the token: stop it "
                   f"first ({', '.join(str(door) for door in others)}), then cadgen server --rotate-token", file=sys.stderr)
-            held.close()
+            let_go(held)
             return 1
         try:
             if rotate_token() is None:
                 raise OSError("no state folder")
         except OSError as error:
             print(f"cadgen: cannot replace the page token: {error.strerror or error}", file=sys.stderr)
-            held.close()
+            let_go(held)
             return 1
         print("cadgen: a new page token: every link shared before no longer works", file=sys.stderr)
     try:
@@ -2543,8 +2694,10 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
             _can_listen()
     except OSError as error:
         _note_failure("the engine server cannot listen on a local port", error)
-        held.close()
+        let_go(held, failed=True)
         return 1
+    # The files of engines that died without removing theirs, swept while this one starts.
+    threading.Thread(target=sweep_dead, daemon=True).start()
     daemon = Daemon(port=port)
     daemon.stand()
     if foreground:
@@ -2556,7 +2709,7 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
             daemon.shutdown()
             if listener is not None:
                 listener.close()
-            held.close()
+            let_go(held, failed=True)
             return 1
         for said in daemon.port_notice.splitlines():
             print(f"cadgen: {said}", file=sys.stderr)  # ``cadgen server``'s terminal
@@ -2569,6 +2722,7 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
         signal.signal(signal.SIGTERM, lambda _signum, _frame: daemon.stopping.set())
         signal.signal(signal.SIGPIPE, signal.SIG_IGN)
     threading.Thread(target=daemon.watch, daemon=True).start()
+    failed = False  # its door could not be made: its note says why, and stays
     try:
         if listener is not None:
             port = listener.getsockname()[1]
@@ -2594,6 +2748,7 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
                 daemon.reached_by(door_path())
             except OSError as error:
                 _note_failure(f"the engine server cannot make its door {door_path()}", error)
+                failed = True
                 return 1
             daemon.stopping.wait()
     finally:
@@ -2602,12 +2757,8 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
         if daemon.door is not None:
             daemon.door.close()  # first: no hello is taken while the rest stops
         daemon.shutdown()
-        if listener is not None:
-            try:
-                port_path().unlink(missing_ok=True)
-            except OSError:
-                pass
-        held.close()
+        # Its port file, its failure note but a failure's, and its lock: nothing of it stays behind.
+        let_go(held, failed=failed or daemon.refusal is not None)
     return 1 if daemon.refusal is not None else 0
 
 
