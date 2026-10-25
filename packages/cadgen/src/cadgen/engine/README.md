@@ -915,7 +915,10 @@ and the command, or "serving its previous good build". A font is named by a fami
 
 **The bound.** Past `CADGEN_ENGINE_CACHE_GB` (default 4 GB; `0`: no cache at all), the least
 recently used cache files go down to 80 % of it, as 0.7's store did, never one a live worker holds
-or a page watches; the record stays, without `cache`. Removing a detached document from the home
+or a page watches; the record stays, without `cache`. A shape handed over's file (`store: "shape"`)
+never goes for the bound: no program is behind it to build it again, so it leaves disk only with its
+record. It still moves from memory to disk under the memory budget; the bound takes model documents
+alone. Removing a detached document from the home
 removes its cache file with its record. A save that fails is logged and listed by `cadgen status`,
 never raised: with the cache folder read-only the engine behaves as with no cache.
 

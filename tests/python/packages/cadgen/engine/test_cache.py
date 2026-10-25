@@ -417,5 +417,47 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(read_only["restart"][0], 2, "after a restart it is not held: its command is said")
 
 
+class BoundTest(unittest.TestCase):
+    """The cache's bound on its own: model documents' files go, least recently used first; a shape
+    handed over's never does (nothing builds it again)."""
+
+    def test_past_the_bound_shape_files_stay_and_model_files_go_first(self) -> None:
+        from cadgen.engine import cache as engine_cache
+
+        folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="engine-bound-")))
+        self.addCleanup(shutil.rmtree, folder, True)
+        held = Registry(folder / "state", folder / "cache")
+
+        class Models:
+            def registry(self) -> Registry:
+                return held
+
+            def row(self, _ident: str) -> None:
+                return None
+
+            def in_use(self) -> set:
+                return set()
+
+            def on_disk(self, _ident: str, _revision: str | None) -> None:
+                pass
+
+        names = ["old_shape", "old_model", "new_shape", "new_model"]
+        idents = {name: model_id(folder / f"{name}.py", name) for name in names}
+        for name, ident in idents.items():
+            held.put({"id": ident, "kind": "model", "store": "shape" if name.endswith("shape") else "pointer",
+                      "root": str(folder), "home": f"{name}.py", "entry": name, "revision": "r1"})
+        # Room for three and a half: the fourth write is past the bound. It is written by an engine
+        # started after the first three, whose index is the listing's and knows no store.
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_CACHE_GB": str(3500 / 2**30)}):
+            first, second = engine_cache.Cache(Models()), engine_cache.Cache(Models())
+        for name in names[:3]:
+            first._write(idents[name], "r1", b"x" * 1000)
+        second._write(idents["new_model"], "r1", b"x" * 1000)
+        kept = {name for name, ident in idents.items() if (folder / "cache" / "documents" / ident).exists()}
+        self.assertEqual(kept, {"old_shape", "new_shape", "new_model"}, "the model went, the older shape stayed")
+        self.assertNotIn("cache", held.get(idents["old_model"]), "its record stays, saying it is not cached")
+        self.assertEqual(second.evictions, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
