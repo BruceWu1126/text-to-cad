@@ -7,7 +7,7 @@ a. ``+<version>`` as the first argument (``cadgen +0.8.0 export ...``: what the 
 b. ``CADGEN_VERSION``;
 c. ``version = "<version>"`` in the first ``cadgen.toml``, from the current folder up, that says one;
 d. the installation whose engine runs and is held by a CAD app server of the host this shell is
-   (``cadgen.mcp.host.shell``: its variables; the hold names its host, ``host.family``);
+   (``engine_host.shell``: its variables; the hold names its host, ``cadgen.mcp.host.family``);
 e. any installation whose engine runs, the newest version first;
 f. the newest installation registered.
 
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     try:
         from cadgen._internal.installations import records
-        from cadgen.mcp.host import shell
+        from cadgen._internal.engine_host import shell
 
         version, args = named(args, os.environ, os.getcwd())
         record = choose(version, records(), engines, shell())

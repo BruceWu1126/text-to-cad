@@ -25,3 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout.flush()
     os.execv(sys.executable, command)
     return 1  # not reached
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

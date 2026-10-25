@@ -21,6 +21,7 @@ add_repo_path("packages/cadgen/src")
 
 from cadgen._internal import installations, proxy  # noqa: E402
 from cadgen.engine.registry import Folder, Registry  # noqa: E402
+from cadgen._internal import engine_host  # noqa: E402
 from cadgen.mcp import host  # noqa: E402
 
 POSIX = unittest.skipIf(os.name == "nt", "the proxy is an sh script on POSIX")
@@ -228,9 +229,9 @@ class ResolutionTests(Fixture):
         execv.assert_called_once_with(self.old["python"], [self.old["python"], "model.py", "a"])
 
     def test_the_shell_names_its_host(self) -> None:
-        self.assertEqual(host.shell({"CODEX_THREAD_ID": "t", "CLAUDECODE": "1"}), "codex")
-        self.assertEqual(host.shell({"CLAUDECODE": "1"}), "claude code")
-        self.assertIsNone(host.shell({}))
+        self.assertEqual(engine_host.shell({"CODEX_THREAD_ID": "t", "CLAUDECODE": "1"}), "codex")
+        self.assertEqual(engine_host.shell({"CLAUDECODE": "1"}), "claude code")
+        self.assertIsNone(engine_host.shell({}))
         self.assertEqual(host.family({"host": "codex app-server"}), "codex")
         self.assertEqual(host.family({"host": "claude code"}), "claude code")
         self.assertIsNone(host.family(None))
