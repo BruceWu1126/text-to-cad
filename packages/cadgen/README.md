@@ -337,7 +337,8 @@ src/cadgen/
                          #   kernel loads on first use; cadgen-lazy-kernel.pth, at the root
                          #   of site-packages, installs it at interpreter start),
                          #   the engine observer and the telemetry sender, the install
-                         #   channel, atomic replace, file locks, the CLI derivation
+                         #   channel, atomic replace, file locks (the state folder's one
+                         #   lock: `file_lock.state`), the CLI derivation
   _runtime/              # BUILT: the CAD Viewer client, the CAD app page and the headless
                          #   browser bundle -- produced when the wheel is packaged, never
                          #   committed, never edited

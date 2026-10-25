@@ -1,7 +1,7 @@
 """What cadgen leaves behind that no cadgen running now needs, which ``cadgen doctor`` reports and
 ``cadgen doctor --prune`` removes. Nothing here removes anything by itself.
 
-Four classes, each found by what it is, never by a guess:
+Five classes, each found by what it is, never by a guess:
 
 - **Engine records of an older format**: ``<state>/engines/<installation>.json`` that the engine
   does not read (``registry.Registry.engine``: another ``schema``, or not a record), removed; one
@@ -14,6 +14,7 @@ Four classes, each found by what it is, never by a guess:
   answering, in the engine folder).
 - **Cache folders with no record**: ``<cache>/documents/<id>/`` whose document has no record
   (``<state>/documents/<id>/document.json``): a document the registry forgot.
+- **Files of an earlier 0.8 build** that no cadgen writes now (``EARLIER``).
 - **cadgen 0.7's leftovers**: its store in the cache folder (``objects/``, ``index/``, each of the
   store's own shape) and the files of the state folder only 0.7 writes (``SEVEN_STATE``). 0.8
   never reads them; a 0.7 still installed (a plugin not yet updated) does, and nothing tells from
@@ -46,9 +47,13 @@ SEVEN_STORE = ("objects", "index")
 SEVEN_KINDS = frozenset({"model", "document", "output", "component", "surface", "bounds", "mesh", "drawing", "op"})
 _SHARD = re.compile(r"[0-9a-f]{2}")
 # The state folder's files only cadgen 0.7 writes: the sidebar's views, the snapshot browser's
-# install lock and marker, a detached viewer's log, Recents' log and its lock.
+# install lock and marker, a detached viewer's log, Recents' log and its lock, and the install
+# channels' lock (0.8 holds the state folder's one lock, ``file_lock.state``).
 SEVEN_STATE = ("sidebar-views", "snapshot-browser.lock", "snapshot-browser.installing", "viewer.log",
-               "recents/recents.jsonl", "recents/recents.lock")
+               "recents/recents.jsonl", "recents/recents.lock", "install-channels.json.lock")
+# The state folder's files an earlier 0.8 build kept that no cadgen writes now: when the last
+# telemetry sender started, which the time of the state folder's one lock says now.
+EARLIER = ("telemetry-sender",)
 
 
 @dataclass
@@ -257,6 +262,26 @@ def unrecorded(state: Path, cache: Path, now: float | None = None) -> Found:
             found.recent.append(folder)
             continue
         found.paths.append(folder)
+        found.bytes += size
+    return found
+
+
+# --- an earlier build's files --------------------------------------------------------------------
+
+
+def earlier(state: Path, now: float | None = None) -> Found:
+    """The state folder's files an earlier 0.8 build kept that no cadgen writes now (``EARLIER``)."""
+    now = time.time() if now is None else now
+    found = Found()
+    for name in EARLIER:
+        path = state / name
+        if path.is_symlink() or not path.is_file():
+            continue
+        size, newest = _walk(path)
+        if not _quiet(newest, now):
+            found.recent.append(path)
+            continue
+        found.paths.append(path)
         found.bytes += size
     return found
 

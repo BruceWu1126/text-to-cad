@@ -7,8 +7,9 @@ The file is one JSON object with a section per feature, each owned by the module
 (``telemetry``: whether usage stats and crash reports are sent, and the install's random id,
 ``cadgen/analytics.py``; ``language``: the language a person chose for the CAD views,
 ``cadgen/language.py``). A change reads,
-changes and writes its own section under one lock (``update_section``), so two apps changing
-settings at once never undo each other, whichever sections they touch.
+changes and writes its own section under the state folder's one lock (``update_section``,
+``file_lock.state``), so two apps changing settings at once never undo each other, whichever
+sections they touch.
 """
 
 from __future__ import annotations
@@ -19,10 +20,9 @@ from pathlib import Path
 from typing import Any
 
 from cadgen._internal.atomic_replace import write_bytes_atomic
-from cadgen._internal.file_lock import exclusive
+from cadgen._internal.file_lock import state
 
 FILE = "settings.json"
-LOCK = "settings.lock"
 
 
 def settings_path() -> Path:
@@ -62,7 +62,7 @@ def update_section(name: str, change: Callable[[dict[str, Any]], dict[str, Any] 
     be read or written."""
     path = path or settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with exclusive(path.with_name(LOCK)):
+    with state(path.parent):
         settings = _load(path)
         current = settings.get(name)
         before = dict(current) if isinstance(current, dict) else None

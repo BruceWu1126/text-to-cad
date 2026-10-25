@@ -425,13 +425,15 @@ class LeftoversTest(PrivateFolders):
         self.file(f"cache/documents/{forgotten}/document.xbf", "z" * 4096)
         self.file(f"cache/documents/{fresh}/document.xbf", old=False)
         self.file("cache/documents/not-a-document/notes.txt")
+        stamp = self.file("state/telemetry-sender", "")  # an earlier 0.8 build's sender's start
         before = self.tree()
 
         with mock.patch.object(installations, "targets", return_value=None):
             code, out, _ = _run(["--no-server", str(self.root)])
         self.assertEqual(code, 0)
         self.assertIn("  leftover 2 engine records of an older format, 1 bytecode folder of installations no longer "
-                      "registered (2.0 KB), 1 cache folder with no record (4.0 KB): cadgen doctor --prune removes them\n", out)
+                      "registered (2.0 KB), 1 cache folder with no record (4.0 KB), 1 file an earlier 0.8 build kept "
+                      "(telemetry-sender): cadgen doctor --prune removes them\n", out)
         self.assertEqual(self.tree(), before, "nothing is removed without --prune")
 
         code, out, _ = _run(["--prune"])
@@ -440,7 +442,8 @@ class LeftoversTest(PrivateFolders):
                               "removed 1 engine record of an older format\n"
                               "removed the page token 1 engine record still carried (the port each rolled to is kept)\n"
                               "removed 1 bytecode folder of installations no longer registered (2.0 KB)\n"
-                              "removed 1 cache folder with no record (4.0 KB)\n")
+                              "removed 1 cache folder with no record (4.0 KB)\n"
+                              f"removed {stamp}, a file an earlier 0.8 build kept\n")
         self.assertFalse((self.state / "engines" / "aaaaaaaa.json").exists())
         self.assertEqual(json.loads(trimmed.read_text(encoding="utf-8")), {"port": 3246, "schema": 3})
         for kept in (current, recent_record, token, registered, live, recent_bytecode,
@@ -461,14 +464,15 @@ class SevenLeftoversTest(PrivateFolders):
     def seven(self, *, recent: str | None = None) -> list[Path]:
         made = [self.file("cache/objects/ab/" + "c" * 62, "o" * 4089), self.file("cache/index/model/" + "d" * 64, "{}"),
                 self.file("state/sidebar-views/views.json", "[]"), self.file("state/snapshot-browser.lock", ""),
-                self.file("state/recents/recents.jsonl", "{}\n")]
+                self.file("state/recents/recents.jsonl", "{}\n"), self.file("state/install-channels.json.lock", "")]
         if recent:
             made.append(self.file(recent, "written now", old=False))
         return made
 
     def ours(self) -> list[Path]:
         """0.8's own files beside 0.7's, which nothing here touches."""
-        return [self.file("state/settings.json", "{}"), self.file("state/recents/thumbnails/" + "e" * 32 + ".png", "p"),
+        return [self.file("state/settings.json", "{}"), self.file("state/settings.lock", ""),
+                self.file("state/install-channels.json", "{}"), self.file("state/recents/thumbnails/" + "e" * 32 + ".png", "p"),
                 self.file("cache/pycache/aaaaaaaaaaaa/x.pyc", old=False),
                 self.file("cache/documents/11111111-1111-5111-8111-111111111111/document.xbf", old=False)]
 
@@ -479,7 +483,7 @@ class SevenLeftoversTest(PrivateFolders):
 
     def test_a_quiet_0_7_is_said_with_its_size_and_age_and_pruned(self) -> None:
         made, ours = self.seven(), self.ours()
-        said = f"cadgen 0.7's store and 3 state files (4.0 KB), last written {self.last(made)}"
+        said = f"cadgen 0.7's store and 4 state files (4.0 KB), last written {self.last(made)}"
         code, out, _ = _run(["--no-server", str(self.root)])
         self.assertEqual(code, 0)
         self.assertIn(f"  0.7      {said}: cadgen doctor --prune removes it\n", out)
@@ -487,14 +491,14 @@ class SevenLeftoversTest(PrivateFolders):
         code, out, _ = _run(["--prune"])
         self.assertEqual(out, f"no registered installation has lost its interpreter\nremoved {said}\n")
         for gone in ("cache/objects", "cache/index", "state/sidebar-views", "state/snapshot-browser.lock",
-                     "state/recents/recents.jsonl"):
+                     "state/recents/recents.jsonl", "state/install-channels.json.lock"):
             self.assertFalse((self.root / gone).exists(), gone)
         self.assertTrue(all(path.exists() for path in ours), "0.8's own files stay")
         self.assertNotIn("0.7", _run(["--no-server", str(self.root)])[1])
 
     def test_a_0_7_written_in_the_last_week_stays_until_all_versions_says_none_needs_it(self) -> None:
         made, ours = self.seven(recent="state/viewer.log"), self.ours()
-        said = f"cadgen 0.7's store and 4 state files (4.0 KB), last written {self.last(made)}"
+        said = f"cadgen 0.7's store and 5 state files (4.0 KB), last written {self.last(made)}"
         code, out, _ = _run(["--no-server", str(self.root)])
         self.assertIn(f"  0.7      {said}: cadgen doctor --prune removes it once nothing has written it for 7 days, "
                       "or now with --all-versions\n", out)

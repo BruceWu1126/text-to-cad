@@ -110,7 +110,7 @@ Telemetry never gets in the way of CAD:
   makes a second copy the first one, never more counts. One the receiver read and refused
   (``REFUSED``) is dropped: it would be refused again, and take everything after it down with it.
 
-The answer is changed only under the settings lock (``settings.update_section``), so the processes
+The answer is changed only under the state folder's one lock (``settings.update_section``), so the processes
 answering, opting out or making the install's id at once never undo one another. A settings file
 that is there but cannot be read counts as no answer that can be kept ("unavailable"), never as no
 answer yet, and is never written back over.
@@ -138,8 +138,8 @@ from typing import Any, Callable, Mapping
 
 from cadgen._internal.api import api_url
 from cadgen._internal.atomic_replace import replace_atomic, temp_suffix
-from cadgen._internal.file_lock import exclusive
-from cadgen.settings import LOCK, read_section, settings_path, update_section
+from cadgen._internal.file_lock import state
+from cadgen.settings import read_section, settings_path, update_section
 
 LOG = logging.getLogger("cadgen.analytics")
 
@@ -420,7 +420,7 @@ _UNREAD = object()  # a process's first batch, before its first use: the answer 
 
 
 def _update(path: Path, change: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any] | None:
-    """Change the telemetry section under the settings lock: what is kept, or ``None`` when it
+    """Change the telemetry section under the state folder's one lock: what is kept, or ``None`` when it
     could not be read or written -- and then this process stops asking (``_can_keep``)."""
     try:
         return update_section(SECTION, change, path=path)
@@ -529,7 +529,7 @@ _KEEPS: set[Path] = set()  # state files whose folder took a file in this proces
 
 def _can_keep(path: Path) -> bool:
     """Whether an answer could be written to ``path``, found by doing what a write does -- a file
-    beside it, and the settings lock opened and held -- rather than by ``os.access``, which calls
+    beside it, and the state folder's one lock opened and held -- rather than by ``os.access``, which calls
     every folder writable on Windows. A folder that passed is not tried again in this process, one
     that refused is, every time it matters; once a write has failed after all, this process asks
     no more (``_UNKEPT``)."""
@@ -544,7 +544,7 @@ def _can_keep(path: Path) -> bool:
         probe = path.with_name(f"{path.name}{temp_suffix()}")
         probe.write_bytes(b"")
         try:
-            with exclusive(path.with_name(LOCK)):
+            with state(path.parent):
                 pass
         finally:
             with contextlib.suppress(OSError):
@@ -1121,13 +1121,13 @@ def spool(counts: dict[str, Any], *, path: Path | None = None) -> bool:
 
 def _take_spool(path: Path, name: str = SPOOL, key: str = "counts") -> list[dict[str, Any]]:
     """What commands kept (``spool``), or exiting processes (``KEPT``, each line a ``batch``), taken whole
-    by one process: moved aside under the settings lock, so no line is taken twice or lost to a process
+    by one process: moved aside under the state folder's one lock, so no line is taken twice or lost to a process
     appending meanwhile."""
     kept = path.with_name(name)
     if not kept.exists():
         return []
     taken = path.with_name(f"{name}{temp_suffix()}")
-    with exclusive(path.with_name(LOCK)):
+    with state(path.parent):
         try:
             replace_atomic(kept, taken)
         except FileNotFoundError:
@@ -1147,11 +1147,11 @@ def _take_spool(path: Path, name: str = SPOOL, key: str = "counts") -> list[dict
 
 
 def _keep(path: Path, name: str, entry: dict[str, Any]) -> bool:
-    """One line appended to the kept file ``name`` beside the settings, under the settings lock: past
+    """One line appended to the kept file ``name`` beside the settings, under the state folder's one lock: past
     ``SPOOL_BYTES`` nothing more is kept. A local write, never the network."""
     line = json.dumps(entry, separators=(",", ":"))
     kept = path.with_name(name)
-    with exclusive(path.with_name(LOCK)):
+    with state(path.parent):
         size = kept.stat().st_size if kept.exists() else 0
         if size + len(line) + 1 > SPOOL_BYTES:
             return False
@@ -1162,7 +1162,7 @@ def _keep(path: Path, name: str, entry: dict[str, Any]) -> bool:
 
 def _drop_spool(path: Path) -> None:
     """A no: what commands and exiting processes kept for sending is deleted, not left to be dropped later."""
-    with contextlib.suppress(OSError), exclusive(path.with_name(LOCK)):
+    with contextlib.suppress(OSError), state(path.parent):
         path.with_name(SPOOL).unlink(missing_ok=True)
         path.with_name(KEPT).unlink(missing_ok=True)
 

@@ -238,10 +238,10 @@ def _leftovers():
     prefixes = [record["prefix"] for record in installations.records()]
     return (state, cache, leftovers.engine_records(state),
             leftovers.bytecode_folders(cache, prefixes, daemon.state_dir()), leftovers.unrecorded(state, cache),
-            leftovers.seven(state, cache))
+            leftovers.earlier(state), leftovers.seven(state, cache))
 
 
-def _leftover_words(records, bytecode, cached) -> list[str]:
+def _leftover_words(records, bytecode, cached, earlier) -> list[str]:
     """Each class of leftovers that may go, in words: ``3 engine records of an older format``."""
     from cadgen._internal.leftovers import count, size
 
@@ -254,6 +254,9 @@ def _leftover_words(records, bytecode, cached) -> list[str]:
                     + f" of installations no longer registered ({size(bytecode.bytes)})")
     if cached.paths:
         said.append(count(len(cached.paths), "cache folder", "cache folders") + f" with no record ({size(cached.bytes)})")
+    if earlier.paths:
+        said.append(count(len(earlier.paths), "file", "files") + " an earlier 0.8 build kept "
+                    f"({', '.join(path.name for path in earlier.paths)})")
     return said
 
 
@@ -263,10 +266,10 @@ def _report_leftovers() -> list[str]:
     from cadgen._internal import leftovers
 
     try:
-        _state, _cache, records, bytecode, cached, seven = _leftovers()
+        _state, _cache, records, bytecode, cached, earlier, seven = _leftovers()
     except Exception as error:  # noqa: BLE001 - a report line, never a reason for the report to fail
         return [f"leftover unknown ({type(error).__name__}: {error})"]
-    said = _leftover_words(records, bytecode, cached)
+    said = _leftover_words(records, bytecode, cached, earlier)
     lines = [f"leftover {', '.join(said)}: cadgen doctor --prune removes them"] if said else []
     if seven.paths:
         when = ("cadgen doctor --prune removes it" if leftovers.quiet(seven) else
@@ -282,7 +285,7 @@ def _prune_leftovers(all_versions: bool = False) -> list[str]:
     from cadgen._internal import leftovers
     from cadgen._internal.leftovers import count, size
 
-    state, _cache, records, bytecode, cached, seven = _leftovers()
+    state, _cache, records, bytecode, cached, earlier, seven = _leftovers()
     lines = []
     removed, trimmed = leftovers.remove_engine_records(state, records)
     if removed:
@@ -297,6 +300,9 @@ def _prune_leftovers(all_versions: bool = False) -> list[str]:
     gone = leftovers.remove(cached.paths)
     if gone:
         lines.append(f"removed {count(gone, 'cache folder', 'cache folders')} with no record ({size(cached.bytes)})")
+    for path in earlier.paths:
+        if leftovers.remove([path]):
+            lines.append(f"removed {path}, a file an earlier 0.8 build kept")
     if seven.paths and (all_versions or leftovers.quiet(seven)):
         left = [path for path in seven.paths if leftovers.remove([path]) == 0]
         lines.append(f"removed {leftovers.seven_text(seven)}" + "".join(f"; could not remove {path}" for path in left))

@@ -131,14 +131,14 @@ def remember(*, path: Path | None = None) -> str | None:
         return None
     try:
         from cadgen._internal.atomic_replace import write_bytes_atomic
-        from cadgen._internal.file_lock import exclusive
+        from cadgen._internal.file_lock import state
 
         path = path or _record_path()
         key = installation()
         if _load(path).get(key) == value:  # as nearly every start finds it: no lock to wait on, nothing to write
             return value
         path.parent.mkdir(parents=True, exist_ok=True)
-        with exclusive(path.with_name(RECORD + ".lock")):
+        with state(path.parent):  # the state folder's one lock
             kept = _load(path)
             if kept.get(key) == value:
                 return value

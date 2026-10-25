@@ -36,7 +36,7 @@ def read(*, path: Path | None = None) -> dict[str, str | None]:
 
 
 def change(choice: Any, *, path: Path | None = None) -> dict[str, str | None]:
-    """Keep the person's language (``{"locale": "<one of LOCALES>"}``) under the settings lock,
+    """Keep the person's language (``{"locale": "<one of LOCALES>"}``) under the state folder's one lock,
     beside every other setting, or forget it (``{"locale": null}``: Automatic), and answer it as it
     now is. Raises ``ValueError`` for anything else, and ``OSError`` when the settings cannot be
     written."""
