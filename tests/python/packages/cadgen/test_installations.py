@@ -223,10 +223,17 @@ class ResolutionTests(Fixture):
     def test_run_execs_the_installations_python_and_anything_else_its_cadgen(self) -> None:
         self.assertEqual(proxy.command(self.old, ["run", "model.py", "--force"]), [self.old["python"], "model.py", "--force"])
         self.assertEqual(proxy.command(self.old, ["export", "a.xbf"]), [self.old["cadgen"], "export", "a.xbf"])
+        run = [self.old["python"], "model.py", "a"]
         with mock.patch.dict("os.environ", {"CADGEN_STATE_DIR": str(self.root / "state"), "CADGEN_VERSION": ""}), \
-                mock.patch.object(proxy, "engines", return_value=[]), mock.patch.object(proxy.os, "execv") as execv:
-            proxy.main(["+0.8.0", "run", "model.py", "a"])
-        execv.assert_called_once_with(self.old["python"], [self.old["python"], "model.py", "a"])
+                mock.patch.object(proxy, "engines", return_value=[]), mock.patch.object(proxy.os, "execv") as execv, \
+                mock.patch("subprocess.call", return_value=3) as call:
+            code = proxy.main(["+0.8.0", "run", "model.py", "a"])
+        if os.name == "nt":  # no exec on Windows: the installation's python is a child, its exit code the proxy's
+            call.assert_called_once_with(run)
+            self.assertEqual((code, execv.call_count), (3, 0))
+        else:
+            execv.assert_called_once_with(self.old["python"], run)
+            self.assertEqual(call.call_count, 0)
 
     def test_the_shell_names_its_host(self) -> None:
         self.assertEqual(engine_host.shell({"CODEX_THREAD_ID": "t", "CLAUDECODE": "1"}), "codex")
