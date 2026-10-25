@@ -1,7 +1,9 @@
 """Session-owned, in-memory export jobs and explicitly requested temporary downloads.
 
 No native save dialog: the destination is chosen on the browser's computer. Kernel
-work goes through the engine worker. Disconnecting a request never cancels a job.
+work goes through the engine worker. Disconnecting a request never cancels a job. Nothing is
+inspected before a job: the page offers the formats a file's kind writes, and a job the engine
+cannot write fails, saying why.
 
 An artifact is deleted as soon as the browser has fetched it whole (the server saw its GET
 end), and one nobody fetches within ``ARTIFACT_SECONDS`` (ten minutes) is deleted then; either
@@ -22,7 +24,7 @@ import time
 from pathlib import Path
 
 FORMATS = {"step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "dxf": ".dxf", "xbf": ".xbf", "original": ".xbf"}
-from cadgen.jobs import Jobs, JobError as ExportError, STATUS_SECONDS, MAX_JOBS, TERMINAL
+from cadgen.jobs import Jobs, JobError as ExportError, STATUS_SECONDS, TERMINAL
 
 ARTIFACT_SECONDS = 600
 MAX_RETAINED_BYTES = 4 * 1024**3
@@ -41,7 +43,6 @@ class ExportJobs(Jobs):
     def __init__(self, server, *, run=None, clock=time.time, root=None):
         self.server, self.clock = server, clock
         super().__init__(clock=clock)
-        self.inspections = {}
         self.root = Path(root) if root else None
         self.run = run or self._worker
         self.started = False
@@ -66,21 +67,19 @@ class ExportJobs(Jobs):
                         except OSError:
                             pass
                 active = any(j["state"] not in TERMINAL for j in self.jobs.values())
-                active = active or any(not row["done"] for row in self.inspections.values())
             if active:
                 self.server.touch()
             else:
                 # Only run a janitor while this session owns anything.
                 with self.changed:
-                    if not self.jobs and not self.inspections:
+                    if not self.jobs:
                         self.started = False
                         return
 
     def keeps_alive(self):
         with self.changed:
             self._prune()
-            return (any(job["state"] not in TERMINAL or job["state"] == "ready" for job in self.jobs.values())
-                    or any(not row["done"] for row in self.inspections.values()))
+            return any(job["state"] not in TERMINAL or job["state"] == "ready" for job in self.jobs.values())
 
     def _start(self):
         if not self.started:
@@ -93,9 +92,6 @@ class ExportJobs(Jobs):
             if job["state"] == "ready" and (job.get("fetched") or now >= job["expiresAt"]) and not job["readers"]:
                 self._remove(job)
                 self._change(job, state="expired", stage="Export downloaded" if job.get("fetched") else "Export expired")
-        for key, row in list(self.inspections.items()):
-            if row["done"] and now - row["at"] > 30:
-                self.inspections.pop(key)
 
     def _source(self, spec):
         if self.server is None:
@@ -139,43 +135,11 @@ class ExportJobs(Jobs):
         from cadgen.engine.client import request
 
         source, expected, _name = self._source(spec)
-        answer = request({"op": "export", "source": source, "expected": expected,
-                          "destinations": [str(target)] if target else [], "inspect": target is None,
+        answer = request({"op": "export", "source": source, "expected": expected, "destinations": [str(target)],
                           "original": spec.get("format") == "original"}, on_progress=progress)
         if not answer or "failed" in answer:
             raise ExportError((answer or {}).get("failed", "The export worker disconnected."))
         return answer["done"]
-
-    def options(self, payload):
-        spec = specification(payload)
-        key = json.dumps(spec, sort_keys=True)
-        with self.changed:
-            self._prune()
-            row = self.inspections.get(key)
-            if row is None:
-                if sum(not r["done"] for r in self.inspections.values()) >= MAX_JOBS:
-                    raise ExportError("Already checking formats. Try again shortly.", 429)
-                row = self.inspections[key] = {"done": False, "at": self.clock()}
-                self._start()
-                threading.Thread(target=self._inspect, args=(row, spec), daemon=True).start()
-            if not row["done"]:
-                return 202, {"state": "checking", "retryMs": 500}
-            if "error" in row:
-                raise ExportError(row["error"], 409)
-            return 200, {"epoch": self.epoch, "formats": row["formats"]}
-
-    def _inspect(self, row, spec):
-        try:
-            formats = self.run(spec, None, lambda _p: None)["formats"]
-            with self.changed:
-                row["formats"] = formats
-        except Exception as error:
-            with self.changed:
-                row["error"] = str(error)
-        finally:
-            with self.changed:
-                row.update(done=True, at=self.clock())
-                self.changed.notify_all()
 
     def create(self, payload):
         if not isinstance(payload, dict) or set(payload) != {"requestId", "epoch", "source", "format"}:
@@ -309,14 +273,15 @@ class ExportJobs(Jobs):
             if request.method == "POST":
                 if int(request.header("content-length") or 0) > 65536:
                     raise ExportError("Export request too large.", 413)
-                if tail == ["options"]:
-                    status, body = self.options(json.loads(request.body()))
-                    return response.send_json(status, body)
                 if tail == [""]:
                     return response.send_json(202, self.create(json.loads(request.body())))
                 if len(tail) == 2 and tail[1] in ("cancel", "release"):
                     return response.send_json(200, getattr(self, tail[1])(tail[0]))
             elif request.method == "GET":
+                if tail == [""]:
+                    # The session's epoch, which a new request names (``create``): a request a page
+                    # kept across a reload is refused once this server has gone, never run again.
+                    return response.send_json(200, {"epoch": self.epoch})
                 if len(tail) == 1:
                     after = request.query.get("after")
                     return response.send_json(200, self.get(tail[0], int(after) if after is not None else None,

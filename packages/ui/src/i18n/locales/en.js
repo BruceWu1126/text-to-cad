@@ -7,14 +7,8 @@
  */
 export default {
   "export.button": "Export",
-  "export.heading": "Export model",
-  "export.preview": "Preview exports the authored model.",
-  "export.geometry": "Visibility, clipping and explode do not affect the export. GLB includes authored animations.",
-  "export.format": "Format",
-  "export.original": "Download original XBF",
-  "export.checking": "Checking available formats…",
-  "export.start": "Export and download",
-  "export.open": "Open a STEP, XBF or live model to export.",
+  "export.note": "Exports the model as authored, not as shown.",
+  "export.noteAnimated": "Exports the model as authored, not as shown. GLB includes its animations.",
   "export.show": "Show exports ({count})",
   "export.jobs": "Export jobs",
   "export.toast": "Export {name}",

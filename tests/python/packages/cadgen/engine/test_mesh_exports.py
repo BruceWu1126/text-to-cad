@@ -295,19 +295,11 @@ class WhatIsRefused(MeshExportTestCase):
             translate(path, None, self.folder / "squeezed.stl")
 
 
-class TheVerbAndTheViewer(MeshExportTestCase):
+class TheVerb(MeshExportTestCase):
     def test_export_in_process_writes_each_destination_from_one_read(self) -> None:
         written = api.export(stl(self.folder / "cube.stl"), self.folder / "cube.3mf", self.folder / "cube.glb", daemon=False)
         self.assertEqual([(row.path.name, row.kind) for row in written], [("cube.3mf", "threemf"), ("cube.glb", "glb")])
         self.assertTrue(all(row.bytes == row.path.stat().st_size for row in written))
-
-    def test_a_mesh_page_offers_the_other_two_mesh_kinds_alone(self) -> None:
-        from cadgen.engine.export.viewer import check, options
-
-        source = Source.read(glb(self.folder / "parts.glb"))
-        self.assertEqual([row["format"] for row in options(source)], ["stl", "threemf"])
-        stat = (self.folder / "parts.glb").stat()
-        check(source, {"version": f"{stat.st_mtime_ns}-{stat.st_size}"})  # the displayed revision is the file's
 
 
 class ItStaysOffTheKernel(unittest.TestCase):

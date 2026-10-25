@@ -18,8 +18,6 @@ class ExportsTest(unittest.TestCase):
         self.entered, self.finish = threading.Event(), threading.Event()
         self.calls = []
         def run(spec, target, progress):
-            if target is None:
-                return {"formats": []}
             self.calls.append(spec)
             self.entered.set()
             if not self.finish.wait(10):
@@ -218,6 +216,17 @@ class ExportsTest(unittest.TestCase):
         self.assertEqual(caught.exception.status, 410)
         self.assertEqual(len(self.calls), 130)
 
+    def test_a_new_request_names_the_epoch_the_exports_route_reads(self):
+        # Nothing is inspected before a job: the page reads the session's epoch and submits at once.
+        response = Mock()
+        self.jobs.handle(SimpleNamespace(path="/__cad/exports", method="GET", query={}), response)
+        response.send_json.assert_called_once_with(200, {"epoch": self.jobs.epoch})
+        self.finish.set()
+        ident = self.jobs.create({**self.request(), "epoch": response.send_json.call_args.args[1]["epoch"]})["id"]
+        self.assertEqual(self.settled(ident)["state"], "ready")
+        self.assertEqual(len(self.calls), 1)
+        self.jobs.release(ident)
+
     def test_stale_epoch_closed_formats_and_a_part_or_a_pose_are_refused(self):
         for change in ({"epoch": "old"}, {"format": "zip"}, {"format": []}, {"output": "/tmp/unasked"}):
             with self.assertRaises(ExportError):
@@ -268,8 +277,7 @@ class MeshFileExportTest(unittest.TestCase):
             from cadgen.engine.worker import _export
 
             source, expected, _name = self.jobs._source(spec)
-            return _export({"source": source, "expected": expected, "destinations": [str(target)] if target else [],
-                            "inspect": target is None}, lambda _text: None)
+            return _export({"source": source, "expected": expected, "destinations": [str(target)]}, lambda _text: None)
         self.downloads = Path(self.tmp.name) / "downloads"
         self.downloads.mkdir()
         self.jobs = ExportJobs(server, run=run, root=self.downloads)
@@ -288,11 +296,6 @@ class MeshFileExportTest(unittest.TestCase):
 
     def test_a_mesh_file_exports_to_the_other_mesh_kinds_and_a_changed_one_is_refused(self):
         source = self.shown()
-        with self.jobs.changed:
-            self.jobs.options(source)
-            self.assertTrue(self.jobs.changed.wait_for(lambda: all(row["done"] for row in self.jobs.inspections.values()), 30))
-        status, offered = self.jobs.options(source)
-        self.assertEqual((status, [row["format"] for row in offered["formats"]]), (200, ["glb", "threemf"]))
         job = self.finished(self.jobs.create({"requestId": "mesh-request-000001", "epoch": self.jobs.epoch,
                                               "source": source, "format": "threemf"})["id"])
         self.assertEqual((job["state"], job["filename"]), ("ready", "part.3mf"), job)

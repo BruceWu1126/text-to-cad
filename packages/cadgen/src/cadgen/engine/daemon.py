@@ -2093,7 +2093,7 @@ class Daemon:
             order = {"id": 1, "op": "export", "source": request["source"], "destinations": request["destinations"],
                      "cwd": request.get("cwd"),
                      "draw": request.get("draw"), "draw_still": request.get("draw_still"),
-                     "expected": request.get("expected"), "inspect": request.get("inspect"), "original": request.get("original")}
+                     "expected": request.get("expected"), "original": request.get("original")}
             return self._call(request, order, send, payload)
         if op == "result" and "id" in request:
             # A handle's shape (``api.Document.shape``): the document its id names, as the engine

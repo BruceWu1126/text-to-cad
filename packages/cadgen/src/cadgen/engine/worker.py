@@ -421,12 +421,9 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
             why = export.refused(source.path, destination)
             if why:
                 raise export.ExportRefused(why)
-    if request.get("expected"):
-        from cadgen.engine.export.viewer import check, options
-        if "document" not in source_spec:  # a held document's revision the daemon checked
-            check(source, request["expected"])
-        if request.get("inspect"):
-            return {"reports": [], "files": [], "formats": options(source, original_allowed="version" in request["expected"])}
+    if request.get("expected") and "document" not in source_spec:
+        from cadgen.engine.export.viewer import check
+        check(source, request["expected"])  # a held document's revision is the daemon's to check
     files = []
     for destination in request["destinations"]:
         clock = time.perf_counter()

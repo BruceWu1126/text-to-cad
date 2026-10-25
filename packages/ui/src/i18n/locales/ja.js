@@ -4,14 +4,8 @@
  */
 export default {
   "export.button": "エクスポート",
-  "export.heading": "モデルをエクスポート",
-  "export.preview": "プレビューでは作成時のモデルをエクスポートします。",
-  "export.geometry": "表示状態、クリップ、分解表示は出力に影響しません。GLB には作成したアニメーションが含まれます。",
-  "export.format": "形式",
-  "export.original": "元の XBF をダウンロード",
-  "export.checking": "利用可能な形式を確認中…",
-  "export.start": "エクスポートしてダウンロード",
-  "export.open": "STEP、XBF、またはメモリ上のモデルを開いてエクスポートします。",
+  "export.note": "表示状態に関係なく、作成時のモデルをエクスポートします。",
+  "export.noteAnimated": "表示状態に関係なく、作成時のモデルをエクスポートします。GLB にはモデルのアニメーションが含まれます。",
   "export.show": "エクスポートを表示 ({count})",
   "export.jobs": "エクスポートジョブ",
   "export.toast": "エクスポート {name}",

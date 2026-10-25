@@ -168,7 +168,7 @@ Where the mechanism is written:
 
 Use `@text-to-cad/core/client`, `/common/*` and `/lib/*` exports.
 Construct `createCadClient({ origin, fetch })` in a host. Its `exports` service
-(`client/exports.js`) inspects formats, submits idempotent jobs, long-polls their
+(`client/exports.js`) asks the session's epoch, submits idempotent jobs, long-polls their
 status, cancels/releases them, and names a ready job's file URL (`fileUrl`). It
 starts no download; the host hands that URL to the browser. Construction is
 inert; subscriptions start catalog polling, which the host's `shouldPoll` gates
