@@ -660,6 +660,169 @@ class StepTest(unittest.TestCase):
             np.testing.assert_allclose(matrix, posed[at], atol=1e-6)
 
 
+def _arms():
+    """One ring placed alike under two arms of other names, once more apart in each, the right
+    arm's ring coloured its own way; and a body of two solids, coloured, under both arms."""
+    import copy
+
+    import build123d as bd
+
+    ring = bd.Cylinder(5, 2) - bd.Cylinder(3, 2)
+    ring.color = bd.Color(0.1, 0.7, 0.2)
+    body = bd.Compound([bd.Box(4, 4, 4), bd.Pos(10, 0, 0) * bd.Box(4, 4, 4)])
+    body.color = bd.Color(0.8, 0.3, 0.1)
+
+    def arm(side: str, y: float) -> "bd.Compound":
+        held = copy.copy(ring)
+        held.label = f"{side}_ring"
+        if side == "right":
+            held.color = bd.Color(0.2, 0.2, 0.9)
+        top = copy.copy(ring).moved(bd.Location((0, 0, 5)))
+        top.label = f"{side}_ring_top"
+        carried = copy.copy(body)
+        carried.label = f"{side}_body"
+        return bd.Compound(children=[held, top, carried], label=f"arm_{side}").moved(bd.Location((0, y, 0)))
+
+    return bd.Compound(children=[arm("left", 0), arm("right", 30)], label="robot")
+
+
+def _usages(doc) -> dict[tuple, dict]:
+    """Each occurrence of an XCAF document by its path of component places: its name (its
+    usage's, else its product's), its product's name, its usage's own colour, a part's colour
+    (its label's, else the one colour its solids are given: what the XCAF reader makes of a STEP
+    styling each solid) and a part's placement."""
+    from OCP.TDF import TDF_Label, TDF_LabelSequence
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
+
+    def part_color(label) -> tuple | None:
+        own = document._label_color(label)
+        if own is not None:
+            return own
+        faces = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(XCAFDoc_ShapeTool.GetShape_s(label), TopAbs_FACE, faces)
+        given, subs = {}, TDF_LabelSequence()
+        XCAFDoc_ShapeTool.GetSubShapes_s(label, subs)
+        for at in range(1, subs.Length() + 1):
+            held, rgba = XCAFDoc_ShapeTool.GetShape_s(subs.Value(at)), document._label_color(subs.Value(at))
+            if rgba is not None and held.ShapeType() != TopAbs_FACE:
+                inner = TopTools_IndexedMapOfShape()
+                TopExp.MapShapes_s(held, TopAbs_FACE, inner)
+                given.update((faces.FindIndex(inner.FindKey(k)), rgba) for k in range(1, inner.Extent() + 1))
+        return given[1] if len(given) == faces.Extent() and len(set(given.values())) == 1 else None
+
+    found: dict[tuple, dict] = {}
+
+    def visit(label, usage, location, path) -> None:
+        name = (document._label_name(usage) if usage is not None else "") or document._label_name(label)
+        own = document._label_color(usage) if usage is not None else None
+        if XCAFDoc_ShapeTool.IsAssembly_s(label):
+            found[path] = {"name": name, "product": document._label_name(label), "own": own}
+            components = TDF_LabelSequence()
+            XCAFDoc_ShapeTool.GetComponents_s(label, components, False)
+            for at in range(1, components.Length() + 1):
+                component, referred = components.Value(at), TDF_Label()
+                XCAFDoc_ShapeTool.GetReferredShape_s(component, referred)
+                visit(referred, component, location.Multiplied(XCAFDoc_ShapeTool.GetLocation_s(component)),
+                      path + (at - 1,))
+            return
+        shape = XCAFDoc_ShapeTool.GetShape_s(label)
+        found[path] = {"name": name, "product": document._label_name(label), "own": own,
+                       "color": part_color(label), "matrix": document._matrix(location.Multiplied(shape.Location()))}
+
+    free = TDF_LabelSequence()
+    XCAFDoc_DocumentTool.ShapeTool_s(doc.Main()).GetFreeShapes(free)
+    visit(free.Value(1), None, document._identity(), ())
+    return found
+
+
+class StepUsagesTest(unittest.TestCase):
+    """A prototype used under two parents of other names keeps one product name and each usage
+    its own NEXT_ASSEMBLY_USAGE_OCCURRENCE name, placement and instance colour; a coloured part of
+    several solids keeps its colour. Read back through OCCT's XCAF reader alone, a third party's
+    read."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.folder = Path(tempfile.mkdtemp(prefix="engine-step-usages-")).resolve()
+        cls.xbf, cls.step = cls.folder / "arms.xbf", cls.folder / "arms.step"
+        cls.xbf.write_bytes(document.to_bytes(document.to_xcaf(document.collect(_arms(), "robot"))))
+        cls.held = document.load(cls.xbf)
+        cls.placements = cls.components()
+        translate(cls.xbf, None, cls.step)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    def third_party(self) -> dict[tuple, dict]:
+        from OCP.IFSelect import IFSelect_RetDone
+        from OCP.STEPCAFControl import STEPCAFControl_Reader
+
+        doc = document._new_document()
+        reader = STEPCAFControl_Reader()
+        reader.SetNameMode(True)
+        reader.SetColorMode(True)
+        self.assertEqual(reader.ReadFile(str(self.step)), IFSelect_RetDone)
+        self.assertTrue(reader.Transfer(doc))
+        return _usages(doc)
+
+    def assert_colour(self, got: tuple | None, want: tuple | None, what: str) -> None:
+        self.assertEqual(got is None, want is None, what)
+        for one, two in zip(got or (), want or ()):
+            self.assertAlmostEqual(one, two, delta=1e-5, msg=what)
+
+    def test_each_usage_reads_back_with_its_name_placement_and_colour_through_occt_s_reader(self) -> None:
+        built, read = _usages(self.held.doc), self.third_party()
+        self.assertEqual(list(read), list(built))
+        self.assertEqual([built[(side, 0)]["name"] for side in (0, 1)], ["left_ring", "right_ring"])
+        self.assertEqual({built[(side, 0)]["product"] for side in (0, 1)}, {"left_ring"}, "one prototype")
+        self.assertIsNotNone(built[(1, 0)]["own"], "the right arm's ring is coloured its own way")
+        for path, want in built.items():
+            got = read[path]
+            self.assertEqual((got["name"], got["product"]), (want["name"], want["product"]), path)
+            self.assert_colour(got["own"], want["own"], f"{path}'s usage colour")
+            if "matrix" in want:
+                self.assert_colour(got["color"], want["color"], f"{path}'s part colour")
+                np.testing.assert_allclose(got["matrix"], want["matrix"], atol=1e-9, err_msg=str(path))
+        import re
+
+        text = self.step.read_text(encoding="ascii")
+        self.assertEqual(text.count("PRODUCT('left_ring'"), 1, "one product, used four times")
+        self.assertEqual(sorted(re.findall(r"NEXT_ASSEMBLY_USAGE_OCCURRENCE\('\d+','([^']*)'", text)), sorted(
+            ["arm_left", "arm_right", *(f"{side}_{part}" for side in ("left", "right")
+                                        for part in ("ring", "ring_top", "body"))]), "a usage, a name")
+
+    @classmethod
+    def components(cls) -> list:
+        """Each component of the held document with its placement, the datum it holds."""
+        from OCP.TDF import TDF_LabelSequence
+        from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
+
+        labels, found = TDF_LabelSequence(), []
+        XCAFDoc_DocumentTool.ShapeTool_s(cls.held.doc.Main()).GetShapes(labels)
+        for at in range(1, labels.Length() + 1):
+            components = TDF_LabelSequence()
+            XCAFDoc_ShapeTool.GetComponents_s(labels.Value(at), components, False)
+            found += [(document._entry(component), XCAFDoc_ShapeTool.GetLocation_s(component))
+                      for component in (components.Value(place) for place in range(1, components.Length() + 1))]
+        return found
+
+    def test_the_held_document_is_as_it_was_and_writes_the_same_bytes_again(self) -> None:
+        # Each usage was placed apart from its others for the writer, and set back after: the same
+        # datum on every component (a placement is told from another by its datum).
+        after = self.components()
+        self.assertEqual([entry for entry, _ in after], [entry for entry, _ in self.placements])
+        self.assertTrue(all(mine.IsEqual(theirs) for (_, mine), (_, theirs) in zip(after, self.placements)))
+        self.assertTrue(self.placements[3][1].IsEqual(self.placements[0][1]),
+                        "the arms' rings are one placement to the kernel")
+        again = self.folder / "again.step"
+        translate(self.xbf, None, again)
+        self.assertEqual(again.read_bytes(), self.step.read_bytes())
+
+
 class StepBytesTest(unittest.TestCase):
     """A STEP is a function of its document: a build's, a warm worker's and a fresh process's
     from the xbf read cold are the same bytes, and a model run again to the same document keeps

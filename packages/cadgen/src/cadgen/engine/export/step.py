@@ -25,6 +25,14 @@ breaks of the numbers it had, other breaks in every warm export: each record ren
 on one line (``_one_line``; ISO 10303-21 sets no line length). Every other record is the
 writer's, broken where its own text puts the breaks, the same text in every process.
 
+Each usage of a prototype is a ``NEXT_ASSEMBLY_USAGE_OCCURRENCE`` of its own, named by the usage
+(the component's name), of the one ``PRODUCT`` the prototype is (its name); a usage coloured its
+own way is an ``OVER_RIDING_STYLED_ITEM`` whose ``PRESENTATION_STYLE_BY_CONTEXT`` names that
+usage's shape representation. The writer finds a usage by its prototype's shape moved by the
+usage's placement, and tells placements apart by their datum: a prototype placed alike under two
+parents is placed apart for the transfer and set back after (``_usages_apart``), the same numbers
+written, so no usage takes another's name or colour (juno's arms: 29 of 391 usages misnamed).
+
 A build's document is written as its xbf reads back (``write``): reading a document sets each
 placement from its matrix, which moves it by a last bit (``mesh.shape_bytes``), so the STEP of
 the document in a build's memory and of the same document read from its xbf, in any process,
@@ -37,6 +45,8 @@ from __future__ import annotations
 
 import itertools
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -83,12 +93,82 @@ def write_document(doc: Any, path: Path) -> None:
         writer.SetColorMode(True)
         writer.SetMaterialMode(True)
         writer.SetLayerMode(False)
-        if not writer.Transfer(doc, STEPControl_AsIs):
-            raise OSError(f"could not write {path}")
+        with _usages_apart(doc):
+            if not writer.Transfer(doc, STEPControl_AsIs):
+                raise OSError(f"could not write {path}")
         _stamp(writer.ChangeWriter().Model())
         if writer.Write(str(path)) != IFSelect_RetDone:
             raise OSError(f"could not write {path}")
     _settle(Path(path))
+
+
+@contextmanager
+def _usages_apart(doc: Any) -> Iterator[None]:
+    """The document with every usage of a prototype placed apart from its others while the writer
+    transfers it, and as it was after. AP242 gives each usage of a product its own
+    ``NEXT_ASSEMBLY_USAGE_OCCURRENCE``, named by the usage, and styles a usage by a
+    ``PRESENTATION_STYLE_BY_CONTEXT`` naming its shape representation; OCCT's writer finds a
+    component's usage by its prototype's shape moved by the component's placement, and a placement
+    is told from another by its datum, not by its value. Two components of one prototype at one
+    placement datum -- one sub-part where two assemblies hold it alike, as a robot's left and right
+    arms hold their shared parts, or at the identity, which has no datum -- are one key to it: the
+    last one's name went on the first one's usage and none on the other's (a reader names it by
+    its id), and an instance colour was put in the other usage's context. So each component that
+    would be another's key is given a datum of its own, of the same transformation, written as
+    the same numbers; the components and their assemblies' compounds are set back after, each
+    compound's named shape at the version it had, so the document saves to the bytes it did."""
+    from OCP.TDF import TDF_AttributeIterator, TDF_Label, TDF_LabelSequence
+    from OCP.TNaming import TNaming_NamedShape
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_Location, XCAFDoc_ShapeTool
+
+    from cadgen.engine.document import _entry
+
+    tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+    labels = TDF_LabelSequence()
+    tool.GetShapes(labels)
+    placed: dict[tuple[str, int], list] = {}
+    moved: list[tuple[Any, Any]] = []
+    assemblies: list[Any] = []
+    for at in range(1, labels.Length() + 1):
+        assembly = labels.Value(at)
+        if not XCAFDoc_ShapeTool.IsAssembly_s(assembly):
+            continue
+        assemblies.append(assembly)
+        components = TDF_LabelSequence()
+        XCAFDoc_ShapeTool.GetComponents_s(assembly, components, False)
+        for place in range(1, components.Length() + 1):
+            component = components.Value(place)
+            referred = TDF_Label()
+            XCAFDoc_ShapeTool.GetReferredShape_s(component, referred)
+            location = XCAFDoc_ShapeTool.GetLocation_s(component)
+            others = placed.setdefault((_entry(referred), location.HashCode()), [])
+            if any(location.IsEqual(other) for other in others):
+                moved.append((component, location))
+                location = TopLoc_Location(location.Transformation())
+                XCAFDoc_Location.Set_s(component, location)
+            others.append(location)
+    versions = []
+    if moved:
+        for assembly in assemblies:
+            # Its attributes walked, never found into a new attribute: a named shape so filled
+            # shares the document's nodes and frees them when it goes.
+            attributes = TDF_AttributeIterator(assembly)
+            while attributes.More():
+                named = attributes.Value()
+                if isinstance(named, TNaming_NamedShape):
+                    versions.append((named, named.Version()))
+                attributes.Next()
+        tool.UpdateAssemblies()
+    try:
+        yield
+    finally:
+        if moved:
+            for component, location in moved:
+                XCAFDoc_Location.Set_s(component, location)
+            tool.UpdateAssemblies()
+            for named, version in versions:
+                named.SetVersion(version)
 
 
 def _stamp(model: Any) -> None:
