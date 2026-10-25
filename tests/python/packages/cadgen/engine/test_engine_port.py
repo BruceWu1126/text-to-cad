@@ -176,6 +176,19 @@ class EnginePortTest(unittest.TestCase):
             self.assertEqual(found.stat().st_mode & 0o777, 0o600)
         return found.read_text(encoding="utf-8").strip()
 
+    @staticmethod
+    def ask(port: int, route: str, **headers: str) -> tuple[int, dict, bytes]:
+        """``GET route`` of the engine on ``port``, redirects not followed."""
+        import http.client
+
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
+        try:
+            connection.request("GET", route, headers={name.replace("_", "-"): value for name, value in headers.items()})
+            answer = connection.getresponse()
+            return answer.status, dict(answer.getheaders()), answer.read()
+        finally:
+            connection.close()
+
     def held(self, door: Path) -> None:
         """An app server's hold on the engine at ``door``, as ``client.hold`` asks one, kept to the end."""
         from cadgen.engine import client
@@ -464,11 +477,30 @@ class EnginePortTest(unittest.TestCase):
         self.assertEqual(first["port"], named)
         self.assertNotIn("port", self.record(), "a named port is never remembered")
         self.assertEqual(first["token"], self.token())
+        # The link a launch prints and the session a browser is given for it outlive the engine and
+        # its port: the next engine, on another port of the host, admits both.
+        from urllib.parse import parse_qs, urlsplit
+
+        from cadgen.viewer.engine_app import TOKEN_NEEDED_PAGE
+
+        link = parse_qs(urlsplit(first["url"]).query)["token"][0]
+        status, headers, _ = self.ask(named, f"/?token={link}")
+        self.assertEqual(status, 302)
+        cookie = headers["set-cookie"].split(";")[0]
         self.stop()
-        # --port on ``cadgen server`` outranks CADGEN_ENGINE_PORT; --rotate-token retires every link.
+        moved = self.launch(CADGEN_ENGINE_PORT=str(free_port()))
+        self.assertNotEqual((moved["pid"], moved["port"]), (first["pid"], named))
+        self.assertEqual(self.ask(moved["port"], "/__cad/server", Cookie=cookie)[0], 200)
+        self.assertEqual(self.ask(moved["port"], f"/?token={link}")[0], 302)
+        self.stop()
+        # --port on ``cadgen server`` outranks CADGEN_ENGINE_PORT; --rotate-token retires every link
+        # and every session: each page then needs a new link.
         other = free_port()
         self.env["CADGEN_ENGINE_PORT"] = str(named)
         self.server("--port", str(other), "--rotate-token")
+        for headers in ({"Cookie": cookie}, {}):
+            self.assertEqual(self.ask(other, "/" if headers else f"/?token={link}", Sec_Fetch_Dest="document",
+                                      **headers)[::2], (403, TOKEN_NEEDED_PAGE))
         rotated = self.launch()
         self.assertEqual(rotated["port"], other)
         self.assertNotEqual(rotated["token"], first["token"])

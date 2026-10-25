@@ -285,10 +285,9 @@ class Models:
 
     @staticmethod
     def url(server: Any, ident: str) -> str:
-        """The page of document ``ident`` on ``server``: ``/<id>``, with the token that lets it in."""
+        """The page of document ``ident`` on ``server``: ``/<id>``, with a fresh link that lets it in."""
         app = getattr(server.http, "app", None)
-        token = app.token if app is not None else ""
-        return f"{server.url}/{ident}" + (f"?token={token}" if token else "")
+        return f"{server.url}/{ident}" + (f"?token={app.link()}" if app is not None else "")
 
     def register_page(self, ident: str) -> Any:
         server = self.daemon.serve({})

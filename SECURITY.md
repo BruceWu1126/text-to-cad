@@ -17,30 +17,47 @@ else `/tmp/cadgen-<uid>`). The client and the daemon refuse a folder that
 another user owns or that others can write to.
 
 **The CAD Viewer and the MCP endpoint.** The engine serves the CAD Viewer and
-the CAD app's MCP endpoint over HTTP on `127.0.0.1`. Every route needs the
-engine's token. A request can carry it as a Bearer header, or as the
-HttpOnly, SameSite=Strict cookie that the printed launch URL's `?token=` is
-exchanged for. Behind the token:
+the CAD app's MCP endpoint over HTTP on `127.0.0.1` (port 3245 unless you name
+another; when another program holds it, the next free port, which your
+installation keeps and names in `cadgen status`). Every route needs one of three
+credentials, all made from one token:
+
+- **The token** is yours, not one engine's: made once, kept in a file only you
+  can read in your state folder (`engines/token`), and served by every
+  installation's engine at every start until you rotate it. No URL carries it,
+  and only `cadgen viewer --api-only --json` prints it, for the development
+  client's proxy. Your own clients read it through the engine's door and send
+  it as a Bearer header.
+- **A link** is what every URL cadgen prints or opens carries (`cad_show`'s,
+  `cadgen viewer`'s, a build's `view:` line, the page it opens in your
+  browser): `?token=` with an expiry and the token's signature of it. It works
+  for 24 hours. After that it opens the viewer only in a browser that holds a
+  session; anywhere else its page says it has expired and to run
+  `cadgen viewer` for a new one.
+- **The session cookie** is what a browser is given for a link: HttpOnly,
+  SameSite=Strict, one name for every port of this host, holding the token's
+  signature of its own expiry, never the token. It lasts 30 days from the last
+  page load, and every page load renews it.
+
+An engine checks a link or a cookie by signing it again, so it keeps no
+sessions: links and cookies outlive a restart, a reboot, a port that moved and
+an upgrade. `cadgen server --rotate-token`, with every engine stopped
+(`cadgen stop`, with each version that runs one), replaces the token, and with
+it every link and every session made before. Behind the credentials:
 
 - A Host check refuses DNS rebinding.
+- A request the cookie alone admits must come from the engine's own pages or
+  from you (the browser says which in `Sec-Fetch-Site`), so another site, or a
+  page on another port of this host, cannot use it.
 - A state-changing request also needs a custom header, so a cross-site form or
   fetch cannot make one.
 - No CORS headers are sent.
 
-**The token is the boundary.** Whoever holds it can read any CAD file on your
-machine by its path, list folders, export, and use every Viewer action. So keep
-the launch URL private. Do not bind a non-loopback `--host` unless you mean to
-offer exactly that to everyone who can reach the port.
-
-**The token lasts.** It belongs to you, not to one run of the engine or one
-installation of cadgen: it is made once, kept in a file only you can read in
-your state folder (`engines/token`), and reused at every start of every
-installation's engine, so a link survives an upgrade, on the same port (3245 unless you name another; when
-another program holds 3245, the next free port, which your installation keeps and
-names in `cadgen status`). So a shared link keeps working on this machine, across restarts and
-reboots, until you rotate it. It reaches your folders whenever the engine runs.
-`cadgen server --rotate-token`, with every engine stopped (`cadgen stop`, with
-each version that runs one), replaces it and retires every link shared before.
+**The credentials are the boundary.** Whoever holds the token, a link within its
+day, or a session cookie can read any CAD file on your machine by its path, list
+folders, export, and use every Viewer action. So keep links private. Do not bind
+a non-loopback `--host` unless you mean to offer exactly that to everyone who
+can reach the port.
 
 **The CAD app in agent hosts.** The page's own tools (`cad_sync`,
 `cad_capture_reply`) and its full `cad_http` access need a per-session
@@ -58,8 +75,9 @@ reference only when asked (`--gz-remote`).
 
 ### What we treat as a vulnerability
 
-- Reaching the engine, its files or its actions without the token, or taking
-  the token, from another origin, another local user, or a file you open.
+- Reaching the engine, its files or its actions without the token, a link or
+  the session cookie, or taking one of them, from another origin, another
+  local user, or a file you open.
 - A file from someone else that reads, writes or runs anything beyond what
   opening, viewing, exporting or snapshotting it should. This includes a file
   that makes the engine do unbounded work or hold unbounded memory.
@@ -70,9 +88,9 @@ reference only when asked (`--gz-remote`).
 - `api.texttocad.dev`: anything beyond its documented behaviour (version feed,
   consented analytics).
 
-Out of scope: what someone who already has your token, or already runs code as
-you, can do; and effects on your own machine that you start yourself, such as
-building your own script.
+Out of scope: what someone who already has your token, a link within its day or
+your session cookie, or already runs code as you, can do; and effects on your
+own machine that you start yourself, such as building your own script.
 
 ## Reporting a Vulnerability
 

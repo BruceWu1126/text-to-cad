@@ -322,8 +322,12 @@ costs one its warm worker. The workers' memory cap retires a watched worker only
 is left to retire. A retired worker's documents stay served: the daemon takes them from it first, and
 holds them under one memory budget that never evicts a watched one (**Document lifetime**).
 
-The installation's door (**The door**) supplies its HTTP token. Page URLs exchange it
-for a same-site cookie; programmatic clients use Bearer authentication. All routes
+The installation's door (**The door**) supplies its HTTP token, which programmatic clients send as a
+Bearer header; no URL carries it. A page URL the engine prints or opens carries a link instead, good
+for a day, which a browser exchanges for a SameSite=Strict session cookie, one name on every port of
+the host, that lasts 30 days from its last page load, each of which renews it: both are the token's
+signatures of an expiry, checked by signing again, so no engine keeps a session
+(`viewer.engine_app`: `EngineApp.link`, `sign`, `standing`). All routes
 retain the application's Host and cross-site mutation checks. Explicit host/port
 requests must match an existing listener. A second installed version has a different
 installation identity and therefore a different engine -- in another environment, and in the same
@@ -395,11 +399,12 @@ installation serves on a port it rolled to; `registry.Registry.engine`, its own
 every installation's engine serves with (`registry.Registry.token`; both this user's alone, 0600),
 so a link outlives an upgrade too. So a page link
 -- the `cadgen viewer` output, a model's `view:` line, the CAD app's card -- works across `cadgen
-stop`, a crash and a reboot, and a page that lost its engine keeps asking the same address and
-reloads itself when the engine answers again. A stable token means a
-shared link keeps working on this machine until it is rotated: whoever holds it reaches the user's
-folders whenever the engine runs. `cadgen server --rotate-token` replaces it, with no engine running
-(it refuses while this installation's or another's runs), and every link shared before stops working. `cadgen status` says the
+stop`, a crash and a reboot for its day, the session it left in a browser for 30 days past that
+browser's last page load, on any port, and a page that lost its engine keeps asking the same address
+and reloads itself when the engine answers again. Whoever holds a live link or session reaches the
+user's folders whenever the engine runs. `cadgen server --rotate-token` replaces the token, with no
+engine running (it refuses while this installation's or another's runs), and every link and session
+made before stops working. `cadgen status` says the
 port and where it came from: the default, `--port`, `CADGEN_ENGINE_PORT`, or `rolled from 3245
 because <name> (pid N) holds it`.
 
