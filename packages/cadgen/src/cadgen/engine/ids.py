@@ -15,9 +15,12 @@ engine's to say, never the uuid's version.
 
 ``canonical`` is the one spelling of a path the engine and the viewer key by: ``realpath``,
 then, on macOS, each name as the file system spells it (``getattrlist``, which opens nothing), so
-a symlink, a ``..`` and a case variant of one file are one key. On Windows ``realpath`` already
-resolves the final path. A part of the path that does not exist keeps the spelling it was given
-below the deepest part that does. Ids hash the canonical path exactly, with no case folding.
+a symlink, a ``..`` and a case variant of one file are one key. On Windows ``realpath`` resolves
+the final path, except through a link whose target does not exist yet: that comes back as the
+target the link names, its folders unresolved (a short ``RUNNER~1`` name, a ``..``), so it is
+asked again until the answer stands -- a canonical path is its own canonical spelling. A part of
+the path that does not exist keeps the spelling it was given below the deepest part that does.
+Ids hash the canonical path exactly, with no case folding.
 
 Nothing here reads, builds or persists a document, and nothing imports the kernel.
 """
@@ -33,6 +36,8 @@ __all__ = ["NAMESPACE", "canonical", "check_key", "check_name", "derived_id", "f
 
 # cadgen's namespace for derived ids: written once, never changed.
 NAMESPACE = uuid.UUID("ad198b15-841c-4d1f-81be-6aa78d2737c0")
+
+WINDOWS = sys.platform == "win32"
 
 _ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 
@@ -84,6 +89,13 @@ def _spelled(path: str) -> str | None:
 def canonical(path: str | os.PathLike) -> str:
     """The one spelling of ``path`` every document key is made from (the module docstring)."""
     real = os.path.realpath(os.fspath(path))
+    if WINDOWS:
+        for _ in range(8):  # a link to a missing target: the target as the link names it (the docstring)
+            again = os.path.realpath(real)
+            if again == real:
+                break
+            real = again
+        return real
     if sys.platform != "darwin":
         return real
     parts = real.split("/")[1:]
