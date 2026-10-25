@@ -479,6 +479,62 @@ class QueryTest(MemoCase):
             self.assertEqual((run.tally["queries_run"], run.tally["queries_answered"]), (1, 0))
         self.assertEqual(volume, part.volume)
 
+    def test_a_clearance_of_shapes_the_memo_handed_back_is_answered(self) -> None:
+        from build123d import Pos, Solid
+        from OCP import BRepExtrema
+
+        own = BRepExtrema.BRepExtrema_DistShapeShape.__kernel_memo_class__
+
+        def model(gap, deflection=None):
+            a = Solid.make_box(10, 10, 10)
+            b = Pos(10 + gap, 0, 0) * Solid.make_sphere(3)
+            found = BRepExtrema.BRepExtrema_DistShapeShape(a.wrapped, b.wrapped) if deflection is None else (
+                BRepExtrema.BRepExtrema_DistShapeShape(a.wrapped, b.wrapped, deflection))
+            found.Perform()
+            return a.distance_to(b), a.distance_to((20 + gap, 5, 5)), found.Value() if found.IsDone() else None, a, b
+
+        counted, runs = _counted(own, "Perform")
+        with counted:
+            (to_b, to_point, direct, a, b), _, cold = _run(model, 5.0)
+            self.assertEqual((len(runs), cold.tally["queries_answered"]), (3, 1), "a second Perform is answered")
+            (*warm, _a, _b), _, run = _run(model, 5.0)
+            self.assertEqual((len(runs), run.tally["queries_answered"]), (3, 4))
+            _run(model, 5.0, 1e-3)
+            self.assertEqual(len(runs), 4, "another deflection is another key")
+            _run(model, 6.0)
+            self.assertEqual(len(runs), 7, "another shape is measured")
+        self.assertEqual(warm, [to_b, to_point, direct])
+        self.assertEqual((to_b, to_point), (a.distance_to(b), a.distance_to((25.0, 5, 5))))
+        self.assertEqual(direct, own(a.wrapped, b.wrapped).Value())
+        self.assertAlmostEqual(direct, 2.0, places=6)
+
+    def test_an_answered_distance_asked_for_its_points_runs_as_it_was_given(self) -> None:
+        from build123d import Pos, Solid
+        from OCP import BRepExtrema
+
+        own = BRepExtrema.BRepExtrema_DistShapeShape.__kernel_memo_class__
+
+        def model():
+            a, b = Solid.make_box(10, 10, 10), Pos(15, 2, 3) * Solid.make_sphere(3)
+            found = BRepExtrema.BRepExtrema_DistShapeShape()
+            found.LoadS1(a.wrapped)
+            found.LoadS2(b.wrapped)
+            done = found.Perform()
+            point = found.PointOnShape1(1)
+            return done, found.Value(), (point.X(), point.Y(), point.Z())
+
+        counted, runs = _counted(own, "Perform")
+        with counted:
+            cold, _, _ = _run(model)
+            warm, _, _ = _run(model)
+        self.assertEqual(warm, cold)
+        self.assertEqual(len(runs), 2, "a point is no answer the memo keeps: asking one runs it")
+        loose_a, loose_b = Solid.make_box(1, 1, 1), Pos(3, 0, 0) * Solid.make_box(1, 1, 1)
+        with counted:
+            for _ in range(2):
+                _run(lambda: loose_a.distance_to(loose_b))
+        self.assertEqual(len(runs), 4, "a distance of shapes made past the memo is measured every time")
+
 
 class VertexTest(MemoCase):
     def test_a_point_placed_by_a_model_is_keyed(self) -> None:

@@ -790,6 +790,9 @@ _QUERY_TARGETS: tuple[tuple[str, str], ...] = (
     ("Mixin3D", "center"), ("Compound", "center"), ("Shell", "center"), ("Face", "center"), ("Mixin1D", "center"),
     ("Shape", "matrix_of_inertia"), ("Shape", "principal_properties"), ("Shape", "static_moments"),
     ("Shape", "radius_of_gyration"),
+    # Clearances (``BRepExtrema_DistShapeShape``'s minimum distance alone, no points): to a
+    # shape or a point.
+    ("Shape", "distance"), ("Shape", "distance_to"),
 )
 # The answers one shape's record keeps, the oldest dropped past them: a model asking one
 # shape about many points keeps the last of them.
@@ -975,7 +978,8 @@ class _Spec:
     perform: str | None = None
     runs: tuple[str, ...] = ()
     loads: tuple[str, ...] = ()
-    settings: tuple[tuple[str | None, str, Any], ...] = ()
+    # (getter or None, setter, the default where no getter reads it: a function, called when asked)
+    settings: tuple[tuple[str | None, str, Callable[[], Any] | None], ...] = ()
 
     def parse(self, args: tuple) -> tuple[tuple | None, dict]:
         """A constructor's arguments: the inputs it runs on (None for one that does not run)
@@ -1017,9 +1021,15 @@ class _Spec:
         for getter, setter, default in self.settings:
             if getter is not None:
                 found[setter] = (getattr(cls, getter)(instance),)
-            else:
-                found[setter] = given.get(setter, (default,))
+            elif setter in given:
+                found[setter] = given[setter]
+            elif default is not None:
+                found[setter] = (default(),)
         return found
+
+
+def _occt(module: str, name: str) -> Any:
+    return getattr(importlib.import_module(module), name)
 
 
 class _Analysis:
@@ -1341,7 +1351,77 @@ class _AnalyzerSpec(_Spec):
         cls.Init(instance, *data)
 
 
-_ANALYSES: tuple[_Spec, ...] = (_CheckSpec(), _AnalyzerSpec())
+class _DistanceSpec(_Spec):
+    """``BRepExtrema_DistShapeShape``: the minimum distance between two shapes. It records
+    whether it was found and its value: the least distance over every pair of the shapes'
+    vertices, edges and faces, each pair's computed from their geometry alone, under the
+    deflection, the flag, the algorithm and the parallel mode it is given, all keyed. The
+    bounding boxes it prunes pairs with may read a mesh the shapes hold, which no key names,
+    but they only drop a pair whose box lies farther than the least distance found: the
+    pair that holds the minimum is never dropped, whatever order the pairs come in, so the
+    value is the same. Which of several equally near points it hands back (``PointOnShape1``,
+    ``NbSolution``) does depend on that order, so a point is not recorded: asking one runs it.
+    No global tolerance, no randomness; it writes nothing into the shapes."""
+
+    module, name = "OCP.BRepExtrema", "BRepExtrema_DistShapeShape"
+    answers = ("IsDone", "Value")
+    perform = "Perform"
+    loads = ("LoadS1", "LoadS2")
+
+    settings = ((None, "SetDeflection", lambda: _occt("OCP.Precision", "Precision").Confusion_s()),
+                (None, "SetFlag", lambda: _occt("OCP.Extrema", "Extrema_ExtFlag").Extrema_ExtFlag_MINMAX),
+                (None, "SetAlgo", lambda: _occt("OCP.Extrema", "Extrema_ExtAlgo").Extrema_ExtAlgo_Grad),
+                ("IsMultiThread", "SetMultiThread", None))
+
+    def parse(self, args: tuple) -> tuple[tuple | None, dict]:
+        from OCP.Extrema import Extrema_ExtAlgo, Extrema_ExtFlag
+
+        if not args:
+            return None, {}
+        if len(args) < 2:
+            raise _Unkeyable("one shape")
+        first, second, *rest = args
+        given = {}
+        if rest and isinstance(rest[0], numbers.Real) and not isinstance(rest[0], bool):
+            given["SetDeflection"] = (float(rest.pop(0)),)
+        if len(rest) > 2:
+            raise _Unkeyable("a progress range")
+        if rest:
+            if not isinstance(rest[0], Extrema_ExtFlag):
+                raise _Unkeyable("a flag that is no Extrema_ExtFlag")
+            given["SetFlag"] = (rest[0],)
+        if len(rest) > 1:
+            if not isinstance(rest[1], Extrema_ExtAlgo):
+                raise _Unkeyable("an algorithm that is no Extrema_ExtAlgo")
+            given["SetAlgo"] = (rest[1],)
+        return (_shape_argument(first), _shape_argument(second)), given
+
+    def data(self, method: str, args: tuple, current: tuple | None) -> tuple:
+        if len(args) != 1:
+            raise _Unkeyable("not one shape")
+        first, second = current or (None, None)
+        shape = _shape_argument(args[0])
+        return (shape, second) if method == "LoadS1" else (first, shape)
+
+    def load(self, cls: type, instance: Any, data: tuple) -> None:
+        if data[0] is not None:
+            cls.LoadS1(instance, data[0])
+        if data[1] is not None:
+            cls.LoadS2(instance, data[1])
+
+    def run(self, cls: type, instance: Any, data: tuple) -> None:
+        self.load(cls, instance, data)
+        cls.Perform(instance)
+
+    def read(self, cls: type, instance: Any) -> dict:
+        done = cls.IsDone(instance)
+        return {"IsDone": done, "Value": cls.Value(instance)} if done else {"IsDone": done}
+
+    def performed(self, cls: type, instance: Any, answers: dict | None) -> Any:
+        return answers["IsDone"] if answers is not None else cls.IsDone(instance)
+
+
+_ANALYSES: tuple[_Spec, ...] = (_CheckSpec(), _AnalyzerSpec(), _DistanceSpec())
 
 
 def _patch(cls: type, attr: str, label: str, kind: str) -> None:
