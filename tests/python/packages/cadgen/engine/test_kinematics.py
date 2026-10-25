@@ -2,7 +2,8 @@
 ground and configurations) and read back; a chain's links and a prismatic pair; a pair the
 built tree contradicts refused by name; ``posed`` by a configuration's name and by joint values
 placing a part where the closed form and the sampler say, a model of its own whose STEP carries no
-mechanism and whose xbf keeps it at the asked values; what a pose names wrong refused by name; the structure's ``kinematics`` the same from the file and from the
+mechanism and whose xbf keeps it at the asked values; what a pose names wrong refused by name; a
+mechanism state outside its joint's range failing the build in one line, one on a bound built; the structure's ``kinematics`` the same from the file and from the
 build; a document served at a pose; the mechanism subtree AP242's names and nothing else."""
 
 from __future__ import annotations
@@ -82,6 +83,27 @@ def lift():
     root = bd.Compound(children=[base, carriage, clamp, arm], label="lift")
     mechanism_state(root, "top", lift=90, wrist=45)
     return root
+"""
+
+# A wheel steered about its kingpin, the joint's range the steering lock, and a state of the
+# model's own turning it to {turned} degrees.
+CAR = """
+import build123d as bd
+from cadgen.ap242 import mechanism_state
+from cadgen.engine import xbf
+
+
+@xbf("XBF/car.xbf")
+def car():
+    body = bd.Box(400, 200, 50)
+    body.label = "body"
+    wheel = bd.Pos(150, 120, 0) * bd.Cylinder(30, 20, rotation=(90, 0, 0))
+    wheel.label = "wheel"
+    kingpin = bd.Axis((150, 120, 0), (0, 0, 1))
+    bd.RevoluteJoint("steer", body, axis=kingpin, angular_range=(-30, 30))
+    bd.RigidJoint("steer", wheel, bd.Plane(origin=kingpin.position, z_dir=kingpin.direction).location)
+    body.joints["steer"].connect_to(wheel.joints["steer"], angle=0)
+    return mechanism_state(bd.Compound(children=[body, wheel], label="car"), "turned_left", steer={turned})
 """
 
 
@@ -251,15 +273,10 @@ class HingeTest(_Folder):
                 self.assertIn(word, report["error"], state)
             self.assertFalse((self.folder / "refused.step").exists(), state)
 
-    def test_a_configuration_naming_no_joint_fails_the_build_and_one_out_of_range_warns(self) -> None:
-        # The one harvest error: a configuration naming a joint its assembly does not hold.
+    def test_a_configuration_naming_no_joint_fails_the_build(self) -> None:
         report = self.hinge(flat="elbw=0", ok=False)
         self.assertIn("names no joint 'elbw'", report["error"])
         self.assertIn("elbow", report["error"])
-        report = self.hinge(flat="elbow=200")
-        self.assertIn("'elbow' at 200 deg is outside its range [-10, 120] deg: the value is left out",
-                      " ".join(report["kinematics"]["warnings"]))
-        self.assertEqual(document.Loaded(self.folder / "XBF/hinge.xbf").mechanism.configurations["flat"], {})
 
     def test_a_part_moved_after_it_was_connected_is_refused_by_name(self) -> None:
         # Connected after the compound holding the arm was made: the arm is not where the joint
@@ -347,6 +364,44 @@ class HingeTest(_Folder):
             with self.assertRaises(urllib.error.HTTPError) as gone:
                 call(f"/api/doc/{made[0]}")
             self.assertEqual(gone.exception.code, 404)
+
+
+class RangeTest(_Folder):
+    def test_a_state_outside_its_joint_s_range_fails_the_build_in_one_line_and_one_on_a_bound_builds(self) -> None:
+        self.build("car", CAR.format(turned=30))  # the lock itself: within the range
+        xbf = self.folder / "XBF/car.xbf"
+        self.assertEqual(document.Loaded(xbf).mechanism.configurations, {"turned_left": {"steer": (30.0,)}})
+        before = xbf.read_bytes()
+        report = self.build("car", CAR.format(turned=32), ok=False)
+        self.assertEqual(report["error"].splitlines()[-1],
+                         "cadgen.engine.mechanism.KinematicsError: mechanism state 'turned_left' of car puts joint "
+                         "'steer' at 32 deg, outside its range -30 to 30")
+        self.assertEqual(xbf.read_bytes(), before, "the refused build leaves the file the build before wrote")
+        # Past a bound by less than the six digits a value shows: every digit.
+        report = self.build("car", CAR.format(turned=-30.0000002), ok=False)
+        self.assertIn("puts joint 'steer' at -30.0000002 deg, outside its range -30 to 30", report["error"])
+        self.build("car", CAR.format(turned=-30))
+        self.assertEqual(document.Loaded(xbf).mechanism.configurations, {"turned_left": {"steer": (-30.0,)}})
+
+    def test_a_pose_outside_its_joint_s_range_keeps_its_refusal(self) -> None:
+        from cadgen.engine.snapshot import SnapshotRefused, snapshot
+
+        self.build("car", CAR.format(turned=30))
+        path = self.folder / "XBF/car.xbf"
+        refusal = "the pose: joint 'steer' at 32 deg is outside its range [-30, 30] deg"
+        with self.assertRaises(mechanism.KinematicsError) as refused:
+            mechanism.resolve(document.Loaded(path).structure()["kinematics"], {"steer": 32})
+        self.assertEqual(str(refused.exception), refusal)
+        previous = os.environ.get("CADGEN_ENGINE_MESH")
+        os.environ["CADGEN_ENGINE_MESH"] = "inline"  # one part at a time on this thread: no pool
+        self.addCleanup(lambda: os.environ.pop("CADGEN_ENGINE_MESH") if previous is None
+                        else os.environ.__setitem__("CADGEN_ENGINE_MESH", previous))
+        out = self.folder / "stale.png"
+        out.write_bytes(b"before")
+        with self.assertRaises(SnapshotRefused) as refused:
+            snapshot(path, out, pose={"steer": 32}, size=(160, 120), daemon=False)
+        self.assertEqual(str(refused.exception), f"--pose: {refusal}")
+        self.assertEqual(out.read_bytes(), b"before", "a refused snapshot keeps the picture at OUT")
 
 
 class JointMemoTest(_Folder):

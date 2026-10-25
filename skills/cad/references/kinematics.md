@@ -82,7 +82,11 @@ if __name__ == "__main__":
   moves the child's part. Connect parts before putting them in the compound that holds
   them.
 - **Values are degrees and millimetres.** A joint's `angular_range` or `linear_range` is
-  its limits; a pose or a mechanism state outside them is refused.
+  its limits, a value on a limit within them. A mechanism state that puts a joint outside
+  them fails the run, in one line naming the state, the joint, the value and the range; a
+  pose outside them is refused. A coupling's value outside its range is left out of a
+  mechanism state, and a configuration sequence that goes outside a joint's limits is left
+  out, each with a warning.
 - **A pair is named by its moving joint's label** (`elbow`). A label two pairs share
   takes the path of the part that holds it (`hand/left:knuckle`).
 - **Links are parts that move as one**: parts whose rigid joints are connected are one

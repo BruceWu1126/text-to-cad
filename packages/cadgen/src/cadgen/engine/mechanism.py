@@ -164,6 +164,9 @@ _STRING_KEYS = ("schema", "angle_unit", "length_unit", "entity")
 class KinematicsError(ValueError):
     """A mechanism the engine will not keep or pose, said by name."""
 
+    # A joint's value outside its range (``_checked``): the joint, the value, its unit and the range.
+    outside: tuple[str, float, str, tuple[float | None, float | None]] | None = None
+
 
 @dataclass
 class Link:
@@ -944,7 +947,8 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
 
     # A mechanism state, a configuration sequence or a coupling naming a joint no part of its assembly holds means
     # nothing, nor does a coupling named as a joint is (a pose could not tell them apart): the
-    # harvest's errors, as is a pair the built tree contradicts (below); a value no pair can take is warned.
+    # harvest's errors, as are a pair the built tree contradicts (below) and a mechanism state putting a joint
+    # outside its range (``_configurations``); any other value no pair can take is warned.
     for path, _obj, held in configured:
         labels, controls = labels_below(path), controls_below(path)
         for name, values in held.items():
@@ -1294,9 +1298,9 @@ def _converter(path: tuple[int, ...], mechanism: Mechanism, joint_labels: list,
 def _convert(values: dict[str, Any], where: str, mechanism: Mechanism, naming: dict[str, list[str]],
              matching: dict[str, list[Pair]], couplings: dict[str, Any], locked: dict[str, str],
              as_built: dict[str, tuple[float, ...]],
-             checked: Callable) -> tuple[dict[str, tuple[float, ...]], list[str]]:
+             checked: Callable) -> tuple[dict[str, tuple[float, ...]], list[KinematicsError]]:
     found: dict[str, tuple[float, ...]] = {}
-    problems: list[str] = []
+    problems: list[KinematicsError] = []
     driving: dict[str, Any] = {}
     for key, value in values.items():
         named = naming.get(key)
@@ -1305,24 +1309,25 @@ def _convert(values: dict[str, Any], where: str, mechanism: Mechanism, naming: d
             continue
         matches = matching.get(key, [])
         if not matches:
-            problems.append(f"{where} sets joint {key!r}, which is in no pair")
+            problems.append(KinematicsError(f"{where} sets joint {key!r}, which is in no pair"))
         for pair in matches:
             if pair.label in locked:
-                problems.append(f"{where}: joint {pair.label!r} moves only with its coupling "
-                                f"{locked[pair.label]!r}; set {locked[pair.label]!r}")
+                problems.append(KinematicsError(f"{where}: joint {pair.label!r} moves only with its coupling "
+                                                f"{locked[pair.label]!r}; set {locked[pair.label]!r}"))
                 continue
             try:
                 found[pair.label] = _checked(pair, value, where)
             except KinematicsError as error:
-                problems.append(str(error))
+                problems.append(error)
     for name in list(driving):
         clash = [label for label in mechanism.couplings[name].ratios if label in found]
-        problem = f"{where} sets coupling {name!r} and its joint {clash[0]!r}: set one of them" if clash else None
+        problem = (KinematicsError(f"{where} sets coupling {name!r} and its joint {clash[0]!r}: set one of them")
+                   if clash else None)
         if problem is None:
             try:
                 _coupled({name: driving[name]}, couplings, as_built, checked, where)
             except KinematicsError as error:
-                problem = str(error)
+                problem = error
         if problem is not None:
             problems.append(problem)
             del driving[name]
@@ -1330,7 +1335,7 @@ def _convert(values: dict[str, Any], where: str, mechanism: Mechanism, naming: d
         try:
             found.update(_coupled(driving, couplings, as_built, checked, where))
         except KinematicsError as error:  # each alone within the limits, together past them
-            problems.append(str(error))
+            problems.append(error)
     return {pair.label: found[pair.label] for pair in mechanism.pairs if pair.label in found}, problems
 
 
@@ -1391,7 +1396,7 @@ def _motions(motioned: list, mechanism: Mechanism, joint_labels: list, controls:
             def convert(values: dict[str, Any], at: str) -> dict[str, tuple[float, ...]]:
                 converted, problems = converter(values, f"{where}: {at}")
                 if problems:
-                    raise _Unfit(problems[0])
+                    raise _Unfit(str(problems[0]))
                 return converted
 
             try:
@@ -1525,12 +1530,26 @@ def _configurations(configured: list, mechanism: Mechanism, joint_labels: list, 
                     name_of: Callable) -> dict:
     """Each named configuration as pair values (a coupling's value made its joints'), every
     assembly's that names it merged, a deeper one's values first and a shallower one's over
-    them. What a value cannot be taken for (``_converted``) is left out, and warned."""
+    them. A value putting a joint outside its range fails the harvest in one line naming the
+    state, the joint, the value and the range (a value on a bound is within it): left out, the
+    state would be another design than the one the model declares. Anything else a value cannot
+    be taken for (``_converted``) is left out, and warned -- a coupling's value outside its range
+    among them: a posed copy (``posed``) is built at its pose, which moves each coupling's zero,
+    so a value the original's state gives a coupling stands for another pose in the copy."""
     merged: dict[str, dict[str, tuple[float, ...]]] = {}
     for path, _obj, held in sorted(configured, key=lambda item: -len(item[0])):
         for name, values in held.items():
-            found, problems = _converted(path, values, mechanism, joint_labels, controls,
-                                         f"mechanism state {name!r} of {name_of(path)}")
+            where = f"mechanism state {name!r} of {name_of(path)}"
+            found, problems = _converted(path, values, mechanism, joint_labels, controls, where)
+            outside = next((problem.outside for problem in problems if problem.outside is not None), None)
+            if outside is not None:
+                label, value, unit, (lower, upper) = outside
+                bounds = (_bound(lower, "-"), _bound(upper, ""))
+                shown = f"{value:g}"
+                if shown in bounds:  # past a bound by less than six digits show: every digit
+                    shown = repr(value)
+                raise KinematicsError(f"{where} puts joint {label!r} at {shown} {unit}, outside its range "
+                                      f"{bounds[0]} to {bounds[1]}")
             mechanism.warnings.extend(f"{problem}: the value is left out" for problem in problems)
             merged.setdefault(name, {}).update(found)
     return {name: merged[name] for name in sorted(merged)}
@@ -1546,8 +1565,10 @@ def _checked(pair: Pair, value: Any, where: str) -> tuple[float, ...]:
         if not _within(value_at, limits):
             lower = "-inf" if limits[0] is None else f"{limits[0]:g}"
             upper = "inf" if limits[1] is None else f"{limits[1]:g}"
-            raise KinematicsError(f"{where}: joint {pair.label!r} at {value_at:g} {unit} is outside its range "
-                                  f"[{lower}, {upper}] {unit}")
+            error = KinematicsError(f"{where}: joint {pair.label!r} at {value_at:g} {unit} is outside its range "
+                                    f"[{lower}, {upper}] {unit}")
+            error.outside = (pair.label, value_at, unit, limits)  # what a mechanism state's refusal says
+            raise error
     return found
 
 
