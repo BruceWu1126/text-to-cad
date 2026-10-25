@@ -18,8 +18,7 @@ depends on React or UI. Shared packages never import application source, and
 applications never import one another. The root npm workspace and lockfile own
 JavaScript installation; `npm run build:packages` builds core before UI.
 
-The Python wheel assembles the built headless browser bundle and the built CAD
-Viewer client and CAD app page. That build dependency does not
+The Python wheel assembles the built CAD Viewer client and CAD app page. That build dependency does not
 let Python engine code reach into app source.
 The wheel works outside this repository, so its own Markdown must also stand
 alone; repository development instructions belong in `CONTRIBUTING.md`.

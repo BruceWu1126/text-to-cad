@@ -100,10 +100,10 @@ Shaded, Parts, X-ray, Hidden line and Wireframe at iso and front (`--modes`,
 `--cameras`, `--size`) twice, both from the engine daemon's meshes
 (`CADGEN_ENGINE_DIR` picks the daemon): by OCCT, whose look is the reference
 (`cadgen/engine/render/look.py`) and which `cadgen snapshot` draws with; and by the
-viewer's own scene code, `@text-to-cad/core`'s headless renderer, which
-`scripts/bundle/bundle.sh` builds into cadgen's `_runtime/browser`
-(`CADGEN_BROWSER_RUNTIME_DIR` names another): the bench loads it in a headless
-Chromium and drives it itself. Per picture pair it prints the silhouettes' IoU, the
+viewer's own scene code, `@text-to-cad/core`'s headless renderer, which the bench
+builds at the start of each run (`scripts/bundle/lib/snapshot_runtime.sh`, into the
+ignored `tmp/bench/snapshot-page`; the wheel does not carry it), then loads in a
+headless Chromium and drives itself. Per picture pair it prints the silhouettes' IoU, the
 median and 95th-percentile CIE76 colour difference over the pixels both give the
 model, and, for the line modes, the share of inked pixels that differ visibly; and
 it writes each picture, `metrics.json`, `table.json` and a contact sheet per

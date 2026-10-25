@@ -120,8 +120,7 @@ pins its HTTP port and `--host ADDRESS` pins its bind address. If the running en
 port or address, the launch fails with that conflict; it never replaces a server
 or starts a second engine. A taken port that `--port` names fails, naming its holder. There are no page sessions: every launch
 reuses the one page, and its folder replaces the last launch's as the one the home shows.
-An old page session's link (`/s/...`) and a document named by query (`/?doc=`, `/?file=`)
-are answered with the home. `--dist DIR` (or `CADGEN_VIEWER_DIST`) selects a built client.
+`--dist DIR` (or `CADGEN_VIEWER_DIST`) selects a built client.
 
 The JSON record includes `url`, `apiUrl`, `token`, `port`, `pid`, `start` (the folder the home
 shows), `documents` (`{id, file, url}` for each FILE) and `action` (`started` or `reused`,

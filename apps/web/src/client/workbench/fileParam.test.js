@@ -9,8 +9,6 @@ test("a page names its document by id in its path, and every other path is the h
   assert.equal(readDocumentId(`/${ID}`), ID);
   assert.equal(readDocumentId(`/${ID}/`), ID);
   assert.equal(readDocumentId("/"), null);
-  // The forms that are gone: a page session, a document named by query, a script.
-  assert.equal(readDocumentId("/s/abc/"), null);
   assert.equal(readDocumentId("/Users/me/a.step"), null);
   assert.equal(readDocumentId(`/${ID.toUpperCase()}`), null);
 });
@@ -19,7 +17,7 @@ test("the URL is /<id> for a document and / for the home, a step pushed for each
   const originalWindow = globalThis.window;
   const calls = [];
   globalThis.window = {
-    location: { pathname: "/", search: "?file=/m/a.step&debug=1", hash: "" },
+    location: { pathname: "/", search: "?debug=1", hash: "" },
     history: { pushState: (...args) => calls.push(["push", args[2]]), replaceState: (...args) => calls.push(["replace", args[2]]) },
   };
   try {

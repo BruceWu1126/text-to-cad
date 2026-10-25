@@ -1,16 +1,4 @@
-// The drawing tools, and the two strip tools that hold them. Pencil holds the pen, the highlighter
-// and the eraser; Shapes the rectangle (the default), line, arrow, ellipse and text. Pure ids: the
-// session (`session.js`) keeps which of each is in hand, the toolbar (`toolbar.jsx`) their glyphs.
 
-/**
- * @typedef {'freedraw' | 'highlighter' | 'eraser'} PencilTool
- * @typedef {'rectangle' | 'line' | 'arrow' | 'ellipse' | 'text'} ShapeTool
- * @typedef {PencilTool | ShapeTool} AnnotationTool
- * @typedef {'pencil' | 'shapes'} AnnotationFamily  The strip tools, as the tool modes name them.
- */
-
-/** @type {readonly PencilTool[]} */
-export const PENCIL_TOOLS = Object.freeze(['freedraw', 'highlighter', 'eraser']);
 /** @type {readonly ShapeTool[]} */
 export const SHAPE_TOOLS = Object.freeze(['rectangle', 'line', 'arrow', 'ellipse', 'text']);
 /** The tool each strip tool takes up first. */

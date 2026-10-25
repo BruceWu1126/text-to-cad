@@ -234,9 +234,3 @@ export function controlWriteForHandle(articulation, handle, values, target) {
   const rest = handleRowValue(articulation, handle, values) - weight * current;
   return { id: control.id, value: clampControlValue(control, (finite(target, rest) - rest) / weight) };
 }
-
-/** The handle that drives a control's own row, when a joint row carries it as a term — what the
- * Position panel's slider for the control shows and writes through. */
-export function handleForControl(articulation, controlId) {
-  return articulationHandles(articulation).find((handle) => handle.id === String(controlId || "")) || null;
-}

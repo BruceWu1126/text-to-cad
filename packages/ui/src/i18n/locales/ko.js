@@ -65,8 +65,6 @@ export default {
   "consent.shareUsageEnvironment": "원격 분석(환경에서 설정됨)",
   "consent.telemetryInfo": "text-to-cad 개선에 도움이 되는 익명 사용 데이터와 오류 보고서입니다. 프롬프트, 모델, 파일은 절대 전송되지 않습니다.",
 
-  "appearance.label": "모양",
-  "appearance.current": "모양: {scheme}",
   "appearance.system": "시스템",
   "appearance.light": "라이트",
   "appearance.dark": "다크",

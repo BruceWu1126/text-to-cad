@@ -136,10 +136,6 @@ class Folder:
             except OSError:
                 pass
 
-    def copy_in(self, inside: str, source: Path | str) -> Path:
-        """``source``'s bytes at ``inside``, landed whole."""
-        return self._land(inside, lambda temporary: shutil.copyfile(source, temporary))
-
     def _land(self, inside: str, fill: Callable[[Path], Any]) -> Path:
         target = self.path(inside)
         target.parent.mkdir(parents=True, exist_ok=True)

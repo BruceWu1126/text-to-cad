@@ -916,7 +916,7 @@ def told_failure(found: Mapping[str, Any]) -> str:
             return "bug"
         kind = _builtin(found.get("type"))
         for named, reason in _BUILD_ERRORS:
-            if kind is not None and not isinstance(named, str) and issubclass(kind, named):
+            if kind is not None and issubclass(kind, named):
                 return reason
         if found.get("engine"):
             return "export_error"
@@ -934,13 +934,11 @@ def told_failure(found: Mapping[str, Any]) -> str:
 
 # Why a failure failed, where cadgen named it (``because``): a word of ``BUILD_FAILURES`` or ``SNAPSHOT_FAILURES``.
 _BECAUSE = "__cadgen_failure__"
-# Errors that say why by what they are, whoever raised them, by the first of their classes named here (a class
-# by its module and name: importing it would import what defines it, the CAD kernel among them). Only a module
-# that is not there is the machine's: another ``ImportError`` (``from build123d import Boxx``) is whoever's code
-# asked for the name, decided below.
-_BUILD_ERRORS: tuple[tuple[type[BaseException] | str, str], ...] = (
+# Errors that say why by what they are, whoever raised them, by the first of their classes named here. Only a
+# module that is not there is the machine's: another ``ImportError`` (``from build123d import Boxx``) is whoever's
+# code asked for the name, decided below.
+_BUILD_ERRORS: tuple[tuple[type[BaseException], str], ...] = (
     (SyntaxError, "script_error"), (ModuleNotFoundError, "missing_module"), (FileNotFoundError, "missing_file"),
-    ("cadgen.assets.AssetMissing", "missing_file"),
     (TimeoutError, "timeout"), (MemoryError, "memory"), (OSError, "io_error"))
 
 
@@ -956,12 +954,6 @@ def because(error: BaseException, reason: str) -> BaseException:
 def _named(error: BaseException, vocabulary: frozenset[str]) -> str | None:
     reason = getattr(error, _BECAUSE, None)
     return reason if reason in vocabulary else None
-
-
-def _is(error: BaseException, kind: type[BaseException] | str) -> bool:
-    if not isinstance(kind, str):
-        return isinstance(error, kind)
-    return any(f"{cls.__module__}.{cls.__qualname__}" == kind for cls in type(error).__mro__)
 
 
 def _whose(error: BaseException) -> tuple[str | None, tuple[str, str, int] | None]:
@@ -995,7 +987,7 @@ def build_failure(error: BaseException) -> str:
         if named:
             return named
         for kind, reason in _BUILD_ERRORS:
-            if _is(error, kind):
+            if isinstance(error, kind):
                 return reason
         if decisive is None:
             return "other"

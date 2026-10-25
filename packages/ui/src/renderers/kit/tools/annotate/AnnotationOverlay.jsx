@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { annotationAt, highlighterMark, penMark, shapeMarks, textMark, withGroups } from "../../../../annotation/geometry.js";
 import { DEFAULT_OVERLAY_ANNOTATION_COLOR } from "../../../../annotation/toolbar.jsx";
 import { capturePointer } from "../../../../lib/pointerCapture.js";

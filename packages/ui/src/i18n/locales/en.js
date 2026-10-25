@@ -75,8 +75,6 @@ export default {
   "consent.telemetryInfo": "Anonymous usage data and crash reports that help improve text-to-cad. Your prompts, models and files are never sent.",
 
   // The colour schemes (the app menu's Theme, the web home's appearance button).
-  "appearance.label": "Appearance",
-  "appearance.current": "Appearance: {scheme}",
   "appearance.system": "System",
   "appearance.light": "Light",
   "appearance.dark": "Dark",

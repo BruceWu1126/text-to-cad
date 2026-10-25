@@ -100,7 +100,7 @@ async function newPage() {
     const parsed = new URL(url);
     // A file is named by its absolute path in every request: the page addresses documents by id
     // (`/<id>`) and asks for a file by the path its row gives.
-    if (["/__cad/catalog", "/__cad/artifact", "/__cad/preview"].includes(parsed.pathname)) {
+    if (parsed.pathname === "/__cad/catalog") {
       const file = parsed.searchParams.get("file") || "";
       if (file && !/^(?:\/|[a-z]:\/)/i.test(file)) {
         errors.push(`a relative file reached ${parsed.pathname}: ${file}`);

@@ -4,10 +4,9 @@ The published distribution: CAD models written as Python, built by cadgen's engi
 (`cadgen.engine`) into live XCAF documents and the files those models declare (XBF, STEP, GLB, STL,
 3MF, DXF), and the tools that show and check them. One PyPI package carrying the Python under
 `src/cadgen/` and what it ships that is not Python under `src/cadgen/_runtime/`: the CAD
-Viewer's client and the CAD app page, which it serves, and a headless browser bundle of the
-viewer's scene, which nothing in it loads (its snapshots are drawn by OCCT, never in a
-browser), built from their JavaScript packages and bundled in at build time (the JS *source*
-never ships).
+Viewer's client and the CAD app page, which it serves, built from their JavaScript packages
+and bundled in at build time (the JS *source* never ships). Its snapshots are drawn by OCCT,
+never in a browser.
 
 ```python
 from cadgen import step, xbf
@@ -288,7 +287,7 @@ src/cadgen/
                          #   threemf, dxf), memo, Material, materials, paint, read_step,
                          #   read_xbf, read_mesh, and the operations on documents (export,
                          #   snapshot, inspect), every name loaded on first use; the font
-                         #   guard, the kernel-import recorder and the lazy kernel, first
+                         #   guard and the lazy kernel, first
   ap242.py               # the mechanism's AP242 names: mechanism_state,
                          #   configuration_sequence, gear_pair, rack_and_pinion_pair,
                          #   screw_pair (product and manufacturing information to join them)
@@ -334,16 +333,15 @@ src/cadgen/
                          #   it writes (installations: ~/.local/bin/cadgen, which the
                          #   skills run as `cadgen +<version>`; written as `cadgen mcp`
                          #   starts and by `cadgen doctor`, never by another command), the
-                         #   proxy's resolver (proxy), the font guard, the kernel-import recorder,
+                         #   proxy's resolver (proxy), the font guard,
                          #   the lazy kernel (lazy_kernel: `import build123d` binds, the
                          #   kernel loads on first use; cadgen-lazy-kernel.pth, at the root
                          #   of site-packages, installs it at interpreter start),
                          #   the engine observer and the telemetry sender, the install
                          #   channel, atomic replace, file locks (the state folder's one
                          #   lock: `file_lock.state`), the CLI derivation
-  _runtime/              # BUILT: the CAD Viewer client, the CAD app page and the headless
-                         #   browser bundle -- produced when the wheel is packaged, never
-                         #   committed, never edited
+  _runtime/              # BUILT: the CAD Viewer client and the CAD app page -- produced
+                         #   when the wheel is packaged, never committed, never edited
 ```
 
 Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and

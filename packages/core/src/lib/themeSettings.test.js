@@ -15,7 +15,6 @@ import {
   normalizeThemeFillColors,
   normalizeThemeSettings,
   resolveThemeFillColor,
-  resolveThemeSettingsForColorMode,
   resolveSystemThemePresetId,
   themeSettingsSupportsSystemColorMode,
   SNAPSHOT_THEME_ID,
@@ -40,18 +39,6 @@ const BLUE_FILL_COLORS = Object.freeze(["#4cc9f0"]);
 const MAGENTA_FILL_COLORS = Object.freeze(["#ff4faf"]);
 const CLAY_FILL_COLORS = Object.freeze(["#b9856e"]);
 const TERMINAL_FILL_COLORS = Object.freeze(["#073a20"]);
-const DARKOAL_FILL_COLORS = Object.freeze([
-  "#b6c4ce",
-  "#c2a1a5",
-  "#e6d1af",
-  "#b0ab85",
-  "#91ae86",
-  "#7cab9f",
-  "#7da5b9",
-  "#8996be",
-  "#988ebe",
-  "#ad8dab"
-]);
 
 test("theme presets expose a default material color", () => {
   const blue = cloneThemePresetSettings("blue");

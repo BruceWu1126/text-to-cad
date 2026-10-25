@@ -143,9 +143,6 @@ class Query:
                 return value
         return default
 
-    def get_all(self, key: str) -> list[str]:
-        return [value for name, value in self._pairs if name == key]
-
     def __contains__(self, key: object) -> bool:
         return any(name == key for name, _ in self._pairs)
 

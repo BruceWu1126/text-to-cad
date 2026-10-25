@@ -65,8 +65,6 @@ export default {
   "consent.shareUsageEnvironment": "テレメトリ（環境で設定済み）",
   "consent.telemetryInfo": "text-to-cad の改善に役立つ匿名の利用データとクラッシュレポートです。プロンプト、モデル、ファイルが送信されることはありません。",
 
-  "appearance.label": "外観",
-  "appearance.current": "外観: {scheme}",
   "appearance.system": "システム",
   "appearance.light": "ライト",
   "appearance.dark": "ダーク",

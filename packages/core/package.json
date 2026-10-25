@@ -21,7 +21,8 @@
       "import": "./dist/prompt/index.js"
     },
     "./chunk-ids": "./scripts/chunk-ids.mjs",
-    "./source-maps": "./scripts/source-maps.mjs"
+    "./source-maps": "./scripts/source-maps.mjs",
+    "./third-party-licenses": "./scripts/third-party-licenses.mjs"
   },
   "scripts": {
     "test": "node scripts/run-tests.mjs",
@@ -48,6 +49,7 @@
     "dist",
     "scripts/chunk-ids.mjs",
     "scripts/source-maps.mjs",
+    "scripts/third-party-licenses.mjs",
     "docs",
     "README.md"
   ]

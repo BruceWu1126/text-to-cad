@@ -221,13 +221,11 @@ class OneRenderPerDrawing(unittest.TestCase):
         with self.render({"payload": 1}):
             self.assertEqual(renders.response(str(self.drawing)), (202, {"state": "drawing", "retryMs": 750}))
             self.assertEqual(renders.response(str(self.drawing))[0], 202)
-            self.assertTrue(renders.any_in_flight())
             self.release.set()
             renders.hold_seconds = 30
             self.assertEqual(renders.response(str(self.drawing)), (200, b'{"payload":1}'))
         # Rendered once, from the bytes the request read.
         self.assertEqual(self.calls, [(str(self.drawing), self.drawing.read_bytes())])
-        self.assertFalse(renders.any_in_flight())
 
     def test_a_drawing_that_will_not_render_is_reported_to_the_request_that_follows(self) -> None:
         crashes = []

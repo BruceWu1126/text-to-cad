@@ -14,7 +14,6 @@ import webbrowser
 from cadgen import assets
 
 DEFAULT_PROG = 'cadgen viewer'
-DEFAULT_VIEWER_HOST = '127.0.0.1'
 
 
 def resolve_dist_dir(explicit: str) -> str:

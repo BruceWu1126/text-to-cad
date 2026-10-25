@@ -57,14 +57,6 @@ import { DEFAULT_STEP_CLIP_SETTINGS, normalizeStepClipSettings } from "../lib/vi
 // colour; X-ray, Hidden line and Wireframe are made of the edges. Preview's photographic look
 // (Render) is none of them: it is asked for on its own, drawn with Preview's own settings.
 export const VIEW_MODE_VALUES = Object.freeze(["solid", "shaded", "parts", "xray", "hidden-line", "wireframe"]);
-export const VIEW_MODES = Object.freeze([
-  Object.freeze({ id: "solid", label: "Solid" }),
-  Object.freeze({ id: "shaded", label: "Shaded" }),
-  Object.freeze({ id: "parts", label: "Parts" }),
-  Object.freeze({ id: "xray", label: "X-ray" }),
-  Object.freeze({ id: "hidden-line", label: "Hidden line" }),
-  Object.freeze({ id: "wireframe", label: "Wireframe" })
-]);
 export const VIEW_SETTINGS_KEYS = Object.freeze(["mode", "grid", "appearance", "camera", "clip", "exploded"]);
 export const VIEW_CAMERA_KEYS = Object.freeze(["projection", "focalLength"]);
 // Preview's settings, in the order its panel lists them, and each group's fields.

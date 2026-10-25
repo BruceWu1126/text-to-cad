@@ -32,14 +32,6 @@ class Finding:
         hint = f" Hint: {self.hint}" if self.hint else ""
         return f"{self.severity}: {self.code}{location}: {self.message}{hint}"
 
-    def to_dict(self) -> dict[str, str]:
-        payload = {"severity": str(self.severity), "code": self.code, "message": self.message}
-        if self.path:
-            payload["path"] = self.path
-        if self.hint:
-            payload["hint"] = self.hint
-        return payload
-
 
 @dataclass
 class FindingsReport:

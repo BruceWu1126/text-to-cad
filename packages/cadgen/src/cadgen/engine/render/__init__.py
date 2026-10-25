@@ -12,8 +12,7 @@ OCCT's own; a file no document (a mesh file, a robot) from the buffers its reade
   look, which ``occt.py`` draws by and ``serve.py`` serves to the viewer (``GET /api/look``);
   ``text.py`` and ``overlay.py`` the annotation's words and Measure's marks, as the page draws them.
 - ``explode.py``: the viewer's Explode, ported (held to the viewer by one golden).
-- ``shapes.py``: a part's buffer as triangulation-only faces and polygon edges, in one kernel read;
-  ``attach.py`` the alternative measured against it.
+- ``shapes.py``: a part's buffer as triangulation-only faces and polygon edges, in one kernel read.
 - ``context.py``: the headless OpenGL context, per platform.
-- ``meshes.py``, ``compare.py``: the prototype's harness (buffers from a server, side-by-side sheets).
+- ``meshes.py``: where the prototype's CLI and the parity bench get the engine's buffers.
 """

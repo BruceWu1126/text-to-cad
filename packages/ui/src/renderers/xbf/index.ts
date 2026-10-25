@@ -18,9 +18,6 @@ export interface XbfRendererOptions {
 export interface PreparedXbfDocument extends PreparedWorkspaceEntry {
   services: Omit<XbfRendererOptions, 'client'> & { preferences: CadPreferenceSource };
 }
-
-/** A cadgen engine document: B-rep parts placed by instances, every face, edge and vertex named. */
-export const XBF_FILE = /\.xbf$/i;
 /** What the cadgen engine reads and serves as a document: its own, and a STEP. */
 export const ENGINE_DOCUMENT_FILE = /\.(?:xbf|step|stp)$/i;
 

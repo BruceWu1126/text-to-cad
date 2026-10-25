@@ -1416,14 +1416,6 @@ class Loaded:
             found["animations"] = animated
         return found
 
-    def root_label(self) -> Any:
-        from OCP.TDF import TDF_LabelSequence
-        from OCP.XCAFDoc import XCAFDoc_DocumentTool
-
-        free = TDF_LabelSequence()
-        XCAFDoc_DocumentTool.ShapeTool_s(self.doc.Main()).GetFreeShapes(free)
-        return free
-
 
 def saved(path: Path) -> "Tree | None":
     """The tree this process last saved at ``path`` (``save``), or None."""

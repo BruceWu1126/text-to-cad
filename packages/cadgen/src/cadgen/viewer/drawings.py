@@ -110,11 +110,6 @@ class DrawingRenders:
         self._renders: dict[str, _Render] = {}
         self._held: OrderedDict[str, _Render] = OrderedDict()
 
-    def any_in_flight(self) -> bool:
-        """Whether a render is running: work a development restart would throw away."""
-        with self._lock:
-            return bool(self._renders)
-
     def response(self, file_ref) -> tuple[int, bytes | dict]:
         """``(status, body)``: the payload's bytes at 200, 202 while it renders, or a JSON error dict."""
         candidate = resolve_drawing_path(file_ref)

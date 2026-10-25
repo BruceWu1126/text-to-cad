@@ -26,16 +26,17 @@ where those files ship, so these scripts are what produces them.
   metadata (which IS committed) rather than writing it. `--clean` removes the
   `_runtime` tree first. Called by `test.yml`, `release-publish.yml`,
   `check-builds.sh`, the pre-commit hook.
-- `cadgen-runtime.sh` — builds the three runtime stages: `--browser` (the
-  headless browser bundle of the viewer's scene), `--viewer` (vite build of
-  `apps/web`), `--mcp` (vite build of `apps/mcp`, one `index.html`).
-  `--print-outputs` lists the directory a bundle always produces; `--check` skips
-  the viewer and MCP stages, which need the apps' `node_modules` and which nothing
-  in a checkout reads. Called by `bundle.sh`, `check-builds.sh` and
-  `test/test-installed.sh`; pinned by `test_js_runtime_reproducibility.py`. Call
-  it directly only to debug one stage.
-- `lib/snapshot_runtime.sh` — sourced by `cadgen-runtime.sh`; esbuilds the browser
-  bundle with `three`/`meshoptimizer` pinned from `package-lock.json`.
+- `cadgen-runtime.sh` — builds the two runtime stages: `--viewer` (vite build of
+  `apps/web`) and `--mcp` (vite build of `apps/mcp`, one `index.html`).
+  `--print-outputs` lists the directories a bundle always produces; `--check`
+  builds both and asserts each stage's `index.html` and the `THIRD_PARTY_LICENSES.txt` its
+  build writes (`@text-to-cad/core/third-party-licenses`). Called by `bundle.sh` and
+  `check-builds.sh`; pinned by `test_js_runtime_reproducibility.py`. Call it
+  directly only to debug one stage.
+- `lib/snapshot_runtime.sh [OUT_DIR]` — the OCCT parity bench's snapshot page,
+  never part of the wheel: esbuilds `@text-to-cad/core`'s headless render entry
+  with `three`/`meshoptimizer` pinned from `package-lock.json` into the ignored
+  `tmp/bench/snapshot-page` (or `OUT_DIR`). Run by `bench/occt_parity.py`.
 
 `test/` — test runners.
 
@@ -118,8 +119,8 @@ where those files ship, so these scripts are what produces them.
   lockfile and `pyproject.toml` metadata, the cadgen pins and the skills' `cadgen +VERSION`) from
   `VERSION`. Called by `bump-version.sh`, `bundle.sh`, `test.yml` (Version Check), `release-publish.yml`.
 - `check-wheel-contents.sh` — builds the wheel and asserts the Python modules,
-  the engine's page, environment image and README, and `_runtime/{browser,viewer,mcp}`
-  are inside it, the runtime with bytes identical to the bundled source, and that
+  the engine's page, environment image and README, and `_runtime/{viewer,mcp}` with each
+  one's third-party notice are inside it, the runtime with bytes identical to the bundled source, and that
   no engine test golden is. The only gate on package data, which fails quietly. Called by
   `test.yml` and `release-publish.yml`.
 - `plugin_zip.py --out PATH | --check` — builds the plugin ZIP OpenAI's plugin
@@ -190,7 +191,7 @@ where those files ship, so these scripts are what produces them.
 `git-hooks/pre-commit` — the body `.githooks/pre-commit` runs: `bundle.sh --check`
 when staged paths touch `packages`, `apps`, `skills` or `scripts/bundle`. It is
 kept now that nothing is committed, because the question it asks is still worth
-asking locally and is cheap once `tmp/`'s pinned esbuild toolchain exists: does
+asking locally and costs seconds (the shared packages, then two vite builds): does
 this edit still BUILD? It no longer has anything to say about the index.
 
 `build/library.mjs` — the esbuild library build `packages/core` and

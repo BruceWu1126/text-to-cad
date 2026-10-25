@@ -125,8 +125,8 @@ dev install's server and skills at it (see [Test In Agent Apps](#test-in-agent-a
 
 `packages/cadgen/src/cadgen/_runtime/` is BUILT, not committed — the whole
 directory is gitignored, and the wheel is the only place those files ship. A
-fresh clone therefore has no Viewer client, CAD app page or headless browser
-bundle until `scripts/bundle/bundle.sh` runs, and cadgen says so by name the
+fresh clone therefore has no Viewer client or CAD app page until
+`scripts/bundle/bundle.sh` runs, and cadgen says so by name the
 first time it reaches for one. Building a model needs none of it.
 
 For CAD Viewer development:
@@ -504,8 +504,7 @@ imports remain inside its directory.
 - Editing anything the bundlers consume? Run `scripts/bundle/bundle.sh` and
   there is nothing to commit: all of `_runtime/` is gitignored, so a JS edit
   shows up in the diff as the shared package source it was made in and reaches a user
-  as the wheel the release builds. A rebundle used to add ~1.3 MB of
-  `snapshot-render.js` to every commit that touched the renderer.
+  as the wheel the release builds.
 - `VERSION` at the repo root is canonical; release tooling stamps every
   duplicate. Never hand-edit versions under `packages/`.
 
@@ -565,7 +564,7 @@ without opening a browser. Each launch's folder becomes the folder the home show
 An explicit `--host` or `--port` pins the engine listener; a conflict with an
 already-running engine fails. There is no fixed default port or viewer process.
 A checkout serves its local web build; `CADGEN_VIEWER_DIST` and
-`CADGEN_BROWSER_RUNTIME_DIR` are explicit asset overrides. A wheel resolves its
+`CADGEN_MCP_APP_DIR` are explicit asset overrides. A wheel resolves its
 bundled assets without the repository. Run `scripts/bundle/bundle.sh` after
 editing build inputs to refresh all packaged outputs.
 
@@ -609,8 +608,9 @@ scripts/bundle/bundle.sh --check
 ```
 
 `--clean` removes old runtime outputs before building. `--check` builds and
-asserts the required browser outputs; wheel validation checks
-the complete packaged viewer too. Per-stage `cadgen-runtime.sh` flags are for
+asserts the required outputs (the Viewer client's and the CAD app's
+`index.html`, and the `THIRD_PARTY_LICENSES.txt` each build writes beside its page of the
+packages it inlines); wheel validation checks the complete packaged runtime too. Per-stage `cadgen-runtime.sh` flags are for
 debugging; normal iteration goes through `bundle.sh`.
 
 ## Branch Layout
@@ -655,8 +655,8 @@ the jobs each change can break ([CI](#ci)); a push whose tree its pull request
 already tested runs nothing again, and the `packaging` job builds the runtime
 from clean with `scripts/bundle/bundle.sh --clean` and checks the layout and the
 wheel. `main` commits no generated runtime at all —
-cadgen's snapshot bundle and the Viewer client are built from `packages/core`,
-`packages/ui` and `apps/web` on demand, and ship only inside the wheel. What IS
+the Viewer client and the CAD app page are built from `packages/core`,
+`packages/ui`, `apps/web` and `apps/mcp` on demand, and ship only inside the wheel. What IS
 committed and therefore checked for freshness is the version
 metadata derived from `VERSION`, asserted by the separate `Version Check` job
 (`scripts/release/check-version.sh` and `sync-version.mjs --check`).
@@ -674,9 +674,9 @@ wrong.
 
 ### Build artifacts live in the wheel, never in git
 
-`main` is source. Everything cadgen serves that is not Python — the headless
-browser bundle under `cadgen/_runtime/browser`, the CAD Viewer client under
-`_runtime/viewer` and the CAD app page under `_runtime/mcp` — is gitignored and
+`main` is source. Everything cadgen serves that is not Python — the CAD Viewer
+client under `cadgen/_runtime/viewer` and the CAD app page under `_runtime/mcp`
+— is gitignored and
 produced by `scripts/bundle/bundle.sh`. Nothing built is ever
 committed: a rebundle used to add a megabyte of history per commit, and a
 committed bundle can drift from the source that claims to produce it.
@@ -782,13 +782,12 @@ green: that is the release. `Publish Release`, on the merge commit:
    (`cad-openai-plugin-<version>`). `scripts/release/plugin_branch.py --check`
    does the same for both copies of the plugin the install branches get. Then
    `bundle.sh --clean` — which is where cadgen's whole runtime comes into
-   existence, snapshot bundle and Viewer client alike, because the release
+   existence, Viewer client and CAD app alike, because the release
    commit carries none of it; its `TEXT_TO_CAD_RELEASE` names the version, so
    the Viewer and the CAD app show `v<VERSION>` where every other build shows
    `v<VERSION>-dev.<commit>` (`@text-to-cad/ui/build-id`) — `check-builds.sh`,
    the wheel-contents check, `python -m build`, and an `unzip -l` assertion that
-   the wheel about to ship really holds `_runtime/browser`, `_runtime/viewer`
-   and `_runtime/mcp`. The pages' source maps, which the bundle
+   the wheel about to ship really holds `_runtime/viewer` and `_runtime/mcp`. The pages' source maps, which the bundle
    builds and the wheel leaves out, are gathered too
    (`scripts/release/sourcemaps.py`): every chunk a crash on the CAD Viewer or
    the CAD app can name, by the debug id its build stamped on it, with its map

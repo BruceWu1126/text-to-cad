@@ -7,6 +7,7 @@ import react from "@vitejs/plugin-react";
 import { buildId } from "@text-to-cad/ui/build-id";
 import { stampDebugId } from "@text-to-cad/core/chunk-ids";
 import { packageSourceMaps } from "@text-to-cad/core/source-maps";
+import { thirdPartyLicenses } from "@text-to-cad/core/third-party-licenses";
 
 import { resolveDirectoryRoot as resolveViewerDirectoryRoot } from "./scripts/directoryRoot.mjs";
 import { resolveServerFsAllow } from "./scripts/serverFsAllow.mjs";
@@ -187,6 +188,10 @@ function chunkIdsPlugin() {
   };
 }
 
+// The third-party notice beside index.html, of every package the client and its workers inline:
+// it ships with the client (@text-to-cad/core/third-party-licenses).
+const licenses = thirdPartyLicenses();
+
 export default defineConfig(async ({ command }) => (refuseClientTokens(), {
   root: viewerAppRoot,
   base: "./",
@@ -199,6 +204,7 @@ export default defineConfig(async ({ command }) => (refuseClientTokens(), {
     serverLifetimePlugin(),
     packageSourceMaps(["@text-to-cad/core", "@text-to-cad/ui"]),
     chunkIdsPlugin(),
+    licenses.plugin(),
   ],
   resolve: { alias: { "@": viewerClientRoot }, dedupe: ["react", "react-dom", "three", "lucide-react"] },
   build: {
@@ -214,6 +220,7 @@ export default defineConfig(async ({ command }) => (refuseClientTokens(), {
   },
   worker: {
     format: "es",
+    plugins: licenses.worker,
   },
   server: {
     host: "127.0.0.1",

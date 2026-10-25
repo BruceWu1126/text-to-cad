@@ -192,10 +192,6 @@ function configureRenderer(width, height, job, context) {
   });
 }
 
-function shouldBurnInViewLabels(job = {}) {
-  return sharedShouldBurnInViewLabels(job);
-}
-
 function rendererDataUrlWithOptionalLabel(renderer, label, job, size) {
   return sharedRendererDataUrlWithOptionalLabel(renderer, label, job, size);
 }
@@ -1035,22 +1031,4 @@ export async function captureModel(viewport, captureOptions = {}) {
     },
     warnings
   };
-}
-
-export async function renderMeshJob(meshData, job = {}) {
-  const context = renderJobContext(meshData, job);
-  const model = buildModel(THREE, meshData, modelOptionsForRenderJob(context, job));
-  if (context.mode === "list") {
-    try {
-      return await captureModel({ model, context }, { job });
-    } finally {
-      model.dispose();
-    }
-  }
-  const viewport = renderModel(THREE, model, { job, context });
-  try {
-    return await captureModel(viewport, { job });
-  } finally {
-    viewport.dispose();
-  }
 }

@@ -43,9 +43,7 @@ file it registers by the id of its canonical path, or a document id the engine h
 home, `/`. `--json` prints the launch record without opening a browser. An explicit host or port
 must match a running engine. There is one page per engine and no page session: each launch's
 folder becomes the folder the home shows, replacing the last. Always use the printed URL,
-including its token query; the browser exchanges the token for a same-site HTTP-only cookie. An
-old page session's link (`/s/...`) and a document named by query (`/?doc=`, `/?file=`) answer
-with the home.
+including its token query; the browser exchanges the token for a same-site HTTP-only cookie.
 
 `cadgen stop` stops the installation's whole engine, including its workers and
 MCP sessions. Closing a page, a Vite process or a host's stdio shim does not stop it.

@@ -3,13 +3,12 @@ set -euo pipefail
 
 # Assert the cadgen wheel actually contains its runtime assets.
 #
-# cadgen ships JavaScript it serves (the CAD Viewer's built client, the CAD app page,
-# the headless browser bundle of the viewer's scene) and non-Python data its server reads
-# (collation.json).
+# cadgen ships JavaScript it serves (the CAD Viewer's built client, the CAD app page) and
+# non-Python data its server reads (collation.json).
 # Those arrive through `[tool.setuptools.package-data]`, which is exactly the kind of
 # declaration that fails QUIETLY: a glob that does not match nested files produces a
-# wheel that imports fine, passes every Python test, and then cannot render a snapshot
-# -- or serve a Viewer -- on a user's machine. The repo has already been bitten by the
+# wheel that imports fine, passes every Python test, and then cannot serve a Viewer or
+# the CAD app on a user's machine. The repo has already been bitten by the
 # same shape of bug in JS bundling (an entry tree-shaken to a 20-byte shebang, exit
 # code 0).
 #
@@ -75,14 +74,15 @@ REQUIRED=(
   "cadgen/engine/page/index.html"
   "cadgen/engine/page/viewer.js"
   "cadgen/engine/render/studio.hdr"
-  "cadgen/_runtime/browser/snapshot-render.js"
-  "cadgen/_runtime/browser/render.html"
   "cadgen/_runtime/viewer/index.html"
+  # Each page's third-party notice, written by its build: the wheel redistributes what they inline.
+  "cadgen/_runtime/viewer/THIRD_PARTY_LICENSES.txt"
   # CAD in an agent host: the server `cadgen mcp` runs and the one page it serves.
   "cadgen/cli/mcp.py"
   "cadgen/mcp/server.py"
   "cadgen/mcp/tunnel.py"
   "cadgen/_runtime/mcp/index.html"
+  "cadgen/_runtime/mcp/THIRD_PARTY_LICENSES.txt"
 )
 
 echo "Building cadgen wheel for content check..."

@@ -170,8 +170,8 @@ def make_handler_class(app):
         def _drain_body(self) -> None:
             """Discard an unread body so the NEXT request on this connection parses.
 
-            ``POST /__cad/artifact`` never reads its body — every parameter
-            rides the query string, so a body sent with it goes unread.
+            A route whose parameters ride the query string never reads its
+            body, so a body sent with it goes unread.
             Node discards them harmlessly; an HTTP/1.1 handler that leaves
             content-length bytes in the buffer mis-parses the next request, and
             the symptom is intermittent garbage under the client's parallel

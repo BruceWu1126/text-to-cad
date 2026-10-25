@@ -20,10 +20,6 @@ class RenderAssetSourceScopeError extends Error {
   }
 }
 
-export function isRenderAssetSourceScopeError(error) {
-  return String(error?.name || "") === "RenderAssetSourceScopeError";
-}
-
 function normalizeScope(scope) {
   return typeof scope === "string" ? scope.trim() : "";
 }
