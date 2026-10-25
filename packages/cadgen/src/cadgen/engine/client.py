@@ -218,11 +218,13 @@ def wait_gone(timeout: float = 60.0, endpoint: _daemon.Endpoint | None = None) -
     return False
 
 
-def hold(*, start: bool = True, host: Callable[[], str | None] | None = None) -> Connection | None:
+def hold(*, start: bool = True, host: Callable[[], str | None] | None = None,
+         holder: str | None = None) -> Connection | None:
     """A hold on the engine (``Daemon.hold``), started when ``start`` and none runs: while the
     connection returned stays open, the engine does not stop for idleness. Reading it waits until
     the engine goes (its end of file). None when none runs and ``start`` is false. ``host()``, asked
-    once the engine answers, names the agent host the holder serves (its ``status`` counts it)."""
+    once the engine answers, names the agent host the holder serves (its ``status`` counts it);
+    ``holder``, the name its MCP sessions are opened under, which end when the hold does."""
     connection = connect(start=start)
     if connection is None:
         return None
@@ -231,6 +233,8 @@ def hold(*, start: bool = True, host: Callable[[], str | None] | None = None) ->
         named = host() if host is not None else None
         if named:
             message["host"] = named
+        if holder:
+            message["holder"] = holder
         if _daemon.WINDOWS:
             message = {"token": _daemon.port_path().read_text(encoding="utf-8").split()[1], **message}
         connection.writer.write((json.dumps(message) + "\n").encode())

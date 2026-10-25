@@ -1688,13 +1688,17 @@ class Daemon:
         return Worker(STANDBY, environment, self.patched, self.settled, cwd=os.getcwd(), on_progress=self.progressed,
                       on_saved=self.models.cache.saved, standby=True)
 
-    def hold(self, reader: Any, send: Callable[[dict[str, Any]], None], host: Any = None) -> None:
-        """A hold on the engine (``{"op": "hold", "host": ...}``): answered, then kept until its client
-        goes (its end of file). While any is kept, another installation's engine that wants the port
-        never retires this one: it rolls past it, or refuses a port it was named (``bind``). ``host``,
-        the agent host the holder serves (its MCP server says it), is counted in ``status``
-        (``hosts``): the ``cadgen`` command in that host's shell runs this installation."""
+    def hold(self, reader: Any, send: Callable[[dict[str, Any]], None], host: Any = None, holder: Any = None) -> None:
+        """A hold on the engine (``{"op": "hold", "host": ..., "holder": ...}``): answered, then kept until
+        its client goes (its end of file). While any is kept, another installation's engine that wants
+        the port never retires this one: it rolls past it, or refuses a port it was named (``bind``).
+        ``host``, the agent host the holder serves (its MCP server says it), is counted in ``status``
+        (``hosts``): the ``cadgen`` command in that host's shell runs this installation. ``holder``, the
+        name an MCP server holds with and opens its sessions under: once its client is gone -- a
+        server that exits, or one killed before it could say goodbye -- those sessions end
+        (``serve.Server.on_hold_end``)."""
         host = host if isinstance(host, str) and 0 < len(host) <= 64 else None
+        holder = holder if isinstance(holder, str) and 0 < len(holder) <= 64 else None
         with self.busy_lock:
             self.holders += 1
             if host:
@@ -1710,6 +1714,12 @@ class Daemon:
                     self.hosts[host] -= 1
                     if not self.hosts[host]:
                         del self.hosts[host]
+            server = self.server
+            if holder and server is not None:
+                try:
+                    server.on_hold_end(holder)
+                except Exception:  # noqa: BLE001 - what the sessions could not end, their idle hour ends
+                    pass
             self.touch()
 
     def connected(self, worker: Worker) -> bool:
@@ -2422,7 +2432,7 @@ def _serve(daemon: Daemon, reader: Any, writer: Any, prefix: bytes = b"") -> Non
             writer.flush()
 
     if request.get("op") == "hold":
-        daemon.hold(reader, send, request.get("host"))
+        daemon.hold(reader, send, request.get("host"), request.get("holder"))
         return
     try:
         daemon.handle(request, send)

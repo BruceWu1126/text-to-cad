@@ -195,6 +195,13 @@ class EngineApp:
             self._mcp.close()
         self.analytics.close()
 
+    def hold_ended(self, holder):
+        """An MCP server's hold on the engine gone (``Daemon.hold``): the sessions it opened end."""
+        with self.lock:
+            mcp = self._mcp
+        if mcp is not None:
+            mcp.release(holder)
+
     def endpoint(self):
         return {'ok': True, 'url': self.server.url, 'port': self.server.port, 'token': self.token}
 

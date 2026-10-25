@@ -434,7 +434,10 @@ for the removed telemetry tool. Sidebar views alone are shared through
 an in-memory registry; thread views remain session-local. The host's stdio process
 proxies JSON-RPC and owns no page, tool implementation, catalog or view state.
 Active HTTP calls keep the daemon alive; quiet MCP sessions expire after an hour. The host's
-stdio process holds the engine from its start while the host runs (**The door**).
+stdio process holds the engine from its start while the host runs (**The door**), under a name it
+opens its sessions with: it ends them itself at its input's end and on SIGTERM, and when its hold's
+connection drops -- the process gone, killed before it could say so -- the engine ends every session
+opened under that name, or once its running operations finish (`Sessions.release`).
 A card's `cad_sync` renews its served document's warm-worker lease.
 
 The viewer launcher owns no server, reload watcher or process-reuse probe. It

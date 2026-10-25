@@ -11,6 +11,8 @@ import copy
 import json
 import logging
 import os
+import secrets
+import signal
 import sys
 import threading
 
@@ -21,10 +23,11 @@ from .protocol import Connection, RequestContext, RpcError, claim_stdin, claim_s
 LOG = logging.getLogger('cadgen.mcp')
 
 
-def initialize_params(params, launcher=None):
+def initialize_params(params, launcher=None, holder=None):
     """The host's initialize as the engine is sent it: with what the person said of the host
-    (``CADGEN_MCP_PRESENTATION``) as a declaration, and ``launcher``, the host that started this
-    process (``host.launcher``), for the server to weigh (``host.presentation``)."""
+    (``CADGEN_MCP_PRESENTATION``) as a declaration, ``launcher``, the host that started this
+    process (``host.launcher``), for the server to weigh (``host.presentation``), and ``holder``,
+    the name of this process's hold (``Holder``), whose end ends the session."""
     params = copy.deepcopy(params)
     offered = params.setdefault('capabilities', {})
     extensions = offered.setdefault('extensions', {})
@@ -37,6 +40,7 @@ def initialize_params(params, launcher=None):
         launcher = {'host': 'CADGEN_MCP_PRESENTATION=text', 'renders': False}
     params.setdefault('_meta', {})['dev.texttocad/transport'] = {
         'appDir': os.environ.get('CADGEN_MCP_APP_DIR', ''), 'cwd': os.getcwd(), 'launcher': launcher,
+        **({'holder': holder} if holder else {}),
     }
     return params
 
@@ -50,6 +54,9 @@ class Holder:
 
     def __init__(self, host=lambda: None):
         self.host = host  # the host this server serves, said with the hold (``host.family``)
+        # The name this process holds with and opens its sessions under: when the hold's connection
+        # drops -- this process gone, however it went -- the engine ends them (``Daemon.hold``).
+        self.ident = secrets.token_urlsafe(18)
         self.wanted = threading.Event()
         self.tried = threading.Event()  # the first hold taken, or failed
         self.holding = False
@@ -69,7 +76,7 @@ class Holder:
             self.wanted.wait()
             self.wanted.clear()
             try:
-                connection = hold(host=self.host)
+                connection = hold(host=self.host, holder=self.ident)
             except Exception as error:  # noqa: BLE001 - held again at the next request; the thread lives
                 LOG.info('could not hold the engine: %s', error)
                 self.tried.set()
@@ -177,7 +184,7 @@ class Proxy:
 
     def handle(self, method, params, context: RequestContext):
         if method == 'initialize':
-            params = initialize_params(params, self.launcher())
+            params = initialize_params(params, self.launcher(), self.holder.ident if self.holder is not None else None)
             result, _session = self._open(context.request_id, params)
             with self.lock:
                 self.initialize = params
@@ -200,6 +207,10 @@ class Proxy:
                 self.client.call('DELETE', '/mcp', headers={'Mcp-Session-Id': ident}, start=False)
             except OSError:
                 pass
+
+
+def _leave(number, _frame):
+    raise SystemExit(128 + number)
 
 
 def start():
@@ -235,6 +246,11 @@ def serve(argv=None):
 
     proxy = Proxy(holder=holder, launcher=launched)
     connection = Connection(requests, output, proxy.handle, workers=64, notification=proxy.notify)
+    # A host that ends this server with a signal rather than by closing its input (or both, at
+    # once): it leaves as at the input's end, its session ended (``proxy.close``) before it exits.
+    for name in ('SIGTERM', 'SIGHUP'):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), _leave)
     try:
         connection.serve()
     finally:
