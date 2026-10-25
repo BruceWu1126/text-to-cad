@@ -3,8 +3,6 @@ export const REFERENCE_SELECTED_COLOR = "#4f9dff";
 export const REFERENCE_CORNER_COLOR = "#2563eb";
 export const REFERENCE_HIGHLIGHT_WIDTH_MULTIPLIER = 3;
 export const REFERENCE_HOVER_HIGHLIGHT_WIDTH_MULTIPLIER = REFERENCE_HIGHLIGHT_WIDTH_MULTIPLIER;
-export const REFERENCE_HOVER_FILL_OPACITY = 0.3;
-export const REFERENCE_SELECTED_FILL_OPACITY = 0.24;
 
 function isPlanarFaceReference(reference) {
   const surfaceType = String(reference?.pickData?.surfaceType || reference?.pickData?.surface?.type || "")

@@ -1493,13 +1493,6 @@ export const RENDER_ONLY_THEME_PRESETS = Object.freeze([SNAPSHOT_THEME_PRESET]);
 
 export const DEFAULT_THEME_PRESET_ID = "workbench-light";
 
-// The two ids that are not presets. "system" follows prefers-color-scheme;
-// "custom" is the single slot holding whatever the user has edited. Everything
-// else is a built-in preset, and presets are read-only.
-export const SYSTEM_THEME_ID = "system";
-export const CUSTOM_THEME_ID = "custom";
-export const DEFAULT_THEME_ID = SYSTEM_THEME_ID;
-
 export const DEFAULT_THEME_PRESET = Object.freeze(
   THEME_PRESETS.find((preset) => preset.id === DEFAULT_THEME_PRESET_ID) || THEME_PRESETS[0]
 );
@@ -1508,29 +1501,6 @@ export const DEFAULT_THEME_SETTINGS = Object.freeze(DEFAULT_THEME_PRESET.setting
 
 export function resolveSystemThemePresetId({ prefersDark = false } = {}) {
   return prefersDark === true ? "workbench-dark" : "workbench-light";
-}
-
-// The id the UI shows as selected, and the only ids that may be stored.
-export function normalizeThemeId(themeId) {
-  const normalized = String(themeId || "").trim();
-  if (normalized === SYSTEM_THEME_ID || normalized === CUSTOM_THEME_ID) {
-    return normalized;
-  }
-  return normalizeThemePresetId(normalized);
-}
-
-// Resolve an active theme id to the settings it renders with. "custom" uses the
-// stored custom settings; "system" and presets resolve to preset settings, which
-// is why selecting a preset is all it takes to reset a customized theme.
-export function resolveThemeSettingsForId(themeId, { custom = null, prefersDark = false } = {}) {
-  const normalizedThemeId = normalizeThemeId(themeId) || DEFAULT_THEME_ID;
-  if (normalizedThemeId === CUSTOM_THEME_ID && custom) {
-    return normalizeThemeSettings(custom);
-  }
-  const presetId = normalizedThemeId === CUSTOM_THEME_ID || normalizedThemeId === SYSTEM_THEME_ID
-    ? resolveSystemThemePresetId({ prefersDark })
-    : normalizedThemeId;
-  return cloneThemePresetSettings(presetId);
 }
 
 const PRESET_ID_SET = new Set(ENVIRONMENT_PRESETS.map((preset) => preset.id));
@@ -1856,8 +1826,4 @@ export function resolveThemeSettingsForColorMode(themeSettings = {}, options = {
 export function themeSettingsSupportsSystemColorMode(themeSettings = {}) {
   const normalized = normalizeThemeSettings(themeSettings);
   return normalized.colorMode === THEME_COLOR_MODES.SYSTEM;
-}
-
-export function getEnvironmentPresetById(presetId) {
-  return ENVIRONMENT_PRESETS.find((preset) => preset.id === presetId) || ENVIRONMENT_PRESETS[0];
 }
