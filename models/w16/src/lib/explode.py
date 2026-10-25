@@ -91,14 +91,21 @@ class _Moves:
         self.systems = K.systems_of(engine)
         self.leaves = {part.label: part for part in _leaves(engine)}
         self.sets = explode_sets(self.systems)
+        self._paths: dict[int, str] = {}
 
     def path(self, node) -> str:
-        steps = []
-        while node.parent is not None:
-            siblings = [child for child in node.parent.children if child.label == node.label]
-            steps.append(node.label if len(siblings) == 1 else f"{node.label}.{siblings.index(node) + 1}")
-            node = node.parent
-        return "/".join([self.root, *reversed(steps)])
+        """A node's occurrence path, worked out once a node: the clips ask it of the same
+        parts at every key."""
+        found = self._paths.get(id(node))
+        if found is None:
+            steps = []
+            walked = node
+            while walked.parent is not None:
+                siblings = [child for child in walked.parent.children if child.label == walked.label]
+                steps.append(walked.label if len(siblings) == 1 else f"{walked.label}.{siblings.index(walked) + 1}")
+                walked = walked.parent
+            found = self._paths[id(node)] = "/".join([self.root, *reversed(steps)])
+        return found
 
     def system(self, name: str) -> str:
         return f"{self.root}/{name}"
@@ -225,12 +232,22 @@ def _times(duration: float, step: float) -> list[float]:
     return [duration * i / count for i in range(count + 1)]
 
 
-def _clip(engine, name: str, duration: float, turbo_tags, moves_at) -> object:
+def _pose(theta: float, turbo_tags, poses: dict) -> dict[str, float]:
+    """The crank cycle's pose at ``theta``, solved once per angle: both clips pose it at the
+    same angles (every 2.4 deg from 0), the explode's two cycles the running cutaway's first two."""
+    found = poses.get(theta)
+    if found is None:
+        found = poses[theta] = K.pose(theta, turbo_tags)
+    return found
+
+
+def _clip(engine, name: str, duration: float, turbo_tags, moves_at, poses: dict) -> object:
     """The GLB animation ``name``: the crank cycle posed every ``_POSE_STEP``, and each
     reference's translation, the sum of every move that names it, sampled every
     ``_KEY_STEP`` as LINEAR keys (a key whose neighbours hold its value dropped)."""
     show = animation(engine, name, duration=duration)
-    show.pose(at={t: K.pose(_theta(t), turbo_tags) for t in _times(duration, _POSE_STEP)}, interpolation="LINEAR")
+    show.pose(at={t: _pose(_theta(t), turbo_tags, poses) for t in _times(duration, _POSE_STEP)},
+              interpolation="LINEAR")
     times = _times(duration, _KEY_STEP)
     offsets: dict[str, list[tuple[float, float, float]]] = {}
     for at, t in enumerate(times):
@@ -247,22 +264,22 @@ def _clip(engine, name: str, duration: float, turbo_tags, moves_at) -> object:
     return show
 
 
-def explode_animation(engine, turbo_tags) -> None:
+def explode_animation(engine, turbo_tags, poses: dict) -> None:
     """`explode`: the staged explode over EXPLODE_SECONDS with the crank cycle running
-    throughout (two cycles)."""
+    throughout (two cycles). ``poses``: the crank's poses by angle, shared by both clips."""
     moves = _Moves(engine)
     _clip(engine, "explode", EXPLODE_SECONDS, turbo_tags,
-          lambda t: explode_moves(moves, min(1.0, max(0.0, t / EXPLODE_SECONDS))))
+          lambda t: explode_moves(moves, min(1.0, max(0.0, t / EXPLODE_SECONDS))), poses)
 
 
-def running_reveal_animation(engine, turbo_tags) -> None:
+def running_reveal_animation(engine, turbo_tags, poses: dict) -> None:
     """`running_reveal`: the cutaway off, held and back on over REVEAL_SECONDS while the crank
     cycle runs (four cycles); the crankcase casting and its face skins hidden while the old
     clip had them faded past half (0.5 < its fade's stage, from p = 0.65 out to p = 0.65
     back)."""
     moves = _Moves(engine)
     show = _clip(engine, "running_reveal", REVEAL_SECONDS, turbo_tags,
-                 lambda t: reveal_moves(moves, reveal_progress(t)))
+                 lambda t: reveal_moves(moves, reveal_progress(t)), poses)
     ghost = moves.parts(*sorted(label for label in moves.leaves
                                 if moves.leaves[label].parent is moves.systems["block"]
                                 and (label == "block" or label.startswith("block_face"))))
