@@ -155,6 +155,14 @@ class EnginePortTest(unittest.TestCase):
             self.assertIn(f" (pid {os.getpid()}): ", said)
         self.answering()
 
+    def test_cadgen_server_on_a_held_port_fails_at_once_and_leaves_no_engine(self) -> None:
+        port = held_port(self)
+        done = self.cli("server", "--port", str(port))  # no request is ever sent: it binds at its start
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertRegex(done.stderr.strip().splitlines()[-1],
+                         rf"^cadgen: port {port} is held by .+: stop it, or pass another --port$")
+        self.answering()
+
     def test_an_unused_engine_of_another_installation_is_retired_and_its_port_taken(self) -> None:
         _python, theirs, _door = self.other()
         ours = self.launch(CADGEN_ENGINE_PORT=str(theirs["port"]))

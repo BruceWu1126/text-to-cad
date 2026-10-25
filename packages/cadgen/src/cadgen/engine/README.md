@@ -331,8 +331,11 @@ installation identity and therefore a different engine.
 engine's (`daemon.bind`). The listener takes one port, never another: `--port` (`cadgen server
 --port`, or a `serve`/`viewer` request's), else `CADGEN_ENGINE_PORT` (0: any free port), read from
 the engine's own environment, else 3245 (`daemon.DEFAULT_PORT`, 0xCAD). When another process holds
-it, the engine does not start: the request that started it fails with one line naming the holder,
-and the engine leaves its note (`daemon.failure_path`) and exits 1 (`daemon.PortHeld`):
+it, the engine does not start, and says so in one line naming the holder (`daemon.PortHeld`).
+`cadgen server` binds at its start, so the command fails at once with that line on stderr and exits
+1, no engine left. An engine a client starts binds on the first request that serves (that request
+may name its own port: `cadgen viewer --port`), which fails with the line; the engine leaves its
+note (`daemon.failure_path`) and exits 1:
 
 - another program: `port 3245 is held by <name> (pid N): stop it, or start cadgen with
   CADGEN_ENGINE_PORT=<n>`, its name and pid as the system says them (`daemon.port_holder`: `lsof` on

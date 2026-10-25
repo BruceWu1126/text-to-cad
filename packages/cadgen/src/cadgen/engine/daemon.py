@@ -1918,9 +1918,13 @@ def _identity(path: Path) -> tuple[int, int] | None:
     return found.st_dev, found.st_ino
 
 
-def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool = False) -> int:
+def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool = False,
+         foreground: bool = False) -> int:
     """Run the engine here. ``port``: the HTTP port it must take (``cadgen server --port``);
-    ``rotate``: a new page token first (``--rotate-token``), refused while another engine runs."""
+    ``rotate``: a new page token first (``--rotate-token``), refused while another engine runs;
+    ``foreground`` (``cadgen server``): its HTTP server bound before anything else, so a port
+    another process holds fails the command at once (``bind``). An engine a client starts binds
+    on the first request that serves, which may name its own port (``cadgen viewer --port``)."""
     bytecode(os.environ)  # its own (``client._start`` set it), or made here: a daemon run in the foreground
     sys.pycache_prefix = os.environ.get("PYTHONPYCACHEPREFIX") or None
     sys.dont_write_bytecode = sys.pycache_prefix is None
@@ -1955,6 +1959,17 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
         held.close()
         return 1
     daemon = Daemon(port=port)
+    if foreground:
+        try:
+            daemon.serve({})
+        except ValueError as error:  # a port held (``PortHeld``, noted by ``serve``) or refused
+            if not isinstance(error, PortHeld):
+                _note(str(error))
+            daemon.shutdown()
+            if listener is not None:
+                listener.close()
+            held.close()
+            return 1
     if not WINDOWS:
         import signal
 
