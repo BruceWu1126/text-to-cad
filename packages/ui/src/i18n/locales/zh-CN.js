@@ -64,8 +64,6 @@ export default {
   "consent.shareUsageEnvironment": "遥测（由你的环境设置）",
   "consent.telemetryInfo": "匿名使用数据和崩溃报告，用于改进 text-to-cad。你的提示词、模型和文件绝不会被发送。",
 
-  "appearance.label": "外观",
-  "appearance.current": "外观：{scheme}",
   "appearance.system": "跟随系统",
   "appearance.light": "浅色",
   "appearance.dark": "深色",
