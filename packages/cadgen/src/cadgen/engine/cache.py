@@ -1,7 +1,7 @@
 """The engine's document cache: each model document it held, kept in the cache folder until a person
 deletes it, so a restart opens every project at once -- with the code still the only source of truth.
 
-For every ``pointer`` and ``shape`` model document (never a file's document: that is its own file),
+For every ``model`` and ``shape`` document (never a file's document: that is its own file),
 the engine keeps ``<cache>/documents/<id>/document.xbf`` -- ``<cache>`` the platform's cache folder
 the distribution names (``Registry.cache``: ``CADGEN_CACHE_DIR``, else ``$XDG_CACHE_HOME/cadgen`` or
 ``%LOCALAPPDATA%\\cadgen``, else ``~/.cache/cadgen``), the record staying in the state folder
@@ -233,7 +233,8 @@ class Cache:
         held = self.registry()
         record = held.get(ident) if held is not None else None
         meta = (record or {}).get("cache")
-        if record is None or record.get("kind") != "model" or not isinstance(meta, dict) or not meta.get("revision"):
+        if record is None or record.get("kind") not in ("model", "shape") or not isinstance(meta, dict) \
+                or not meta.get("revision"):
             return None
         try:
             size = held.cache.path(self.inside(ident)).stat().st_size

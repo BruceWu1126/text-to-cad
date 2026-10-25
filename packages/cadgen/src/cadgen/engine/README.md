@@ -928,9 +928,10 @@ the declarations on it with it -- its joints, mechanism states, configuration se
 couplings -- and its GLB animations, passed as `animations=[...]` (the `animation()` builders, each
 on the shape or a part of it), since there is no body to declare them in. The daemon (`{"op":
 "shape"}`, `Models.hand_over`) reads the bytes through the documents worker, holds them as a drained
-document is held (in memory, whole, and in the cache), registers its page, and records it with
-`store: "shape"`, its scope as `home`, an empty `run` and `shown`: the words that a program the
-engine did not run showed it, so no command builds it again. `name=` is required; its id is
+document is held (in memory, whole, and in the cache), registers its page, and records it as
+`kind: "shape"`, its scope as `home` and the program that handed it over as `program` (none from a
+REPL or a notebook), from which every surface words it: a program the engine did not run showed it,
+so no command builds it again. `name=` is required; its id is
 `ids.derived_id` of the calling script (or the working folder, from a REPL) and the name, or
 `ids.key_id` of its `key=`. The handle's `.shape` is the shape passed. Called inside a model's body
 it is refused: a body returns its shape.
@@ -939,13 +940,18 @@ it is refused: a body returns its shape.
 `documents/<id>/document.json` in the user's state folder ([registry.py](registry.py); the
 distribution names the folder, `cadgen.viewer.recents.state_dir`): it points; a document's bytes
 are the cache's, in the cache folder (**The cache**).
-A model's record holds what a restart needs and no more: its store, its script and function
-(`home`, `entry`), the program that ran it (`run`, `["python", program]`), its revision and when
-it was built, its `key=` and its last build's facts (what the delta says against); a file's its path,
-when it was opened and whether it is pinned; either's Recents picture (`preview`, UI state: the PNG
-under `recents/thumbnails`), and a model's `cache` once the cache holds it (**The cache**). What a
-build read is the cache's (`cache.read`), and its closure is its document's own (**Build
-closure**): neither is copied here. Every path in it is relative to its one `root`, so a record moves by one field. It is written synchronously
+Every record has one shape, `{schema, id, kind, root, home, entry, revision, built, key?, facts?,
+program?, cache?{revision, bytes, read}, opened?, pinned?, preview?}`, and holds what a restart needs
+and no more. `kind` says what it is: `model` (`home` and `entry`, its script and function; the
+command that builds it again is always `cadgen run` of its home), `shape` (a shape handed over:
+`program`, where there was one, names the program that showed it, and nothing builds it again) or
+`file` (a CAD file a page opened: its path, `opened` and `pinned`, never a revision or bytes). A
+model's and a shape's hold their revision and when they were built, their `key=` and a build's facts
+(what the delta says against); any record its Recents picture (`preview`, UI state: the PNG under
+`recents/thumbnails`), and a model's or a shape's `cache` once the cache holds it (**The cache**).
+What a build read is the cache's (`cache.read`), and its closure is its document's own (**Build
+closure**): neither is copied here. Nothing records which files a model declared or wrote: a
+declared file is an export, a plain file to every surface. Every path in it is relative to its one `root`, so a record moves by one field. It is written synchronously
 as a build registers, and only when a field differs: an unchanged build rewrites
 nothing; each write is then told to `registry.OBSERVERS`, never waited on. It is read on demand,
 never at start: an id the engine does not hold (after a restart) is answered from its record,
@@ -960,7 +966,7 @@ is a token of its build's own: a rebuild is a new generation, and no generation 
 a restart starts again. Recents is the registry's view (`cadgen.viewer.recents`): pinned
 first, then the most recently opened or built.
 
-**The cache.** For every `pointer` and `shape` model document -- never a file's, which is its own
+**The cache.** For every model and shape document -- never a file's, which is its own
 file -- the engine keeps `documents/<id>/document.xbf` in the cache folder its host names
 ([cache.py](cache.py); `cadgen.viewer.recents.cache_dir`: `CADGEN_CACHE_DIR`, else
 `$XDG_CACHE_HOME/cadgen` or `%LOCALAPPDATA%\cadgen`, else `~/.cache/cadgen`, the folder 0.7's store
@@ -1043,7 +1049,7 @@ engine, and refuses a DOC that names nothing recorded, by name and before anythi
 
 **Drain.** Before the pool stops a worker -- the count cap's least recently used, replaced for
 another environment, retired for memory -- the daemon asks it
-(the `result` request with `whole`, nothing meshed) for every `pointer` document of it the server
+(the `result` request with `whole`, nothing meshed) for every document of it the server
 does not hold whole at its version (`Models.drain`), out of the pool, then closes its stdin. The
 worker serializes the document in memory (`document.to_bytes`: `TDocStd_Application.SaveAs` to a
 stream, the bytes `@xbf` writes), and the documents worker reads them in memory too

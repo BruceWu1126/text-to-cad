@@ -102,9 +102,8 @@ class LibraryTest(unittest.TestCase):
         script = self.tmp / "parts.py"
         script.write_text("", encoding="utf-8")
         ident = model_id(script, "cube")
-        Registry(self.tmp / "state").put({"id": ident, "kind": "model", "store": "pointer", "root": str(self.tmp),
-                                          "home": "parts.py", "entry": "cube", "label": "cube",
-                                          "run": ["python", "parts.py"], "built": 1.0})
+        Registry(self.tmp / "state").put({"id": ident, "kind": "model", "root": str(self.tmp),
+                                          "home": "parts.py", "entry": "cube", "revision": "r1", "built": 1.0})
         status, body = self.request("GET", "/__cad/recents")
         [entry] = json.loads(body)["recents"]
         self.assertEqual((status, entry["path"], entry["kind"], entry["name"]), (200, ident, "model", "cube"),

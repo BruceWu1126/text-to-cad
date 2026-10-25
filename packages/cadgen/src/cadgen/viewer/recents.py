@@ -7,7 +7,8 @@ through its tunnel).
 Recents is a view of the registry (``cadgen.engine.registry``, ``<state>/documents/<id>/document.json``):
 a CAD file opened on a page is a record of its own (``kind: "file"``: its path, when it was opened,
 whether it is pinned), and every model a script built is one already (``kind: "model"``, which the
-engine writes when it registers the build). The home's picture of each is UI state on its record (``preview``), the PNG under
+engine writes when it registers the build), as is every shape a program handed over (``kind:
+"shape"``). The home's picture of each is UI state on its record (``preview``), the PNG under
 ``recents/thumbnails`` named by its content. Removing a file's entry forgets its record, the file
 untouched; a model's entry is deleted with its document (``cadgen.engine.models.delete``: its record
 and its document in the engine's cache). Nothing goes on its own: a model whose script is gone stays
@@ -100,25 +101,25 @@ class Recent:
     thumbnail: str | None = None
     # When the picture was taken, in seconds: a file changed since has an old one.
     pictured: float | None = None
+    # ``file``, ``model`` or ``shape`` (the record's ``kind``).
     kind: str = "file"
-    # A model's: its name, its script, and the command that builds it again.
+    # A model's (and a shape's): its name, its script, and the command that builds it again.
     name: str | None = None
     script: str | None = None
     rebuild: str | None = None
-    # A shape handed over (``store: "shape"``): its home is the script or the folder it was handed
-    # over from, nothing builds it again, and ``shown`` says so; ``built`` is when it was handed over.
-    store: str | None = None
+    # A shape handed over: its home is the script or the folder it was handed over from, nothing
+    # builds it again, and ``shown`` says so, from the program that handed it over; ``built`` is when.
     shown: str | None = None
     built: float | None = None
 
     def public(self) -> dict[str, Any]:
-        on_disk = self.script if self.kind == "model" else self.path
+        on_disk = self.script if self.kind != "file" else self.path
         try:
             status = os.stat(on_disk) if on_disk else None
         except OSError:
             status = None
         exists = status is not None and stat.S_ISREG(status.st_mode)
-        shape = self.kind == "model" and self.store == "shape"
+        shape = self.kind == "shape"
         if shape:
             # Its document is the engine's, not its home's: a folder home (a REPL's) is where it came
             # from, and nothing of it goes missing (``registry.detached``).
@@ -138,11 +139,11 @@ class Recent:
             "thumbnail": self.thumbnail,
             "pictured": self.pictured,
         }
-        found["kind"] = "file"
-        if self.kind == "model":
-            found.update(kind="model", id=self.path, script=self.script, rebuild=self.rebuild)
+        found["kind"] = self.kind
+        if self.kind != "file":
+            found.update(id=self.path, script=self.script, rebuild=self.rebuild)
         if shape:
-            found.update(kind="shape", shown=self.shown or "a shape handed over: no script to rerun")
+            found.update(shown=self.shown or "a shape handed over: no script to rerun")
         return found
 
 
@@ -208,6 +209,7 @@ class RecentStore:
     def list(self) -> list[Recent]:
         """Pinned first, then most recently opened or built; at most ``LIMIT``."""
         from cadgen.engine import registry as registering
+        from cadgen.engine.models import Models
 
         entries = []
         for record in self.registry.list():
@@ -217,11 +219,13 @@ class RecentStore:
             if record.get("kind") == "file" and record.get("opened"):
                 entries.append(Recent(path=str(registering.home(self.registry, record)), opened=float(record["opened"]),
                                       **common))
-            elif record.get("kind") == "model":
-                entries.append(Recent(path=record["id"], kind="model", name=record.get("entry"),
+            elif record.get("kind") in ("model", "shape"):
+                program = registering.program(self.registry, record)
+                entries.append(Recent(path=record["id"], kind=record["kind"], name=record.get("entry"),
                                       script=str(registering.home(self.registry, record)),
                                       rebuild=registering.command(self.registry, record),
-                                      store=record.get("store"), shown=record.get("shown"), built=record.get("built"),
+                                      shown=Models.shown(str(program) if program else None)
+                                      if record["kind"] == "shape" else None, built=record.get("built"),
                                       opened=float(max(record.get("opened") or 0, record.get("built") or 0)), **common))
         ordered = sorted(entries, key=lambda entry: (not entry.pinned, -entry.opened))
         return ordered[:LIMIT]

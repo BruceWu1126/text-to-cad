@@ -580,7 +580,7 @@ class Server:
         draw at once, and Open with the desktop's chooser."""
         try:
             recents = [entry.public() for entry in self.recents.list()
-                       if entry.kind == "model" or os.path.splitext(entry.path)[1].lower() in VIEWER_EXTENSIONS]
+                       if entry.kind != "file" or os.path.splitext(entry.path)[1].lower() in VIEWER_EXTENSIONS]
         except Exception:  # the home opens whatever the library says
             LOG.exception("could not read recents")
             recents = []

@@ -190,6 +190,9 @@ class CacheTest(unittest.TestCase):
         self.run_script("cube")
         meta = self.cached(ident)
         record = self.record(ident)
+        self.assertEqual(set(record), {"schema", "id", "kind", "root", "home", "entry", "revision", "built", "facts",
+                                       "cache"}, "a build's record, once its document is cached")
+        self.assertEqual(set(meta), {"revision", "bytes", "read"})
         self.assertEqual((meta["revision"], meta["bytes"]), (record["revision"], self.file(ident).stat().st_size))
         self.assertEqual(sorted(row[1] for row in meta["read"]), ["cube.py"], "what the build read, by digest")
         self.assertEqual(sorted(os.listdir(self.state / "documents" / ident)), ["document.json"],
@@ -605,7 +608,7 @@ class KeptTest(unittest.TestCase):
         names = ["a_shape", "a_model", "b_shape", "b_model"]
         idents = {name: model_id(folder / f"{name}.py", name) for name in names}
         for name, ident in idents.items():
-            held.put({"id": ident, "kind": "model", "store": "shape" if name.endswith("shape") else "pointer",
+            held.put({"id": ident, "kind": "shape" if name.endswith("shape") else "model",
                       "root": str(folder), "home": f"{name}.py", "entry": name, "revision": "r1"})
         self.assertFalse(hasattr(engine_cache, "cap") or hasattr(engine_cache, "CACHE_GB"), "no cap to set")
         first, second = engine_cache.Cache(Models()), engine_cache.Cache(Models())
@@ -629,8 +632,8 @@ class KeptTest(unittest.TestCase):
         held = Registry(folder / "state", folder / "cache")
         ident = model_id(folder / "hand.py", "crate")
         words = Book.shown(str(folder / "hand.py"))
-        held.put({"id": ident, "kind": "model", "store": "shape", "root": str(folder), "home": "hand.py",
-                  "entry": "crate", "run": [], "shown": words, "revision": "h1", "built": 1.0})
+        held.put({"id": ident, "kind": "shape", "root": str(folder), "home": "hand.py", "program": "hand.py",
+                  "entry": "crate", "revision": "h1", "built": 1.0})
         held.cache.write(f"documents/{ident}/document.xbf", b"x" * 10)
         held.update(ident, lambda found: {**found, "cache": {"revision": "h1", "bytes": 10, "read": []}})
         daemon = mock.Mock(server=None)
@@ -641,7 +644,7 @@ class KeptTest(unittest.TestCase):
             book.cache.remove(ident)  # its file gone (its bytes did not read)
             found = book.rebuild(ident)
         self.assertEqual((found["state"], found["rebuild"]), ("unsaved", None))
-        self.assertIn(words, found["error"], "the words its record keeps, not a Python session's")
+        self.assertIn(words, found["error"], "the words of the program its record names, not a Python session's")
 
 
 if __name__ == "__main__":

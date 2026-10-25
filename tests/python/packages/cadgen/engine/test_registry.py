@@ -32,8 +32,7 @@ from cadgen.engine.registry import Registry  # noqa: E402
 
 
 def _record(ident: str, root: Path, **extra) -> dict:
-    return {"id": ident, "kind": "model", "store": "pointer", "root": str(root), "home": "parts.py", "entry": "cube",
-            "run": ["python", "caller.py"], **extra}
+    return {"id": ident, "kind": "model", "root": str(root), "home": "parts.py", "entry": "cube", **extra}
 
 
 class RegistryTest(unittest.TestCase):
@@ -86,7 +85,7 @@ class RegistryTest(unittest.TestCase):
         record = self.registry.get(self.ident)
         self.assertEqual(registry.home(self.registry, record), moved / "parts.py")
         self.assertTrue(registry.detached(self.registry, record), "its script is not there")
-        self.registry.put({**_record(self.ident, moved), "store": "shape", "run": []})
+        self.registry.put({**_record(self.ident, moved), "kind": "shape"})
         record = self.registry.get(self.ident)
         self.assertFalse(registry.detached(self.registry, record), "a shape points at nothing that builds it")
         self.assertIsNone(registry.command(self.registry, record))
@@ -213,11 +212,10 @@ class RegistryDaemonTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         cube = model_id(project / "parts.py", "cube")
         record = self.records()[cube]
-        self.assertEqual((record["store"], record["home"], record["run"], Path(record["root"])),
-                         ("pointer", "parts.py", ["python", "caller.py"], project))
-        # What a restart needs and no more: no closure (the document's own), no versions, no stamps.
-        self.assertEqual(set(record), {"schema", "id", "kind", "store", "root", "home", "entry", "run", "revision",
-                                       "built", "facts"})
+        self.assertEqual((record["kind"], record["home"], Path(record["root"])), ("model", "parts.py", project))
+        # What a restart needs and no more: no closure (the document's own), no versions, no stamps,
+        # no command (always `cadgen run` of its home), no record of the files it declared.
+        self.assertEqual(set(record), {"schema", "id", "kind", "root", "home", "entry", "revision", "built", "facts"})
         self.assertEqual(sorted(os.listdir(self.state / "documents" / cube)), ["document.json"], "it points: no geometry")
         self.assertEqual(listed(), before, "nothing beside the script")
         written = (self.state / "documents" / cube / "document.json").stat().st_mtime_ns

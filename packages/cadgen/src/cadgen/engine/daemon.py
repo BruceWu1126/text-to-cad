@@ -18,7 +18,7 @@ processes' with them -- is held to one cap (``CADGEN_ENGINE_WORKER_RSS_MB``, ``w
 Past it, or under the system's memory-pressure signal (``serve.Pressure``), idle processes are
 retired, least recently used first: the standby, then render processes, then the workers no page
 watches, and a watched one only when no other is left. A worker alone over the cap after its build
-is retired at once (``worker.retirement``). Before a worker is stopped, every ``pointer`` document
+is retired at once (``worker.retirement``). Before a worker is stopped, every document
 of it the server does not hold is taken from it (``models.Models.drain``): a document outlives its
 worker. A retired script's next build is a fresh worker's, a restart. Each such document is also
 kept in the engine's cache once it is idle, at its drain and at shutdown (``cache``), so a restart
@@ -2039,7 +2039,7 @@ class Daemon:
                 send(refused(self.models.not_held(ident)))
             else:
                 model = {key: record.get(key) for key in ("id", "source", "program", "builtAt", "version", "files",
-                                                          "store")}
+                                                          "kind")}
                 model["state"] = self.models.state(ident)
                 # On disk in the engine's cache, at its revision: a restart reopens it as last built.
                 model["cached"] = (self.models.where(ident) or "").endswith("disk")

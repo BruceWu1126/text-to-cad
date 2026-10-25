@@ -613,7 +613,7 @@ class CadApp:
     def _recents_payload(self) -> dict:
         # Recents, the registry's view (``recents.py``): the CAD files the viewer opens, and the models.
         return {"recents": [entry.public() for entry in self.recents.list()
-                            if entry.kind == "model" or extension_of(entry.path) in VIEWER_EXTENSIONS]}
+                            if entry.kind != "file" or extension_of(entry.path) in VIEWER_EXTENSIONS]}
 
     def _change_recents(self, payload) -> dict:
         """A change to the library -- ``{action, path, png?}``, a file by its absolute path, a model by

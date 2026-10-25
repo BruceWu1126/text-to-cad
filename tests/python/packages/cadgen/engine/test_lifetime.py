@@ -155,7 +155,7 @@ class NotHeldRefusalTest(unittest.TestCase):
         ident = model_id(script, "cell")
         # Built before, its worker crashed before anything kept it: no worker, no bytes, no cache file.
         engine.models.records[ident] = {"id": ident, "source": {"script": str(script), "name": "cell"}, "worker": None,
-                                        "program": str(script), "store": "pointer", "version": "g1", "builtAt": 0,
+                                        "program": str(script), "kind": "model", "version": "g1", "builtAt": 0,
                                         "files": [], "revision": "r1", "read": []}
         answers: list[dict] = []
         engine.handle({"op": "document", "id": ident}, answers.append)
@@ -186,7 +186,7 @@ class StatusTextTest(unittest.TestCase):
         from cadgen.engine.cli import status_text
 
         text = status_text({"pid": 1, "up": 5, "cap": 4, "workers": [], "models": [
-            {"id": "id-1", "name": "plate", "state": "unsaved", "store": "shape"}]})
+            {"id": "id-1", "name": "plate", "state": "unsaved", "kind": "shape"}]})
         self.assertIn("  unsaved   plate  id-1  a shape handed over: no script to rerun", text.splitlines())
 
 
