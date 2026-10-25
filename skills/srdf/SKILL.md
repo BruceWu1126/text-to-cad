@@ -41,9 +41,8 @@ Do not place geometry, inertials, joint origins, link poses, mesh references, ph
 ## Show the model
 
 Show the user each model and file you create or change, and any they ask to see.
-Snapshots and validation don't replace this. Once a viewer is open, the person is looking
-at the model: after an edit, report the run's one line and stop. Never screenshot the
-viewer to confirm your own work.
+Snapshots and validation don't replace this. Never screenshot the viewer to confirm your
+own work; review with `cadgen snapshot`.
 
 - If your tools include `cad_show` (your host may prefix it), call it with the model's id
   or the file's absolute path, and follow its description for when to call it again.
