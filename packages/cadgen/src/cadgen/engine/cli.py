@@ -8,6 +8,7 @@ ordinary Python scripts call decorated models explicitly.
         [--size-profile P] [--json]
     cadgen serve DOC [--port N] [--three DIR]
     cadgen status [--json] | stop [--json] | server [--port N] [--rotate-token]
+    cadgen delete DOC [DOC ...] [--json]             documents deleted: record, cached document, the engine's copy
     cadgen inspect DOC [REF]                           what a document holds and its build closure, or what a ref names (``refs``)
 
 SRC and DOC are an on-disk CAD file's path or a document's id (``ids``): a model's id is what
@@ -55,6 +56,14 @@ def _status_arguments(status: argparse.ArgumentParser) -> None:
 
 def _stop_arguments(stop: argparse.ArgumentParser) -> None:
     stop.add_argument("--json", action="store_true", help="what was stopped as JSON")
+
+
+def _delete_arguments(delete: argparse.ArgumentParser) -> None:
+    delete.add_argument("documents", nargs="+", metavar="DOC",
+                        help="a document's id, a model's script (every document recorded of it), or a CAD file "
+                             "a page opened; your own files -- a script, its declared files, an opened file -- "
+                             "are never touched")
+    delete.add_argument("--json", action="store_true", help="what was deleted as JSON")
 
 
 def _server_arguments(server: argparse.ArgumentParser) -> None:
@@ -209,8 +218,7 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
     worker = "" if fresh is None else (" cold" if fresh else " warm")
     if memo.get("bodies_loaded"):
         taken = (report.get("cache") or {}).get("from")
-        holder = ("the engine's cache" if taken == "cache" else "its file" if report.get("files")
-                  else "its document in memory")
+        holder = "the engine's cache" if taken == "cache" else "its document in memory"
         line = (f"took {report['model']}{worker} in {wall:.2f}s: {holder} holds the model's key, "
                 f"{memo.get('bodies_loaded', 0)} bodies loaded, nothing ran") + _waited(report, "took")
         line += _delta(report.get("delta"))
@@ -638,6 +646,22 @@ def _stop(args: argparse.Namespace, prog: str) -> int:
     return 0
 
 
+def _delete(args: argparse.Namespace, _prog: str) -> int:
+    from cadgen.engine.api import delete
+
+    try:
+        deleted = delete(args.documents)
+    except ValueError as error:
+        raise Failed(str(error), 2) from None
+    if args.json:
+        print(json.dumps({"ok": True, "deleted": deleted}, indent=2))
+        return 0
+    # A line per document deleted, for a person or an agent; JSON only under ``--json``.
+    for row in deleted:
+        print(f"deleted {row['name']} {row['id']}")
+    return 0
+
+
 def main(argv: list[str] | None = None, prog: str = "python -m cadgen.engine") -> int:
     """The engine's own command: ``VERB [args]``, every verb of ``VERBS``."""
     args = build_parser(prog).parse_args(argv)
@@ -682,6 +706,14 @@ def _port(serving: dict[str, Any]) -> str:
         return f" (rolled from {default} because {serving.get('portBecause') or 'another process'} holds it)"
     return " (" + {"--port": "the port --port named", "CADGEN_ENGINE_PORT": "the port CADGEN_ENGINE_PORT names"
                    }.get(source, f"not the default {default}") + ")"
+
+
+def cache_text(root: Any, documents: Any, size: Any) -> str:
+    """The engine's document cache as ``cadgen status`` and ``cadgen doctor`` say it, after the word
+    ``cache``: its folder, and the documents and bytes it keeps, which stay until a person deletes
+    them (no cap)."""
+    return (f"{root}: {documents or 0} document{'' if documents == 1 else 's'} · {_bytes(size)}, "
+            "kept until deleted")
 
 
 def workers_text(answer: dict[str, Any]) -> str:
@@ -754,13 +786,10 @@ def status_text(answer: dict[str, Any]) -> str:
     cache = answer.get("cache") or {}
     if cache.get("enabled"):
         failures = cache.get("failures") or []
-        lines.append(f"cache {cache.get('root')}: {cache.get('documents', 0)} document"
-                     f"{'' if cache.get('documents') == 1 else 's'} · {_bytes(cache.get('bytes'))} of "
-                     f"{_bytes(cache.get('capBytes'))}"
-                     + (f" · {cache['evictions']} evicted" if cache.get("evictions") else "")
+        lines.append("cache " + cache_text(cache.get("root"), cache.get("documents"), cache.get("bytes"))
                      + (f" · last save failed: {failures[0]['error']}" if failures else ""))
     elif cache:
-        lines.append("cache off (CADGEN_ENGINE_CACHE_GB=0)" if not cache.get("capBytes") else "cache off: no cache folder")
+        lines.append("cache off: no cache folder")
     models = answer.get("models") or []
     if models:
         # Each model document, its state, and for one not held the command that builds it again.
@@ -771,8 +800,8 @@ def status_text(answer: dict[str, Any]) -> str:
             if row.get("held"):
                 line += f"  {row['held']}"  # where: memory, disk (the cache), or both
             if row.get("rebuild"):
-                line += f"  run `{row['rebuild']}`" + (" (kept in memory only)" if row.get("store") == "memory" else "")
-            elif row.get("store") == "shape":
+                line += f"  run `{row['rebuild']}`"
+            elif row.get("kind") == "shape":
                 line += "  a shape handed over: no script to rerun"
             if row.get("state") == "failed":
                 line += "  serving its previous good build"
@@ -794,6 +823,8 @@ VERBS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[
     "status": ("the engine server's workers, what each is building, and its served documents", _status_arguments,
                _status),
     "stop": ("stop the engine server", _stop_arguments, _stop),
+    "delete": ("delete documents: each one's record and its document in the engine's cache, and what the engine "
+               "holds of it; never a file of yours", _delete_arguments, _delete),
     "server": ("run the engine server in this process", _server_arguments, _server),
 }
 

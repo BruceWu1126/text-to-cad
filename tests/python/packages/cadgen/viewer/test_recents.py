@@ -70,8 +70,8 @@ class RecentStoreTest(unittest.TestCase):
         script = self.tmp / "parts.py"
         script.write_text("", encoding="utf-8")
         ident = model_id(script, "plate")
-        Registry(self.tmp).put({"id": ident, "kind": "model", "store": "pointer", "root": str(self.tmp),
-                                "home": "parts.py", "entry": "plate", "run": ["python", "caller.py"],
+        Registry(self.tmp).put({"id": ident, "kind": "model", "root": str(self.tmp),
+                                "home": "parts.py", "entry": "plate", "revision": "r1",
                                 "built": time.time()})
         store = RecentStore(self.tmp)
         [entry] = [recent.public() for recent in store.list()]
@@ -87,12 +87,10 @@ class RecentStoreTest(unittest.TestCase):
         from cadgen.engine.ids import derived_id
 
         ident, built = derived_id(self.tmp, "plate"), time.time() - 60
-        Registry(self.tmp).put({"id": ident, "kind": "model", "store": "shape", "root": str(self.tmp), "home": ".",
-                                "entry": "plate", "run": [], "built": built,
-                                "shown": "a shape handed over from a Python session the engine did not run: no script "
-                                         "to rerun, and no command builds it again"})
+        Registry(self.tmp).put({"id": ident, "kind": "shape", "root": str(self.tmp), "home": ".",
+                                "entry": "plate", "revision": "h1", "built": built})
         [entry] = [recent.public() for recent in RecentStore(self.tmp).list()]
-        self.assertEqual((entry["id"], entry["missing"], entry["rebuild"], entry["store"], entry["modified"]),
+        self.assertEqual((entry["id"], entry["missing"], entry["rebuild"], entry["kind"], entry["modified"]),
                          (ident, False, None, "shape", built), "a folder home is where it came from, not a lost file")
         self.assertIn("a shape handed over", entry["shown"])
         self.assertIn("no script to rerun", entry["shown"])

@@ -435,6 +435,8 @@ class LeftoversTest(PrivateFolders):
                       "registered (2.0 KB), 1 cache folder with no record (4.0 KB), 1 file an earlier 0.8 build kept "
                       "(telemetry-sender): cadgen doctor --prune removes them\n", out)
         self.assertEqual(self.tree(), before, "nothing is removed without --prune")
+        self.assertIn(f"  cache    {self.cache}: 1 document · 1 B, kept until deleted\n", out,
+                      "the documents the cache keeps, each a record names, with no cap")
 
         code, out, _ = _run(["--prune"])
         self.assertEqual(code, 0)

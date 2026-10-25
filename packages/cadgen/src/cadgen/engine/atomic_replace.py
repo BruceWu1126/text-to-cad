@@ -13,6 +13,10 @@ and a ``5`` with no file at the target, surfaces at once. Off Windows this is ``
 
 It is cadgen's own policy (``cadgen._internal.atomic_replace``, whose docstring has the
 measurements) kept in the engine because the engine imports nothing of cadgen outside itself.
+
+A declared or exported file is written through ``put``: moved into place only when the file there
+does not hold its bytes already, so writing the same translation twice writes it once and an
+unchanged file keeps its bytes and its time.
 """
 
 from __future__ import annotations

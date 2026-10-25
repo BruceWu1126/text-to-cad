@@ -76,14 +76,16 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    never geometry and never source. In the
    platform's cache folder (`~/.cache/cadgen`, by 0.7's rule) it keeps, under `documents/` and
    nowhere else there, each model document's bytes as it last built them: its own file, never a
-   declared or exported xbf, regenerable and wiped at no loss, so a restart opens every project at
-   once; and under `pycache/` the bytecode its own processes compile of the libraries they load
+   declared or exported xbf (the same bytes), kept until a person deletes it -- nothing evicts it
+   -- and made again by a run of its script (a shape's by the program that handed it over), so a
+   restart opens every project at once; and under `pycache/` the bytecode its own processes compile of the libraries they load
    (`PYTHONPYCACHEPREFIX`, a folder per installation), regenerable too, so nothing is written
    beside a library or a model. The code stays the only source of truth: a document whose code changed since says so,
    with the command that builds it again, and nothing reruns. It writes no
    sidecar, record of a build beside a model, index, memo, mesh or parsed document, and no derived file
-   beside an input. A model whose xbf holds the closure the model has now is not run, nor one with no file
-   whose cached document holds it. Explicit viewer exports write only the requested
+   beside an input. A model whose document -- in its warm worker, else the cache -- holds the closure the
+   model has now is not run, whatever files it declares: they are exports of the document, written
+   after it. Explicit viewer exports write only the requested
    artifact to managed temporary storage for delivery; no source or intermediate XBF
    is written (the engine's **Viewer exports**).
 3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself: OCP, build123d (and
@@ -100,8 +102,8 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    runs is keyed by its inputs. A hit hands back the objects the first run made, and a miss
    makes everything downstream of it miss. So an edit costs what it changed, and an element
    keeps the name its feature history gave it across edits. Across a restart, a model's build
-   is cold but for its own xbf -- or, for a model with no file, its cached document -- taken whole
-   or not at all; what a restart shows without a build
+   is cold but for its document in the cache -- every model's alike, taken whole by its key or not
+   at all; a declared file, its xbf too, is never a source -- and what a restart shows without a build
    is the engine's document cache (law 2): the last built state, never a step of a build.
 6. **One document per model, with one id.** Every called model makes one document, and a call
    returns its handle (`.id`, `.url`, `.name`, `.shape`, `.export`, `.snapshot`), never a bare
@@ -110,16 +112,16 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    no name (`ids.file_id`, inside the engine only: its public name stays its path), a shape handed
    over its calling script, or the working folder, and its name -- the same in every process,
    worked out without asking the engine. `key="..."` replaces it with `uuid5(NAMESPACE, "key::" +
-   key)`, global, and refused, naming the other, when another declaration claims the key. The
-   store rule: a function in a file is a `pointer` (the registry points at its script),
-   `store="memory"` a throwaway (nothing is recorded), and a shape is handed over
-   (`model(shape, name=...)`: held and cached, never rebuilt). A function is declared by `@model`
-   (no file) or by its file decorators (those files), never both; file decorators write only
-   their named outputs. No xbf, mesh, memo,
-   provenance or derived file is written for a document beyond what it declares. A document
-   lives until the engine exits or memory evicts it; its worker retiring does not end it,
-   except a `memory` document's. A document that is not held names the command that builds it
-   again; the engine never runs it (the engine's **Document lifetime**).
+   key)`, global, and refused, naming the other, when another declaration claims the key. A
+   function in a file is a model (the registry points at its script), and a shape is handed over
+   (`model(shape, name=...)`: held and kept, never rebuilt); every one is recorded and kept in
+   the engine's document cache alike. A function is declared by `@model` (no file) or by its file
+   decorators (those files), never both; file decorators write only their named outputs. No xbf,
+   mesh, memo, provenance or derived file is written for a document beyond what it declares. A
+   document lives until a person deletes it (`cadgen delete`, the home's Delete); its worker
+   retiring does not end it, nor does memory, which reads it again from the cache. A document
+   that is not held names the command that builds it again; the engine never runs it (the
+   engine's **Document lifetime**).
 7. **Provenance is served live, never written.** What made an element -- the feature, its
    operation, the function, file and line of its call -- lives in the trace of the worker that
    built the document, and is asked of it while it lives (`made_by`, `cadgen inspect`). A document
@@ -133,9 +135,11 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    code renames nothing, and the file holds no line to go stale.
 10. **A file decorator requires an explicit output path.** `out` is its only argument;
     omitted paths and `None` are refused. Whenever the model it decorates runs in a
-    build -- the build's target, or a child another model's body calls -- that file is written,
-    once per build, from the model's own document; a GLB's animations are baked from the code
-    when that GLB is written. A model with no file decorator writes nothing.
+    build -- the build's target, or a child another model's body calls -- or is taken from its
+    key, that file is written, once per build, from the model's own document, exactly as an export
+    of it writes it: translated, compared, and written only where it differs or is missing; a
+    GLB's animations are baked from the code when that GLB is written. A model with no file
+    decorator writes nothing.
 11. **Decoration only declares; a model script is Python.** A script runs only when Python
     runs it; no verb imports or builds a script. Importing cadgen or
     defining a decorated function never builds a model, writes its outputs, starts a
@@ -199,8 +203,9 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
     document a page watches only when no other is left. The engine outlives its clients; a page
     closing never stops a worker. The worker-count cap never retires a worker whose document a
     page watches; it is exceeded instead. The memory cap may retire it (the
-    engine's **Architecture** and **The engine server and its workers**). Memory may evict a worker's
-    document only when nothing watches it (the engine's **Document lifetime**).
+    engine's **Architecture** and **The engine server and its workers**). Memory may take a
+    document out of memory, for the engine's cache to give back, only when nothing watches it (the
+    engine's **Document lifetime**).
 
 20. **One engine serves the installation; tabs select documents at `/<uuid>`.** A tab names
     a model's id, or a file's id after a launcher registers it; Python scripts are never
@@ -219,8 +224,8 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
 21. **Operations on documents are Python functions the CLI exposes; process control is the
     CLI's alone.** `export`, `snapshot` and `inspect` are functions of the root
     (`cadgen.export`, ...) and commands that call them; serving, the engine's status, stopping it
-    and running it (`cadgen serve`, `status`, `stop`, `server`) are commands only, with no
-    function of the root. Every successful server-backed build reports its id and localhost
+    and running it (`cadgen serve`, `status`, `stop`, `server`), and deleting a document (`cadgen
+    delete`, which the home's Delete is too), are commands only, with no function of the root. Every successful server-backed build reports its id and localhost
     viewer URL, including a build with file outputs. A cold `daemon=False` build has no served
     URL.
 
@@ -270,7 +275,7 @@ before starting. An agent's explicit host path is a different destination contra
 
 `cadgen inspect`, `cadgen.inspect()` and `cad_inspect` read existing files or the
 documents the engine holds by id. They never execute source to obtain a missing model or write
-its declared outputs. An unbuilt, evicted or expired model requires an explicit build: one
+its declared outputs. An unbuilt or unsaved model requires an explicit build: one
 the engine built before names the command (`cadgen run` and the script that defines it). With no reference,
 `cadgen inspect` prints what the document holds -- its state, parts, bounds, volume, materials,
 joints, couplings (name, kind, ratio, joints), states, sequences, animations and declared files -- then its build closure (`--json`:
@@ -344,7 +349,7 @@ src/cadgen/
                          #   when the wheel is packaged, never committed, never edited
 ```
 
-Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and
+Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `delete` and
 `server` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
 snapshot for those files alone; `cadgen urdf|sdf|srdf validate` the validators; `cadgen
 doctor` the setup (the installation registered, the `cadgen` command written, the engine started),

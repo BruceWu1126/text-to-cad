@@ -123,6 +123,7 @@ export default {
   "home.pinAria": "Pin {name}",
   "home.unpinAria": "Unpin {name}",
   "home.removeAria": "Remove {name}",
+  "home.deleteAria": "Delete {name}",
   "home.fileUnavailable": "File unavailable",
   "home.openingAria": "Opening {name}",
   "home.editedJustNow": "Edited just now",

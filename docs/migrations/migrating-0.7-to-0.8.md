@@ -401,10 +401,11 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   (the handle's `.url`). An open page follows every later run; share the link once.
 - **The commands take an id or a file.** `cadgen export`, `cadgen snapshot` and
   `cadgen inspect` read the document as the engine holds it, and never run a script.
-- **The engine never reruns code.** A document it no longer holds (its cache dropped it
-  past the cache's bound while nothing held it) is answered, by its page, by
+- **The engine never reruns code.** A document it holds no file of any more (its file in the
+  engine's cache deleted by hand, or never saved) is answered, by its page, by
   `cadgen inspect <id>` and by the CAD app, with the command that brings it back:
-  `python <the script>`.
+  `cadgen run <the script>`. A restart or the engine's memory budget never does this: the cache
+  keeps every document.
 - **A viewer link outlives a restart.** The engine keeps one port (3245, or the one
   `CADGEN_ENGINE_PORT` or `--port` names) and one page token per user, so a link works
   across a stop, a crash or a reboot, and an open page reconnects on its own when the engine
@@ -425,10 +426,14 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   geometry), and the home's Recents lists them, most recent first. 0.7's Recents are not
   read: they start empty after the upgrade.
 - **Documents reopen after a restart** from the engine's cache, as last built; the code
-  stays the source, and a document whose code changed since says so.
-- **A model lives in a `.py` file.** Its record points at the script (`pointer`).
-  `@model(store="memory")` keeps a document in its worker's memory alone, unrecorded and
-  out of Recents: for throwaway probes.
+  stays the source, and a document whose code changed since says so. The cache
+  (`documents/<uuid>/document.xbf` in the cache folder, `~/.cache/cadgen` by 0.7's rule)
+  keeps every document until you delete it: it has no size cap, and nothing evicts from it.
+  `cadgen delete <id>` (or a model's script, or a file's path), or Delete on a model's row of
+  the home, deletes a document: its record and its cached document. Your script and its files
+  stay.
+- **A model lives in a `.py` file.** Its record points at the script, and every model's
+  document is recorded and kept alike: no decorator takes a store.
 - **A notebook hands its shape over.** In a notebook cell or a REPL, build the shape and
   call `model(shape, name="bracket")`: the engine holds, caches and serves a document of
   it, exports it like any other, and returns the same handle (`.shape` is your shape).
@@ -454,7 +459,7 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
 | snapshot `--kinematics` | `--pose` |
 | snapshot `--focus`, `--hide` | `--display '{"isolated": [...]}'`, `--display '{"hidden": [...]}'` |
 | snapshot `--mode list` | the model's tree: `[part.label for part in assembly().shape.leaves]` |
-| `cadgen store why\|where\|forget\|gc\|info` | nothing: no store. `cadgen inspect <id>` prints what a document was built from |
+| `cadgen store why\|where\|forget\|gc\|info` | no store to manage: `cadgen inspect <id>` prints what a document was built from, `cadgen delete <id>` deletes it |
 
 `--no-daemon` is gone from every command, and `cadgen build` and `cadgen.build()`, which
 0.8 previews had, are gone too: the only way to build is a decorated function called
@@ -567,7 +572,7 @@ opt in.
 | Materials | `materials=` definitions and assignments | `part.material = ...` in the body |
 | Colours | linear floats, `srgb(...)` | sRGB hex or 0-255 integers |
 | Refs | `#o1.2.f7` | `<id>#path/to/part/f:function.feature.n` |
-| The cache | the store in `~/.cache/cadgen` | the warm worker's memory, and one `document.xbf` per model under `~/.cache/cadgen/documents/` (4 GB at most, `CADGEN_ENGINE_CACHE_GB`), with the engine's bytecode under `pycache/` |
+| The cache | the store in `~/.cache/cadgen` | the warm worker's memory, and each document as last built in `~/.cache/cadgen/documents`, kept until deleted, with the engine's bytecode under `pycache/` |
 | The viewer | its own process, `?file=` links, page sessions | the engine's one page, `/<uuid>` |
 
 ## Troubleshooting a half-migrated project
@@ -584,8 +589,9 @@ opt in.
   as sRGB: give the hex of what you see (step 6).
 - **A link opens the home instead of the model.** It is a 0.7 or pre-release link
   (`?file=`, `/s/...`). Run the model and use the page it prints.
-- **A page or `cadgen inspect` says the document is not held.** The engine freed it and its
-  cache dropped it past its bound. Run the command it prints.
+- **A page or `cadgen inspect` says the document is not saved.** Its file in the engine's
+  cache is gone (deleted by hand), or was never written (the cache folder could not be
+  written). Run the command it prints.
 - **The viewer shows an old mechanism or none.** A sidecar is read by nothing: the
   mechanism must be in the model's body (step 4).
 

@@ -1,5 +1,7 @@
-"""A model's previous document is its cache: a restart with nothing changed runs no
-body and writes nothing; anything else builds, and writes the cold build's bytes."""
+"""A model's previous document is the engine's cache of it, or this worker's own record: a restart
+with nothing changed runs no body, and its declared files are exports of the document taken --
+compared, and written only where they differ or are missing; anything else builds, and writes the
+cold build's bytes. The key alone decides: a declared file plays no part."""
 
 from __future__ import annotations
 
@@ -15,6 +17,20 @@ from pathlib import Path
 
 from cadgen.engine import build as engine_build
 from cadgen.engine import document, previous
+from cadgen.engine.ids import model_id
+
+
+def keep(script: Path, name: str, cache: Path) -> Path:
+    """What the daemon's idle save writes (``cache``): the document of model ``name`` this process
+    holds, as ``worker._save`` answers it, at its file in the cache's ``documents/`` folder."""
+    from cadgen.engine import worker
+
+    header, payload = worker._save({"ident": "-", "script": str(script), "name": name, "generation": "g"})
+    assert not header.get("error"), header
+    path = cache / model_id(script, name) / "document.xbf"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+    return path
 
 KIT = """
 import json
@@ -63,6 +79,8 @@ class PreviousTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
         self.script = self.folder / "kit.py"
         self.xbf = self.folder / "XBF/kit.xbf"
+        self.cache = self.folder / "cache" / "documents"
+        self.cached = self.cache / model_id(self.script, "kit") / "document.xbf"
         (self.folder / "inputs").mkdir()
         bd.export_step(bd.Cylinder(3, 4), str(self.folder / "inputs" / "cap.step"))
         (self.folder / "peg.json").write_text(json.dumps({"size": 4}), encoding="utf-8")
@@ -71,10 +89,13 @@ class PreviousTest(unittest.TestCase):
         self.addCleanup(self.restart)
         memo.install()
 
-    def restart(self) -> None:
-        """What a new worker holds: nothing."""
+    def restart(self, saved: bool = True) -> None:
+        """What a new worker holds: nothing; and the engine's cache, the kit's document as the
+        worker held it (``saved``: its idle save, before the worker went)."""
         from cadgen.engine.kernel import memo
 
+        if saved and engine_build.held(self.script, "kit") is not None:
+            keep(self.script, "kit", self.cache)
         memo.clear()
         engine_build._WRITTEN.clear()
         engine_build._PARTS.clear()
@@ -86,18 +107,19 @@ class PreviousTest(unittest.TestCase):
 
     def kit(self, said: list | None = None) -> dict:
         """The kit built, what the build logs (the files it wrote or kept) appended to ``said``."""
-        (report,) = engine_build.build(self.script, ["kit"], cwd=self.folder,
+        (report,) = engine_build.build(self.script, ["kit"], cwd=self.folder, cache=str(self.cache),
                                        log=said.append if said is not None else lambda _line: None)
         self.assertTrue(report["ok"], report)
         return report
 
     def cold(self, **values) -> bytes:
-        """The kit as a process that never built it, with no file, builds it."""
-        self.restart()
+        """The kit as a process that never built it, with no file and nothing cached, builds it."""
+        self.restart(saved=False)
         self.xbf.unlink(missing_ok=True)
+        self.cached.unlink(missing_ok=True)
         self.source(**values)
         report = self.kit()
-        self.assertEqual(report["cache"]["reason"], "no file yet")
+        self.assertEqual(report["cache"]["reason"], "the engine's cache holds none of it")
         return self.xbf.read_bytes()
 
     def test_a_restart_with_nothing_changed_runs_no_body_and_writes_nothing(self) -> None:
@@ -106,7 +128,7 @@ class PreviousTest(unittest.TestCase):
         self.restart()
         said: list[str] = []
         report = self.kit(said)
-        self.assertEqual(report["cache"], {"used": True, "from": "file"})
+        self.assertEqual(report["cache"], {"used": True, "from": "cache"})
         self.assertEqual(report["memo"]["bodies_run"], 0)
         self.assertEqual(report["memo"]["bodies_loaded"], 3, "kit, peg and cap")
         self.assertEqual(report["bodies"], {"kit.py::kit": "loaded"})
@@ -119,6 +141,7 @@ class PreviousTest(unittest.TestCase):
         self.assertNotIn("read", again["timings"])
         self.assertEqual(self.xbf.stat().st_mtime_ns, written)
         self.assertEqual(said, [], "a take is said by its run line alone: it wrote and logged nothing")
+        self.assertEqual(self.cached.read_bytes(), first, "the cache holds the bytes the declared xbf has")
 
     def test_another_process_takes_the_file_whatever_its_hash_seed(self) -> None:
         import subprocess
@@ -126,15 +149,19 @@ class PreviousTest(unittest.TestCase):
 
         self.source()
         code = ("import json, sys; from pathlib import Path; from cadgen.engine import build; "
-                "print(json.dumps(build.build(Path(sys.argv[1]), ['kit'], cwd=Path(sys.argv[1]).parent)[0]))")
+                "from tests.python.packages.cadgen.engine.test_previous import keep; "
+                "script, cache = Path(sys.argv[1]), Path(sys.argv[2]); "
+                "report = build.build(script, ['kit'], cwd=script.parent, cache=str(cache))[0]; "
+                "keep(script, 'kit', cache); print(json.dumps(report))")
         found = []
         for seed in ("1", "2"):
-            done = subprocess.run([sys.executable, "-c", code, str(self.script)], capture_output=True, text=True,
-                                  env={**os.environ, "PYTHONHASHSEED": seed})
+            done = subprocess.run([sys.executable, "-c", code, str(self.script), str(self.cache)], capture_output=True,
+                                  text=True, env={**os.environ, "PYTHONHASHSEED": seed},
+                                  cwd=Path(__file__).resolve().parents[5])
             self.assertEqual(done.returncode, 0, done.stderr)
             found.append(json.loads(done.stdout.strip().splitlines()[-1]))
-        self.assertEqual(found[0]["cache"]["reason"], "no file yet")
-        self.assertEqual(found[1]["cache"], {"used": True, "from": "file"})
+        self.assertEqual(found[0]["cache"]["reason"], "the engine's cache holds none of it")
+        self.assertEqual(found[1]["cache"], {"used": True, "from": "cache"})
 
     def test_an_edit_after_a_restart_writes_the_cold_bytes(self) -> None:
         self.cold()
@@ -196,34 +223,39 @@ class PreviousTest(unittest.TestCase):
             self.assertEqual(report["cache"]["reason"], f"{named} changed", change)
             self.assertTrue(report["files"][str(self.xbf)]["written"], change)
 
-    def test_a_warm_build_whose_file_moved_or_went_is_replayed(self) -> None:
+    def test_a_declared_file_touched_or_deleted_is_written_again_from_the_document_and_nothing_runs(self) -> None:
         first = self.cold()
         later = self.xbf.stat().st_mtime_ns + 1_000_000_000
         os.utime(self.xbf, ns=(later, later))
         report = self.kit()
-        self.assertEqual(report["cache"]["reason"], "replayed from memory")
-        self.assertEqual(set(report["bodies"].values()), {"replayed"})
-        self.assertEqual(self.xbf.read_bytes(), first)
+        self.assertEqual((report["cache"], report["bodies"]), ({"used": True, "from": "memory"}, {"kit.py::kit": "loaded"}),
+                         "the key alone decides: a declared file plays no part")
+        self.assertFalse(report["files"][str(self.xbf)]["written"], "compared: the same bytes, left as they are")
+        self.assertEqual((self.xbf.read_bytes(), self.xbf.stat().st_mtime_ns), (first, later))
         self.xbf.unlink()
         report = self.kit()
-        self.assertEqual(report["cache"]["reason"], "replayed from memory")
+        self.assertEqual((report["cache"], report["memo"]["bodies_run"]), ({"used": True, "from": "memory"}, 0))
+        self.assertTrue(report["files"][str(self.xbf)]["written"])
+        self.assertEqual(self.xbf.read_bytes(), first, "written again from the document, the cold bytes")
+        # After a restart too: the document the cache holds writes it, and no body runs.
+        self.restart()
+        self.xbf.write_bytes(b"edited by hand")
+        report = self.kit()
+        self.assertEqual((report["cache"], report["memo"]["bodies_run"]), ({"used": True, "from": "cache"}, 0))
         self.assertTrue(report["files"][str(self.xbf)]["written"])
         self.assertEqual(self.xbf.read_bytes(), first)
-        self.assertEqual(self.kit()["cache"], {"used": True, "from": "memory"})
 
-    def test_a_warm_build_whose_child_models_file_moved_or_went_is_replayed(self) -> None:
+    def test_a_child_models_declared_file_is_its_own_models_to_write(self) -> None:
         self.cold()
-        self.assertEqual(self.kit()["cache"], {"used": True, "from": "memory"}, "every file as the last build left it")
         peg = self.folder / "XBF/peg.xbf"
         written = peg.read_bytes()
-        later = peg.stat().st_mtime_ns + 1_000_000_000
-        os.utime(peg, ns=(later, later))
-        self.assertEqual(self.kit()["cache"]["reason"], "replayed from memory", "a child's file moved")
         peg.unlink()
         report = self.kit()
-        self.assertEqual(report["cache"]["reason"], "replayed from memory", "a child's file gone")
-        self.assertEqual(peg.read_bytes(), written, "the replay writes the child's file again")
-        self.assertEqual(self.kit()["cache"], {"used": True, "from": "memory"})
+        self.assertEqual(report["cache"], {"used": True, "from": "memory"}, "the parent is taken: no child runs")
+        self.assertFalse(peg.exists(), "nothing ran peg: its file is written when its own model is")
+        self.source(plate=44)  # an edit that runs the kit runs peg, its child, which writes its file
+        self.kit()
+        self.assertEqual(peg.read_bytes(), written)
 
     def test_a_verifying_warm_build_runs_every_body(self) -> None:
         self.cold()
@@ -268,14 +300,20 @@ class PreviousTest(unittest.TestCase):
         self.assertNotIn(b"thickness", text, "no source text")
         self.assertEqual(writer, document._writer())
 
-    def test_another_programs_file_is_built_again(self) -> None:
-        self.cold()
+    def test_a_cache_another_program_wrote_is_built_again_and_a_declared_file_is_never_read(self) -> None:
+        first = self.cold()
         writer = document._writer().encode()
-        self.xbf.write_bytes(self.xbf.read_bytes().replace(writer, writer.replace(b"(cadgen ", b"(cadgem ")))
         self.restart()
+        self.cached.write_bytes(self.cached.read_bytes().replace(writer, writer.replace(b"(cadgen ", b"(cadgem ")))
         report = self.kit()
-        self.assertEqual(report["cache"]["reason"], "written by another program")
-        self.assertTrue(report["files"][str(self.xbf)]["written"])
+        self.assertEqual(report["cache"]["reason"], "its cache was written by another program")
+        self.assertFalse(report["files"][str(self.xbf)]["written"], "built again: the same bytes")
+        # The declared xbf is an export, never a source: another program's in its place is written over.
+        self.restart()
+        self.xbf.write_bytes(first.replace(writer, writer.replace(b"(cadgen ", b"(cadgem ")))
+        report = self.kit()
+        self.assertEqual(report["cache"], {"used": True, "from": "cache"})
+        self.assertEqual(self.xbf.read_bytes(), first)
 
     def test_another_release_of_the_format_is_current_and_another_format_builds_once(self) -> None:
         self.cold()
@@ -283,25 +321,24 @@ class PreviousTest(unittest.TestCase):
         release = previous.version().encode()
         # Another cadgen release that wrote this format: the key is the format's, the file is taken.
         other_release = writer.replace(b"(cadgen " + release, b"(cadgen " + b"9" * len(release))
-        self.xbf.write_bytes(self.xbf.read_bytes().replace(writer, other_release))
         self.restart()
-        self.assertEqual(self.kit()["cache"], {"used": True, "from": "file"})
+        self.cached.write_bytes(self.cached.read_bytes().replace(writer, other_release))
+        self.assertEqual(self.kit()["cache"], {"used": True, "from": "cache"})
         # A document of the format before (the key made differently): built again, once.
         old = other_release.replace(f"cadgen.engine {previous.FORMAT} ".encode(), b"cadgen.engine xbf/1 ")
         self.assertEqual(len(old), len(other_release))
-        self.xbf.write_bytes(self.xbf.read_bytes().replace(other_release, old))
-        self.restart()
+        self.restart(saved=False)
+        self.cached.write_bytes(self.cached.read_bytes().replace(other_release, old))
         report = self.kit()
-        self.assertEqual(report["cache"]["reason"], f"written by {old.decode()}")
-        self.assertTrue(report["files"][str(self.xbf)]["written"])
+        self.assertEqual(report["cache"]["reason"], f"its cache was written by {old.decode()}")
         self.restart()
-        self.assertEqual(self.kit()["cache"], {"used": True, "from": "file"}, "built once, then current")
+        self.assertEqual(self.kit()["cache"], {"used": True, "from": "cache"}, "built once, then current")
 
-    def test_a_missing_or_broken_file_builds(self) -> None:
+    def test_a_missing_or_broken_cache_file_builds(self) -> None:
         first = self.cold()
         self.restart()
-        self.xbf.unlink()
-        self.assertEqual(self.kit()["cache"]["reason"], "no file yet")
+        self.cached.unlink()
+        self.assertEqual(self.kit()["cache"]["reason"], "the engine's cache holds none of it")
         self.assertEqual(self.xbf.read_bytes(), first)
         # Its head whole, the rest gone: the closure shows, the document does not read. (Cut
         # right after the closure, in the main label's attributes: OCCT's reader aborts the
@@ -309,10 +346,11 @@ class PreviousTest(unittest.TestCase):
         # Standard_NullObject -- measured at a half of this one, and at a third once the
         # closure grew by its symbols.)
         head = first[: first.index(b"\x00", first.index(b'{"schema":"cadgen.engine closure/1",')) + 1]
-        self.xbf.write_bytes(head)
         self.restart()
+        self.cached.write_bytes(head)
         report = self.kit()
-        self.assertTrue(report["cache"]["reason"].startswith("the file does not read"), report["cache"])
+        self.assertTrue(report["cache"]["reason"].startswith("its cache does not read"), report["cache"])
+        self.assertTrue(report["cache"]["unreadable"], "the daemon drops it, and caches the build again")
         self.assertEqual(self.xbf.read_bytes(), first)
 
     def export(self, name: str) -> bytes:
@@ -395,6 +433,7 @@ class ClosureTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
         self.script = self.folder / "plate.py"
         self.xbf = self.folder / "XBF/plate.xbf"
+        self.cache = self.folder / "cache" / "documents"
         self.script.write_text(textwrap.dedent(PLATE), encoding="utf-8")
         self.helper()
         (self.folder / "depth.json").write_text(json.dumps({"depth": 6}), encoding="utf-8")
@@ -403,8 +442,11 @@ class ClosureTest(unittest.TestCase):
         memo.install()
 
     def restart(self) -> None:
+        """A new worker: nothing held but what the engine's cache kept of the plate."""
         from cadgen.engine.kernel import memo
 
+        if engine_build.held(self.script, "plate") is not None:
+            keep(self.script, "plate", self.cache)
         memo.clear()
         engine_build._WRITTEN.clear()
         engine_build._PARTS.clear()
@@ -418,7 +460,7 @@ class ClosureTest(unittest.TestCase):
     def plate(self, restart: bool = True) -> dict:
         if restart:
             self.restart()
-        (report,) = engine_build.build(self.script, ["plate"], cwd=self.folder)
+        (report,) = engine_build.build(self.script, ["plate"], cwd=self.folder, cache=str(self.cache))
         self.assertTrue(report["ok"], report)
         return report
 
@@ -449,7 +491,7 @@ class ClosureTest(unittest.TestCase):
         before = dict(map(tuple, previous.of(self.xbf)["modules"]))
         # A comment, and an edit to a function the model does not reach: nothing it is made of.
         self.helper(comment=", in millimetres", unused=2)
-        self.assertEqual(self.plate()["cache"], {"used": True, "from": "file"})
+        self.assertEqual(self.plate()["cache"], {"used": True, "from": "cache"})
         self.helper(width=24)
         report = self.plate()
         self.assertEqual(report["cache"]["changed"], ["../dims.py: WIDTH changed"])
@@ -466,7 +508,7 @@ class ClosureTest(unittest.TestCase):
         self.assertTrue(report["files"][str(self.xbf)]["written"])
         # Found missing is an input too: the next restart takes the file.
         self.assertEqual(previous.of(self.xbf)["inputs"][0][2], None)
-        self.assertEqual(self.plate()["cache"], {"used": True, "from": "file"})
+        self.assertEqual(self.plate()["cache"], {"used": True, "from": "cache"})
 
     def test_a_commit_is_nothing_to_the_engine_and_a_no_op_after_one_writes_nothing(self) -> None:
         import subprocess
@@ -498,8 +540,8 @@ class ClosureTest(unittest.TestCase):
         with watching():
             report = self.plate()
         self.assertEqual(asked, [], "the engine calls no git")
-        # The no-op after a commit: taken from the file, nothing written, the same bytes.
-        self.assertEqual(report["cache"], {"used": True, "from": "file"})
+        # The no-op after a commit: taken from the cache, nothing written, the same bytes.
+        self.assertEqual(report["cache"], {"used": True, "from": "cache"})
         self.assertFalse(report["files"][str(self.xbf)]["written"])
         self.assertEqual((self.xbf.read_bytes(), self.xbf.stat().st_mtime_ns), written)
 

@@ -1,21 +1,23 @@
 """The registry: one self-describing record per document the engine knows, in the user's state folder.
 
-``<state>/documents/<id>/document.json`` is a document's record: a model built from a script
-(``kind: "model"``, ``store: "pointer"``: the script and the function it points at), a shape a
-program handed over (``kind: "model"``, ``store: "shape"``: the script that handed it over, or the
-folder it was handed over in, its name, and no command that builds it again -- ``run`` empty, and
-``shown`` says so in words), or an on-disk CAD file the person opened (``kind: "file"``). The registry POINTS: no geometry, no
+``<state>/documents/<id>/document.json`` is a document's record, one shape for every kind:
+``{schema, id, kind, root, home, entry, revision, built, key?, facts?, program?, cache?, opened?,
+pinned?, preview?}``. ``kind`` is ``model``, a model built from a script (``home`` and ``entry``: the
+script and the function it points at; the command that builds it again is always ``cadgen run``
+of its home); ``shape``, a shape a program handed over (``home``: the script that handed it over,
+or the folder it was handed over in; ``program``: that program, where there is one; nothing builds
+it again); or ``file``, an on-disk CAD file the person opened (``home`` and ``opened`` alone, and
+``pinned`` and ``preview``: never a ``revision``, never bytes). The registry POINTS: no geometry, no
 mesh, no xbf and no memo is ever written here. A model's record may say that the engine's cache
 holds its document (``cache``: ``{revision, bytes, read}``), whose bytes live in the
 cache folder, not here (``Registry.cache``: ``<cache>/documents/<id>/document.xbf``, the engine's
 ``cache`` module): regenerable, wiped at no loss, never the source of anything; the record is
-authoritative, and a cache file missing or unreadable is simply not cached. A ``memory`` document
-has no record. Ids are the
+authoritative, and a cache file missing or unreadable is simply not cached. Ids are the
 documents' own (``ids``: one formula of the canonical path and the name, or a ``key=``'s); the
 registry is their reverse map, never their authority.
 
 A record is relocatable: ``root`` is the one absolute folder in it, and ``home`` (the script, or
-the file) and ``run`` (the command that builds it again, ``["python", program]``) are relative to it.
+the file) and a shape's ``program`` are relative to it.
 
 The interface is the ``Registry``'s: ``get``, ``put``, ``list``, ``delete`` (records in, records
 out) and ``update`` (a read and a write under one lock). The filesystem implementation here is the only one; it is the seam a
@@ -155,10 +157,6 @@ class Folder:
             return self.path(inside).read_bytes()
         except OSError:
             return None
-
-    def touch(self, inside: str) -> None:
-        """A file's modification time, now: when it was last used (the cache's least recently used)."""
-        os.utime(self.path(inside))
 
     def remove(self, inside: str) -> None:
         """A file or a folder, whole; nothing when it is not there."""
@@ -353,9 +351,10 @@ def home(registry: Registry, record: dict[str, Any]) -> Path:
 
 
 def program(registry: Registry, record: dict[str, Any]) -> Path | None:
-    """The program whose run builds a model's document again, absolute; None for a file's."""
-    run = record.get("run") or []
-    return Path(os.path.normpath(registry.root(record) / run[-1])) if run else None
+    """The program that handed a shape over, absolute; None for any other record, and for a shape
+    handed over from a Python session (a REPL, a notebook)."""
+    given = record.get("program") if record.get("kind") == "shape" else None
+    return Path(os.path.normpath(registry.root(record) / given)) if given else None
 
 
 def rerun(program: str | os.PathLike) -> str:
@@ -370,13 +369,13 @@ def rerun(program: str | os.PathLike) -> str:
 
 
 def command(registry: Registry, record: dict[str, Any]) -> str | None:
-    """The command that builds a model's document again (``rerun``): its own script, the one that
-    defines it, never a program that imported it and called it (a check script). None for what
-    no run built. The engine never runs it."""
-    return None if program(registry, record) is None else rerun(home(registry, record))
+    """The command that builds a model's document again (``rerun``): ``cadgen run`` of its home, the
+    script that defines it, never a program that imported it and called it (a check script). None
+    for a shape handed over, which no run built, and for a file's. The engine never runs it."""
+    return rerun(home(registry, record)) if record.get("kind") == "model" else None
 
 
 def detached(registry: Registry, record: dict[str, Any]) -> bool:
     """Whether the script or the file a record points at is gone (moved, deleted). A shape handed
     over points at nothing that builds it: never detached."""
-    return record.get("store") != "shape" and not home(registry, record).is_file()
+    return record.get("kind") != "shape" and not home(registry, record).is_file()

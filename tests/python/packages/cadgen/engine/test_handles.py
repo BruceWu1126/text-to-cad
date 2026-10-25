@@ -277,10 +277,14 @@ class HandleTest(unittest.TestCase):
                          ["lift"], "the animations passed are baked into its GLB")
         self.assertTrue((project / "crate.step").is_file())
         record = Registry(self.state).get(ident)
-        self.assertEqual((record["store"], record["run"], record["entry"]), ("shape", [], "crate"))
-        self.assertIn("a program the engine did not run: no script to rerun", record["shown"])
-        self.assertEqual(set(record) - {"cache"}, {"schema", "id", "kind", "store", "root", "home", "entry", "run",
-                                                   "shown", "revision", "built"}, "a model's shape, and its words")
+        self.assertEqual((record["kind"], record["entry"], record["program"]), ("shape", "crate", "hand.py"))
+        self.assertEqual(set(record) - {"cache"}, {"schema", "id", "kind", "root", "home", "entry", "program",
+                                                   "revision", "built"}, "a model's shape, and the program that showed it")
+        from cadgen.viewer.recents import RecentStore
+
+        [shown] = [entry.public() for entry in RecentStore(self.state).list() if entry.path == ident]
+        self.assertIn(f"a shape handed over by {project / 'hand.py'}, a program the engine did not run", shown["shown"],
+                      "its words, from its program")
         # From a REPL: the working folder is its scope.
         repl = self.run_python("-", cwd=project, input="import json, build123d as bd\nfrom cadgen import model\n"
                                "h = model(bd.Box(2, 2, 2), name='scratch')\nprint('RESULT ' + json.dumps(h.id))\n")
@@ -296,7 +300,7 @@ class HandleTest(unittest.TestCase):
         self.assertEqual(refused.returncode, 2, refused.stderr)
         self.assertIn("a program the engine did not run: no script to rerun", refused.stderr)
         answer = self.ask({"op": "state", "id": ident})
-        self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", None))
+        self.assertEqual((answer["state"], answer["rebuild"]), ("unsaved", None))
 
 
     def test_a_handle_is_posed_where_the_engine_holds_its_mechanism(self) -> None:

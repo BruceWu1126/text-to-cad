@@ -3,7 +3,7 @@
 Every subcommand is also reachable as ``python -m cadgen.<module>``; this is the friendly
 front door, not a second implementation. A subcommand's parser lives in its own module and
 owns its arguments, so the console and module entry points cannot drift. The engine's verbs
-(``export``, ``snapshot``, ``serve``, ``inspect``, ``status``, ``stop``, ``server``) are
+(``export``, ``snapshot``, ``serve``, ``inspect``, ``status``, ``stop``, ``delete``, ``server``) are
 ``cadgen.engine.cli``'s, each run by its name; the robot validators' parsers are DERIVED from
 the verb function's signature (``cadgen._internal.cli_from_function``).
 
@@ -38,6 +38,7 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     "inspect": ("cadgen.cli.inspect", "an xbf's build closure, or what made one element of it"),
     "status": ("cadgen.cli.status", "show the engine server's workers and what it serves"),
     "stop": ("cadgen.cli.stop", "stop the engine server"),
+    "delete": ("cadgen.cli.delete", "delete documents: record, cached document, the engine's copy"),
     "server": ("cadgen.cli.server", "run the engine server in this process"),
     # DXF and robot descriptions: each format's snapshot draws its own files alone (the engine's
     # snapshot), and the robot validators check a description.

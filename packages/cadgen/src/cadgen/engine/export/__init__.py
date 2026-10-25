@@ -334,7 +334,10 @@ def _instances(node: dict[str, Any]) -> list[int]:
 
 def translate(document: Any, kind: str | None, path: Any) -> int:
     """Write ``document`` (a ``Source``, or the path of an ``.xbf``/``.step`` or a mesh file) to ``path``
-    as ``kind`` (from the suffix when None); returns the file's size."""
+    as ``kind`` (from the suffix when None); returns the file's size. The translation lands only where
+    the file does not hold its bytes already (``put``): a file written again the same is left as it
+    is. Every declared file is written this way too, after the build or the take-up that made its
+    document (``build``)."""
     path = Path(path)
     kind = kind or kind_of(path)
     if kind not in KINDS:

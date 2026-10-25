@@ -64,7 +64,7 @@ class VerbsTest(unittest.TestCase):
         cls.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(engine),
                                          "CADGEN_STATE_DIR": str(cls.folder / "state"),
                                          "CADGEN_CACHE_DIR": str(cls.folder / "cache"),
-                                         "CADGEN_ENGINE_MESH": "inline", "CADGEN_ENGINE_CACHE_GB": "0"},
+                                         "CADGEN_ENGINE_MESH": "inline"},
                                         cls.addClassCleanup)
         cls.addClassCleanup(cls.run_, "-m", "cadgen.engine", "stop")
         script = cls.folder / "parts.py"

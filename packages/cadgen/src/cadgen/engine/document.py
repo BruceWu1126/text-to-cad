@@ -1145,19 +1145,39 @@ def _apart(shape: Any) -> Any:
     return made
 
 
-def save(doc: Any, path: Path, *, compare: bool) -> tuple[bool, int]:
+def write_bytes(path: Path, data: bytes, tree: "Tree | None" = None) -> tuple[bool, int]:
+    """A document's xbf bytes (``to_bytes``: the bytes ``save`` writes) at ``path``, landed whole
+    and only where the file does not hold them already (``atomic_replace.put``). ``tree``, the tree
+    the document was made from, is remembered as the one at ``path`` (``saved``) and, when the file
+    is written, told to ``SAVED_LISTENERS`` as ``save`` tells it. Returns whether the file was
+    written, and its size."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if tree is not None:
+        _SAVED[path.resolve()] = tree
+    written, _size = put(path, lambda temporary: temporary.write_bytes(data))
+    if written and tree is not None:
+        for listener in list(SAVED_LISTENERS):
+            listener(path.resolve(), tree)
+    return written, len(data)
+
+
+def save(doc: Any, path: Path, *, compare: bool, tree: "Tree | None" = None) -> tuple[bool, int]:
     """Save ``doc`` to ``path`` atomically: a temporary file beside it whose name ends in
     ``.xbf`` (BinXCAF appends the suffix to any other name), then replaced over the
-    path. With ``compare``, an existing file with the same bytes is left as it is.
-    Returns whether the file was written, and its size. The tree ``doc`` was made from
-    is remembered as the one at ``path`` (``saved``)."""
+    path. With ``compare``, an existing file with the same bytes is left as it is
+    (``atomic_replace.put``). Returns whether the file was written, and its size. The
+    tree ``doc`` was made from -- the one just made (``to_xcaf``), or ``tree``, a kept document's
+    own, saved again -- is remembered as the one at ``path`` (``saved``): its parts are the shapes
+    written, so a kept document saved again writes the bytes it wrote first."""
     from OCP.PCDM import PCDM_StoreStatus
     from OCP.TCollection import TCollection_ExtendedString
 
-    tree = None
     if _MADE and _MADE[0] is doc:
-        tree = _SAVED[Path(path).resolve()] = _MADE[1]
+        tree = _MADE[1]
         _MADE.clear()
+    if tree is not None:
+        _SAVED[Path(path).resolve()] = tree
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     shapes = [part.shape for part in tree.parts] if tree is not None else _free_shapes(doc)

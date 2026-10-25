@@ -18,7 +18,7 @@ processes' with them -- is held to one cap (``CADGEN_ENGINE_WORKER_RSS_MB``, ``w
 Past it, or under the system's memory-pressure signal (``serve.Pressure``), idle processes are
 retired, least recently used first: the standby, then render processes, then the workers no page
 watches, and a watched one only when no other is left. A worker alone over the cap after its build
-is retired at once (``worker.retirement``). Before a worker is stopped, every ``pointer`` document
+is retired at once (``worker.retirement``). Before a worker is stopped, every document
 of it the server does not hold is taken from it (``models.Models.drain``): a document outlives its
 worker. A retired script's next build is a fresh worker's, a restart. Each such document is also
 kept in the engine's cache once it is idle, at its drain and at shutdown (``cache``), so a restart
@@ -922,7 +922,7 @@ class Pool:
         -- idle processes are retired, least recently used first within each rank: the standby, then
         render processes (each holds a document the daemon sends again), then the workers no page
         watches, then the watched ones, which go only when no other is left. A busy process is never
-        retired. A worker retired is drained to the held tier first (``drain``). The retired."""
+        retired. A worker retired is drained first (``drain``): its documents stay ``held``. The retired."""
         cap, renders, drawing = self.memory(), self.renders, self._drawing()
         with self.lock:
             if self.stopped or (cap is None and not (pressure and self.standby is not None)):
@@ -1868,6 +1868,8 @@ class Daemon:
                 self.server.lost = self.models.rebuild
                 self.server.revive = self.models.adopt
                 self.server.stale = self.models.stale
+                self.server.leaving = self.models.leaving
+                self.server.delete = self.models.delete
                 self.server.start()
                 started = True
             elif ((request.get("port") and int(request["port"]) != self.server.port)
@@ -2053,11 +2055,16 @@ class Daemon:
         if op == "models":
             send({"ok": True, "models": self.models.listing()})
             return
+        if op == "delete":
+            # ``cadgen delete`` (``api.delete``): each id deleted by the one deletion (``models.delete``).
+            deleted = [self.models.delete(str(ident)) for ident in request.get("ids") or []]
+            send({"ok": True, "deleted": [found for found in deleted if found is not None]})
+            return
         if op == "model_info":
             self.models.prune()
             ident = str(request.get("id"))
             with self.models.lock:
-                record = self.models.records.get(ident) or self.models.expired.get(ident)
+                record = self.models.records.get(ident)
             if record is None:
                 self.models.adopt(ident)  # held on disk (the engine's cache), after a restart
                 with self.models.lock:
@@ -2066,7 +2073,7 @@ class Daemon:
                 send(refused(self.models.not_held(ident)))
             else:
                 model = {key: record.get(key) for key in ("id", "source", "program", "builtAt", "version", "files",
-                                                          "store")}
+                                                          "kind")}
                 model["state"] = self.models.state(ident)
                 # On disk in the engine's cache, at its revision: a restart reopens it as last built.
                 model["cached"] = (self.models.where(ident) or "").endswith("disk")
@@ -2187,7 +2194,7 @@ class Daemon:
                             order["env"] = request["env"]  # the run's own (``worker.adopt``)
                         cached = self.models.cache.folder()
                         if cached is not None:
-                            order["cache"] = cached  # what a fresh worker takes a model with no file from
+                            order["cache"] = cached  # what a fresh worker takes a model from, by its key
                         server = self.server
                         if server is not None:
                             # The worker sends each served document it builds back as a patch,
@@ -2365,9 +2372,9 @@ class Daemon:
     def tend(self) -> None:
         """What the engine looks after, each ``TEND_SECONDS``: never the process, and nothing by how
         long anything has been idle. A killed client's pipes are swept, and the workers' memory is
-        held to its cap and the system's pressure (``Pool.shed``: its documents drained to the held
-        tier first); the memory budget evicts unwatched documents to the cache as they are loaded
-        (``serve.Server.trim``). The engine stops on ``stop``, a terminate, another installation's
+        held to its cap and the system's pressure (``Pool.shed``: its documents drained first, so they
+        stay held); the memory budget sends unwatched documents out of memory, least recently used
+        first, to the cache, as they are loaded (``serve.Server.trim``). The engine stops on ``stop``, a terminate, another installation's
         retiring it (``bind``), and here when its door is gone (its folder removed, a temporary
         folder cleaned up) or another's: no one can reach it, so it stops as ``stop`` does, saving
         what it holds to the cache."""

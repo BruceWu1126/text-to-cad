@@ -19,6 +19,7 @@ from unittest import mock
 from cadgen.engine import build as engine_build
 from cadgen.engine import cli
 from cadgen.engine import document
+from tests.python.support import engine_cache
 
 KIT = """
 import build123d as bd
@@ -339,16 +340,11 @@ class ReadsTest(unittest.TestCase):
         bd.export_stl(bd.Box(length, 30, 2), str(self.stl))
 
     def restart(self) -> None:
-        """What a new worker holds: nothing."""
-        from cadgen.engine.kernel import memo
-
-        memo.clear()
-        engine_build._WRITTEN.clear()
-        engine_build._PARTS.clear()
-        engine_build._BUILT.clear()
+        """What a new worker holds: nothing but what the engine's cache kept (``engine_cache``)."""
+        engine_cache.restart(self.folder / "cache")
 
     def built(self, name: str) -> dict:
-        (report,) = engine_build.build(self.folder / "reads.py", [name], cwd=self.folder)
+        (report,) = engine_build.build(self.folder / "reads.py", [name], cwd=self.folder, cache=str(self.folder / "cache"))
         self.assertTrue(report["ok"], report)
         return report
 
@@ -446,25 +442,30 @@ class ReadsTest(unittest.TestCase):
             self.assertIsNotNone(closure["key"], name)
             self.assertIn(f"../{path}", [row[1] for row in closure["inputs"]], name)
             self.restart()
-            self.assertEqual(self.built(name)["cache"], {"used": True, "from": "file"}, name)
+            self.assertEqual(self.built(name)["cache"], {"used": True, "from": "cache"}, name)
 
-    def test_a_model_reading_its_inputs_beside_it_restarts_from_its_file_wherever_it_is_copied(self) -> None:
+    def test_a_model_reading_its_inputs_beside_it_restarts_from_the_cache_wherever_it_is_copied(self) -> None:
         # tom reads vendor parts past the engine (import_brep) from beside its sources: copied
-        # elsewhere with them, a restart with nothing changed takes the document, and an edited
-        # input builds it.
+        # elsewhere with them, it is another document (its id is its script's), built once there;
+        # then a restart with nothing changed takes the document, and an edited input builds it.
         self.built("by_occt")
         moved = Path(tempfile.mkdtemp(prefix="engine-reads-moved-")).resolve() / "copy"
         self.addCleanup(shutil.rmtree, moved.parent, ignore_errors=True)
         shutil.copytree(self.folder, moved)
         self.restart()
-        (report,) = engine_build.build(moved / "reads.py", ["by_occt"], cwd=moved)
-        self.assertEqual(report["cache"], {"used": True, "from": "file"}, report)
+
+        def build() -> dict:
+            (report,) = engine_build.build(moved / "reads.py", ["by_occt"], cwd=moved, cache=str(self.folder / "cache"))
+            return report
+
+        self.assertEqual(build()["cache"]["reason"], "the engine's cache holds none of it", "a copy is a document of its own")
+        self.restart()
+        self.assertEqual(build()["cache"], {"used": True, "from": "cache"})
         import build123d as bd
 
         bd.export_brep(bd.Box(12, 10, 10), str(moved / "part.brep"))
         self.restart()
-        (report,) = engine_build.build(moved / "reads.py", ["by_occt"], cwd=moved)
-        self.assertEqual(report["cache"]["changed"], ["../part.brep changed"])
+        self.assertEqual(build()["cache"]["changed"], ["../part.brep changed"])
 
     def test_a_model_sized_by_import_stl_builds_again_when_the_stl_changes(self) -> None:
         """The probe: a model sized from cube.stl by build123d's import_stl kept its 40 mm box

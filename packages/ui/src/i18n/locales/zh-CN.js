@@ -111,6 +111,7 @@ export default {
   "home.pinAria": "置顶 {name}",
   "home.unpinAria": "取消置顶 {name}",
   "home.removeAria": "移除 {name}",
+  "home.deleteAria": "删除 {name}",
   "home.fileUnavailable": "文件不可用",
   "home.openingAria": "正在打开 {name}",
   "home.editedJustNow": "刚刚编辑",

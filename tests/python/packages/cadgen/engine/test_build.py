@@ -405,32 +405,33 @@ class ChildFilesTest(EngineCase):
         self.assertIn("no rig", failed["error"])
         self.assertTrue(failed["child_models"]["bracket.py::bracket"]["files"][str(self.folder / "bracket.stl")]["written"])
 
-    def test_a_child_s_files_are_its_own_build_s_and_a_warm_build_keeps_them(self) -> None:
+    def test_a_child_s_files_are_its_own_build_s_and_a_taken_parent_writes_its_own_alone(self) -> None:
         from cadgen.engine import api
-        from cadgen.engine.kernel import memo
+        from tests.python.support import engine_cache
 
         self.rig("rig")
         written = (self.folder / "XBF/bracket.xbf").read_bytes()
-        # Replayed, its children replayed too: kept, and a file gone is written again alone.
+        # Taken by its key, nothing runs: the rig writes its own files, and a child's file gone is
+        # its own model's to write.
         (self.folder / "bracket.stl").unlink()
         [warm] = self.rig("rig")
-        self.assertEqual(warm["bodies"]["bracket.py::bracket"], "replayed")
+        self.assertEqual((warm["cache"], warm["bodies"]), ({"used": True, "from": "memory"}, {"rig.py::rig": "loaded"}))
         self.assertEqual({Path(path).name: row["written"] for path, row in api.Report([warm]).files.items()},
-                         {"rig.xbf": False, "bracket.xbf": False, "bracket.stl": True, "peg.stl": False})
-
-        def fresh() -> None:
-            memo.clear()
-            engine_build._WRITTEN.clear()
-            engine_build._PARTS.clear()
-
-        # The bracket's own build, in a fresh process, takes the file its parent's build wrote:
-        # the same closure; and built cold, it writes the same bytes.
-        fresh()
-        [own] = engine_build.build(self.folder / "bracket.py", None, cwd=self.folder)
-        self.assertEqual(own["cache"], {"used": True, "from": "file"})
-        fresh()
+                         {"rig.xbf": False})
+        self.assertFalse((self.folder / "bracket.stl").exists())
+        # The bracket's own build, in a fresh worker, takes the document its parent's build made (the
+        # engine's cache keeps a child's as any document), writing the file that went, nothing run.
+        cache = self.folder / "cache"
+        engine_cache.restart(cache)
+        [own] = engine_build.build(self.folder / "bracket.py", None, cwd=self.folder, cache=str(cache))
+        self.assertEqual((own["cache"], own["memo"]["bodies_run"]), ({"used": True, "from": "cache"}, 0))
+        self.assertEqual({Path(path).name: row["written"] for path, row in own["files"].items()},
+                         {"bracket.xbf": False, "bracket.stl": True})
+        # Built cold, it writes the same bytes.
+        engine_cache.restart(cache)
+        (cache / own["id"] / "document.xbf").unlink()
         (self.folder / "XBF/bracket.xbf").unlink()
-        engine_build.build(self.folder / "bracket.py", None, cwd=self.folder)
+        engine_build.build(self.folder / "bracket.py", None, cwd=self.folder, cache=str(cache))
         self.assertEqual((self.folder / "XBF/bracket.xbf").read_bytes(), written)
 
 

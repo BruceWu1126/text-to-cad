@@ -95,7 +95,7 @@ def _replays_unchanged(case: unittest.TestCase) -> None:
     """Body retention is what these tests watch, on unchanged builds too: the whole-model skip
     a warm worker takes when its document holds the model's key (``build._previous``, held by
     test_previous) is set aside, so an unchanged root is replayed as a body."""
-    patch = mock.patch.object(engine_build, "_as_built", return_value=False)
+    patch = mock.patch.object(engine_build, "_previous", return_value=({"used": False, "reason": "set aside"}, None))
     patch.start()
     case.addCleanup(patch.stop)
 

@@ -48,7 +48,7 @@ def _document(name: str) -> dict:
 
 
 class BudgetTest(unittest.TestCase):
-    """The budget over a server's documents and tessellations, its tiers, and the pressure signal."""
+    """The budget over a server's documents and tessellations, its one order, and the pressure signal."""
 
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-lifetime-")).resolve()
@@ -67,26 +67,28 @@ class BudgetTest(unittest.TestCase):
         return self.server.put(model_id(self.folder / f"{name}.py", name), _document(name),
                                {f"{name}-key": b"m" * (size * MIB)})
 
-    def test_files_go_before_other_documents_least_recently_used_first_and_a_watched_one_never(self) -> None:
+    def test_the_least_recently_used_goes_first_a_file_or_a_model_alike_and_a_watched_one_never(self) -> None:
         server = self.server
+        left: list[tuple[str, object, bytes]] = []
+        server.leaving = lambda ident, version, xbf: left.append((ident, version, xbf))
         server.cache.put("mesh", b"x" * (4 * MIB))
-        older = self.model("older", 20)
-        first = self.file("first", 20)
-        newer = self.model("newer", 16)
-        self.assertEqual(len(server.served), 3, "under the budget nothing goes")
-        second = self.file("second", 20)  # 80 MiB: past the budget, trimmed to 80 % of it
+        older = self.model("older", 26)
+        server.keep(older, _document("older"), {"older-key": b"m" * (26 * MIB)}, "g1", b"the older xbf")
+        file = self.file("file", 26)
+        self.assertEqual(len(server.served), 2, "under the budget nothing goes")
+        newer = self.model("newer", 10)  # 66 MiB: past the budget, trimmed to 80 % of it
         self.assertNotIn("mesh", server.cache.items, "a tessellation goes first: it is remade from the shape")
-        self.assertEqual(set(server.served), {newer, second},
-                         "the other file first, then the least recently used model; the document put stays")
+        self.assertEqual(set(server.served), {file, newer},
+                         "the least recently used, a model before a newer file: one order, nothing ranked above it")
+        self.assertEqual(left, [(older, "g1", b"the older xbf")], "its bytes handed to the cache as it leaves")
         self.assertLessEqual(server.holding(), int(64 * MIB * 0.8))
-        self.assertNotIn(older, server.served)
-        self.assertNotIn(first, server.served)
         server.sync(newer)  # a page watches it
         third = self.model("third", 30)
-        self.assertEqual(set(server.served), {newer, third}, "the file goes before any model")
+        self.assertEqual(set(server.served), {newer, third}, "the file goes: it is the least recently used")
         fourth = self.model("fourth", 30)
         self.assertEqual(set(server.served), {newer, fourth}, "a watched document is never evicted")
-        self.assertEqual(server.memory()["evictions"], 4)
+        self.assertEqual(server.memory()["evictions"], 3)
+        self.assertEqual(len(left), 1, "a document with no bytes of its own held (a live worker's) hands none")
 
     def test_a_pressure_signal_evicts_down_to_the_low_water_mark(self) -> None:
         server = self.server
@@ -144,18 +146,25 @@ class NotHeldRefusalTest(unittest.TestCase):
         from cadgen.engine import api, daemon
         from cadgen.engine.serve import NotHeld
 
+        folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="engine-refusal-")))
+        self.addCleanup(shutil.rmtree, folder, True)
+        script = folder / "cell.py"
+        script.write_text("", encoding="utf-8")
         engine = daemon.Daemon()
         self.addCleanup(engine.pool.stop)
-        ident = model_id(Path("/nowhere/cell.py"), "cell")
-        engine.models.expired[ident] = {"id": ident, "source": {"script": "/nowhere/cell.py", "name": "cell"},
-                                        "program": "/nowhere/caller.py", "store": "memory", "version": 1, "builtAt": 0}
+        ident = model_id(script, "cell")
+        # Built before, its worker crashed before anything kept it: no worker, no bytes, no cache file.
+        engine.models.records[ident] = {"id": ident, "source": {"script": str(script), "name": "cell"}, "worker": None,
+                                        "program": str(script), "kind": "model", "version": "g1", "builtAt": 0,
+                                        "files": [], "revision": "r1", "read": []}
         answers: list[dict] = []
         engine.handle({"op": "document", "id": ident}, answers.append)
         (answer,) = answers
-        self.assertEqual((answer["state"], answer["rebuild"]), ("expired", "cadgen run /nowhere/cell.py"))
+        command = f"cadgen run {script}"
+        self.assertEqual((answer["state"], answer["rebuild"]), ("unsaved", command))
         error = api._failed(answer)
         self.assertIsInstance(error, NotHeld, "raised as its type: the CLI exits 2 for a ValueError")
-        self.assertEqual((error.state, error.rebuild, str(error)), ("expired", "cadgen run /nowhere/cell.py", answer["failed"]))
+        self.assertEqual((error.state, error.rebuild, str(error)), ("unsaved", command, answer["failed"]))
         answers.clear()
         engine.handle({"op": "document", "id": model_id(Path("/nowhere/other.py"), "other")}, answers.append)
         self.assertIsInstance(api._failed(answers[0]), NotHeld, "an id it never built is refused the same")
@@ -177,8 +186,8 @@ class StatusTextTest(unittest.TestCase):
         from cadgen.engine.cli import status_text
 
         text = status_text({"pid": 1, "up": 5, "cap": 4, "workers": [], "models": [
-            {"id": "id-1", "name": "plate", "state": "evicted", "store": "shape"}]})
-        self.assertIn("  evicted   plate  id-1  a shape handed over: no script to rerun", text.splitlines())
+            {"id": "id-1", "name": "plate", "state": "unsaved", "kind": "shape"}]})
+        self.assertIn("  unsaved   plate  id-1  a shape handed over: no script to rerun", text.splitlines())
 
 
 SCRIPT = """
@@ -189,7 +198,7 @@ from cadgen.engine import model
 pathlib.Path(__file__).with_suffix(".ran").write_text("ran", encoding="utf-8")
 
 
-@model{store}
+@model
 def {name}():
     return bd.Box(3, 2, 1)
 """
@@ -305,9 +314,9 @@ class LifetimeDaemonTest(unittest.TestCase):
         return await_(lambda: (lambda row: row if row.get("state") == state else None)(found()),
                       f"{ident} {state}") if state else found()
 
-    def built(self, name: str, store: str = "", env: dict | None = None, script: str = SCRIPT) -> str:
+    def built(self, name: str, env: dict | None = None, script: str = SCRIPT) -> str:
         """``python caller_NAME.py`` builds model ``name`` of ``NAME.py``: its id, once its worker retired."""
-        (self.folder / f"{name}.py").write_text(textwrap.dedent(script.format(name=name, store=store)), encoding="utf-8")
+        (self.folder / f"{name}.py").write_text(textwrap.dedent(script.format(name=name)), encoding="utf-8")
         caller = self.folder / f"caller_{name}.py"
         caller.write_text(textwrap.dedent(CALLER.format(name=name)), encoding="utf-8")
         done = engine_daemon.run([sys.executable, caller.name], cwd=self.folder, env=env or self.env)
@@ -439,35 +448,28 @@ class LifetimeDaemonTest(unittest.TestCase):
         self.assert_documents_worker_alone("hinge.py")
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
 
-    def test_an_evicted_and_an_expired_document_name_their_rebuild_and_nothing_runs_it(self) -> None:
-        # Every document is evicted once drained, and no cache holds it on disk (``test_cache``'s).
-        tiny = {**self.env, "CADGEN_ENGINE_MEMORY_MB": "0.001", "CADGEN_ENGINE_CACHE_GB": "0"}
-        evicted = self.built("arm", env=tiny)
-        expired = self.built("cell", store='(store="memory")', env=tiny)
+    def test_a_document_no_cache_keeps_names_its_rebuild_and_nothing_runs_it(self) -> None:
+        # Every document leaves memory once drained, and no cache can keep it on disk (``test_cache``'s).
+        tiny = {**self.env, "CADGEN_ENGINE_MEMORY_MB": "0.001", "CADGEN_CACHE_DIR": engine_daemon.unwritable(self.folder)}
+        unsaved = self.built("arm", env=tiny)
         command = f"cadgen run {self.folder / 'arm.py'}"
-        row = self.row(evicted, "evicted")
+        row = self.row(unsaved, "unsaved")
         self.assertEqual(row["rebuild"], command, "the script that defines it, not the program that called it")
-        status, body = self.page(evicted)
-        self.assertEqual((status, body["state"], body["rebuild"]), (404, "evicted", command))
-        inspected = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "inspect", evicted],
+        status, body = self.page(unsaved)
+        self.assertEqual((status, body["state"], body["rebuild"]), (404, "unsaved", command))
+        self.assertEqual(body["error"], f"arm ({unsaved}) is not saved: the engine's cache holds no file of its last "
+                                        f"build; run `{command}` to build it again")
+        inspected = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "inspect", unsaved],
                                       cwd=self.folder, env=self.env)
         self.assertEqual(inspected.returncode, 2, "a document not held is a refusal, not a failure")
         self.assertIn(f"run `{command}`", inspected.stderr)
-        row = self.row(expired, "expired")
-        self.assertEqual(row["rebuild"], f"cadgen run {self.folder / 'cell.py'}")
-        status, body = self.page(expired)
-        self.assertEqual((status, body["state"]), (404, "expired"))
-        self.assertIn("it is kept in memory only", body["error"])
         listed = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "status"], cwd=self.folder, env=self.env)
-        self.assertIn(f"evicted   arm   {evicted}  run `{command}`", listed.stdout)
-        self.assertIn(f"expired   cell  {expired}", listed.stdout)
+        self.assertIn(f"unsaved   arm  {unsaved}  run `{command}`", listed.stdout)
         from cadgen.mcp.server import ToolFailed, _say_not_held
 
-        with self.assertRaisesRegex(ToolFailed, "kept in memory only"):
-            _say_not_held(expired)
+        with self.assertRaisesRegex(ToolFailed, f"run `{command}`"):
+            _say_not_held(unsaved)
         self.assertFalse((self.folder / "arm.ran").exists(), "nothing ran the script to restore it")
-        self.assertFalse((self.folder / "cell.ran").exists())
-
 
 if __name__ == "__main__":
     unittest.main()

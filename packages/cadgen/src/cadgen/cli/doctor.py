@@ -48,6 +48,7 @@ stdlib-only on purpose: this must work when the heavy dependency set is broken.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -205,7 +206,6 @@ def _setup() -> list[str]:
         said = {setup.OK: "OK", setup.NEWER: "OK (a later cadgen's)",
                 setup.FOREIGN: "is not cadgen's (left alone): remove it to run cadgen +<version> by it",
                 setup.MISSING: "missing", setup.STALE: "stale"}[status]
-        import os
 
         folder = os.path.dirname(path)
         # The folder off PATH: the command is there, but the shell does not find it by its name.
@@ -225,6 +225,33 @@ def _setup() -> list[str]:
     except Exception as error:  # noqa: BLE001 - a report line, never a reason for the report to fail
         lines.append(f"registry unknown ({type(error).__name__}: {error})")
     return lines
+
+
+def _cache() -> str:
+    """The engine's document cache, as ``cadgen status`` says it (``cache_text``): its folder and the
+    documents and bytes it keeps -- each file a record names (one no record names is a leftover,
+    ``_leftovers``) -- counted from the folders (a listing and a stat each), no engine asked. Nothing
+    removes them but a person's delete."""
+    from cadgen.engine.cache import FILE
+    from cadgen.engine.cli import cache_text
+    from cadgen.engine.ids import is_id
+    from cadgen.engine.registry import DOCUMENTS, RECORD
+    from cadgen.viewer.recents import cache_dir, state_dir
+
+    try:
+        root, state = cache_dir(), state_dir()
+        count = size = 0
+        for name in sorted(os.listdir(root / DOCUMENTS)) if (root / DOCUMENTS).is_dir() else []:
+            if not is_id(name) or not (state / DOCUMENTS / name / RECORD).is_file():
+                continue
+            try:
+                size += (root / DOCUMENTS / name / FILE).stat().st_size
+            except OSError:
+                continue
+            count += 1
+        return cache_text(root, count, size)
+    except Exception as error:  # noqa: BLE001 - a report line, never a reason for the report to fail
+        return f"unknown ({type(error).__name__}: {error})"
 
 
 def _leftovers():
@@ -377,6 +404,8 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     # Its record and the command the skills run it by (`cadgen._internal.installations`).
     for line in _setup():
         sys.stdout.write(f"  {line}\n")
+    # The engine's document cache: what it keeps, until a person deletes it.
+    sys.stdout.write(f"  cache    {_cache()}\n")
     # What --prune would remove: nothing is removed without it.
     for line in _report_leftovers():
         sys.stdout.write(f"  {line}\n")

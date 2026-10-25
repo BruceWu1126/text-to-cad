@@ -438,7 +438,7 @@ class JointMemoTest(_Folder):
 
         # A joint on a part keys the compound that holds it: an unchanged build replays the body
         # (the whole-model skip of a warm worker, held by test_previous, set aside to see it).
-        skip = mock.patch.object(engine_build, "_as_built", return_value=False)
+        skip = mock.patch.object(engine_build, "_previous", return_value=({"used": False, "reason": "set aside"}, None))
         skip.start()
         self.addCleanup(skip.stop)
         self.hinge()

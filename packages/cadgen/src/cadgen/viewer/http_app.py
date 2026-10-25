@@ -612,13 +612,14 @@ class CadApp:
     def _recents_payload(self) -> dict:
         # Recents, the registry's view (``recents.py``): the CAD files the viewer opens, and the models.
         return {"recents": [entry.public() for entry in self.recents.list()
-                            if entry.kind == "model" or extension_of(entry.path) in VIEWER_EXTENSIONS]}
+                            if entry.kind != "file" or extension_of(entry.path) in VIEWER_EXTENSIONS]}
 
     def _change_recents(self, payload) -> dict:
         """A change to the library -- ``{action, path, png?}``, a file by its absolute path, a model by
         its id (its entry's ``path``) -- answered with the library as it now is. A file opened is
         also counted for analytics; a model's entry is the engine's, written when it builds, so only
-        pinning, its picture and its removal change it."""
+        pinning, its picture and its deletion (``delete``: the document, ``delete_document``) change
+        it. A file's entry is removed (``remove``), its file untouched."""
         from .recents import thumbnail_png
 
         if type(payload) is not dict:
@@ -628,8 +629,8 @@ class CadApp:
             ident = payload["path"]
             if action in ("pin", "unpin"):
                 self.recents.pin(ident, action == "pin")
-            elif action == "remove":
-                self.recents.remove(ident)
+            elif action == "delete":
+                self.delete_document(ident)
             elif action == "thumbnail":
                 self.recents.thumbnail(ident, thumbnail_png(payload.get("png")))
             elif action != "open":
@@ -654,6 +655,14 @@ class CadApp:
         else:
             raise ValueError(f"unknown recents action {action!r}")
         return self._recents_payload()
+
+    def delete_document(self, ident):
+        """A model's Delete: the one deletion ``cadgen delete`` is too (``cadgen.engine.models.delete``)
+        -- its record and its document in the engine's cache, and, from the engine's own page
+        (``engine_app.ViewerApp``), what the engine holds of it first. Never a file of the person's."""
+        from cadgen.engine.models import delete
+
+        delete(self.recents.registry, ident)
 
     def _handle_thumbnail(self, response, query):
         """A library picture, by the content name the library gives it."""

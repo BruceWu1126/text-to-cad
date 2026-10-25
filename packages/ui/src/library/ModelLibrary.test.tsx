@@ -119,6 +119,20 @@ it('names a card by its file and when it was edited, and switches between a grid
   expect(screen.getByRole('button', { name: 'Remove bracket.step' })).toBeTruthy();
 });
 
+it('deletes a model from its row, in the word Delete, and removes a file from the list, its file kept', async () => {
+  const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
+  const source = library([model('bracket.step'), model('arm', { path: id, kind: 'model' }), model('plate', { path: 'b' + id.slice(1), kind: 'shape' })]);
+  render(<ModelLibrary library={source} layout="list" />);
+  const deleting = await screen.findByRole('button', { name: 'Delete arm' });
+  await act(async () => { fireEvent.click(deleting); });
+  expect(source.change).toHaveBeenLastCalledWith('delete', expect.objectContaining({ path: id }));
+  expect(screen.getByRole('button', { name: 'Delete plate' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Remove arm' })).toBeNull();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Remove bracket.step' })); });
+  expect(source.change).toHaveBeenLastCalledWith('remove', expect.objectContaining({ name: 'bracket.step' }));
+  expect(screen.queryByRole('button', { name: 'Delete bracket.step' })).toBeNull();
+});
+
 it('says how long ago a file changed in the largest unit that is at least one', () => {
   const ago = (seconds: number) => editedLabel(NOW / 1000 - seconds, NOW);
   expect([ago(20), ago(5 * 60), ago(16 * 3600), ago(3 * 86400)]).toEqual(['Edited just now', 'Edited 5m ago', 'Edited 16h ago', 'Edited 3d ago']);
