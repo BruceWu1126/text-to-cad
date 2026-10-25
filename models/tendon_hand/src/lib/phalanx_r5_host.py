@@ -12,14 +12,15 @@ import io
 
 import build123d as bd
 from cadgen import memo
-from OCP.STEPControl import STEPControl_Reader
-from OCP.TopoDS import TopoDS
 
 from lib.phalanx_continuous_r5 import make_phalanx as make_continuous
 
 
 @memo
 def warm_host():
+    from OCP.STEPControl import STEPControl_Reader
+    from OCP.TopoDS import TopoDS
+
     buffer = io.BytesIO()
     bd.export_step(make_continuous(45, 18, label="middle_proximal_frame"), buffer)
     buffer.seek(0)

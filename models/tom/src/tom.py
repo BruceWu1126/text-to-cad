@@ -29,9 +29,6 @@ def kinematics():
     return with_audited_limits(rezeroed_kinematics(configuration()['final']))
 
 
-KINEMATICS=kinematics()
-
-
 # The occurrence ids the old showcase clips addressed are still pinned and checked below;
 # the clips play control/ik/showcase.py's validated performances on the joints
 # (lib/tom_showcase.py).
@@ -39,17 +36,18 @@ KINEMATICS=kinematics()
 def tom():
     # Imported stock is read once. The stock recipe retains vendor BREP and
     # combines layout transforms without building intermediate native arms.
+    mates=kinematics()
     stock=component_stock(tom2_symmetric_yokes())
     arm=posed_at_zero(build_current_arm(stock),configuration()['final'])
     check_occurrence_ids(arm)
     # Finished parts: their materials, then the mates (at joint zero) as joints.
     finishes=apply_materials(arm)
-    joints=author_joints(arm,KINEMATICS)
+    joints=author_joints(arm,mates)
     print(f"tom: materials {finishes}; joints placed {len(joints['placed'])}, "
           f"unplaced {joints['unplaced']}, missing {joints['missing']}",file=sys.stderr,flush=True)
     # The mates' presets and the showcase's clips, by joint label (the mates' names).
-    add_poses(arm,KINEMATICS)
-    return add_clips(arm,KINEMATICS)
+    add_poses(arm,mates)
+    return add_clips(arm,mates)
 
 
 if __name__=='__main__':tom()

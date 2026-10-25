@@ -137,11 +137,12 @@ def _color_key(color):
     return tuple(round(float(channel), 5) for channel in bd.Color(color))
 
 
-_MATERIAL_BY_COLOR = {_color_key(color): material for material, color in MATERIAL_COLORS.items()}
+def _material_by_color():
+    return {_color_key(color): material for material, color in MATERIAL_COLORS.items()}
 
 
-def material_of(part) -> str:
-    material = _MATERIAL_BY_COLOR.get(_color_key(part.color))
+def material_of(part, by_color=None) -> str:
+    material = (by_color or _material_by_color()).get(_color_key(part.color))
     if material is None:
         raise ValueError(f"{part.label!r} has no named radial material for colour {part.color}")
     return material
@@ -156,8 +157,9 @@ def material_compound(parts, label, finishes):
     compounds) for its decorator's `materials=` to target; a material is set on the
     part itself here, so the leaves sit directly under the system."""
     grouped: dict[str, list] = {}
+    by_color = _material_by_color()
     for part in parts:
-        grouped.setdefault(material_of(part), []).append(part)
+        grouped.setdefault(material_of(part, by_color), []).append(part)
     labels = [p.label for p in parts]
     if any(not l for l in labels):
         raise ValueError(f"{label}: unlabelled leaf")
