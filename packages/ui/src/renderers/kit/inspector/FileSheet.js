@@ -3,19 +3,9 @@ import { Children, useEffect, useId, useRef, useState } from "react";
 import { cn } from "@text-to-cad/ui/utils";
 import { Checkbox } from "@text-to-cad/ui/primitives/checkbox";
 import { ColorPicker } from "@text-to-cad/ui/primitives/color-picker";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue
-} from "@text-to-cad/ui/primitives/select";
 
 export const FILE_SHEET_CONTROL_ROW_CLASSES = "space-y-1 px-2";
 export const FILE_SHEET_ROW_STACK_CLASSES = "space-y-3";
-export const FILE_SHEET_INLINE_CONTROL_ROW_CLASSES = "px-2";
 // Section headers sit at the navbar's size (12px, normal weight) — a sheet's headings
 // and the chrome above it read as the same level of structure. Row labels stay
 // 11px muted, so a header separates from its rows by both size and colour.
@@ -28,13 +18,6 @@ export const FILE_SHEET_STATUS_TEXT_CLASSES = "px-2 text-tiny leading-4 text-mut
 // through the border instead of truncating.
 const FILE_SHEET_SELECT_TRIGGER_BASE_CLASSES = "!h-7 px-2 !text-tiny overflow-hidden [&_svg]:size-3.5 [&>span]:min-w-0 [&>span]:truncate";
 export const FILE_SHEET_SELECT_TRIGGER_CLASSES = `${FILE_SHEET_SELECT_TRIGGER_BASE_CLASSES} w-full`;
-// Inline triggers hug their value between two fixed bounds: never narrower than
-// the standard control (the 80px value input / colour swatch) so a column of
-// dropdowns, inputs and pickers shares one minimum size, and never wide enough
-// to crowd the label. A percentage max-width cannot be used here — the wrapper
-// is shrink-to-fit, so the percentage resolves against a width the trigger
-// itself determines.
-export const FILE_SHEET_INLINE_SELECT_TRIGGER_CLASSES = `${FILE_SHEET_SELECT_TRIGGER_BASE_CLASSES} w-fit min-w-20 max-w-44`;
 export const FILE_SHEET_VALUE_BADGE_CLASSES = "shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-micro leading-none tabular-nums text-muted-foreground";
 export const FILE_SHEET_VALUE_BADGE_INPUT_CLASSES = [
   "h-7 w-20 shrink-0 rounded-md border border-input bg-transparent px-2 py-1 text-right text-tiny leading-none tabular-nums text-foreground shadow-xs outline-none",
@@ -81,15 +64,6 @@ export function FileSheetSettingRow({ label, children, disabled = false, classNa
     <TooltipHint content={label} overflowOnly><span className={cn(FILE_SHEET_FIELD_LABEL_CLASSES, disabled && "opacity-50")}>{label}</span></TooltipHint>
     <div className="flex min-w-0 items-center gap-1">{children}</div>
   </div>;
-}
-
-export function FileSheetCheckboxRow({ label, checked, onCheckedChange, className, disabled = false }) {
-  return (
-    <label className={cn("flex h-6 items-center gap-2 px-2 text-tiny text-foreground", disabled ? "cursor-default opacity-50" : "cursor-pointer", className)}>
-      <Checkbox aria-label={label} checked={checked} disabled={disabled} onCheckedChange={next => onCheckedChange(next === true)} />
-      <span className="truncate">{label}</span>
-    </label>
-  );
 }
 
 // Figma-like property: the icon/unit carries the visible meaning; its accessible
@@ -344,17 +318,6 @@ export function FileSheetSliderField({ label, value, onValueCommit, valueInputPr
   </FileSheetControlRow>;
 }
 
-export function FileSheetInlineControlRow({ label, children, className }) {
-  return (
-    <div className={cn(FILE_SHEET_INLINE_CONTROL_ROW_CLASSES, className)}>
-      <div className="flex min-h-7 max-w-full items-center justify-between gap-2">
-        <span className={FILE_SHEET_FIELD_LABEL_CLASSES}>{label}</span>
-        <span className="shrink-0">{children}</span>
-      </div>
-    </div>
-  );
-}
-
 // An empty or info line. The one style for every in-sheet message.
 export function FileSheetStatusText({ children, className }) {
   return (
@@ -387,77 +350,6 @@ export function FileSheetFieldGrid({ columns = 2, children, className }) {
     >
       {children}
     </div>
-  );
-}
-
-// The standard select: an inline row, trigger on the control axis; `hideLabel` is the
-// trigger alone, full width, its label its accessible name.
-// Pass triggerContent to replace the plain SelectValue (e.g. a swatch + label).
-export function FileSheetSelectRow({
-  label,
-  value,
-  onValueChange,
-  options,
-  ariaLabel,
-  placeholder,
-  triggerContent,
-  hideLabel = false,
-  triggerClassName,
-  className
-}) {
-  const selectedIcon = options.find(option => option.value === value)?.icon;
-  const select = (
-    <Select value={value} onValueChange={onValueChange}>
-      <TooltipHint content={hideLabel ? ariaLabel || label : undefined}><SelectTrigger
-        size="sm"
-        className={cn(hideLabel ? FILE_SHEET_SELECT_TRIGGER_CLASSES : FILE_SHEET_INLINE_SELECT_TRIGGER_CLASSES, triggerClassName)}
-
-        aria-label={ariaLabel || (typeof label === "string" ? label : undefined)}
-      >
-        {triggerContent ?? (selectedIcon ? <span className="flex min-w-0 items-center gap-1">{selectedIcon}<SelectValue placeholder={placeholder} /></span> : <SelectValue placeholder={placeholder} />)}
-      </SelectTrigger></TooltipHint>
-      <SelectContent>
-        {(() => {
-          // Options may carry a `group`: grouped ones render under SelectGroup headings in
-          // first-appearance order, ungrouped ones (e.g. a leading "None") stay at the top.
-          const renderItem = (option) => (
-            <TooltipHint key={option.value} content={option.title}><SelectItem
-
-              value={option.value}
-              disabled={option.disabled}
-
-              icon={option.icon}
-            >
-              {option.label}
-            </SelectItem></TooltipHint>
-          );
-          const ungrouped = options.filter((option) => !option.group);
-          const groupNames = [...new Set(options.map((option) => option.group).filter(Boolean))];
-          if (!groupNames.length) {
-            return options.map(renderItem);
-          }
-          return (
-            <>
-              {ungrouped.map(renderItem)}
-              {groupNames.map((groupName) => (
-                <SelectGroup key={groupName}>
-                  <SelectLabel className="text-micro uppercase tracking-wide text-muted-foreground">
-                    {groupName}
-                  </SelectLabel>
-                  {options.filter((option) => option.group === groupName).map(renderItem)}
-                </SelectGroup>
-              ))}
-            </>
-          );
-        })()}
-      </SelectContent>
-    </Select>
-  );
-  if (hideLabel) return <div className={cn("min-w-0 px-2", className)}>{select}</div>;
-  return (
-    <FileSheetInlineControlRow label={label} className={className}>
-      {select}
-    </FileSheetInlineControlRow>
   );
 }
 
