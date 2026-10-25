@@ -11,8 +11,8 @@ Usage:
 
 Checks that VERSION contains a valid canonical release version and that every
 skill's SKILL.md names exactly that version: its install command
-(`uvx ... --from cadgen==<version> cadgen doctor`) and its launchers
-(`~/.local/bin/cadgen-<version>`, `~/.local/bin/cadgen-python-<version>`). main is
+(`uvx ... --from cadgen==<version> cadgen doctor`) and the version it runs
+(`cadgen +<version>`, "it says <version> is not installed"). main is
 the source branch AND what installers clone, so a stale pin ships.
 With --incremented-from, also checks that the current version is greater than
 the version at REF (a commit, branch, or release tag -- `v0.5.0` or the bare
@@ -65,7 +65,7 @@ if [ -n "$BASE_REF" ]; then
   "$SCRIPT_DIR/bump-version.sh" --check-incremented-from "$BASE_REF"
 fi
 
-# Every skill's install command and launchers must name THIS version. The release PR
+# Every skill's install command and `cadgen +<version>` must name THIS version. The release PR
 # stamps them (sync-version.mjs) alongside VERSION; another version means the two
 # moved separately.
 stale=0
@@ -76,15 +76,15 @@ while IFS= read -r skill; do
       stale=1
     fi
   done < <(grep -oE -- '--from cadgen==[^[:space:]`]+' "$skill" | sed 's/.*==//')
-  while IFS= read -r launcher; do
-    if [ "$launcher" != "$version" ]; then
-      echo "$skill names the launchers of cadgen $launcher; expected $version" >&2
+  while IFS= read -r named; do
+    if [ "$named" != "$version" ]; then
+      echo "$skill runs cadgen +$named; expected +$version" >&2
       stale=1
     fi
-  done < <(grep -oE -- '~/\.local/bin/cadgen-(python-)?[0-9][^[:space:]`]*' "$skill" | sed -E 's/.*cadgen-(python-)?//')
+  done < <(grep -oE -- '(cadgen \+|it says )[0-9][^[:space:]`)]*' "$skill" | sed -E 's/^(cadgen \+|it says )//')
 done < <(find skills -mindepth 2 -maxdepth 2 -name SKILL.md -type f | sort)
 if [ "$stale" -ne 0 ]; then
   echo "Run node scripts/release/sync-version.mjs to stamp the pins from VERSION." >&2
   exit 1
 fi
-echo "Skill cadgen pins and launchers match VERSION ($version)."
+echo "Skill cadgen pins and versions match VERSION ($version)."

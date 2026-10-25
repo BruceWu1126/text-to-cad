@@ -127,9 +127,10 @@ class VersionSyncMirrorTests(unittest.TestCase):
             # Every cadgen skill's launch command moves with the server's, so they stay one installation.
             skill = (root / "skills/cad/SKILL.md").read_text(encoding="utf-8")
             self.assertIn("--from cadgen==9.9.9 cadgen doctor`", skill)
-            # And so do its launchers, the installation's own commands.
-            self.assertIn("`~/.local/bin/cadgen-9.9.9`", skill)
-            self.assertIn("`~/.local/bin/cadgen-python-9.9.9`", skill)
+            # And so does the version it runs by the `cadgen` command, and the refusal it names.
+            self.assertIn("`cadgen +9.9.9`", skill)
+            self.assertIn("`python` below means `cadgen +9.9.9 run`", skill)
+            self.assertIn("it says 9.9.9 is not installed", skill)
             # So does the turn-off command the README and the docs site print.
             for page in ("README.md", "apps/docs/src/lib/content.ts", "apps/docs/src/app/privacy-policy/page.tsx"):
                 self.assertIn("--from cadgen==9.9.9 cadgen telemetry off", (root / page).read_text(encoding="utf-8"))

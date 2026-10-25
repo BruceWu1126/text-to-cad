@@ -17,16 +17,16 @@ Use this skill for URDF robot-description outputs. Treat URDF work as constraine
 Run cadgen by the launchers its installation publishes, so this skill's commands share
 one installation, and its engine server, with the CAD app's:
 
-- `cadgen` below means `~/.local/bin/cadgen-0.8.0`
-- `python` below means `~/.local/bin/cadgen-python-0.8.0`
+- `cadgen` below means `cadgen +0.8.0` (`~/.local/bin/cadgen +0.8.0` where `~/.local/bin` is not on your PATH)
+- `python` below means `cadgen +0.8.0 run`
 
-If either file is missing (a skills-only install, or a purged uv cache), run
+If `cadgen` is not on your PATH, or it says 0.8.0 is not installed, run
 `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen doctor` once,
-outside any sandbox or with the sandbox's permission: it installs cadgen and publishes the
-launchers. With the CAD app's server running, nothing else needs the sandbox's
-permission: it starts the engine and holds it. Without it, a sandboxed shell cannot start
-the engine; when a command says no engine is running, run `cadgen server` outside the
-sandbox once.
+outside any sandbox or with its permission: it installs cadgen, registers it, writes the
+`cadgen` command and starts the engine. With the CAD app's server running, nothing else
+needs the sandbox's permission: it starts the engine and holds it. Without it, a sandboxed
+shell cannot start the engine; when a command says no engine is running, run `cadgen server`
+outside the sandbox once.
 
 ## Core Rules
 
