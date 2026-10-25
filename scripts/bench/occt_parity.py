@@ -243,7 +243,8 @@ def draw_occt(doc: Path, folder: Path, modes: list[str], cameras: list[str], siz
 # The page (render.html, snapshot-render.js) is built by scripts/bundle/lib/snapshot_runtime.sh into
 # the ignored tmp/bench/snapshot-page, once per run, so it is always the checkout's own scene code;
 # it is read as files and routed to the page's origin, and it reads the document from the engine
-# daemon that serves it. ``cadgen snapshot`` drew mesh files this way before OCCT drew every kind;
+# daemon that serves it: those requests are fetched for the page with the user's token, which the
+# page has no way to send, and answered with the page's origin allowed (the engine sends no CORS). ``cadgen snapshot`` drew mesh files this way before OCCT drew every kind;
 # nothing cadgen ships carries the page now, and this bench builds it for the viewer's side alone.
 
 PAGE_ORIGIN = "http://localhost"
@@ -265,9 +266,10 @@ def _runtime() -> Path:
     return folder
 
 
-def _served(doc: Path) -> str:
-    """The document's API URL on the engine daemon, which serves and meshes it."""
-    from urllib.parse import parse_qs, urlparse
+def _served(doc: Path) -> tuple[str, str]:
+    """The document's API URL on the engine daemon, which serves and meshes it, and the token its
+    requests carry."""
+    from urllib.parse import urlparse
     from urllib.request import Request, urlopen
 
     from cadgen.engine.client import request
@@ -276,13 +278,14 @@ def _served(doc: Path) -> str:
     if not answer or "failed" in answer:
         raise RuntimeError(f"the engine would not serve {doc.name}: {(answer or {}).get('failed', 'no daemon')}")
     parsed = urlparse(answer["url"])
-    url = f"{parsed.scheme}://{parsed.netloc}/api/doc/{parse_qs(parsed.query)['doc'][0]}"
-    with urlopen(Request(f"{url}/mesh", method="POST"), timeout=900) as done:  # noqa: S310 - the engine, on loopback
+    url = f"{parsed.scheme}://{parsed.netloc}/api/doc/{answer['doc']}"
+    headers = {"Authorization": f"Bearer {answer['token']}", "x-cadgen-viewer": "1"}
+    with urlopen(Request(f"{url}/mesh", data=b"", method="POST", headers=headers), timeout=900) as done:  # noqa: S310 - the engine, on loopback
         done.read()
-    return url
+    return url, answer["token"]
 
 
-def _page(job: dict[str, Any], size: tuple[int, int]) -> dict[str, Any]:
+def _page(job: dict[str, Any], size: tuple[int, int], token: str) -> dict[str, Any]:
     """The snapshot page's answer to ``job`` (its PNGs as data URLs), in a headless Chromium."""
     from urllib.parse import urlparse
 
@@ -299,6 +302,10 @@ def _page(job: dict[str, Any], size: tuple[int, int]) -> dict[str, Any]:
         kind = "text/html" if found.suffix == ".html" else "text/javascript"
         handle.fulfill(status=200, content_type=kind, body=found.read_bytes(), headers={"cache-control": "no-store"})
 
+    def engine(handle: Any) -> None:
+        answer = handle.fetch(headers={**handle.request.headers, "authorization": f"Bearer {token}"})
+        handle.fulfill(response=answer, headers={**answer.headers, "access-control-allow-origin": PAGE_ORIGIN})
+
     args = ["--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,"
             "PrivateNetworkAccessRespectPreflightResults,PrivateNetworkAccessChecks,LocalNetworkAccessChecks",
             *(["--use-angle=metal"] if sys.platform == "darwin" else [])]
@@ -307,6 +314,8 @@ def _page(job: dict[str, Any], size: tuple[int, int]) -> dict[str, Any]:
         try:
             page = browser.new_context(viewport={"width": size[0], "height": size[1]}, device_scale_factor=1).new_page()
             page.route(f"{PAGE_ORIGIN}/**", route)
+            engine_origin = urlparse(str(job["resolved"]["url"]))
+            page.route(f"{engine_origin.scheme}://{engine_origin.netloc}/**", engine)
             page.goto(f"{PAGE_ORIGIN}/render.html", wait_until="load", timeout=300_000)
             page.wait_for_function("typeof window.__snapshotRender === 'function'", timeout=300_000)
             result = page.evaluate("(job) => window.__snapshotRender(job)", job)
@@ -319,14 +328,14 @@ def _page(job: dict[str, Any], size: tuple[int, int]) -> dict[str, Any]:
 
 def draw_chromium(doc: Path, folder: Path, modes: list[str], cameras: list[str], size: tuple[int, int],
                   preview: bool = False) -> None:
-    url = _served(doc.resolve())
+    url, token = _served(doc.resolve())
     for mode in [*modes, *(["preview"] if preview else [])]:
         outputs = [{"path": str(folder / f"{mode}-{camera}-chromium.png"), "width": size[0], "height": size[1],
                     "camera": camera} for camera in cameras]
         job = {"kind": "xbf", "mode": "view", "display": {"mode": "solid" if mode == "preview" else mode},
                "outputs": outputs, "resolved": {"kind": "xbf", "url": url, "inputPath": str(doc)},
                **({"preview": True} if mode == "preview" else {})}
-        result = _page(job, size)
+        result = _page(job, size, token)
         for output, drawn in zip(outputs, result["outputs"]):
             Path(output["path"]).write_bytes(base64.b64decode(str(drawn["dataUrl"]).partition(",")[2]))
 
