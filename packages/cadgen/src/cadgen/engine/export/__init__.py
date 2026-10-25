@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from cadgen.engine.atomic_replace import replace_atomic, staging
+from cadgen.engine.atomic_replace import land, staging
 
 __all__ = ["KINDS", "ExportRefused", "Kind", "Source", "View", "kind_of", "refused", "translate"]
 
@@ -334,7 +334,10 @@ def _instances(node: dict[str, Any]) -> list[int]:
 
 def translate(document: Any, kind: str | None, path: Any) -> int:
     """Write ``document`` (a ``Source``, or the path of an ``.xbf``/``.step`` or a mesh file) to ``path``
-    as ``kind`` (from the suffix when None); returns the file's size."""
+    as ``kind`` (from the suffix when None); returns the file's size. The translation lands only where
+    the file does not hold its bytes already (``land``): a file written again the same is left as it
+    is. Every declared file is written this way too, after the build or the take-up that made its
+    document (``build``)."""
     path = Path(path)
     kind = kind or kind_of(path)
     if kind not in KINDS:
@@ -360,5 +363,5 @@ def translate(document: Any, kind: str | None, path: Any) -> int:
     with staging(path) as temporary:
         spec.write(view, temporary)
         size = temporary.stat().st_size
-        replace_atomic(temporary, path)
+        land(temporary, path)
     return size

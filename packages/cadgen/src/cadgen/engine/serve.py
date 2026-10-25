@@ -361,10 +361,10 @@ class Pressure:
 
 
 class NotHeld(ValueError):
-    """A document the engine knows but no longer holds: its ``state`` (``evicted``, ``detached``)
+    """A document the engine knows but no longer holds: its ``state`` (``unsaved``, ``detached``)
     and the command that builds it again (``rebuild``), which the engine never runs."""
 
-    def __init__(self, text: str, state: str = "evicted", rebuild: str | None = None) -> None:
+    def __init__(self, text: str, state: str = "unsaved", rebuild: str | None = None) -> None:
         super().__init__(text)
         self.state, self.rebuild = state, rebuild
 
@@ -1524,7 +1524,7 @@ class Server:
             self.error(handler, 404, "not found")
         except (BrokenPipeError, ConnectionResetError):
             pass
-        except NotHeld as error:  # its worker gone and its bytes evicted: the command that builds it again
+        except NotHeld as error:  # no worker, no bytes, no cache file: the command that builds it again
             self.send(handler, 404, json.dumps(error.payload()).encode(), "application/json")
         except ValueError as error:  # a pose refused by name (``mechanism.KinematicsError``), a body not JSON
             self.error(handler, 400, str(error))

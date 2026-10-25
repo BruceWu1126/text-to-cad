@@ -35,7 +35,7 @@ files its bodies read (the closure's own digests), which is what staleness compa
 Read: at start the daemon indexes which records have a cache file (``Cache.ensure_index``: a listing
 and a stat each, no record and no byte read). A document with one answers every verb by loading its
 bytes through the documents worker, as a held document does. A run reads it too: a build is handed
-the folder (``folder``), and a fresh worker takes a model with no file from its cache file when the
+the folder (``folder``), and a fresh worker takes any model from its cache file when the
 key it holds is the model's (``build._previous``), with nothing run.
 
 Kept: nothing removes a cache file on its own -- no size cap, no least recently used, no age. A
@@ -175,7 +175,7 @@ class Cache:
 
     def folder(self) -> str | None:
         """The folder the documents' cache files are in (``documents/`` of the cache folder), which a
-        build is handed: a fresh worker takes a model with no file of its own from its cache file
+        build is handed: a fresh worker takes a model, whatever files it declares, from its cache file
         when it holds the key the model has now (``build._previous``). None with no cache."""
         from cadgen.engine.registry import DOCUMENTS
 

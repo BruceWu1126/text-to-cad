@@ -13,6 +13,10 @@ and a ``5`` with no file at the target, surfaces at once. Off Windows this is ``
 
 It is cadgen's own policy (``cadgen._internal.atomic_replace``, whose docstring has the
 measurements) kept in the engine because the engine imports nothing of cadgen outside itself.
+
+A declared or exported file lands through ``land``: moved into place only when the file there does
+not hold its bytes already, so writing the same translation twice writes it once and an unchanged
+file keeps its bytes and its time.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
+import stat
 import tempfile
 import time
 from pathlib import Path
@@ -65,6 +70,25 @@ def staging(target: Path | str) -> Iterator[Path]:
         yield folder / target.name
     finally:
         shutil.rmtree(folder, ignore_errors=True)
+
+
+def land(source: Path | str, target: Path | str) -> bool:
+    """``source`` moved over ``target`` (``replace_atomic``), unless ``target`` is a file holding
+    ``source``'s bytes already: then it is left as it is, untouched. Whether it was written."""
+    try:
+        there = os.stat(target)
+    except OSError:
+        there = None
+    if there is not None and stat.S_ISREG(there.st_mode) and there.st_size == os.stat(source).st_size:
+        with open(source, "rb") as one, open(target, "rb") as two:
+            while True:
+                a, b = one.read(1 << 22), two.read(1 << 22)
+                if a != b:
+                    break
+                if not a:
+                    return False
+    replace_atomic(source, target)
+    return True
 
 
 def replace_atomic(source: Path | str, target: Path | str) -> None:

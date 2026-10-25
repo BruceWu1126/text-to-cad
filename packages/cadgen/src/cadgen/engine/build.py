@@ -6,8 +6,9 @@ too: an edit anywhere in the model's code is read; one run's later calls reuse a
 whose files stand, ``_Load``), runs each model named, or every
 model the script defines, in one memo run, and then, outside the run, makes each
 result a document (``document.collect``), names its parts' elements from the run's
-history, writes the xbf when its content changed, and writes the exports in order:
-those files and nothing else. Every model that ran writes its files: each target, and
+history, and writes its declared files in order, each exactly an export of the document
+(``_outputs``): translated, compared with the file, and written only where it differs or is
+missing -- those files and nothing else. Every model that ran writes its files: each target, and
 then each child model its run ran, from the child's own document (its result as its body
 returned it, its closure its own script's), once a build, its report under the target's
 (``child_models``). A model whose body raises reports the error with the model's own
@@ -17,15 +18,14 @@ What this process remembers between builds is in memory only: per part ``TShape`
 its element names and its geometry key; per model, the document it last wrote, kept
 (``document.Kept``). A part a warm build hands back unchanged (the memo's hit is the same
 object) is neither named nor keyed again; a document whose every part, placement, name
-and colour is what the file already holds is not touched or rewritten; and any other
-document is the kept one patched, only its changed prototypes made again.
+and colour is what the kept one holds is not made again; and any other document is the
+kept one patched, only its changed prototypes made again.
 
-Before a model's body runs or is replayed, its xbf is asked (``previous``): an xbf holding
-the key the model has now is what the body would make, and the body is not run, nor any
-file written. A warm worker asks its own record of the document it built and left as it
-stands; a body the memo could replay is replayed only when a file of the model's last
-build here moved or is gone. A model with no file has the engine's cache of its document in
-its xbf's place, which a fresh worker takes as it takes an xbf.
+Before a model's body runs or is replayed, its document is asked (``_previous``): one holding
+the key the model has now is what the body would make, and the body is neither run nor
+replayed. A warm worker asks its own record of the document it built or took; a fresh one, the
+engine's cache file of it -- every model alike, whatever files it declares, which play no part:
+a model taken still writes them, from the document taken (``_taken_outputs``).
 """
 
 from __future__ import annotations
@@ -68,13 +68,14 @@ class _Written:
     kept: Any = None
     # The build closure the file holds (``previous.manifest``, as text), or None.
     record: str | None = None
-    # Per derived file this process wrote: the document's signature and the kind it was
-    # written with, and its stat as written. The same three again: the file is kept.
-    files: dict[str, tuple] | None = None
     # The tree the kept document was made from: what a derived file is translated from.
     tree: Any = None
     # The document's bytes as taken from the engine's cache (``_previous``): what it answers with.
     data: bytes | None = None
+    # A model declaring an xbf: the document's xbf bytes as its build made them, before any export
+    # (a mesh export leaves the shapes meshed, which a later serialisation would write too): what
+    # its declared xbf is written from on every run, and what the engine's cache keeps of it.
+    xbf: bytes | None = None
 
 
 @dataclass
@@ -363,7 +364,7 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
     Each top-level report carries that same request-wide profile, never a cached profile.
     ``run`` names the calling process's run: its later calls may be served from this one's load
     (``_Load``); None loads the script afresh. ``cache`` is the engine's cache of documents (the
-    daemon's ``documents`` folder there), which a model with no file of its own is taken from when
+    daemon's ``documents`` folder there), which every model is taken from when
     it holds the key the model has now (``_previous``).
     """
     if not profile:
@@ -567,6 +568,14 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
         if result is not None:
             report["timings"] = {"load": round(load_seconds, 4), "body": round(body, 4)}
             _written(model, result, run, report, log, model.plan(), context)
+        elif report.get("ok") and (report.get("cache") or {}).get("used"):
+            # Taken from its key, nothing run: its declared files are exports of the document taken.
+            try:
+                _taken_outputs(model, report, log)
+            except Exception as error:  # noqa: BLE001 - a file that cannot be written is the build's error
+                report["ok"] = False
+                report["error"] = "".join(traceback.format_exception_only(type(error), error)).rstrip()
+                report["trace"] = traceback.format_exc()
         # Each child that ran writes the files it declares, from its own document, after its
         # target's: its report is the target's, under its identity (``child_models``).
         for child, made in children:
@@ -718,80 +727,99 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
 
 def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str, Any],
            log: Callable[[str], None]) -> None:
-    """The model's files: the xbf first -- saved, and the viewer woken with it, before any
-    derived file is written -- then each derived file, translated from the document
-    (``export.translate``). A file whose document and stat are what this process left is
-    kept, not rewritten; the xbf is not rewritten when its bytes are the file's."""
+    """The model's document, kept in memory -- made again only when it changed, or when none is
+    held: a build always leaves its document there, for the exports asked of it later -- then its
+    declared files, each an export of it (``_outputs``)."""
     from cadgen.engine import document
 
     timings = report["timings"]
     key = f"{model.script}::{model.name}"
     remembered = _WRITTEN.get(key)
-    stats = {str(target.path): _stat(target.path) for target in plan}
-    files = dict((remembered.files or {}) if remembered is not None else {})
     same = remembered is not None and remembered.signature == signature
-
-    def current(target: Any) -> bool:
-        stat = stats[str(target.path)]
-        if not same or stat is None:
-            return False
-        if target.kind == "xbf":
-            return remembered.stats.get(str(target.path)) == stat
-        return files.get(str(target.path)) == (signature, target.kind, stat)
-
-    stale = [target for target in plan if not current(target)]
-    written: dict[str, Any] = {}
-    for target in plan:
-        if target not in stale:
-            written[str(target.path)] = {"kind": target.kind, "written": False, "seconds": 0.0,
-                                         "bytes": stats[str(target.path)][1]}
     kept = remembered.kept if remembered is not None and remembered.kept is not None else None
-    # The document is made again when it changed, when its xbf is written, or when none is
-    # held: a build always leaves its document in memory, for the exports asked of it later.
-    if not same or kept is None or kept.doc is None or any(target.kind == "xbf" for target in stale):
+    if not same or kept is None or kept.doc is None:
         clock = time.perf_counter()
         kept = kept if kept is not None else document.Kept()
         _say("stage", "document")
         doc = document.to_xcaf(tree, kept)
         timings["document"] = round(time.perf_counter() - clock, 4)
         report["converted"] = {"prototypes": len(tree.order), "converted": kept.converted, "patched": kept.patched}
+        made_from = tree
     else:
-        doc = kept.doc
-    if stale:
-        xbf = next((target.path for target in plan if target.kind == "xbf"), None)
-        source = None
-        for target in stale:
-            clock = time.perf_counter()
-            _say("writing", target.path)
-            if target.kind == "xbf":
-                # A file this process did not write as it stands -- in a fresh process, one it
-                # took, one another worker wrote (a child's, which its parent's build writes
-                # too) -- is compared with what it made: the same bytes are not written again.
-                # A save tells the viewer before the build goes on (``worker``).
-                theirs = remembered is None or remembered.kept is None or \
-                    remembered.stats.get(str(target.path)) != stats[str(target.path)]
-                fresh, size = document.save(doc, target.path, compare=theirs)
-            else:
-                from cadgen.engine import export
+        # The kept document, and the tree it was made from.
+        doc, made_from = kept.doc, remembered.tree
+    xbf = next((target.path for target in plan if target.kind == "xbf"), None)
+    # Its xbf bytes, serialised before any export touches its shapes: made again with the document.
+    data = None
+    if xbf is not None:
+        data = remembered.xbf if same and remembered is not None and remembered.xbf is not None else \
+            document.to_bytes(doc, [part.shape for part in made_from.parts])
+    sources: list[Any] = []
 
-                if source is None:
-                    source = export.Source.built(doc, tree, xbf)
-                size = export.translate(source, target.kind, target.path)
-                # A writer that found its bytes in the file left it there (a DXF): kept.
-                now = _stat(target.path)
-                fresh = now != stats[str(target.path)]
-                files[str(target.path)] = (signature, target.kind, now)
-            seconds = time.perf_counter() - clock
-            timings[target.kind] = round(seconds, 4)
-            written[str(target.path)] = {"kind": target.kind, "written": fresh, "seconds": round(seconds, 4),
-                                         "bytes": size}
-            log(f"{'wrote' if fresh else 'kept'} {_shown(target.path, None)} ({size / 1e6:.1f} MB) in {seconds:.2f}s")
+    def source() -> Any:
+        from cadgen.engine import export
+
+        if not sources:
+            sources.append(export.Source.built(doc, tree, xbf))
+        return sources[0]
+
+    _outputs(plan, report, log, lambda path: document.write_bytes(path, data or b"", made_from), source, kept=True)
     _WRITTEN[key] = _Written(signature, {str(target.path): _stat(target.path) for target in plan}, kept, tree.closure,
-                             files, tree)
-    report["files"] = {str(target.path): written[str(target.path)] for target in plan}
+                             made_from, xbf=data)
     report["id"] = model.id
     report["source"] = {"script": str(model.script), "name": model.name}
     report["key"] = model.key
+
+
+def _outputs(plan: list, report: dict[str, Any], log: Callable[[str], None],
+             save: Callable[[Path], tuple[bool, int]], source: Callable[[], Any], kept: bool = False) -> None:
+    """A model's declared files, each exactly an export of its document appended to the run: the xbf
+    first (``save``: the document's own bytes, and the viewer woken with it, before any derived file
+    is written), then each derived file translated from the document (``source``:
+    ``export.translate``) -- every one landed only where the file does not hold its bytes already
+    (``atomic_replace.land``), as ``cadgen export`` writes. Nothing remembers what was written: every
+    run that reaches a declared file translates it and compares, so a file someone deleted or edited
+    is written again from the document, and one nobody touched keeps its bytes and its time. The
+    report's ``files``: each file's kind, whether it was written, the seconds and its bytes. ``log``
+    hears each file written, and each one kept too when ``kept`` (a build's; a take says only what it
+    wrote, its run line the rest)."""
+    from cadgen.engine import export
+
+    timings = report.setdefault("timings", {})
+    written: dict[str, Any] = {}
+    for target in sorted(plan, key=lambda target: target.kind != "xbf"):
+        clock = time.perf_counter()
+        before = _stat(target.path)
+        _say("writing", target.path)
+        if target.kind == "xbf":
+            fresh, size = save(target.path)
+        else:
+            size = export.translate(source(), target.kind, target.path)
+            fresh = _stat(target.path) != before
+        seconds = time.perf_counter() - clock
+        timings[target.kind] = round(seconds, 4)
+        written[str(target.path)] = {"kind": target.kind, "written": fresh, "seconds": round(seconds, 4), "bytes": size}
+        if fresh or kept:
+            log(f"{'wrote' if fresh else 'kept'} {_shown(target.path, None)} ({size / 1e6:.1f} MB) in {seconds:.2f}s")
+    report["files"] = {str(target.path): written[str(target.path)] for target in plan}
+
+
+def _taken_outputs(model: Any, report: dict[str, Any], log: Callable[[str], None]) -> None:
+    """A model taken from its key (``_previous``) writes its declared files as an export of the
+    document taken, its body not run (``_outputs``): from the document this worker holds, or the
+    bytes the engine's cache gave it (the xbf those bytes themselves)."""
+    from cadgen.engine import document
+
+    plan = model.plan()
+    name = f"{model.script}::{model.name}"
+    written = _WRITTEN[name]
+    if any(target.kind == "xbf" for target in plan) and written.xbf is None and written.data is None:
+        # Taken by a worker that built it when it declared no xbf: its bytes, made now.
+        written.xbf = document.to_bytes(written.kept.doc, [part.shape for part in written.tree.parts])
+    data = written.xbf if written.xbf is not None else written.data or b""
+    _outputs(plan, report, log, lambda path: document.write_bytes(path, data, written.tree),
+             lambda: held(model.script, model.name))
+    written.stats = {str(target.path): _stat(target.path) for target in plan}
 
 
 def held(script: Path | None = None, name: str | None = None, *, path: Path | None = None) -> Any:
@@ -826,10 +854,13 @@ def held(script: Path | None = None, name: str | None = None, *, path: Path | No
 
 def taken(script: Path, name: str) -> bytes | None:
     """The bytes model ``name`` of ``script`` was taken from the engine's cache with, while this
-    process holds it as taken (``_previous``); None for one it built, or holds none of. A document
-    read is never written again (**Build closure**): what is asked of it whole is these bytes."""
+    process holds it as taken (``_previous``), else the xbf bytes its build made of it (a model that
+    declares an xbf: ``_Written.xbf``); None for any other, or one it holds none of. A document read
+    is never written again (**Build closure**): what is asked of it whole is these bytes."""
     written = _WRITTEN.get(f"{canonical(script)}::{name}")
-    return written.data if written is not None else None
+    if written is None:
+        return None
+    return written.data if written.data is not None else written.xbf
 
 
 # The held documents this process read last, by their bytes' digest and name: an export, a snapshot
@@ -905,21 +936,14 @@ def _identity(name: str) -> str:
 
 
 def _previous(model: Any, context: Any, shown: str, cache: str | None = None) -> tuple[dict, dict | None]:
-    """The model's previous document asked before its body runs (``previous``): the
-    verdict, and the model's report where the document is what the body would make -- the
-    key the model has now is the one the document holds -- so the body is not run and the
-    files are left as they are. A warm worker asks its own record of the document it built,
-    as a fresh one asks the file: a body the memo could replay is not replayed when the key
-    is unchanged and every file the model's last build here wrote -- its own and its child
-    models' -- is as that build left it; a file moved or gone, and it is replayed, as ever.
-
-    A model with no file at all asks its record in memory as one with an xbf does: one this
-    worker built or took, whose key is unchanged, is taken from memory and nothing runs or is
-    replayed. In a fresh worker -- after a restart, or once the script's worker retired -- a
-    ``pointer`` one has the engine's cache of its document (``cache``: ``<id>/document.xbf``
-    there) in its xbf's place, taken when its key is the model's (``"from": "cache"``). A model
-    that declares a file and no xbf is never taken: nothing says its file is the cached
-    revision's."""
+    """The model's previous document asked before its body runs (``previous``): the verdict, and
+    the model's report where the document is what the body would make -- the key the model has now
+    is the one the document holds -- so the body is neither run nor replayed. The key alone decides,
+    asked of this worker's own record of the document it last built or took (``"from": "memory"``),
+    else of the engine's cache file of it (``cache``: ``<id>/document.xbf`` there, ``"from":
+    "cache"``) -- the one take-up of every model, with or without declared files, warm and after a
+    restart. A model's declared files play no part: they are written after it, from the document
+    taken, as an export of it is (``_taken_outputs``)."""
     from cadgen.engine import document, previous
     from cadgen.engine.kernel import memo
 
@@ -927,35 +951,27 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
     xbf = next((Path(path) for kind, path in targets if kind == "xbf"), None)
     name = f"{model.script}::{model.name}"
     remembered = _WRITTEN.get(name)
-    cached = None
-    if xbf is None and (targets or remembered is None):
-        # No xbf, and no record of its own here of a model with no file: the engine's cache of it is
-        # in the xbf's place; a model with a file and no xbf has nothing that says what it was.
-        if targets or cache is None:
-            return {"used": False, "reason": "the model declares no xbf"}, None
-        from cadgen.engine.cache import FILE
-
-        cached = Path(cache) / model.id / FILE
     if not memo.enabled() or os.environ.get("CADGEN_ENGINE_BODIES", "1").strip() == "0":
         return {"used": False, "reason": "retention is off"}, None
     folder = xbf.parent if xbf is not None else model.script.parent  # what the closure's paths are relative to
     clock = time.perf_counter()
-    source = context.source(model)
     always = memo.always()
     impure = sorted(_identity(family) for family in _FAMILIES.get(name, ()) if family in always)
     if impure:
         return {"used": False, "reason": f"it calls {', '.join(impure)}, which a verification found impure"}, None
-    stats = {str(path): _stat(path) for _kind, path in targets}
-    if memo.replayable(name, source) and not _as_built(name, remembered, stats):
-        return {"used": False, "reason": "replayed from memory"}, None
-    where = "memory"
-    if remembered is not None and remembered.stats == stats:
-        # The file this process last wrote or took, as it left it: its record is in memory.
+    cached = None
+    if remembered is not None:
+        where = "memory"  # the document this process last built or took: its record is in memory
         text = remembered.record
         if text is None:
             return {"used": False, "reason": "its last build wrote no key"}, None
-    elif cached is not None:
+    else:
         where = "cache"
+        if cache is None:
+            return {"used": False, "reason": "the engine keeps no cache to take it from"}, None
+        from cadgen.engine.cache import FILE
+
+        cached = Path(cache) / model.id / FILE
         if not cached.is_file():
             return {"used": False, "reason": "the engine's cache holds none of it"}, None
         writer, text = previous.scan(cached)
@@ -963,22 +979,9 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
             return {"used": False, "reason": f"its cache was written by {writer or 'another program'}"}, None
         if text is None:
             return {"used": False, "reason": "its cache holds no key"}, None
-    else:
-        where = "file"
-        if stats[str(xbf)] is None:
-            return {"used": False, "reason": "no file yet"}, None
-        missing = [path for kind, path in targets if kind != "xbf" and stats[str(path)] is None]
-        if missing:
-            return {"used": False, "reason": f"{_shown(Path(missing[0]), xbf.parent)} is missing"}, None
-        writer, text = previous.scan(xbf)
-        # The format, not the release: a cadgen release that leaves the document alone keeps it.
-        if document.written_format(writer) != previous.FORMAT:
-            return {"used": False, "reason": f"written by {writer or 'another program'}"}, None
-        if text is None:
-            return {"used": False, "reason": "the file holds no key"}, None
     found = json.loads(text)
     if found.get("key") is None:
-        return {"used": False, "reason": "the file holds no key"}, None
+        return {"used": False, "reason": "its cache holds no key" if where == "cache" else "its last build wrote no key"}, None
     modules, _unkeyable = context.modules(model)
     now, changes = previous.again(found, model, folder, modules, context.named(model))
     keyed = time.perf_counter()
@@ -987,21 +990,9 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
         shown_changes = changes[:3] + ([f"{len(changes) - 3} more"] if len(changes) > 3 else [])
         return {"used": False, "reason": ", ".join(shown_changes), "changed": changes}, None
     timings = {"key": round(keyed - clock, 4)}
-    if where == "file":
-        # Taken only once it reads whole, written by this engine, holding the record its head showed.
-        try:
-            doc = document._read(xbf)
-            held = previous.read_record(doc)
-        except Exception as error:  # noqa: BLE001 - a document that does not read is built again
-            return {"used": False, "reason": f"the file does not read: {error}"}, None
-        del doc
-        if document.written_format(held[0]) != previous.FORMAT or held[1] != text:
-            return {"used": False, "reason": "the file does not hold the closure its head shows"}, None
-        timings["read"] = round(time.perf_counter() - keyed, 4)
-        _WRITTEN[name] = _Written(("loaded", found["key"]), stats, None, text)
-    elif where == "cache":
-        # Taken as a file is, read whole, and kept as its bytes: a document read is never written
-        # again (the class's note), so what is asked of it is answered from them (``held``).
+    if cached is not None:
+        # Taken read whole, and kept as its bytes: a document read is never written again (the
+        # class's note), so what is asked of it is answered from them (``held``).
         try:
             data = cached.read_bytes()
             doc = document.read_bytes(data)
@@ -1014,7 +1005,7 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
             return {"used": False, "reason": "its cache does not hold the closure its head shows",
                     "unreadable": True}, None
         timings["read"] = round(time.perf_counter() - keyed, 4)
-        _WRITTEN[name] = _Written(("loaded", found["key"]), stats, None, text, data=data)
+        _WRITTEN[name] = _Written(("loaded", found["key"]), {}, None, text, data=data)
     else:
         # What the bodies made stays the memo's, as a replay would keep it: an edit after
         # any number of these builds replays all it leaves alone.
@@ -1028,26 +1019,9 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
                                           if key == model.identity},
                             "reads": {}},
               "children": {}, "bodies": {model.identity: "loaded"}, "cache": {"used": True, "from": where},
-              "timings": timings,
-              # Each file's row as a build's has it, its kind too: what reads the report for the
-              # document (an export, a snapshot) finds the taken xbf by it and reads that file.
-              "files": {str(path): {"kind": kind, "written": False, "seconds": 0.0, "bytes": stats[str(path)][1]}
-                        for kind, path in targets}}
+              "timings": timings, "files": {}}
     report["closure"] = previous.located(found, folder)
     return report["cache"], report
-
-
-def _as_built(name: str, remembered: _Written | None, stats: dict[str, tuple | None]) -> bool:
-    """Whether model ``name``'s last build in this process made the document it holds and
-    left every file as it stands now: the model's own (``stats``) and each child model's
-    its run wrote, which a replay would write again were one moved or gone."""
-    if remembered is None or remembered.kept is None or remembered.record is None or remembered.stats != stats:
-        return False
-    for family in _FAMILIES.get(name, ()):
-        child = _WRITTEN.get(family) if family != name else None
-        if child is not None and any(_stat(Path(path)) != stat for path, stat in child.stats.items()):
-            return False
-    return True
 
 
 def _names(run: Any, part: Any) -> tuple[Any, dict[str, dict[str, Any]], dict[tuple[str, str], str | None]]:

@@ -296,7 +296,7 @@ class HandleTest(unittest.TestCase):
         self.assertEqual(refused.returncode, 2, refused.stderr)
         self.assertIn("a program the engine did not run: no script to rerun", refused.stderr)
         answer = self.ask({"op": "state", "id": ident})
-        self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", None))
+        self.assertEqual((answer["state"], answer["rebuild"]), ("unsaved", None))
 
 
     def test_a_handle_is_posed_where_the_engine_holds_its_mechanism(self) -> None:

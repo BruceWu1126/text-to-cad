@@ -70,6 +70,23 @@ if __name__ == "__main__":
 """
 GOOD = '    print("the body ran", file=sys.stderr)\n    return bd.Box(WIDTH, 2, 1)'
 
+# A model declaring a STEP and no xbf, whose body says on stderr that it ran.
+STEPPED = """
+import sys
+import build123d as bd
+from cadgen.engine import step
+
+
+@step("plate.step")
+def plate():
+    print("the body ran", file=sys.stderr)
+    return bd.Box({width}, 3, 1)
+
+
+if __name__ == "__main__":
+    plate()
+"""
+
 DECLARED = """
 import build123d as bd
 from cadgen.engine import xbf
@@ -487,6 +504,43 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.cache / "documents")), [ident], "a file's document is its own file")
         self.assertEqual(meta["bytes"], self.file(ident).stat().st_size)
 
+    def test_a_model_declaring_a_step_is_taken_by_its_key_after_a_restart_and_its_file_written_from_it(self) -> None:
+        (self.project / "plate.py").write_text(textwrap.dedent(STEPPED.format(width=4)), encoding="utf-8")
+        ident = model_id(self.project / "plate.py", "plate")
+        self.assertIn("the body ran", self.run_script("plate").stderr)
+        declared = self.project / "plate.step"
+        first = declared.read_bytes()
+        self.cached(ident)
+        self.assertNotIn("files", self.record(ident), "nothing records which files a model wrote")
+        self.assertEqual(self.cli("stop").returncode, 0)
+        # Unchanged after a restart: taken by its key, nothing run; its STEP is the document's export, as
+        # `cadgen export` writes it of the document taken (OCCT's xbf read gives a -0. back for a 0.:
+        # the first run after a restart may write it once, the same geometry).
+        done = self.run_script("plate")
+        self.assertIn("took plate.py::plate cold in", done.stdout)
+        self.assertIn("the engine's cache holds the model's key", done.stdout)
+        self.assertNotIn("the body ran", done.stderr)
+        exported = self.folder / "exported.step"
+        self.assertEqual(self.cli("export", ident, str(exported)).returncode, 0)
+        taken = declared.read_bytes()
+        self.assertEqual(taken, exported.read_bytes(), "exactly an export of the document")
+        # Unchanged, it is compared and left as it is: its bytes and its time.
+        stamp = declared.stat().st_mtime_ns
+        done = self.run_script("plate")
+        self.assertIn("took plate.py::plate warm in", done.stdout)
+        self.assertEqual((declared.read_bytes(), declared.stat().st_mtime_ns), (taken, stamp))
+        # Deleted: the next run writes it again from the document, and still runs nothing.
+        declared.unlink()
+        done = self.run_script("plate")
+        self.assertIn("took plate.py::plate warm in", done.stdout)
+        self.assertNotIn("the body ran", done.stderr)
+        self.assertEqual(declared.read_bytes(), taken)
+        # A key change runs the body.
+        (self.project / "plate.py").write_text(textwrap.dedent(STEPPED.format(width=5)), encoding="utf-8")
+        done = self.run_script("plate")
+        self.assertIn("the body ran", done.stderr)
+        self.assertNotEqual(declared.read_bytes(), first)
+
     @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
                      "a read-only folder is POSIX's, and refuses no one running as root")
     def test_with_its_cache_folder_read_only_the_engine_saves_nothing_and_does_everything_else(self) -> None:
@@ -566,7 +620,7 @@ class KeptTest(unittest.TestCase):
         self.assertNotIn("capBytes", status)
         self.assertNotIn("evictions", status)
 
-    def test_a_shape_taken_up_after_a_restart_and_evicted_names_the_program_that_handed_it_over(self) -> None:
+    def test_a_shape_taken_up_after_a_restart_and_unsaved_names_the_program_that_handed_it_over(self) -> None:
         from cadgen.engine import registry as registering
         from cadgen.engine.models import Models as Book
 
@@ -586,7 +640,7 @@ class KeptTest(unittest.TestCase):
             self.assertEqual(book.state(ident), "held")
             book.cache.remove(ident)  # its file gone (its bytes did not read)
             found = book.rebuild(ident)
-        self.assertEqual((found["state"], found["rebuild"]), ("evicted", None))
+        self.assertEqual((found["state"], found["rebuild"]), ("unsaved", None))
         self.assertIn(words, found["error"], "the words its record keeps, not a Python session's")
 
 

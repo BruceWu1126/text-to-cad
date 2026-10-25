@@ -401,10 +401,11 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   (the handle's `.url`). An open page follows every later run; share the link once.
 - **The commands take an id or a file.** `cadgen export`, `cadgen snapshot` and
   `cadgen inspect` read the document as the engine holds it, and never run a script.
-- **The engine never reruns code.** A document it no longer holds (the engine restarted,
-  or it dropped the document to free memory) is answered, by its page, by
+- **The engine never reruns code.** A document it holds no file of any more (its file in the
+  engine's cache deleted by hand, or never saved) is answered, by its page, by
   `cadgen inspect <id>` and by the CAD app, with the command that brings it back:
-  `python <the script>`.
+  `cadgen run <the script>`. A restart or the engine's memory budget never does this: the cache
+  keeps every document.
 - **A viewer link outlives a restart.** The engine keeps one port (3245, or the one
   `CADGEN_ENGINE_PORT` or `--port` names) and one page token per user, so a link works
   across a stop, a crash or a reboot, and an open page reconnects on its own when the engine
@@ -588,8 +589,9 @@ opt in.
   as sRGB: give the hex of what you see (step 6).
 - **A link opens the home instead of the model.** It is a 0.7 or pre-release link
   (`?file=`, `/s/...`). Run the model and use the page it prints.
-- **A page or `cadgen inspect` says the document is not held.** The engine restarted or
-  freed it. Run the command it prints.
+- **A page or `cadgen inspect` says the document is not saved.** Its file in the engine's
+  cache is gone (deleted by hand), or was never written (the cache folder could not be
+  written). Run the command it prints.
 - **The viewer shows an old mechanism or none.** A sidecar is read by nothing: the
   mechanism must be in the model's body (step 4).
 

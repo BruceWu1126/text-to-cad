@@ -24,6 +24,7 @@ import numpy as np
 from cadgen.engine import build as engine_build
 from cadgen.engine import document, mechanism
 from cadgen.engine.export.keys import KEY_DEGREES, KEY_MM
+from tests.python.support import engine_cache
 
 ARM = """
 import math
@@ -301,11 +302,8 @@ class MotionReadsTest(unittest.TestCase):
         self.table(40)
 
     def restart(self) -> None:
-        from cadgen.engine.kernel import memo
-
-        memo.clear()
-        engine_build._WRITTEN.clear()
-        engine_build._PARTS.clear()
+        """A fresh worker: nothing held but what the engine's cache kept (``engine_cache``)."""
+        engine_cache.restart(self.folder / "cache")
 
     def table(self, base: float) -> None:
         path = self.folder / "table.json"
@@ -313,7 +311,8 @@ class MotionReadsTest(unittest.TestCase):
         os.utime(path, ns=(time.time_ns(), time.time_ns()))
 
     def hinge(self, *, verify: bool = False) -> dict:
-        [report] = engine_build.build(self.folder / "hinge.py", ["hinge"], cwd=self.folder, verify=verify)
+        [report] = engine_build.build(self.folder / "hinge.py", ["hinge"], cwd=self.folder, verify=verify,
+                                      cache=str(self.folder / "cache"))
         self.assertTrue(report["ok"], report)
         return report
 
@@ -321,7 +320,7 @@ class MotionReadsTest(unittest.TestCase):
         return document.Loaded(self.xbf).mechanism.motions["table"].keys[0][2]["elbow"][0]
 
     def test_a_file_a_motion_reads_changed_builds_the_model_again(self) -> None:
-        self.assertEqual(self.hinge()["cache"]["reason"], "no file yet")
+        self.assertEqual(self.hinge()["cache"]["reason"], "the engine's cache holds none of it")
         self.assertIn(["read", "../table.json"], [row[:2] for row in document.Loaded(self.xbf).closure["inputs"]])
         self.assertEqual(self.hinge()["cache"], {"used": True, "from": "memory"})
         self.table(45)
@@ -331,7 +330,7 @@ class MotionReadsTest(unittest.TestCase):
                          "the body replayed, and its harvest is not reused: a file its function read changed")
         self.assertEqual(self.first(), 45.0, "sampled again, from the file as it is")
         self.restart()
-        self.assertEqual(self.hinge()["cache"], {"used": True, "from": "file"})
+        self.assertEqual(self.hinge()["cache"], {"used": True, "from": "cache"})
         self.table(50)
         self.assertEqual(self.hinge()["cache"]["reason"], "../table.json changed")
         self.assertEqual(self.first(), 50.0)
@@ -401,6 +400,10 @@ class HarvestKeptTest(unittest.TestCase):
         for clear in (memo.clear, engine_build._WRITTEN.clear, engine_build._PARTS.clear):
             clear()
             self.addCleanup(clear)
+        # Replays are what this class watches: the take of an unchanged model by its key is set aside.
+        aside = mock.patch.object(engine_build, "_previous", return_value=({"used": False, "reason": "set aside"}, None))
+        aside.start()
+        self.addCleanup(aside.stop)
         patch = mock.patch.dict(os.environ)
         patch.start()
         self.addCleanup(patch.stop)
@@ -417,8 +420,8 @@ class HarvestKeptTest(unittest.TestCase):
             os.utime(path, ns=(time.time_ns(), time.time_ns()))
 
     def build(self, ok: bool = True, **values: Any) -> dict:
-        """The hinge built with its files gone, so a body the memo holds is replayed and they are
-        written again (a model with no xbf replays every build: tom)."""
+        """The hinge built with its files gone, so they are written again; a body the memo holds is
+        replayed (the take by its key set aside)."""
         self.write(**values)
         for path in (self.xbf, self.glb):
             path.unlink(missing_ok=True)
@@ -437,7 +440,7 @@ class HarvestKeptTest(unittest.TestCase):
         cold = self.written()
         report = self.build()
         self.assertEqual((report["bodies"], report["harvest"], report["cache"]["reason"]),
-                         ({"hinge.py::hinge": "replayed"}, "reused", "replayed from memory; the harvest reused"))
+                         ({"hinge.py::hinge": "replayed"}, "reused", "set aside; the harvest reused"))
         self.assertEqual(self.written(), cold, "the xbf, the GLB and the served structure are the fresh harvest's")
         nod = document.Loaded(self.xbf).mechanism.motions["nod"].keys
 

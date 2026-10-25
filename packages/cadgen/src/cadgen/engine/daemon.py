@@ -2159,7 +2159,7 @@ class Daemon:
                             order["env"] = request["env"]  # the run's own (``worker.adopt``)
                         cached = self.models.cache.folder()
                         if cached is not None:
-                            order["cache"] = cached  # what a fresh worker takes a model with no file from
+                            order["cache"] = cached  # what a fresh worker takes a model from, by its key
                         server = self.server
                         if server is not None:
                             # The worker sends each served document it builds back as a patch,

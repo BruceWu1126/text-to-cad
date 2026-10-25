@@ -161,10 +161,10 @@ class NotHeldRefusalTest(unittest.TestCase):
         engine.handle({"op": "document", "id": ident}, answers.append)
         (answer,) = answers
         command = f"cadgen run {script}"
-        self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", command))
+        self.assertEqual((answer["state"], answer["rebuild"]), ("unsaved", command))
         error = api._failed(answer)
         self.assertIsInstance(error, NotHeld, "raised as its type: the CLI exits 2 for a ValueError")
-        self.assertEqual((error.state, error.rebuild, str(error)), ("evicted", command, answer["failed"]))
+        self.assertEqual((error.state, error.rebuild, str(error)), ("unsaved", command, answer["failed"]))
         answers.clear()
         engine.handle({"op": "document", "id": model_id(Path("/nowhere/other.py"), "other")}, answers.append)
         self.assertIsInstance(api._failed(answers[0]), NotHeld, "an id it never built is refused the same")
@@ -186,8 +186,8 @@ class StatusTextTest(unittest.TestCase):
         from cadgen.engine.cli import status_text
 
         text = status_text({"pid": 1, "up": 5, "cap": 4, "workers": [], "models": [
-            {"id": "id-1", "name": "plate", "state": "evicted", "store": "shape"}]})
-        self.assertIn("  evicted   plate  id-1  a shape handed over: no script to rerun", text.splitlines())
+            {"id": "id-1", "name": "plate", "state": "unsaved", "store": "shape"}]})
+        self.assertIn("  unsaved   plate  id-1  a shape handed over: no script to rerun", text.splitlines())
 
 
 SCRIPT = """
@@ -451,22 +451,24 @@ class LifetimeDaemonTest(unittest.TestCase):
     def test_a_document_no_cache_keeps_names_its_rebuild_and_nothing_runs_it(self) -> None:
         # Every document leaves memory once drained, and no cache can keep it on disk (``test_cache``'s).
         tiny = {**self.env, "CADGEN_ENGINE_MEMORY_MB": "0.001", "CADGEN_CACHE_DIR": engine_daemon.unwritable(self.folder)}
-        evicted = self.built("arm", env=tiny)
+        unsaved = self.built("arm", env=tiny)
         command = f"cadgen run {self.folder / 'arm.py'}"
-        row = self.row(evicted, "evicted")
+        row = self.row(unsaved, "unsaved")
         self.assertEqual(row["rebuild"], command, "the script that defines it, not the program that called it")
-        status, body = self.page(evicted)
-        self.assertEqual((status, body["state"], body["rebuild"]), (404, "evicted", command))
-        inspected = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "inspect", evicted],
+        status, body = self.page(unsaved)
+        self.assertEqual((status, body["state"], body["rebuild"]), (404, "unsaved", command))
+        self.assertEqual(body["error"], f"arm ({unsaved}) is not saved: the engine's cache holds no file of its last "
+                                        f"build; run `{command}` to build it again")
+        inspected = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "inspect", unsaved],
                                       cwd=self.folder, env=self.env)
         self.assertEqual(inspected.returncode, 2, "a document not held is a refusal, not a failure")
         self.assertIn(f"run `{command}`", inspected.stderr)
         listed = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "status"], cwd=self.folder, env=self.env)
-        self.assertIn(f"evicted   arm  {evicted}  run `{command}`", listed.stdout)
+        self.assertIn(f"unsaved   arm  {unsaved}  run `{command}`", listed.stdout)
         from cadgen.mcp.server import ToolFailed, _say_not_held
 
         with self.assertRaisesRegex(ToolFailed, f"run `{command}`"):
-            _say_not_held(evicted)
+            _say_not_held(unsaved)
         self.assertFalse((self.folder / "arm.ran").exists(), "nothing ran the script to restore it")
 
 if __name__ == "__main__":

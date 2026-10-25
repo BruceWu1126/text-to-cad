@@ -12,7 +12,8 @@ The book is process memory.
 
 What outlives the process is the registry's (``registry``): each ``pointer`` and ``shape`` document
 is recorded there as it is registered (``record``, ``hand_over``), synchronously, so after a restart
-its id is known -- ``evicted``, with the command that builds it again (none for a shape), or
+its id is known -- ``held`` from its cache file, or ``unsaved`` with the command that builds it
+again (none for a shape) when the cache holds no file of it, or
 ``detached`` once its script is gone -- and nothing is run to bring it back. A ``key=`` claims its id
 for one declaration: another declaration's build or hand-over
 of that key is refused, naming the one that holds it (``claimed``). A served
@@ -42,7 +43,19 @@ from typing import Any
 from cadgen.engine.cache import reads as cache_reads
 
 # A document's states, as ``cadgen status`` lists them (``state``).
-STATES = ("live", "held", "building", "failed", "evicted", "detached")
+STATES = ("live", "held", "building", "failed", "unsaved", "detached")
+
+
+def unsaved(name: str, ident: str, command: str | None, shown: str | None = None) -> str:
+    """Why a model document is ``unsaved`` -- held by no worker and in no memory, its file missing from
+    the engine's cache (deleted by hand, or the cache could not be written when it was to be saved),
+    which nothing else empties -- in the words every surface says: with the command that builds it
+    again, or, for a shape handed over (``shown``, the words its record keeps), the program that
+    handed it over."""
+    said = f"{name} ({ident}) is not saved: the engine's cache holds no file of its last "
+    if command is None:
+        return said + f"hand-over, and it is {shown}; run that program again to hand it over again"
+    return said + f"build; run `{command}` to build it again"
 
 
 def delete(held: Any, ident: str, book: "Models | None" = None) -> dict[str, Any] | None:
@@ -324,7 +337,7 @@ class Models:
         return worker is not None and (self.daemon.pool.holds(worker) or worker.alive())
 
     def rebuild(self, ident: str) -> dict[str, Any] | None:
-        """What the engine knows of a model document it does not hold: its state (``evicted``), the
+        """What the engine knows of a model document it does not hold: its state (``unsaved``), the
         command that builds it again -- ``cadgen run`` and the script that defines it -- and why, in
         words (the page's ``error``). None for a document it holds or never built. The engine never
         runs the command."""
@@ -341,13 +354,12 @@ class Models:
             known = self.recorded(ident) if found.get("program") is None else None
             if known is not None:
                 return known  # taken up after a restart (``adopt``): its record's words name the program
-            return {"error": f"{name} ({ident}) is no longer held: it is {self.shown(found.get('program'))}; run "
-                             "that program again to hand it over again", "state": "evicted", "rebuild": None}
+            return {"error": unsaved(name, ident, None, self.shown(found.get("program"))), "state": "unsaved",
+                    "rebuild": None}
         if not Path(found["source"]["script"]).is_file():
             return {"error": f"{name} ({ident}) is detached: {found['source']['script']} is gone, and nothing "
                              "builds it again; delete it from the home", "state": "detached", "rebuild": None}
-        return {"error": f"{name} ({ident}) is no longer held: run `{command}` to build it again",
-                "state": "evicted", "rebuild": command}
+        return {"error": unsaved(name, ident, command), "state": "unsaved", "rebuild": command}
 
     def command(self, ident: str) -> str | None:
         """The command that builds model document ``ident`` again: ``cadgen run`` and the script that
@@ -366,7 +378,8 @@ class Models:
 
     def recorded(self, ident: str) -> dict[str, Any] | None:
         """What the registry knows of a model document this process never built (one built before a
-        restart): ``evicted``, with the command that builds it again, or ``detached`` when its script
+        restart) whose cache file is not there: ``unsaved``, with the command that builds it again, or
+        ``detached`` when its script
         is gone. None for an id it has no model's record of. Nothing is run."""
         from cadgen.engine import registry as registering
 
@@ -376,14 +389,13 @@ class Models:
             return None
         name = found.get("entry") or ident
         if found.get("store") == "shape":
-            return {"error": f"{name} ({ident}) is no longer held: it is {found.get('shown') or self.shown(None)}; "
-                             "run that program again to hand it over again", "state": "evicted", "rebuild": None}
+            return {"error": unsaved(name, ident, None, found.get("shown") or self.shown(None)), "state": "unsaved",
+                    "rebuild": None}
         if registering.detached(held, found):
             return {"error": f"{name} ({ident}) is detached: {registering.home(held, found)} is gone, and nothing "
                              "builds it again; delete it from the home", "state": "detached", "rebuild": None}
         command = registering.command(held, found)
-        return {"error": f"{name} ({ident}) is no longer held: run `{command}` to build it again",
-                "state": "evicted", "rebuild": command}
+        return {"error": unsaved(name, ident, command), "state": "unsaved", "rebuild": command}
 
     def missing(self, ident: str) -> str:
         """Why no document ``ident`` is here, with the command that builds it again where the
@@ -397,7 +409,7 @@ class Models:
 
         found = self.rebuild(ident)
         if found is None:
-            return NotHeld(self.missing(ident), "evicted", None)
+            return NotHeld(self.missing(ident), "unsaved", None)
         return NotHeld(found["error"], found["state"], found["rebuild"])
 
     def drain(self, worker: Any) -> None:
@@ -405,7 +417,8 @@ class Models:
         whole at its version is taken from it -- its ``result``, never meshed, with the whole
         document as xbf bytes (``document.to_bytes``, its animations' record with it) -- so it outlives
         the worker and answers every verb as an on-disk xbf does, and a GLB of it as the build's GLB. A
-        worker that is gone (a crash) drains nothing: its documents the server lacks are evicted."""
+        worker that is gone (a crash) drains nothing: its documents the server and the cache lack are
+        ``unsaved``."""
         server = self.daemon.server
         if server is None or not worker.alive():
             return
@@ -515,7 +528,7 @@ class Models:
                 stale = self.stale(ident) if every and entry["state"] in ("live", "held") else None  # ``status``'s
                 if stale:  # its code changed since: what changed, and the command
                     entry["stale"] = {"changes": stale["changes"], "rebuild": stale["rebuild"]}
-                lost = self.rebuild(ident) if entry["state"] in ("evicted", "detached") else None
+                lost = self.rebuild(ident) if entry["state"] in ("unsaved", "detached") else None
                 if lost is not None and lost["rebuild"]:
                     entry["rebuild"] = lost["rebuild"]
                 found.append(entry)
@@ -523,8 +536,9 @@ class Models:
 
     def state(self, ident: str) -> str:
         """``live`` (a live worker holds it), ``held`` (the server holds its bytes; no worker),
-        ``building``, ``failed`` (its last build), ``evicted`` (neither: its worker crashed, or the
-        engine restarted since: the registry knows it), or ``detached`` (not held, and its script is
+        ``building``, ``failed`` (its last build), ``unsaved`` (neither, nor its file in the engine's
+        cache: deleted by hand, or never written -- the cache could not be written, its worker crashed
+        first -- the registry knows it), or ``detached`` (not held, and its script is
         gone). ``held`` is in memory, on disk -- the cache's -- or both (``where``)."""
         self.adopt(ident)
         with self.lock:
@@ -537,14 +551,14 @@ class Models:
             return "failed"
         if record is None:
             known = self.recorded(ident)
-            return known["state"] if known is not None else "evicted"
+            return known["state"] if known is not None else "unsaved"
         if self._working(record["worker"]):
             return "live"
         if self.where(ident):
             return "held"
         if record["store"] == "shape":
-            return "evicted"  # nothing builds it again, and nothing of it goes missing
-        return "evicted" if Path(record["source"]["script"]).is_file() else "detached"
+            return "unsaved"  # nothing builds it again, and nothing of it goes missing
+        return "unsaved" if Path(record["source"]["script"]).is_file() else "detached"
 
     # --- the cache (``cache``) ----------------------------------------------------------------
 
@@ -659,7 +673,7 @@ class Models:
         said = f"the engine's cache of {ident} does not read ({why}), and is removed"
         found = self.rebuild(ident)
         if found is None:
-            return NotHeld(said, "evicted", self.command(ident))
+            return NotHeld(said, "unsaved", self.command(ident))
         return NotHeld(f"{said}: {found['error']}", found["state"], found["rebuild"])
 
     def disk_bytes(self, ident: str) -> bytes | None:

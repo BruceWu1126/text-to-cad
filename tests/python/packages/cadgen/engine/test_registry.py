@@ -231,7 +231,7 @@ class RegistryDaemonTest(unittest.TestCase):
         self.assertEqual(inspected.returncode, 2, inspected.stderr)
         self.assertIn(f"run `cadgen run {project / 'parts.py'}`", inspected.stderr)
         answer = self.ask({"op": "state", "id": cube})
-        self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", f"cadgen run {project / 'parts.py'}"))
+        self.assertEqual((answer["state"], answer["rebuild"]), ("unsaved", f"cadgen run {project / 'parts.py'}"))
         from cadgen.viewer.recents import RecentStore
 
         listed = {entry.path: entry.public() for entry in RecentStore(self.state).list()}

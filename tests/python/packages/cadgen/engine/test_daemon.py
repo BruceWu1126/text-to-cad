@@ -1200,7 +1200,8 @@ class DaemonTest(unittest.TestCase):
         # After a restart the registry knows it: refused with the command that builds it again, run by no one.
         missing = self.cli("inspect", ident, "face 1")
         self.assertEqual(missing.returncode, 2)
-        self.assertIn(f"block ({ident}) is no longer held: run `cadgen run ", missing.stderr)
+        self.assertIn(f"block ({ident}) is not saved: the engine's cache holds no file of its last build; run "
+                      "`cadgen run ", missing.stderr)
         self.assertFalse(marker.exists())
         inspected = self.cli("inspect", str(self.folder / "XBF/block.xbf"), "--query", "build")
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
@@ -1217,7 +1218,9 @@ class DaemonTest(unittest.TestCase):
     def test_a_named_model_updates_one_address_and_after_a_restart_names_its_command(self) -> None:
         from urllib.parse import urlparse, parse_qs
 
-        self.env = {**self.env, "CADGEN_CACHE_DIR": engine_daemon.unwritable(self.folder)}  # nothing kept: ``test_cache``'s
+        aside = Path(tempfile.mkdtemp(prefix="engine-daemon-cache-")).resolve()
+        self.addCleanup(shutil.rmtree, aside, True)
+        self.env = {**self.env, "CADGEN_CACHE_DIR": engine_daemon.unwritable(aside)}  # nothing kept: ``test_cache``'s
 
         address = self._bare()
         first = self.built("bracket")
@@ -1249,7 +1252,8 @@ class DaemonTest(unittest.TestCase):
         self._stop_daemon()
         missing = self.cli("inspect", f"{address}#face 1")
         self.assertEqual(missing.returncode, 2)
-        self.assertIn(f"bracket ({address}) is no longer held: run `cadgen run ", missing.stderr)
+        self.assertIn(f"bracket ({address}) is not saved: the engine's cache holds no file of its last build; "
+                      "run `cadgen run ", missing.stderr)
         self.assertEqual(json.loads(self.cli("status", "--json").stdout)["models"], [],
                          "a restart holds nothing: status lists what this server built")
 
@@ -1705,7 +1709,7 @@ if __name__ == '__main__':
         done = engine_daemon.run([sys.executable, "-c", probe], cwd=self.folder, env=self.env)
         self.assertEqual(done.returncode, 0, done.stderr)
         found = json.loads(done.stdout.strip().splitlines()[-1])
-        self.assertEqual(found["bodies"], {"plug.py::plug": "replayed"}, "the script's warm worker")
+        self.assertEqual(found["bodies"], {"plug.py::plug": "loaded"}, "the script's warm worker, by its key")
         self.assertEqual(found["name"], "plug")
         self.assertAlmostEqual(found["volume"], 8 - 3.14159265 * 0.25 * 2, places=2)
 

@@ -83,8 +83,9 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    beside a library or a model. The code stays the only source of truth: a document whose code changed since says so,
    with the command that builds it again, and nothing reruns. It writes no
    sidecar, record of a build beside a model, index, memo, mesh or parsed document, and no derived file
-   beside an input. A model whose xbf holds the closure the model has now is not run, nor one with no file
-   whose cached document holds it. Explicit viewer exports write only the requested
+   beside an input. A model whose document -- in its warm worker, else the cache -- holds the closure the
+   model has now is not run, whatever files it declares: they are exports of the document, written
+   after it. Explicit viewer exports write only the requested
    artifact to managed temporary storage for delivery; no source or intermediate XBF
    is written (the engine's **Viewer exports**).
 3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself: OCP, build123d (and
@@ -101,8 +102,8 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    runs is keyed by its inputs. A hit hands back the objects the first run made, and a miss
    makes everything downstream of it miss. So an edit costs what it changed, and an element
    keeps the name its feature history gave it across edits. Across a restart, a model's build
-   is cold but for its own xbf -- or, for a model with no file, its cached document -- taken whole
-   or not at all; what a restart shows without a build
+   is cold but for its document in the cache -- every model's alike, taken whole by its key or not
+   at all; a declared file, its xbf too, is never a source -- and what a restart shows without a build
    is the engine's document cache (law 2): the last built state, never a step of a build.
 6. **One document per model, with one id.** Every called model makes one document, and a call
    returns its handle (`.id`, `.url`, `.name`, `.shape`, `.export`, `.snapshot`), never a bare
@@ -134,9 +135,11 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    code renames nothing, and the file holds no line to go stale.
 10. **A file decorator requires an explicit output path.** `out` is its only argument;
     omitted paths and `None` are refused. Whenever the model it decorates runs in a
-    build -- the build's target, or a child another model's body calls -- that file is written,
-    once per build, from the model's own document; a GLB's animations are baked from the code
-    when that GLB is written. A model with no file decorator writes nothing.
+    build -- the build's target, or a child another model's body calls -- or is taken from its
+    key, that file is written, once per build, from the model's own document, exactly as an export
+    of it writes it: translated, compared, and written only where it differs or is missing; a
+    GLB's animations are baked from the code when that GLB is written. A model with no file
+    decorator writes nothing.
 11. **Decoration only declares; a model script is Python.** A script runs only when Python
     runs it; no verb imports or builds a script. Importing cadgen or
     defining a decorated function never builds a model, writes its outputs, starts a
@@ -271,7 +274,7 @@ before starting. An agent's explicit host path is a different destination contra
 
 `cadgen inspect`, `cadgen.inspect()` and `cad_inspect` read existing files or the
 documents the engine holds by id. They never execute source to obtain a missing model or write
-its declared outputs. An unbuilt or evicted model requires an explicit build: one
+its declared outputs. An unbuilt or unsaved model requires an explicit build: one
 the engine built before names the command (`cadgen run` and the script that defines it). With no reference,
 `cadgen inspect` prints what the document holds -- its state, parts, bounds, volume, materials,
 joints, couplings (name, kind, ratio, joints), states, sequences, animations and declared files -- then its build closure (`--json`:

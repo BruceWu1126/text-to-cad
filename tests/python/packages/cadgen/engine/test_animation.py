@@ -378,7 +378,7 @@ class KeysTest(unittest.TestCase):
 
 
 class GlbTest(_Folder):
-    def test_a_restart_takes_an_animated_model_from_its_xbf_and_its_glb_is_the_cold_builds(self) -> None:
+    def test_a_restart_takes_an_animated_model_from_the_cache_and_its_glb_is_the_cold_builds(self) -> None:
         from cadgen.engine import export
         from cadgen.engine.kernel import memo
 
@@ -399,12 +399,13 @@ class GlbTest(_Folder):
         """
         self.build(source, "pair")
         self.assertNotIn("animations", document.Loaded(self.folder / "XBF/pair.xbf").closure, "the record is its own")
-        memo.clear()  # a fresh worker: no memo, no document in memory
-        engine_build._WRITTEN.clear()
-        engine_build._PARTS.clear()
-        again = self.build(source, "pair")
-        self.assertTrue(again["cache"]["used"], again["cache"])
-        self.assertEqual(again["memo"]["bodies_run"], 0, "taken from its file: nothing ran")
+        from tests.python.support import engine_cache
+
+        cache = self.folder / "cache"
+        engine_cache.restart(cache)  # a fresh worker: no memo, no document in memory, the engine's cache
+        (again,) = engine_build.build(self.folder / "model.py", ["pair"], cwd=self.folder, cache=str(cache))
+        self.assertEqual(again["cache"], {"used": True, "from": "cache"})
+        self.assertEqual(again["memo"]["bodies_run"], 0, "taken from the engine's cache: nothing ran")
         out = self.folder / "again.glb"
         export.translate(engine_build.held(self.folder / "model.py", "pair"), None, out)
         self.assertEqual([clip["name"] for clip in _glb(out)[0]["animations"]], ["slide"])
