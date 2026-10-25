@@ -2287,6 +2287,11 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
             print("cadgen: an engine server is running; run cadgen stop first, then cadgen server --rotate-token",
                   file=sys.stderr)
             return 1
+        if foreground:  # ``cadgen server``: said, never a silent success that serves nothing it asked
+            print("cadgen: this installation's engine server is already running: `cadgen status` says where it "
+                  "serves, `cadgen stop` stops it" + (f" (to serve on {port})" if port is not None else ""),
+                  file=sys.stderr)
+            return 1 if port is not None else 0
         return 0  # another daemon is up
     if rotate:
         others = others_running()

@@ -524,7 +524,7 @@ def _server(args: argparse.Namespace, prog: str) -> int:
     from cadgen.engine.daemon import main as daemon
 
     if args.port is not None and not 0 <= args.port <= 65535:
-        raise Failed(f"{prog}: --port must be between 0 and 65535", 2)
+        raise Failed("--port must be between 0 and 65535", 2)
     return daemon([], port=args.port, rotate=args.rotate_token, foreground=True)
 
 

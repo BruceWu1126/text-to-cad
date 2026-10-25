@@ -226,6 +226,21 @@ class EnginePortTest(unittest.TestCase):
                          rf"^cadgen: port {port} is held by .+: stop it, or pass another --port$")
         self.answering()
 
+    def test_cadgen_server_beside_a_running_engine_says_so_and_a_port_it_cannot_take_fails(self) -> None:
+        running = self.launch(CADGEN_ENGINE_PORT=str(free_port()))
+        asked = free_port()
+        done = self.cli("server", "--port", str(asked))
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("this installation's engine server is already running", done.stderr)
+        self.assertFalse(listening(asked), "nothing serves the port it named")
+        plain = self.cli("server")
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        self.assertIn("already running", plain.stderr)
+        self.assertEqual(self.launch()["pid"], running["pid"])
+        bad = self.cli("server", "--port", "70000")
+        self.assertEqual(bad.returncode, 2)
+        self.assertRegex(bad.stderr.strip(), r"^[^:]*server: --port must be between 0 and 65535$", "its name said once")
+
     def test_a_held_default_rolls_to_the_next_free_port_says_so_once_and_keeps_it(self) -> None:
         mine = not listening(3245)
         if mine:  # else another program's already: the same roll
