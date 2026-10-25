@@ -29,7 +29,8 @@ class LibraryTest(unittest.TestCase):
         self.model = self.tmp / "anywhere" / "a.stl"
         self.model.parent.mkdir()
         self.model.write_bytes(STL)
-        state = mock.patch.dict(os.environ, {"CADGEN_STATE_DIR": str(self.tmp / "state")})
+        state = mock.patch.dict(os.environ, {"CADGEN_STATE_DIR": str(self.tmp / "state"),
+                                             "CADGEN_CACHE_DIR": str(self.tmp / "cache")})
         state.start()
         self.addCleanup(state.stop)
         server = handler_module.serve(create_cad_app(host="127.0.0.1", port=0), "127.0.0.1", 0)
@@ -61,12 +62,14 @@ class LibraryTest(unittest.TestCase):
         status, answer = self.change("thumbnail", str(self.model), png=base64.b64encode(PNG).decode("ascii"))
         [entry] = answer["recents"]
         self.assertEqual(entry, RecentStore().list()[0].public())
+        self.assertEqual(entry["kind"], "file", "a file's row: removed from the list, its file untouched")
         self.assertTrue(self.change("pin", str(self.model))[1]["recents"][0]["pinned"])
         self.assertFalse(self.change("unpin", str(self.model))[1]["recents"][0]["pinned"])
         # The picture, by the content name the library gives it.
         status, png = self.request("GET", f"/__cad/thumbnail?name={entry['thumbnail']}")
         self.assertEqual((status, png), (200, PNG))
         self.assertEqual(self.change("remove", str(self.model)), (200, {"recents": []}))
+        self.assertTrue(self.model.is_file(), "removing a file's entry leaves the file")
 
     def test_a_link_its_target_and_a_case_variant_are_one_entry(self) -> None:
         # One file, one entry, however it is spelled: the spelling the engine keys it by (ids.canonical).
@@ -92,7 +95,7 @@ class LibraryTest(unittest.TestCase):
                 self.assertEqual(self.change(action, path, **extra)[0], 400)
         self.assertEqual(RecentStore().list(), [])
 
-    def test_a_built_model_is_listed_by_its_id_pinned_and_removed_by_it(self) -> None:
+    def test_a_built_model_is_listed_by_its_id_pinned_and_deleted_by_it(self) -> None:
         from cadgen.engine.ids import model_id
         from cadgen.engine.registry import Registry
 
@@ -107,8 +110,14 @@ class LibraryTest(unittest.TestCase):
         self.assertEqual((status, entry["path"], entry["kind"], entry["name"]), (200, ident, "model", "cube"),
                          "the home opens it by its id: /<id>")
         self.assertTrue(self.change("pin", ident)[1]["recents"][0]["pinned"])
-        self.assertEqual(self.change("remove", ident), (200, {"recents": []}))
+        cached = self.tmp / "cache" / "documents" / ident / "document.xbf"
+        cached.parent.mkdir(parents=True)
+        cached.write_bytes(b"its document")
+        self.assertEqual(self.change("remove", ident)[0], 400, "a model is deleted, never removed: the word is Delete")
+        self.assertEqual(self.change("delete", ident), (200, {"recents": []}))
         self.assertIsNone(Registry(self.tmp / "state").get(ident))
+        self.assertFalse(cached.parent.exists(), "its document in the engine's cache goes with its record")
+        self.assertTrue(script.is_file(), "its script stays")
 
     def test_only_a_thumbnail_name_reads_a_thumbnail(self) -> None:
         for name in ("", "x.png", "../recents.jsonl", "0" * 32 + ".png"):

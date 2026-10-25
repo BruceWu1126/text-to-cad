@@ -1835,6 +1835,7 @@ class Daemon:
                 self.server.revive = self.models.adopt
                 self.server.stale = self.models.stale
                 self.server.leaving = self.models.leaving
+                self.server.delete = self.models.delete
                 self.server.start()
                 started = True
             elif ((request.get("port") and int(request["port"]) != self.server.port)
@@ -2019,6 +2020,11 @@ class Daemon:
         op = request.get("op")
         if op == "models":
             send({"ok": True, "models": self.models.listing()})
+            return
+        if op == "delete":
+            # ``cadgen delete`` (``api.delete``): each id deleted by the one deletion (``models.delete``).
+            deleted = [self.models.delete(str(ident)) for ident in request.get("ids") or []]
+            send({"ok": True, "deleted": [found for found in deleted if found is not None]})
             return
         if op == "model_info":
             self.models.prune()

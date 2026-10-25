@@ -450,7 +450,7 @@ only, and a file's id is derived again from its path after a restart.
 | Module | What it is |
 | --- | --- |
 | `model.py` | the decorators (`out`, `store=`, `key=`), `@model` or file decorators and never both; `Model` (the function, `.id`, `.build` the debug seam); its id (`ids.model_id` of its script and function, or `ids.key_id` of its key; `claim`: one key per declaration), and a build's report of every model a program's call builds, wherever the model is defined; a call returning the document's handle; a child model called in a body is a sub-assembly built in the same run, its call its handle with the result in the worker, and the models a target's run ran (`BuildContext.children`); `model(shape, name=)` handing a shape over; `@memo` and its calls; a script's module and package (`module_of`); `paint`, `mechanism_state`, `configuration_sequence`; `read_step`, `read_xbf` |
-| `api.py` | the verbs as functions, through the daemon: `export`, `snapshot`, `inspect` (the root's `cadgen.export`, ...), and `serve`, `status`, `stop`, `server`, which only the CLI calls (process control is the CLI's alone), and `build_script`, a script's models built by `Model.build()`; `Document`, the handle a model call returns (`.shape` transferred by id on first access: `result`); `hand_over`, a shape made a document in the caller and handed to the daemon; `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
+| `api.py` | the verbs as functions, through the daemon: `export`, `snapshot`, `inspect` (the root's `cadgen.export`, ...), and `serve`, `status`, `stop`, `delete`, `server`, which only the CLI calls (process control and deletion are the CLI's alone), and `build_script`, a script's models built by `Model.build()`; `Document`, the handle a model call returns (`.shape` transferred by id on first access: `result`); `hand_over`, a shape made a document in the caller and handed to the daemon; `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
 | `colors.py` | a colour as the author gives it (sRGB hex, 0-255 integers, a build123d `Color`) held linear, and the way back (**Materials**) |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`gear_pair`, `rack_and_pinion_pair`, `screw_pair`), mechanism states (`mechanism_state`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground; `posed`, an assembly copied at a state), and configuration sequences (`configuration_sequence`, a function's samples, `Timeline`: a sequence's pair values over time) |
@@ -473,7 +473,7 @@ only, and a file's id is derived again from its path after a restart.
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
 | `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads, staleness (`changes`); kept until a person deletes it, with no cap (`Cache`) |
 | `registry.py` | the registry of documents in the user's state folder (`Registry`: `get`, `put`, `list`, `delete`), the user's page token (`token`, `put_token`), each installation's engine record (`engine`, `put_engine`: its rolled port), and the one owner of every write under that folder (`Folder`); where the folder is, the distribution's (`FACTORY`) |
-| `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `server` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
+| `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `delete`, `server` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
 
 ## CLI
@@ -495,6 +495,9 @@ cadgen inspect DOC [REF] [--json]              what the document holds, then its
                                              meshes and animations (an STL or a 3MF, and a ref into any
                                              mesh, is refused, saying what shows it)
 cadgen status [--json] | stop [--json] | server [--port N] [--rotate-token]
+cadgen delete DOC [DOC ...] [--json]        each document deleted: its record, its document in the engine's
+                                             cache and what the engine holds of it (**Delete**); never a
+                                             file of yours
 ```
 
 `python -m cadgen.engine VERB ...` takes the same verbs, the engine's own entry.
@@ -507,13 +510,13 @@ and `x.py::fn` are refused as any other file that is no document is.
 
 Every build and every verb goes through the engine: no command runs one in its own process. A
 verb that starts the engine to answer says so, `engine started` on stderr, once, and only when the
-engine that answers is the one it started (`client.on_started`); `status` and `stop` never start
+engine that answers is the one it started (`client.on_started`); `status`, `stop` and `delete` never start
 one, nor does an MCP host closing its session.
 `daemon=False` on the Python functions (`Model.build`, `export`, `snapshot`) is a seam for tests
 and debugging only: it runs in this process, cold, and no document is served: no page, and
 nothing for `inspect` to read by its id.
 
-A verb's `--json` (`export`, `snapshot`, `status`, `stop`) prints its answer as one JSON object
+A verb's `--json` (`export`, `snapshot`, `status`, `stop`, `delete`) prints its answer as one JSON object
 on stdout, and a failure as `{"ok": false, "error": ...}` there too, exit status 1, so a caller
 reading stdout always finds an answer (`cli.answered`); without `--json` a failure is its words
 on stderr, exit 2 for a request refused by name before anything ran and 1 for one that failed.
@@ -1016,6 +1019,19 @@ build writes it again (`Models.unreadable`). A save that fails is logged and lis
 status`, never raised: with the cache folder read-only, or not writable at all, the engine saves
 nothing and does everything else as it would.
 
+**Delete.** A document stays until a person deletes it: `cadgen delete DOC [DOC ...]` (each DOC a
+document's id, a model's script -- every document recorded of it, a shape it handed over among
+them -- or the path of a CAD file opened before), or the home's Delete on a model's row. Both are
+one function (`models.delete`): what the engine holds of the document goes first, when an engine
+runs (`Models.forget`: its row, the server's copy and its page, the cache's timer and index; a
+live document's worker keeps its memo, and its next run registers the document again), then its
+record and its file in the cache (`Registry.delete`). Nothing of the person's is touched: a model's
+script and its declared files, and an opened file, stay where they are; a file's row on the home
+says Remove, which forgets its entry alone. `cadgen delete` prints a line per document deleted,
+`deleted <name> <id>` (`--json`: `{"ok": true, "deleted": [{id, name, kind}]}`), never starts an
+engine, and refuses a DOC that names nothing recorded, by name and before anything is deleted
+(exit 2).
+
 **Drain.** Before the pool stops a worker -- the count cap's least recently used, replaced for
 another environment, retired for memory -- the daemon asks it
 (the `result` request with `whole`, nothing meshed) for every `pointer` document of it the server
@@ -1495,7 +1511,7 @@ The xbf is saved first and the viewer woken with it: the worker waits for the da
 the patch (`{"op": "patched"}` on its pipe) before it writes a derived file.
 
 **Functions** (`api`, also `cadgen.export`, `cadgen.snapshot` and `cadgen.inspect`; `serve`,
-`status`, `stop` and `server` only the CLI calls): one per command, each through the daemon. No function builds source text;
+`status`, `stop`, `delete` and `server` only the CLI calls): one per command, each through the daemon. No function builds source text;
 a shape made elsewhere is handed over, never built (`model(shape, name=...)`, **Shapes handed over**).
 `export(source, *destinations)` a list of `Written`; `snapshot(source, out, ...)` a `Drawn`, and `snapshot(job=PACKET, ...)` (with `source` in place of the packet's input, as `--job PACKET SRC`) a list of them, one verb with two input shapes, anything else refused as Python refuses a call; `where(doc)` the build
 closure an xbf holds, `where(doc, ref)` an element's facts. Each takes a handle (what a model call

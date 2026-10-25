@@ -92,7 +92,7 @@ class RecentStoreTest(unittest.TestCase):
                                 "shown": "a shape handed over from a Python session the engine did not run: no script "
                                          "to rerun, and no command builds it again"})
         [entry] = [recent.public() for recent in RecentStore(self.tmp).list()]
-        self.assertEqual((entry["id"], entry["missing"], entry["rebuild"], entry["store"], entry["modified"]),
+        self.assertEqual((entry["id"], entry["missing"], entry["rebuild"], entry["kind"], entry["modified"]),
                          (ident, False, None, "shape", built), "a folder home is where it came from, not a lost file")
         self.assertIn("a shape handed over", entry["shown"])
         self.assertIn("no script to rerun", entry["shown"])

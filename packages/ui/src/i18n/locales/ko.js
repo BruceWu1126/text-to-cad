@@ -110,6 +110,7 @@ export default {
   "home.pinAria": "{name} 고정",
   "home.unpinAria": "{name} 고정 해제",
   "home.removeAria": "{name} 제거",
+  "home.deleteAria": "{name} 삭제",
   "home.fileUnavailable": "파일을 사용할 수 없음",
   "home.openingAria": "{name} 여는 중",
   "home.editedJustNow": "방금 편집함",

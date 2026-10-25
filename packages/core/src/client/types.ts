@@ -36,6 +36,8 @@ export interface CadRecent {
   pinned: boolean; missing: boolean;
   /** The picture's name, for `thumbnail()`, and when it was taken. */
   thumbnail: string | null; pictured: number | null;
+  /** A CAD file on disk, or a document built from code: a model's, or a shape a program handed over. */
+  kind: 'file' | 'model' | 'shape';
 }
 /** Whether the person's usage stats are sent (`/__cad/analytics`; nothing asks): `reason` says who decided. */
 export interface CadConsent { sharing: boolean; reason: 'default' | 'untold' | 'choice' | 'environment' | 'unavailable'; policy: string; saved?: boolean }
@@ -168,8 +170,11 @@ export interface CadWorkspaceService {
   search(path: string, query: string, options?: CadRequestOptions): Promise<CadSearch>;
   /** The home's library, newest first. */
   recents(options?: CadRequestOptions): Promise<CadRecent[]>;
-  /** A change to the library (`open`, `pin`, `unpin`, `remove`, `thumbnail`): the library as it now is. */
-  changeRecents(change: { action: 'open' | 'pin' | 'unpin' | 'remove' | 'thumbnail'; path: string; png?: string }): Promise<CadRecent[]>;
+  /**
+   * A change to the library (`open`, `pin`, `unpin`, `thumbnail`; `remove` a file's entry, its file
+   * untouched; `delete` a model, its entry and the engine's copy): the library as it now is.
+   */
+  changeRecents(change: { action: 'open' | 'pin' | 'unpin' | 'remove' | 'delete' | 'thumbnail'; path: string; png?: string }): Promise<CadRecent[]>;
   /** Keep a model's picture in the library. */
   keepThumbnail(png: Blob, path: string): Promise<CadRecent[]>;
   /** A library picture, by the name the library gives it, as a data URL; null when there is none. */

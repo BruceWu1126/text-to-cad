@@ -401,6 +401,16 @@ class Cache:
                     if found is not None and "cache" in found else None)
         held.cache.remove(f"{self.inside(ident).rsplit('/', 1)[0]}")  # documents/<id>, nothing outside it
 
+    def forget(self, ident: str) -> None:
+        """Document ``ident`` deleted (``models.delete``): nothing of it is saved from now on -- its idle
+        timer, a write queued for it and its index entry go; its file is the registry's to remove
+        (``Registry.delete``), and a save under way finds no record to write to."""
+        with self.lock:
+            self.index.pop(ident, None)
+            self.due.pop(ident, None)
+            self.writes = collections.deque(row for row in self.writes if row[0] != ident)
+            self.lock.notify_all()
+
     def failed(self, ident: str, error: str) -> None:
         """A save that failed: logged, and listed by ``status``; never raised."""
         with self.lock:

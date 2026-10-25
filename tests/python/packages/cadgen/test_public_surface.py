@@ -75,6 +75,7 @@ ADAPTERS: dict[str, frozenset[str]] = {
     "inspect": frozenset({"document", "ref", "query", "json"}),
     "status": frozenset({"json"}),
     "stop": frozenset({"json"}),
+    "delete": frozenset({"documents", "json"}),
     "server": frozenset({"port", "rotate_token"}),
 }
 
@@ -193,7 +194,7 @@ class Manifest(unittest.TestCase):
 
     def test_the_engines_verbs_are_commands_of_their_own(self):
         # One parser per verb, the engine's (cadgen.engine.cli), named by the command that runs it.
-        for verb in ("export", "snapshot", "serve", "inspect", "status", "stop", "server"):
+        for verb in ("export", "snapshot", "serve", "inspect", "status", "stop", "delete", "server"):
             with self.subTest(verb=verb):
                 module = importlib.import_module(cli._COMMANDS[verb][0])
                 self.assertEqual(module.build_parser().prog, f"cadgen {verb}")

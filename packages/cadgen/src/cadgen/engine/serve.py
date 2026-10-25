@@ -674,6 +674,10 @@ class Server:
         # its xbf bytes (``Served.xbf``): the daemon's cache keeps them when it does not hold them
         # yet (``models.Models.leaving``), so the document is read again from there.
         self.leaving: Callable[[str, Any, bytes], None] = lambda _ident, _version, _xbf: None
+        # A document deleted (the home's Delete): the daemon's ``models.Models.delete``, which drops what
+        # the engine holds of it and then its record and its cached document; None for a server of
+        # its own (a test's), whose application deletes the record alone.
+        self.delete: Callable[[str], dict[str, Any] | None] | None = None
         if budget is not None:
             self.cache.cap = None
             self.cache.grown = self._grown

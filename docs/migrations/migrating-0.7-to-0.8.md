@@ -428,6 +428,9 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   stays the source, and a document whose code changed since says so. The cache
   (`documents/<uuid>/document.xbf` in the cache folder, `~/.cache/cadgen` by 0.7's rule)
   keeps every document until you delete it: it has no size cap, and nothing evicts from it.
+  `cadgen delete <id>` (or a model's script, or a file's path), or Delete on a model's row of
+  the home, deletes a document: its record and its cached document. Your script and its files
+  stay.
 - **A model lives in a `.py` file.** Its record points at the script (`pointer`).
   `@model(store="memory")` keeps a document in its worker's memory alone, unrecorded and
   out of Recents: for throwaway probes.
@@ -456,7 +459,7 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
 | snapshot `--kinematics` | `--pose` |
 | snapshot `--focus`, `--hide` | `--display '{"isolated": [...]}'`, `--display '{"hidden": [...]}'` |
 | snapshot `--mode list` | the model's tree: `[part.label for part in assembly().shape.leaves]` |
-| `cadgen store why\|where\|forget\|gc\|info` | nothing: no store. `cadgen inspect <id>` prints what a document was built from |
+| `cadgen store why\|where\|forget\|gc\|info` | no store to manage: `cadgen inspect <id>` prints what a document was built from, `cadgen delete <id>` deletes it |
 
 `--no-daemon` is gone from every command, and `cadgen build` and `cadgen.build()`, which
 0.8 previews had, are gone too: the only way to build is a decorated function called

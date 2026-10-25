@@ -111,6 +111,7 @@ export default {
   "home.pinAria": "釘選 {name}",
   "home.unpinAria": "取消釘選 {name}",
   "home.removeAria": "移除 {name}",
+  "home.deleteAria": "刪除 {name}",
   "home.fileUnavailable": "無法使用檔案",
   "home.openingAria": "正在開啟 {name}",
   "home.editedJustNow": "剛剛編輯",

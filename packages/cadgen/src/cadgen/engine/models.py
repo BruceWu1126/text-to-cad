@@ -46,6 +46,26 @@ from cadgen.engine.cache import reads as cache_reads
 STATES = ("live", "held", "building", "failed", "evicted", "expired", "detached")
 
 
+def delete(held: Any, ident: str, book: "Models | None" = None) -> dict[str, Any] | None:
+    """Delete document ``ident``: the one deletion, which ``cadgen delete`` and the home's Delete both
+    are. What the engine holds of it goes first, where an engine runs (``book``: ``Models.forget``),
+    then its record and its document in the engine's cache (``held``, the registry:
+    ``Registry.delete``). Never a file of the person's: a model's script and its declared files, and a
+    file a page opened, stay where they are. What was deleted, ``{"id", "name", "kind"}``, or None for
+    an id nothing records or holds."""
+    record = held.get(ident) if held is not None else None
+    row = book.forget(ident) if book is not None else None
+    if held is not None:
+        held.delete(ident)
+    if record is not None:
+        name = record.get("entry") or os.path.basename(str(record.get("home") or "")) or ident
+        kind = "shape" if record.get("store") == "shape" else record.get("kind")
+        return {"id": ident, "name": name, "kind": kind}
+    if row is not None:
+        return {"id": ident, "name": row["source"]["name"], "kind": "shape" if row.get("store") == "shape" else "model"}
+    return None
+
+
 def revision(report: dict[str, Any]) -> str:
     """A model document's recorded revision: its closure's key (the same code, the same revision, in
     any process), else a token of this build's own."""
@@ -574,6 +594,25 @@ class Models:
         memory = server is not None and server.has(ident, record["version"])
         disk = self.cache.current(ident, record.get("revision"))
         return "memory and disk" if memory and disk else "memory" if memory else "disk" if disk else None
+
+    def delete(self, ident: str) -> dict[str, Any] | None:
+        """``delete`` with this engine's book: what it holds of document ``ident`` dropped first."""
+        return delete(self.registry(), ident, self)
+
+    def forget(self, ident: str) -> dict[str, Any] | None:
+        """What this engine holds of document ``ident``, dropped: its row in the book (a live
+        document's too: its next run registers it again), the server's copy and its page, the cache's
+        index and timer of it. Its record and its cache file are ``delete``'s. The row as it was, or
+        None."""
+        with self.lock:
+            row = self.records.pop(ident, None)
+        if self.daemon.builders.get(ident) is not None:
+            self.daemon.builders.pop(ident, None)
+        server = self.daemon.server
+        if server is not None:
+            server.forget_model(ident)
+        self.cache.forget(ident)
+        return row
 
     def leaving(self, ident: str, version: Any, data: bytes) -> None:
         """Document ``ident``'s xbf bytes at generation ``version``, leaving the server's memory for

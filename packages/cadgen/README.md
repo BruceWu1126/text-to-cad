@@ -220,8 +220,8 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
 21. **Operations on documents are Python functions the CLI exposes; process control is the
     CLI's alone.** `export`, `snapshot` and `inspect` are functions of the root
     (`cadgen.export`, ...) and commands that call them; serving, the engine's status, stopping it
-    and running it (`cadgen serve`, `status`, `stop`, `server`) are commands only, with no
-    function of the root. Every successful server-backed build reports its id and localhost
+    and running it (`cadgen serve`, `status`, `stop`, `server`), and deleting a document (`cadgen
+    delete`, which the home's Delete is too), are commands only, with no function of the root. Every successful server-backed build reports its id and localhost
     viewer URL, including a build with file outputs. A cold `daemon=False` build has no served
     URL.
 
@@ -346,7 +346,7 @@ src/cadgen/
                          #   committed, never edited
 ```
 
-Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and
+Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `delete` and
 `server` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
 snapshot for those files alone; `cadgen urdf|sdf|srdf validate` the validators; `cadgen
 doctor` the setup (the installation registered, the `cadgen` command written, the engine started),

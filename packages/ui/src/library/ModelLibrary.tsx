@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
-import { Box, FolderOpen, LayoutGrid, List, Pin, Search, X } from "lucide-react";
+import { Box, FolderOpen, LayoutGrid, List, Pin, Search, Trash2, X } from "lucide-react";
 import { Button } from "../primitives/button.jsx";
 import { Input } from "../primitives/input.jsx";
 import { Spinner } from "../primitives/spinner.jsx";
@@ -27,13 +27,23 @@ export interface LibraryModel {
   thumbnail: string | null;
   /** When the picture was taken, in seconds; null without one. A file changed since has an old one. */
   pictured: number | null;
+  /**
+   * What it is: a document built from code, a model's or a shape's (`model`, `shape`), which a row
+   * deletes -- the engine's copy and its entry; or a CAD file on disk (`file`, and when the host does
+   * not say), which a row removes from the list, the file untouched.
+   */
+  kind?: "file" | "model" | "shape";
 }
+
+/** Whether a row deletes the model (a document built from code) rather than removing a file from the list. */
+export const deletes = (model: LibraryModel) => model.kind === "model" || model.kind === "shape";
 
 /** A host's library of models: read, changed and opened through the host. */
 export interface ModelLibrarySource<Model extends LibraryModel = LibraryModel> {
   /** Pinned first, then most recently opened. */
   list(): Promise<readonly Model[]>;
-  change(action: "pin" | "unpin" | "remove", model: Model): Promise<readonly Model[]>;
+  /** `delete` for a model's row (`deletes`), `remove` for a file's. */
+  change(action: "pin" | "unpin" | "remove" | "delete", model: Model): Promise<readonly Model[]>;
   /** An image URL for a model's thumbnail, or null. */
   thumbnail(name: string): Promise<string | null>;
   open(model: Model): Promise<void>;
@@ -216,16 +226,18 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
     void current.current.open(item).catch(fail).finally(() => setOpening(null));
   };
   const pick = library.pick ? () => { setError(""); void current.current.pick?.().catch(fail); } : null;
-  const change = (action: "pin" | "unpin" | "remove", item: Model) => { void current.current.change(action, item).then(setItems, fail); };
+  const change = (action: "pin" | "unpin" | "remove" | "delete", item: Model) => { void current.current.change(action, item).then(setItems, fail); };
   const all = items ?? [];
   // The host lists pinned models first; a search keeps that order.
   const searchQuery = query;
   const shown = filterModels(all, searchQuery);
   const now = Date.now();
-  // A card pins; a row pins and removes.
+  // A card pins; a row pins, and deletes a model or removes a file.
   const actions = (item: Model, removable: boolean) => <div className="cad-library-actions" data-pinned={item.pinned || undefined}>
     <Button variant="ghost" size="icon-xs" aria-label={t(item.pinned ? "home.unpinAria" : "home.pinAria", { name: item.name })} aria-pressed={item.pinned} onClick={() => change(item.pinned ? "unpin" : "pin", item)}><Pin aria-hidden="true" fill={item.pinned ? "currentColor" : "none"} /></Button>
-    {removable ? <Button variant="ghost" size="icon-xs" aria-label={t("home.removeAria", { name: item.name })} onClick={() => change("remove", item)}><X aria-hidden="true" /></Button> : null}
+    {removable ? deletes(item)
+      ? <Button variant="ghost" size="icon-xs" aria-label={t("home.deleteAria", { name: item.name })} onClick={() => change("delete", item)}><Trash2 aria-hidden="true" /></Button>
+      : <Button variant="ghost" size="icon-xs" aria-label={t("home.removeAria", { name: item.name })} onClick={() => change("remove", item)}><X aria-hidden="true" /></Button> : null}
   </div>;
   const status = (item: Model) => item.missing ? t("home.fileUnavailable") : editedLabel(item.modified, now, t, locale);
   const models = layout === "list"

@@ -9,9 +9,10 @@ a CAD file opened on a page is a record of its own (``kind: "file"``: its path, 
 whether it is pinned), and every model a script built is one already (``kind: "model"``, which the
 engine writes when it registers the build). ``memory`` documents have none, so they are never
 listed. The home's picture of each is UI state on its record (``preview``), the PNG under
-``recents/thumbnails`` named by its content. Removing an entry deletes its record, and a copied
-model's bundle with it; nothing is removed on its own: a model whose script is gone stays listed,
-``missing``, until the person removes it.
+``recents/thumbnails`` named by its content. Removing a file's entry forgets its record, the file
+untouched; a model's entry is deleted with its document (``cadgen.engine.models.delete``: its record
+and its document in the engine's cache). Nothing goes on its own: a model whose script is gone stays
+listed, ``missing``, until the person deletes it.
 
 A file is named by its canonical path (``cadgen.engine.ids.canonical``), the engine's, and its
 record by that path's id, so a symlink and its target, or two spellings of one file, are one
@@ -138,10 +139,11 @@ class Recent:
             "thumbnail": self.thumbnail,
             "pictured": self.pictured,
         }
+        found["kind"] = "file"
         if self.kind == "model":
             found.update(kind="model", id=self.path, script=self.script, rebuild=self.rebuild)
         if shape:
-            found.update(store="shape", shown=self.shown or "a shape handed over: no script to rerun")
+            found.update(kind="shape", shown=self.shown or "a shape handed over: no script to rerun")
         return found
 
 
@@ -176,7 +178,7 @@ class RecentStore:
         self._change(path, lambda record: {**record, "pinned": bool(pinned)})
 
     def remove(self, path: str) -> None:
-        """Forget an entry: its record."""
+        """Forget a file's entry: its record. The file stays where it is."""
         self.registry.delete(self._ident(path))
 
     def thumbnail(self, path: str, png: bytes) -> str:

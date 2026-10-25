@@ -898,6 +898,51 @@ def stop() -> bool:
     return True
 
 
+def delete(documents: Any) -> list[dict[str, Any]]:
+    """``cadgen delete``: documents deleted, each by the one deletion the home's Delete is too
+    (``models.delete``): what the engine holds of it, when one runs (never started for it), then its
+    record and its document in the engine's cache. Each of ``documents`` is a document's id, a model's
+    script or a shape's home (every document recorded of it), or a CAD file's path a page opened; the
+    person's own files are never touched. One that names nothing recorded is refused (``ValueError``),
+    naming each, before anything is deleted. What was deleted, ``{"id", "name", "kind"}`` each, in
+    the order named."""
+    from cadgen.engine import registry as registering
+    from cadgen.engine.client import request
+    from cadgen.engine.ids import canonical, file_id, is_id
+    from cadgen.engine.models import delete as deleting
+
+    held = registering.current()
+    idents: list[str] = []
+    unknown: list[str] = []
+    listed: list[dict[str, Any]] | None = None
+    for named in [str(document) for document in documents]:
+        found: list[str] = []
+        if held is not None and is_id(named):
+            found = [named] if held.get(named) is not None else []
+        elif held is not None:
+            path = canonical(os.path.abspath(os.path.expanduser(named)))
+            record = held.get(file_id(path))
+            if record is not None and record.get("kind") == "file":
+                found = [record["id"]]
+            else:
+                listed = held.list() if listed is None else listed
+                found = sorted(row["id"] for row in listed if row.get("kind") != "file"
+                               and canonical(registering.home(held, row)) == path)
+        if not found:
+            unknown.append(named)
+        idents.extend(ident for ident in found if ident not in idents)
+    if unknown:
+        raise ValueError(f"no document is recorded for {', '.join(unknown)}: name a document's id, a model's "
+                         "script or a CAD file a page opened (`cadgen status` lists the documents); nothing "
+                         "was deleted")
+    answer = request({"op": "delete", "ids": idents}, start=False)
+    if answer is not None:
+        if not answer.get("ok"):
+            raise EngineError(str(answer.get("failed") or answer.get("error") or answer))
+        return list(answer.get("deleted") or [])
+    return [found for found in (deleting(held, ident) for ident in idents) if found is not None]
+
+
 def server() -> int:
     """Run the engine server in this process (`cadgen server`)."""
     from cadgen.engine.daemon import main

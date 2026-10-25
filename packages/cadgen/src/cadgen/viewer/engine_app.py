@@ -155,6 +155,13 @@ class ViewerApp(CadApp):
     def file_of(self, ident):
         return self.server.file_of(ident)
 
+    def delete_document(self, ident):
+        # The engine's own deletion (``Server.delete``, the daemon's ``Models.delete``): what it holds
+        # of the document, then its record and its cached document.
+        if self.server.delete is None:
+            return super().delete_document(ident)
+        return self.server.delete(ident)
+
     def handle(self, request, response):
         self.server.touch()
         if not host_is_allowed(request.header('host'), self.host):

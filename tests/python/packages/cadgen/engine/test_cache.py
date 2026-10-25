@@ -187,12 +187,60 @@ class CacheTest(unittest.TestCase):
                           (self.state / "documents" / ident / "document.json").stat().st_mtime_ns), stamps,
                          "an unchanged document is never rewritten")
         self.assertEqual(self.ask({"op": "status"})["cache"]["written"], 1)
-        # Removed from the home, its cache file goes with its record.
-        from cadgen.viewer.recents import RecentStore
 
-        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.cache)}):
-            RecentStore(self.state).remove(ident)
-        self.assertFalse(self.file(ident).parent.exists())
+    def home(self, action: str, path: str) -> tuple[int, dict]:
+        """A change to the home's library, as the engine's page posts it (``/__cad/recents``)."""
+        serving = self.ask({"op": "status"})["serving"]
+        request = urllib.request.Request(f"{serving['url']}/__cad/recents", method="POST",
+                                         data=json.dumps({"action": action, "path": path}).encode(),
+                                         headers={"Authorization": "Bearer " + self.ask({"op": "http"})["token"],
+                                                  "x-cadgen-viewer": "1", "content-type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            return error.code, json.loads(error.read() or b"{}")
+
+    def test_delete_is_one_function_from_the_shell_and_from_the_home(self) -> None:
+        cube, other = self.write("cube"), self.write("other")
+        for name, ident in (("cube", cube), ("other", other)):
+            self.run_script(name)
+            self.cached(ident)
+        # The shell refuses a document it cannot name, before anything is deleted.
+        refused = self.cli("delete", cube, str(self.project / "nothing.py"))
+        self.assertEqual(refused.returncode, 2, refused.stderr)
+        self.assertIn(f"no document is recorded for {self.project / 'nothing.py'}", refused.stderr)
+        self.assertTrue(self.record(cube) and self.file(cube).is_file(), "nothing was deleted")
+        # Several at once, an id and a model's script: a line each; the record, the cached document and
+        # the engine's copy go; the script stays.
+        done = self.cli("delete", cube, str(self.project / "other.py"))
+        self.assertEqual((done.returncode, done.stdout, done.stderr), (0, f"deleted cube {cube}\ndeleted other {other}\n", ""))
+        for ident in (cube, other):
+            self.assertEqual(self.record(ident), {})
+            self.assertFalse(self.file(ident).parent.exists())
+        self.assertEqual([row["id"] for row in self.ask({"op": "status"})["models"]], [])
+        self.assertEqual(self.page(cube)[0], 404, "the engine holds it no more")
+        self.assertTrue((self.project / "cube.py").is_file(), "never a file of the person's")
+        # The next run registers it again, and the cache keeps it again.
+        self.run_script("cube")
+        self.cached(cube)
+        # The home's Delete is the same deletion; Remove is a file's alone.
+        self.assertEqual(self.home("remove", cube)[0], 400, "a model's row is deleted, never removed")
+        status, body = self.home("delete", cube)
+        self.assertEqual(status, 200, body)
+        self.assertNotIn(cube, [row.get("id") for row in body["recents"]])
+        self.assertEqual(self.record(cube), {})
+        self.assertFalse(self.file(cube).parent.exists())
+        self.assertEqual(self.page(cube)[0], 404)
+        # With no engine running, the shell deletes the record and its file, and starts none.
+        self.run_script("other")
+        self.cached(other)
+        self.assertEqual(self.cli("stop").returncode, 0)
+        done = self.cli("delete", other, "--json")
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertEqual(json.loads(done.stdout), {"ok": True, "deleted": [{"id": other, "name": "other", "kind": "model"}]})
+        self.assertEqual((self.record(other), self.file(other).parent.exists()), ({}, False))
+        self.assertIn("no engine server is running", self.cli("status").stdout)
 
     def test_a_restart_answers_every_verb_from_the_cache_and_an_edit_is_said_never_rerun(self) -> None:
         ident = self.write("cube")

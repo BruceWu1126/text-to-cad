@@ -8,6 +8,7 @@ ordinary Python scripts call decorated models explicitly.
         [--size-profile P] [--json]
     cadgen serve DOC [--port N] [--three DIR]
     cadgen status [--json] | stop [--json] | server [--port N] [--rotate-token]
+    cadgen delete DOC [DOC ...] [--json]             documents deleted: record, cached document, the engine's copy
     cadgen inspect DOC [REF]                           what a document holds and its build closure, or what a ref names (``refs``)
 
 SRC and DOC are an on-disk CAD file's path or a document's id (``ids``): a model's id is what
@@ -55,6 +56,14 @@ def _status_arguments(status: argparse.ArgumentParser) -> None:
 
 def _stop_arguments(stop: argparse.ArgumentParser) -> None:
     stop.add_argument("--json", action="store_true", help="what was stopped as JSON")
+
+
+def _delete_arguments(delete: argparse.ArgumentParser) -> None:
+    delete.add_argument("documents", nargs="+", metavar="DOC",
+                        help="a document's id, a model's script (every document recorded of it), or a CAD file "
+                             "a page opened; your own files -- a script, its declared files, an opened file -- "
+                             "are never touched")
+    delete.add_argument("--json", action="store_true", help="what was deleted as JSON")
 
 
 def _server_arguments(server: argparse.ArgumentParser) -> None:
@@ -635,6 +644,22 @@ def _stop(args: argparse.Namespace, prog: str) -> int:
     return 0
 
 
+def _delete(args: argparse.Namespace, _prog: str) -> int:
+    from cadgen.engine.api import delete
+
+    try:
+        deleted = delete(args.documents)
+    except ValueError as error:
+        raise Failed(str(error), 2) from None
+    if args.json:
+        print(json.dumps({"ok": True, "deleted": deleted}, indent=2))
+        return 0
+    # A line per document deleted, for a person or an agent; JSON only under ``--json``.
+    for row in deleted:
+        print(f"deleted {row['name']} {row['id']}")
+    return 0
+
+
 def main(argv: list[str] | None = None, prog: str = "python -m cadgen.engine") -> int:
     """The engine's own command: ``VERB [args]``, every verb of ``VERBS``."""
     args = build_parser(prog).parse_args(argv)
@@ -796,6 +821,8 @@ VERBS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[
     "status": ("the engine server's workers, what each is building, and its served documents", _status_arguments,
                _status),
     "stop": ("stop the engine server", _stop_arguments, _stop),
+    "delete": ("delete documents: each one's record and its document in the engine's cache, and what the engine "
+               "holds of it; never a file of yours", _delete_arguments, _delete),
     "server": ("run the engine server in this process", _server_arguments, _server),
 }
 
