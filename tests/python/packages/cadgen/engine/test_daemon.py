@@ -574,6 +574,23 @@ class WindowsTokenFirstTest(unittest.TestCase):
         handled, _token = self.serve(b'{"token": "' + b"0" * 32 + b'", "op": "status", "pad": "' + b"x" * 200_000)
         self.assertEqual(handled, [])
 
+    def test_a_port_file_being_renamed_into_place_is_read_once_it_is_there(self) -> None:
+        # Windows refuses a reader while the starting engine renames its port file into place; a
+        # client polling for it then is not refused by the system, and one refused throughout is.
+        from unittest import mock
+
+        from cadgen.engine import client
+
+        port_file = Path(tempfile.mkdtemp(prefix="eng-port-")) / "x.port"
+        self.addCleanup(shutil.rmtree, port_file.parent, True)
+        refused = PermissionError(13, "Permission denied")
+        with mock.patch.object(client.time, "sleep"), \
+                mock.patch.object(Path, "read_text", side_effect=[refused, refused, "1234 ab\n"]):
+            self.assertEqual(client._port_text(port_file), "1234 ab\n")
+        with mock.patch.object(client.time, "sleep"), mock.patch.object(Path, "read_text", side_effect=refused), \
+                mock.patch.object(client._daemon, "WINDOWS", True), self.assertRaisesRegex(ConnectionError, "denies"):
+            client._connect(port_file)
+
     def test_the_client_puts_its_token_first_and_is_served(self) -> None:
         import socket
         import threading
