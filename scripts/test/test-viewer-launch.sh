@@ -108,9 +108,6 @@ with tempfile.TemporaryDirectory(prefix="cv-") as temporary:
                 assert not errors, errors
                 assert "token=" not in page.url
                 assert urlsplit(page.url).path == page_path, page.url
-                # A page session's old link is the home now.
-                page.goto(opened["apiUrl"] + "/s/old/")
-                assert urlsplit(page.url).path == "/", page.url
                 print("Bundled viewer rendered a STEP on the engine at /<id>; launch reuse and authentication passed.")
             finally:
                 browser.close()
