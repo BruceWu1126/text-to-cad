@@ -34,7 +34,8 @@ ASK_SECONDS = 0.5
 CONFIG = "cadgen.toml"
 NOT_INSTALLED = ("cadgen {version} is not installed: run `uvx --no-config --managed-python --python 3.13 "
                  "--from cadgen=={version} cadgen doctor` once, outside any sandbox or with its permission")
-NONE_INSTALLED = ("no cadgen is installed: run `uvx --no-config --managed-python --python 3.13 --from cadgen "
+# The ``cadgen`` command's own words (``installations._SH``) when no installation is registered.
+NONE_INSTALLED = ("cadgen is not installed: run `uvx --no-config --managed-python --python 3.13 --from cadgen "
                   "cadgen doctor` once, outside any sandbox or with its permission")
 
 

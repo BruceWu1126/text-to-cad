@@ -144,6 +144,14 @@ class ProxyFileTests(Fixture):
         missing = subprocess.run([proxy_file, "+9.9.9", "status"], capture_output=True, text=True, env=environment)
         self.assertEqual(missing.returncode, 1)
         self.assertEqual(missing.stderr.strip(), proxy.NOT_INSTALLED.format(version="9.9.9"))
+        # None installed: the sh and the proxy say it in one wording, the command that installs it.
+        none = subprocess.run([proxy_file, "status"], capture_output=True, text=True, env=environment)
+        self.assertEqual((none.returncode, none.stderr.strip()), (1, proxy.NONE_INSTALLED))
+        with self.assertRaises(proxy.Refused) as refused:
+            proxy.choose(None, [], list, None)
+        self.assertEqual(str(refused.exception), "cadgen is not installed: run `uvx --no-config --managed-python "
+                                                 "--python 3.13 --from cadgen cadgen doctor` once, outside any "
+                                                 "sandbox or with its permission")
         for version in ("1.0.0", "2.0.0"):
             record = self.registered(version)
             Path(record["python"]).write_text(f'#!/bin/sh\necho "{version}" "$@"\n', encoding="utf-8")
