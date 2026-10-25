@@ -127,6 +127,21 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual([line.strip() for line in lines if line.strip().startswith("registry")],
                          [f"registry {record} OK"])
 
+    def test_a_development_installs_pin_is_the_version_it_runs_as(self) -> None:
+        """A SKILL.md a development install wrote names `cadgen +<version>-dev.<time>`: OK for that
+        installation, a mismatch for another."""
+        with TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "SKILL.md"
+            skill.write_text("- `cadgen` below means `cadgen +0.8.0-dev.20261025032333`\n", encoding="utf-8")
+            with mock.patch.dict("os.environ", {"CADGEN_INSTALLATION_VERSION": "0.8.0-dev.20261025032333"}):
+                code, out, _ = _run(["--no-server", tmp])
+            self.assertEqual(code, 0, out)
+            self.assertIn("pin      OK — cadgen==0.8.0-dev.20261025032333", out)
+            with mock.patch.dict("os.environ", {"CADGEN_INSTALLATION_VERSION": "0.8.0-dev.1"}):
+                code, _, err = _run(["--no-server", tmp])
+            self.assertEqual(code, 3)
+            self.assertIn("pins cadgen==0.8.0-dev.20261025032333, but cadgen 0.8.0-dev.1 is installed", err)
+
     @unittest.skipIf(os.name == "nt", "the legacy pair on POSIX: a symlink and an sh script")
     def test_prune_removes_the_per_version_launchers_earlier_builds_published(self) -> None:
         env = self.state / "env" / "bin"
@@ -185,18 +200,24 @@ class DoctorTests(unittest.TestCase):
         self.assertFalse((self.state / "engine").exists(), "nothing started")
         # Running: said. None running: started, by the client's start (a request that may start one).
         # The workers counted as `cadgen status` counts them: the standby with them, against the cap.
-        answer = {"pid": 4242, "workers": [{"script": "a.py"}], "standby": {"pid": 4343}, "cap": 10}
+        # And the version it runs as, so a stale engine is seen (one that says none: its release).
+        answer = {"pid": 4242, "workers": [{"script": "a.py"}], "standby": {"pid": 4343}, "cap": 10,
+                  "version": "0.8.0", "installation": "0.8.0-dev.2"}
         with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request", return_value=answer):
             _, out, _ = _run([tmp])
-        self.assertRegex(out, r"server   running, pid 4242, workers 2/10 with the standby \(.+\)\n")
+        self.assertRegex(out, r"server   running, pid 4242, cadgen 0\.8\.0-dev\.2, workers 2/10 with the standby \(.+\)\n")
+        with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request",
+                                                     return_value={**answer, "installation": None}):
+            self.assertRegex(_run([tmp])[1], r"server   running, pid 4242, cadgen 0\.8\.0, workers 2/10")
         from cadgen.engine.cli import status_text
 
         self.assertIn(" · workers 2/10 with the standby · ", status_text({**answer, "up": 1}))
-        answer = {"pid": 4242, "workers": [{"script": "a.py"}, {"script": "b.py"}], "standby": None, "cap": 10}
+        answer = {"pid": 4242, "workers": [{"script": "a.py"}, {"script": "b.py"}], "standby": None, "cap": 10,
+                  "installation": "0.8.0-dev.2"}
         with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request", side_effect=[None, answer]) as asked:
             _, out, _ = _run([tmp])
         self.assertEqual([call.kwargs["start"] for call in asked.call_args_list], [False, True])
-        self.assertRegex(out, r"server   started, pid 4242, workers 2/10 \(.+\)\n")
+        self.assertRegex(out, r"server   started, pid 4242, cadgen 0\.8\.0-dev\.2, workers 2/10 \(.+\)\n")
         # --no-server: everything else, and the engine only asked about, never started.
         with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request", return_value=None) as asked:
             code, out, _ = _run(["--no-server", tmp])

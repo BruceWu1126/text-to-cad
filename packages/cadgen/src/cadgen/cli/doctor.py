@@ -80,8 +80,11 @@ def _server(start: bool = True) -> str:
         return f"not running ({where}); a build starts it outside a sandbox; inside one, run `cadgen server` outside first"
     from cadgen.engine.cli import workers_text
 
-    # The workers as `cadgen status` counts them: the standby with them.
-    return f"{'started' if started else 'running'}, pid {answer.get('pid')}, {workers_text(answer)} ({where})"
+    # The version the engine runs as (an engine started before engines said it, its release), so a
+    # stale one is seen; the workers as `cadgen status` counts them: the standby with them.
+    version = answer.get("installation") or answer.get("version")
+    return (f"{'started' if started else 'running'}, pid {answer.get('pid')}"
+            + (f", cadgen {version}" if version else "") + f", {workers_text(answer)} ({where})")
 
 
 def _on_path(folder: str) -> bool:
@@ -306,7 +309,7 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
         # No pinned launch command (a development install points it at a checkout): nothing to enforce.
         sys.stdout.write(f"  pin      unpinned in {skill}\n")
         return status
-    if pin == installed:
+    if pin in (installed, own_version()):  # a development install's pin is the version it runs as
         sys.stdout.write(f"  pin      OK — cadgen=={pin} ({skill})\n")
         return status
     from cadgen._internal.installations import VERSION
@@ -318,7 +321,7 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
         return 3
     sys.stderr.write(
         f"  pin      MISMATCH — {skill} pins cadgen=={pin}, "
-        f"but cadgen {installed} is installed.\n"
+        f"but cadgen {own_version() or installed} is installed.\n"
     )
     editable = _editable_source()
     if editable is None:
