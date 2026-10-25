@@ -250,6 +250,9 @@ def _exchange(connection: Connection, message: dict[str, Any], on_log: Callable[
                 if on_progress is not None:
                     on_progress(answer["progress"])
                 continue
+            notice = answer.pop("notice", None)
+            if notice:  # the request that bound the engine's port, when that start moved it (``daemon.bind``)
+                print(f"cadgen: {notice}", file=sys.stderr)
             return answer
     raise ConnectionError("the engine server closed the connection")
 

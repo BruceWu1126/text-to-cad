@@ -59,8 +59,9 @@ def _stop_arguments(stop: argparse.ArgumentParser) -> None:
 
 def _server_arguments(server: argparse.ArgumentParser) -> None:
     server.add_argument("--port", type=int, default=None,
-                        help="the HTTP port the engine takes (else CADGEN_ENGINE_PORT, else 3245); refused "
-                             "when another process holds it; 0 takes any free port")
+                        help="the HTTP port the engine takes, refused when another process holds it (else "
+                             "CADGEN_ENGINE_PORT, else 3245 or the port this installation rolled to); 0 takes "
+                             "any free port")
     server.add_argument("--rotate-token", action="store_true",
                         help="replace this installation's page token first: every link shared before stops working")
 
@@ -608,15 +609,19 @@ def _gb(megabytes: Any) -> str:
 
 
 def _port(serving: dict[str, Any]) -> str:
-    """Where the served port came from, in words -- the default, ``--port`` or
-    ``CADGEN_ENGINE_PORT`` -- as the serving line's parenthesis; nothing for an answer that does not say."""
+    """Where the served port came from, in words -- the default, ``--port``, ``CADGEN_ENGINE_PORT``
+    or a roll from a held default -- as the serving line's parenthesis; nothing for an answer that
+    does not say."""
     port, default = serving.get("port"), serving.get("defaultPort")
     if port is None or default is None:
         return ""
     if port == default:
         return " (the default port)"
+    source = serving.get("portSource") or ""
+    if source == "rolled":
+        return f" (rolled from {default} because {serving.get('portBecause') or 'another process'} holds it)"
     return " (" + {"--port": "the port --port named", "CADGEN_ENGINE_PORT": "the port CADGEN_ENGINE_PORT names"
-                   }.get(serving.get("portSource") or "", f"not the default {default}") + ")"
+                   }.get(source, f"not the default {default}") + ")"
 
 
 def status_text(answer: dict[str, Any]) -> str:
@@ -678,6 +683,8 @@ def status_text(answer: dict[str, Any]) -> str:
         lines.append(f"serving {serving['url']}{_port(serving)}: {opened} document{'' if opened == 1 else 's'} opened by a page or a command"
                      + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else "")
                      + (f" · {_gb(held / 2**20)} of {_gb(memory['budget'] / 2**20)} held" if memory.get("budget") else ""))
+        if serving.get("portNotice"):  # this engine's start moved the port: a roll, or the return to the default
+            lines.append(f"  {serving['portNotice']}")
     cache = answer.get("cache") or {}
     if cache.get("enabled"):
         failures = cache.get("failures") or []

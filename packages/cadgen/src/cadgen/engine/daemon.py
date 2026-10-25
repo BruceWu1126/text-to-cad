@@ -88,8 +88,11 @@ PRESSURE_SHARE = 0.5
 # The standby's name where a worker's script would be (``Pool.stand``): it builds no script yet.
 STANDBY = "standby"
 # The engine's HTTP port when nothing names one (0xCAD): ``--port`` on ``cadgen server`` (or a
-# request's own), then ``CADGEN_ENGINE_PORT``, then this (``bind``). Held, it is refused, never moved.
+# request's own), then ``CADGEN_ENGINE_PORT``, then the installation's remembered port, then this
+# (``bind``). Held by another program, the engine rolls to the next free port and remembers it.
 DEFAULT_PORT = 3245
+# How many ports past a held default (or remembered) one the engine tries before any free one.
+PORTS_TRIED = 64
 # How long the engine waits for another installation's engine it asked to stop to let its port go.
 RETIRE_SECONDS = 10.0
 # How long the engine waits for another installation's engine to answer what it is using.
@@ -1059,15 +1062,26 @@ def _answers(host: str, port: int) -> bool:
 
 
 class PortHeld(ValueError):
-    """The engine's port is another process's: refused in one line that names the holder (``bind``)."""
+    """The engine's port is another process's (``bind``): ``who`` holds it, in words. A port named
+    (``--port``, ``CADGEN_ENGINE_PORT``) is refused in one line that names the holder; the default
+    or remembered one is rolled from."""
+
+    def __init__(self, said: str, who: str) -> None:
+        super().__init__(said)
+        self.who = who
 
 
-def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tuple[Any, str]:
-    """The engine's HTTP server, listening, and where its port came from: ``asked`` (``--port``),
-    else ``CADGEN_ENGINE_PORT``, else ``DEFAULT_PORT`` -- never another. ``listen(port, token)``
-    makes it. A port another process holds is refused by name (``PortHeld``, ``_holder``), but for
-    another installation's engine that nothing uses: that one is asked to stop, and its port is
-    taken once it has gone. The page token is the installation's (its record), made on its first start."""
+def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tuple[Any, dict[str, Any]]:
+    """The engine's HTTP server, listening, and where its port came from. ``listen(port, token)``
+    makes it. A port named -- ``asked`` (``--port``), else ``CADGEN_ENGINE_PORT`` -- is taken or
+    refused by name (``PortHeld``). Else the installation's port: 3245 (``DEFAULT_PORT``) when it is
+    free, else the port it remembers, else the one it rolls to (``_installation_port``). Either way
+    another installation's engine that nothing uses is retired for it (``_listen``). The page token
+    is the installation's (its record), made on its first start.
+
+    ``where``: ``source`` (``--port``, ``CADGEN_ENGINE_PORT``, ``default`` or ``rolled``), for a
+    rolled port ``because`` (who holds 3245), and ``notice``, the one line a start that moved the
+    port says (a roll, or the return to 3245)."""
     import secrets
 
     from cadgen.engine import registry
@@ -1076,19 +1090,69 @@ def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tup
     installation = _tag()
     record = held.engine(installation) if held is not None else {}
     token = record.get("token") or secrets.token_urlsafe(32)
+    remembered = record.get("port")
     if asked is not None:
-        port, source = asked, "--port"
+        server, where = _listen(host, asked, "--port", token, listen), {"source": "--port"}
     elif (named := environment_port()) is not None:
-        port, source = named, "CADGEN_ENGINE_PORT"
+        server, where = _listen(host, named, "CADGEN_ENGINE_PORT", token, listen), {"source": "CADGEN_ENGINE_PORT"}
     else:
-        port, source = DEFAULT_PORT, "default"
-    server = _listen(host, port, source, token, listen)
-    if held is not None and record.get("token") != token:
+        server, where = _installation_port(host, remembered, token, listen)
+        remembered = server.port if where["source"] == "rolled" else None
+    kept = {"token": token, **({"port": remembered} if remembered else {})}
+    if held is not None and kept != record:
         try:
-            held.put_engine(installation, {"token": token})
+            held.put_engine(installation, kept)
         except OSError:
             pass  # a state folder it cannot write: this start's links work, the next start's are new
-    return server, source
+    return server, where
+
+
+def _installation_port(host: str, remembered: int | None, token: str,
+                       listen: Callable[[int, str], Any]) -> tuple[Any, dict[str, Any]]:
+    """The server on the installation's own port, and where it came from (``bind``): 3245 when it is
+    free (a remembered other port forgotten: the one time a link changes), else the remembered port,
+    else -- that one held by anything but another installation's engine nothing uses -- the next
+    free port, ``PORTS_TRIED`` above it and then any (``_roll``), remembered from then on."""
+    first = remembered or DEFAULT_PORT
+    if first != DEFAULT_PORT:
+        server = _free(host, DEFAULT_PORT, token, listen)
+        if server is not None:
+            return server, {"source": "default",
+                            "notice": f"back on the default port {DEFAULT_PORT}: links made on {first} no longer work"}
+    try:
+        server = _listen(host, first, "default", token, listen)
+    except PortHeld as refusal:
+        server = _roll(host, first, token, listen)
+        return server, {"source": "rolled", "because": refusal.who if first == DEFAULT_PORT else _who(DEFAULT_PORT),
+                        "notice": f"{first} is held by {refusal.who}; this installation serves on {server.port} "
+                                  "and keeps it"}
+    if first == DEFAULT_PORT:
+        return server, {"source": "default"}
+    return server, {"source": "rolled", "because": _who(DEFAULT_PORT)}
+
+
+def _free(host: str, port: int, token: str, listen: Callable[[int, str], Any]) -> Any:
+    """``listen(port, token)`` when nothing holds ``port``, else None."""
+    if _answers(host, port):  # a listener on every interface lets a loopback bind through
+        return None
+    try:
+        return listen(port, token)
+    except OSError as error:
+        if not _held(error):
+            raise ValueError(f"cannot listen on {host}:{port}: {error.strerror or error}") from None
+    return None
+
+
+def _roll(host: str, held: int, token: str, listen: Callable[[int, str], Any]) -> Any:
+    """The server on the first free port past ``held``, ``PORTS_TRIED`` at most, else on any."""
+    for port in range(held + 1, min(held + 1 + PORTS_TRIED, 65536)):
+        server = _free(host, port, token, listen)
+        if server is not None:
+            return server
+    try:
+        return listen(0, token)
+    except OSError as error:
+        raise ValueError(f"cannot listen on {host}: {error.strerror or error}") from None
 
 
 def _listen(host: str, port: int, source: str, token: str, listen: Callable[[int, str], Any]) -> Any:
@@ -1112,7 +1176,7 @@ def _listen(host: str, port: int, source: str, token: str, listen: Callable[[int
             deadline = time.monotonic() + RETIRE_SECONDS
         elif time.monotonic() > deadline:
             raise PortHeld(f"port {port} is held by {retired}, which was asked to stop and still holds it after "
-                           f"{RETIRE_SECONDS:.0f} s: run `cadgen stop` with that version") from None
+                           f"{RETIRE_SECONDS:.0f} s: run `cadgen stop` with that version", retired) from None
         time.sleep(0.1)
 
 
@@ -1121,16 +1185,15 @@ def _holder(port: int, source: str) -> str:
     stop (its ``stop``), and named. Else ``PortHeld``, naming the holder: that engine and what uses
     it, one this cadgen cannot ask, or the process the system names (``port_holder``). ``source``:
     where the port came from (``bind``), which says how to name another."""
-    other = "pass another --port" if source == "--port" else "start cadgen with CADGEN_ENGINE_PORT=<n>"
+    other = "pass another --port" if source == "--port" else "start cadgen with another CADGEN_ENGINE_PORT"
     remedy = f"stop it, or {other}"
     found = _engine_serving(port)
     if found is not None:
         address, status = found
-        version = status.get("version")
-        who = (f"cadgen {version}'s engine" if version else "another cadgen's engine") + f" (pid {status.get('pid')})"
+        who = _engine_name(status)
         if not {"watched", "active", "busy"} <= status.keys():
             raise PortHeld(f"port {port} is held by {who}, which this cadgen cannot ask whether it is in use: "
-                           f"run `cadgen stop` with that version, or {other}")
+                           f"run `cadgen stop` with that version, or {other}", who)
         holders, pages = status.get("holders") or 0, status["watched"]
         uses = [f"{count} {noun}{'' if count == 1 else 's'}"
                 for count, noun in ((holders, "app server"), (pages, "open page"),
@@ -1138,18 +1201,36 @@ def _holder(port: int, source: str) -> str:
         if uses:
             then = "quit that app" if holders else "close that page" if pages else "let it finish"
             raise PortHeld(f"port {port} is held by {who}, still in use by {' and '.join(uses)}: {then} "
-                           "or run `cadgen stop` with that version")
+                           "or run `cadgen stop` with that version", who)
         if _ask(address, {"op": "stop"}) is None:
             raise PortHeld(f"port {port} is held by {who}, which did not answer when asked to stop: "
-                           "run `cadgen stop` with that version")
+                           "run `cadgen stop` with that version", who)
         return who
     pid, name, command = port_holder(port)
     if pid is None:
-        raise PortHeld(f"port {port} is held by another process: {remedy}")
+        raise PortHeld(f"port {port} is held by another process: {remedy}", "another process")
     if _CADGEN.search(command or ""):
-        raise PortHeld(f"port {port} is held by another cadgen ({name}, pid {pid}), which this one cannot ask "
-                       f"to stop: {remedy}")
-    raise PortHeld(f"port {port} is held by {name or 'a process'} (pid {pid}): {remedy}")
+        who = f"another cadgen ({name}, pid {pid})"
+        raise PortHeld(f"port {port} is held by {who}, which this one cannot ask to stop: {remedy}", who)
+    who = f"{name or 'a process'} (pid {pid})"
+    raise PortHeld(f"port {port} is held by {who}: {remedy}", who)
+
+
+def _engine_name(status: dict[str, Any]) -> str:
+    """Another installation's engine, by its ``status``: its version and pid."""
+    version = status.get("version")
+    return (f"cadgen {version}'s engine" if version else "another cadgen's engine") + f" (pid {status.get('pid')})"
+
+
+def _who(port: int) -> str:
+    """Who holds ``port``, in words, as ``_holder`` names it: never refused, never asked to stop."""
+    found = _engine_serving(port)
+    if found is not None:
+        return _engine_name(found[1])
+    pid, name, command = port_holder(port)
+    if pid is None:
+        return "another process"
+    return f"another cadgen ({name}, pid {pid})" if _CADGEN.search(command or "") else f"{name or 'a process'} (pid {pid})"
 
 
 # A command line that runs cadgen's engine or viewer: ``-m cadgen.…``, or the ``cadgen`` command's
@@ -1285,7 +1366,7 @@ def rotate_token() -> str | None:
     if held is None:
         return None
     token = secrets.token_urlsafe(32)
-    held.put_engine(_tag(), {"token": token})
+    held.put_engine(_tag(), {**held.engine(_tag()), "token": token})  # its rolled port kept
     return token
 
 
@@ -1293,7 +1374,9 @@ class Daemon:
     def __init__(self, cap: int | None = None, port: int | None = None) -> None:
         self.port = port  # ``cadgen server --port``: the HTTP port this engine must take, or None
         self.port_source = ""  # where the HTTP port the server took came from (``bind``)
-        self.refusal: PortHeld | None = None  # its port held by another process: it stops (``serve``)
+        self.port_because = ""  # a rolled port: who holds the default one
+        self.port_notice = ""  # a start that moved the port: the line it says, once (``bind``)
+        self.refusal: PortHeld | None = None  # its named port held by another process: it stops (``serve``)
         from cadgen.engine.serve import Pressure
         from cadgen.engine.worker import rss_cap_mb
 
@@ -1367,8 +1450,8 @@ class Daemon:
 
     def hold(self, reader: Any, send: Callable[[dict[str, Any]], None]) -> None:
         """A hold on the engine (``{"op": "hold"}``): answered, then kept until its client goes (its
-        end of file). While any is kept, another installation's engine that needs the port refuses
-        to start rather than retire this one (``bind``)."""
+        end of file). While any is kept, another installation's engine that wants the port never
+        retires this one: it rolls past it, or refuses a port it was named (``bind``)."""
         with self.busy_lock:
             self.holders += 1
         try:
@@ -1492,7 +1575,7 @@ class Daemon:
             if self.server is None:
                 host = request.get("host") or "127.0.0.1"
                 try:
-                    self.server, self.port_source = bind(
+                    self.server, where = bind(
                         host, int(request["port"]) if request.get("port") else self.port,
                         lambda port, token: Server(port=port, three=request.get("three"), touch=self.touch,
                                                    provenance=self.provenance, cache=MESHES, isolated=True, host=host,
@@ -1503,6 +1586,10 @@ class Daemon:
                     self.refusal = refusal
                     _note(str(refusal))
                     raise
+                self.port_source, self.port_because = where["source"], where.get("because", "")
+                self.port_notice = where.get("notice", "")
+                if self.port_notice:
+                    request["_notice"] = self.port_notice  # said by the client whose request bound it (``_serve``)
                 # One pressure signal: under it the server trims its documents and the pool its workers.
                 self.server.pressure = self.pressure
                 self.server.pressed = lambda: self.pool.shed(True)
@@ -1956,6 +2043,8 @@ class Daemon:
                 "active": server is not None and bool(server.clients_active()),
                 "serving": None if self.server is None else {"url": self.server.url, "port": self.server.port,
                                                              "portSource": self.port_source,
+                                                             "portBecause": self.port_because,
+                                                             "portNotice": self.port_notice,
                                                              "defaultPort": DEFAULT_PORT,
                                                              "documents": self.server.listing(every=True),
                                                              "memory": self.server.memory()},
@@ -2032,6 +2121,8 @@ def _serve(daemon: Daemon, reader: Any, writer: Any, prefix: bytes = b"") -> Non
     lock = threading.Lock()
 
     def send(message: dict[str, Any]) -> None:
+        if "_notice" in request and "log" not in message and set(message) != {"progress"}:
+            message = {**message, "notice": request.pop("_notice")}  # its answer carries it: said once
         with lock:
             writer.write((json.dumps(message, separators=(",", ":")) + "\n").encode())
             writer.flush()
@@ -2182,6 +2273,8 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
                 listener.close()
             held.close()
             return 1
+        if daemon.port_notice:
+            print(f"cadgen: {daemon.port_notice}", file=sys.stderr)  # ``cadgen server``'s terminal
     if not WINDOWS:
         import signal
 

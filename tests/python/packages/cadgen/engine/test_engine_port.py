@@ -1,7 +1,7 @@
 """An installation's page links outlive its engine: one HTTP port (``--port``, else
-``CADGEN_ENGINE_PORT``, else 3245, never another) and one page token, the same at every start until
-``cadgen server --rotate-token``. A port another process holds is refused by name, but for another
-installation's engine that nothing uses, which is retired."""
+``CADGEN_ENGINE_PORT``, else 3245 or the port it rolled to when 3245 was another's, remembered) and
+one page token, the same at every start until ``cadgen server --rotate-token``. A named port another
+process holds is refused by name; another installation's engine that nothing uses is retired."""
 
 from __future__ import annotations
 
@@ -48,6 +48,20 @@ def other_installation(root: Path) -> str:
     (site / "inherit.pth").write_text(f"import site; site.addsitedir({sysconfig.get_paths()['purelib']!r})\n",
                                       encoding="utf-8")
     return str(folder / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
+
+
+class Listener:
+    """What ``daemon.bind``'s ``listen`` makes, in process: a plain listener on ``port``."""
+
+    def __init__(self, port: int, token: str) -> None:
+        self.socket = socket.socket()
+        try:
+            self.socket.bind(("127.0.0.1", port))
+        except OSError:
+            self.socket.close()
+            raise
+        self.socket.listen(1)
+        self.port, self.token = self.socket.getsockname()[1], token
 
 
 def listening(port: int) -> bool:
@@ -135,6 +149,24 @@ class EnginePortTest(unittest.TestCase):
             self.assertEqual(found.stat().st_mode & 0o777, 0o600)
         return json.loads(found.read_text(encoding="utf-8"))
 
+    def bound(self, default: int) -> tuple[Listener, dict]:
+        """``daemon.bind`` in this process, nothing named, its default ``default``: its listener
+        (closed at the end) and where its port came from."""
+        from cadgen.engine import daemon, registry
+
+        environment = {key: value for key, value in os.environ.items() if key != "CADGEN_ENGINE_PORT"}
+        with mock.patch.dict(os.environ, {**environment, "CADGEN_ENGINE_DIR": self.env["CADGEN_ENGINE_DIR"]},
+                             clear=True), mock.patch.object(daemon, "DEFAULT_PORT", default), \
+                mock.patch.object(registry, "FACTORY", lambda: registry.Registry(self.root / "state")):
+            server, where = daemon.bind("127.0.0.1", None, Listener)
+        self.addCleanup(server.socket.close)
+        return server, where
+
+    def remembered(self) -> int | None:
+        from cadgen.engine import daemon, registry
+
+        return registry.Registry(self.root / "state").engine(daemon._tag()).get("port")
+
     def test_the_default_port_is_3245(self) -> None:
         from cadgen.engine.daemon import DEFAULT_PORT
 
@@ -150,7 +182,7 @@ class EnginePortTest(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stdout)
         (said,) = done.stderr.strip().splitlines()[-1:]
         self.assertRegex(said, rf"^CAD Viewer: port {port} is held by (.+ \(pid (\d+)\)|another process): "
-                               r"stop it, or start cadgen with CADGEN_ENGINE_PORT=<n>$")
+                               r"stop it, or start cadgen with another CADGEN_ENGINE_PORT$")
         if os.name != "nt":  # the system names the holder: this process
             self.assertIn(f" (pid {os.getpid()}): ", said)
         self.answering()
@@ -163,6 +195,55 @@ class EnginePortTest(unittest.TestCase):
                          rf"^cadgen: port {port} is held by .+: stop it, or pass another --port$")
         self.answering()
 
+    def test_a_held_default_rolls_to_the_next_free_port_says_so_once_and_keeps_it(self) -> None:
+        mine = not listening(3245)
+        if mine:  # else another program's already: the same roll
+            holder = socket.socket()
+            self.addCleanup(holder.close)
+            holder.bind(("127.0.0.1", 3245))
+            holder.listen(1)
+        done = self.started()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        port = json.loads(done.stdout)["port"]
+        self.assertTrue(3245 < port <= 3245 + 64, port)
+        pid = str(os.getpid()) if mine and os.name != "nt" else r"\d+"  # the system names the holder
+        said = rf"3245 is held by (.+pid {pid}\)|another process); this installation serves on {port} and keeps it"
+        self.assertRegex(done.stderr, rf"(?m)^cadgen: {said}$")
+        self.assertEqual(self.record()["port"], port)
+        status = self.cli("status").stdout
+        self.assertRegex(status, rf"serving http://127\.0\.0\.1:{port} \(rolled from 3245 because .+ holds it\)")
+        self.assertRegex(status, rf"(?m)^  {said}$")
+        self.stop()
+        again = self.started()  # the remembered port: the same links, nothing said
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(json.loads(again.stdout)["port"], port)
+        self.assertNotIn("3245 is held", again.stderr + self.cli("status").stdout)
+
+    def test_the_installation_port_returns_to_a_free_default_and_rolls_from_a_held_remembered_one(self) -> None:
+        from cadgen.engine import daemon, registry
+
+        default, remembered = held_port(self), free_port()
+        registry.Registry(self.root / "state").put_engine(daemon._tag(), {"token": "t" * 43, "port": remembered})
+        server, where = self.bound(default)  # the default held, the remembered port free: used, nothing said
+        self.assertEqual((server.port, where["source"], "notice" in where), (remembered, "rolled", False))
+        self.assertEqual(server.token, "t" * 43)
+        server.socket.close()
+        held = Listener(remembered, "")  # the remembered port held too: the roll starts from it
+        self.addCleanup(held.socket.close)
+        server, where = self.bound(default)
+        self.assertGreater(server.port, remembered)
+        self.assertRegex(where["notice"], rf"^{remembered} is held by .+; this installation serves on {server.port} "
+                                          "and keeps it$")
+        self.assertEqual(self.remembered(), server.port)
+        server.socket.close()
+        default = free_port()  # the default free again: taken back, the rolled port forgotten
+        rolled = self.remembered()
+        server, where = self.bound(default)
+        self.assertEqual((server.port, where["source"]), (default, "default"))
+        self.assertEqual(where["notice"], f"back on the default port {default}: links made on {rolled} no longer work")
+        self.assertIsNone(self.remembered())
+        self.assertEqual(server.token, "t" * 43)
+
     def test_an_unused_engine_of_another_installation_is_retired_and_its_port_taken(self) -> None:
         _python, theirs, _door = self.other()
         ours = self.launch(CADGEN_ENGINE_PORT=str(theirs["port"]))
@@ -170,7 +251,7 @@ class EnginePortTest(unittest.TestCase):
         self.assertNotEqual(ours["pid"], theirs["pid"])
         self.answering(self.ours())
 
-    def test_an_engine_of_another_installation_in_use_is_refused_by_name(self) -> None:
+    def test_an_engine_of_another_installation_in_use_is_refused_when_named_and_else_rolled_from(self) -> None:
         from cadgen.engine import client, previous
 
         python, theirs, door = self.other()
@@ -189,13 +270,17 @@ class EnginePortTest(unittest.TestCase):
                          f"(pid {theirs['pid']}), still in use by 1 app server: quit that app or run `cadgen stop` "
                          "with that version")
         self.answering(door)
+        server, where = self.bound(theirs["port"])  # its port the default: rolled from, never retired
+        self.assertGreater(server.port, theirs["port"])
+        self.assertEqual(where["notice"], f"{theirs['port']} is held by cadgen {previous.version()}'s engine (pid "
+                                          f"{theirs['pid']}); this installation serves on {server.port} and keeps it")
         self.assertEqual(self.launch(python)["pid"], theirs["pid"], "theirs runs on")
 
     def test_a_named_port_wins_and_rotate_token_replaces_the_token(self) -> None:
         named = free_port()
         first = self.launch(CADGEN_ENGINE_PORT=str(named))
         self.assertEqual(first["port"], named)
-        self.assertEqual(set(self.record()), {"schema", "token"}, "the record keeps the token alone")
+        self.assertEqual(set(self.record()), {"schema", "token"}, "a named port is never remembered")
         self.stop()
         # --port on ``cadgen server`` outranks CADGEN_ENGINE_PORT; --rotate-token retires every link.
         other = free_port()
