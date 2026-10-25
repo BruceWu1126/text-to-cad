@@ -20,6 +20,10 @@ export CADGEN_ENGINE_PORT=0
 # Nor does it keep a standby worker (``daemon.standby``): each daemon a test starts would load the
 # kernel twice over (2.4 s and 440 MB a standby) on runners short of memory. Its own tests set it on.
 export CADGEN_ENGINE_STANDBY=0
+# A test's process that dies in native code (a worker's access violation as it loads the kernel)
+# prints its Python stack before it goes: workers inherit it from the run, so the model log the
+# client prints, and so the failing test's output, says where.
+export PYTHONFAULTHANDLER=1
 
 # The paths a run is narrowed to: test-python.sh and test-global.sh take them as arguments,
 # and only the test files at or under one of them run. Empty, the default, runs every file.
