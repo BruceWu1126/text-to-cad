@@ -198,11 +198,12 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
                                                                         "glb", "stl", "threemf", "dxf")
                            if timings.get(name))
         line = (f"built {report['model']}{worker} in {wall:.2f}s: bodies {shown}; {memo.get('misses', 0)} misses, "
-                f"{memo.get('hits', 0)} hits" + (f"; {stages}" if stages else "")) + _delta(report.get("delta"))
+                f"{memo.get('hits', 0)} hits" + (f"; {stages}" if stages else ""))
         waited = report.get("waited")
         if waited:
             line += (f"; {'replayed' if counted.get('replayed') and not counted.get('run') else 'ran after'} "
                      f"the build of {waited.get('script')} it waited {waited.get('seconds', 0):.0f}s for")
+        line += _delta(report.get("delta"))
         if (report.get("cache") or {}).get("changed"):
             line += f"\n  rebuilt: {report['cache']['reason']}"
     if report.get("retired"):
