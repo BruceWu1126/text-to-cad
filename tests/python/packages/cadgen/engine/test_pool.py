@@ -294,6 +294,7 @@ class StandbyTest(unittest.TestCase):
         from cadgen.engine.cli import status_text
 
         daemon = Daemon(cap=4)
+        daemon.pressure.simulate(False)  # this machine's memory pressure would keep any standby from starting
         daemon.pool.start = Fake
         self.addCleanup(daemon.shutdown)
         daemon.pool.spare = lambda environment: Fake("standby", environment, None, rss=440.0)
