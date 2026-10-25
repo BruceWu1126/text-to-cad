@@ -219,8 +219,9 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
         stages = ", ".join(f"{name} {timings[name]:.2f}s" for name in ("body", "names", "document", "xbf", "step",
                                                                         "glb", "stl", "threemf", "dxf")
                            if timings.get(name))
-        line = (f"built {report['model']}{worker} in {wall:.2f}s: bodies {shown}; {memo.get('misses', 0)} misses, "
-                f"{memo.get('hits', 0)} hits" + (f"; {stages}" if stages else ""))
+        misses, hits = memo.get("misses", 0), memo.get("hits", 0)
+        line = (f"built {report['model']}{worker} in {wall:.2f}s: bodies {shown}; {misses} miss{'' if misses == 1 else 'es'}, "
+                f"{hits} hit{'' if hits == 1 else 's'}" + (f"; {stages}" if stages else ""))
         waited = report.get("waited")
         if waited:
             line += (f"; {'replayed' if counted.get('replayed') and not counted.get('run') else 'ran after'} "
