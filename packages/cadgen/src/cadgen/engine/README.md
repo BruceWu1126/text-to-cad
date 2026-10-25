@@ -78,7 +78,9 @@ A part's material is set on the shape, as its colour is: `part.material =
 materials.aluminium_6061` (or `materials("6061")`: a catalogue of common engineering
 materials, **Materials**), or a `Material(...)` constant of the project's own for any other.
 `paint(part, faces, material)` gives faces one. On an assembly, a material is every part's
-below it that has none: a whole-model default. Set materials on finished parts, after the
+below it that has none: a whole-model default. An explicit colour always wins: `part.color = …`
+is the part's colour whatever its material, set before or after it, and its material's base
+colour in the file; a material's look colours only a part with no colour of its own. Set materials on finished parts, after the
 last operation: an edit of one is then no kernel call. Two limits of OCCT's STEP writer show in a STEP export: it names the density
 unit gram³·cm² (the exponents wrong, the number right: the reader gives the density back as
 written), and it writes materials sharing a name as one entity, so a STEP gives every such
