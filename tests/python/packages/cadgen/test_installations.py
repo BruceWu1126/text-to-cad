@@ -162,17 +162,25 @@ class ProxyFileTests(Fixture):
         self.assertEqual(ran.stdout, "1.0.0 -P -m cadgen._internal.proxy +2.0.0 a b\n")
 
 
-    def test_the_windows_proxy_reads_the_python_a_record_names(self) -> None:
-        # No Windows runner executes the cmd: its for /f is checked against the record's own line.
+    def test_the_windows_proxy_reads_the_python_and_the_cadgen_a_record_names(self) -> None:
+        # No Windows runner executes the cmd: each for /f is checked against the record's own line.
         # With delims set to a quote alone, cmd skips empty pieces and keeps the indent as one.
         import re
 
         record = self.registered("1.0.0")
-        (line,) = [row for row in Path(record["path"]).read_text(encoding="utf-8").splitlines()
-                   if '"python":' in row]
-        (taken,) = re.findall(r"tokens\^=(\d+)\^ delims\^=\^\" %%p", installations.script(True))
-        pieces = [piece for piece in line.split('"') if piece]
-        self.assertEqual(pieces[int(taken) - 1].replace("\\\\", "\\"), record["python"])
+        lines = Path(record["path"]).read_text(encoding="utf-8").splitlines()
+        text = installations.script(True)
+        reads = re.findall(r'tokens\^=(\d+)\^ delims\^=\^" %%(\w) in \(`findstr /c:"\\"(\w+)\\":" '
+                           r'"!state!\\installations\\%%n"`\) do set "(\w+)=%%\2"', text)
+        self.assertEqual(sorted((key, name) for _taken, _letter, key, name in reads),
+                         [("cadgen", "console"), ("python", "python")])
+        for taken, _letter, key, _name in reads:
+            (line,) = [row for row in lines if f'"{key}":' in row]
+            pieces = [piece for piece in line.split('"') if piece]
+            self.assertEqual(pieces[int(taken) - 1].replace("\\\\", "\\"), record[key])
+        # Alive as alive() says it, as the sh does: an uninstalled cadgen leaves its python.
+        self.assertIn('if exist "!python!" if exist "!console!" goto run', text)
+        self.assertEqual(text.count("goto run"), 1)
 
     @POSIX
     def test_the_sh_passes_over_an_installation_whose_cadgen_is_gone(self) -> None:

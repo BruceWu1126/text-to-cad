@@ -44,7 +44,7 @@ WINDOWS = os.name == "nt"
 # The line that makes a file the proxy, and the proxy's revision: a later one is never replaced by an
 # earlier, so an older installation's server starting never undoes a newer one's proxy.
 MARK = "cadgen proxy: "
-REVISION = 2
+REVISION = 3
 VERSION = re.compile(r"[0-9][0-9A-Za-z.+_-]*")
 
 OK = "ok"
@@ -303,12 +303,18 @@ rem The cadgen command: runs the installation of cadgen that +<version>, CADGEN_
 rem cadgen.toml or a running engine names (cadgen._internal.proxy), through the one registered last.\r
 setlocal EnableDelayedExpansion\r
 if defined CADGEN_STATE_DIR (set "state=!CADGEN_STATE_DIR!") else if defined LOCALAPPDATA (set "state=!LOCALAPPDATA!\\cadgen-state") else (set "state=!USERPROFILE!\\AppData\\Local\\cadgen-state")\r
-rem A record's python line is: space "python": "PATH", -- split at each quote, PATH is its fourth piece.\r
+rem A record's python and cadgen lines are: space "KEY": "PATH", -- split at each quote, PATH is the\r
+rem fourth piece. Alive as alive() says it: its python and its console script (an uninstalled cadgen\r
+rem leaves the python), else the next record.\r
 for /f "delims=" %%n in ('dir /b /o-d "!state!\\installations\\*.json" 2^>nul') do (\r
-  for /f usebackq^ tokens^=4^ delims^=^" %%p in (`findstr /c:"\\"python\\":" "!state!\\installations\\%%n"`) do (\r
-    set "python=%%p"\r
+  set "python="\r
+  set "console="\r
+  for /f usebackq^ tokens^=4^ delims^=^" %%p in (`findstr /c:"\\"python\\":" "!state!\\installations\\%%n"`) do set "python=%%p"\r
+  for /f usebackq^ tokens^=4^ delims^=^" %%c in (`findstr /c:"\\"cadgen\\":" "!state!\\installations\\%%n"`) do set "console=%%c"\r
+  if defined python if defined console (\r
     set "python=!python:\\\\=\\!"\r
-    if exist "!python!" goto run\r
+    set "console=!console:\\\\=\\!"\r
+    if exist "!python!" if exist "!console!" goto run\r
   )\r
 )\r
 echo cadgen is not installed: run `uvx --no-config --managed-python --python 3.13 --from cadgen cadgen doctor` once, outside any sandbox or with its permission 1>&2\r
