@@ -147,6 +147,31 @@ class PthTest(unittest.TestCase):
         self.assertEqual(self.run_python("import build123d as bd; import sys; bd.Box(1, 1, 1); "
                                          "print('OCP' in sys.modules)"), "True")
 
+    def test_dir_of_a_lazy_module_lists_its_public_names_and_loads_nothing(self) -> None:
+        """An agent discovering the API with ``dir()`` sees every name ``__all__`` offers, and
+        none of the module's own imports, while the kernel and the engine's model stay unloaded."""
+        found = self.run_python(textwrap.dedent("""
+            import json, sys
+            import cadgen, cadgen.ap242, cadgen.engine, cadgen.gltf
+            seen = {module.__name__: [name for name in dir(module) if not name.startswith("_")]
+                    for module in (cadgen, cadgen.ap242, cadgen.engine, cadgen.gltf)}
+            print(json.dumps([seen, [name for name in ("OCP", "build123d", "cadgen.engine.model")
+                                     if name in sys.modules and type(sys.modules[name]) is type(sys)]]))
+        """))
+        import json
+
+        import cadgen
+        import cadgen.ap242
+        import cadgen.engine
+        import cadgen.gltf
+
+        seen, loaded = json.loads(found)
+        self.assertEqual(loaded, [])
+        self.assertEqual(seen["cadgen.ap242"], sorted(cadgen.ap242.__all__))
+        self.assertEqual(seen["cadgen.gltf"], ["animation"])
+        self.assertEqual(seen["cadgen.engine"], sorted(cadgen.engine.__all__))
+        self.assertEqual(seen["cadgen"], sorted({*cadgen.__all__, "ap242", "engine", "gltf"} - {"__version__"}))
+
 
 if __name__ == "__main__":
     unittest.main()
