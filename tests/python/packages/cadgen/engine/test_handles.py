@@ -69,6 +69,46 @@ print("RESULT " + json.dumps({
     "labels": sorted(child.label for child in shape.children), "again": handle.shape is shape}))
 """
 
+# Eight models with no file of their own, each body noting its run (an append: an output, which no
+# key hears), exported by their functions and one by its handle, and drawn by a function where OCCT draws.
+EIGHT = """
+import pathlib
+
+import build123d as bd
+from cadgen import model
+
+RUNS = pathlib.Path(__file__).with_name("runs.txt")
+
+
+def _box(name, size):
+    with RUNS.open("a", encoding="utf-8") as runs:
+        runs.write(name + "\\n")
+    box = bd.Box(size, size, size)
+    box.label = name
+    return box
+""" + "".join(f"""
+
+@model
+def m{at}():
+    return _box("m{at}", {at + 1})
+""" for at in range(8))
+
+EXPORTER = """
+import json
+import sys
+
+import cadgen
+import eight
+
+MODELS = [getattr(eight, f"m{at}") for at in range(8)]
+for found in MODELS:
+    cadgen.export(found, f"out/{found.name}.step")
+eight.m0().export("out/handle.step")
+if "--draw" in sys.argv:
+    cadgen.snapshot(eight.m1, "out/m1.png", width=64, height=48)
+print("RESULT " + json.dumps({"ok": True}))
+"""
+
 HANDED = """
 import json
 
@@ -201,6 +241,31 @@ class HandleTest(unittest.TestCase):
         self.assertEqual((project / "out/a.step").read_bytes(), (project / "out/b.step").read_bytes(),
                          "handle.export is export(handle)")
         self.assertEqual(_served(found["url"], ident)["name"], "base", "its page serves it")
+
+    def test_a_model_exported_by_its_function_is_built_as_its_call_is_never_cold(self) -> None:
+        """``export(model, path)`` is the model's call, then its handle's export: eight in one program
+        run once, replay in the next run, and after a restart are taken from the engine's cache --
+        no body runs again -- and write what the handle form writes, byte for byte. (A document taken
+        from the cache writes its STEP as read back, a signed zero apart from the live build's: the
+        handle form's the same.)"""
+        from cadgen.engine.render import context
+        from tests.python.support import opengl
+
+        project = self.project("eight", {"eight.py": EIGHT, "exporter.py": EXPORTER})
+        draw = ["--draw"] if opengl.draws(context.available(), "a snapshot is drawn by OCCT") else []
+        runs = project / "runs.txt"
+        self.run_python("exporter.py", *draw, cwd=project)
+        self.assertEqual(sorted(runs.read_text(encoding="utf-8").split()), sorted(f"m{at}" for at in range(8)),
+                         "each body ran once, the handle's call and the snapshot's reusing the first")
+        first = {path.name: path.read_bytes() for path in (project / "out").glob("*.step")}
+        self.assertEqual(first["m0.step"], first["handle.step"], "the function form writes the handle form's bytes")
+        self.run_python("exporter.py", *draw, cwd=project)
+        self.assertEqual(len(runs.read_text(encoding="utf-8").split()), 8, "a second program's run replays")
+        self.assertEqual(self.cli("stop").returncode, 0)
+        self.run_python("exporter.py", *draw, cwd=project)
+        self.assertEqual(len(runs.read_text(encoding="utf-8").split()), 8, "after a restart: taken from the cache")
+        self.assertEqual((project / "out/m0.step").read_bytes(), (project / "out/handle.step").read_bytes(),
+                         "from the cache too, the function form writes the handle form's bytes")
 
     def test_a_shape_handed_over_is_a_document_held_served_exported_and_never_rebuilt(self) -> None:
         project = self.project("handed", {"hand.py": HANDED})

@@ -1338,7 +1338,8 @@ target and moved over it; a DXF only when its bytes change.
   document's id (written from what the engine holds of it -- its worker's document, or the whole
   document the server took from the worker before it went (**Document lifetime**) -- byte for byte
   what it would write however the script has changed since, and nothing is built); from Python, a
-  `Model` (built first, in its worker: the program's own call) too. An xbf is written from a
+  `Model` (called first, as the program's own call of it is: taken from its key or the engine's
+  cache, or replayed, when nothing changed; then exported by its handle) too. An xbf is written from a
   STEP; never from an xbf, which already is the document. Several destinations read the document
   once, and every destination is checked before any is written; an export
   runs in the worker that built the document while the file is as it left it, else in the
