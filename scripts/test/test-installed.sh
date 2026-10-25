@@ -162,18 +162,6 @@ while read -r command; do
   echo "   cadgen $command"
 done <"$WORK/commands.txt"
 
-step "The installation published its launchers, as the skills name them"
-VERSION_INSTALLED="$("$VENV/bin/python" -c 'import cadgen; print(cadgen.__version__)')"
-CADGEN_LAUNCHER="$CADGEN_LAUNCHER_DIR/cadgen-$VERSION_INSTALLED"
-PYTHON_LAUNCHER="$CADGEN_LAUNCHER_DIR/cadgen-python-$VERSION_INSTALLED"
-# Compared resolved: the temporary folder's path may be spelled through a symlink (/var, /private/var).
-same() { "$VENV/bin/python" -c 'import os, sys; sys.exit(os.path.realpath(sys.argv[1]) != os.path.realpath(sys.argv[2]))' "$1" "$2"; }
-[ -L "$CADGEN_LAUNCHER" ] && same "$CADGEN_LAUNCHER" "$VENV/bin/cadgen" \
-  || fail "$CADGEN_LAUNCHER is not a link to $VENV/bin/cadgen"
-same "$("$PYTHON_LAUNCHER" -c 'import sys; print(sys.prefix)')" "$VENV" \
-  || fail "$PYTHON_LAUNCHER does not run the installation's python"
-echo "   $(basename "$CADGEN_LAUNCHER") and $(basename "$PYTHON_LAUNCHER")"
-
 step "Serve the CAD app over MCP, as an agent host starts it"
 "$VENV/bin/python" - "$VENV/bin/cadgen" "$WORK" <<'PY' || exit 1
 import json, os, subprocess, sys, threading
@@ -225,6 +213,18 @@ if server.wait(30) != 0:
 watchdog.cancel()
 print(f"   {len(tools)} tools; the app is {len(page) // 1024} KiB at {uri}")
 PY
+
+step "Starting the CAD app's server published its launchers, as the skills name them"
+VERSION_INSTALLED="$("$VENV/bin/python" -c 'import cadgen; print(cadgen.__version__)')"
+CADGEN_LAUNCHER="$CADGEN_LAUNCHER_DIR/cadgen-$VERSION_INSTALLED"
+PYTHON_LAUNCHER="$CADGEN_LAUNCHER_DIR/cadgen-python-$VERSION_INSTALLED"
+# Compared resolved: the temporary folder's path may be spelled through a symlink (/var, /private/var).
+same() { "$VENV/bin/python" -c 'import os, sys; sys.exit(os.path.realpath(sys.argv[1]) != os.path.realpath(sys.argv[2]))' "$1" "$2"; }
+[ -L "$CADGEN_LAUNCHER" ] && same "$CADGEN_LAUNCHER" "$VENV/bin/cadgen" \
+  || fail "$CADGEN_LAUNCHER is not a link to $VENV/bin/cadgen"
+same "$("$PYTHON_LAUNCHER" -c 'import sys; print(sys.prefix)')" "$VENV" \
+  || fail "$PYTHON_LAUNCHER does not run the installation's python"
+echo "   $(basename "$CADGEN_LAUNCHER") and $(basename "$PYTHON_LAUNCHER")"
 
 step "Build a real model with no repo in sight"
 mkdir -p "$EMPTY/models"
