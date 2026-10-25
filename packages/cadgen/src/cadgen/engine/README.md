@@ -485,7 +485,7 @@ cadgen status [--json] | stop [--json] | server [--port N] [--rotate-token]
 Every `SRC` and `DOC` is an on-disk CAD file's path or a document's id (`ids`): a model's id is
 what `python SCRIPT.py` prints for it (`id:`, beside its page, `view: <engine>/<id>`). A document
 id is read as the engine holds it, never built: one it does not hold is refused with the command
-that builds it again, `cadgen run <the program that built it>`. A script is never a source: `x.py`
+that builds it again, `cadgen run <the script that defines it>`. A script is never a source: `x.py`
 and `x.py::fn` are refused as any other file that is no document is.
 
 Every build and every verb goes through the engine: no command runs one in its own process. A
@@ -1029,14 +1029,14 @@ mark, half the budget:
 Where none can be read, the budget alone applies. `Pressure.simulate` is the tests' hook.
 
 **The rebuild command.** A document that is not held -- `evicted`, `expired` -- names the exact
-command that builds it again: `cadgen run` and the program whose call built it (its `__main__`
-file, else the model's script) -- the engine that says it is the one `cadgen run` reaches, and its
+command that builds it again: `cadgen run` and the script that defines its model -- never a
+program that imported it and called it, a check script, whose next run may do something else -- the engine that says it is the one `cadgen run` reaches, and its
 python has the kernel a bare `python` may lack -- from the daemon's record of it, or after a
 restart the registry's. The program is quoted for the shell a person pastes it into (`registry.rerun`):
 `shlex.quote` on POSIX; on Windows the double quotes cmd.exe and PowerShell both read, only where a
 space or a quote needs them (`subprocess.list2cmdline`), since to cmd.exe a single quote is part of
 the path. A shape handed over has none: its words say that a program the engine did
-not run showed it, and that only running that program again hands it over again. A child model's is its parent's program, whose run builds it. The page
+not run showed it, and that only running that program again hands it over again. A child model's is its own script too. The page
 reads it from its document's 404 (`GET /api/doc/<id>`: `{"error", "state", "rebuild"}`),
 `cadgen inspect` and `cad_show` of its id refuse with it, and `cadgen status` lists it. A `memory`
 document's words add that it is kept in memory only. The engine never runs it: no access, no start
@@ -2523,7 +2523,7 @@ inspect ID 'face 1'` take the id; `cadgen inspect 'ID#face 1'` uses the same ref
 Each reads the document the engine holds, as it is: editing the script changes nothing until
 Python runs it again, and no verb imports, runs or builds a script. An id the engine no longer
 holds (evicted, expired) is refused with its state and the command that builds it again
-(`cadgen run <the program that built it>`; **Document lifetime**).
+(`cadgen run <the script that defines it>`; **Document lifetime**).
 `--query build` returns saved-file metadata/closure or live-build metadata; `--query closure` and
 `--query geometry` select the other queries explicitly. In the CAD Viewer a model's page is
 `/<id>`; it has no file of its own, so no Select File and no file menu.

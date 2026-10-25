@@ -381,9 +381,10 @@ def rerun(program: str | os.PathLike) -> str:
 
 
 def command(registry: Registry, record: dict[str, Any]) -> str | None:
-    """The command that builds a model's document again (``rerun``). The engine never runs it."""
-    found = program(registry, record)
-    return None if found is None else rerun(found)
+    """The command that builds a model's document again (``rerun``): its own script, the one that
+    defines it, never a program that imported it and called it (a check script). None for what
+    no run built. The engine never runs it."""
+    return None if program(registry, record) is None else rerun(home(registry, record))
 
 
 def detached(registry: Registry, record: dict[str, Any]) -> bool:
