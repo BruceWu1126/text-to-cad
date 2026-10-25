@@ -46,7 +46,7 @@ START = {
     "cad_export": obj({"source": STRING, "destinations": {"type": "array", "minItems": 1, "maxItems": 32, "items": STRING}},
                       ("source", "destinations")),
     "cad_snapshot": obj(SNAPSHOT),
-    "cad_inspect": obj({"source": STRING, "ref": STRING, "query": {"type": "string", "enum": ["closure", "geometry", "build"]}}, ("source",)),
+    "cad_inspect": obj({"source": STRING, "ref": STRING, "query": {"type": "string", "enum": ["summary", "closure", "geometry", "build"]}}, ("source",)),
 }
 # The arguments each start requires, beside requestId: one set, or (a snapshot) one of several.
 STARTS = {"cad_export": (("source", "destinations"),), "cad_snapshot": (("source", "output"), ("packet",)),
@@ -54,7 +54,7 @@ STARTS = {"cad_export": (("source", "destinations"),), "cad_snapshot": (("source
 DESCRIPTIONS = {
     "cad_export": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf). The source is an absolute CAD file path or a document id (a model's, which running its script prints); a document id is exported as the engine holds it. A mesh source (.glb/.stl/.3mf) exports to the other two mesh kinds only, each holding what its format carries. Reuses the Python export operation. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts.",
     "cad_snapshot": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. The source is an absolute CAD file path or a document id; paths must be absolute on the engine host. A failed snapshot or packet leaves existing pictures unchanged.",
-    "cad_inspect": "Read closure, geometry (requires ref), or build metadata of an existing CAD file or a document id. Never builds a model or writes its declared outputs; a document the engine no longer holds is refused with the command that builds it again. Defaults to geometry with a ref, otherwise closure.",
+    "cad_inspect": "Inspect an existing CAD file (.xbf, .step, a mesh) or a document id. Without a ref it answers what `cadgen inspect SOURCE` prints: the summary (parts, bounds, volume, materials and mass, joints, states, sequences, animations) as data and as its text, with the build closure where there is one. With a ref (or SOURCE#REF), that element's or part's geometry. query picks one answer instead: summary, closure, geometry (requires ref) or build (file metadata or live build metadata). Never builds a model or writes its declared outputs; a document the engine no longer holds is refused with the command that builds it again.",
 }
 
 
@@ -168,6 +168,18 @@ def checked(value, schema, label="arguments"):
             raise JobError(f"Invalid length for {label}")
         for item in value:
             checked(item, schema["items"], label + "[]")
+
+
+# The snapshot's words name its command's flags (``--pose '{"hinge": 90}'``); a cad_snapshot's caller
+# gave arguments: the same words with each flag named as the argument it is.
+_FLAG_VALUE = re.compile(r"--(pose|display|camera) '([^']*)'")
+_FLAG = re.compile(r"--(pose|display|camera|annotation|measurements|width|height|grid|preview|size-profile)\b")
+
+
+def arguments_named(text):
+    """A snapshot's refusal in the words of cad_snapshot's arguments, not the command's flags."""
+    text = _FLAG_VALUE.sub(lambda found: f"{found[1]} {found[2]}", text)
+    return _FLAG.sub(lambda found: found[1].replace("-", "_"), text)
 
 
 def absolute(value):
@@ -286,6 +298,8 @@ class Operations(Jobs):
 
     def public(self, job):
         result = super().public(job)
+        if job.get("operation") == "cad_snapshot" and isinstance(result.get("error"), str):
+            result["error"] = arguments_named(result["error"])
         if len(json.dumps(result).encode()) <= REPORT_BYTES:
             return result
         # MCP transports have bounded messages. Never silently omit a long report.
@@ -297,14 +311,19 @@ class Operations(Jobs):
 
     def _failure(self, job, error):
         """Whether a failed operation may have written: only once its export or snapshot was asked
-        for (``_perform``), and not where this process refused it -- the export's and the snapshot's
-        own checks, which run before the engine is asked for anything. A refusal the engine raised
-        (``api._failed`` marks it) may come after a destination was written."""
+        for (``_perform``), and not where it was refused before any output was opened. A snapshot's
+        refusal is that wherever it was raised, here or in the engine (``api._failed`` raises the
+        engine's as its own type): ``SnapshotRefused`` is a request the snapshot will not draw,
+        refused before it renders, and a picture is written whole or not at all
+        (``snapshot.write_png``, ``draw_pictures``). An export's refusal is that only where this
+        process raised it, before the engine was asked; one the engine raised may come after a
+        destination was written (a DXF's checks, after a STEP beside it)."""
         from cadgen.engine.export import ExportRefused
         from cadgen.engine.snapshot import SnapshotRefused
 
-        refused_here = isinstance(error, (ExportRefused, SnapshotRefused)) and not getattr(error, "_engine_refusal", False)
-        return {"result": {"outputsMayHaveBeenWritten": bool(job.get("writing")) and not refused_here}}
+        refused_before = isinstance(error, SnapshotRefused) or (
+            isinstance(error, ExportRefused) and not getattr(error, "_engine_refusal", False))
+        return {"result": {"outputsMayHaveBeenWritten": bool(job.get("writing")) and not refused_before}}
 
     def _finished(self, job):
         job.pop("arguments", None)
@@ -339,5 +358,12 @@ class Operations(Jobs):
                 job["writing"] = True
                 result = {"pictures": [serial(api.snapshot(**args, out=absolute(output)))]}
         elif name == "cad_inspect":
-            result = {"inspection": serial(api.inspect(**args))}
+            if "ref" not in args and "query" not in args and "#" not in args["source"]:
+                args["query"] = "summary"  # what `cadgen inspect SOURCE` prints (``engine.cli``)
+            found = serial(api.inspect(**args))
+            if isinstance(found, dict) and isinstance(found.get("summary"), dict):
+                from cadgen.engine.cli import summary_text
+
+                found = {**found, "text": summary_text(found["summary"])}
+            result = {"inspection": found}
         return {"state": "succeeded", "stage": "Complete", "result": result}
