@@ -8,7 +8,8 @@ proxy, ``~/.local/bin/cadgen`` (``cadgen._internal.installations``), through whi
 write (a sandbox's), the records of installations whose interpreter is gone, and a file in the
 proxy's place that is not cadgen's. ``--prune`` removes those records. Then it starts the engine
 when none runs (``cadgen.engine.client``): in a sandbox that cannot start one it says so in its usual
-line. Run pointed at a skill (its directory or SKILL.md), it also says whether this is the cadgen the
+line. ``--no-server`` does all of it but start the engine, saying whether one runs: a CI job's
+smoke check, which must leave no engine behind. Run pointed at a skill (its directory or SKILL.md), it also says whether this is the cadgen the
 skill's docs were written against: the version its install command pins.
 
 It also proves the CAD kernel loads. ``OCP`` is imported in a fresh interpreter
@@ -206,6 +207,11 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
         action="store_true",
         help="Remove the record of every registered installation whose interpreter is gone, and exit.",
     )
+    parser.add_argument(
+        "--no-server",
+        action="store_true",
+        help="Do everything but start the engine: say only whether one is running.",
+    )
     args = parser.parse_args(argv)
 
     if args.prune:
@@ -231,7 +237,7 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     for line in _setup():
         sys.stdout.write(f"  {line}\n")
     # One per installation: the same door means the same warm daemon. Started here when none runs.
-    sys.stdout.write(f"  server   {_server()}\n")
+    sys.stdout.write(f"  server   {_server(start=not args.no_server)}\n")
     sharing = _sharing()
     if sharing:
         # Whether CAD's apps send usage stats, as `cadgen telemetry` says it.

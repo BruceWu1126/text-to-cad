@@ -126,6 +126,11 @@ class DoctorTests(unittest.TestCase):
             _, out, _ = _run([tmp])
         self.assertEqual([call.kwargs["start"] for call in asked.call_args_list], [False, True])
         self.assertRegex(out, r"server   started, pid 4242, 2 workers \(.+\)\n")
+        # --no-server: everything else, and the engine only asked about, never started.
+        with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request", return_value=None) as asked:
+            code, out, _ = _run(["--no-server", tmp])
+        self.assertEqual((code, [call.kwargs["start"] for call in asked.call_args_list]), (0, [False]))
+        self.assertRegex(out, r"server   not running \(.+\); the first build starts it\n")
 
     def test_the_report_names_the_kernel_it_loaded(self) -> None:
         with TemporaryDirectory() as tmp:
