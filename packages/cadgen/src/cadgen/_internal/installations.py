@@ -218,6 +218,15 @@ def _legacy_console(path: str) -> bool:
     return parts[-1:] == ["cadgen"] and parts[-2:-1] == ["bin"]
 
 
+def _registered_environment(path: str) -> bool:
+    """Whether the symlink ``path`` leads into the environment of a registered installation."""
+    place = os.path.dirname(os.path.dirname(os.path.realpath(path)))
+    try:
+        return any(_same_place(record["prefix"], place) for record in records())
+    except OSError:
+        return False
+
+
 def prune_legacy(where: str | None = None, windows: bool = WINDOWS) -> list[str]:
     """Remove the per-version launchers earlier 0.8 builds published in the proxy's folder (``where``):
     each ``cadgen-python-<version>`` carrying ``LEGACY_MARK``, and each ``cadgen-<version>`` symlink
@@ -242,7 +251,12 @@ def prune_legacy(where: str | None = None, windows: bool = WINDOWS) -> list[str]
             legacy = stem[len("cadgen-python-"):] in marked
         elif stem.startswith("cadgen-") and VERSION.fullmatch(stem[len("cadgen-"):]):
             version = stem[len("cadgen-"):]
-            legacy = _legacy_console(path) or (windows and name.lower().endswith(".exe") and version in marked)
+            # A symlink into a cadgen environment is an earlier build's only beside its marked python,
+            # or pointing nowhere now, or into an environment registered here: a person's own
+            # ``cadgen-0.7`` into a venv of theirs is theirs.
+            legacy = (_legacy_console(path) and (version in marked or not os.path.exists(path)
+                                                 or _registered_environment(path))) \
+                or (windows and name.lower().endswith(".exe") and version in marked)
         else:
             legacy = False
         if legacy:
