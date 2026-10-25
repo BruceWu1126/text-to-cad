@@ -1401,6 +1401,9 @@ class Daemon:
         self.port_source = ""  # where the HTTP port the server took came from (``bind``)
         self.port_because = ""  # a rolled port: who holds the default one
         self.port_notice = ""  # a start that moved the port: the line it says, once (``bind``)
+        # That line when no request of a client bound the port -- a build's page did
+        # (``models.register_page``): the next build's answer says it (``_serve``).
+        self.unsaid = ""
         self.refusal: PortHeld | None = None  # its named port held by another process: it stops (``serve``)
         from cadgen.engine.serve import Pressure
         from cadgen.engine.worker import rss_cap_mb
@@ -1623,8 +1626,10 @@ class Daemon:
                     raise
                 self.port_source, self.port_because = where["source"], where.get("because", "")
                 self.port_notice = where.get("notice", "")
-                if self.port_notice:
+                if self.port_notice and request:
                     request["_notice"] = self.port_notice  # said by the client whose request bound it (``_serve``)
+                elif self.port_notice:
+                    self.unsaid = self.port_notice  # bound for a build's page: that build's answer says it
                 # One pressure signal: under it the server trims its documents and the pool its workers.
                 self.server.pressure = self.pressure
                 self.server.pressed = lambda: self.pool.shed(True)
@@ -2157,8 +2162,12 @@ def _serve(daemon: Daemon, reader: Any, writer: Any, prefix: bytes = b"") -> Non
     lock = threading.Lock()
 
     def send(message: dict[str, Any]) -> None:
-        if "_notice" in request and "log" not in message and set(message) != {"progress"}:
-            message = {**message, "notice": request.pop("_notice")}  # its answer carries it: said once
+        if "log" not in message and set(message) != {"progress"}:
+            if "_notice" in request:
+                message = {**message, "notice": request.pop("_notice")}  # its answer carries it: said once
+            elif daemon.unsaid and request.get("op") == "build":
+                notice, daemon.unsaid = daemon.unsaid, ""
+                message = {**message, "notice": notice}
         with lock:
             writer.write((json.dumps(message, separators=(",", ":")) + "\n").encode())
             writer.flush()
@@ -2317,6 +2326,7 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
             return 1
         if daemon.port_notice:
             print(f"cadgen: {daemon.port_notice}", file=sys.stderr)  # ``cadgen server``'s terminal
+            daemon.unsaid = ""
     if not WINDOWS:
         import signal
 

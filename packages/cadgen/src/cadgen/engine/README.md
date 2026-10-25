@@ -333,7 +333,8 @@ is taken or refused. Else the installation's own port: 3245 (`daemon.DEFAULT_POR
 can, as Vite, Jupyter and Next.js take theirs; when another program holds it, the next free port
 (`daemon.PORTS_TRIED` above it, then any), which the installation remembers in its record and takes
 at every later start, so its links stay what they were. The start that rolls says so once, on the
-stderr of the client whose request bound the port (or `cadgen server`'s) and in `cadgen status`:
+stderr of the client whose request bound the port (a build's, when its page bound it; or `cadgen
+server`'s) and in `cadgen status`:
 `3245 is held by <name> (pid N); this installation serves on 3246 and keeps it`. A remembered port
 that is free is used, and one held is rolled from the same way. When 3245 is free again at a start,
 the engine takes it back and forgets the port it rolled to: `back on the default port 3245: links

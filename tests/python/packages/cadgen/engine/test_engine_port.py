@@ -322,5 +322,34 @@ class EnginePortTest(unittest.TestCase):
         self.assertEqual(self.token(), rotated["token"])
 
 
+class BuildBoundNoticeTest(unittest.TestCase):
+    def test_a_roll_a_builds_page_made_is_said_by_the_next_build_once_and_by_no_status(self) -> None:
+        """A build's page binds the port with no client's request (``models.register_page``): the
+        next build's answer says the roll, once; a status asked meanwhile does not take it."""
+        import io
+
+        from cadgen.engine import daemon
+
+        said = "3245 is held by another process; this installation serves on 3246 and keeps it"
+
+        class Engine:
+            refusal, token, unsaid = None, "", said
+
+            def handle(self, request: dict, send) -> None:
+                send({"log": "building"})
+                send({"ok": True})
+
+        engine = Engine()
+
+        def asked(op: str) -> list[dict]:
+            out = io.BytesIO()
+            daemon._serve(engine, io.BytesIO((json.dumps({"op": op}) + "\n").encode()), out)
+            return [json.loads(line) for line in out.getvalue().splitlines()]
+
+        self.assertEqual(asked("status"), [{"log": "building"}, {"ok": True}])
+        self.assertEqual(asked("build"), [{"log": "building"}, {"ok": True, "notice": said}])
+        self.assertEqual(asked("build"), [{"log": "building"}, {"ok": True}])
+
+
 if __name__ == "__main__":
     unittest.main()
