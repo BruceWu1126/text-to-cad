@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import threading
@@ -69,6 +70,9 @@ TOKEN = f"{ENGINES}/token"
 OBSERVERS: list[Callable[[dict[str, Any]], None]] = []
 # The distribution's: makes the registry of the user's state folder (``cadgen._internal.engine_host``).
 FACTORY: Callable[[], "Registry"] | None = None
+
+# A page token as ``secrets.token_urlsafe`` makes one, long enough to guard anything.
+_TOKEN = re.compile(r"[A-Za-z0-9_-]{32,256}")
 
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_LOCK = threading.Lock()
@@ -226,10 +230,20 @@ class Registry:
     # --- the installation's engine -------------------------------------------------------------
 
     def token(self) -> str | None:
-        """The user's page token (``TOKEN``), or None before the first engine has made one."""
+        """The user's page token (``TOKEN``), or None before the first engine has made one -- or
+        when the file is not one this user alone could have written and can read (on POSIX: another
+        user's, or open to others, as in a state folder others share), or holds anything but a
+        token's characters (it goes into a cookie and a URL): the next engine makes a new one."""
+        if os.name != "nt":
+            try:
+                found = os.stat(self.state.path(TOKEN))
+            except OSError:
+                return None
+            if found.st_uid != os.getuid() or found.st_mode & 0o077:
+                return None
         data = self.state.read(TOKEN)
         token = data.decode("ascii", "replace").strip() if data is not None else ""
-        return token if len(token) >= 32 and token.isascii() and " " not in token else None
+        return token if _TOKEN.fullmatch(token) else None
 
     def put_token(self, token: str) -> None:
         """Write the user's page token, this user's alone."""

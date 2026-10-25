@@ -279,6 +279,16 @@ class TokenTests(unittest.TestCase):
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             path.write_text("short\n", encoding="utf-8")
             self.assertIsNone(held.token(), "a token too short to guard anything is none")
+            path.write_text("t" * 40 + "\r\nSet-Cookie: x=y\n", encoding="utf-8")
+            self.assertIsNone(held.token(), "only a token's characters: it goes into a cookie")
+            held.put_token("u" * 43)
+            if os.name != "nt":
+                os.chmod(path, 0o644)  # readable by others, as in a state folder others share
+                self.assertIsNone(held.token(), "a token others can read guards nothing: a new one is made")
+                os.chmod(path, 0o600)
+                with mock.patch("os.getuid", return_value=os.getuid() + 1):
+                    self.assertIsNone(held.token(), "another user's token file is not this user's token")
+            self.assertEqual(held.token(), "u" * 43)
 
 
 if __name__ == "__main__":
