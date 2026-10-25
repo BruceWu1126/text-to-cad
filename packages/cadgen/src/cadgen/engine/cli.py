@@ -212,7 +212,8 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
         holder = ("the engine's cache" if taken == "cache" else "its file" if report.get("files")
                   else "its document in memory")
         line = (f"took {report['model']}{worker} in {wall:.2f}s: {holder} holds the model's key, "
-                f"{memo.get('bodies_loaded', 0)} bodies loaded, nothing ran") + _delta(report.get("delta"))
+                f"{memo.get('bodies_loaded', 0)} bodies loaded, nothing ran") + _waited(report, "took")
+        line += _delta(report.get("delta"))
     else:
         counted = {status: bodies.count(status) for status in ("run", "replayed") if bodies.count(status)}
         shown = ", ".join(f"{count} {status}" for status, count in counted.items()) or "none"
@@ -222,10 +223,7 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
         misses, hits = memo.get("misses", 0), memo.get("hits", 0)
         line = (f"built {report['model']}{worker} in {wall:.2f}s: bodies {shown}; {misses} miss{'' if misses == 1 else 'es'}, "
                 f"{hits} hit{'' if hits == 1 else 's'}" + (f"; {stages}" if stages else ""))
-        waited = report.get("waited")
-        if waited:
-            line += (f"; {'replayed' if counted.get('replayed') and not counted.get('run') else 'ran after'} "
-                     f"the build of {waited.get('script')} it waited {waited.get('seconds', 0):.0f}s for")
+        line += _waited(report, "replayed" if counted.get("replayed") and not counted.get("run") else "ran after")
         line += _delta(report.get("delta"))
         if (report.get("cache") or {}).get("changed"):
             line += f"\n  rebuilt: {report['cache']['reason']}"
@@ -234,6 +232,16 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
     return (line + "".join(f"\n  {text}" for text in files) + children
             + "".join(f"\n  warning: kinematics: {text}" for text in report.get("kinematics", {}).get("warnings", ()))
             + _verified(report.get("verify")))
+
+
+def _waited(report: dict[str, Any], how: str) -> str:
+    """The end of the run line of a build that waited for its script's running one (``waited``,
+    ``Daemon.behind``): what it did with what that build left, ``how`` (``took``, ``replayed``,
+    ``ran after``) the build of which script, waited how long for. Nothing for one that did not wait."""
+    waited = report.get("waited")
+    if not waited:
+        return ""
+    return f"; {how} the build of {waited.get('script')} it waited {waited.get('seconds', 0):.0f}s for"
 
 
 def _delta(found: dict[str, Any] | None) -> str:

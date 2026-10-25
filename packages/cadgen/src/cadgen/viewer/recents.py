@@ -167,8 +167,7 @@ class RecentStore:
 
         def change(record):
             record = dict(record or {"id": file_id(found), "kind": "file"})
-            record.update(root=os.path.dirname(found), home=os.path.basename(found),
-                          format=os.path.splitext(found)[1].lower().lstrip("."), opened=now)
+            record.update(root=os.path.dirname(found), home=os.path.basename(found), opened=now)
             return record
 
         self.registry.update(file_id(found), change)
@@ -218,7 +217,7 @@ class RecentStore:
                 entries.append(Recent(path=str(registering.home(self.registry, record)), opened=float(record["opened"]),
                                       **common))
             elif record.get("kind") == "model":
-                entries.append(Recent(path=record["id"], kind="model", name=record.get("label") or record.get("entry"),
+                entries.append(Recent(path=record["id"], kind="model", name=record.get("entry"),
                                       script=str(registering.home(self.registry, record)),
                                       rebuild=registering.command(self.registry, record),
                                       store=record.get("store"), shown=record.get("shown"), built=record.get("built"),

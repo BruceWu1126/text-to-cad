@@ -245,18 +245,21 @@ def load_script(script: Path) -> Any:
 # once: only a load that made no kernel call (its module holds no shape a run made), and only after
 # a build that ran nothing (each model taken from its key: no body ran, so the module is as its
 # import left it), while every file the load read -- each first-party module and its folder, and
-# each file or folder the import opened or listed -- stands as the load found it. Anything else
+# each file or folder the import opened or listed -- stands as the load found it, and the call comes
+# in the environment the load ran in (a run is its caller's environment, ``worker.adopt``: a program
+# that changes its own between two calls changes what an import of its script reads). Anything else
 # loads again, as every build did: a later run, an edit, a verification, a build that ran a body.
 
 
 @dataclass
 class _Load:
     """A script's load kept for its run's later calls: the module and the models it defined, the
-    first-party modules it imported, the stat of every file it read, and the build's key
-    resolution (``sources.Symbols``), made against that module."""
+    first-party modules it imported, the stat of every file it read, the environment it ran in, and
+    the build's key resolution (``sources.Symbols``), made against that module."""
 
     key: tuple
     stats: dict[str, tuple | None]
+    environment: dict[str, str]
     module: Any
     models: dict[str, Any]
     loaded: set[str]
@@ -320,12 +323,14 @@ def _made(run: Any) -> tuple:
 
 
 def _kept_load(key: tuple) -> _Load | None:
-    """The load kept for ``key``'s run, when every file it read stands as it found it; taken, so
-    a build that does not end as ``_keep_load`` keeps it leaves none kept."""
+    """The load kept for ``key``'s run, when every file it read stands as it found it and the
+    environment is the one it ran in; taken, so a build that does not end as ``_keep_load`` keeps
+    it leaves none kept."""
     if not _LOAD:
         return None
     kept = _LOAD.pop()
-    if kept.key != key or any(_stat(Path(path)) != stat for path, stat in kept.stats.items()):
+    if (kept.key != key or kept.environment != dict(os.environ)
+            or any(_stat(Path(path)) != stat for path, stat in kept.stats.items())):
         return None
     return kept
 
@@ -426,6 +431,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
         else:
             _LOAD.clear()  # this load replaces the modules any kept one held
             made, began, heard = _made(run), time.time_ns(), []
+            environment = dict(os.environ)  # the one the load runs in, before its import changes any
             if run_token and not verify:
                 _hear()
                 _HEARD[0] = heard
@@ -443,7 +449,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
                 sources = [stats.get(getattr(sys.modules.get(name), "__file__", None) or "") for name in context.loaded]
                 # A module edited while it loaded: the load may hold either version, so it is not kept.
                 if all(stat is None or stat[0] < began for stat in sources):
-                    fresh = _Load(load_key, stats, module, dict(_MODELS), context.loaded)
+                    fresh = _Load(load_key, stats, environment, module, dict(_MODELS), context.loaded)
         loaded = time.perf_counter()
         context.base = script.parent
         context.script = script
@@ -486,7 +492,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
                 if verify:
                     verdict, previous_report = {"used": False, "reason": "verifying"}, None
                 else:
-                    verdict, previous_report = _previous(model, context, shown, log, cache)
+                    verdict, previous_report = _previous(model, context, shown, cache)
             except Exception as error:  # noqa: BLE001 - the cache never fails a build: the body runs
                 verdict, previous_report = {"used": False, "reason": f"the cache failed: {error}"}, None
             if previous_report is not None:
@@ -900,8 +906,7 @@ def _identity(name: str) -> str:
     return f"{Path(script).name}::{function}"
 
 
-def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None],
-              cache: str | None = None) -> tuple[dict, dict | None]:
+def _previous(model: Any, context: Any, shown: str, cache: str | None = None) -> tuple[dict, dict | None]:
     """The model's previous document asked before its body runs (``previous``): the
     verdict, and the model's report where the document is what the body would make -- the
     key the model has now is the one the document holds -- so the body is not run and the
@@ -910,12 +915,13 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None],
     is unchanged and every file the model's last build here wrote -- its own and its child
     models' -- is as that build left it; a file moved or gone, and it is replayed, as ever.
 
-    A model with no file at all, a ``pointer`` one, has the engine's cache of its document
-    (``cache``: ``<id>/document.xbf`` there) in its xbf's place: a fresh worker -- after a restart,
-    or once the script's worker retired -- takes it when its key is the model's (``"from":
-    "cache"``), and from then on asks its record in memory, as it does of a file it took. One
-    this worker built is replayed by the memo, as ever. A model that declares a file and no xbf
-    is never taken: nothing says its file is the cached revision's."""
+    A model with no file at all asks its record in memory as one with an xbf does: one this
+    worker built or took, whose key is unchanged, is taken from memory and nothing runs or is
+    replayed. In a fresh worker -- after a restart, or once the script's worker retired -- a
+    ``pointer`` one has the engine's cache of its document (``cache``: ``<id>/document.xbf``
+    there) in its xbf's place, taken when its key is the model's (``"from": "cache"``). A model
+    that declares a file and no xbf is never taken: nothing says its file is the cached
+    revision's."""
     from cadgen.engine import document, previous
     from cadgen.engine.kernel import memo
 
@@ -924,9 +930,10 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None],
     name = f"{model.script}::{model.name}"
     remembered = _WRITTEN.get(name)
     cached = None
-    if xbf is None:
-        if (targets or cache is None or getattr(model, "store", "pointer") != "pointer"
-                or (remembered is not None and remembered.data is None)):
+    if xbf is None and (targets or remembered is None):
+        # No xbf, and no record of its own here of a model with no file: the engine's cache of a
+        # ``pointer`` one is in the xbf's place; anything else has nothing that says what it was.
+        if targets or cache is None or getattr(model, "store", "pointer") != "pointer":
             return {"used": False, "reason": "the model declares no xbf"}, None
         from cadgen.engine.cache import FILE
 
@@ -1014,9 +1021,7 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None],
         # What the bodies made stays the memo's, as a replay would keep it: an edit after
         # any number of these builds replays all it leaves alone.
         memo.keep(name)
-    taken_from = ("the engine's cache of it" if where == "cache" else _shown(xbf, None) if xbf is not None
-                  else "its document in memory")
-    log(f"took {taken_from}: its key is the model's ({found['bodies']} bodies), nothing ran")
+    # Said once, by the run line its report makes (``cli._describe``): ``took ... nothing ran``.
     report = {"ok": True, "model": f"{shown}::{model.name}",
               "memo": {"hits": 0, "misses": 0, "uncached": 0, "bodies_run": 0, "bodies_skipped": 0,
                        "bodies_loaded": found["bodies"]},

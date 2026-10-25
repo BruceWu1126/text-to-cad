@@ -262,6 +262,22 @@ class CacheTest(unittest.TestCase):
         self.assertIn("the engine's cache holds the model's key, 1 bodies loaded, nothing ran", done.stdout)
         self.assertNotIn("the body ran", done.stderr)
 
+    def test_an_unchanged_warm_run_is_taken_from_memory_and_an_edit_rebuilds(self) -> None:
+        self.said()
+        self.assertIn("the body ran", self.run_script("cube").stderr)
+        warm = self.run_script("cube")
+        self.assertNotIn("the body ran", warm.stderr)
+        lines = warm.stdout.splitlines()
+        self.assertRegex(lines[0], r"^took cube\.py::cube warm in \d+\.\d\ds: its document in memory holds the "
+                                   r"model's key, 1 bodies loaded, nothing ran$")
+        self.assertEqual(lines[1].replace("×", "x").replace("·", "|"),
+                         "  parts 1 | bounds 3 x 2 x 1 mm | joints 0 | sequences 0", "the delta: nothing changed")
+        self.said(width=5.0)
+        rebuilt = self.run_script("cube")
+        self.assertIn("the body ran", rebuilt.stderr)
+        self.assertIn("rebuilt: cube.py: WIDTH changed", rebuilt.stdout)
+        self.assertIn("bounds 5 x 2 x 1 mm (was 3 x 2 x 1)", rebuilt.stdout.replace("×", "x"))
+
     def test_after_a_restart_an_unchanged_run_is_taken_from_the_cache_and_an_edit_rebuilds(self) -> None:
         ident = self.said()
         self.assertIn("the body ran", self.run_script("cube").stderr)
@@ -462,11 +478,13 @@ class CacheTest(unittest.TestCase):
 
 
 class BoundTest(unittest.TestCase):
-    """The cache's bound on its own: model documents' files go, least recently used first; a shape
-    handed over's never does (nothing builds it again)."""
+    """The cache's bound on its own: the least recently used files go first, a shape handed over's as
+    a model's; its id then says to hand it over again."""
 
-    def test_past_the_bound_shape_files_stay_and_model_files_go_first(self) -> None:
+    def test_past_the_bound_the_least_recently_used_go_a_shape_as_a_model(self) -> None:
         from cadgen.engine import cache as engine_cache
+        from cadgen.engine import registry as registering
+        from cadgen.engine.models import Models as Book
 
         folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="engine-bound-")))
         self.addCleanup(shutil.rmtree, folder, True)
@@ -488,19 +506,52 @@ class BoundTest(unittest.TestCase):
         names = ["old_shape", "old_model", "new_shape", "new_model"]
         idents = {name: model_id(folder / f"{name}.py", name) for name in names}
         for name, ident in idents.items():
-            held.put({"id": ident, "kind": "model", "store": "shape" if name.endswith("shape") else "pointer",
-                      "root": str(folder), "home": f"{name}.py", "entry": name, "revision": "r1"})
-        # Room for three and a half: the fourth write is past the bound. It is written by an engine
-        # started after the first three, whose index is the listing's and knows no store.
+            shape = name.endswith("shape")
+            held.put({"id": ident, "kind": "model", "store": "shape" if shape else "pointer",
+                      "root": str(folder), "home": f"{name}.py", "entry": name, "revision": "r1",
+                      "run": [] if shape else ["python", f"{name}.py"]})
+        # Room for three and a half: the fourth write is past the bound, and the pass goes down to
+        # 80 % of it, two files. It is written by an engine started after the first three, whose
+        # index is the listing's.
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_CACHE_GB": str(3500 / 2**30)}):
             first, second = engine_cache.Cache(Models()), engine_cache.Cache(Models())
-        for name in names[:3]:
+        for age, name in enumerate(names[:3]):
             first._write(idents[name], "r1", b"x" * 1000)
+            stamp = time.time() - 60 + age  # the listing's order of use: its mtimes, oldest first
+            os.utime(folder / "cache" / "documents" / idents[name] / "document.xbf", (stamp, stamp))
         second._write(idents["new_model"], "r1", b"x" * 1000)
         kept = {name for name, ident in idents.items() if (folder / "cache" / "documents" / ident).exists()}
-        self.assertEqual(kept, {"old_shape", "new_shape", "new_model"}, "the model went, the older shape stayed")
-        self.assertNotIn("cache", held.get(idents["old_model"]), "its record stays, saying it is not cached")
-        self.assertEqual(second.evictions, 1)
+        self.assertEqual(kept, {"new_shape", "new_model"}, "the older two went, the shape first")
+        self.assertEqual(second.evictions, 2)
+        self.assertNotIn("cache", held.get(idents["old_shape"]), "its record stays, saying it is not cached")
+        # The shape's id, asked after: no longer held, and the words that hand it over again.
+        with mock.patch.object(registering, "FACTORY", lambda: held):
+            found = Book(mock.Mock()).recorded(idents["old_shape"])
+        self.assertEqual((found["state"], found["rebuild"]), ("evicted", None))
+        self.assertIn("run that program again to hand it over again", found["error"])
+
+    def test_a_shape_taken_up_after_a_restart_and_evicted_names_the_program_that_handed_it_over(self) -> None:
+        from cadgen.engine import registry as registering
+        from cadgen.engine.models import Models as Book
+
+        folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="engine-shape-")))
+        self.addCleanup(shutil.rmtree, folder, True)
+        held = Registry(folder / "state", folder / "cache")
+        ident = model_id(folder / "hand.py", "crate")
+        words = Book.shown(str(folder / "hand.py"))
+        held.put({"id": ident, "kind": "model", "store": "shape", "root": str(folder), "home": "hand.py",
+                  "entry": "crate", "run": [], "shown": words, "revision": "h1", "built": 1.0})
+        held.cache.write(f"documents/{ident}/document.xbf", b"x" * 10)
+        held.update(ident, lambda found: {**found, "cache": {"revision": "h1", "bytes": 10, "read": []}})
+        daemon = mock.Mock(server=None)
+        with mock.patch.object(registering, "FACTORY", lambda: held):
+            book = Book(daemon)
+            book.adopt(ident)  # a restart: taken up from its record, its cache file at its revision
+            self.assertEqual(book.state(ident), "held")
+            book.cache.remove(ident)  # the bound took its file
+            found = book.rebuild(ident)
+        self.assertEqual((found["state"], found["rebuild"]), ("evicted", None))
+        self.assertIn(words, found["error"], "the words its record keeps, not a Python session's")
 
 
 if __name__ == "__main__":

@@ -84,8 +84,10 @@ class PreviousTest(unittest.TestCase):
         self.script.write_text(textwrap.dedent(KIT.format(peg=peg, plate=plate)), encoding="utf-8")
         os.utime(self.script, ns=(time.time_ns(), time.time_ns()))
 
-    def kit(self) -> dict:
-        (report,) = engine_build.build(self.script, ["kit"], cwd=self.folder)
+    def kit(self, said: list | None = None) -> dict:
+        """The kit built, what the build logs (the files it wrote or kept) appended to ``said``."""
+        (report,) = engine_build.build(self.script, ["kit"], cwd=self.folder,
+                                       log=said.append if said is not None else lambda _line: None)
         self.assertTrue(report["ok"], report)
         return report
 
@@ -102,7 +104,8 @@ class PreviousTest(unittest.TestCase):
         first = self.cold()
         written = self.xbf.stat().st_mtime_ns
         self.restart()
-        report = self.kit()
+        said: list[str] = []
+        report = self.kit(said)
         self.assertEqual(report["cache"], {"used": True, "from": "file"})
         self.assertEqual(report["memo"]["bodies_run"], 0)
         self.assertEqual(report["memo"]["bodies_loaded"], 3, "kit, peg and cap")
@@ -111,10 +114,11 @@ class PreviousTest(unittest.TestCase):
         self.assertEqual(self.xbf.read_bytes(), first)
         self.assertEqual(self.xbf.stat().st_mtime_ns, written)
         # The next build in the same worker: the key it took, in memory, and no read.
-        again = self.kit()
+        again = self.kit(said)
         self.assertEqual(again["cache"], {"used": True, "from": "memory"})
         self.assertNotIn("read", again["timings"])
         self.assertEqual(self.xbf.stat().st_mtime_ns, written)
+        self.assertEqual(said, [], "a take is said by its run line alone: it wrote and logged nothing")
 
     def test_another_process_takes_the_file_whatever_its_hash_seed(self) -> None:
         import subprocess
@@ -312,13 +316,23 @@ class PreviousTest(unittest.TestCase):
         self.assertEqual(self.xbf.read_bytes(), first)
 
     def export(self, name: str) -> bytes:
-        """The kit's STEP as ``cadgen export`` writes it, in a process of its own."""
+        """The kit's STEP as ``cadgen export`` writes it, in a process of its own, through an engine
+        of the test's own -- its folders, no port of its own choosing -- stopped once the test ends:
+        never the developer's engine, state or cache, however the file is run."""
         import subprocess
         import sys
 
+        if not hasattr(self, "engine_env"):
+            engine = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
+            self.addCleanup(shutil.rmtree, engine, True)
+            self.engine_env = {**os.environ, "CADGEN_ENGINE_DIR": str(engine), "CADGEN_STATE_DIR": str(engine / "state"),
+                               "CADGEN_CACHE_DIR": str(engine / "cache"), "CADGEN_ENGINE_PORT": "0",
+                               "CADGEN_ENGINE_STANDBY": "0"}
+            self.addCleanup(subprocess.run, [sys.executable, "-m", "cadgen.engine", "stop"], env=self.engine_env,
+                            capture_output=True)
         out = self.folder / name
         done = subprocess.run([sys.executable, "-m", "cadgen.engine", "export", str(self.xbf), str(out)],
-                              cwd=self.folder, capture_output=True, text=True)
+                              cwd=self.folder, capture_output=True, text=True, env=self.engine_env)
         self.assertEqual(done.returncode, 0, done.stderr)
         # The STEP header's time stamp is the second it was written: masked.
         return re.sub(rb"'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d'", b"'T'", out.read_bytes(), count=1)
@@ -513,6 +527,198 @@ class ClosureTest(unittest.TestCase):
         self.addCleanup(previous._libraries.cache_clear)
         with mock.patch.object(metadata, "version", version):
             self.assertEqual(previous._libraries(), {"build123d": "1.0", "OCP": "7.9.3.1"})
+
+
+# Models with no file: each body says it ran in a log it appends to (written, so never one of its
+# inputs), and reads a file itself; the plate reads a STEP through the engine and calls the peg.
+WARM = """
+import json
+from pathlib import Path
+
+import build123d as bd
+from cadgen.engine import model, read_step
+
+import dims
+
+HERE = Path(__file__).resolve().parent
+
+
+def ran(name):
+    with open(HERE / "ran.log", "a", encoding="utf-8") as handle:
+        handle.write(name + "\\n")
+
+
+@model
+def peg():
+    ran("peg")
+    peg = bd.Cylinder(dims.RADIUS, json.loads((HERE / "peg.json").read_text())["height"])
+    peg.label = "{peg}"
+    return peg
+
+
+@model
+def plate():
+    ran("plate")
+    plate = bd.Box({width}, json.loads((HERE / "plate.json").read_text())["depth"], 2)
+    plate.label = "plate"
+    cap = read_step(HERE / "cap.step")
+    return bd.Compound(children=[plate, peg().shape.moved(bd.Pos(0, 0, 6)), cap.moved(bd.Pos(10, 0, 8))],
+                       label="plate")
+"""
+
+
+class WarmModelTest(unittest.TestCase):
+    """A model with no file built in this worker: an unchanged warm build takes its document from
+    memory by its key and runs no body, as one with an xbf does; a change to anything the key
+    covers -- the script, a module it imports, a file a body reads itself or through the engine, a
+    child model's code or its reads -- runs what it reaches again."""
+
+    def setUp(self) -> None:
+        import build123d as bd
+
+        from cadgen.engine.kernel import memo
+
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-warm-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.script = self.folder / "plate.py"
+        self.source()
+        self.write("dims.py", "RADIUS = 2\n")
+        self.write("peg.json", json.dumps({"height": 10}))
+        self.write("plate.json", json.dumps({"depth": 6}))
+        bd.export_step(bd.Cylinder(3, 4), str(self.folder / "cap.step"))
+        self.restart()
+        self.addCleanup(self.restart)
+        memo.install()
+
+    def restart(self) -> None:
+        from cadgen.engine.kernel import memo
+
+        memo.clear()
+        engine_build._WRITTEN.clear()
+        engine_build._PARTS.clear()
+        engine_build._BUILT.clear()
+
+    def write(self, name: str, text: str) -> None:
+        path = self.folder / name
+        path.write_text(text, encoding="utf-8")
+        os.utime(path, ns=(time.time_ns(), time.time_ns()))
+
+    def source(self, width: float = 40, peg: str = "peg") -> None:
+        self.write("plate.py", textwrap.dedent(WARM.format(width=width, peg=peg)))
+
+    def build(self, name: str = "plate") -> dict:
+        (report,) = engine_build.build(self.script, [name], cwd=self.folder)
+        self.assertTrue(report["ok"], report)
+        return report
+
+    def ran(self) -> list[str]:
+        """The bodies that ran since the last call, in order."""
+        log = self.folder / "ran.log"
+        found = log.read_text(encoding="utf-8").split() if log.exists() else []
+        log.unlink(missing_ok=True)
+        return found
+
+    def test_an_unchanged_warm_build_takes_its_document_and_runs_no_body(self) -> None:
+        self.build()
+        self.assertEqual(self.ran(), ["plate", "peg"])
+        for _ in range(2):
+            report = self.build()
+            self.assertEqual((report["cache"], report["bodies"], self.ran()),
+                             ({"used": True, "from": "memory"}, {"plate.py::plate": "loaded"}, []))
+            self.assertEqual((report["memo"]["bodies_run"], report["memo"]["bodies_skipped"],
+                              report["memo"]["bodies_loaded"]), (0, 0, 2))
+            self.assertEqual(report["files"], {})
+        # The child, built in the plate's run, is taken alike.
+        self.assertEqual((self.build("peg")["cache"], self.ran()), ({"used": True, "from": "memory"}, []))
+
+    def test_a_change_to_anything_its_key_covers_runs_what_it_reaches(self) -> None:
+        import build123d as bd
+
+        self.build()
+        self.ran()
+        changes = (
+            ("the script", lambda: self.source(width=44), "plate.py: plate changed", ["plate"]),
+            ("a module it imports", lambda: self.write("dims.py", "RADIUS = 3\n"), "dims.py: RADIUS changed",
+             ["plate", "peg"]),
+            ("a file the body reads", lambda: self.write("plate.json", json.dumps({"depth": 7})),
+             "plate.json changed", ["plate"]),
+            ("a file read through the engine", lambda: bd.export_step(bd.Cylinder(3, 5), str(self.folder / "cap.step")),
+             "cap.step changed", ["plate"]),
+            ("a child model's code", lambda: self.source(width=44, peg="pin"), "plate.py: peg changed",
+             ["plate", "peg"]),
+            ("a file the child reads", lambda: self.write("peg.json", json.dumps({"height": 12})), "peg.json changed",
+             ["plate", "peg"]),
+        )
+        for what, change, said, ran in changes:
+            change()
+            report = self.build()
+            self.assertEqual((report["cache"]["changed"], self.ran()), ([said], ran), what)
+            again = self.build()
+            self.assertEqual((again["cache"], self.ran()), ({"used": True, "from": "memory"}, []), what)
+        # What the last build made, taken: the cold build of the same code makes it too.
+        held = engine_build.held(self.script, "plate").structure
+        self.restart()
+        self.build()
+        self.assertEqual(json.loads(json.dumps(engine_build.held(self.script, "plate").structure)),
+                         json.loads(json.dumps(held)))
+
+
+# A script whose module reads its environment as it is imported.
+ENVIRONED = """
+import os
+
+import build123d as bd
+from cadgen.engine import xbf
+
+WIDTH = float(os.environ.get("ENGINE_TEST_WIDTH", "10"))
+
+
+@xbf("XBF/strip.xbf")
+def strip():
+    return bd.Box(WIDTH, 4, 1)
+"""
+
+
+class LoadTest(unittest.TestCase):
+    """One run's calls of a script are served from one load of it (``build._Load``) only while
+    what the load read stands: its files, and the environment it ran in."""
+
+    def setUp(self) -> None:
+        from cadgen.engine.kernel import memo
+
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-load-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.script = self.folder / "strip.py"
+        self.script.write_text(textwrap.dedent(ENVIRONED), encoding="utf-8")
+        self.restart()
+        self.addCleanup(self.restart)
+        memo.install()
+
+    def restart(self) -> None:
+        from cadgen.engine.kernel import memo
+
+        memo.clear()
+        engine_build._WRITTEN.clear()
+        engine_build._PARTS.clear()
+        engine_build._BUILT.clear()
+        engine_build._LOAD.clear()
+
+    def strip(self, width: str) -> dict:
+        """One call of the run's: ``strip`` built with the environment saying ``width``."""
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"ENGINE_TEST_WIDTH": width}):
+            (report,) = engine_build.build(self.script, ["strip"], cwd=self.folder, run="one run")
+        self.assertTrue(report["ok"], report)
+        return report
+
+    def test_a_call_in_another_environment_loads_the_script_again(self) -> None:
+        self.assertEqual(self.strip("10")["facts"]["bounds"], [10.0, 4.0, 1.0])
+        self.assertEqual(self.strip("10")["cache"], {"used": True, "from": "memory"}, "taken: its load is kept")
+        # The program changed its environment between two calls: the import reads another width.
+        report = self.strip("20")
+        self.assertEqual(report["cache"]["changed"], ["../strip.py: WIDTH changed"])
+        self.assertEqual(report["facts"]["bounds"], [20.0, 4.0, 1.0])
 
 
 if __name__ == "__main__":

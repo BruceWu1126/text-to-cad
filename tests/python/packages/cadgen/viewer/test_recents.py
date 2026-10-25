@@ -38,6 +38,8 @@ class RecentStoreTest(unittest.TestCase):
         self.assertIsNotNone(entries[1].pictured)
         self.assertIsNone(entries[0].public()["pictured"])
         self.assertEqual(len(Registry(self.tmp).list()), 2, "one record per file; the removed one's folder went")
+        self.assertEqual(set(Registry(self.tmp).list()[0]) - {"pinned", "preview"},
+                         {"schema", "id", "kind", "root", "home", "opened"}, "its path, and when it was opened")
 
     def test_a_picture_no_record_shows_goes_once_no_writer_can_still_name_it(self) -> None:
         # Each rebuilt revision a view pictures adds a PNG; replaced ones must not pile up.
@@ -69,7 +71,7 @@ class RecentStoreTest(unittest.TestCase):
         script.write_text("", encoding="utf-8")
         ident = model_id(script, "plate")
         Registry(self.tmp).put({"id": ident, "kind": "model", "store": "pointer", "root": str(self.tmp),
-                                "home": "parts.py", "entry": "plate", "label": "plate", "run": ["python", "caller.py"],
+                                "home": "parts.py", "entry": "plate", "run": ["python", "caller.py"],
                                 "built": time.time()})
         store = RecentStore(self.tmp)
         [entry] = [recent.public() for recent in store.list()]
@@ -86,7 +88,7 @@ class RecentStoreTest(unittest.TestCase):
 
         ident, built = derived_id(self.tmp, "plate"), time.time() - 60
         Registry(self.tmp).put({"id": ident, "kind": "model", "store": "shape", "root": str(self.tmp), "home": ".",
-                                "entry": "plate", "label": "plate", "run": [], "built": built,
+                                "entry": "plate", "run": [], "built": built,
                                 "shown": "a shape handed over from a Python session the engine did not run: no script "
                                          "to rerun, and no command builds it again"})
         [entry] = [recent.public() for recent in RecentStore(self.tmp).list()]

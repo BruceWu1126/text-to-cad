@@ -726,7 +726,9 @@ tessellations, is under one memory budget: **Document lifetime**.)
   no request has come for half a second, so a script's calls one after another never wait on
   it. A worker over its memory cap collects before it measures again.
 - **One load per run.** The calls one `python model.py` process makes of its script are served
-  from one load of it while every file the load read stands as it was, the load made no kernel
+  from one load of it while every file the load read stands as it was, the call comes in the
+  environment the load ran in (a run is its caller's environment, and a program that changes its
+  own between two calls changes what an import of its script reads), the load made no kernel
   call and every call since took its models from their keys. Anything else loads the script
   again: another run, an edit, a body that ran.
 
@@ -929,13 +931,14 @@ it is refused: a body returns its shape.
 `documents/<id>/document.json` in the user's state folder ([registry.py](registry.py); the
 distribution names the folder, `cadgen.viewer.recents.state_dir`): it points; a document's bytes
 are the cache's, in the cache folder (**The cache**).
-A model's record holds its store, its script and function (`home`, `entry`), the command that
-builds it again (`run`, `["python", program]`), its revision and when it was built, its closure
-(modules and inputs, with their digests) and the versions it was built on; a file's its path,
-its format, when it was opened and whether it is pinned; either's Recents picture (`preview`, UI
-state: the PNG under `recents/thumbnails`), and a model's `cache` once the cache holds it (**The
-cache**). Every path in it is relative to its one `root`, so a record moves by one field. It is written synchronously
-as a build registers, and only when a field but `changed` differs: an unchanged build rewrites
+A model's record holds what a restart needs and no more: its store, its script and function
+(`home`, `entry`), the program that ran it (`run`, `["python", program]`), its revision and when
+it was built, its `key=` and its last build's facts (what the delta says against); a file's its path,
+when it was opened and whether it is pinned; either's Recents picture (`preview`, UI state: the PNG
+under `recents/thumbnails`), and a model's `cache` once the cache holds it (**The cache**). What a
+build read is the cache's (`cache.read`), and its closure is its document's own (**Build
+closure**): neither is copied here. Every path in it is relative to its one `root`, so a record moves by one field. It is written synchronously
+as a build registers, and only when a field differs: an unchanged build rewrites
 nothing; each write is then told to `registry.OBSERVERS`, never waited on. It is read on demand,
 never at start: an id the engine does not hold (after a restart) is answered from its record,
 `evicted` with its command, or `detached`, and nothing runs. The registry is the ids' reverse map,
@@ -971,7 +974,7 @@ bytecode is under `pycache/`), and lists, counts and removes nothing else there 
 - at shutdown (`cadgen stop`, a terminate), best effort within 10 s (`cache.SHUTDOWN_SECONDS`), for
   the documents built or read in the last idle window.
 
-Once per revision: the record gains `cache: {revision, bytes, written_at, read}`, and a document
+Once per revision: the record gains `cache: {revision, bytes, read}`, and a document
 whose revision is the cache's is never written again. A restart indexes the cache files (a listing
 and a stat, nothing read); a document with one is `held` and answers every verb -- page, export,
 snapshot, inspect, `cad_show` -- by reading its bytes through the documents worker, as a held
@@ -985,8 +988,9 @@ reads that model's cache file before its body runs, as it reads an xbf (**Build 
 key the model has now, the document is taken whole and nothing runs (`cache: {"used": true, "from":
 "cache"}`; the CLI's `took tube.py::tube cold in 0.42s: the engine's cache holds the model's key`),
 its bytes kept as they are, never written again; any other key builds the model, and says why. A
-later unchanged run in that worker takes it from memory. A model that declares a file and no xbf is
-never taken: nothing says the file is the cached revision's.
+later unchanged run in that worker takes it from memory, as it does a model with no file the worker
+built itself: no body runs or is replayed (**Build closure**). A model that declares a file and no xbf
+is never taken: nothing says the file is the cached revision's.
 
 **Staleness.** `read` is what the build read, with digests: the script and each module its model
 reached (each file's bytes, SHA-256, as the build answered) and each file its bodies read (the
@@ -1005,10 +1009,10 @@ and the command, or "serving its previous good build". A font is named by a fami
 
 **The bound.** Past `CADGEN_ENGINE_CACHE_GB` (default 4 GB; `0`: no cache at all), the least
 recently used cache files go down to 80 % of it, as 0.7's store did, never one a live worker holds
-or a page watches; the record stays, without `cache`. A shape handed over's file (`store: "shape"`)
-never goes for the bound: no program is behind it to build it again, so it leaves disk only with its
-record. It still moves from memory to disk under the memory budget; the bound takes model documents
-alone. Removing a detached document from the home
+or a page watches; the record stays, without `cache`. A shape handed over (`store: "shape"`) is a
+document like any: its file goes for the bound as a model's does, and its id then answers `evicted`,
+saying to run the program that handed it over again (nothing the engine runs makes it). Removing a
+detached document from the home
 removes its cache file with its record. A save that fails is logged and listed by `cadgen status`,
 never raised: with the cache folder read-only the engine behaves as with no cache.
 
@@ -1136,8 +1140,9 @@ the daemon:
   rerun after its client was killed (a shell's time limit) waits for the build that client left
   running, nothing cancelled. Its client says so on stderr at once ("waiting for the build of
   turbine.py started 21 s ago"), the frames follow as its own build's would, and its report's
-  `waited` (`{"script", "ago", "seconds"}`) ends its line: "replayed the build of turbine.py it
-  waited 206s for".
+  `waited` (`{"script", "ago", "seconds"}`) ends its line: "took the build of turbine.py it
+  waited 206s for" when it takes the document that build made from its key, "replayed ..." when
+  the memo replays it.
 
 Each model's report holds its last frame (`progress`), so a failed build
 says where it was; a worker that dies during a build fails it with where it was in the words.
