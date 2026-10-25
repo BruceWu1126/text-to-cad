@@ -1,5 +1,5 @@
 """The engine daemon: one per installation, started on demand, and never stopped by a timer: it
-stops on ``cadgen stop`` (or a terminate), when a newer installation that needs its port retires it
+stops on ``cadgen stop`` (or a terminate), when a newer installation's engine retires it
 (``bind``: only while nothing uses it), when its door is gone and no one can reach it (``tend``),
 and with the machine. Idleness sheds memory instead.
 
@@ -97,6 +97,11 @@ PORTS_TRIED = 64
 RETIRE_SECONDS = 10.0
 # How long the engine waits for another installation's engine to answer what it is using.
 ASK_SECONDS = 5.0
+# The version an installation that cannot know its own name runs as (a development install's
+# ``<version>-dev.<time>``, set by its launcher and the ``cadgen`` command): the name its records
+# and its engine's ``status`` give it (``installation``). The engine reads the variable, never the
+# distribution's module that sets it (law 3).
+INSTALLATION_ENV = "CADGEN_INSTALLATION_VERSION"
 PROTOCOL = 3  # 3: the door (named pipes) in place of the Unix socket
 WINDOWS = os.name == "nt"
 # The retirements ``status`` lists, the latest first.
@@ -1075,19 +1080,122 @@ class PortHeld(ValueError):
         self.who = who
 
 
+def installation() -> str:
+    """The version this installation runs as: ``CADGEN_INSTALLATION_VERSION`` when it names one (a
+    development install, which reports its release's version), else the release declared beside
+    this code (``previous.version``)."""
+    from cadgen.engine.previous import version
+
+    named = os.environ.get(INSTALLATION_ENV, "")
+    return named if re.fullmatch(r"[0-9][0-9A-Za-z.+_-]*", named) else version()
+
+
+# A version as PEP 440 spells it, with the spellings it normalizes (``0.8.0-dev.20261024`` is
+# ``0.8.0.dev20261024``): the pattern ``packaging.version`` parses, whose order ``rank`` keeps.
+_PEP440 = re.compile(r"""v?(?:(?P<epoch>[0-9]+)!)?(?P<release>[0-9]+(?:\.[0-9]+)*)
+    (?:[-_.]?(?P<pre_l>alpha|a|beta|b|preview|pre|c|rc)[-_.]?(?P<pre_n>[0-9]+)?)?
+    (?:-(?P<post_n1>[0-9]+)|[-_.]?(?P<post_l>post|rev|r)[-_.]?(?P<post_n2>[0-9]+)?)?
+    (?:[-_.]?(?P<dev_l>dev)[-_.]?(?P<dev_n>[0-9]+)?)?
+    (?:\+(?P<local>[a-z0-9]+(?:[-_.][a-z0-9]+)*))?""", re.VERBOSE | re.IGNORECASE)
+_PRE = {"alpha": "a", "a": "a", "beta": "b", "b": "b", "c": "rc", "pre": "rc", "preview": "rc", "rc": "rc"}
+
+
+def rank(version: Any) -> tuple | None:
+    """A version's place among installations', newest highest, as ``packaging.version`` orders them:
+    a release above its own pre-releases and development builds (``0.8.0`` above ``0.8.0-dev.<time>``,
+    which sort by their time), and those above the release before. None for a version that is no
+    PEP 440 version (the standard library only: law 3)."""
+    found = _PEP440.fullmatch(version.strip()) if isinstance(version, str) else None
+    if found is None:
+        return None
+    release = [int(part) for part in found["release"].split(".")]
+    while len(release) > 1 and release[-1] == 0:
+        release.pop()
+    post = found["post_n1"] or (found["post_n2"] or "0" if found["post_l"] else None)
+    dev = found["dev_n"] or "0" if found["dev_l"] else None
+    pre = ((1, _PRE[found["pre_l"].lower()], int(found["pre_n"] or 0)) if found["pre_l"]
+           else (0,) if post is None and dev is not None else (2,))
+    local = found["local"]
+    return (int(found["epoch"] or 0), tuple(release), pre, (0,) if post is None else (1, int(post)),
+            (2,) if dev is None else (1, int(dev)),
+            (0,) if local is None else (1, tuple((1, int(part), "") if part.isdigit() else (0, 0, part.lower())
+                                                 for part in re.split(r"[-_.]", local))))
+
+
+def _standing(status: dict[str, Any]) -> int | None:
+    """How another installation's engine, by its ``status``, ranks against this one: -1 older, 0 the
+    same version, 1 newer; None when it cannot be said. Its installation's version first (``rank``);
+    one either side cannot parse is older only when its release (``version``) is lower than this one's."""
+    from cadgen.engine.previous import version
+
+    ours, theirs = rank(installation()), rank(status.get("installation") or status.get("version"))
+    if ours is None or theirs is None:
+        ours, theirs = rank(version()), rank(status.get("version"))
+        return -1 if ours is not None and theirs is not None and theirs < ours else None
+    return (theirs > ours) - (theirs < ours)
+
+
+def _uses(status: dict[str, Any]) -> list[str] | None:
+    """What uses another installation's engine, by its ``status``, in words: its holds (an agent
+    host's app server), the pages that watch its documents, its requests; None when its ``status``
+    does not say (one this cadgen cannot ask)."""
+    if not {"watched", "active", "busy"} <= status.keys():
+        return None
+    holders, pages = status.get("holders") or 0, status["watched"]
+    return [f"{count} {noun}{'' if count == 1 else 's'}"
+            for count, noun in ((holders, "app server"), (pages, "open page"),
+                                (status["busy"] + bool(status["active"]), "request")) if count]
+
+
+def retire_older(host: str = "127.0.0.1") -> list[str]:
+    """Every other installation's engine in this engine folder that nothing uses (``_uses``) and that
+    ranks below this installation (``_standing``), asked to stop and waited for until its door and
+    its port are gone (``RETIRE_SECONDS`` at most in all): so an upgrade converges on the newest
+    installation's engine wherever the older one serves, and an older one never retires a newer. A
+    line for each retired, the start's notice (``bind``)."""
+    from cadgen.engine import client
+
+    ours = {_tag(protocol) for protocol in range(1, PROTOCOL + 1)}
+    try:
+        doors = sorted(state_dir().glob("*.port" if WINDOWS else "*.door"))
+    except OSError:
+        return []
+    asked = []
+    for door in doors:
+        if door.stem in ours:
+            continue
+        status = _ask(door, {"op": "status"})
+        if status is None or _uses(status) != [] or _standing(status) != -1:
+            continue
+        if _ask(door, {"op": "stop"}) is None:
+            continue
+        serving = status.get("serving")
+        port = serving.get("port") if isinstance(serving, dict) else None
+        asked.append((door, port, f"retired cadgen {status.get('installation') or status.get('version')}'s idle "
+                                  f"engine (pid {status.get('pid')}) for this newer installation"))
+    deadline = time.monotonic() + RETIRE_SECONDS
+    for door, port, _said in asked:
+        while (client._answering(door) or (port and _answers(host, port))) and time.monotonic() < deadline:
+            time.sleep(0.05)
+    return [said for _door, _port, said in asked]
+
+
 def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tuple[Any, dict[str, Any]]:
     """The engine's HTTP server, listening, and where its port came from. ``listen(port, token)``
-    makes it. A port named -- ``asked`` (``--port``), else ``CADGEN_ENGINE_PORT`` -- is taken or
-    refused by name (``PortHeld``). Else the installation's port: 3245 (``DEFAULT_PORT``) when it is
-    free, else the port it remembers, else the one it rolls to (``_installation_port``). Either way
-    another installation's engine that nothing uses is retired for it (``_listen``). The page token
-    is the user's (``registry.TOKEN``), one for every installation, made by the first engine to start.
+    makes it. First every other installation's engine that is older than this one and that nothing
+    uses is retired, wherever it serves (``retire_older``). Then a port named -- ``asked``
+    (``--port``), else ``CADGEN_ENGINE_PORT`` -- is taken or refused by name (``PortHeld``). Else the
+    installation's port: 3245 (``DEFAULT_PORT``) when it is free, else the port it remembers, else
+    the one it rolls to (``_installation_port``). Either way another installation's engine on it that
+    nothing uses and that is not newer is retired for it (``_listen``); a newer one never is. The page
+    token is the user's (``registry.TOKEN``), one for every installation, made by the first engine to start.
 
     ``where``: ``source`` (``--port``, ``CADGEN_ENGINE_PORT``, ``default`` or ``rolled``), for a
-    rolled port ``because`` (who holds 3245), and ``notice``, the one line a start that moved the
-    port says (a roll, or the return to 3245)."""
+    rolled port ``because`` (who holds 3245), and ``notice``, the lines this start says once: each
+    engine it retired, and a move of its port (a roll, or the return to 3245)."""
     from cadgen.engine import registry
 
+    retired = retire_older(host)
     held = registry.current()
     installation = _tag()
     record = held.engine(installation) if held is not None else {}
@@ -1106,7 +1214,8 @@ def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tup
             held.put_engine(installation, kept)
         except OSError:
             pass  # a state folder it cannot write: this start's links work, the next start's are new
-    return server, where
+    said = "\n".join([*retired, *([where["notice"]] if where.get("notice") else [])])
+    return server, {**where, "notice": said} if said else where
 
 
 def _new_token(held: Any) -> str:
@@ -1206,15 +1315,16 @@ def _holder(port: int, source: str) -> str:
     if found is not None:
         address, status = found
         who = _engine_name(status)
-        if not {"watched", "active", "busy"} <= status.keys():
+        uses = _uses(status)
+        if uses is None:
             raise PortHeld(f"port {port} is held by {who}, which this cadgen cannot ask whether it is in use: "
                            f"run `cadgen stop` with that version, or {other}", who)
-        holders, pages = status.get("holders") or 0, status["watched"]
-        uses = [f"{count} {noun}{'' if count == 1 else 's'}"
-                for count, noun in ((holders, "app server"), (pages, "open page"),
-                                    (status["busy"] + bool(status["active"]), "request")) if count]
+        if _standing(status) == 1:  # an older installation never retires a newer one's engine
+            raise PortHeld(f"port {port} is held by {who}, a newer installation's, which this one never retires: "
+                           f"use that version, or {other}", who)
         if uses:
-            then = "quit that app" if holders else "close that page" if pages else "let it finish"
+            then = "quit that app" if (status.get("holders") or 0) else "close that page" if status["watched"] \
+                else "let it finish"
             raise PortHeld(f"port {port} is held by {who}, still in use by {' and '.join(uses)}: {then} "
                            "or run `cadgen stop` with that version", who)
         if _ask(address, {"op": "stop"}) is None:
@@ -1232,8 +1342,8 @@ def _holder(port: int, source: str) -> str:
 
 
 def _engine_name(status: dict[str, Any]) -> str:
-    """Another installation's engine, by its ``status``: its version and pid."""
-    version = status.get("version")
+    """Another installation's engine, by its ``status``: its installation's version and pid."""
+    version = status.get("installation") or status.get("version")
     return (f"cadgen {version}'s engine" if version else "another cadgen's engine") + f" (pid {status.get('pid')})"
 
 
@@ -1405,6 +1515,9 @@ class Daemon:
         self.port_source = ""  # where the HTTP port the server took came from (``bind``)
         self.port_because = ""  # a rolled port: who holds the default one
         self.port_notice = ""  # a start that moved the port: the line it says, once (``bind``)
+        # That line when no request of a client bound the port -- a build's page did
+        # (``models.register_page``): the next build's answer says it (``_serve``).
+        self.unsaid = ""
         self.refusal: PortHeld | None = None  # its named port held by another process: it stops (``serve``)
         from cadgen.engine.serve import Pressure
         from cadgen.engine.worker import rss_cap_mb
@@ -1634,8 +1747,10 @@ class Daemon:
                     raise
                 self.port_source, self.port_because = where["source"], where.get("because", "")
                 self.port_notice = where.get("notice", "")
-                if self.port_notice:
+                if self.port_notice and request:
                     request["_notice"] = self.port_notice  # said by the client whose request bound it (``_serve``)
+                elif self.port_notice:
+                    self.unsaid = self.port_notice  # bound for a build's page: that build's answer says it
                 # One pressure signal: under it the server trims its documents and the pool its workers.
                 self.server.pressure = self.pressure
                 self.server.pressed = lambda: self.pool.shed(True)
@@ -2081,7 +2196,8 @@ class Daemon:
                    else {"pid": None, "rssMb": None, "seconds": None, "starting": True} if readying else None)
         # What uses it, which another installation's engine asks before it retires this one (``bind``):
         # its holds, the documents pages watch, its builds and draws, and HTTP work underway.
-        return {"ok": True, "pid": os.getpid(), "version": version(), "up": round(time.time() - self.born, 1),
+        return {"ok": True, "pid": os.getpid(), "version": version(), "installation": installation(),
+                "up": round(time.time() - self.born, 1),
                 "workers": workers, "standby": standby, "cap": self.pool.cap, "waiting": self.pool.waiting(),
                 "rssMb": round(self.pool.resident()), "rssCapMb": rss_cap_mb(), "retired": list(self.pool.retired),
                 "idle": round(now - self.last, 1), "holders": self.holders, "hosts": dict(self.hosts),
@@ -2168,8 +2284,12 @@ def _serve(daemon: Daemon, reader: Any, writer: Any, prefix: bytes = b"") -> Non
     lock = threading.Lock()
 
     def send(message: dict[str, Any]) -> None:
-        if "_notice" in request and "log" not in message and set(message) != {"progress"}:
-            message = {**message, "notice": request.pop("_notice")}  # its answer carries it: said once
+        if "log" not in message and set(message) != {"progress"}:
+            if "_notice" in request:
+                message = {**message, "notice": request.pop("_notice")}  # its answer carries it: said once
+            elif daemon.unsaid and request.get("op") == "build":
+                notice, daemon.unsaid = daemon.unsaid, ""
+                message = {**message, "notice": notice}
         with lock:
             writer.write((json.dumps(message, separators=(",", ":")) + "\n").encode())
             writer.flush()
@@ -2331,8 +2451,9 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
                 listener.close()
             held.close()
             return 1
-        if daemon.port_notice:
-            print(f"cadgen: {daemon.port_notice}", file=sys.stderr)  # ``cadgen server``'s terminal
+        for said in daemon.port_notice.splitlines():
+            print(f"cadgen: {said}", file=sys.stderr)  # ``cadgen server``'s terminal
+            daemon.unsaid = ""
     if not WINDOWS:
         import signal
 

@@ -245,5 +245,53 @@ class HandleTest(unittest.TestCase):
         self.assertEqual(found["refused"], "posed() was given hinge's .shape, which carries its parts and not its "
                                            "joints: pass the handle the model call returns, posed(hinge(), 'open')")
 
+
+UNREACHED = """
+import sys
+
+import build123d as bd
+from cadgen import model
+
+
+@model
+def peg():
+    return bd.Cylinder(2, 10)
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["catch"]:
+        try:
+            peg()
+        except ConnectionError:
+            print("caught")
+    else:
+        peg()
+"""
+
+
+class UnreachedEngineTest(unittest.TestCase):
+    def test_a_model_call_no_engine_serves_ends_in_one_line_on_stderr(self) -> None:
+        """``python model.py`` and ``cadgen run model.py`` in a sandboxed shell with no engine: the
+        client's line on stderr, as a ``cadgen`` verb says it, status 1, no traceback; a program
+        that catches the error hears nothing."""
+        folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="unreached-")))
+        self.addCleanup(shutil.rmtree, folder, True)
+        engine = folder / "engine"
+        engine.mkdir(mode=0o700)
+        (folder / "peg.py").write_text(UNREACHED, encoding="utf-8")
+        from cadgen._internal.engine_host import SANDBOXES
+        from cadgen.engine.client import SANDBOXED
+
+        env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(engine),
+               "CADGEN_STATE_DIR": str(folder / "state"), "CADGEN_CACHE_DIR": str(folder / "cache"),
+               **dict(SANDBOXES)}
+        for command in ([sys.executable, "peg.py"], [sys.executable, "-m", "cadgen.cli", "run", "peg.py"]):
+            done = engine_daemon.run(command, cwd=folder, env=env)
+            self.assertEqual((done.returncode, done.stdout, done.stderr), (1, "", f"cadgen: {SANDBOXED}\n"), command)
+        caught = engine_daemon.run([sys.executable, "peg.py", "catch"], cwd=folder, env=env)
+        self.assertEqual((caught.returncode, caught.stdout, caught.stderr), (0, "caught\n", ""))
+        self.assertEqual(sorted(path.name for path in engine.iterdir()), [], "no engine started")
+
+
 if __name__ == "__main__":
     unittest.main()

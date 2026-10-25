@@ -26,7 +26,8 @@ interpreter is gone.
 
 An editable install (a checkout's environment) registers nothing by itself: it reports the release's
 version, and its record would take a user's place. A development install names its own
-(``CADGEN_INSTALLATION_VERSION``).
+(``CADGEN_INSTALLATION_VERSION``), which the ``cadgen`` command sets for it as it runs it
+(``named``, ``cadgen._internal.proxy``).
 """
 
 from __future__ import annotations
@@ -46,6 +47,10 @@ WINDOWS = os.name == "nt"
 MARK = "cadgen proxy: "
 REVISION = 2
 VERSION = re.compile(r"[0-9][0-9A-Za-z.+_-]*")
+# A release's version, as a wheel reports it of itself (``cadgen.__version__``). Any other version a
+# record names -- a development install's ``<version>-dev.<time>``, a source tree's -- is a name the
+# installation cannot know by itself: the ``cadgen`` command gives it (``named``).
+RELEASE = re.compile(r"[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?(\.post[0-9]+)?")
 
 OK = "ok"
 MISSING = "missing"
@@ -172,6 +177,13 @@ def records(folder=None) -> list[dict]:
             if record is not None and record["version"] == name[:-5]:
                 found.append({**record, "path": str(folder.path(f"{FOLDER}/{name}"))})
     return found
+
+
+def named(record: dict) -> str | None:
+    """The version the ``cadgen`` command tells the installation of ``record`` it runs as
+    (``NAME_ENV``): a development or source registration's, which it cannot know by itself (it
+    reports its release's); None for a release, which knows."""
+    return None if RELEASE.fullmatch(record["version"]) else record["version"]
 
 
 def alive(record: dict) -> bool:

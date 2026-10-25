@@ -635,6 +635,13 @@ def _port(serving: dict[str, Any]) -> str:
                    }.get(source, f"not the default {default}") + ")"
 
 
+def workers_text(answer: dict[str, Any]) -> str:
+    """The workers against their count cap, as ``cadgen status`` (and ``cadgen doctor``) says them:
+    the standby holds a slot of the cap, counted with the workers, never one of them."""
+    counted = len(answer.get("workers") or []) + (1 if answer.get("standby") else 0)
+    return f"workers {counted}/{answer.get('cap')}" + (" with the standby" if answer.get("standby") else "")
+
+
 def status_text(answer: dict[str, Any]) -> str:
     """``cadgen status``: the server and its pool's rules -- its workers against their count cap,
     their memory against its cap -- a line per worker -- busy or idle, its script, process, builds
@@ -650,10 +657,7 @@ def status_text(answer: dict[str, Any]) -> str:
     resident = answer.get("rssMb")
     memory = (f"RSS {_gb(resident)} of {_gb(cap)}" if resident is not None else f"RSS cap {_gb(cap)}") if cap \
         else "no RSS cap"
-    # The standby holds a slot of the count cap: counted with the workers, never one of them.
-    counted = len(workers) + (1 if standby else 0)
-    lines = [" · ".join([f"engine server {answer.get('pid')}, up {_span(answer.get('up'))}",
-                         f"workers {counted}/{answer.get('cap')}" + (" with the standby" if standby else ""),
+    lines = [" · ".join([f"engine server {answer.get('pid')}, up {_span(answer.get('up'))}", workers_text(answer),
                          *([f"held by {answer['holders']} app server{'' if answer['holders'] == 1 else 's'}"]
                            if answer.get("holders") else []),
                          memory])]
@@ -694,8 +698,8 @@ def status_text(answer: dict[str, Any]) -> str:
         lines.append(f"serving {serving['url']}{_port(serving)}: {opened} document{'' if opened == 1 else 's'} opened by a page or a command"
                      + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else "")
                      + (f" · {_gb(held / 2**20)} of {_gb(memory['budget'] / 2**20)} held" if memory.get("budget") else ""))
-        if serving.get("portNotice"):  # this engine's start moved the port: a roll, or the return to the default
-            lines.append(f"  {serving['portNotice']}")
+        # What this engine's start said: the older engines it retired, a move of its port.
+        lines.extend(f"  {said}" for said in (serving.get("portNotice") or "").splitlines())
     cache = answer.get("cache") or {}
     if cache.get("enabled"):
         failures = cache.get("failures") or []

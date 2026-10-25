@@ -333,7 +333,8 @@ is taken or refused. Else the installation's own port: 3245 (`daemon.DEFAULT_POR
 can, as Vite, Jupyter and Next.js take theirs; when another program holds it, the next free port
 (`daemon.PORTS_TRIED` above it, then any), which the installation remembers in its record and takes
 at every later start, so its links stay what they were. The start that rolls says so once, on the
-stderr of the client whose request bound the port (or `cadgen server`'s) and in `cadgen status`:
+stderr of the client whose request bound the port (a build's, when its page bound it; or `cadgen
+server`'s) and in `cadgen status`:
 `3245 is held by <name> (pid N); this installation serves on 3246 and keeps it`. A remembered port
 that is free is used, and one held is rolled from the same way. When 3245 is free again at a start,
 the engine takes it back and forgets the port it rolled to: `back on the default port 3245: links
@@ -342,12 +343,20 @@ system says it (`daemon.port_holder`: `lsof` on macOS, `/proc` on Linux, `netsta
 `another process` where it does not say; a cadgen this one cannot reach is `another cadgen (<name>,
 pid N)`.
 
-Another installation's engine (an older version, after an upgrade) on the port is found by its door
-in the same engine folder and asked its `status`: when nothing uses it -- no hold, no page watching a
-document, no build, draw or HTTP request underway -- it is told to `stop`, and its port is taken once
-it has gone (`daemon.RETIRE_SECONDS` at most), whether the port was named, the default or the
-remembered one. One still in use is never stopped: the installation rolls from it as from any other
-holder.
+**An upgrade converges.** As an engine binds its port, it first asks every other installation's
+engine in the engine folder (each door) its `status`, and tells every one to `stop` that nothing uses
+-- no hold, no page watching a document, no build, draw or HTTP request underway -- and that is older
+than itself, wherever it serves, waiting until each has gone (`daemon.RETIRE_SECONDS` at most;
+`daemon.retire_older`). Older is by the installations' version ranking (`daemon.rank`, the order
+`packaging.version` gives and the `cadgen` command picks by): an installation's version is its
+`installation` in `status` (`CADGEN_INSTALLATION_VERSION`, a development install's
+`<version>-dev.<time>`, else its release), a release ranks above its own `-dev.*` builds, and a
+version that does not parse is older only when that engine's release (`version`) is lower. It says
+each, once, as it says a roll: `retired cadgen 0.8.0's idle engine (pid N) for this newer
+installation`. Then it binds as above. Another installation's engine still on the port is retired
+the same way when nothing uses it and it is not newer, and its port taken once it has gone, whether
+the port was named, the default or the remembered one. An older installation never retires a newer
+one's engine, nor one still in use: it rolls from it as from any other holder.
 
 A named port another process holds is refused in one line naming the holder (`daemon.PortHeld`).
 `cadgen server` binds at its start, so the command fails at once with that line on stderr and exits
@@ -362,7 +371,10 @@ engine, which can never serve, leaves its note (`daemon.failure_path`) and exits
 - another installation's engine in use: `port 3245 is held by cadgen <version>'s engine (pid N),
   still in use by 1 app server: quit that app or run `cadgen stop` with that version` (or `N open
   pages`, `N requests`); an engine whose `status` does not say what uses it cannot be asked, and is
-  refused by name the same way.
+  refused by name the same way;
+- a newer installation's engine: `port 3245 is held by cadgen <version>'s engine (pid N), a newer
+  installation's, which this one never retires: use that version, or start cadgen with another
+  CADGEN_ENGINE_PORT`.
 
 The token is made at the installation's first start and every start serves with it, in the
 installation's record, `engines/<installation>.json` in the state folder (`port` while the
@@ -555,7 +567,10 @@ If a body raises, the error is reported with the model's frames and the
 previous files stay: the program's own call prints those frames once on stderr, then `failed
 <script>::<model>`, and nothing else; the call still raises (`EngineError`), so a caller may catch
 it, and left uncaught it ends the program with status 1 without its traceback again
-(`model._told`). Builds run in the daemon's warm workers, at most one per core alive
+(`model._told`). A call the engine never served -- none runs and this shell's sandbox cannot
+start one, a folder refused, its port held -- raises its `ConnectionError` or `EngineError` the
+same way: left uncaught, its one line on stderr (`cadgen: <why>`, as a `cadgen` verb says it) and
+status 1, no traceback; caught, nothing said. Builds run in the daemon's warm workers, at most one per core alive
 (**The engine server and its workers**). `CADGEN_ENGINE_DIR` moves its door and lock; the client and the server resolve it alike (`daemon.state_dir`: a `..`, a symlink or a trailing slash names the same folder). On POSIX the folder must be the user's own and closed to writing by anyone else (`daemon.folder_refusal`): whoever owns or can write the folder could take the door's place, so a client refuses to connect or start there and the daemon refuses to lock there, saying why.
 `CADGEN_ENGINE_MEMORY_MB` sets the server's memory budget, and `CADGEN_ENGINE_CACHE_GB` the
 document cache's size (`0`: no cache; `CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, is the tests'
@@ -627,8 +642,8 @@ which also avoids pybind11's unmatched profile events on Python 3.12 and later.
 One engine server per installation (`daemon.py`: a daemon, which `cadgen server` runs in the
 foreground), started on demand by the first command that needs it. **No timer stops it**: a
 person may be using a page or the CAD app for hours without a build. It stops in four ways: on
-`cadgen stop` (or a terminate); when another installation that needs its port retires it while
-nothing uses it (**A link outlives its engine**); when its door is gone -- its folder removed, a
+`cadgen stop` (or a terminate); when a newer installation's engine starts, or another that needs its
+port, and retires it while nothing uses it (**A link outlives its engine**); when its door is gone -- its folder removed, a
 temporary folder cleaned up, or another file put in the door's place -- so that no one can reach it
 (`Daemon.tend` sees it within a round, and it stops as `stop` does, saving what it holds to the
 cache); and with the machine. **No timer retires a worker either**: memory alone does. Idle
@@ -758,7 +773,7 @@ lifetime**), and a held one where it is held: in memory, on disk (the cache), or
 `cache` line is the cache folder, the documents and bytes in it against its cap, the files evicted
 for room and the last save that failed. `--json` lists the documents as `models`, the cache as
 `cache`, and `serving.documents` the files served, each `held` or `evicted`, with the bytes it holds. It
-also says its `version` and what uses it -- `holders`, `watched` (the documents pages watch), `busy`
+also says its `version` (its release), its `installation` (the version it runs as) and what uses it -- `holders`, `watched` (the documents pages watch), `busy`
 (builds and draws running) and `active` (HTTP work underway) -- which another installation's engine
 asks before it retires this one (**A link outlives its engine**).
 

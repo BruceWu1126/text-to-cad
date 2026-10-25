@@ -169,6 +169,14 @@ class ProxyFileTests(Fixture):
         missing = subprocess.run([proxy_file, "+9.9.9", "status"], capture_output=True, text=True, env=environment)
         self.assertEqual(missing.returncode, 1)
         self.assertEqual(missing.stderr.strip(), proxy.NOT_INSTALLED.format(version="9.9.9"))
+        # None installed: the sh and the proxy say it in one wording, the command that installs it.
+        none = subprocess.run([proxy_file, "status"], capture_output=True, text=True, env=environment)
+        self.assertEqual((none.returncode, none.stderr.strip()), (1, proxy.NONE_INSTALLED))
+        with self.assertRaises(proxy.Refused) as refused:
+            proxy.choose(None, [], list, None)
+        self.assertEqual(str(refused.exception), "cadgen is not installed: run `uvx --no-config --managed-python "
+                                                 "--python 3.13 --from cadgen cadgen doctor` once, outside any "
+                                                 "sandbox or with its permission")
         for version in ("1.0.0", "2.0.0"):
             record = self.registered(version)
             Path(record["python"]).write_text(f'#!/bin/sh\necho "{version}" "$@"\n', encoding="utf-8")
@@ -315,15 +323,37 @@ class ResolutionTests(Fixture):
         self.assertEqual(proxy.command(self.old, ["export", "a.xbf"]), [self.old["cadgen"], "export", "a.xbf"])
         run = [self.old["python"], "model.py", "a"]
         with mock.patch.dict("os.environ", {"CADGEN_STATE_DIR": str(self.root / "state"), "CADGEN_VERSION": ""}), \
-                mock.patch.object(proxy, "engines", return_value=[]), mock.patch.object(proxy.os, "execv") as execv, \
+                mock.patch.object(proxy, "engines", return_value=[]), mock.patch.object(proxy.os, "execve") as execve, \
                 mock.patch("subprocess.call", return_value=3) as call:
             code = proxy.main(["+0.8.0", "run", "model.py", "a"])
         if os.name == "nt":  # no exec on Windows: the installation's python is a child, its exit code the proxy's
-            call.assert_called_once_with(run)
-            self.assertEqual((code, execv.call_count), (3, 0))
+            call.assert_called_once_with(run, env=mock.ANY)
+            self.assertEqual((code, execve.call_count), (3, 0))
         else:
-            execv.assert_called_once_with(self.old["python"], run)
+            execve.assert_called_once_with(self.old["python"], run, mock.ANY)
             self.assertEqual(call.call_count, 0)
+
+    def test_a_development_installation_is_told_its_version_and_a_release_is_not(self) -> None:
+        """A dev or source registration reports its release's version: the proxy names it, in the
+        environment of what it runs (and its children, the same installation). A release knows its
+        own, and a name a dev installation's process passed down is taken off."""
+        ran = {}
+
+        def child(argv, env):  # Windows runs the installation as a child rather than exec
+            ran.update({argv[0]: dict(env)})
+            return 0
+
+        with mock.patch.dict("os.environ", {"CADGEN_STATE_DIR": str(self.root / "state"), "CADGEN_VERSION": "",
+                                            installations.NAME_ENV: "0.9.0-dev.1"}), \
+                mock.patch.object(proxy, "engines", return_value=[]), \
+                mock.patch.object(proxy.os, "execve", side_effect=lambda path, argv, env: ran.update({path: dict(env)})), \
+                mock.patch("subprocess.call", side_effect=child):
+            proxy.main(["+0.9.0-dev.20261024", "doctor"])
+            proxy.main(["+0.8.0", "doctor"])
+        self.assertEqual(ran[self.dev["cadgen"]][installations.NAME_ENV], "0.9.0-dev.20261024")
+        self.assertNotIn(installations.NAME_ENV, ran[self.old["cadgen"]])
+        self.assertEqual([installations.named(record) for record in (self.old, self.new, self.dev)],
+                         [None, None, "0.9.0-dev.20261024"])
 
     def test_the_shell_names_its_host(self) -> None:
         self.assertEqual(engine_host.shell({"CODEX_THREAD_ID": "t", "CLAUDECODE": "1"}), "codex")
