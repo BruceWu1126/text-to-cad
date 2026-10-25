@@ -195,6 +195,7 @@ class SdfValidateCliTests(unittest.TestCase):
             self.assertIn("gz_check_passed", {issue.code for issue in result.issues})
             self.assertEqual([sdf_path], list(self.temp_root.glob("*.sdf")))
 
+    @unittest.skipUnless(os.name == "posix", "native POSIX interpreter lookup")
     def test_a_gz_check_that_never_finishes_is_bounded_not_hung(self) -> None:
         # A hostile document can point gz at a host that accepts but never answers.
         # The check must return a failure within its timeout, not block the verb forever.

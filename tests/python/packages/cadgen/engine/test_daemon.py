@@ -738,7 +738,8 @@ class DaemonEnvironmentTest(unittest.TestCase):
         for process in ("daemon", "worker"):
             self.assertEqual(found[process].get("PYTHONPYCACHEPREFIX"), ours, process)
             self.assertNotIn("PYTHONDONTWRITEBYTECODE", found[process], f"a caller's switch is not the {process}'s")
-        self.assertEqual(stat.S_IMODE(os.stat(ours).st_mode) & 0o077, 0, "this user's alone")
+        if os.name != "nt":  # a folder's mode bits are POSIX's; Windows' per-user temporary folder is the user's
+            self.assertEqual(stat.S_IMODE(os.stat(ours).st_mode) & 0o077, 0, "this user's alone")
         given = started({"CADGEN_CACHE_DIR": str(cache), "PYTHONPYCACHEPREFIX": str(cache / "theirs")})
         self.assertEqual(given["daemon"]["PYTHONPYCACHEPREFIX"], str(cache / "theirs"), "a prefix given is honoured")
         with mock.patch.object(registry, "FACTORY", None):  # no distribution names a cache folder: nothing written
