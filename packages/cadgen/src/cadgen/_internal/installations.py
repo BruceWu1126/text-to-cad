@@ -150,7 +150,16 @@ def register(version: str, found: tuple[str, str, str] | None = None, folder=Non
     # One key a line, the python's alone: the proxy's sh reads that line (``script``).
     text = json.dumps(record, indent=1, sort_keys=True, ensure_ascii=False) + "\n"
     folder.write(inside, text.encode("utf-8"))
+    # An environment holds one cadgen: the record of another version in it (an upgrade in place,
+    # ``pip install -U``, ``uv tool upgrade``) names code that is gone, and would run this one as it.
+    for other in records(folder):
+        if other["version"] != version and _same_place(other["prefix"], prefix):
+            folder.remove(_inside(other["version"]))
     return path, REGISTERED
+
+
+def _same_place(one: str, other: str) -> bool:
+    return os.path.normcase(os.path.realpath(one)) == os.path.normcase(os.path.realpath(other))
 
 
 def records(folder=None) -> list[dict]:

@@ -63,6 +63,14 @@ class RegistryTests(Fixture):
         self.assertEqual(installations.register("1.2.3", moved, self.state)[1], installations.REGISTERED)
         self.assertEqual(installations.records(self.state)[0]["python"], moved[1])
 
+    def test_an_upgrade_in_place_takes_over_its_environment_s_record(self) -> None:
+        found = self.environment("tool")
+        installations.register("0.8.0", found, self.state)
+        installations.register("0.8.1", found, self.state)  # the same environment, upgraded
+        self.registered("0.7.0")
+        self.assertEqual(sorted(record["version"] for record in installations.records(self.state)), ["0.7.0", "0.8.1"],
+                         "0.8.0's code is gone from it: `cadgen +0.8.0` must not run 0.8.1")
+
     def test_prune_removes_only_records_whose_interpreter_is_gone(self) -> None:
         gone, live = self.registered("1.0.0"), self.registered("2.0.0")
         os.unlink(gone["python"])
