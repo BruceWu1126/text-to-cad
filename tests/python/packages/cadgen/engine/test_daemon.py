@@ -1394,9 +1394,10 @@ if __name__ == '__main__':
         self.assertEqual(done.returncode, 1)
         self.assertIn("RuntimeError: no", done.stderr)
 
-    def test_a_rerun_behind_its_script_s_running_build_says_it_waits_and_replays_it(self) -> None:
+    def test_a_rerun_behind_its_script_s_running_build_says_it_waits_and_takes_what_it_built(self) -> None:
         # A client its shell's time limit killed leaves its build running; the same command again
-        # waits for that build, says so at once, and replays it. Nothing is cancelled.
+        # waits for that build, says so at once, and takes the document it made from its key.
+        # Nothing is cancelled.
         from cadgen.engine import client
 
         gate = self.folder / "gate"
@@ -1438,8 +1439,8 @@ if __name__ == '__main__':
         out, err = engine_daemon.communicate(second, self.env)
         self.assertEqual(second.returncode, 0, err)
         self.assertRegex(err, r"(?m)^waiting for the build of turbine\.py started \d+ s ago$")
-        self.assertRegex(out, r"(?m)^built turbine\.py::turbine warm in .*bodies 1 replayed; .*"
-                         r"replayed the build of turbine\.py it waited \d+s for$")
+        self.assertRegex(out, r"(?m)^took turbine\.py::turbine warm in .*nothing ran; "
+                         r"took the build of turbine\.py it waited \d+s for$")
 
     def test_running_a_model_script_asks_the_daemon_to_build_it(self) -> None:
         # A script runs like Python and takes no options (law 11): every model it defines writes

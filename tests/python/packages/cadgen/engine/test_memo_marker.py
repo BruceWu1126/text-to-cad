@@ -366,22 +366,20 @@ class MemoNativeTest(MemoCase):
         return self.build("native.py")
 
     def test_a_memo_call_keys_the_shapes_it_made_with_occt_s_own_makers(self) -> None:
-        # Unmarked, the box no key names keeps the body running, and the report says why.
+        # Unmarked, the box no key names keeps the body from being kept: a no-op takes the document
+        # by its key, but an edit runs the body whole, the box made again, and the report says why.
         self.native("")
         self.calls()
         report = self.native("")
+        self.assertEqual((self.calls(), report["cache"]), ([], {"used": True, "from": "memory"}))
+        report = self.native("", hole=1.25)
         self.assertEqual((self.calls(), self.statuses(report)), (["drilled", "native_block"],
                                                                  {"native.py::drilled": ["run"]}))
         self.assertIn("no keyed call made", " ".join(report["retention"]["fallbacks"]["native.py::drilled"]))
-        # Marked, the call keys its result: a no-op replays both bodies, with no fallback.
+        # Marked, the call keys its result, with no fallback: an edit of the caller runs it on the
+        # very box the replayed call hands back; then a no-op takes the document.
         self.native("@memo")
         self.calls()
-        report = self.native("@memo")
-        self.assertEqual((self.calls(), report["retention"]["fallbacks"]), ([], {}))
-        self.assertEqual(self.statuses(report), {"native.py::drilled": ["replayed"],
-                                                 "native.py::native_block": ["replayed"]})
-        # An edit of the caller runs it on the very box the replayed call hands back; then a
-        # no-op replays both again.
         report = self.native("@memo", hole=1.5)
         self.assertEqual((self.calls(), report["retention"]["fallbacks"]), (["drilled"], {}))
         self.assertEqual(self.statuses(report)["native.py::native_block"], ["replayed"])

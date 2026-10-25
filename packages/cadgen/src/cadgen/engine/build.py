@@ -915,12 +915,13 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
     is unchanged and every file the model's last build here wrote -- its own and its child
     models' -- is as that build left it; a file moved or gone, and it is replayed, as ever.
 
-    A model with no file at all, a ``pointer`` one, has the engine's cache of its document
-    (``cache``: ``<id>/document.xbf`` there) in its xbf's place: a fresh worker -- after a restart,
-    or once the script's worker retired -- takes it when its key is the model's (``"from":
-    "cache"``), and from then on asks its record in memory, as it does of a file it took. One
-    this worker built is replayed by the memo, as ever. A model that declares a file and no xbf
-    is never taken: nothing says its file is the cached revision's."""
+    A model with no file at all asks its record in memory as one with an xbf does: one this
+    worker built or took, whose key is unchanged, is taken from memory and nothing runs or is
+    replayed. In a fresh worker -- after a restart, or once the script's worker retired -- a
+    ``pointer`` one has the engine's cache of its document (``cache``: ``<id>/document.xbf``
+    there) in its xbf's place, taken when its key is the model's (``"from": "cache"``). A model
+    that declares a file and no xbf is never taken: nothing says its file is the cached
+    revision's."""
     from cadgen.engine import document, previous
     from cadgen.engine.kernel import memo
 
@@ -929,9 +930,10 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
     name = f"{model.script}::{model.name}"
     remembered = _WRITTEN.get(name)
     cached = None
-    if xbf is None:
-        if (targets or cache is None or getattr(model, "store", "pointer") != "pointer"
-                or (remembered is not None and remembered.data is None)):
+    if xbf is None and (targets or remembered is None):
+        # No xbf, and no record of its own here of a model with no file: the engine's cache of a
+        # ``pointer`` one is in the xbf's place; anything else has nothing that says what it was.
+        if targets or cache is None or getattr(model, "store", "pointer") != "pointer":
             return {"used": False, "reason": "the model declares no xbf"}, None
         from cadgen.engine.cache import FILE
 

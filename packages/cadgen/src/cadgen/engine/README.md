@@ -973,8 +973,9 @@ reads that model's cache file before its body runs, as it reads an xbf (**Build 
 key the model has now, the document is taken whole and nothing runs (`cache: {"used": true, "from":
 "cache"}`; the CLI's `took tube.py::tube cold in 0.42s: the engine's cache holds the model's key`),
 its bytes kept as they are, never written again; any other key builds the model, and says why. A
-later unchanged run in that worker takes it from memory. A model that declares a file and no xbf is
-never taken: nothing says the file is the cached revision's.
+later unchanged run in that worker takes it from memory, as it does a model with no file the worker
+built itself: no body runs or is replayed (**Build closure**). A model that declares a file and no xbf
+is never taken: nothing says the file is the cached revision's.
 
 **Staleness.** `read` is what the build read, with digests: the script and each module its model
 reached (each file's bytes, SHA-256, as the build answered) and each file its bodies read (the

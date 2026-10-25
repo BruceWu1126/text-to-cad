@@ -262,6 +262,22 @@ class CacheTest(unittest.TestCase):
         self.assertIn("the engine's cache holds the model's key, 1 bodies loaded, nothing ran", done.stdout)
         self.assertNotIn("the body ran", done.stderr)
 
+    def test_an_unchanged_warm_run_is_taken_from_memory_and_an_edit_rebuilds(self) -> None:
+        self.said()
+        self.assertIn("the body ran", self.run_script("cube").stderr)
+        warm = self.run_script("cube")
+        self.assertNotIn("the body ran", warm.stderr)
+        lines = warm.stdout.splitlines()
+        self.assertRegex(lines[0], r"^took cube\.py::cube warm in \d+\.\d\ds: its document in memory holds the "
+                                   r"model's key, 1 bodies loaded, nothing ran$")
+        self.assertEqual(lines[1].replace("×", "x").replace("·", "|"),
+                         "  parts 1 | bounds 3 x 2 x 1 mm | joints 0 | sequences 0", "the delta: nothing changed")
+        self.said(width=5.0)
+        rebuilt = self.run_script("cube")
+        self.assertIn("the body ran", rebuilt.stderr)
+        self.assertIn("rebuilt: cube.py: WIDTH changed", rebuilt.stdout)
+        self.assertIn("bounds 5 x 2 x 1 mm (was 3 x 2 x 1)", rebuilt.stdout.replace("×", "x"))
+
     def test_after_a_restart_an_unchanged_run_is_taken_from_the_cache_and_an_edit_rebuilds(self) -> None:
         ident = self.said()
         self.assertIn("the body ran", self.run_script("cube").stderr)

@@ -401,7 +401,7 @@ class ReadsTest(unittest.TestCase):
         self.assertEqual(self.built("enclosure")["cache"]["changed"], ["../scans/pcb.stl changed"])
         self.assertEqual(self.size("enclosure"), (66.0, 36.0, 6.0))
 
-    def test_build123d_s_importers_are_inputs_by_their_bytes_and_their_bodies_replay(self) -> None:
+    def test_build123d_s_importers_are_inputs_by_their_bytes_and_keep_their_bodies(self) -> None:
         import build123d as bd
 
         from cadgen.engine import previous
@@ -413,15 +413,17 @@ class ReadsTest(unittest.TestCase):
             closure = json.loads(record)
             self.assertIsNotNone(closure["key"], name)
             self.assertIn(["file", f"../{path}"], [row[:2] for row in closure["inputs"]], name)
-        # A model with no file: its body replays while the brep's bytes are the same, and runs
-        # once they changed.
-        for status in ("run", "replayed"):
+        # A model with no file: kept (no fallback), its document taken by its key while the brep's
+        # bytes are the same, and its body run once they changed.
+        for status in ("run", "loaded"):
             report = self.built("by_import_brep")
             self.assertEqual((report["bodies"], report["retention"]["fallbacks"]),
                              ({"reads.py::by_import_brep": status}, {}))
         bd.export_brep(bd.Box(12, 10, 10), str(self.folder / "part.brep"))
-        self.assertEqual(self.built("by_import_brep")["bodies"], {"reads.py::by_import_brep": "run"})
-        self.assertEqual(self.built("by_import_brep")["bodies"], {"reads.py::by_import_brep": "replayed"})
+        report = self.built("by_import_brep")
+        self.assertEqual((report["bodies"], report["cache"]["changed"]),
+                         ({"reads.py::by_import_brep": "run"}, ["part.brep changed"]))
+        self.assertEqual(self.built("by_import_brep")["bodies"], {"reads.py::by_import_brep": "loaded"})
 
     def test_a_file_read_past_the_engine_is_an_input_by_its_bytes_and_its_body_never_retained(self) -> None:
         from cadgen.engine import previous
