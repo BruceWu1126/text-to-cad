@@ -77,8 +77,9 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    never geometry and never source. In the
    platform's cache folder (`~/.cache/cadgen`, by 0.7's rule) it keeps, under `documents/` and
    nowhere else there, each model document's bytes as it last built them: its own file, never a
-   declared or exported xbf, regenerable and wiped at no loss, so a restart opens every project at
-   once; and under `pycache/` the bytecode its own processes compile of the libraries they load
+   declared or exported xbf (the same bytes), kept until a person deletes it -- nothing evicts it
+   -- and made again by a run of its script (a shape's by the program that handed it over), so a
+   restart opens every project at once; and under `pycache/` the bytecode its own processes compile of the libraries they load
    (`PYTHONPYCACHEPREFIX`, a folder per installation), regenerable too, so nothing is written
    beside a library or a model. The code stays the only source of truth: a document whose code changed since says so,
    with the command that builds it again, and nothing reruns. It writes no
@@ -203,8 +204,9 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
     document a page watches only when no other is left. The engine outlives its clients; a page
     closing never stops a worker. The worker-count cap never retires a worker whose document a
     page watches; it is exceeded instead. The memory cap may retire it (the
-    engine's **Architecture** and **The engine server and its workers**). Memory may evict a worker's
-    document only when nothing watches it (the engine's **Document lifetime**).
+    engine's **Architecture** and **The engine server and its workers**). Memory may take a
+    document out of memory, for the engine's cache to give back, only when nothing watches it (the
+    engine's **Document lifetime**).
 
 20. **One engine serves the installation; tabs select documents at `/<uuid>`.** A tab names
     a model's id, or a file's id after a launcher registers it; Python scripts are never

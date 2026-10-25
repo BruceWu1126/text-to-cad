@@ -148,8 +148,9 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
    its script or file (**Document lifetime**), and the installation's engine record, its page
    token and the port it rolled to while 3245 is another's (**Architecture**); never geometry and never source. In the cache folder its host names (the platform's: `~/.cache/cadgen`) it
    keeps, under `documents/` alone, each model document's bytes as it last built them (**The
-   cache**): its own file, never a declared or exported xbf, regenerable and wiped at no loss,
-   so a restart opens every project at once; and under `pycache/` the bytecode its own processes
+   cache**): its own file, never a declared or exported xbf (the same bytes), kept until a person
+   deletes it -- nothing evicts it -- and made again by a run of its script (a shape's by the program
+   that handed it over), so a restart opens every project at once; and under `pycache/` the bytecode its own processes
    compile of the libraries they load (`daemon.bytecode`: `PYTHONPYCACHEPREFIX`, a folder per
    installation), so nothing is written beside a library or a model; the code stays the only
    source of truth. It
@@ -252,8 +253,8 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
     file's `file_id`, a model's `model_id` or `key_id`; they never turn a model into a file path.
     No timer retires a worker: memory does, and it retires a worker whose document a page watches
     only when no other is left to retire. The worker-count cap never retires a watched worker; it
-    is exceeded instead. Memory may evict a worker's document only when nothing watches it
-    (**Document lifetime**). Closing a page never stops the engine or its worker.
+    is exceeded instead. Memory may take a document out of memory, for the cache to give back,
+    only when nothing watches it (**Document lifetime**). Closing a page never stops the engine or its worker.
 
 15. **One HTTP owner per installation.** The daemon serves its one page and document
     reads on one authenticated listener. Both `serve` and `viewer` start or reuse it;
@@ -2263,7 +2264,7 @@ tree by labels.
 **A model never reads a file its own build writes**: its own xbf or export, a child's, a
 sibling's (`reader.refuse_written`: `read_xbf` and `read_step` ask as they read the file). Read,
 the file would be an input the build rewrites -- its key moving on every build, so the model would
-never be taken from its file -- or, kept out of the key, a model depending on its own past. A
+never be taken by its key -- or, kept out of the key, a model depending on its own past. A
 model takes what it makes from the live shape instead: so its own output never invalidates it.
 
 ## Body retention
@@ -2449,7 +2450,7 @@ and accepted**), which is `same`. The report's `verify` gives each body checked
 as `same`, `differs: <where>`, or `follows <function>` for one whose result holds a body
 that differs. A function whose result differs is marked to run on every call for the
 worker's life (`memo.always()`), the bodies that call it with it, and a model that calls it
-is not taken from its file. A verifying build does not ask the previous document.
+is not taken by its key. A verifying build does not ask the previous document.
 
 ## Known and accepted
 
