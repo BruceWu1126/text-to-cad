@@ -596,9 +596,12 @@ which also avoids pybind11's unmatched profile events on Python 3.12 and later.
 
 One engine server per installation (`daemon.py`: a daemon, which `cadgen server` runs in the
 foreground), started on demand by the first command that needs it. **No timer stops it**: a
-person may be using a page or the CAD app for hours without a build. It stops on `cadgen stop` (or
-a terminate), when another installation that needs its port retires it while nothing uses it
-(**A link outlives its engine**), and with the machine. Idleness costs it memory instead
+person may be using a page or the CAD app for hours without a build. It stops in four ways: on
+`cadgen stop` (or a terminate); when another installation that needs its port retires it while
+nothing uses it (**A link outlives its engine**); when its door is gone -- its folder removed, a
+temporary folder cleaned up, or another file put in the door's place -- so that no one can reach it
+(`Daemon.tend` sees it within a round, and it stops as `stop` does, saving what it holds to the
+cache); and with the machine. Idleness costs it memory instead
 (`Daemon.tend`): idle workers are retired, idle render processes stop, idle documents are saved
 to the cache, and past the memory budget what no page watches is evicted (**Document lifetime**). It holds a pool of warm workers, one per model script (and one for the documents no
 worker built), each a process whose memo lives as long as

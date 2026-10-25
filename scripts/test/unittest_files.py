@@ -50,7 +50,8 @@ import unittest
 # hang runs out the CI job's timeout and says nothing about where it is.
 FILE_HANG_SECONDS = 15 * 60
 # A file's engine daemon goes when the file ends (``stop_engine``): an engine never stops on a
-# timer, so one a killed run leaves behind runs until it is stopped (``cadgen stop`` with its folder).
+# timer, so one a killed run leaves behind runs until it is stopped (``cadgen stop`` with its
+# folder) or its folder is removed (an engine whose door is gone stops).
 
 # Stopping a file's daemon waits for its workers to exit.
 ENGINE_STOP_SECONDS = 120

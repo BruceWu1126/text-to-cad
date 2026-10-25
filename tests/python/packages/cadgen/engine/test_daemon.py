@@ -628,6 +628,21 @@ class NoTimerTest(unittest.TestCase):
         self.assertEqual(sent, [{"ok": True}])
         self.assertTrue(engine.stopping.is_set())
 
+    def test_an_engine_whose_door_is_gone_stops_and_one_whose_door_stands_stays(self) -> None:
+        from cadgen.engine import daemon
+
+        folder = Path(tempfile.mkdtemp(prefix="door-"))
+        self.addCleanup(shutil.rmtree, folder, True)
+        door = folder / "engine.door"
+        door.write_bytes(b"")
+        engine = daemon.Daemon(cap=1)
+        engine.reached_by(door)
+        engine.tend(now=time.monotonic() + 24 * 3600)
+        self.assertFalse(engine.stopping.is_set(), "its door stands: it stays, however long idle")
+        door.unlink()  # its folder cleaned up: no one can reach it
+        engine.tend()
+        self.assertTrue(engine.stopping.is_set())
+
 
 class KernelWarmUpTest(unittest.TestCase):
     def test_a_host_s_first_hold_http_or_warm_loads_the_kernel_once(self) -> None:

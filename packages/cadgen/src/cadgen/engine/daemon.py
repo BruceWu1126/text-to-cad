@@ -1,6 +1,7 @@
 """The engine daemon: one per installation, started on demand, and never stopped by a timer: it
 stops on ``cadgen stop`` (or a terminate), when a newer installation that needs its port retires it
-(``bind``: only while nothing uses it), and with the machine. Idleness sheds memory instead.
+(``bind``: only while nothing uses it), when its door is gone and no one can reach it (``tend``),
+and with the machine. Idleness sheds memory instead.
 
 It holds a pool of warm workers, one per model script (``Pool``), and hands each build to its
 script's worker: one build at a time per worker, builds of different scripts at once, and at
@@ -1130,6 +1131,10 @@ class Daemon:
         # runs): while one is open, no other installation's engine retires this one (``bind``).
         self.holders = 0
         self.door = None  # on POSIX, the door clients reach it by (``door.Door``)
+        # Where clients reach it (its door; on Windows its port file) and that file's identity
+        # (``reached_by``): once it is gone or another's, no one can reach this engine, and it stops.
+        self.address: Path | None = None
+        self.address_id: tuple[int, int] | None = None
         self.server = None
         self.token = secrets.token_hex(16) if WINDOWS else ""
         # Per document a build made (its id: each xbf's ``file_id``, each model's ``model_id``),
@@ -1750,12 +1755,21 @@ class Daemon:
         while not self.stopping.wait(period):
             self.tend()
 
+    def reached_by(self, address: Path) -> None:
+        """Clients reach this engine at ``address`` from now on (``tend`` watches it)."""
+        self.address, self.address_id = address, _identity(address)
+
     def tend(self, now: float | None = None) -> None:
         """What idleness costs the engine, at ``now``: memory, never the process. Each worker idle
         its time with no page watching is retired (its documents drained to the held tier first),
         each idle render process too, and a killed client's pipes swept; the memory budget evicts
         unwatched documents to the cache as they are loaded (``serve.Server.trim``). The engine
-        stops only on ``stop``, a terminate, or another installation's retiring it (``bind``)."""
+        stops on ``stop``, a terminate, another installation's retiring it (``bind``), and here
+        when its door is gone (its folder removed, a temporary folder cleaned up) or another's:
+        no one can reach it, so it stops as ``stop`` does, saving what it holds to the cache."""
+        if self.address is not None and _identity(self.address) != self.address_id:
+            self.stopping.set()
+            return
         if self.door is not None:
             self.door.sweep()
         self.pool.retire_idle(now)
@@ -1895,6 +1909,15 @@ def lock(path: Path | None = None) -> Any:
     return handle
 
 
+def _identity(path: Path) -> tuple[int, int] | None:
+    """The file at ``path`` (not a link it names): its device and inode, or None when there is none."""
+    try:
+        found = os.lstat(path)
+    except OSError:
+        return None
+    return found.st_dev, found.st_ino
+
+
 def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool = False) -> int:
     """Run the engine here. ``port``: the HTTP port it must take (``cadgen server --port``);
     ``rotate``: a new page token first (``--rotate-token``), refused while another engine runs."""
@@ -1946,6 +1969,7 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
             temporary = port_path().with_suffix(".tmp")
             temporary.write_text(f"{port} {daemon.token}\n", encoding="utf-8")
             replace_atomic(temporary, port_path())
+            daemon.reached_by(port_path())
             listener.settimeout(0.5)
             while not daemon.stopping.is_set():
                 try:
@@ -1961,6 +1985,7 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
 
             try:
                 daemon.door = Door(door_path(), lambda ident: _serve_door(daemon, ident))
+                daemon.reached_by(door_path())
             except OSError as error:
                 _note_failure(f"the engine server cannot make its door {door_path()}", error)
                 return 1
