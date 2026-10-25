@@ -125,19 +125,19 @@ are answered with the home. `--dist DIR` (or `CADGEN_VIEWER_DIST`) selects a bui
 
 The JSON record includes `url`, `apiUrl`, `token`, `port`, `pid`, `start` (the folder the home
 shows), `documents` (`{id, file, url}` for each FILE) and `action` (`started` or `reused`,
-referring to the page). The URL is usable
-as soon as it is printed. Its token is exchanged for an HttpOnly, SameSite cookie
-and removed from the address bar. Programmatic clients send the token as a Bearer
-header. Every route, including documents, requires it. The loopback Host check,
+referring to the page). Each URL, and `token`, carries a fresh link, good for a day
+(`--api-only`'s `token` is the user's token itself, for the dev proxy). The URL is usable
+as soon as it is printed. Its link is exchanged for an HttpOnly, SameSite=Strict session cookie,
+one for every port of the host, that lasts 30 days from its last use, and is removed from the
+address bar. Programmatic clients send the link or the token as a Bearer header. Every route,
+including documents, requires one. The loopback Host check,
 cross-site POST guard and raw-file response headers remain. Binding `--host`
-off loopback exposes these same authenticated routes; anyone with the token has
+off loopback exposes these same authenticated routes; anyone with a link or the cookie has
 local-file access. Keep the URL private. Vite remains on its own strict port, 5173.
-A refused navigation is answered 403 with a static page of a few lines, no script and no asset.
-One that carried a token this engine never issued (a tab reloaded after its engine stopped, or
-under a newer one) says the link no longer works and that opening the viewer again (from the
-agent, or `cadgen viewer`) gives a fresh one. One that carried no token (the page's address without
-its `?token=`, or a fetch that kept no cookie) says the engine is running and the page must be
-opened in a browser from the whole link the agent gave. A
+A refused page load is answered 403 with a static page of a few lines, no script and no asset: a
+link past its day says it has expired, any other (no link, a session 30 days unused, or a link or
+cookie from before `cadgen server --rotate-token`) that the page needs its link, and both say to
+run `cadgen viewer` and open the link it prints. A
 loaded page whose engine stops under it says the engine is not running, in the person's
 language, over the page until a read answers again.
 

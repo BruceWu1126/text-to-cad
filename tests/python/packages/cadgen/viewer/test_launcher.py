@@ -8,11 +8,12 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from cadgen.viewer.engine_app import LINK_GONE_PAGE, TOKEN_NEEDED_PAGE
+from cadgen.viewer.engine_app import LINK_EXPIRED_PAGE, TOKEN_NEEDED_PAGE, sign
 from tests.python.support import engine_daemon
 
 
@@ -56,6 +57,16 @@ class LauncherTest(unittest.TestCase):
             return response.status, dict(response.getheaders()), response.read()
         finally:
             conn.close()
+
+    def master(self):
+        """The user's token, as its file holds it: never in a printed URL."""
+        return (self.root / 'state' / 'engines' / 'token').read_text(encoding='utf-8').strip()
+
+    def session(self, headers):
+        """The ``Cookie`` header that sends back the session a response set."""
+        self.assertRegex(headers['set-cookie'], r'^cadgen-[\w-]{12}=\d+\.[\w-]{43}; Path=/; Max-Age=2592000; '
+                                                r'HttpOnly; SameSite=Strict$')
+        return {'Cookie': headers['set-cookie'].split(';')[0]}
 
     def test_launches_reuse_one_engine_and_the_home_shows_the_latest_folder(self):
         b, c = self.root / 'b', self.root / 'c'
@@ -112,55 +123,75 @@ class LauncherTest(unittest.TestCase):
         for route in ('/', '/assets/app.js', '/__cad/server', '/api/docs', '/__cad/api/docs', '/mcp'):
             self.assertEqual(self.get(launch, route, token=False)[0], 403, route)
             self.assertEqual(self.get(launch, route, headers={'Host': 'evil.example'})[0], 403, route)
-        # A navigation without the token is refused too, with a static page (no script, no asset),
-        # never the raw JSON: one with no token at all needs its link, opened in a browser; one with
-        # a token this engine never issued (its link's, or the cookie of an engine on this port
-        # before) has an engine that was restarted or stopped.
+        # A page load without a credential is refused with a static page (no script, no asset), never
+        # the raw JSON: it needs a link. A link or a cookie the user's token never signed is none.
         status, headers, body = self.get(launch, '/', token=False, headers={'Sec-Fetch-Dest': 'document'})
         self.assertEqual((status, headers['content-type'], body), (403, 'text/html; charset=utf-8', TOKEN_NEEDED_PAGE))
-        self.assertIn(b'The engine is running, but this request carried no token', body)
-        for gone in ({'Sec-Fetch-Dest': 'document'}, {'Sec-Fetch-Dest': 'document',
-                                                     'Cookie': f"cadgen-engine-{launch['port']}=gone"}):
-            path = '/?token=gone' if 'Cookie' not in gone else '/'
-            status, headers, body = self.get(launch, path, token=False, headers=gone)
-            self.assertEqual((status, body), (403, LINK_GONE_PAGE), gone)
-        for body in (TOKEN_NEEDED_PAGE, LINK_GONE_PAGE):
-            self.assertNotIn(b'<script', body)
-        status, headers, _ = self.get(launch, urlsplit(launch['url']).path+'?token='+launch['token'], token=False)
+        page = urlsplit(launch['url']).path
+        master, link = self.master(), launch['token']
+        self.assertNotIn(master, json.dumps(launch), 'a printed launch carries a link, never the token')
+        self.assertEqual(launch['url'], f"{launch['apiUrl']}/?token={link}")
+        # The link (or the token itself) is exchanged for a session cookie, which is neither.
+        status, headers, _ = self.get(launch, f'{page}?token={link}', token=False)
+        self.assertEqual((status, headers['location']), (302, page))
+        cookie = self.session(headers)
+        status, headers, _ = self.get(launch, f'{page}?token={master}', token=False)
         self.assertEqual(status, 302)
-        self.assertIn('HttpOnly', headers['set-cookie'])
-        self.assertNotIn(launch['token'], headers['location'])
+        for value in (master, link):
+            self.assertNotIn(value, headers['set-cookie'] + cookie['Cookie'])
+        name = cookie['Cookie'].split('=')[0]
+        for stale in ({'Cookie': f'{name}=gone'}, {'Cookie': f'{name}={sign("x" * 43, "session", 60)}'}):
+            status, _, body = self.get(launch, '/', token=False, headers={**stale, 'Sec-Fetch-Dest': 'document'})
+            self.assertEqual((status, body), (403, TOKEN_NEEDED_PAGE), stale)
+            # ... and never outranks the link of the URL a launch just printed.
+            self.assertEqual(self.get(launch, f'{page}?token={link}', token=False, headers=stale)[0], 302)
+        self.assertEqual(self.get(launch, '/?token=gone', token=False, headers={'Sec-Fetch-Dest': 'document'})[2],
+                         TOKEN_NEEDED_PAGE)
         # Arrived from another origin (the browser opened on the launcher's redirect file): the
         # cookie, and a page of this origin that navigates on, so the browser sends the cookie.
-        status, headers, body = self.get(launch, urlsplit(launch['url']).path+'?token='+launch['token'],
-                                         token=False, headers={'Sec-Fetch-Site': 'cross-site'})
+        status, headers, body = self.get(launch, f'{page}?token={link}', token=False, headers={'Sec-Fetch-Site': 'cross-site'})
         self.assertEqual(status, 200)
-        self.assertIn(launch['token'], headers['set-cookie'])
+        self.session(headers)
         self.assertIn(b'http-equiv="refresh" content="0;url=/"', body)
-        self.assertNotIn(launch['token'].encode(), body)
-        # A cookie from an engine that held this port before (restarted with --port) never
-        # outranks the launch URL's token, and a token that is not ASCII is refused, not a crash.
-        stale = {'Cookie': f"cadgen-engine-{launch['port']}=stale"}
-        status, headers, _ = self.get(launch, urlsplit(launch['url']).path+'?token='+launch['token'],
-                                      token=False, headers=stale)
-        self.assertEqual(status, 302)
-        self.assertIn(launch['token'], headers['set-cookie'])
+        self.assertNotIn(link.encode(), body)
+        # A link past its day says so, alone; with a session it is just dropped from the address, and
+        # one followed from another site is asked again from this origin, where the session is sent.
+        expired = sign(master, 'link', -60)
+        navigation = {'Sec-Fetch-Dest': 'document'}
+        self.assertEqual(self.get(launch, f'/?token={expired}', token=False, headers=navigation)[::2],
+                         (403, LINK_EXPIRED_PAGE))
+        status, headers, _ = self.get(launch, f'/?token={expired}', token=False, headers={**cookie, **navigation})
+        self.assertEqual((status, headers['location']), (302, '/'))
+        for sent, site in ((sent, site) for sent in ({}, cookie) for site in ('cross-site', 'same-site')):
+            status, headers, body = self.get(launch, f'/?token={expired}', token=False,
+                                             headers={**sent, **navigation, 'Sec-Fetch-Site': site})
+            self.assertEqual((status, 'set-cookie' in headers), (200, False), (sent, site))
+            self.assertIn(f'url=/?token={expired}'.encode(), body)
+        for body in (TOKEN_NEEDED_PAGE, LINK_EXPIRED_PAGE):
+            self.assertNotIn(b'<script', body)
+            self.assertNotIn(b'?token=', body)
+        # Each page load the session admits renews it, 30 days from then; a read only once it is a day old.
+        status, headers, _ = self.get(launch, '/', token=False, headers={**cookie, **navigation})
+        self.assertEqual(status, 200)
+        self.session(headers)
+        self.assertNotIn('set-cookie', self.get(launch, '/__cad/server', token=False, headers=cookie)[1])
+        old = {'Cookie': f'{name}={sign(master, "session", 30 * 86400, now=time.time() - 2 * 86400)}'}
+        self.session(self.get(launch, '/__cad/server', token=False, headers=old)[1])
         # A sibling cookie that another page on this host set (cookies are host-scoped, not
         # port-scoped), even one a strict parser rejects, must not drop the engine's own cookie.
-        for header in (f"x=y z; cadgen-engine-{launch['port']}={launch['token']}",
-                       f"cadgen-engine-{launch['port']}={launch['token']}; a[b]=1"):
+        for header in (f"x=y z; {cookie['Cookie']}", f"{cookie['Cookie']}; a[b]=1"):
             status, _, _ = self.get(launch, '/__cad/server', token=False, headers={'Cookie': header})
             self.assertEqual(status, 200, header)
         self.assertEqual(self.get(launch, '/__cad/server?token=%C3%A9', token=False)[0], 403)
         # The cookie reaches every port of this host, so it admits only what the browser says came
-        # from this origin or from the person (or from a client that is not a browser); a token in
-        # the header or the URL is admitted from anywhere.
-        cookie = {'Cookie': f"cadgen-engine-{launch['port']}={launch['token']}"}
+        # from this origin or from the person (or from a client that is not a browser); a token or a
+        # link in the header or the URL is admitted from anywhere, and another origin with neither not.
         for site, expected in (('same-origin', 200), ('none', 200), ('same-site', 403), ('cross-site', 403)):
             status, _, body = self.get(launch, '/__cad/server', token=False,
                                        headers={**cookie, 'Sec-Fetch-Site': site})
             self.assertEqual(status, expected, site)
             self.assertEqual(self.get(launch, '/__cad/server', headers={'Sec-Fetch-Site': site})[0], 200, site)
+            self.assertEqual(self.get(launch, '/__cad/server', token=False, headers={'Sec-Fetch-Site': site})[0], 403)
         self.assertIn(b'cross-origin request refused', self.get(
             launch, '/', token=False, headers={**cookie, 'Sec-Fetch-Site': 'same-site'})[2])
         # Every page may be framed by its own origin alone: the client's, and the link-gone page.

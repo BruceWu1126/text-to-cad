@@ -8,11 +8,15 @@ naming a document by query (``?doc=``, ``?file=``), is answered with the home.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import html
 import io
 import os
 import secrets
 import threading
+import time
 from urllib.parse import urlencode
 
 from cadgen.engine.ids import is_id
@@ -22,30 +26,69 @@ from .scanner import to_posix_path
 from .http_app import CadApp, RAW_FILE_HEADERS, host_is_allowed
 
 
-# What a navigation without this engine's token is answered with (``EngineApp._refused``). The
-# token is the installation's, the same at every start (``cadgen.engine.daemon.bind``), so a link
-# outlives a restart: one that carried a token this engine never issued -- in its link, or in the
-# cookie an engine on this port left -- is from before ``cadgen server --rotate-token``, or another
-# installation's (``LINK_GONE_PAGE``); one that carried none reached a running engine without the
-# token its link gives (``TOKEN_NEEDED_PAGE``).
+# The page's credentials all come from the user's one token (``engines/token``, read at the start:
+# ``cadgen.engine.daemon.bind``), which only the user's own clients present, as a Bearer header: the
+# door hands it to them. Every URL a launch prints or opens carries a link instead,
+# ``?token=<expires>.<mac>``, good for a day (``LINK_SECONDS``), and a browser that opens one is given
+# the session cookie, ``<expires>.<mac>`` too, good for 30 days from its last use, which renews it
+# (``SESSION_SECONDS``, ``EngineApp._admitted``). A mac is the token's HMAC of the credential's kind and expiry, so
+# each is checked by recomputing it: no engine keeps a session, every engine of this user -- on any
+# port, of any installation, after any restart -- admits what another issued, and ``cadgen server
+# --rotate-token`` ends every link and session at once. The cookie is named for the token too
+# (``EngineApp.cookie``): one name on every port of the host, while another user's engine, or one
+# with a rotated token, reads a name of its own and never sees, refuses or replaces this one.
+LINK_SECONDS = 24 * 60 * 60
+SESSION_SECONDS = 30 * 24 * 60 * 60
+
+
+def _mac(master, message):
+    digest = hmac.new(master.encode('utf-8'), message.encode('utf-8', 'surrogateescape'), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
+
+
+def sign(master, kind, seconds, now=None):
+    """A ``kind`` credential (``link``, ``session``) of token ``master``, good for ``seconds``."""
+    expires = int(time.time() if now is None else now) + seconds
+    return f'{expires}.{_mac(master, f"{kind} {expires}")}'
+
+
+def standing(master, kind, value):
+    """``'ok'`` for a ``kind`` credential ``master`` signed that is still good, ``'expired'`` for one
+    past its time, None for anything else."""
+    expires, _, mac = str(value).partition('.')
+    if not mac or not hmac.compare_digest(mac.encode('utf-8', 'surrogateescape'),
+                                          _mac(master, f'{kind} {expires}').encode('ascii')):
+        return None
+    return 'ok' if int(expires) > time.time() else 'expired'
+
+
+# What a page load without a credential this engine admits is answered with (``EngineApp._refused``):
+# a link past its day says so (``LINK_EXPIRED_PAGE``); any other -- none, or one the token never
+# signed, from before ``cadgen server --rotate-token`` -- that the page needs a link
+# (``TOKEN_NEEDED_PAGE``). Each names the one thing to do.
 _PAGE_HEAD = (
     '<!doctype html><html lang="en"><head><meta charset="utf-8">'
     '<meta name="viewport" content="width=device-width, initial-scale=1"><title>CAD</title>'
     '<style>body{font:15px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem}</style>'
     '</head><body>'
 )
-LINK_GONE_PAGE = (
-    _PAGE_HEAD + '<h1>This CAD Viewer link no longer works</h1>'
-    '<p>Its token was replaced (<code>cadgen server --rotate-token</code>), or another cadgen answers '
-    'on its port. Open the viewer again, from your agent or with <code>cadgen viewer</code>, for a '
-    'fresh link.</p></body></html>\n'
+LINK_EXPIRED_PAGE = (
+    _PAGE_HEAD + '<h1>This CAD Viewer link has expired</h1>'
+    '<p>A link opens the viewer for a day. Run <code>cadgen viewer</code> and open the link it '
+    'prints.</p></body></html>\n'
 ).encode('utf-8')
 TOKEN_NEEDED_PAGE = (
     _PAGE_HEAD + '<h1>This CAD Viewer page needs its link</h1>'
-    '<p>The engine is running, but this request carried no token. Open the page in a browser from '
-    'the whole link your agent gave, which ends in <code>?token=</code>; the browser keeps the '
-    'token from then on. Run <code>cadgen viewer</code> for a fresh link.</p></body></html>\n'
+    '<p>This browser has not opened the viewer in the last 30 days, or its links were replaced '
+    'since. Run <code>cadgen viewer</code> and open the link it prints.</p></body></html>\n'
 ).encode('utf-8')
+
+
+def _navigation(request):
+    """A browser's page load (a document, or HTML asked for) of a page, never a route of the engine."""
+    return (request.header('sec-fetch-dest') == 'document' or 'text/html' in request.header('accept')) \
+        and request.method == 'GET' and not request.path.startswith('/__cad/') and request.path != '/mcp'
+
 
 def bounce_page(location):
     """A page of this origin that navigates to ``location`` (a path of it), with no script."""
@@ -126,6 +169,7 @@ class EngineApp:
         self.server, self.host = server, host
         # The installation's page token, the same at every start (``daemon.bind``), else one of its own.
         self.token = getattr(server, 'token', None) or secrets.token_urlsafe(32)
+        self.cookie = 'cadgen-' + _mac(self.token, 'cookie')[:12]
         self.lock = threading.RLock()
         self.active_requests = 0
         self._default = None
@@ -154,11 +198,17 @@ class EngineApp:
     def endpoint(self):
         return {'ok': True, 'url': self.server.url, 'port': self.server.port, 'token': self.token}
 
+    def link(self):
+        """A fresh link for a URL this engine prints or opens: good for ``LINK_SECONDS``."""
+        return sign(self.token, 'link', LINK_SECONDS)
+
     def launch(self, options):
         """A launch of the one page (``cadgen viewer``, a text-only host's link, the dev client's
         ``--api-only``): its folder (``start``) becomes the folder the home shows, and each file it
         names (``files``: on-disk CAD files, or ids the engine holds) is registered and given its
-        page, ``/<id>``. ``url`` is the first file's page, else the home's."""
+        page, ``/<id>``. ``url`` is the first file's page, else the home's, each with a fresh link,
+        which ``token`` is too -- the user's token itself only for the dev client's ``--api-only``,
+        whose proxy outlives a link."""
         from .main import resolve_dist_dir
         start = os.path.abspath(options.get('start') or os.path.expanduser('~'))
         dist = '' if options.get('api_only') else resolve_dist_dir(options.get('dist') or '')
@@ -172,11 +222,12 @@ class EngineApp:
             reused = self._default is not None
             app = self.default_app(dist or None)
             app.start = to_posix_path(start)
-        token = f'?token={self.token}'
+        link = self.link()
         for document in documents:
-            document['url'] = f'{self.server.url}/{document["id"]}{token}'
-        return {'ok': True, 'url': documents[0]['url'] if documents else f'{self.server.url}/{token}',
-                'apiUrl': self.server.url, 'token': self.token, 'port': self.server.port, 'pid': os.getpid(),
+            document['url'] = f'{self.server.url}/{document["id"]}?token={link}'
+        return {'ok': True, 'url': documents[0]['url'] if documents else f'{self.server.url}/?token={link}',
+                'apiUrl': self.server.url, 'token': self.token if options.get('api_only') else link,
+                'port': self.server.port, 'pid': os.getpid(),
                 'start': app.start, 'documents': documents, 'action': 'reused' if reused else 'started'}
 
     def document(self, name, start):
@@ -224,49 +275,60 @@ class EngineApp:
         # neither keeps the engine from retiring nor counts as an active client.
         if not host_is_allowed(request.header('host'), self.host):
             return response.send_json(403, {'error': 'Host is not a local name'})
-        bearer = request.header('authorization').removeprefix('Bearer ')
         # Read only this engine's cookie out of the header by hand. A stdlib SimpleCookie parse
         # is all-or-nothing: a sibling cookie another page on this host set (cookies are scoped by
         # host, not port) with a name or value it rejects would drop the whole jar, and the engine's
         # own valid cookie with it, turning a good request into a 403.
-        cookie_name = f'cadgen-engine-{self.server.port}'
         saved = ''
         for pair in (request.header('cookie') or '').split(';'):
             name, _, value = pair.strip().partition('=')
-            if name == cookie_name:
+            if name == self.cookie:
                 saved = value.strip().strip('"')
-        # Any one credential suffices: a cookie left by an engine that held this port before
-        # must not outrank the token of the URL a launch just printed.
-        expected = self.token.encode()
 
-        def matches(value):
-            return bool(value) and secrets.compare_digest(str(value).encode('utf-8', 'surrogateescape'), expected)
+        def named(value):  # the user's token, or a link it signed
+            if value and secrets.compare_digest(str(value).encode('utf-8', 'surrogateescape'), self.token.encode()):
+                return 'ok'
+            return standing(self.token, 'link', value) if value else None
 
-        named = matches(bearer) or matches(request.query.get('token', ''))
-        if not named and not matches(saved):
-            return self._refused(request, response, bool(bearer or request.query.get('token', '') or saved))
-        if not named and request.header('sec-fetch-site') not in ('', 'same-origin', 'none'):
+        # Any one credential suffices: a cookie the token never signed is not one, and never outranks
+        # the link of the URL a launch just printed.
+        offered = {named(request.header('authorization').removeprefix('Bearer ')),
+                   named(request.query.get('token', ''))}
+        session = saved if saved and standing(self.token, 'session', saved) == 'ok' else ''
+        if 'ok' not in offered and not session:
+            return self._refused(request, response, 'expired' in offered)
+        if 'ok' not in offered and request.header('sec-fetch-site') not in ('', 'same-origin', 'none'):
             # The cookie is sent to every port of this host, so a request it alone admits must come
             # from this engine's own pages (or be typed or opened by the person): the browser says
             # so in Sec-Fetch-Site, which a page cannot set. One without the header is a client's
-            # that is not a browser, and is admitted as before.
+            # that is not a browser, and is admitted as before. An old link followed from such a page
+            # is asked again from this origin (``_refused``).
+            if 'expired' in offered:
+                return self._refused(request, response, True)
             return response.send_json(403, {'error': 'cross-origin request refused'})
         with self.lock:
             self.active_requests += 1
         self.server.touch()
         try:
-            return self._admitted(request, response, cookie_name)
+            return self._admitted(request, response, session)
         finally:
             with self.lock:
                 self.active_requests -= 1
             self.server.touch()
 
-    def _admitted(self, request, response, cookie_name):
-        """A request past the Host and token gates."""
-        if request.query.get('token') == self.token and request.method == 'GET':
+    def _session_cookie(self):
+        return ('set-cookie', f'{self.cookie}={sign(self.token, "session", SESSION_SECONDS)}; Path=/; '
+                              f'Max-Age={SESSION_SECONDS}; HttpOnly; SameSite=Strict')
+
+    def _admitted(self, request, response, session):
+        """A request past the Host and token gates: by a credential it names, else by its ``session``
+        cookie's value."""
+        if 'token' in request.query and request.method == 'GET':
+            # A link (or the token) is exchanged for a session and dropped from the address; one past
+            # its day that the session admitted is just dropped.
             query = {k: v for k, v in request.query if k != 'token'}
             location = request.path + ('?' + urlencode(query) if query else '')
-            cookie = ('set-cookie', f'{cookie_name}={self.token}; Path=/; HttpOnly; SameSite=Strict')
+            cookie = self._session_cookie()
             if request.header('sec-fetch-site') in ('', 'none', 'same-origin'):
                 return response.send_bytes(302, b'', '', [('location', location), cookie,
                                                           ('referrer-policy', 'no-referrer')])
@@ -276,6 +338,10 @@ class EngineApp:
             return response.send_bytes(200, bounce_page(location), 'text/html; charset=utf-8', [cookie,
                 ('referrer-policy', 'no-referrer'), ('cache-control', 'no-store'),
                 ('content-security-policy', "default-src 'none'; frame-ancestors 'self'")])
+        if session and (_navigation(request) or int(session.partition('.')[0]) < time.time() + SESSION_SECONDS - 86400):
+            # Each page load renews it, and any request once it is a day old, so a tab left open
+            # keeps it too: 30 days from the last use.
+            response.also = (self._session_cookie(),)
         if request.path == '/mcp' and self.session_factory is not None:
             return self.mcp().handle(request, response)
         if request.method == 'GET' and (request.path.startswith('/s/') or request.path == '/s'
@@ -286,19 +352,20 @@ class EngineApp:
             self.server.warm()  # a build's view link opened: its meshing pool starts as the page loads
         return self.default_app().handle(request, response)
 
-    def _refused(self, request, response, presented=False):
-        """A request without this engine's token: refused, 403, whatever it asks for -- a route, a
-        page or an asset. A navigation is told why in a static page of a few lines (no script, no
-        asset, nothing of the person's), never raw JSON: one that ``presented`` a token this engine
-        never issued -- a link from before the token was rotated, or another installation's -- that
-        the link no longer works (``LINK_GONE_PAGE``); one that presented none -- the page's
-        address without its ``?token=``, or a fetch that kept no cookie -- that it needs the link its
-        agent gave, opened in a browser (``TOKEN_NEEDED_PAGE``). Every other refusal is the JSON
-        error."""
-        navigation = (request.header('sec-fetch-dest') == 'document' or 'text/html' in request.header('accept')) \
-            and request.method == 'GET' and not request.path.startswith('/__cad/') and request.path != '/mcp'
-        if navigation:
-            return response.send_bytes(403, LINK_GONE_PAGE if presented else TOKEN_NEEDED_PAGE,
+    def _refused(self, request, response, expired=False):
+        """A request without a credential this engine admits: refused, 403, whatever it asks for -- a
+        route, a page or an asset. A page load is told why in a static page of a few lines (no script,
+        no asset, nothing of the person's), never raw JSON: a link past its day that it ``expired``
+        (``LINK_EXPIRED_PAGE``), else that it needs a link (``TOKEN_NEEDED_PAGE``). An expired link
+        followed from another site is first asked again from this origin, so the browser sends the
+        session it holds (SameSite=Strict withholds it from the other site's navigation), which
+        admits it; a request with no link is never. Every other refusal is the JSON error."""
+        if _navigation(request):
+            if expired and 'token' in request.query and request.header('sec-fetch-site') in ('cross-site', 'same-site'):
+                return response.send_bytes(200, bounce_page(request.path + '?' + urlencode(list(request.query))),
+                                           'text/html; charset=utf-8', [('referrer-policy', 'no-referrer'),
+                                           ('content-security-policy', "default-src 'none'; frame-ancestors 'self'")])
+            return response.send_bytes(403, LINK_EXPIRED_PAGE if expired else TOKEN_NEEDED_PAGE,
                                        'text/html; charset=utf-8',
                                        [('referrer-policy', 'no-referrer'),
                                         ('content-security-policy',

@@ -1098,7 +1098,7 @@ class DaemonTest(unittest.TestCase):
         before = get_json(endpoint, token)
         (self.folder / "bracket.py").write_text(textwrap.dedent(BARE.format(size=2)), encoding="utf-8")
         second = self.built("bracket")
-        self.assertEqual(second["url"], first["url"])
+        self.assertEqual(urlparse(second["url"])[:3], url[:3], "one address, each URL with a fresh link")
         from cadgen.engine.ids import model_id
 
         self.assertEqual((first["id"], second["id"], doc), (model_id(self.folder / "bracket.py", "bracket"),) * 3,
