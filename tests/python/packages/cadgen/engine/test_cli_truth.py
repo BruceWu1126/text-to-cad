@@ -121,13 +121,18 @@ class VerbsTest(unittest.TestCase):
         self.assertEqual(self.failed.stderr.count("Traceback"), 1, self.failed.stderr)
 
     def test_a_wrote_line_names_each_path_as_it_was_given(self) -> None:
-        """An absolute path outside the working folder stays absolute (unresolved: macOS's /var is
-        /private/var), and a relative one stays relative, for export and snapshot alike."""
+        """An absolute path outside the working folder stays absolute, unresolved (macOS's /var is
+        /private/var), and a relative one stays relative, for export and, where OCCT can draw,
+        snapshot alike."""
+        from cadgen.engine.render import context
+
         elsewhere = Path(tempfile.mkdtemp(prefix="engine-wrote-"))
         self.addCleanup(shutil.rmtree, elsewhere, True)
         small = ["--width", "64", "--height", "48"]
-        for verb, out, extra in (("export", str(elsewhere / "box.stl"), []), ("export", "box.stl", []),
-                                 ("snapshot", str(elsewhere / "box.png"), small), ("snapshot", "box.png", small)):
+        verbs = [("export", str(elsewhere / "box.stl"), []), ("export", "box.stl", [])]
+        if opengl.draws(context.available(), "the snapshot verb is drawn by OCCT"):
+            verbs += [("snapshot", str(elsewhere / "box.png"), small), ("snapshot", "box.png", small)]
+        for verb, out, extra in verbs:
             done = self.cli(verb, self.box, out, *extra)
             self.assertEqual(done.returncode, 0, done.stderr)
             self.assertTrue(done.stdout.startswith(f"wrote {out} ("), f"{verb} {out}: {done.stdout}")

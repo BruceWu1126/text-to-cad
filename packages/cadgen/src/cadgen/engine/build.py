@@ -335,8 +335,8 @@ def _model_traceback(error: BaseException) -> str:
 
 
 def _refused(error: BaseException) -> dict[str, str]:
-    """``failedAt``: the kernel call an OCCT exception with no words of its own was raised in
-    (``memo.refused_call``), which the failure line names; nothing for any other error."""
+    """``failedAt``: the kernel call an OCCT exception was raised in (``memo.refused_call``),
+    which the failure line names; nothing for any other error."""
     from cadgen.engine.kernel.memo import refused_call
 
     found = refused_call(error)
