@@ -86,6 +86,48 @@ class DoorTest(unittest.TestCase):
         self.assertEqual(list(self.clients.iterdir()), [])
         self.assertFalse(door.answering(self.folder / "missing.door"))
 
+    def test_a_daemon_that_dies_after_reading_the_hello_ends_the_client_s_wait(self) -> None:
+        from cadgen.engine import door
+
+        path = self.folder / "dying.door"
+        os.mkfifo(path, 0o600)
+        reading = os.open(path, os.O_RDONLY | os.O_NONBLOCK)  # the daemon: it reads one hello, and dies
+
+        def die() -> None:
+            while True:
+                try:
+                    if os.read(reading, 64):
+                        break
+                except BlockingIOError:
+                    time.sleep(0.01)
+            os.close(reading)
+
+        dying = threading.Thread(target=die, daemon=True)
+        dying.start()
+        started = time.monotonic()
+        self.assertIsNone(door.dial(path, timeout=60))
+        self.assertLess(time.monotonic() - started, 30, "not the whole greeting wait: nobody reads the door")
+        dying.join(5)
+        self.assertEqual(list(self.clients.iterdir()), [])
+
+    def test_a_clients_folder_opened_to_others_is_closed_again_and_connects(self) -> None:
+        from cadgen.engine import door
+
+        def serve(reader, writer) -> None:
+            reader.readline()
+            writer.write(b"ok\n")
+            writer.flush()
+
+        path = self.open_door(serve)
+        os.chmod(self.clients, 0o755)
+        connection = door.dial(path)
+        self.assertIsNotNone(connection, "a folder of this user's, in the engine's own: closed, not a dead end")
+        with connection:
+            connection.writer.write(b"{}\n")
+            connection.writer.flush()
+            self.assertEqual(connection.reader.readline(), b"ok\n")
+        self.assertEqual(self.clients.stat().st_mode & 0o777, 0o700)
+
     def test_a_pair_that_is_not_this_user_s_fifo_is_refused_and_never_served(self) -> None:
         from cadgen.engine import door
 
