@@ -48,7 +48,8 @@ class Holder:
     timeout once the host has quit and this process with it. An engine that goes while held (``cadgen
     stop``, a crash) is held again at the host's next request, never at once: a stop is obeyed."""
 
-    def __init__(self):
+    def __init__(self, host=lambda: None):
+        self.host = host  # the host this server serves, said with the hold (``host.family``)
         self.wanted = threading.Event()
         self.tried = threading.Event()  # the first hold taken, or failed
         self.holding = False
@@ -68,7 +69,7 @@ class Holder:
             self.wanted.wait()
             self.wanted.clear()
             try:
-                connection = hold()
+                connection = hold(host=self.host)
             except (ConnectionError, OSError, ValueError) as error:
                 LOG.info('could not hold the engine: %s', error)
                 self.tried.set()
@@ -201,9 +202,10 @@ class Proxy:
 
 
 def start():
-    """What this server does first, as the host installs or starts it outside any sandbox: publish
-    this installation's launchers, the paths the skills run it by (``cadgen._internal.launchers``)."""
-    from cadgen._internal.launchers import startup
+    """What this server does first, as the host installs or starts it outside any sandbox: register
+    this installation and write the ``cadgen`` command the skills run it by
+    (``cadgen._internal.installations``)."""
+    from cadgen._internal.installations import startup
     startup()
 
 
@@ -215,10 +217,8 @@ def serve(argv=None):
     from cadgen._internal.channel import remember
     remembering = threading.Thread(target=remember, daemon=True)
     remembering.start()
-    holder = Holder()
-    holder.start()  # the engine up and held from the start, not from the first card
     # Which host started this process, read from its parents while the host starts to greet it.
-    from .host import launcher
+    from .host import family, launcher
     found = {}
     reading = threading.Thread(target=lambda: found.update(host=launcher()), name='cadgen-host', daemon=True)
     reading.start()
@@ -226,6 +226,11 @@ def serve(argv=None):
     def launched():
         reading.join(5)
         return found.get('host')
+
+    # The engine up and held from the start, not from the first card; the hold names the host once
+    # it is read, so the `cadgen` command in that host's shells runs this installation.
+    holder = Holder(host=lambda: family(launched()))
+    holder.start()
 
     proxy = Proxy(holder=holder, launcher=launched)
     connection = Connection(requests, output, proxy.handle, workers=64, notification=proxy.notify)

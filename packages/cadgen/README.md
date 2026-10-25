@@ -69,8 +69,9 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    `$TMPDIR`), else `/tmp/cadgen-<uid>` -- and cadgen's own
    state in the user's state folder: settings, Recents' small previews, and the registry of the
    documents it has built, been handed or opened, one record each that points at its script or
-   file, and each installation's engine record (its page token, and the port it rolled to while
-   3245 is another program's; this user's alone);
+   file, the user's one page token, every installation's engine record (the port it rolled to while
+   3245 is another program's; both this user's alone), and each registered installation's record
+   (`installations/<version>.json`: its python, its console script, its environment);
    never geometry and never source. In the
    platform's cache folder (`~/.cache/cadgen`, by 0.7's rule) it keeps, under `documents/` and
    nowhere else there, each model document's bytes as it last built them: its own file, never a
@@ -323,10 +324,11 @@ src/cadgen/
   assets.py              # where the bundled runtime is
   check_fonts.py         # `python -m cadgen.check_fonts`: the font that breaks
                          #   `import build123d`
-  _internal/             # the launch command and the launchers it publishes (launchers:
-                         #   ~/.local/bin/cadgen-<version>, cadgen-python-<version>, what
-                         #   the skills run; written as `cadgen mcp` starts and by `cadgen
-                         #   doctor`, never by another command), the font guard, the kernel-import recorder,
+  _internal/             # the launch command, the installations' registry and the proxy
+                         #   it writes (installations: ~/.local/bin/cadgen, which the
+                         #   skills run as `cadgen +<version>`; written as `cadgen mcp`
+                         #   starts and by `cadgen doctor`, never by another command), the
+                         #   proxy's resolver (proxy), the font guard, the kernel-import recorder,
                          #   the lazy kernel (lazy_kernel: `import build123d` binds, the
                          #   kernel loads on first use; cadgen-lazy-kernel.pth, at the root
                          #   of site-packages, installs it at interpreter start),
@@ -340,9 +342,12 @@ src/cadgen/
 Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and
 `server` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
 snapshot for those files alone; `cadgen urdf|sdf|srdf validate` the validators; `cadgen
-doctor` the installation, its launchers and a skill's pin; `cadgen viewer` the engine page launcher;
+doctor` the setup (the installation registered, the `cadgen` command written, the engine started) and
+a skill's pin; `cadgen run` a model script by the installation's python; `cadgen viewer` the engine page launcher;
 `cadgen mcp` the stateless proxy an agent host starts; and `cadgen telemetry` the person's answer. A
-model builds by running its script: `python model.py`.
+model builds by running its script: `python model.py`, or `cadgen +<version> run model.py` through
+the `cadgen` command, which picks the installation `+<version>`, `CADGEN_VERSION`, a `cadgen.toml`
+(`version = "<version>"`) or the running engine names (`_internal/proxy.py`).
 
 Coming from 0.7: cadgen 0.7.x kept a cache store, which can hold gigabytes, at
 `~/.cache/cadgen` (macOS and Linux; `$XDG_CACHE_HOME/cadgen` when that is set),

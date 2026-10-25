@@ -181,6 +181,30 @@ def launcher() -> dict[str, Any] | None:
     return host_of(ancestors())
 
 
+def family(found: Any) -> str | None:
+    """The host a launcher (``launcher``) names, as its shells name it (``shell``): ``codex`` for
+    each of Codex's programs, ``claude code``, else the host's own name; None where none is known."""
+    name = str(found.get("host") or "") if isinstance(found, dict) else ""
+    return "codex" if name.startswith("codex") else (name or None)
+
+
+# The variables an agent host sets in the shells it runs a command in, which name it there as
+# ``family`` names it from its process: Codex's (seen with ``env`` in codex-cli 0.163's ``exec`` and
+# ``sandbox`` shells), then Claude Code's. Codex first: a Codex started from a Claude Code shell
+# inherits Claude Code's.
+SHELLS = (("codex", ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_TOOL_CALL_ID", "CODEX_SANDBOX")),
+          ("claude code", ("CLAUDECODE",)))
+
+
+def shell(environ: Any = None) -> str | None:
+    """The host whose shell this is, from its environment (``SHELLS``), or None."""
+    environ = os.environ if environ is None else environ
+    for name, variables in SHELLS:
+        if any(environ.get(variable) for variable in variables):
+            return name
+    return None
+
+
 def presentation(client: dict[str, Any], offered: dict[str, Any], launched: Any) -> tuple[str, bool | None, str]:
     """How a host presents CAD, from its initialize: ``(presentation, renders, why)``. ``presentation``
     is ``tabs``, ``inline`` or ``text``, the catalog the host is listed; ``renders`` whether it shows
