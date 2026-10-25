@@ -5,14 +5,20 @@ journal folder in ``CADGEN_TEST_JOURNAL``; the command, the engine daemon it sta
 daemon's workers all inherit both, so each one, at its start, writes ``<role>-<pid>.txt``
 there: when it started, when it listened (a daemon that made its door, or on Windows listened on
 its port), when it left and with what, an uncaught error's traceback, and every thread's stack
-each ``DUMP_SECONDS`` it is alive -- where a process that hangs is waiting. The test reads the folder when a command
-does not finish. Nothing here may fail the process it is in."""
+each ``DUMP_SECONDS`` it is alive -- where a process that hangs is waiting -- and, in the same
+``<role>-<pid>.stacks.txt``, the stack of a process that dies in native code. The test reads the
+folder when a command does not finish, and prints the stacks when one fails. Nothing here may fail
+the process it is in.
+
+``DUMP_SECONDS`` is long, under the commands' 300 s timeout so a hung one still leaves a dump: the
+dump's watchdog thread walks the other threads' frames without the GIL, and in a process still
+importing at that moment (a cold first build on a loaded Windows runner) that walk can itself fault."""
 
 from __future__ import annotations
 
 import os
 
-DUMP_SECONDS = 45
+DUMP_SECONDS = 240
 
 
 def _record() -> None:
@@ -28,8 +34,12 @@ def _record() -> None:
     if not folder or not os.path.isdir(folder):
         return
     argv = " ".join(getattr(sys, "orig_argv", sys.argv))
-    roles = {"daemon": "daemon", "worker": "worker", "reader": "reader", "render.service": "render"}
-    role = next((role for module, role in roles.items() if f"cadgen.engine.{module}" in argv), "process")
+    # Each by its module; the distribution starts the daemon as ``cadgen._internal.engine_daemon``
+    # (``engine_host``), its engine's own entry point being ``cadgen.engine.daemon``.
+    roles = {"cadgen.engine.daemon": "daemon", "cadgen._internal.engine_daemon": "daemon",
+             "cadgen.engine.worker": "worker", "cadgen.engine.reader": "reader",
+             "cadgen.engine.render.service": "render"}
+    role = next((role for module, role in roles.items() if module in argv), "process")
     path = os.path.join(folder, f"{role}-{os.getpid()}.txt")
     started = time.time()
 
