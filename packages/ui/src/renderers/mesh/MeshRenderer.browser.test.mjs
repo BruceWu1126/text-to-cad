@@ -110,8 +110,8 @@ const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first()
 async function exported(page, file) {
   await page.waitForFunction(() => window.cadHarness.exportViews.at(-1));
   const shown = await page.evaluate(() => window.cadHarness.exportViews.at(-1));
-  assert.deepEqual(Object.keys(shown).sort(), ['doc', 'file', 'name', 'preview', 'revision']);
-  assert.deepEqual([shown.doc, shown.file, shown.name, shown.preview], [`/models/${file}`, `/models/${file}`, file, false]);
+  assert.deepEqual(Object.keys(shown).sort(), ['doc', 'file', 'name', 'revision']);
+  assert.deepEqual([shown.doc, shown.file, shown.name], [`/models/${file}`, `/models/${file}`, file]);
   assert.ok(shown.revision.endsWith(`-${file}`), `the catalog hash of the bytes shown: ${shown.revision}`);
 }
 // A mesh file's strip: an STL's Select (in hand, picking nothing), Pencil, Shapes and Clip; a 3MF's Select (in hand),

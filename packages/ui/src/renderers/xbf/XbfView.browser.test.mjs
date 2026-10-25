@@ -53,8 +53,9 @@ test('an engine document reopens with its tree as it was left, and its selection
   assert.equal(views.length, published, 'a selection is not an export source');
   const shown = views.at(-1);
   assert.ok(shown, 'the view handed Export no document');
-  assert.deepEqual(Object.keys(shown).sort(), ['doc', 'file', 'name', 'preview', 'revision']);
+  assert.deepEqual(Object.keys(shown).sort(), ['doc', 'file', 'name', 'planar', 'revision']);
   assert.ok(shown.doc && shown.revision, JSON.stringify(shown));
-  assert.deepEqual([shown.file, shown.name, shown.preview], ['/models/bracket.xbf', 'bracket.xbf', false]);
+  // A bracket is a solid: the scene it draws is not flat, so its menu has no DXF.
+  assert.deepEqual([shown.file, shown.name, shown.planar], ['/models/bracket.xbf', 'bracket.xbf', false]);
   assert.deepEqual(errors, []);
 });

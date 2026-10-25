@@ -57,6 +57,8 @@ const EMPTY = Object.freeze([]);
 const NO_HOVER = Object.freeze({ parts: EMPTY, element: null });
 const EXPLODE_OFF = Object.freeze({ exploded: { enabled: false, amount: 0 } });
 const isElementId = id => String(id).includes("/");
+// How far off z=0 a point may be, in the document's millimetres, for its DXF: the writer's own test.
+const PLANAR = 1e-6;
 
 /** The selection after a pick of a part or subassembly, as a STEP's: a plain pick drops the faces and edges. */
 function pickNode(current, id, multiSelect) {
@@ -280,11 +282,13 @@ function XbfSurface({ view, data }) {
     annotationUnits: scene?.units?.unit || "mm"
   });
   // Export writes the document as its code built it: the displayed document and revision alone,
-  // never the selection or the pose (`docs/viewer-host.md`, Export destinations and jobs).
+  // never the selection, the pose or Preview (`docs/viewer-host.md`, Export destinations and jobs).
+  // A document the scene draws flat on z=0 at rest holds no solid, so it writes a DXF too.
+  const restBounds = scene?.restBounds;
+  const planar = Boolean(restBounds && Math.abs(restBounds.min[2]) <= PLANAR && Math.abs(restBounds.max[2]) <= PLANAR);
   const exportView = useMemo(() => loaded.document && !host.environment.compact ? {
-    doc: loaded.document.source.doc, revision: loaded.revision, file: view.file.path, name: view.file.name,
-    preview: shell.previewing
-  } : null, [loaded.document, loaded.revision, host.environment.compact, view.file.path, view.file.name, shell.previewing]);
+    doc: loaded.document.source.doc, revision: loaded.revision, file: view.file.path, name: view.file.name, planar
+  } : null, [loaded.document, loaded.revision, host.environment.compact, view.file.path, view.file.name, planar]);
   useExportView(exportView);
   // A measurement taken, deleted or cleared is a step of the view's one history, with the ink's.
   measure.history.current = shell.frame.history;

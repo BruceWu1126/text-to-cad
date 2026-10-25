@@ -239,7 +239,7 @@ export interface CadActivity {
 
 export type ExportFormat = 'step' | 'glb' | 'stl' | 'threemf' | 'dxf' | 'xbf' | 'original';
 export interface ExportSource { doc: string; revision: string }
-export interface ExportOption { format: ExportFormat; label: string; extension: string; reason: string | null }
+/** One export: `epoch` is the session's (`ExportService.epoch`), `''` until the page has asked it. */
 export interface ExportRequest { requestId: string; epoch: string; source: ExportSource; format: ExportFormat }
 export interface ExportJob {
   id: string; requestId: string; epoch: string; filename: string;
@@ -250,7 +250,8 @@ export interface ExportJob {
   fetched?: boolean;
 }
 export interface ExportService {
-  options(source: ExportSource, signal: AbortSignal): Promise<{ epoch: string; formats: ExportOption[] }>;
+  /** The session's epoch, which a request names so that a server restarted since refuses it. */
+  epoch(signal?: AbortSignal): Promise<string>;
   create(request: ExportRequest, signal?: AbortSignal): Promise<ExportJob>;
   status(id: string, sequence?: number, signal?: AbortSignal): Promise<ExportJob>;
   cancel(id: string): Promise<ExportJob>;

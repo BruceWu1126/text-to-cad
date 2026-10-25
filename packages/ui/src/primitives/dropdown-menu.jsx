@@ -49,6 +49,7 @@ const DropdownMenuContent = React.forwardRef(/**
   );
 });
 
+/** @param {React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & { inset?: boolean, variant?: "default" | "destructive" }} props */
 function DropdownMenuItem({
   className,
   inset,
@@ -128,6 +129,7 @@ function DropdownMenuRadioItem({
   );
 }
 
+/** @param {React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Label> & { inset?: boolean }} props */
 function DropdownMenuLabel({
   className,
   inset,
@@ -143,6 +145,7 @@ function DropdownMenuLabel({
   );
 }
 
+/** @param {React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Separator>} props */
 function DropdownMenuSeparator({
   className,
   ...props

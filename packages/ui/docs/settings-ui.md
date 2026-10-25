@@ -1003,6 +1003,16 @@ the stack sits at the view's bottom, the view's width less 8px each side, and it
 stack and scroll within the viewport; dismissing one only hides it, and Export's Show
 exports restores the stack. No other action earns a toast. Export is an icon button at
 the navbar's right end, named on hover as the view controls are, never in the tool strip.
+It opens a dropdown as the file's ⋯ does, on Display's surface and in its type, Display's
+width (`export/ExportControls.tsx`): the formats the file's kind writes, plain items, known
+from the kind and the scene the view already holds, so nothing loads before it shows
+(`export/formats.ts`: a STEP's, an xbf's and a held model's STEP, STL, 3MF, GLB and XBF, and
+DXF where the view draws it flat on z=0, an xbf's XBF its own bytes; a GLB's, an STL's or a
+3MF's the other two mesh kinds); after a rule, Show exports while there are
+any; last, after a rule, one muted line: the model goes as authored, not as shown, and an
+engine document's GLB with its animations. A view with neither formats nor exports has no
+Export. A format chosen closes the menu and starts its export at once; nothing is asked
+first, and what the server refuses is said in that export's toast.
 A finished file is a plain browser download, started once by itself; where it lands is
 the browser's setting. No source bundle is an export format.
 Progress stays in the viewport; a failed action is the

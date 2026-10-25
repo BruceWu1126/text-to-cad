@@ -88,7 +88,9 @@ use the [explicit fake host](../src/host/testing/host.ts).
 browser a ready job's same-origin file URL (`ExportService.fileUrl`) as a plain download,
 so the browser's own download setting decides where it goes. Optional `remember`/`restore`
 persist the page's export records (request, filename, whether the file was handed over),
-never a file, handle or server path. No shared UI detects a browser or writes to the host
+never a file, handle or server path. A request names the session's epoch
+(`ExportService.epoch`, asked as its export starts), so a record restored after the server
+restarted is refused, never run again. No shared UI detects a browser or writes to the host
 filesystem.
 
 `CadViewer` combines that port with `CadWorkspaceService.exports` (`ExportService`).
@@ -96,7 +98,8 @@ Both are required to show Export. A host whose page cannot make a browser downlo
 omits the port: the MCP host has no HTTP origin (every request is a `cad_http` call), so
 it has no Export. The XBF renderer publishes only the displayed document and revision:
 Export writes the document as its code built it, so the menu offers formats alone, never a
-selection or a pose. The GLB and mesh renderers publish the file shown: its path as the
+selection or a pose, and the formats follow from the file's kind (`export/formats.ts`), so it
+has nothing to load; it says too whether its scene lies flat on z=0 (`planar`), which adds DXF. The GLB and mesh renderers publish the file shown: its path as the
 document and the catalog hash of the bytes on screen as the revision, which the server checks
 before it converts the file to the other mesh kinds. `FileViewer.navbarActions` and `overlay` are named
 composition slots: the first is in the navbar's right group; the second is in the

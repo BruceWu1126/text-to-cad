@@ -172,15 +172,16 @@ restarting an engine you own, then rerunning the launcher. Vite handles client H
 ## Export and job status
 
 **Export** sits at the top-right of the navbar of a STEP, XBF, held model, GLB, STL or 3MF
-page. For a model it captures the displayed revision and writes the document as its code built it: every
+page: a dropdown of the formats that page's file writes, there at once, as nothing is
+inspected first. For a model it captures the displayed revision and writes the document as its code built it: every
 part, as authored. The menu chooses a format alone; a posed or partial file is a function
-in the model's code. Only supported formats
-are offered: STEP, GLB, STL, 3MF, planar DXF and eligible XBF; an existing XBF
-has **Download original XBF**. On a GLB, STL or 3MF page Export converts the file shown, at the
+in the model's code. A STEP, XBF or held model offers STEP, STL, 3MF, GLB and XBF (an XBF's
+XBF is its own bytes), and DXF where the view draws it flat on z=0; on a GLB, STL or 3MF page Export converts the file shown, at the
 bytes on screen, to the other two mesh kinds and nothing else; a file changed since is refused.
 Source and outputs stay separate.
 
-**Export and download** submits the job; nothing is asked first. When the file is
+Choosing a format submits the job at once; nothing is asked first, and what the server
+refuses is said in its toast. When the file is
 ready the page hands it to the browser as a plain download (`src/host/downloads.ts`: a
 same-origin link with `download`), once, in every browser: where it goes is the browser's
 own setting (its folder, or its Save dialog for a person who asked for one). The link's
@@ -206,7 +207,8 @@ There is no durable job registry; a server restart ends these jobs.
 
 Reload restores the page's export records from this tab's session storage and reconnects
 with the same request IDs; a file already handed to the browser is not downloaded again
-by itself. Client transport is `@text-to-cad/core/client`'s `ExportService`, shared UI is
+by itself. Each request names the session's epoch, read as its export starts, so a server
+restarted since refuses it rather than running it again. Client transport is `@text-to-cad/core/client`'s `ExportService`, shared UI is
 `packages/ui/src/export`, and `src/host/downloads.ts` owns the browser effect.
 
 ## Shared interface

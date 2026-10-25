@@ -5,14 +5,8 @@
  */
 export default {
   "export.button": "导出",
-  "export.heading": "导出模型",
-  "export.preview": "预览导出原始模型。",
-  "export.geometry": "可见性、裁剪和爆炸视图不影响导出。GLB 包含模型中的动画。",
-  "export.format": "格式",
-  "export.original": "下载原始 XBF",
-  "export.checking": "正在检查可用格式…",
-  "export.start": "导出并下载",
-  "export.open": "打开 STEP、XBF 或内存中的模型以导出。",
+  "export.note": "按原始模型导出，与当前显示无关。",
+  "export.noteAnimated": "按原始模型导出，与当前显示无关。GLB 包含模型中的动画。",
   "export.show": "显示导出 ({count})",
   "export.jobs": "导出任务",
   "export.toast": "导出 {name}",

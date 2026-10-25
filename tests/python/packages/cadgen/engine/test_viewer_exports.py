@@ -11,7 +11,7 @@ from cadgen.engine.worker import _export
 
 
 class ViewerExportsTest(unittest.TestCase):
-    def test_formats_version_pinning_and_live_model_never_rebuilds(self):
+    def test_version_pinning_original_bytes_and_live_model_never_rebuilds(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder).resolve()
             script = root / "part.py"
@@ -20,12 +20,8 @@ class ViewerExportsTest(unittest.TestCase):
             self.assertTrue(reports[0]["ok"], reports)
             source = Source.read(root / "part.xbf")
             expected = {"version": source.structure["version"]}
-            request = {"source": {"path": str(source.path)}, "expected": expected, "destinations": [], "inspect": True}
-            formats = _export(request, lambda _: None)["formats"]
-            allowed = {r["format"] for r in formats if not r["reason"]}
-            self.assertEqual(allowed, {"step", "glb", "stl", "threemf", "original"})
             output = root / "export.stl"
-            request.update(inspect=False, destinations=[str(output)])
+            request = {"source": {"path": str(source.path)}, "expected": expected, "destinations": [str(output)]}
             self.assertGreater(_export(request, lambda _: None)["files"][0]["bytes"], 84)
             with self.assertRaisesRegex(ExportRefused, "source changed"):
                 _export({**request, "expected": {"version": "old"}}, lambda _: None)
@@ -41,7 +37,7 @@ class ViewerExportsTest(unittest.TestCase):
                     _export({**request, "source": {"script": str(script), "function": "part"},
                              "expected": {"digest": "old"}}, lambda _: None)
 
-    def test_planar_dxf_and_no_xbf_of_an_xbf(self):
+    def test_a_planar_document_writes_its_dxf_and_no_xbf_of_an_xbf(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder).resolve()
             script = root / "plate.py"
@@ -50,12 +46,12 @@ class ViewerExportsTest(unittest.TestCase):
             self.assertTrue(reports[0]["ok"], reports)
             source = Source.read(root / "plate.xbf")
             request = {"source": {"path": str(source.path)}, "expected": {"version": source.structure["version"]},
-                       "destinations": [], "inspect": True}
-            rows = _export(request, lambda _: None)["formats"]
-            self.assertIsNone(next(r for r in rows if r["format"] == "dxf")["reason"])
+                       "destinations": [str(root / "plate.dxf")]}
+            self.assertGreater(_export(request, lambda _: None)["files"][0]["bytes"], 0)
             with self.assertRaisesRegex(ExportRefused, "not written from another xbf"):
-                _export({**request, "inspect": False, "destinations": [str(root / "again.xbf")]}, lambda _: None)
+                _export({**request, "destinations": [str(root / "again.xbf")]}, lambda _: None)
             self.assertFalse((root / "again.xbf").exists())
+
 
 class ViewerExportHttpTest(unittest.TestCase):
     def setUp(self):
@@ -116,21 +112,16 @@ class ViewerExportHttpTest(unittest.TestCase):
             _, _, data = http('/api/doc/' + doc)
             structure = json.loads(data)
             source = {'doc': doc, 'revision': structure['version']}
-            code, _, _ = http('/__cad/exports/options', source, headers={'Authorization': ''})
-            self.assertEqual(code, 403)
-            code, _, _ = http('/__cad/exports/options', source, headers={'x-cadgen-viewer': ''})
-            self.assertEqual(code, 403)
-            # Inspection is asynchronous. A real export shares its worker and completes
-            # after it; long-polling the job waits for observable changes, not a sleep.
-            code, _, data = http('/__cad/exports/options', source)
-            self.assertIn(code, (200, 202))
-            # Epoch is public only once inspection has settled. The session's job
-            # capability response is bounded by the worker, which status can observe.
-            while code == 202:
-                code, _, data = http('/__cad/exports/options', source)
+            # Nothing is inspected first: the session's epoch is one read, behind its credential.
+            self.assertEqual(http('/__cad/exports', headers={'Authorization': ''})[0], 403)
+            code, _, data = http('/__cad/exports')
             self.assertEqual(code, 200, data)
             payload = {'requestId': 'http-export-request-0001', 'epoch': json.loads(data)['epoch'],
                        'source': source, 'format': 'stl'}
+            # A job is a POST that needs the credential and the viewer's header too.
+            self.assertEqual(http('/__cad/exports', payload, headers={'Authorization': ''})[0], 403)
+            self.assertEqual(http('/__cad/exports', payload, headers={'x-cadgen-viewer': ''})[0], 403)
+            # Long-polling the job waits for observable changes, not a sleep.
             code, _, data = http('/__cad/exports', payload)
             self.assertEqual(code, 202, data)
             job = json.loads(data)

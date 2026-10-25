@@ -4,14 +4,8 @@
  */
 export default {
   "export.button": "내보내기",
-  "export.heading": "모델 내보내기",
-  "export.preview": "미리보기에서는 작성된 상태의 모델을 내보냅니다.",
-  "export.geometry": "표시 상태, 클리핑, 분해도는 내보내기에 영향을 주지 않습니다. GLB에는 작성된 애니메이션이 포함됩니다.",
-  "export.format": "형식",
-  "export.original": "원본 XBF 다운로드",
-  "export.checking": "사용 가능한 형식 확인 중…",
-  "export.start": "내보내고 다운로드",
-  "export.open": "STEP, XBF 또는 메모리의 모델을 열어 내보내세요.",
+  "export.note": "표시 상태와 관계없이 작성된 상태의 모델을 내보냅니다.",
+  "export.noteAnimated": "표시 상태와 관계없이 작성된 상태의 모델을 내보냅니다. GLB에는 모델의 애니메이션이 포함됩니다.",
   "export.show": "내보내기 표시 ({count})",
   "export.jobs": "내보내기 작업",
   "export.toast": "내보내기 {name}",

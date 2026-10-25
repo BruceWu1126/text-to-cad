@@ -1315,13 +1315,15 @@ Preview -- is an input. A posed or partial file is a function in the model's cod
 - **A mesh file** (GLB, STL, 3MF) is named by its path at the bytes shown (the catalog's hash of
   them), checked before the job and, by its `mtime_ns-size`, again in the worker.
 
-The formats offered are a document's STEP, GLB, STL and 3MF, DXF where it is planar, and an xbf
-but of an engine-written xbf, which offers its original bytes instead (a separate download); a
-mesh file's are the other two mesh kinds and nothing else. A changed source is refused, saying
-to open Export again. There is no source bundle in this interface.
+The page offers what the file's kind writes, and nothing is inspected first: an engine document
+(a STEP, an xbf, a held model) as STEP, STL, 3MF, GLB and xbf -- an xbf's xbf its original bytes
+(`original`), as an xbf is not written from another -- and DXF where the page draws it flat on
+z=0; a mesh file as the other two mesh kinds and nothing else. A job the writer refuses (a DXF
+whose drawing checks fail) fails with its reason. A changed source is refused, saying to open Export again. There is no source bundle in
+this interface.
 
 The enclosing distribution owns the HTTP queue, the browser download and temporary
-artifact lifetime; the standalone engine owns inspection, revision validation and
+artifact lifetime; the standalone engine owns revision validation and
 translation only. One explicit job names one temporary output, with no intermediate
 XBF. Cancellation takes effect between worker operations, discarding an in-flight
 result without killing a worker shared with another caller.
