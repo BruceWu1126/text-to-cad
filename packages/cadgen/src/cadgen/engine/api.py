@@ -552,6 +552,8 @@ def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, 
         order = {"op": "export", "source": spec, "destinations": [], "draw": draw,
                  "cwd": str(source.cwd) if isinstance(source, Document) else os.getcwd()}
         found = _exported(order, spec, lambda _text: None, daemon)["drawn"]
+        if "id" in spec:
+            found["document"] = spec["id"]  # what was drawn, by the id it was named by
         return Drawn(out, found["width"], found["height"], found)
     shown, framed, size = drawing.options(display, camera, grid, width, height, size_profile)
     found = drawing.snapshot(Path(os.fspath(source)), out, display=shown, camera=framed, preview=preview,

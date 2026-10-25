@@ -1067,6 +1067,32 @@ class ToolArgumentsTest(unittest.TestCase):
                                           "its document by id")
         self.assertEqual(answer["result"], {"outputsMayHaveBeenWritten": False})  # refused before the engine was asked
 
+    def test_a_snapshot_of_a_held_document_names_it_by_its_id_and_never_a_file_that_is_not_there(self) -> None:
+        from types import SimpleNamespace
+        from cadgen.engine import snapshot
+
+        server = self.served("text")
+        out = self.tmp / "_probe" / "mcp.png"
+        out.parent.mkdir()
+
+        reports = []
+
+        def worker(order, spec, shown, daemon, progress=None):
+            # What the worker holding the document does with the order: draws it from memory, no file of it.
+            reports.append(snapshot.draw(SimpleNamespace(path=None), Path(order["draw"]["out"])))
+            return {"reports": [], "files": [], "drawn": dict(reports[-1])}
+
+        png = (b"\x89PNG\r\n\x1a\n" + b"\0" * 16, {"width": 4, "height": 3, "timings": {}})
+        with mock.patch("cadgen.engine.api._exported", side_effect=worker), \
+                mock.patch("cadgen.engine.render.service.draw_here", return_value=png):
+            done = self.call(server, "cad_snapshot", {"requestId": "snapshot-held-doc-01", "source": DOCUMENT_ID,
+                                                      "output": str(out), "waitMs": 10000})["structuredContent"]
+        self.assertEqual(done["state"], "succeeded", done)
+        [picture] = done["result"]["pictures"]
+        self.assertEqual(picture["report"]["document"], DOCUMENT_ID)
+        self.assertNotIn("document", reports[0])  # the worker's report names no file it drew from
+        self.assertNotIn("mcp.xbf", json.dumps(done))
+
     def test_the_text_catalog_says_the_model_opens_in_the_browser_and_never_in_the_chat(self) -> None:
         server = self.served("text")
         instructions = server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {},

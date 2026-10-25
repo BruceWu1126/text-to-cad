@@ -714,9 +714,10 @@ def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, st
         from cadgen.engine import api
 
         spec = api._source(str(document))
-        return api._exported({"op": "export", "source": spec, "destinations": [],
-                              "draw_still": {"out": str(out), "still": still.as_json()},
-                              "cwd": os.getcwd()}, spec, lambda _text: None, daemon)["drawn"]
+        drawn = api._exported({"op": "export", "source": spec, "destinations": [],
+                               "draw_still": {"out": str(out), "still": still.as_json()},
+                               "cwd": os.getcwd()}, spec, lambda _text: None, daemon)["drawn"]
+        return {**drawn, "document": str(document)}  # the id it was named by, not the worker's stand-in
     if daemon and source is None:
         from cadgen.engine.client import request
 
@@ -736,17 +737,24 @@ def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, st
             data, report = draw_here(document, still, source=source)
         except FormatError as error:
             raise SnapshotRefused(str(error)) from None
-    return _written(document, out, data, report, started)
+    # A build's document held in memory, no file of it (``draw``), is served under a name made from
+    # ``out``: a path no file is at, which the report never names.
+    stand_in = source is not None and getattr(source, "path", None) is None
+    return _written(document, out, data, report, started, named=None if stand_in else str(document))
 
 
-def _written(document: Path, out: Path, data: bytes, report: dict[str, Any], started: float) -> dict[str, Any]:
-    """A picture drawn, written to ``out``: its warnings said, and what was drawn."""
+def _written(document: Path, out: Path, data: bytes, report: dict[str, Any], started: float, *,
+             named: str | None = "") -> dict[str, Any]:
+    """A picture drawn, written to ``out``: its warnings said, and what was drawn -- ``named``, the
+    document's file (``document`` by default), or None for a document no file holds."""
+    named = str(document) if named == "" else named
     _warn(report.get("unmeshed") or {})
     for warning in report.get("warnings") or []:
-        print(f"warning: {document.name}: {warning}", file=sys.stderr)
+        print(f"warning: {Path(named).name if named else 'the document'}: {warning}", file=sys.stderr)
     write_png(out, data)
     report["timings"]["totalMs"] = round((time.perf_counter() - started) * 1000)
-    return {"ok": True, "document": str(document), "output": str(out), **report, "bytes": out.stat().st_size}
+    found = {"ok": True, "output": str(out), **report, "bytes": out.stat().st_size}
+    return {"document": named, **found} if named else found
 
 
 # --- a job: a Quick Edit packet's views, drawn ---------------------------------------------------
