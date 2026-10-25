@@ -98,6 +98,24 @@ class ExportsTest(unittest.TestCase):
         self.assertEqual(self.jobs.create(self.request())["id"], ident)
         self.assertEqual(len(self.calls), 1)
 
+    def test_a_released_or_fetched_file_is_gone_to_a_new_reader_while_an_earlier_one_finishes(self):
+        # The HTTP test once read a released export again: the download before it had sent its last
+        # byte but not yet let go of the file, so the release could not expire the job yet.
+        self.finish.set()
+        for name, going in (("one", lambda ident: self.jobs.release(ident)),
+                            ("two", lambda ident: self.jobs.fetched(ident))):
+            ident = self.jobs.create(self.request(name))["id"]
+            self.settled(ident)
+            with self.subTest(name), self.jobs.artifact(ident) as path:  # an earlier download, finishing
+                going(ident)
+                with self.assertRaises(ExportError) as caught:
+                    with self.jobs.artifact(ident):
+                        pass
+                self.assertEqual(caught.exception.status, 410)
+                self.assertTrue(path.exists(), "the earlier download keeps its file")
+            self.assertFalse(path.exists())
+            self.assertEqual(self.jobs.get(ident)["state"], "expired")
+
     def download(self, ident, *, gone=False, headers=None):
         response = Mock(gone=gone)
         request = SimpleNamespace(path=f"/__cad/exports/{ident}/file", method="GET", query={},

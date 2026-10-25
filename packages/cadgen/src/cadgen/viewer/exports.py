@@ -288,8 +288,12 @@ class ExportJobs(Jobs):
         with self.changed:
             self.get(ident)
             job = self.jobs[ident]
-            if job["state"] != "ready":
-                raise ExportError("Export is not available for download.", 410 if job["state"] == "expired" else 409)
+            # Released, fetched whole or past its window, it is gone to a new reader at once, though
+            # its file stays until an earlier download still finishing lets go of it (``_prune``).
+            going = job["state"] == "ready" and (job.get("fetched") or self.clock() >= job["expiresAt"])
+            if job["state"] != "ready" or going:
+                raise ExportError("Export is not available for download.",
+                                  410 if going or job["state"] == "expired" else 409)
             job["readers"] += 1
             path = job["directory"] / job["filename"]
         try:
