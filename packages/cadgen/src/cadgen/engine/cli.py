@@ -180,7 +180,8 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
                        + "".join(f"\n    {text}" for text in _files(row))
                        for name, row in (report.get("child_models") or {}).items())
     if not report.get("ok"):
-        return f"failed {report.get('model')}" + children
+        refused = report.get("failedAt")  # an OCCT exception with no words: the call the kernel refused
+        return f"failed {report.get('model')}" + (f" at {refused}: the kernel refused it" if refused else "") + children
     timings = report.get("timings", {})
     memo = report.get("memo", {})
     bodies = list((report.get("bodies") or {}).values())

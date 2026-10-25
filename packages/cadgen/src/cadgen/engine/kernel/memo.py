@@ -1932,7 +1932,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         # The inputs as given, before the call: an in-place operation (clean)
         # leaves its input wrapping the result's TShape.
         given = [_wrapped(shape).TShape() for shape in shapes]
-        with kernel_history.recording() as makers:
+        with kernel_history.recording() as makers, _refusal(op, kind, args, kwargs):
             function_result = function(*args, **kwargs)
         result = args[0] if kind == "constructor" else function_result
         _STATS["misses"] += 1
@@ -2082,7 +2082,7 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
         _STATS["errors"] += 1
         captured = []
         verified = False
-    with kernel_history.recording() as makers:
+    with kernel_history.recording() as makers, _refusal(op, kind, args, kwargs):
         function_result = function(*args, **kwargs)
     result = args[0] if kind == "constructor" else function_result
     feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
@@ -2101,6 +2101,66 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
             copied = _reject_copies(feature, copied, state)
     _register(result, None, feature.index, state, None, copied)
     return function_result
+
+
+@contextlib.contextmanager
+def _refusal(op: str, kind: str, args: tuple, kwargs: dict) -> Iterator[None]:
+    """A kernel call the model made, which an OCCT exception with no words of its own leaves: the
+    exception is given the call, as the model wrote it at a glance (``kernel_call``, read by
+    ``refused_call``), so the build's failure names where the kernel refused. The innermost call
+    the memo saw is kept: one whose exception already names one is left as it is."""
+    try:
+        yield
+    except Exception as error:
+        if type(error).__module__.startswith("OCP") and not str(error).strip() and \
+                getattr(error, "kernel_call", None) is None:
+            try:
+                error.kernel_call = _shown_call(op, kind, args, kwargs)
+            except Exception:  # noqa: BLE001 - naming the call never hides the failure
+                pass
+        raise
+
+
+def refused_call(error: BaseException) -> str | None:
+    """The kernel call an exception, or one it was raised from, says the kernel refused
+    (``_refusal``), or None."""
+    seen: set[int] = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        found = getattr(error, "kernel_call", None)
+        if isinstance(found, str):
+            return found
+        error = error.__cause__ or error.__context__
+    return None
+
+
+def _shown_call(op: str, kind: str, args: tuple, kwargs: dict) -> str:
+    """``Solid.make_box(80, 30, 0, Plane)``: the call's name and its arguments, numbers as
+    written, a shape or any other object by its type, a list by its length."""
+    def shown(value: Any, deep: bool = True) -> str:
+        if isinstance(value, bool) or value is None:
+            return repr(value)
+        if isinstance(value, (int, float)):
+            return f"{value:g}"
+        if isinstance(value, str):
+            return repr(value) if len(value) <= 24 else repr(value[:21] + "...")
+        if isinstance(value, (list, tuple)):
+            if deep and len(value) <= 4:
+                inner = ", ".join(shown(item, False) for item in value)
+                return f"({inner})" if isinstance(value, tuple) else f"[{inner}]"
+            kinds = sorted({type(item).__name__ for item in value})
+            return f"[{len(value)} {kinds[0] if len(kinds) == 1 else 'items'}]"
+        return type(value).__name__
+
+    if kind in ("instance", "property") and args:
+        name, given = f"{type(args[0]).__name__}.{op}", args[1:]
+    elif kind in ("classmethod", "constructor"):
+        name, given = op, args[1:]
+    else:
+        name, given = op, args
+    parts = [shown(value) for value in given] + [f"{key}={shown(value)}" for key, value in kwargs.items()]
+    text = f"{name}({', '.join(parts)})"
+    return text if len(text) <= 120 else text[:117] + "..."
 
 
 def _history(feature: Any, makers: list) -> "kernel_history.History | None":
