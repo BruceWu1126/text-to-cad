@@ -84,8 +84,10 @@ class PreviousTest(unittest.TestCase):
         self.script.write_text(textwrap.dedent(KIT.format(peg=peg, plate=plate)), encoding="utf-8")
         os.utime(self.script, ns=(time.time_ns(), time.time_ns()))
 
-    def kit(self) -> dict:
-        (report,) = engine_build.build(self.script, ["kit"], cwd=self.folder)
+    def kit(self, said: list | None = None) -> dict:
+        """The kit built, what the build logs (the files it wrote or kept) appended to ``said``."""
+        (report,) = engine_build.build(self.script, ["kit"], cwd=self.folder,
+                                       log=said.append if said is not None else lambda _line: None)
         self.assertTrue(report["ok"], report)
         return report
 
@@ -102,7 +104,8 @@ class PreviousTest(unittest.TestCase):
         first = self.cold()
         written = self.xbf.stat().st_mtime_ns
         self.restart()
-        report = self.kit()
+        said: list[str] = []
+        report = self.kit(said)
         self.assertEqual(report["cache"], {"used": True, "from": "file"})
         self.assertEqual(report["memo"]["bodies_run"], 0)
         self.assertEqual(report["memo"]["bodies_loaded"], 3, "kit, peg and cap")
@@ -111,10 +114,11 @@ class PreviousTest(unittest.TestCase):
         self.assertEqual(self.xbf.read_bytes(), first)
         self.assertEqual(self.xbf.stat().st_mtime_ns, written)
         # The next build in the same worker: the key it took, in memory, and no read.
-        again = self.kit()
+        again = self.kit(said)
         self.assertEqual(again["cache"], {"used": True, "from": "memory"})
         self.assertNotIn("read", again["timings"])
         self.assertEqual(self.xbf.stat().st_mtime_ns, written)
+        self.assertEqual(said, [], "a take is said by its run line alone: it wrote and logged nothing")
 
     def test_another_process_takes_the_file_whatever_its_hash_seed(self) -> None:
         import subprocess

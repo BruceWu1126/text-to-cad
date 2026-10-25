@@ -492,7 +492,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
                 if verify:
                     verdict, previous_report = {"used": False, "reason": "verifying"}, None
                 else:
-                    verdict, previous_report = _previous(model, context, shown, log, cache)
+                    verdict, previous_report = _previous(model, context, shown, cache)
             except Exception as error:  # noqa: BLE001 - the cache never fails a build: the body runs
                 verdict, previous_report = {"used": False, "reason": f"the cache failed: {error}"}, None
             if previous_report is not None:
@@ -906,8 +906,7 @@ def _identity(name: str) -> str:
     return f"{Path(script).name}::{function}"
 
 
-def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None],
-              cache: str | None = None) -> tuple[dict, dict | None]:
+def _previous(model: Any, context: Any, shown: str, cache: str | None = None) -> tuple[dict, dict | None]:
     """The model's previous document asked before its body runs (``previous``): the
     verdict, and the model's report where the document is what the body would make -- the
     key the model has now is the one the document holds -- so the body is not run and the
@@ -1020,9 +1019,7 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None],
         # What the bodies made stays the memo's, as a replay would keep it: an edit after
         # any number of these builds replays all it leaves alone.
         memo.keep(name)
-    taken_from = ("the engine's cache of it" if where == "cache" else _shown(xbf, None) if xbf is not None
-                  else "its document in memory")
-    log(f"took {taken_from}: its key is the model's ({found['bodies']} bodies), nothing ran")
+    # Said once, by the run line its report makes (``cli._describe``): ``took ... nothing ran``.
     report = {"ok": True, "model": f"{shown}::{model.name}",
               "memo": {"hits": 0, "misses": 0, "uncached": 0, "bodies_run": 0, "bodies_skipped": 0,
                        "bodies_loaded": found["bodies"]},
