@@ -31,9 +31,11 @@ class LauncherTest(unittest.TestCase):
         self.addCleanup(self.stop_engine)
 
     def stop_engine(self):
+        pid = engine_daemon.engine_pid(self.env)
         done = subprocess.run([sys.executable, '-m', 'cadgen.engine', 'stop'],
                               env=self.env, capture_output=True, text=True, timeout=90)
         self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue(engine_daemon.await_exit(pid), "the stopped engine leaves the test's folder")
 
 
     def launch(self, *args, cwd=None, ok=True):

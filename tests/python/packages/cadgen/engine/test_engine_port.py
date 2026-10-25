@@ -435,28 +435,34 @@ class BuildBoundNoticeTest(unittest.TestCase):
         """A build's page binds the port with no client's request (``models.register_page``): the
         next build's answer says the roll, once; a status asked meanwhile does not take it."""
         import io
+        from unittest import mock
 
         from cadgen.engine import daemon
 
         said = "3245 is held by another process; this installation serves on 3246 and keeps it"
 
         class Engine:
-            refusal, token, unsaid = None, "", said
+            refusal, token, unsaid = None, "ab" * 16, said
 
             def handle(self, request: dict, send) -> None:
                 send({"log": "building"})
                 send({"ok": True})
 
-        engine = Engine()
+        # Both transports' rule: on Windows a request carries the engine's token, as a client puts
+        # it (``client._exchange``), and one without it is answered with nothing.
+        for windows in (False, True):
+            engine = Engine()
 
-        def asked(op: str) -> list[dict]:
-            out = io.BytesIO()
-            daemon._serve(engine, io.BytesIO((json.dumps({"op": op}) + "\n").encode()), out)
-            return [json.loads(line) for line in out.getvalue().splitlines()]
+            def asked(op: str) -> list[dict]:
+                out = io.BytesIO()
+                line = json.dumps({"token": engine.token, "op": op}) + "\n"
+                daemon._serve(engine, io.BytesIO(line.encode()), out)
+                return [json.loads(line) for line in out.getvalue().splitlines()]
 
-        self.assertEqual(asked("status"), [{"log": "building"}, {"ok": True}])
-        self.assertEqual(asked("build"), [{"log": "building"}, {"ok": True, "notice": said}])
-        self.assertEqual(asked("build"), [{"log": "building"}, {"ok": True}])
+            with self.subTest(windows=windows), mock.patch.object(daemon, "WINDOWS", windows):
+                self.assertEqual(asked("status"), [{"log": "building"}, {"ok": True}])
+                self.assertEqual(asked("build"), [{"log": "building"}, {"ok": True, "notice": said}])
+                self.assertEqual(asked("build"), [{"log": "building"}, {"ok": True}])
 
 
 if __name__ == "__main__":

@@ -140,6 +140,33 @@ def _alive(pid: int) -> bool:
     return True
 
 
+def await_exit(pid: int | None, within: float = 30.0) -> bool:
+    """Whether the stopped engine's process ``pid`` has exited, waited for up to ``within`` s. Its lock
+    goes before its process does (``client.wait_gone``), and on Windows that process stands in the
+    parent of the engine's folder (``client._working_folder``) -- a test's temporary folder, which
+    cannot be removed while it does. On POSIX, where the folder can go and an unreaped child would
+    look alive, nothing is waited for."""
+    if os.name != "nt" or pid is None:
+        return True
+    deadline = time.monotonic() + within
+    while _alive(pid):
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def engine_pid(env: dict[str, str]) -> int | None:
+    """The pid of the engine ``env`` names, or None when none answers."""
+    from unittest import mock
+
+    from cadgen.engine.client import request
+
+    with mock.patch.dict(os.environ, env, clear=True):
+        answer = request({"op": "pid"}, start=False)
+    return answer.get("pid") if answer else None
+
+
 def report(env: dict[str, str], started: float, read: dict[str, list[bytes]]) -> str:
     """The daemons started and whether the first listened, every journal entry and stack dump,
     the state folder, and the command's output so far."""
