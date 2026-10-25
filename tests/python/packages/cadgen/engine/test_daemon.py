@@ -606,21 +606,27 @@ class WindowsTokenFirstTest(unittest.TestCase):
         self.assertEqual(handled, [{"token": token, "op": "status"}])
 
 
-class HoldTest(unittest.TestCase):
-    """A hold (an agent host's MCP server, while the host runs) keeps the engine from its idle stop;
-    once let go, the idle time counts from then."""
+class NoTimerTest(unittest.TestCase):
+    """The engine never stops on a timer: idleness sheds memory (an idle worker is retired), and
+    only ``stop`` stops it."""
 
-    def test_a_held_engine_is_never_idle_and_one_let_go_counts_from_then(self) -> None:
+    def test_a_day_idle_unheld_retires_the_idle_worker_and_only_stop_stops_the_engine(self) -> None:
         import types
 
         from cadgen.engine import daemon
 
-        engine = types.SimpleNamespace(busy=0, holders=1, last=0.0, idle=60.0, server=None)
-        self.assertFalse(daemon.Daemon.idle_out(engine, now=10_000.0), "held: never idle")
-        engine.holders = 0
-        self.assertTrue(daemon.Daemon.idle_out(engine, now=10_000.0))
-        engine.last = 9_990.0  # the hold let go ten seconds ago (``Daemon.hold`` touches)
-        self.assertFalse(daemon.Daemon.idle_out(engine, now=10_000.0))
+        engine = daemon.Daemon(cap=1)
+        stopped: list[str] = []
+        worker = types.SimpleNamespace(key="/w/block.py", script="/w/block.py", pid=1, leased=False,
+                                       used=time.monotonic(), stop=lambda: stopped.append("worker"))
+        engine.pool.live[worker.key] = worker
+        engine.tend(now=time.monotonic() + 24 * 3600)  # no holder, nothing to do, a day on
+        self.assertEqual((stopped, engine.pool.live), (["worker"], {}), "its idle worker is retired")
+        self.assertFalse(engine.stopping.is_set(), "the engine stays")
+        sent: list[dict] = []
+        engine.handle({"op": "stop"}, sent.append)
+        self.assertEqual(sent, [{"ok": True}])
+        self.assertTrue(engine.stopping.is_set())
 
 
 class KernelWarmUpTest(unittest.TestCase):
@@ -632,7 +638,7 @@ class KernelWarmUpTest(unittest.TestCase):
 
         for first in ("hold", "http", "warm"):
             with self.subTest(first=first), mock.patch.object(daemon, "warm", return_value=None) as warm:
-                engine = daemon.Daemon(60)
+                engine = daemon.Daemon()
                 self.addCleanup(engine.pool.stop)
                 if first == "hold":  # an MCP server holds the engine from its start, asking nothing else
                     engine.hold(io.BytesIO(b""), lambda _message: None)
@@ -721,8 +727,8 @@ class SweepTest(unittest.TestCase):
     def setUp(self) -> None:
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.addCleanup(shutil.rmtree, self.state, True)
-        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
-                                          "CADGEN_ENGINE_IDLE": "60"}, self.addCleanup)
+        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state)},
+                                         self.addCleanup)
 
     def cli(self, *args: str) -> subprocess.CompletedProcess:
         return engine_daemon.run([sys.executable, "-m", "cadgen.engine", *args], env=self.env)
@@ -807,7 +813,7 @@ class StateDirSpellingTest(unittest.TestCase):
         engine = "engine-" * 14  # a long folder: a pipe's path has no socket's length limit
         dotted = f"{state / 'sub'}{os.sep}..{os.sep}{engine}{os.sep}"  # a `..` and a trailing separator
         plain = str(state / engine)
-        env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_IDLE": "60"}
+        env = {**os.environ, "PYTHONPATH": str(SRC)}
         dotted_env = engine_daemon.watched({**env, "CADGEN_ENGINE_DIR": dotted}, self.addCleanup)
         plain_env = engine_daemon.watched({**env, "CADGEN_ENGINE_DIR": plain}, self.addCleanup)
         self.addCleanup(engine_daemon.run, [sys.executable, "-m", "cadgen.engine", "stop"], env=plain_env)
@@ -878,12 +884,15 @@ class ListenTest(unittest.TestCase):
         taken.bind(("127.0.0.1", 0))
         taken.listen()
         port = taken.getsockname()[1]
-        engine = daemon.Daemon(60)
-        with mock.patch("cadgen.engine.serve.Mesher") as mesher, mock.patch.object(daemon, "HTTP_FACTORY", None):
-            with self.assertRaisesRegex(ValueError, f"127.0.0.1:{port}: .*; pass another --port"):
+        engine = daemon.Daemon()
+        with mock.patch("cadgen.engine.serve.Mesher") as mesher, mock.patch.object(daemon, "HTTP_FACTORY", None), \
+                mock.patch.object(daemon, "_answers", return_value=False), mock.patch.object(daemon, "_note"):
+            # The listen tried (no probe answered first): the server it made fails its bind.
+            with self.assertRaisesRegex(daemon.PortHeld, f"^port {port} is held by .+: stop it, or pass another --port$"):
                 engine.serve({"port": port})
         mesher.return_value.stop.assert_called_once_with()
-        self.assertIsNone(engine.server, "the next request may still choose its port")
+        self.assertIsNone(engine.server)
+        self.assertIsNotNone(engine.refusal, "an engine that cannot serve stops")
         with mock.patch("cadgen.viewer.engine_app.EngineApp") as app, self.assertRaises(OSError):
             engine_host.http_factory(mock.Mock(), "127.0.0.1", port)
         app.return_value.close.assert_called_once_with()
@@ -894,7 +903,7 @@ class DaemonTest(unittest.TestCase):
         self.folder = Path(tempfile.mkdtemp(prefix="engine-daemon-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
-                                          "CADGEN_ENGINE_IDLE": "60", "CADGEN_ENGINE_MESH": "inline"}, self.addCleanup)
+                                          "CADGEN_ENGINE_MESH": "inline"}, self.addCleanup)
         self.addCleanup(self._stop)
         self.script = self.folder / "block.py"
 
@@ -1514,15 +1523,6 @@ if __name__ == '__main__':
         while engine_daemon._alive(pid) or any(self.state.glob("*.door")):
             self.assertLess(time.monotonic(), deadline, "the daemon shut down and removed its door")
             time.sleep(0.05)
-
-    def test_an_idle_daemon_exits(self) -> None:
-        env = {**self.env, "CADGEN_ENGINE_IDLE": "0.5"}
-        self.script.write_text(textwrap.dedent(MODEL.format(size=3)), encoding="utf-8")
-        self.assertEqual(self.run_script("block.py", env=env).returncode, 0)
-        deadline = time.monotonic() + 30
-        while any(self.state.glob("*.door")) and time.monotonic() < deadline:
-            time.sleep(0.1)
-        self.assertFalse(any(self.state.glob("*.door")), "the idle daemon left")
 
 
 if __name__ == "__main__":

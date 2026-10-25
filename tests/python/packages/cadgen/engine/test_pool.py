@@ -184,7 +184,7 @@ class ConnectedPoolTest(unittest.TestCase):
         from cadgen.engine.serve import LIVE, Server
 
         with tempfile.TemporaryDirectory() as folder:
-            daemon = Daemon(3600, cap=2, retire_after=1)
+            daemon = Daemon(cap=2, retire_after=1)
             daemon.pool.start = Fake
             server = daemon.server = Server(mesh_mode="inline")
             self.addCleanup(daemon.shutdown)
@@ -224,7 +224,7 @@ class ConnectedPoolTest(unittest.TestCase):
     def test_the_worker_count_cap_retires_an_unwatched_worker_before_a_watched_one(self) -> None:
         from cadgen.engine.serve import Server
 
-        daemon = Daemon(3600, cap=2)
+        daemon = Daemon(cap=2)
         daemon.pool.start = Fake
         server = daemon.server = Server(mesh_mode="inline")
         self.addCleanup(daemon.shutdown)
@@ -243,7 +243,7 @@ class ConnectedPoolTest(unittest.TestCase):
     def test_at_the_cap_with_every_idle_worker_watched_a_new_build_starts_past_the_cap(self) -> None:
         from cadgen.engine.serve import Server
 
-        daemon = Daemon(3600, cap=2)
+        daemon = Daemon(cap=2)
         daemon.pool.start = Fake
         server = daemon.server = Server(mesh_mode="inline")
         self.addCleanup(daemon.shutdown)
@@ -269,7 +269,7 @@ class ConnectedPoolTest(unittest.TestCase):
     def test_memory_model_sync_keeps_its_worker_warm(self) -> None:
         from cadgen.engine.serve import LIVE, Server
 
-        daemon = Daemon(3600, cap=1, retire_after=1)
+        daemon = Daemon(cap=1, retire_after=1)
         daemon.pool.start = Fake
         server = daemon.server = Server(mesh_mode="inline")
         self.addCleanup(daemon.shutdown)
@@ -288,7 +288,7 @@ class ConnectedPoolTest(unittest.TestCase):
     def test_failed_wait_releases_watcher_and_memory_cap_still_retires(self) -> None:
         from cadgen.engine.serve import Server
 
-        daemon = Daemon(3600, cap=1)
+        daemon = Daemon(cap=1)
         daemon.pool.start = Fake
         server = daemon.server = Server(mesh_mode="inline")
         self.addCleanup(daemon.shutdown)
@@ -334,7 +334,7 @@ class DaemonPoolTest(unittest.TestCase):
         self.folder = Path(tempfile.mkdtemp(prefix="engine-pool-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
-                                          "CADGEN_ENGINE_IDLE": "120", "CADGEN_ENGINE_MESH": "inline",
+                                          "CADGEN_ENGINE_MESH": "inline",
                                           "CADGEN_ENGINE_WORKERS": "1"}, self.addCleanup)
         # This process asks the test's daemon what it holds (``status``), never starting one.
         self.enterContext(mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)}))

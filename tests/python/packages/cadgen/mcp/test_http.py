@@ -183,7 +183,7 @@ class HttpSessionsTest(unittest.TestCase):
             self.assertNotIn('error', result)
             return result['result']
         self.assertEqual(rpc(1, 'initialize', INIT)['protocolVersion'], '2025-11-25')
-        # The server holds the engine while its host runs: it does not stop for idleness meanwhile.
+        # The server holds the engine while its host runs.
         self.await_holders(1)
         resources = rpc(2, 'resources/list', {})['resources']
         document = rpc(3, 'resources/read', {'uri': resources[0]['uri']})['contents'][0]['text']
@@ -194,7 +194,7 @@ class HttpSessionsTest(unittest.TestCase):
         process.stdin = None
         self.assertEqual(process.wait(timeout=20), 0)
         self.assertTrue(request({'op': 'status'})['ok'])
-        self.await_holders(0)  # let go with the host: the idle timeout counts again
+        self.await_holders(0)  # let go with the host; the engine runs on
 
     def await_holders(self, count):
         deadline = time.monotonic() + 60

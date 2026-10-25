@@ -59,8 +59,8 @@ def _stop_arguments(stop: argparse.ArgumentParser) -> None:
 
 def _server_arguments(server: argparse.ArgumentParser) -> None:
     server.add_argument("--port", type=int, default=None,
-                        help="the HTTP port the engine takes (else CADGEN_ENGINE_PORT, else the one it "
-                             "remembers, else 3245); 0 takes any free port")
+                        help="the HTTP port the engine takes (else CADGEN_ENGINE_PORT, else 3245); refused "
+                             "when another process holds it; 0 takes any free port")
     server.add_argument("--rotate-token", action="store_true",
                         help="replace this installation's page token first: every link shared before stops working")
 
@@ -576,16 +576,15 @@ def _gb(megabytes: Any) -> str:
 
 
 def _port(serving: dict[str, Any]) -> str:
-    """Where the served port came from, in words -- the default, or why it is another -- as the
-    serving line's parenthesis; nothing for an answer that does not say."""
+    """Where the served port came from, in words -- the default, ``--port`` or
+    ``CADGEN_ENGINE_PORT`` -- as the serving line's parenthesis; nothing for an answer that does not say."""
     port, default = serving.get("port"), serving.get("defaultPort")
     if port is None or default is None:
         return ""
     if port == default:
         return " (the default port)"
-    return " (" + {"--port": "the port --port named", "CADGEN_ENGINE_PORT": "the port CADGEN_ENGINE_PORT names",
-            "remembered": f"not the default {default}: the port this installation took when it was held, kept"
-            }.get(serving.get("portSource") or "", f"not the default {default}") + ")"
+    return " (" + {"--port": "the port --port named", "CADGEN_ENGINE_PORT": "the port CADGEN_ENGINE_PORT names"
+                   }.get(serving.get("portSource") or "", f"not the default {default}") + ")"
 
 
 def status_text(answer: dict[str, Any]) -> str:
@@ -600,9 +599,8 @@ def status_text(answer: dict[str, Any]) -> str:
     cap = answer.get("rssCapMb")
     lines = [" · ".join([f"engine server {answer.get('pid')}, up {_span(answer.get('up'))}",
                          f"workers {len(workers)}/{answer.get('cap')}",
-                         f"idle timeout {_span(answer.get('idleTimeout'))}"
-                         + (f", held by {answer['holders']} app server{'' if answer['holders'] == 1 else 's'}"
-                            if answer.get("holders") else ""),
+                         *([f"held by {answer['holders']} app server{'' if answer['holders'] == 1 else 's'}"]
+                           if answer.get("holders") else []),
                          f"RSS cap {_gb(cap)}" if cap else "no RSS cap"])]
     names = [Path(str(worker["script"])).name for worker in workers]
     width = max((len(name) for name in names), default=0)

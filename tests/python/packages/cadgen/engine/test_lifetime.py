@@ -144,7 +144,7 @@ class NotHeldRefusalTest(unittest.TestCase):
         from cadgen.engine import api, daemon
         from cadgen.engine.serve import NotHeld
 
-        engine = daemon.Daemon(60)
+        engine = daemon.Daemon()
         self.addCleanup(engine.pool.stop)
         ident = model_id(Path("/nowhere/cell.py"), "cell")
         engine.models.expired[ident] = {"id": ident, "source": {"script": "/nowhere/cell.py", "name": "cell"},
@@ -166,7 +166,7 @@ class StatusTextTest(unittest.TestCase):
         from cadgen.engine.cli import status_text
 
         live = [{"id": f"id-{n}", "name": f"part{n}", "state": "live"} for n in range(6)]
-        text = status_text({"pid": 1, "up": 5, "cap": 4, "idleTimeout": 60, "workers": [], "models": live,
+        text = status_text({"pid": 1, "up": 5, "cap": 4, "workers": [], "models": live,
                             "serving": {"url": "http://127.0.0.1:1", "documents": [
                                 {"id": "f", "path": "/a.xbf", "state": "evicted", "bytes": 0}]}})
         lines = text.splitlines()
@@ -176,7 +176,7 @@ class StatusTextTest(unittest.TestCase):
     def test_a_shape_handed_over_is_worded_as_one_with_no_script_to_rerun(self) -> None:
         from cadgen.engine.cli import status_text
 
-        text = status_text({"pid": 1, "up": 5, "cap": 4, "idleTimeout": 60, "workers": [], "models": [
+        text = status_text({"pid": 1, "up": 5, "cap": 4, "workers": [], "models": [
             {"id": "id-1", "name": "plate", "state": "evicted", "store": "shape"}]})
         self.assertIn("  evicted   plate  id-1  a shape handed over: no script to rerun", text.splitlines())
 
@@ -276,7 +276,7 @@ class LifetimeDaemonTest(unittest.TestCase):
         self.folder = Path(tempfile.mkdtemp(prefix="engine-lifetime-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
-                                          "CADGEN_ENGINE_IDLE": "120", "CADGEN_ENGINE_MESH": "inline",
+                                          "CADGEN_ENGINE_MESH": "inline",
                                           "CADGEN_ENGINE_WORKER_IDLE": "1"}, self.addCleanup)
         # This process asks the test's daemon (``status``, ``export``), never starting one.
         self.enterContext(mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)}))
