@@ -507,7 +507,7 @@ class DaemonPoolTest(unittest.TestCase):
         self.assertTrue(self.build("a").startswith("took a.py::a cold"))
 
     def test_a_new_script_s_first_build_takes_the_standby_and_another_stands_by(self) -> None:
-        env = {**self.env, "CADGEN_ENGINE_WORKERS": ""}
+        env = {**self.env, "CADGEN_ENGINE_WORKERS": "", "CADGEN_ENGINE_STANDBY": "1"}  # the runners' is 0
 
         def standby(besides: int | None = None) -> dict:
             found: dict = {}

@@ -75,7 +75,8 @@ with tempfile.TemporaryDirectory(prefix="cv-") as temporary:
     root = Path(temporary)
     env = {**os.environ, "CADGEN_ENGINE_DIR": str(root / "engine"),
            "CADGEN_STATE_DIR": str(root / "state"), "CADGEN_ENGINE_MESH": "inline",
-           "CADGEN_CACHE_DIR": str(root / "no-0.7-store"), "CADGEN_ENGINE_PORT": "0"}
+           "CADGEN_CACHE_DIR": str(root / "no-0.7-store"), "CADGEN_ENGINE_PORT": "0",
+           "CADGEN_ENGINE_STANDBY": "0"}
     def launch(*options):
         result = subprocess.run([sys.executable, "-m", "cadgen.viewer", "--json", *options],
                                 cwd=root, env=env, capture_output=True, text=True, timeout=120)

@@ -30,7 +30,8 @@ for a script with no live worker takes the standby when its environment shapes t
 the standby's does (``RESTARTS``), and starts a fresh worker otherwise; taken, the standby is that
 script's worker from then on (``Worker.adopt``), so a new script's first build pays no kernel load.
 The standby counts toward the cap, is the first retired for room or memory, and is never a
-script's worker in ``status``.
+script's worker in ``status``. ``CADGEN_ENGINE_STANDBY=0`` keeps none (``standby``): an operator's
+seam for CI and machines short of memory.
 
 It also serves documents over HTTP (``serve``), holding each loaded document and its
 parts' tessellations in its memory under one budget (``serve.memory_budget``,
@@ -179,6 +180,12 @@ def _prune(ours: Path) -> None:
                 shutil.rmtree(entry, ignore_errors=True)
         except OSError:
             pass
+
+
+def standby() -> bool:
+    """Whether the daemon keeps a standby (``Daemon.stand``): ``CADGEN_ENGINE_STANDBY=0`` is the
+    operator's seam to keep none (CI, a machine short of memory); unset or anything else, it does."""
+    return os.environ.get("CADGEN_ENGINE_STANDBY", "").strip() != "0"
 
 
 def worker_cap() -> int:
@@ -1331,8 +1338,11 @@ class Daemon:
         pays while nobody waits. Started in the environment of the client that started the daemon
         (``environment``); each standby after it in that of the build that took the last one. And
         the bytecode folders of installations no daemon started in ``PYCACHE_UNUSED_DAYS`` go, in
-        the background (``prune_bytecode``)."""
+        the background (``prune_bytecode``). With ``CADGEN_ENGINE_STANDBY=0`` (``standby``) the pool
+        is given no standby to start: none stands by, and none replaces one."""
         prune_bytecode()
+        if not standby():
+            return
         self.pool.spare = self._spare
         self.pool.stand(self.environment())
 

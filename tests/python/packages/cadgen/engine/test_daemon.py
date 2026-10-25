@@ -108,16 +108,6 @@ if __name__ == "__main__":
 """
 
 
-def await_(condition, what: str, seconds: float = 120.0):
-    """``condition()``'s first truthy answer, asked until ``seconds`` pass."""
-    deadline = time.monotonic() + seconds
-    while not (found := condition()):
-        if time.monotonic() > deadline:
-            raise AssertionError(f"timed out waiting for {what}")
-        time.sleep(0.05)
-    return found
-
-
 def get(url: str, token: str) -> bytes:
     with urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": "Bearer "+token}), timeout=120) as response:
         return response.read()
@@ -668,11 +658,25 @@ class StandbyStartTest(unittest.TestCase):
         asked: list[dict] = []
         root = daemon.engine_root()
         with mock.patch.object(engine.pool, "stand", side_effect=asked.append), \
-                mock.patch.dict(os.environ, {"PYTHONPATH": os.pathsep.join((root, "/mine"))}):
+                mock.patch.dict(os.environ, {"PYTHONPATH": os.pathsep.join((root, "/mine")),
+                                             "CADGEN_ENGINE_STANDBY": "1"}):
             engine.stand()
         self.assertEqual(engine.pool.spare, engine._spare)
         self.assertEqual(len(asked), 1)
         self.assertEqual(asked[0]["PYTHONPATH"], "/mine", "without the engine's folder its starter put first")
+
+    def test_with_the_switch_off_none_stands_by_and_none_replaces_one(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine import daemon
+
+        engine = daemon.Daemon()
+        self.addCleanup(engine.pool.stop)
+        with mock.patch.object(engine.pool, "stand") as stand, \
+                mock.patch.dict(os.environ, {"CADGEN_ENGINE_STANDBY": "0"}):
+            engine.stand()
+        stand.assert_not_called()
+        self.assertIsNone(engine.pool.spare, "no standby to start after an adoption or a fresh worker either")
 
 
 class DaemonEnvironmentTest(unittest.TestCase):
@@ -1508,23 +1512,23 @@ if __name__ == '__main__':
 
     def test_a_build_with_no_page_starts_no_meshing_process(self) -> None:
         """``python model.py`` serves its document, so the daemon starts its server; the meshing
-        pool waits for a page, a view or a mesh: the daemon's only children are the worker and
-        the standby."""
+        pool waits for a page, a view or a mesh: the daemon's only child is the worker (with no
+        standby, ``CADGEN_ENGINE_STANDBY=0``)."""
         env = {name: value for name, value in self.env.items() if name != "CADGEN_ENGINE_MESH"}
+        env["CADGEN_ENGINE_STANDBY"] = "0"
         self.script.write_text(textwrap.dedent(MODEL.format(size=3)), encoding="utf-8")
         done = self.run_script("block.py", env=env)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("  view: http://127.0.0.1:", done.stdout, "the build registered its page")
-        status = await_(lambda: (lambda found: found if (found.get("standby") or {}).get("pid") else None)(
-            json.loads(self.cli("status", "--json", env=env).stdout)), "the standby")
+        status = json.loads(self.cli("status", "--json", env=env).stdout)
         children = []
         for path in Path(env[engine_daemon.JOURNAL]).glob("*-*.txt"):
             role, _, pid = path.stem.partition("-")
             first = path.read_text(encoding="utf-8").split("\n", 1)[0]
             if pid.isdigit() and f"parent={status['pid']} " in first and engine_daemon._alive(int(pid)):
                 children.append((role, int(pid)))
-        self.assertEqual(sorted(children), sorted([("worker", status["workers"][0]["pid"]),
-                                                   ("worker", status["standby"]["pid"])]))
+        self.assertEqual(children, [("worker", status["workers"][0]["pid"])])
+        self.assertIsNone(status["standby"])
 
     def test_warming_starts_the_server_before_any_document(self) -> None:
         """What the viewer asks at its launch (``{"op": "warm"}``): the daemon, its server and the

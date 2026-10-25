@@ -633,6 +633,9 @@ tessellations, is under one memory budget: **Document lifetime**.)
   script's worker in `status`. Measured on a 10-core Mac (one-box models, an installed bytecode
   cache): a new script's first build took 2.5-2.6 s in a fresh worker and 0.15-0.23 s in the
   standby; the standby holds 440 MB, a one-box model's worker 450-520 MB.
+  `CADGEN_ENGINE_STANDBY=0` keeps none (`daemon.standby`): an operator's seam for CI and machines
+  short of memory, not a setting a model's author touches; unset or any other value, the standby
+  stands by. A test suite sets it for every daemon it starts but the standby's own.
 - **Memory retires, never a timer.** The workers' resident memory -- each one's as it measured it at
   its start and after each build, the standby's and the render processes' with it -- is held to one
   cap, `CADGEN_ENGINE_WORKER_RSS_MB` (default: a quarter of the machine's memory, at least 2 GiB;
