@@ -24,13 +24,14 @@ class RecentStoreTest(unittest.TestCase):
 
     def test_pins_lead_then_the_most_recent_and_a_removal_forgets(self) -> None:
         store = RecentStore(self.tmp)
-        for path in ("/a.step", "/b.step", "/c.step"):
+        a, b, c = (str(self.tmp / name) for name in ("a.step", "b.step", "c.step"))  # absolute on every platform
+        for path in (a, b, c):
             store.opened(path)
-        store.pin("/a.step", True)
-        store.remove("/b.step")
-        store.thumbnail("/c.step", b"\x89PNG fake")
+        store.pin(a, True)
+        store.remove(b)
+        store.thumbnail(c, b"\x89PNG fake")
         entries = store.list()
-        self.assertEqual([(entry.path, entry.pinned) for entry in entries], [("/a.step", True), ("/c.step", False)])
+        self.assertEqual([(entry.path, entry.pinned) for entry in entries], [(a, True), (c, False)])
         self.assertEqual(store.read_thumbnail(entries[1].thumbnail), b"\x89PNG fake")
         self.assertIsNone(store.read_thumbnail("../escape.png"))
         # A picture says when it was taken: a file changed since has an old one.
