@@ -24,8 +24,11 @@ test('an engine document reopens with its tree as it was left, and its selection
   const left = await rows();
   for (const control of ['Collapse peg (2)', 'Reveal plate', 'Exit isolate peg']) assert.ok(left.includes(control), `${control} in ${left}`);
 
-  // The view goes and comes back over the same record: the tree is as it was left.
+  // The view goes and comes back over the same record: the tree is as it was left. It has gone before
+  // it comes back: a busy React can take the two calls in one render, and a view that never went keeps
+  // its sidebar open, for the press on Model tree to close.
   await page.evaluate(() => window.cadHarness.mounted(false));
+  await pane.getByRole('button', { name: 'Model tree', exact: true }).waitFor({ state: 'detached' });
   await page.evaluate(() => window.cadHarness.mounted(true));
   await pane.getByRole('button', { name: 'Model tree', exact: true }).waitFor();
   await loaded();
