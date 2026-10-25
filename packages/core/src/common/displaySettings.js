@@ -34,11 +34,6 @@ export const DEFAULT_DISPLAY_EDGE_SETTINGS = Object.freeze({
   silhouette: false
 });
 
-export const DISABLED_DISPLAY_EDGE_SETTINGS = Object.freeze({
-  ...DEFAULT_DISPLAY_EDGE_SETTINGS,
-  enabled: false
-});
-
 export const CAD_PART_COLOR_MODE = Object.freeze({
   ORIGINAL: "original",
   SINGLE: "single",
