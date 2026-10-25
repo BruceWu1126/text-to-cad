@@ -316,6 +316,8 @@ class Door:
                 if ident is None or self.closed.is_set():
                     continue
                 with self.lock:
+                    if ident in self.holding:
+                        continue  # one answer a pair: a second would greet twice and split its stream
                     self.holding.add(ident)
                 threading.Thread(target=self._answer, args=(ident,), daemon=True).start()
 

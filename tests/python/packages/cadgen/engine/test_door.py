@@ -4,6 +4,7 @@ pipes, the owner and type check on a pair, and the sweep of a killed client's pa
 from __future__ import annotations
 
 import os
+import selectors
 import shutil
 import tempfile
 import threading
@@ -126,6 +127,38 @@ class DoorTest(unittest.TestCase):
         with self.assertRaises(BlockingIOError, msg="nothing was written through the link"):
             os.read(held, 16)
 
+
+    def test_a_pair_named_twice_is_answered_once(self) -> None:
+        from cadgen.engine import door
+
+        release = threading.Event()
+        answered: list[int] = []
+
+        def serve(reader, writer) -> None:
+            answered.append(1)
+            release.wait(10)
+
+        path = self.open_door(serve)
+        self.addCleanup(release.set)
+        ident = "d" * 32
+        up, down = door.pair(self.clients, ident)
+        os.mkfifo(up, 0o600)
+        os.mkfifo(down, 0o600)
+        hold = os.open(down, os.O_RDWR)
+        self.addCleanup(os.close, hold)
+        self.addCleanup(os.close, os.open(up, os.O_RDWR))
+        knock = os.open(path, os.O_WRONLY)
+        self.addCleanup(os.close, knock)
+        os.write(knock, door.hello(ident) * 2)  # one write: the reader takes both lines in one read
+        greeting = b""
+        with selectors.DefaultSelector() as selector:
+            selector.register(hold, selectors.EVENT_READ)
+            self.assertTrue(selector.select(10), "the pair was greeted")
+            greeting += os.read(hold, 64)
+            if selector.select(0.5):  # a second answer, were there one, greets well within this
+                greeting += os.read(hold, 64)
+        self.assertEqual(greeting, door.GREETING, "one greeting: the second hello was not answered")
+        self.assertEqual(answered, [1])
 
     def test_the_sweep_takes_a_killed_client_s_old_pair_without_opening_it(self) -> None:
         from cadgen.engine import door
