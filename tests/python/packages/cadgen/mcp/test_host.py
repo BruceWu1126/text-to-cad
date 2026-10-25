@@ -50,6 +50,26 @@ class LauncherTest(unittest.TestCase):
         self.assertIsNone(host.host_of([UVX, ["/bin/zsh"]]))
         self.assertIsNone(host.host_of([]))
 
+    def test_a_container_whose_entrypoint_is_the_host_names_it(self) -> None:
+        import io
+        from unittest import mock
+
+        # /proc as a container shows it: the server's parent is uv, whose parent is pid 1, the host.
+        proc = {7: (b"/root/.local/bin/uv\0tool\0uvx\0cadgen\0mcp\0", b"7 (uv) S 1 7 7 0"),
+                1: (b"codex\0app-server\0", b"1 (codex) S 0 1 1 0")}
+
+        def read(path: str, _mode: str = "r"):
+            _root, _proc, pid, kind = path.split("/")
+            return io.BytesIO(proc[int(pid)][0 if kind == "cmdline" else 1])
+
+        with mock.patch.object(host, "open", read, create=True):
+            chain = host._ancestors_linux(7)
+        self.assertEqual(chain, [["/root/.local/bin/uv", "tool", "uvx", "cadgen", "mcp"], ["codex", "app-server"]])
+        self.assertEqual(host.host_of(chain)["host"], "codex app-server")
+        # An init the walk ends at, which started the launcher, is no host: none is known.
+        for init in (["/sbin/init", "splash"], ["/usr/lib/systemd/systemd", "--switched-root"], ["/sbin/tini", "--"]):
+            self.assertIsNone(host.host_of([UVX, init]), init)
+
     @unittest.skipUnless(sys.platform == "darwin" or sys.platform.startswith("linux"), "read on macOS and Linux")
     def test_a_parent_is_read_with_its_arguments_exactly(self) -> None:
         child = "import json; from cadgen.mcp.host import ancestors; print(json.dumps(ancestors()[0]))"

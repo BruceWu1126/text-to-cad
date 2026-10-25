@@ -32,11 +32,12 @@ CODEX_TURN = "x-codex-turn-metadata"
 HEADLESS_TRIGGERS = frozenset({"exec"})
 
 # The processes between a host and this server that are not the host: what runs a command for it
-# (Claude Desktop's ``disclaimer`` helper among them, which starts Claude Code's sessions).
+# (Claude Desktop's ``disclaimer`` helper among them, which starts Claude Code's sessions), and the
+# init a walk ends at, pid 1, when that is not the host itself (a container's entrypoint can be).
 # A Python is not one: a host's plugin config runs cadgen through uvx (uv, then this process) or a
 # venv's Python (this process), so a Python above this one is a client of its own, as a test is.
 _LAUNCHERS = frozenset({"uv", "uvx", "sh", "bash", "zsh", "dash", "fish", "env", "nohup", "cadgen", "disclaimer",
-                        "npx", "npm"})
+                        "npx", "npm", "init", "systemd", "tini", "docker-init", "dumb-init"})
 # Codex's options that take a value spelled apart from it (``-c key=value``), before its subcommand.
 _CODEX_VALUED = frozenset({"-c", "--config", "-m", "--model", "-p", "--profile", "-s", "--sandbox",
                            "-a", "--ask-for-approval", "-C", "--cd", "-i", "--image", "--add-dir",
@@ -151,8 +152,10 @@ def _ancestors_darwin(pid: int) -> list[list[str]]:
 
 
 def _ancestors_linux(pid: int) -> list[list[str]]:
+    """The command lines from ``/proc``, up to and with pid 1, whose parent is 0: in a container,
+    pid 1 is its entrypoint, which can be the host."""
     chain = []
-    while pid > 1 and len(chain) < _DEPTH:
+    while pid > 0 and len(chain) < _DEPTH:
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as handle:
                 argv = handle.read().rstrip(b"\0").split(b"\0")
