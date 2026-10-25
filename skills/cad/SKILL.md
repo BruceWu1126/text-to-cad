@@ -158,7 +158,7 @@ run, and the open page follows every run.
   `model(shape, name="plate")` returns the same handle, and no command builds it again.
 - **The engine never reruns code.** When it no longer holds a document (it restarted, or
   dropped the document to free memory), the page, `cadgen inspect <id>` and `cad_show`
-  print the command that brings it back (`python src/bracket.py`). Run it.
+  print the command that brings it back (`cadgen run src/bracket.py`). Run it.
 - Model units are millimetres, +Z up. `$step-parts` finds real vendor models of
   purchasable parts such as fasteners, bearings and servos.
 - An image without a scale sets no fit dimension, and a drawing's units, projection and
