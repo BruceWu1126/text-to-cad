@@ -784,6 +784,12 @@ def uninstall() -> bool:
 _QUERY_TARGETS: tuple[tuple[str, str], ...] = (
     ("Shape", "bounding_box"),
     ("Shape", "is_valid"), ("Shape", "is_manifold"),
+    # Mass properties (``BRepGProp``, of the bare B-rep: no triangulation read): a solid's
+    # volume, a shape's area, an edge's or a wire's length, centres, inertia and moments.
+    ("Solid", "volume"), ("Shape", "area"), ("Mixin1D", "length"),
+    ("Mixin3D", "center"), ("Compound", "center"), ("Shell", "center"), ("Face", "center"), ("Mixin1D", "center"),
+    ("Shape", "matrix_of_inertia"), ("Shape", "principal_properties"), ("Shape", "static_moments"),
+    ("Shape", "radius_of_gyration"),
 )
 # The answers one shape's record keeps, the oldest dropped past them: a model asking one
 # shape about many points keeps the last of them.

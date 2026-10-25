@@ -425,6 +425,60 @@ class QueryTest(MemoCase):
                 _run(lambda: BRepCheck.BRepCheck_Analyzer(loose.wrapped).IsValid())
         self.assertEqual(len(runs), 4, "a shape made past the memo is analysed every time")
 
+    def test_the_volume_of_an_interference_is_answered_once_its_common_is_a_hit(self) -> None:
+        from build123d import Pos, Solid
+        from build123d.topology import Shape
+        from OCP.TopAbs import TopAbs_SOLID
+
+        def model(gap):
+            a = Solid.make_box(10, 10, 10)
+            b = Pos(10 - gap, 2, 2) * Solid.make_box(5, 5, 5)
+            common = a & b
+            return [solid.volume for solid in common.solids()], common
+
+        measured = Shape.shape_properties_LUT[TopAbs_SOLID]
+        runs = []
+        counted = mock.patch.dict(Shape.shape_properties_LUT,
+                                  {TopAbs_SOLID: lambda *args: (runs.append(1), measured(*args))[1]})
+        with counted:
+            (cold, common), _, _ = _run(model, 1.0)
+            (warm, again), hot, run = _run(model, 1.0)
+            self.assertIs(again, common)
+            self.assertEqual((len(runs), hot["misses"], run.tally["queries_answered"]), (1, 0, 1))
+            edited, _, _ = _run(model, 2.0)
+            self.assertEqual(len(runs), 2, "another common is measured")
+        self.assertEqual(warm, cold)
+        self.assertEqual(warm, [solid.volume for solid in common.solids()], "a fresh volume of the same solid")
+        self.assertAlmostEqual(edited[0][0], 2 * 5 * 5, places=6)
+
+    def test_mass_properties_are_answered_as_new_values_keyed_by_their_arguments(self) -> None:
+        from build123d import CenterOf
+
+        def model(center_of):
+            part = self._part(3.0)
+            return part.center(center_of), part.area, part.edges()[0].length, part.matrix_of_inertia, part
+
+        (centre, area, length, inertia, part), _, cold = _run(model, CenterOf.MASS)
+        self.assertEqual(cold.tally["queries_run"], 4)
+        centre.X = 1e9  # the model's own Vector: what was kept is not it
+        inertia[0][0] = -1.0
+        (again, area2, length2, inertia2, _), _, warm = _run(model, CenterOf.MASS)
+        self.assertEqual((warm.tally["queries_run"], warm.tally["queries_answered"]), (0, 4))
+        self.assertIsNot(again, centre)
+        fresh = part.center(CenterOf.MASS)  # outside a run: computed
+        self.assertEqual(tuple(again), tuple(fresh))
+        self.assertEqual((area2, length2, inertia2), (part.area, part.edges()[0].length, part.matrix_of_inertia))
+        (boxed, *_), _, other = _run(model, CenterOf.BOUNDING_BOX)
+        self.assertEqual(other.tally["queries_answered"], 3, "another argument is another key")
+        self.assertEqual(tuple(boxed), tuple(part.center(CenterOf.BOUNDING_BOX)))
+
+    def test_a_volume_of_a_shape_made_past_the_memo_is_measured_every_time(self) -> None:
+        part = self._part(3.0)
+        for _ in range(2):
+            volume, _, run = _run(lambda: part.volume)
+            self.assertEqual((run.tally["queries_run"], run.tally["queries_answered"]), (1, 0))
+        self.assertEqual(volume, part.volume)
+
 
 class VertexTest(MemoCase):
     def test_a_point_placed_by_a_model_is_keyed(self) -> None:
