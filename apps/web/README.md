@@ -140,8 +140,8 @@ opened in a browser from the whole link the agent gave. A
 loaded page whose engine stops under it says the engine is not running, in the person's
 language, over the page until a read answers again.
 
-A page closing never stops the engine. Active requests and document version waits
-keep it alive; it exits after its idle hour. Code changes in a checkout require
+A page closing never stops the engine, and no timer does: it runs until `cadgen stop`.
+Code changes in a checkout require
 restarting an engine you own, then rerunning the launcher. Vite handles client HMR.
 
 ## Behaviours worth knowing before concluding something is broken

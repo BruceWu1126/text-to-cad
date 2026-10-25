@@ -405,9 +405,14 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   or it dropped the document to free memory) is answered, by its page, by
   `cadgen inspect <id>` and by the CAD app, with the command that brings it back:
   `python <the script>`.
-- **A viewer link outlives a restart.** The engine keeps one port (3245, or the next free
-  one it remembers) and one page token per installation, so a link works across a stop, a
-  crash or a reboot, and an open page reconnects on its own when the engine comes back.
+- **A viewer link outlives a restart.** The engine keeps one port (3245, or the one
+  `CADGEN_ENGINE_PORT` or `--port` names) and one page token per installation, so a link works
+  across a stop, a crash or a reboot, and an open page reconnects on its own when the engine
+  comes back. When another program holds the port, the engine refuses to start and names it
+  (`port 3245 is held by <name> (pid N): stop it, or start cadgen with CADGEN_ENGINE_PORT=<n>`);
+  another 0.8 release's engine that nothing uses is stopped for it, and one still in use is
+  named with what uses it. A 0.7 CAD Viewer still on 3245 is named too: 0.7's
+  `cadgen viewer stop` stops it. No timer stops the engine: it runs until `cadgen stop`.
   `cadgen server --rotate-token`, run with the engine stopped, retires every link handed
   out before it.
 - **Every document has a record** in cadgen's state folder, beside your settings

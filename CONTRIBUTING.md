@@ -139,15 +139,15 @@ npm run build:packages
 
 Every build, export and snapshot runs in cadgen's engine server, a daemon: one per
 installation (the interpreter and the engine folder it runs), started by the first
-command that needs it and gone after an idle hour, so a worktree's checkout gets a
-daemon of its own. Its door, a named pipe (on Windows, a port file), and lock live in `cadgen-engine`
+command that needs it and running until `cadgen stop` (no timer stops it), so a worktree's
+checkout gets a daemon of its own. Its door, a named pipe (on Windows, a port file), and lock live in `cadgen-engine`
 in `$XDG_RUNTIME_DIR`, else in the per-user temporary folder (on macOS the system's
 `/var/folders/...` one, whatever `$TMPDIR` a sandbox sets; else a per-user `$TMPDIR`), else in `/tmp/cadgen-<uid>`
 (Windows: the temporary folder); `CADGEN_ENGINE_DIR` moves them, which gives a
 test, a benchmark or an experiment a daemon to itself. `cadgen status` lists its
 workers, one per model script, each with its memo, and what each is building;
-`cadgen stop` stops it (`cadgen server` runs one in the foreground); a running `cadgen mcp` holds it
-up, so it does not idle out while an agent app runs. A running daemon keeps the engine code it started with:
+`cadgen stop` stops it (`cadgen server` runs one in the foreground); a running `cadgen mcp` holds it,
+so another installation needing its port refuses rather than retire it. A running daemon keeps the engine code it started with:
 after editing `packages/cadgen/src/cadgen`, stop the daemon you started so the next
 build runs the new code. Never stop one you did not start.
 
@@ -156,7 +156,8 @@ engine's README, **The engine server and its workers** and **Body retention**):
 `CADGEN_ENGINE_WORKERS`, `CADGEN_ENGINE_WORKER_IDLE`,
 `CADGEN_ENGINE_WORKER_RSS_MB`, `CADGEN_ENGINE_MEMORY_MB` (the daemon's one memory budget,
 **Document lifetime**), `CADGEN_ENGINE_CACHE_GB` (the document cache's size, `0` for none;
-`CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, the tests' seam), `CADGEN_ENGINE_IDLE`, `CADGEN_ENGINE_MEMO=0` (no memo
+`CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, the tests' seam), `CADGEN_ENGINE_PORT` (its HTTP port,
+`0` for any free one; 3245 by default, refused when held), `CADGEN_ENGINE_MEMO=0` (no memo
 hits), `CADGEN_ENGINE_BODIES=0` (no body replay), `CADGEN_ENGINE_MESH=processes|inline`
 `CADGEN_ENGINE_THREE` (the three.js folder `cadgen serve` pages load) and
 `CADGEN_VIEWER_WARM=0` (no engine warm-up at `cadgen viewer`'s launch). What the
