@@ -681,6 +681,12 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     timings["names"] = round(time.perf_counter() - clock, 4)
     report["parts"] = len(tree.parts)
     report["named"] = named
+    # What the tree holds at a glance, which the daemon says against the last build (``delta``).
+    clock = time.perf_counter()
+    from cadgen.engine.delta import facts
+
+    report["facts"] = facts(tree, name, signature)
+    timings["facts"] = round(time.perf_counter() - clock, 4)
     for kind, path in targets:
         if kind == "xbf":
             _BUILT[file_id(path)] = built

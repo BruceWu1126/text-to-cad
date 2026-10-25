@@ -190,7 +190,7 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
         holder = ("the engine's cache" if taken == "cache" else "its file" if report.get("files")
                   else "its document in memory")
         line = (f"took {report['model']}{worker} in {wall:.2f}s: {holder} holds the model's key, "
-                f"{memo.get('bodies_loaded', 0)} bodies loaded, nothing ran")
+                f"{memo.get('bodies_loaded', 0)} bodies loaded, nothing ran") + _delta(report.get("delta"))
     else:
         counted = {status: bodies.count(status) for status in ("run", "replayed") if bodies.count(status)}
         shown = ", ".join(f"{count} {status}" for status, count in counted.items()) or "none"
@@ -203,6 +203,7 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
         if waited:
             line += (f"; {'replayed' if counted.get('replayed') and not counted.get('run') else 'ran after'} "
                      f"the build of {waited.get('script')} it waited {waited.get('seconds', 0):.0f}s for")
+        line += _delta(report.get("delta"))
         if (report.get("cache") or {}).get("changed"):
             line += f"\n  rebuilt: {report['cache']['reason']}"
     if report.get("retired"):
@@ -210,6 +211,37 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
     return (line + "".join(f"\n  {text}" for text in files) + children
             + "".join(f"\n  warning: kinematics: {text}" for text in report.get("kinematics", {}).get("warnings", ()))
             + _verified(report.get("verify")))
+
+
+def _delta(found: dict[str, Any] | None) -> str:
+    """The line under the run line: the model's parts, bounds, joints, configuration sequences and
+    warnings, each with what it was where the build before it held another (``delta.delta``,
+    the engine's); warnings only where there are or were some. Nothing without one."""
+    if not found:
+        return ""
+    times, dot = " × ", " · "
+    try:  # a stdout that cannot write them (a Windows pipe in another code page) is given ASCII
+        (times + dot).encode(getattr(sys.stdout, "encoding", None) or "utf-8")
+    except (UnicodeEncodeError, LookupError):
+        times, dot = " x ", " | "
+
+    def size(value: Any) -> str:
+        return times.join(_number(axis) for axis in value) if value else "none"
+
+    said = []
+    for name in ("parts", "bounds", "joints", "sequences", "warnings"):
+        row = found.get(name) or {}
+        now, changed = row.get("now"), "was" in row
+        if name == "warnings" and not now and not row.get("was"):
+            continue
+        if name == "bounds":
+            text = f"bounds {size(now)}" + (" mm" if now else "") + (f" (was {size(row['was'])})" if changed else "")
+        elif name == "warnings":
+            text = f"warnings {now}" + (f" (was {row['was']})" if changed else "")
+        else:
+            text = f"{name} {now}" + (f" ({now - (row['was'] or 0):+d})" if changed else "")
+        said.append(text)
+    return "\n  " + dot.join(said)
 
 
 def _verified(found: dict[str, Any] | None) -> str:

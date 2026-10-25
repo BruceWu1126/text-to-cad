@@ -86,9 +86,10 @@ class Models:
                     continue
                 version = secrets.token_hex(8)  # this build's generation: a rebuild is a new one
                 recorded = revision(report)
+                facts, before = self.facts(ident, report, recorded)
                 try:
                     self.claimed(ident, source, report.get("key"))
-                    self.record(report, program, recorded)
+                    self.record(report, program, recorded, facts)
                 except ValueError as error:  # a key another declaration holds: the build is refused, by name
                     report["ok"], report["error"] = False, f"{source['name']}: {error}"
                     root["ok"] = False
@@ -101,12 +102,34 @@ class Models:
                                            "store": report.get("store") or "pointer",
                                            "builtAt": time.time(), "version": version,
                                            "files": list(report.get("files") or {}), "revision": recorded,
+                                           "facts": facts,
                                            "read": [] if report.get("store") == "memory" else
                                            cache_reads(report.get("closure"))}
+                if facts is not None:
+                    from cadgen.engine.delta import delta
+
+                    report["delta"] = delta(facts, before)
                 self.daemon.builders[ident] = worker
                 server = self.register_page(ident)
                 report["url"] = self.url(server, ident)
                 self.cache.touch(ident)
+
+    def facts(self, ident: str, report: dict[str, Any], recorded: str) -> tuple[dict | None, dict | None]:
+        """A build's facts (``delta.facts``) and the last build's, of document ``ident``: the
+        worker's, else -- a model taken from its key, nothing built -- the ones its record holds
+        for this revision; the last from the book, else the registry (after a restart). None
+        where there are none."""
+        now = report.pop("facts", None)
+        with self.lock:
+            row = self.records.get(ident) or self.expired.get(ident) or {}
+        kept, at = row.get("facts"), row.get("revision")
+        if kept is None:
+            held = self.registry() if report.get("store") != "memory" else None
+            record = held.get(ident) if held is not None else None
+            kept, at = (record or {}).get("facts"), (record or {}).get("revision")
+        if now is None and at == recorded:
+            now = kept
+        return now, kept
 
     # --- the registry ------------------------------------------------------------------------
 
@@ -145,7 +168,8 @@ class Models:
             raise ValueError(f"key {key!r} is claimed by {theirs}, so {mine} cannot take it: one key names one "
                              "document; give one of them another key")
 
-    def record(self, report: dict[str, Any], program: str | None, recorded: str) -> None:
+    def record(self, report: dict[str, Any], program: str | None, recorded: str,
+               facts: dict[str, Any] | None = None) -> None:
         """The registry's record of a document a build made (``registry``), written when it changed.
         Nothing for a ``memory`` document, or with no registry."""
         from cadgen.engine import registry as registering
@@ -175,6 +199,8 @@ class Models:
             "runtime": runtime()}
         if report.get("key"):
             found["key"] = report["key"]
+        if facts is not None:
+            found["facts"] = facts
         for key in ("opened", "pinned", "preview", "cache"):  # the home's and the cache's, kept across builds
             if key in old:
                 found[key] = old[key]
