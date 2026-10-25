@@ -414,7 +414,8 @@ def build_script(script: Path, functions: list[str] | None = None, *, verify: bo
 def _source(source: Any) -> dict[str, Any]:
     """What an export or a snapshot reads: a document's handle (``Document``) or its id (``{"id"}``:
     the document the engine holds, read as it is and never built), a ``Model`` this Python program
-    names (built first), or an on-disk document's or mesh file's path."""
+    names (``daemon=False`` only: built in this process, cold; through the engine the model is
+    called first, ``_called``), or an on-disk document's or mesh file's path."""
     from cadgen.engine.export import MESHES, SOURCES, ExportRefused
     from cadgen.engine.ids import is_id
     from cadgen.engine.model import Model
@@ -444,7 +445,7 @@ def export(source: Any, *destinations: Any,
     """Write a document to each destination, its kind from its suffix (``.xbf``, ``.step``,
     ``.glb``, ``.stl``, ``.3mf``, and ``.dxf`` of a planar document): the document of an
     ``.xbf``, of a ``.step`` read into one, of a handle (``Document``) or a document id (the one the
-    engine holds, never built), or of a ``Model`` (built first: this program's own call); or a mesh file (``.glb``,
+    engine holds, never built), or of a ``Model`` (called first, as this program's own call of it builds it); or a mesh file (``.glb``,
     ``.stl``, ``.3mf``) to the other two mesh kinds, each file holding what its format carries,
     with no CAD kernel loaded (a mesh has no B-rep: no xbf, STEP or DXF is made from one). Several
     destinations read the document once. The file holds what the code built: no option selects a part or a state
@@ -457,6 +458,7 @@ def export(source: Any, *destinations: Any,
     resolved = [Path(os.fspath(destination)).resolve() for destination in destinations]
     for destination in resolved:
         kind_of(destination)
+    source = _called(source, daemon)
     spec = _source(source)
     if "path" in spec:
         from cadgen.engine.export import refused
@@ -470,6 +472,16 @@ def export(source: Any, *destinations: Any,
     order = {"op": "export", "source": spec, "destinations": [str(path) for path in resolved], "cwd": cwd}
     done = _exported(order, spec, shown, daemon, progress)
     return [Written(Path(row["path"]), row["kind"], row["bytes"], row["seconds"]) for row in done["files"]]
+
+
+def _called(source: Any, daemon: bool) -> Any:
+    """A ``Model`` source through the engine is its call's document: the model is built as a call
+    of it builds -- its run, its program, the engine's cache and the served documents with it, so
+    an unchanged model is taken from its key or replayed by the program's one memo pass -- and the
+    export or the snapshot reads that document by its handle. Any other source as it is."""
+    from cadgen.engine.model import Model
+
+    return source() if daemon and isinstance(source, Model) else source
 
 
 def _exported(order: dict[str, Any], spec: dict[str, Any], shown: Callable[[str], None], daemon: bool,
@@ -498,8 +510,8 @@ def snapshot(source: Any = None, out: Any = None, *, job: Any = None, display: A
              measurements: Any = None) -> Drawn | list[Drawn]:
     """Draw a document (``.xbf``, ``.step``, or a document id: the one the engine holds) or a mesh
     file (``.glb``, ``.stl``, ``.3mf``) into ``out`` (a ``.png``) as the viewer draws it: one
-    picture, a ``Drawn``. A ``Model`` is built first: the document drawn is the one its worker
-    holds in memory, whether or not an xbf of it is on disk. ``annotation`` (the viewer's
+    picture, a ``Drawn``. A ``Model`` is called first, as the program's own call of it builds it:
+    the document drawn is the one the engine then holds, whether or not an xbf of it is on disk. ``annotation`` (the viewer's
     annotation: its file's path, its object, or the Quick Edit packet that carries it) and
     ``measurements`` are drawn over the model; ``camera="authored"`` draws it from the view the
     annotation's ink was drawn in, which the packet holds. ``out`` a folder (a path ending in a
@@ -540,9 +552,10 @@ def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, 
     if isinstance(source, (Model, Document)) or is_id(os.fspath(source)):
         if out.suffix.lower() != ".png":
             raise drawing.SnapshotRefused(f"a snapshot is a .png; {out.name} is not one")
-        spec = _source(source)
         drawing.options(display, camera, grid, width, height, size_profile)  # refused here, before any build
         drawing.parse_annotation(annotation)  # refused here, before any build
+        source = _called(source, daemon)
+        spec = _source(source)
         if isinstance(annotation, (str, Path)) and not str(annotation).lstrip().startswith("{"):
             annotation = str(Path(annotation).expanduser().resolve())  # read in the worker, beside its packets
         draw = {"out": str(out), "display": display, "camera": camera, "grid": grid, "preview": preview,

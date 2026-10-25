@@ -391,6 +391,7 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
                                        f"{source_spec.get('function')} is no longer held: run the program that "
                                        "builds it again")
     elif "script" in source_spec:
+        # ``daemon=False`` alone (``api._called``): a model named by its function, built here, cold.
         script = Path(source_spec["script"])
         function = source_spec.get("function")
         # Built as it declares, its children as theirs (law 10); the exports are this request's.

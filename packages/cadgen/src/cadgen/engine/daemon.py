@@ -2084,6 +2084,11 @@ class Daemon:
                     send({"failed": "The source changed. Open Export again to use the displayed revision."})
                     return
             request = {**request, "source": source}
+        if op == "export" and "script" in (request.get("source") or {}) and not request["source"].get("held") \
+                and not request.get("expected"):
+            # A model is exported by its call's document (``api._called``): never built by an export.
+            send(refused(ValueError("an export reads a document: call the model, then export its handle or id")))
+            return
         if op == "export":
             order = {"id": 1, "op": "export", "source": request["source"], "destinations": request["destinations"],
                      "cwd": request.get("cwd"),
