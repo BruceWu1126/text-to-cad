@@ -914,15 +914,19 @@ class ListenTest(unittest.TestCase):
         taken.bind(("127.0.0.1", 0))
         taken.listen()
         port = taken.getsockname()[1]
-        engine = daemon.Daemon()
-        with mock.patch("cadgen.engine.serve.Mesher") as mesher, mock.patch.object(daemon, "HTTP_FACTORY", None), \
-                mock.patch.object(daemon, "_answers", return_value=False), mock.patch.object(daemon, "_note"):
-            # The listen tried (no probe answered first): the server it made fails its bind.
-            with self.assertRaisesRegex(daemon.PortHeld, f"^port {port} is held by .+: stop it, or pass another --port$"):
-                engine.serve({"port": port})
-        mesher.return_value.stop.assert_called_once_with()
-        self.assertIsNone(engine.server)
-        self.assertIsNotNone(engine.refusal, "an engine that cannot serve stops")
+        for engine, request in ((daemon.Daemon(), {"port": port}), (daemon.Daemon(port=port), {})):
+            with mock.patch("cadgen.engine.serve.Mesher") as mesher, mock.patch.object(daemon, "HTTP_FACTORY", None), \
+                    mock.patch.object(daemon, "_answers", return_value=False), mock.patch.object(daemon, "_note"):
+                # The listen tried (no probe answered first): the server it made fails its bind.
+                with self.assertRaisesRegex(daemon.PortHeld,
+                                            f"^port {port} is held by .+: stop it, or pass another --port$"):
+                    engine.serve(request)
+            mesher.return_value.stop.assert_called_once_with()
+            self.assertIsNone(engine.server)
+            if request:  # a request's own port: that request refused, the engine running on for the others
+                self.assertIsNone(engine.refusal)
+            else:
+                self.assertIsNotNone(engine.refusal, "an engine whose own port is held can never serve: it stops")
         with mock.patch("cadgen.viewer.engine_app.EngineApp") as app, self.assertRaises(OSError):
             engine_host.http_factory(mock.Mock(), "127.0.0.1", port)
         app.return_value.close.assert_called_once_with()
