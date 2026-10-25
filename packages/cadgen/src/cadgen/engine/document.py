@@ -1866,6 +1866,7 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
     vertices = None
     face_colors: dict[int, tuple] = {}
     face_materials: dict[int, Any] = {}
+    part_color = _label_color(label)
     subs = TDF_LabelSequence()
     XCAFDoc_ShapeTool.GetSubShapes_s(label, subs)
     if subs.Length():
@@ -1873,13 +1874,18 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
         TopExp.MapShapes_s(shape, TopAbs_FACE, faces)
         edges = TopTools_IndexedMapOfShape()
         TopExp.MapShapes_s(shape, TopAbs_EDGE, edges)
+        holding: list[tuple[Any, tuple]] = []  # coloured sub-shapes that hold faces: solids, shells
         for at in range(1, subs.Length() + 1):
             sub = subs.Value(at)
             held = XCAFDoc_ShapeTool.GetShape_s(sub)
             if held.IsNull():
                 continue
             kind = held.ShapeType()
-            if kind == TopAbs_FACE:
+            if kind not in (TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX):
+                rgba = _label_color(sub)
+                if rgba is not None:
+                    holding.append((held, rgba))
+            elif kind == TopAbs_FACE:
                 ordinal = faces.FindIndex(held)
                 if ordinal:
                     name = _label_name(sub)
@@ -1904,10 +1910,45 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
                 name = _label_name(sub) if ordinal else ""
                 if name:
                     vertex_names[ordinal] = name
+        if holding:
+            part_color = _held_colors(faces, holding, part_color, face_colors)
     name = step_name(_label_name(label)) if loaded.step else _label_name(label)
-    return Prototype(index, local, name or f"part{index + 1}", _label_color(label), found_key,
+    return Prototype(index, local, name or f"part{index + 1}", part_color, found_key,
                      face_names, edge_names, face_colors, entry, _label_material(label), face_materials,
                      vertex_names=vertex_names)
+
+
+def _held_colors(faces: Any, holding: list[tuple[Any, tuple]], color: tuple | None,
+                 face_colors: dict[int, tuple]) -> tuple | None:
+    """A part's colour, and its faces' (into ``face_colors``), where its file colours the solids or
+    shells that hold its faces: a STEP styles a representation item (``STYLED_ITEM``), and a part of
+    several solids is one ``MANIFOLD_SOLID_BREP`` each, styled each, which the XCAF reader puts on
+    sub-shape labels of the part and none on the part. Each face takes the colour of the innermost
+    coloured shape holding it, under its own. One colour over every face is the part's colour;
+    else each face so coloured, and not the part's colour, is a painted face."""
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    held = []
+    for shape, rgba in holding:
+        inner = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(shape, TopAbs_FACE, inner)
+        held.append((inner, int(shape.ShapeType()), rgba))
+    given: dict[int, tuple] = {}
+    # The outermost first, so an inner shape's colour is the one a face keeps (a shell inside its
+    # solid holds as many faces: a shell comes after a solid in the kernel's order of kinds).
+    for inner, _kind, rgba in sorted(held, key=lambda item: (-item[0].Extent(), item[1])):
+        for at in range(1, inner.Extent() + 1):
+            ordinal = faces.FindIndex(inner.FindKey(at))
+            if ordinal:
+                given[ordinal] = rgba
+    if len(given) == faces.Extent() and len(set(given.values())) == 1:
+        return next(iter(given.values()))
+    for ordinal, rgba in given.items():
+        if ordinal not in face_colors and rgba != color:
+            face_colors[ordinal] = rgba
+    return color
 
 
 def _matrix(location: Any) -> list[float]:

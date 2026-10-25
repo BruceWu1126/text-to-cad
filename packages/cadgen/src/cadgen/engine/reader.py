@@ -70,8 +70,9 @@ def describe(doc: Any, step: bool) -> tuple[dict[str, Any], list[Any], list[Any]
     """An XCAF document as data (see the module), the shapes its parts are, and the locations
     its components are placed at. ``step``: a STEP's names decoded as the file means them,
     and a part's colour, where its label has none, its shape's or its largest coloured
-    face's (as build123d's importer takes it); an xbf's names as the engine wrote them, its
-    colours its labels', its painted faces and face materials carried."""
+    face's (as build123d's importer takes it), a face coloured by the solid or shell holding
+    it; an xbf's names as the engine wrote them, its colours its labels', its painted faces
+    and face materials carried."""
     import unicodedata
 
     from OCP.Bnd import Bnd_Box
@@ -79,7 +80,8 @@ def describe(doc: Any, step: bool) -> tuple[dict[str, Any], list[Any], list[Any]
     from OCP.Quantity import Quantity_ColorRGBA
     from OCP.TDF import TDF_Label, TDF_LabelSequence
     from OCP.TopAbs import TopAbs_FACE
-    from OCP.TopExp import TopExp, TopExp_Explorer
+    from OCP.TopExp import TopExp
+    from OCP.TopoDS import TopoDS_Iterator
     from OCP.TopTools import TopTools_IndexedMapOfShape
     from OCP.XCAFDoc import XCAFDoc_ColorCurv, XCAFDoc_ColorGen, XCAFDoc_ColorSurf, XCAFDoc_ColorTool
     from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
@@ -118,16 +120,26 @@ def describe(doc: Any, step: bool) -> tuple[dict[str, Any], list[Any], list[Any]
         if found is not None:
             return found
         best, extent = None, -1.0
-        explorer = TopExp_Explorer(shape, TopAbs_FACE)
-        while explorer.More():
-            face = explorer.Current()
-            color = own_color(face)
-            if color is not None:
-                box = Bnd_Box()
-                BRepBndLib.Add_s(face, box)
-                if box.SquareExtent() > extent:
-                    best, extent = color, box.SquareExtent()
-            explorer.Next()
+        # Each face in the explorer's order, coloured as itself, else as the innermost coloured
+        # shape holding it: a STEP styles each solid of a part of several, and none of the part.
+        stack = [(shape, None)]
+        while stack:
+            current, held = stack.pop()
+            color = own_color(current) if current is not shape else None
+            color = color if color is not None else held
+            if current.ShapeType() == TopAbs_FACE:
+                if color is not None:
+                    box = Bnd_Box()
+                    BRepBndLib.Add_s(current, box)
+                    if box.SquareExtent() > extent:
+                        best, extent = color, box.SquareExtent()
+                continue
+            inner = TopoDS_Iterator(current)
+            below = []
+            while inner.More():
+                below.append((inner.Value(), color))
+                inner.Next()
+            stack.extend(reversed(below))
         return best
 
     def faces_given(label: Any, shape: Any) -> tuple[dict[str, list[float]], dict[str, Any]]:

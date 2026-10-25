@@ -1439,9 +1439,15 @@ changed or new one fails in one line naming the folder and its mode.
   it keeps in a map keyed by shape, are put in the order of the shapes they style; the assembly
   occurrences, which it numbers on from every STEP the process wrote, are numbered from 1; and
   each record so renumbered is put on one line, as the writer broke it where its old numbers
-  fell. A build's document is written as its xbf reads back (written and read once, in memory),
-  since a read moves placements by a last bit. So the same document is the same STEP in any
-  process on any day, a build's or a cold read's of its xbf.
+  fell. A prototype is one product, and each of its usages a `NEXT_ASSEMBLY_USAGE_OCCURRENCE` of
+  its own with the usage's name, placement and instance colour; OCCT's writer finds a usage by
+  its shape and placement datum, so a prototype placed alike under two parents (a left and a
+  right arm's shared parts) is placed apart while it is written and set back after. A part of
+  several solids is styled solid by solid, as AP242 styles representation items: the engine's
+  readers take one colour over every face as the part's. A build's document is written as its
+  xbf reads back (written and read once, in memory), since a read moves placements by a last
+  bit. So the same document is the same STEP in any process on any day, a build's or a cold
+  read's of its xbf.
 - **GLB**: one mesh per prototype (indexed in 16 bits up to 65,535 vertices, in 32 past them), a
   node per placement named by its path, a PBR material per
   look (a paint is a primitive of its own) with an extension for each part of the look past
