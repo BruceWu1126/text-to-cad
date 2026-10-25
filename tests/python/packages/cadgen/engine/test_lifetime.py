@@ -312,6 +312,17 @@ class LifetimeDaemonTest(unittest.TestCase):
         (self.folder / f"{name}.ran").unlink()
         return model_id(self.folder / f"{name}.py", name)
 
+    def assert_documents_worker_alone(self, script: str) -> None:
+        """Since ``script``'s worker retired, only the documents worker served it: no worker of the
+        script is live, and none retired again (its one retirement is the build's; the documents
+        worker may have retired too, past the 1 MB cap)."""
+        status = self.ask({"op": "status"})
+        live = [Path(w["script"]).name for w in status["workers"]]
+        retired = [Path(row["script"]).name for row in status["retired"]]
+        self.assertNotIn(script, live)
+        self.assertEqual(retired.count(script), 1, retired)
+        self.assertIn("documents", live + retired)
+
     def page(self, ident: str) -> tuple[int, dict]:
         serving = self.ask({"op": "status"})["serving"]
         token = self.ask({"op": "http"}).get("token", "")
@@ -389,7 +400,7 @@ class LifetimeDaemonTest(unittest.TestCase):
                                         "modelRevision": shown["version"]}, "destinations": [str(viewed)]})
         self.assertIn("done", answer, answer)
         self.assertIsNotNone(document.Loaded(viewed).mechanism)
-        self.assertEqual([Path(w["script"]).name for w in self.ask({"op": "status"})["workers"]], ["documents"])
+        self.assert_documents_worker_alone("hinge.py")
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
 
     def test_a_glb_from_the_hold_and_from_its_xbf_file_is_the_live_one(self) -> None:
@@ -420,7 +431,7 @@ class LifetimeDaemonTest(unittest.TestCase):
         self.assertNotIn(b'"tracks"', step.read_bytes(), "a STEP is AP242 alone: no record of ours")
         self.assertTrue(_has_point(_vertices(document.Loaded(step), "arm"), _arm_tip(30)),
                         "a STEP of the same hold, as built: it never carried an animation")
-        self.assertEqual([Path(w["script"]).name for w in self.ask({"op": "status"})["workers"]], ["documents"])
+        self.assert_documents_worker_alone("hinge.py")
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
 
     def test_an_evicted_and_an_expired_document_name_their_rebuild_and_nothing_runs_it(self) -> None:

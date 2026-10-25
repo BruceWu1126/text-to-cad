@@ -656,8 +656,8 @@ The meshing pool starts with the first page or view, never with a build. A build
 document, so the daemon's server starts with the first `python model.py`; its meshing pool
 waits. It starts on the first mesh, topology or pose a page asks, or on `Server.warm`: sent
 by `cadgen viewer` at launch (`CADGEN_VIEWER_WARM=0` skips it), called when an app launches a
-view and when a build's `view:` link lands. With no page, the daemon's only child is the
-worker. Measured on a 24-part model (5 shapes) on a 10-core machine: 1 child and 0.5 GB with
+view and when a build's `view:` link lands. With no page, the daemon's only children are the
+worker and the standby. Measured (before the standby) on a 24-part model (5 shapes) on a 10-core machine: 1 child and 0.5 GB with
 no page, against 12 and 3.2 GB when the pool started with the server. The pool's start costs
 a first page about 0.8 s, less the time the page takes to load after the warm.
 
