@@ -178,7 +178,7 @@ class HolderTest(unittest.TestCase):
             def __exit__(self, *_exc):
                 return None
 
-        def hold(host=None):
+        def hold(host=None, holder=None):
             calls.append(host)
             taking.wait(10)  # the engine starting: the host's initialize arrives meanwhile
             return Held()
@@ -198,7 +198,7 @@ class HolderTest(unittest.TestCase):
     def test_a_hold_that_fails_unexpectedly_is_tried_again_at_the_next_request(self) -> None:
         calls = []
 
-        def hold(host=None):
+        def hold(host=None, holder=None):
             calls.append(host)
             raise RuntimeError("an answer of no shape")
 

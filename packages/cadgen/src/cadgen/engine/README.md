@@ -434,7 +434,10 @@ for the removed telemetry tool. Sidebar views alone are shared through
 an in-memory registry; thread views remain session-local. The host's stdio process
 proxies JSON-RPC and owns no page, tool implementation, catalog or view state.
 Active HTTP calls keep the daemon alive; quiet MCP sessions expire after an hour. The host's
-stdio process holds the engine from its start while the host runs (**The door**).
+stdio process holds the engine from its start while the host runs (**The door**), under a name it
+opens its sessions with: it ends them itself at its input's end and on SIGTERM, and when its hold's
+connection drops -- the process gone, killed before it could say so -- the engine ends every session
+opened under that name, or once its running operations finish (`Sessions.release`).
 A card's `cad_sync` renews its served document's warm-worker lease.
 
 The viewer launcher owns no server, reload watcher or process-reuse probe. It
@@ -580,7 +583,10 @@ none cached and 2.4-2.9 s cached. A folder no daemon started in 30 days goes
 (`PYCACHE_UNUSED_DAYS`). With no cache folder that is this user's alone, nothing is written.
 The daemon's standby (**The engine server and its workers**) loads the kernel at the daemon's
 start: the first load of a fresh installation on macOS also waits on the system's first look at
-each native library, 43 s measured, which the standby pays while nobody waits.
+each native library, 43 s measured, which the standby pays while nobody waits. A build that waits
+on such a load -- one arriving before the standby is ready, or the first of a worker whose kernel is
+not loaded -- says so once, on stderr, when it has waited `worker.KERNEL_PATIENCE` (5 s): `loading
+the CAD kernel for the first time in this environment, up to a minute`. A warm worker says nothing.
 A warm build does not make the document again: the worker holds the XCAF
 document it last wrote and patches it (`document.Kept`). A prototype whose label
 holds what a cold build would make of it keeps that label untouched; one that
@@ -1353,7 +1359,10 @@ The xbf is the model's result; STEP, GLB, STL, 3MF and DXF are exports of a docu
 xbf can be one too. One writer, `export.translate(document, kind, path)`,
 writes every one, whether a decorator declares the file or `cadgen export` asks for it: the
 same document writes the same bytes. The file holds what the code built (law 22). Every file is written beside its
-target and moved over it; a DXF only when its bytes change.
+target and moved over it, and only when its bytes change (`atomic_replace.put`): a target that
+holds them already is left as it is (`cadgen export` says `unchanged`). In a folder that takes no
+new file (read-only), the bytes are made aside and compared, so an unchanged file passes, and a
+changed or new one fails in one line naming the folder and its mode.
 
 - **Sources are documents**: an `.xbf` or a `.step` (read into a document first), or a
   document's id (written from what the engine holds of it -- its worker's document, or the whole

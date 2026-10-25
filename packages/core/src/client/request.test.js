@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isEngineGone, requestViewerJson } from "./request.js";
+import { isEngineGone, isEngineRefused, requestViewerJson } from "./request.js";
 
 const url = "/__cad/artifact?file=part.step";
 
@@ -112,6 +112,9 @@ test("an engine gone is nothing answering, or an engine that does not know this 
   assert.equal(isEngineGone(await failed(async () => { throw new TypeError("Failed to fetch"); })), true);
   const refused = async () => new Response(JSON.stringify({ error: "engine token required" }), { status: 403 });
   assert.equal(isEngineGone(await failed(refused)), true);
+  // The second is told apart: an engine runs, and refuses the page's token.
+  assert.equal(isEngineRefused(await failed(refused)), true);
+  assert.equal(isEngineRefused(await failed(async () => { throw new TypeError("Failed to fetch"); })), false);
   const other = async () => new Response(JSON.stringify({ error: "Host is not a local name" }), { status: 403 });
   assert.equal(isEngineGone(await failed(other)), false);
   assert.equal(isEngineGone(new Error("Failed to fetch")), false);

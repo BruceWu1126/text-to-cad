@@ -123,6 +123,11 @@ plain, or whose entries are gone, runs.
 the files it opens are heard as a body's are, held to their bytes, and are the model's inputs
 (``MotionReads``), so a document is not taken while one of them changed.
 
+**Warnings.** build123d warns with a ``stacklevel`` that names its caller, which, for a call
+this layer wraps, is this layer's frame. Its modules' ``warnings`` is ``_Warnings``: a warning
+that would name a frame of the engine's names the model's line instead (``warn_explicit`` with
+the first model frame's file, line and module), and every other passes on as it would.
+
 **History.** While a call from the model's code runs, the OCCT makers it runs record
 what they were given and what they made (``history``), and right after it the call's
 history is composed from them. The feature carries it, and so does the entry: a hit
@@ -152,7 +157,9 @@ import itertools
 import numbers
 import os
 import struct
+import sys
 import threading
+import warnings
 import weakref
 from collections import OrderedDict
 from pathlib import Path
@@ -164,6 +171,7 @@ from OCP.TopExp import TopExp
 from OCP.TopTools import TopTools_IndexedMapOfShape
 
 from cadgen.engine.kernel import history as kernel_history
+from cadgen.engine.kernel import trace as kernel_trace
 from cadgen.engine.kernel.trace import Trace
 
 __all__ = ["CAPACITY", "RUNS_KEPT", "clear", "enabled", "install", "listened", "motion_reads", "run", "stats",
@@ -409,9 +417,51 @@ def install() -> bool:
                 owner = "OCCT's" if module_name.startswith("OCP.") else "build123d's"
                 hooked = _reader(f"{owner} {class_name}.{method}", original, static)
                 setattr(cls, method, staticmethod(hooked) if static else hooked)
+        for module in list(sys.modules.values()):
+            if getattr(module, "__name__", "").startswith("build123d") and getattr(module, "warnings", None) is warnings:
+                module.warnings = _WARNINGS
         _audit_reads()
         _installed = True
         return True
+
+
+class _Warnings:
+    """``warnings`` as build123d's modules see it: ``warn`` attributes a warning whose
+    ``stacklevel`` lands in an engine frame (a call this layer wraps) to the first frame of the
+    model's code outside it, by its file and line; the rest is the ``warnings`` module."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(warnings, name)
+
+    def warn(self, message: Any, category: Any = None, stacklevel: int = 1, source: Any = None, **options: Any) -> None:
+        frame = sys._getframe(1)
+        for _level in range(stacklevel - 1):
+            if frame.f_back is None:
+                break
+            frame = frame.f_back
+        model = frame if _engine_file(frame.f_code.co_filename) else None
+        while model is not None and kernel_trace._classify(model.f_code.co_filename) != "model":
+            model = model.f_back
+        if model is None:
+            warnings.warn(message, category, stacklevel + 1, source, **options)
+            return
+        if isinstance(message, Warning):
+            category = type(message)
+        named = model.f_globals
+        warnings.warn_explicit(message, category or UserWarning, model.f_code.co_filename, model.f_lineno,
+                               module=named.get("__name__"), registry=named.setdefault("__warningregistry__", {}),
+                               module_globals=named, source=source)
+
+
+_WARNINGS = _Warnings()
+
+
+@functools.lru_cache(maxsize=4096)
+def _engine_file(filename: str) -> bool:
+    try:
+        return kernel_trace._ENGINE in Path(filename).resolve().parents
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 
 # --- files a body opens itself --------------------------------------------------------------

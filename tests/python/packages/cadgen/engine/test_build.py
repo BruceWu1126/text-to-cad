@@ -256,6 +256,36 @@ class BuildTest(EngineCase):
         self.assertNotIn("build123d", frame["error"])
         self.assertEqual(target.stat().st_mtime_ns, stamp)
 
+    def test_a_build123d_warning_in_a_wrapped_call_names_the_model_s_line(self) -> None:
+        # build123d's ``clean`` warns at its caller (``stacklevel=2``), which, for a call the memo
+        # wraps, is the memo's frame: the warning names the model's file and line instead.
+        import warnings
+
+        from build123d.topology import shape_core
+
+        self.write(text="""
+            import build123d as bd
+            from cadgen.engine import model
+
+
+            @model
+            def plate():
+                box = bd.Box(1, 2, 3)
+                return box.clean()
+        """)
+
+        class Refusing(shape_core.ShapeUpgrade_UnifySameDomain):
+            def Build(self) -> None:  # noqa: N802 - OCCT's name
+                raise RuntimeError("refused")
+
+        with mock.patch.object(shape_core, "ShapeUpgrade_UnifySameDomain", Refusing), \
+                warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            report = self.build("plate")["plate"]
+        self.assertTrue(report["ok"], report)
+        [warned] = [found for found in caught if "Unable to clean" in str(found.message)]
+        self.assertEqual((Path(warned.filename), warned.lineno), (self.script, 9))
+
     def test_a_file_read_hits_whether_or_not_a_child_reading_it_ran_alone(self) -> None:
         # A child's body runs inline in every build of its parent, so the n-th read of
         # one file in a build is fixed by the code: building the child alone in between

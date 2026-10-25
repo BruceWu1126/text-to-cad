@@ -683,6 +683,8 @@ class Server:
         self.touch = touch
         self.clients_active = lambda: False
         self.on_close = lambda: None
+        # A hold's client gone (``Daemon.hold``), by the name it held with: its MCP sessions end.
+        self.on_hold_end: Callable[[str], None] = lambda _holder: None
         self.provenance = provenance
         self.load_lock = threading.RLock()
         self.held: dict[str, int] = {}

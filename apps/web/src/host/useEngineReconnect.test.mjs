@@ -75,3 +75,45 @@ test('the engine the page loaded from answering again was a blip: nothing is rel
     for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; }
   }
 });
+
+test('an engine that refuses the page\'s token is told apart from none answering, and the page is never reloaded for it', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-000000000001' });
+  const previous = new Map(['window', 'document', 'IS_REACT_ACT_ENVIRONMENT'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true })) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  // After `cadgen server --rotate-token` the engine runs and refuses the tab's token; it is stopped
+  // a moment (nothing answers), refuses it again, and then admits it: the new link was opened beside it.
+  const answers = ['forbidden', 'forbidden', 'down', 'forbidden', 'back'];
+  const ask = async () => {
+    const answer = answers.shift();
+    if (answer === 'down') return null;
+    if (answer === 'forbidden') return { refused: true };
+    return { pid: 2 };
+  };
+  const queued = [];
+  const reloads = [];
+  const said = [];
+  const options = { pid: 1, ask, reload: () => reloads.push(answers.length),
+    schedule: (run, delayMs) => { const timer = { run, delayMs }; queued.push(timer); return timer; },
+    cancel: timer => queued.splice(queued.indexOf(timer), 1) };
+  function Probe() { said.push(useEngineReconnect(true, options)); return null; }
+  const root = createRoot(dom.window.document.getElementById('root'));
+  const advance = () => act(async () => { await queued.shift().run(); });
+  try {
+    await act(() => root.render(createElement(Probe)));
+    assert.equal(said.at(-1), null, 'nothing is said of the engine before it is asked');
+    await advance();
+    assert.equal(said.at(-1), true, 'an engine answered and refused the token: the link was replaced');
+    await advance();
+    assert.deepEqual([said.at(-1), reloads, queued.length], [true, [], 1], 'never reloaded for a refusal, and still asking');
+    await advance();
+    assert.equal(said.at(-1), false, 'nothing answering is the engine not running');
+    await advance();
+    assert.equal(said.at(-1), true);
+    await advance();
+    assert.deepEqual([reloads, queued.length], [[0], 0], 'the token admitted again by a new engine: reloaded once, and it stops asking');
+  } finally {
+    await act(() => root.unmount());
+    dom.window.close();
+    for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; }
+  }
+});

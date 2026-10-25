@@ -31,6 +31,8 @@ export default {
   "app.start.notAnswering": "CAD ビューアーが応答しません",
   "app.engine.notRunning": "エンジンが動いていません。戻るとページは自動で再接続します。",
   "app.engine.startIt": "python <model>.py か cadgen viewer を実行して起動してください。",
+  "app.engine.linkReplaced": "このページのリンクは置き換えられました。新しいリンクを開くとページは自動で再接続します。",
+  "app.engine.openNewLink": "cadgen viewer を実行し、表示されたリンクを開いてください。",
 
   "file.opening": "開いています…",
   "file.missing": "ファイルが存在しません",

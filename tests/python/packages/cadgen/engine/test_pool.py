@@ -233,18 +233,24 @@ class StandbyTest(unittest.TestCase):
         self.assertEqual(self.standing(pool, spare).environment, {"PYTHONPATH": "/other"})
         self.assertEqual(list(pool.retired), [], "the standby is never a script's retirement")
 
-    def test_a_build_arriving_while_the_standby_starts_waits_for_it(self) -> None:
+    def test_a_build_arriving_while_the_standby_starts_waits_for_it_and_a_long_wait_is_said(self) -> None:
         gate = threading.Event()
         pool = self.pool(gate=gate)
         pool.stand({})
         got: list = []
-        thread = threading.Thread(target=lambda: got.append(pool.lease("a.py", {})), daemon=True)
-        thread.start()
-        await_(lambda: pool.waiting() == 1, "the build to wait")
+        said: list = []
+        with mock.patch("cadgen.engine.worker.KERNEL_PATIENCE", 0.01):
+            thread = threading.Thread(target=lambda: got.append(pool.lease("a.py", {}, None, said.append)), daemon=True)
+            thread.start()
+            await_(lambda: said, "the wait for the standby's kernel to be said")
+        self.assertEqual(said, ["loading the CAD kernel for the first time in this environment, up to a minute"])
         self.assertEqual(self.started, [], "no second kernel load beside the standby's")
         gate.set()
         thread.join(5)
-        self.assertEqual((got[0].script, self.started), ("a.py", []))
+        self.assertEqual((got[0].script, self.started, len(said)), ("a.py", [], 1))
+        pool.release(got[0])
+        pool.lease("a.py", {}, None, said.append)  # its warm worker: nothing waits, nothing is said
+        self.assertEqual(len(said), 1)
 
     def test_the_standby_holds_a_slot_and_is_the_first_to_make_room(self) -> None:
         pool = self.pool(cap=2)

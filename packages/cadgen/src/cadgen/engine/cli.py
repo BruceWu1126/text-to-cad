@@ -383,11 +383,14 @@ def _export(args: argparse.Namespace, prog: str) -> int:
     told_state(args.source, "exporting")
     if args.json:
         print(json.dumps({"ok": True, "source": str(key(args.source)),
-                          "files": [{"path": str(row.path), "kind": row.kind, "bytes": row.bytes, "seconds": row.seconds}
-                                    for row in written]}))
+                          "files": [{"path": str(row.path), "kind": row.kind, "bytes": row.bytes, "seconds": row.seconds,
+                                     "written": row.written} for row in written]}))
         return 0
     for row in written:
-        print(f"wrote {_given(row.path, args.destinations)} ({_bytes(row.bytes)}) in {row.seconds:.2f}s")
+        if row.written:
+            print(f"wrote {_given(row.path, args.destinations)} ({_bytes(row.bytes)}) in {row.seconds:.2f}s")
+        else:
+            print(f"unchanged {_given(row.path, args.destinations)} ({_bytes(row.bytes)}): it holds these bytes already")
     return 0
 
 

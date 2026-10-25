@@ -49,7 +49,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from cadgen.engine.atomic_replace import replace_atomic, staging
+from cadgen.engine.atomic_replace import put
 from cadgen.engine.export import ExportRefused
 
 __all__ = ["DEFAULT_LAYER", "DrawingFinding", "DrawingValidationError", "DxfDeterminismError", "document_is_drawing",
@@ -89,9 +89,7 @@ def write(view: Any, path: Path) -> None:
             return
     except OSError:
         pass
-    with staging(path) as temporary:
-        temporary.write_bytes(data)
-        replace_atomic(temporary, path)
+    put(path, lambda temporary: temporary.write_bytes(data), compare=False)
 
 
 def dxf_bytes(view: Any) -> bytes:

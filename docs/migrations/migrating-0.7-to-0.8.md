@@ -401,8 +401,8 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   (the handle's `.url`). An open page follows every later run; share the link once.
 - **The commands take an id or a file.** `cadgen export`, `cadgen snapshot` and
   `cadgen inspect` read the document as the engine holds it, and never run a script.
-- **The engine never reruns code.** A document it no longer holds (the engine restarted,
-  or it dropped the document to free memory) is answered, by its page, by
+- **The engine never reruns code.** A document it no longer holds (its cache dropped it
+  past the cache's bound while nothing held it) is answered, by its page, by
   `cadgen inspect <id>` and by the CAD app, with the command that brings it back:
   `python <the script>`.
 - **A viewer link outlives a restart.** The engine keeps one port (3245, or the one
@@ -567,7 +567,7 @@ opt in.
 | Materials | `materials=` definitions and assignments | `part.material = ...` in the body |
 | Colours | linear floats, `srgb(...)` | sRGB hex or 0-255 integers |
 | Refs | `#o1.2.f7` | `<id>#path/to/part/f:function.feature.n` |
-| The cache | the store in `~/.cache/cadgen` | the warm worker's memory; nothing on disk |
+| The cache | the store in `~/.cache/cadgen` | the warm worker's memory, and one `document.xbf` per model under `~/.cache/cadgen/documents/` (4 GB at most, `CADGEN_ENGINE_CACHE_GB`), with the engine's bytecode under `pycache/` |
 | The viewer | its own process, `?file=` links, page sessions | the engine's one page, `/<uuid>` |
 
 ## Troubleshooting a half-migrated project
@@ -584,8 +584,8 @@ opt in.
   as sRGB: give the hex of what you see (step 6).
 - **A link opens the home instead of the model.** It is a 0.7 or pre-release link
   (`?file=`, `/s/...`). Run the model and use the page it prints.
-- **A page or `cadgen inspect` says the document is not held.** The engine restarted or
-  freed it. Run the command it prints.
+- **A page or `cadgen inspect` says the document is not held.** The engine freed it and its
+  cache dropped it past its bound. Run the command it prints.
 - **The viewer shows an old mechanism or none.** A sidecar is read by nothing: the
   mechanism must be in the model's body (step 4).
 

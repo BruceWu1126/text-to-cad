@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
-from cadgen.engine.atomic_replace import replace_atomic, staging
+from cadgen.engine.atomic_replace import put
 
 __all__ = ["Assembly", "Component", "Kept", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "merge",
            "mesh_faces", "read_step_shape", "read_xbf_shape", "save", "to_xcaf", "unchecked"]
@@ -1161,16 +1161,17 @@ def save(doc: Any, path: Path, *, compare: bool) -> tuple[bool, int]:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     shapes = [part.shape for part in tree.parts] if tree is not None else _free_shapes(doc)
-    with staging(path.with_suffix(".xbf")) as temporary:
+
+    def write(temporary: Path) -> None:
         with _XCAF_LOCK, unchecked(shapes):
             status = _application().SaveAs(doc, TCollection_ExtendedString(str(temporary), True))
         if status != PCDM_StoreStatus.PCDM_SS_OK or not temporary.exists():
             raise OSError(f"could not save {path}: {status}")
         _fix_date(temporary)
-        size = temporary.stat().st_size
-        if compare and path.exists() and path.stat().st_size == size and _same_bytes(path, temporary):
-            return False, size
-        replace_atomic(temporary, path)
+
+    fresh, size = put(path, write, compare=compare, staged=path.with_suffix(".xbf").name)
+    if not fresh:
+        return False, size
     if tree is not None:
         for listener in list(SAVED_LISTENERS):
             listener(path.resolve(), tree)
@@ -1205,16 +1206,6 @@ def _free_shapes(doc: Any) -> list[Any]:
     free = TDF_LabelSequence()
     XCAFDoc_DocumentTool.ShapeTool_s(doc.Main()).GetFreeShapes(free)
     return [XCAFDoc_ShapeTool.GetShape_s(free.Value(at)) for at in range(1, free.Length() + 1)]
-
-
-def _same_bytes(first: Path, second: Path) -> bool:
-    with open(first, "rb") as one, open(second, "rb") as two:
-        while True:
-            a, b = one.read(1 << 22), two.read(1 << 22)
-            if a != b:
-                return False
-            if not a:
-                return True
 
 
 # --- reading ----------------------------------------------------------------------------

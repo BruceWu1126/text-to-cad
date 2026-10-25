@@ -196,6 +196,38 @@ class HttpSessionsTest(unittest.TestCase):
         self.assertTrue(request({'op': 'status'})['ok'])
         self.await_holders(0)  # let go with the host; the engine runs on
 
+    def test_a_shim_ended_by_a_signal_or_killed_leaves_no_session_behind(self):
+        # A host (codex exec) may end its MCP server with SIGTERM, or kill it outright, rather than
+        # close its input: the shim ends its session on SIGTERM itself, and the engine ends the
+        # session of a shim whose hold is gone, which a killed one cannot say.
+        import signal
+
+        def mcp():
+            return [row for row in request({'op': 'status'})['sessions'] if row.get('kind') == 'mcp']
+
+        # Windows has no SIGTERM a process can catch: its ending is TerminateProcess, as a kill is.
+        endings = ((signal.SIGTERM, 128 + signal.SIGTERM), (signal.SIGKILL, -signal.SIGKILL)) if os.name != 'nt' \
+            else ((signal.SIGTERM, 1),)
+        for ending, code in endings:
+            before = len(mcp())
+            process = subprocess.Popen([sys.executable, '-m', 'cadgen.cli', 'mcp'], env=self.env, stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            self.addCleanup(lambda process=process: process.poll() is None and process.kill())
+            process.stdin.write(json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': INIT}) + '\n')
+            process.stdin.flush()
+            self.assertNotIn('error', json.loads(process.stdout.readline()))
+            self.assertEqual(len(mcp()), before + 1)
+            self.await_holders(1)  # its hold taken: the name its session ends with
+            process.send_signal(ending)
+            self.assertEqual(process.wait(timeout=20), code, f'{ending.name}: the shim left as it should')
+            process.stdin.close()
+            process.stdout.close()
+            deadline = time.monotonic() + 30
+            while len(mcp()) != before:
+                self.assertLess(time.monotonic(), deadline, f'{ending.name}: the session ended')
+                time.sleep(0.05)
+            self.await_holders(0)
+
     def await_holders(self, count):
         deadline = time.monotonic() + 60
         while request({'op': 'status'})['holders'] != count:

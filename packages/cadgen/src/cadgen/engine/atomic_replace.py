@@ -18,12 +18,14 @@ measurements) kept in the engine because the engine imports nothing of cadgen ou
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import shutil
+import stat
 import tempfile
 import time
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 WINDOWS_SHARING_VIOLATION = 32
 WINDOWS_ACCESS_DENIED = 5
@@ -65,6 +67,69 @@ def staging(target: Path | str) -> Iterator[Path]:
         yield folder / target.name
     finally:
         shutil.rmtree(folder, ignore_errors=True)
+
+
+# The refusals that say the target's folder takes no new file from this user.
+_REFUSED = (errno.EACCES, errno.EPERM, errno.EROFS)
+
+
+def put(target: Path | str, write: Callable[[Path], None], *, compare: bool = True,
+        staged: str | None = None) -> tuple[bool, int]:
+    """Write ``target`` with ``write(path)`` -- the new file made at ``path``, named ``staged`` (else
+    the target's name) -- staged beside it and moved over it (``staging``, ``replace_atomic``). With
+    ``compare``, a target that holds the new bytes already is left as it is, written to nothing.
+    A folder that refuses the staging folder (read-only) is written to only when the bytes differ:
+    they are made aside and compared, and a changed or missing target fails in one line naming the
+    folder and its mode. Returns whether the target was written, and its size."""
+    target = Path(target)
+    name = staged or target.name
+    try:
+        stage: Path | None = Path(tempfile.mkdtemp(prefix=f".{target.stem}.", suffix=".tmp", dir=target.parent))
+    except OSError as error:
+        if error.errno not in _REFUSED:
+            raise
+        stage = None
+    try:
+        with contextlib.ExitStack() as aside:
+            folder = stage or Path(aside.enter_context(tempfile.TemporaryDirectory(prefix="cadgen-")))
+            temporary = folder / name
+            write(temporary)
+            size = temporary.stat().st_size
+            if (compare or stage is None) and same_bytes(target, temporary):
+                return False, size
+            if stage is None:
+                raise PermissionError(refused_folder(target))
+            replace_atomic(temporary, target)
+            return True, size
+    finally:
+        if stage is not None:
+            shutil.rmtree(stage, ignore_errors=True)
+
+
+def refused_folder(target: Path) -> str:
+    """The one line a changed file in a folder that takes no new file says."""
+    try:
+        mode = f"mode {stat.S_IMODE(os.stat(target.parent).st_mode):04o}"
+    except OSError:
+        mode = "its mode unreadable"
+    change = "changed" if target.exists() else "is new"
+    return f"{target.name} {change} and cannot be written: its folder {target.parent} is read-only ({mode})"
+
+
+def same_bytes(first: Path, second: Path) -> bool:
+    """Whether the file ``first`` exists and holds the bytes of ``second``."""
+    try:
+        if os.stat(first).st_size != os.stat(second).st_size:
+            return False
+        with open(first, "rb") as one, open(second, "rb") as two:
+            while True:
+                a, b = one.read(1 << 22), two.read(1 << 22)
+                if a != b:
+                    return False
+                if not a:
+                    return True
+    except OSError:
+        return False
 
 
 def replace_atomic(source: Path | str, target: Path | str) -> None:

@@ -31,6 +31,8 @@ class Session:
     client: str
     touched: float = field(default_factory=time.monotonic)
     active: int = 0
+    holder: str | None = None  # the name of the stdio server's hold it was opened under (``release``)
+    released: bool = False  # that hold is gone: the session ends once nothing runs in it
 
     def close(self):
         self.server.sidebar_views.close()
@@ -52,9 +54,20 @@ class Sessions:
     def _expire(self):
         for ident, session in list(self.sessions.items()):
             if (not session.active and not session.server.operations.keeps_alive()
-                    and time.monotonic() - session.touched > IDLE and session.server.operations.idle_seconds() > IDLE):
+                    and (session.released or time.monotonic() - session.touched > IDLE
+                         and session.server.operations.idle_seconds() > IDLE)):
                 del self.sessions[ident]
                 session.close()
+
+    def release(self, holder):
+        """The hold ``holder`` names gone (``EngineApp.hold_ended``): its stdio server exited, or was
+        killed before it could end its sessions itself (``DELETE``). Each session it opened ends now,
+        or once its running operations finish."""
+        with self.lock:
+            for session in self.sessions.values():
+                if session.holder == holder:
+                    session.released = True
+            self._expire()
 
     def active(self):
         with self.lock:
@@ -92,7 +105,9 @@ class Sessions:
         result = server.handle('initialize', params, RequestContext(None, {}))
         client = params.get('clientInfo')
         client = client if isinstance(client, dict) else {}
-        return Session(server, result['protocolVersion'], str(client.get('name', 'unknown'))), result
+        holder = options.get('holder')
+        holder = holder if isinstance(holder, str) and 0 < len(holder) <= 64 else None
+        return Session(server, result['protocolVersion'], str(client.get('name', 'unknown')), holder=holder), result
 
     def handle(self, request, response):
         origin = request.header('origin')

@@ -4,7 +4,7 @@ import { createCadFileActions } from '@text-to-cad/ui/catalog';
 import type { ModelLibrarySource } from '@text-to-cad/ui/library';
 import { createLiveRegistry, type ViewerHost } from '@text-to-cad/ui/host';
 import type { TabStore, Appearance } from '@text-to-cad/ui/tab-store';
-import { cadApiUrl, createHttpPromptFiles, type CadClient, type CadServerInfo } from '@text-to-cad/core/client';
+import { cadApiUrl, createHttpPromptFiles, isEngineRefused, type CadClient, type CadServerInfo } from '@text-to-cad/core/client';
 import { useViewerAutoReload } from './host/useViewerAutoReload.js';
 import { useEngineReconnect } from './host/useEngineReconnect.js';
 import { useAnalyticsConsent } from '@text-to-cad/ui/consent';
@@ -159,9 +159,13 @@ export default function App({ client, server, tabStore, notice = null, language:
   }), [downloads, client, source, fileActions, promptContext, promptFiles, links, appearance.colorScheme, locale]);
   // The engine gone under the page: said over it, which stays as it was for the engine's return.
   const engineGone = useSyncExternalStore(client.subscribe, () => client.getSnapshot().engineGone, () => false) || foreign;
+  const readRefused = useSyncExternalStore(client.subscribe, () => client.getSnapshot().engineRefused, () => false);
   // Asked again, at the same address with the same token, until an engine answers: a new one reloads the page.
-  useEngineReconnect(engineGone, { pid: server.pid, ask: () => client.serverInfo({ fresh: true }).then(info => info, () => null) });
-  return <div className="relative flex h-svh flex-col overflow-hidden">{engineGone ? <EngineStopped locale={locale} /> : null}<div className="min-h-0 flex-1">
+  // An engine that refuses the token runs: the page's link was replaced, which the last ask says once it has asked.
+  const askedRefused = useEngineReconnect(engineGone, { pid: server.pid, ask: () => client.serverInfo({ fresh: true })
+    .then(info => info, error => (isEngineRefused(error) ? { refused: true } : null)) });
+  const refused = askedRefused ?? readRefused;
+  return <div className="relative flex h-svh flex-col overflow-hidden">{engineGone ? <EngineStopped locale={locale} refused={refused} /> : null}<div className="min-h-0 flex-1">
     <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={next => { void show(next); }} onShown={shown} start={start}
       library={library} onThumbnail={client.keepThumbnail} appSettings={appSettings}
       update={updateNotice ? <UpdateButton notice={updateNotice} copy={prompt => browserClipboard.writeText(prompt)} onLink={openTab} /> : null}
