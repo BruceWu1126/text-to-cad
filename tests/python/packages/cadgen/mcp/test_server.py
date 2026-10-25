@@ -22,8 +22,8 @@ from cadgen._internal.picker import FilePicker
 from cadgen.mcp.shim import initialize_params
 from cadgen.mcp.protocol import RequestContext, RpcError
 from cadgen.viewer.recents import RecentStore
-from cadgen.mcp.server import Server, local_path
-from cadgen.mcp.operations import START
+from cadgen.mcp.server import _AGENT_TOOLS, Server, local_path
+from cadgen.mcp.operations import START, STARTS, check_arguments
 from cadgen.mcp.tunnel import MAX_REPLY_BYTES
 from cadgen.mcp.ui import AppPage
 
@@ -963,6 +963,34 @@ class ToolArgumentsTest(unittest.TestCase):
         return {"string": str(self.tmp / "out.png"), "integer": schema.get("minimum", 0), "boolean": False,
                 "object": {}, "array": []}[kind]
 
+    def test_every_schema_property_is_one_its_handler_takes(self) -> None:
+        for catalog in CATALOGS:
+            server = self.served(catalog)
+            for tool in server.handle("tools/list", {}, None)["tools"]:
+                name, schema = tool["name"], tool["inputSchema"]
+                if name in START:
+                    branches = schema["anyOf"]
+                    self.assertEqual(set(schema["properties"]), {key for branch in branches for key in branch["properties"]}, name)
+                    # An agent reads the whole list: all but what names an operation to follow is a start's too.
+                    [start] = [branch for branch in branches if "start" in branch["properties"]["action"]["enum"]]
+                    self.assertEqual(set(schema["properties"]) - set(start["properties"]), {"operationId", "epoch", "afterSequence"}, name)
+                    for branch in branches:
+                        for key, property_schema in branch["properties"].items():
+                            if "start" in branch["properties"]["action"]["enum"]:
+                                # The set of arguments that names this one, else the first: what a start needs beside it.
+                                group = next((group for group in STARTS[name] if key in group), STARTS[name][0])
+                                base = {need: self.sample(need, branch["properties"][need]) for need in ("requestId", *group)}
+                            else:
+                                base = {"action": "status", "operationId": "operation", "epoch": "epoch"}
+                            arguments = {**base, key: self.sample(key, property_schema)}
+                            with self.subTest(catalog=catalog, tool=name, argument=key):
+                                check_arguments(name, arguments)  # raises where the handler refuses one
+                elif name in _AGENT_TOOLS:
+                    base = {need: self.sample(need, schema["properties"][need]) for need in schema.get("required", [])}
+                    for key, property_schema in schema["properties"].items():
+                        with self.subTest(catalog=catalog, tool=name, argument=key):
+                            server._arguments(name, {**base, key: self.sample(key, property_schema)})
+
     def test_every_tool_names_its_model_source(self) -> None:
         for catalog in CATALOGS:
             for tool in self.served(catalog).handle("tools/list", {}, None)["tools"]:
@@ -974,7 +1002,7 @@ class ToolArgumentsTest(unittest.TestCase):
     def test_a_refusal_names_every_argument_missing_and_unknown_and_what_the_tool_takes(self) -> None:
         server = self.served("text")
         shape = ("To start: {requestId, source, output} or {requestId, packet}, optionally with display, camera, grid, "
-                 "preview, pose, width, height, size_profile, annotation, measurements. To follow one: "
+                 "preview, pose, width, height, size_profile, annotation, measurements, waitMs. To follow one: "
                  "{action: status or cancel, operationId, epoch}, optionally with afterSequence, waitMs.")
         for arguments, said in (({"path": str(self.model)}, "missing requestId, source, output; unknown path"),
                                 ({"id": DOCUMENT_ID, "out": str(self.tmp / "a.png")}, "missing requestId, source, output; unknown id, out")):
@@ -983,13 +1011,20 @@ class ToolArgumentsTest(unittest.TestCase):
             self.assertEqual(refused["structuredContent"]["error"], f"cad_snapshot: {said}. {shape}")
         followed = self.call(server, "cad_inspect", {"action": "status", "source": str(self.model)})["structuredContent"]["error"]
         self.assertTrue(followed.startswith("cad_inspect: missing operationId, epoch; unknown source. To start: "
-                                            "{requestId, source}, optionally with ref, query."), followed)
+                                            "{requestId, source}, optionally with ref, query, waitMs."), followed)
         shown = self.call(server, "cad_show", {"path": str(self.model)})
         self.assertTrue(shown["isError"])
         self.assertEqual(shown["content"][0]["text"], "cad_show: missing source; unknown path. cad_show takes source; source "
                                                       "is a document id (running a model's script prints it) or a CAD file's "
                                                       "absolute path.")
         self.assertEqual(server.operations.jobs, {})  # nothing refused was queued
+
+    def test_a_start_waits_for_its_result_as_long_as_wait_ms_says(self) -> None:
+        server = self.served("text")
+        with mock.patch("cadgen.engine.api.inspect", return_value={"faces": 6}):
+            done = self.call(server, "cad_inspect", {"requestId": "inspect-and-wait-01", "source": str(self.model),
+                                                     "waitMs": 10000})["structuredContent"]
+        self.assertEqual((done["state"], done["result"]), ("succeeded", {"inspection": {"faces": 6}}))
 
 class LocalPathTest(unittest.TestCase):
     def test_windows_reads_a_drive_path_however_a_host_spells_it(self) -> None:

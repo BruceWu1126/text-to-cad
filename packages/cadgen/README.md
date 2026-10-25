@@ -246,7 +246,8 @@ A start is checked whole before anything is queued: a refusal names every argume
 missing and every one the tool does not take, and the shape it takes, in one line.
 The result carries `id`, `epoch`, `state`, `sequence`, stage/progress and, when done,
 `result` or `error`. Use the same tool with `action: "status"`, `operationId` and
-`epoch`; `afterSequence` and `waitMs` (up to 25000) provide bounded waiting. A retry
+`epoch`; `waitMs` (up to 25000) waits for the result, on a start or a status, or with
+`afterSequence` for the next change. A retry
 with the same request ID joins the identical operation; changed arguments are
 refused. `action: "cancel"` cancels queued work. Running operations can write
 explicit destinations and are not cancellable. Disconnecting does not cancel. File outputs are not a multi-file transaction: a

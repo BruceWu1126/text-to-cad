@@ -28,7 +28,8 @@ COMMON = {
     "operationId": STRING,
     "epoch": {**STRING, "description": "Session epoch returned by start; required for status/cancel."},
     "afterSequence": {"type": "integer", "minimum": 0},
-    "waitMs": {"type": "integer", "minimum": 0, "maximum": 25000},
+    "waitMs": {"type": "integer", "minimum": 0, "maximum": 25000,
+               "description": "Milliseconds to wait before answering: for the operation to finish, or with afterSequence for its next change."},
 }
 # What follows an operation: status or cancel, by the id and epoch its start returned.
 FOLLOW = ("action", "operationId", "epoch", "afterSequence", "waitMs")
@@ -56,7 +57,7 @@ DESCRIPTIONS = {
 
 def catalog():
     return [{"name": name, "title": name.removeprefix("cad_").capitalize() + " CAD",
-             "description": description + " " + takes(name) + " Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
+             "description": description + " " + takes(name) + " A start returns an asynchronous operation (waitMs waits for its result): call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
              "inputSchema": {**obj({**COMMON, **START[name]["properties"]}), "anyOf": [
                  obj({"action": {"type": "string", "enum": ["start"]}, **_start(name)}, ("requestId", *START[name]["required"])),
                  obj({**{k: COMMON[k] for k in FOLLOW}, "action": {"type": "string", "enum": ["status", "cancel"]}},
@@ -72,8 +73,8 @@ def catalog():
 
 
 def _start(name):
-    """What a start takes: its request ID and the tool's own arguments."""
-    return {"requestId": COMMON["requestId"], **START[name]["properties"]}
+    """What a start takes: its request ID, the tool's own arguments, and how long to wait for its result."""
+    return {"requestId": COMMON["requestId"], **START[name]["properties"], "waitMs": COMMON["waitMs"]}
 
 
 def _shape(groups, optional):
@@ -233,6 +234,7 @@ class Operations(Jobs):
     def call(self, name, arguments):
         try:
             action = check_arguments(name, arguments)
+            wait = min(25, arguments.get("waitMs", 0) / 1000)
             if action != "start":
                 if arguments["epoch"] != self.epoch:
                     raise JobError("Operation session restarted", 409)
@@ -243,17 +245,28 @@ class Operations(Jobs):
                         raise JobError("Use the tool that started this operation", 409)
                     if action == "cancel":
                         return self.cancel(ident)
-                    return self.get(ident, arguments.get("afterSequence"), arguments.get("waitMs", 0) / 1000)
+                    if arguments.get("afterSequence") is None:
+                        return self._settled(ident, wait)
+                    return self.get(ident, arguments.get("afterSequence"), wait)
             request_id = arguments["requestId"]
-            args = {k: v for k, v in arguments.items() if k not in ("action", "requestId")}
+            args = {k: v for k, v in arguments.items() if k not in ("action", "requestId", "waitMs")}
             normalized = hashlib.sha256(json.dumps([name, args], sort_keys=True, allow_nan=False).encode()).hexdigest()
             with self.changed:
                 # Join retries before re-reading a packet or source that may have changed.
                 if request_id in self.requests:
-                    return self._submit(request_id, normalized)
-                return self._submit(request_id, normalized, operation=name, arguments=args)
+                    started = self._submit(request_id, normalized)
+                else:
+                    started = self._submit(request_id, normalized, operation=name, arguments=args)
+                return self._settled(started["id"], wait) if wait else started
         except (ValueError, TypeError, OSError, KeyError) as error:
             return {"state": "rejected", "error": str(error), "status": getattr(error, "status", 400)}
+
+    def _settled(self, ident, wait):
+        """Under changed's lock: the operation once it finished, or as it is after ``wait`` seconds."""
+        job = self.jobs.get(ident)
+        if job is not None and wait:
+            self.changed.wait_for(lambda: job["state"] in TERMINAL, timeout=wait)
+        return self.get(ident)
 
     def public(self, job):
         result = super().public(job)
