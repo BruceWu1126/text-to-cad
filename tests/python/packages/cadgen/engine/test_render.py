@@ -383,7 +383,7 @@ class HeldTest(unittest.TestCase):
         np.testing.assert_allclose(top, (45, 0), atol=0.5)
 
     def test_what_the_document_does_not_offer_is_refused_by_name(self) -> None:
-        with self.assertRaisesRegex(SnapshotRefused, "--pose: .*no configuration 'shut'"):
+        with self.assertRaisesRegex(SnapshotRefused, "--pose: .*no mechanism state 'shut'"):
             self.draw(display={}, pose="shut")
         with self.assertRaisesRegex(SnapshotRefused, "--pose: .*hinge"):
             self.draw(display={}, pose={"hinge": 400})
@@ -574,7 +574,7 @@ class RenderProcessTest(unittest.TestCase):
         self.assertEqual((first["done"]["process"]["frames"], second["done"]["process"]["frames"]), (1, 2))
         self.assertNotIn("sceneMs", second["done"]["timings"], "the second picture is drawn on the first's scene")
         refused, _ = process.ask({"op": "frame", "still": {**still, "pose": "shut"}})
-        self.assertIn("no configuration 'shut'", refused["refused"])
+        self.assertIn("no mechanism state 'shut'", refused["refused"])
         capped = self.start("1")
         answer, _ = capped.ask({"op": "frame", "still": still})
         self.assertIn("CADGEN_ENGINE_WORKER_RSS_MB", answer["done"]["retired"])

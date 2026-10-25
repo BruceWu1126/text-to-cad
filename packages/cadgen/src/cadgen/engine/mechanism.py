@@ -111,6 +111,7 @@ document, and cadgen's OCP reaches neither.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -2087,6 +2088,36 @@ def _block_checked(pair: dict[str, Any], value: Any, where: str) -> tuple[float,
     return _checked(as_pair, value, where)
 
 
+def _no_state(kinematics: dict[str, Any], pose: str) -> str:
+    """The refusal of a pose by a name no mechanism state has: the document's states and its
+    configuration sequences, each by name -- a sequence plays over time and is no pose -- and the
+    joint-value form, with a joint of its own at a value its range allows."""
+    states = ", ".join(sorted(kinematics.get("configurations") or {})) or "none"
+    sequences = kinematics.get("motions") or {}
+    pairs = _block_pairs(kinematics)
+    said = f"the document has no mechanism state {pose!r}"
+    if pose in sequences:
+        said += f" ({pose!r} is a configuration sequence, which plays over time: a pose is a state or joint values)"
+    said += f"; its states: {states}; its sequences: {', '.join(sorted(sequences)) or 'none'}"
+    joint = pose if pose in pairs else next(iter(sorted(pairs)), None)
+    if joint is None:
+        return said
+    values = [_example(limits) for limits in pairs[joint].get("limits") or [[None, None]]]
+    value: Any = values[0] if len(values) == 1 else values
+    return (said + f"; {'it is a joint' if joint == pose else 'its joints: ' + ', '.join(sorted(pairs))}: pose "
+            f"{'it' if joint == pose else 'one'} by value, --pose '{json.dumps({joint: value})}'")
+
+
+def _example(limits: Any) -> float | int:
+    """A value to show a joint posed at: 90 where its range allows, else its range's middle, else
+    the one bound it has."""
+    if _within(90, limits):
+        return 90
+    lower, upper = limits
+    found = (lower + upper) / 2 if lower is not None and upper is not None else lower if lower is not None else upper
+    return int(found) if float(found).is_integer() else round(found, 3)
+
+
 def resolve(kinematics: dict[str, Any] | None, pose: Any, *,
             own: bool = False) -> tuple[dict[str, tuple[float, ...]], str | None]:
     """The values a pose sets every pair to, and the configuration it names: ``pose`` is
@@ -2109,8 +2140,7 @@ def resolve(kinematics: dict[str, Any] | None, pose: Any, *,
     if isinstance(pose, str):
         configurations = kinematics.get("configurations") or {}
         if pose not in configurations:
-            known = ", ".join(sorted(configurations)) or "none"
-            raise KinematicsError(f"the document has no configuration {pose!r}; its configurations: {known}")
+            raise KinematicsError(_no_state(kinematics, pose))
         named, given, where = pose, configurations[pose], f"configuration {pose!r}"
     elif isinstance(pose, dict):
         given, where = pose, "the pose"
