@@ -40,9 +40,9 @@ first tier (read again from disk: evicted first). A run reads it too: a build is
 is the model's (``build._previous``), with nothing run. Bound, as 0.7's store was: past ``cap()`` bytes
 (``CADGEN_ENGINE_CACHE_GB``, default ``CACHE_GB``; ``0``: no cache at all), the least recently used
 files go down to ``LOW_WATER`` of it, so a pass does not run on every save; never the file of a
-document a live worker holds or a page watches, and never a shape handed over's (``store: "shape"``):
-no program is behind it to build it again, so its file leaves only with its record (a person removing
-it from the home), and the bound takes model documents alone. A save that fails is
+document a live worker holds or a page watches. A shape handed over (``store: "shape"``) is a
+document like any: its file goes for the bound too, and its id then answers that it is no longer
+held, and to run the program that handed it over again. A save that fails is
 logged and listed in ``cadgen status``, never raised to anyone: with the state folder read-only the
 engine does everything it did, and caches nothing.
 """
@@ -418,41 +418,25 @@ class Cache:
         held.update(ident, lambda found: {**found, "cache": meta}
                     if found is not None and found.get("revision") == revision else None)
         with self.lock:
-            self.index[ident] = {"bytes": len(data), "revision": revision, "used": time.time(),
-                                 "store": (row or {}).get("store") or record.get("store")}
+            self.index[ident] = {"bytes": len(data), "revision": revision, "used": time.time()}
             self.written += 1
         self.models.on_disk(ident, revision)
         self._bound(ident)
 
-    def _store(self, ident: str, held: Any) -> str | None:
-        """The store of the document whose cache file is ``ident``'s (``pointer``, ``shape``), as its
-        write noted it, else its record says (a file indexed at start), noted from then on."""
-        with self.lock:
-            entry = self.index.get(ident)
-            if entry is None or entry.get("store"):
-                return None if entry is None else entry["store"]
-        record = held.get(ident) if held is not None else None
-        store = (record or {}).get("store") or "pointer"
-        with self.lock:
-            if ident in self.index:
-                self.index[ident]["store"] = store
-        return store
-
     def _bound(self, spare: str) -> None:
         """Past the cap, the least recently used cache files go down to ``LOW_WATER`` of it -- never
-        ``spare`` (just written), the file of a document a live worker holds or a page watches, nor a
-        shape handed over's (``store: "shape"``: nothing builds it again)."""
+        ``spare`` (just written), nor the file of a document a live worker holds or a page watches; a
+        shape handed over's goes as any document's does."""
         with self.lock:
             total = sum(entry["bytes"] for entry in self.index.values())
             if total <= self.cap:
                 return
             order = sorted((ident for ident in self.index if ident != spare), key=lambda ident: self.index[ident]["used"])
         kept = self.models.in_use()
-        held = self.registry()
         for ident in order:
             if total <= int(self.cap * LOW_WATER):
                 break
-            if ident in kept or self._store(ident, held) == "shape":
+            if ident in kept:
                 continue
             with self.lock:
                 entry = self.index.get(ident)
