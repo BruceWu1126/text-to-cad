@@ -16,6 +16,7 @@ the contract tests cost no kernel load, and exercised once for real.
 from __future__ import annotations
 
 import io
+import os
 import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -93,6 +94,33 @@ class DoctorTests(unittest.TestCase):
         self.assertIn(f"registry {record} dangling: its interpreter {found[1]} is gone", gone)
         self.assertEqual(pruned, f"removed {record}\n")
         self.assertFalse(record.exists())
+
+    @unittest.skipIf(os.name == "nt", "the legacy pair on POSIX: a symlink and an sh script")
+    def test_prune_removes_the_per_version_launchers_earlier_builds_published(self) -> None:
+        env = self.state / "env" / "bin"
+        env.mkdir(parents=True)
+        (env / "cadgen").write_text("", encoding="utf-8")
+        (env / "python").write_text("", encoding="utf-8")
+        folder = self.state / "bin"
+        folder.mkdir()
+        console, python = folder / "cadgen-0.8.0", folder / "cadgen-python-0.8.0"
+        console.symlink_to(env / "cadgen")
+        python.write_text(f"#!/bin/sh\n# cadgen launcher: {env / 'python'}\nexec '{env / 'python'}' \"$@\"\n",
+                          encoding="utf-8")
+        gone = folder / "cadgen-0.7.9"  # a dangling one, its environment removed since
+        gone.symlink_to(self.state / "removed" / "bin" / "cadgen")
+        kept = {folder / "cadgen": "#!/bin/sh\n# cadgen proxy: 1\n",  # the proxy itself
+                folder / "cadgen-1.0": "another program's\n",
+                folder / "cadgen-python-1.0": "#!/bin/sh\nexec python \"$@\"\n"}  # no marker: not ours
+        for path, text in kept.items():
+            path.write_text(text, encoding="utf-8")
+        code, out, _ = _run(["--prune"])
+        self.assertEqual(code, 0)
+        for path in (console, python, gone):
+            self.assertIn(f"removed {path}, a launcher the cadgen command replaces\n", out)
+            self.assertFalse(os.path.lexists(path), path)
+        for path, text in kept.items():
+            self.assertEqual(path.read_text(encoding="utf-8"), text, "anything else is left alone")
 
     def test_a_source_tree_registers_nothing_unless_named(self) -> None:
         with TemporaryDirectory() as tmp:

@@ -6,7 +6,9 @@ command. It registers this installation (``<state>/installations/<version>.json`
 proxy, ``~/.local/bin/cadgen`` (``cadgen._internal.installations``), through which the skills run
 ``cadgen +<version>``, and says what it found: each written, already right, or a folder it cannot
 write (a sandbox's), the records of installations whose interpreter is gone, and a file in the
-proxy's place that is not cadgen's. ``--prune`` removes those records. Then it starts the engine
+proxy's place that is not cadgen's. ``--prune`` removes those records, and the per-version
+launchers (``cadgen-<version>``, ``cadgen-python-<version>``) earlier builds published beside the
+proxy (``installations.prune_legacy``). Then it starts the engine
 when none runs (``cadgen.engine.client``): in a sandbox that cannot start one it says so in its usual
 line. ``--no-server`` does all of it but start the engine, saying whether one runs: a CI job's
 smoke check, which must leave no engine behind. Run pointed at a skill (its directory or SKILL.md), it also says whether this is the cadgen the
@@ -205,7 +207,8 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     parser.add_argument(
         "--prune",
         action="store_true",
-        help="Remove the record of every registered installation whose interpreter is gone, and exit.",
+        help="Remove the record of every registered installation whose interpreter is gone, and the "
+             "per-version launchers earlier builds published beside the cadgen command, and exit.",
     )
     parser.add_argument(
         "--no-server",
@@ -222,6 +225,9 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
             sys.stdout.write(f"removed {path}\n")
         if not removed:
             sys.stdout.write("no registered installation has lost its interpreter\n")
+        # And the per-version launchers earlier 0.8 builds published beside the cadgen command.
+        for path in installations.prune_legacy():
+            sys.stdout.write(f"removed {path}, a launcher the cadgen command replaces\n")
         return 0
 
     import cadgen

@@ -180,6 +180,71 @@ def prune(folder=None) -> list[str]:
     return removed
 
 
+# The per-version launchers an earlier 0.8 build published beside the proxy: ``cadgen-<version>``
+# (a symlink to an environment's console script; on Windows a copy, ``.exe``) and
+# ``cadgen-python-<version>`` (a script whose first lines carry ``LEGACY_MARK``).
+LEGACY_MARK = "cadgen launcher: "
+
+
+def _legacy_python(path: str) -> bool:
+    """Whether ``path`` is a python launcher an earlier build wrote: it carries ``LEGACY_MARK``."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            head = handle.read(4096)
+    except (OSError, ValueError):
+        return False
+    return any(LEGACY_MARK in line for line in head.splitlines()[:3])
+
+
+def _legacy_console(path: str) -> bool:
+    """Whether ``path`` is a console launcher an earlier build wrote: a symlink, even a dangling
+    one, to a cadgen environment's console script (``.../bin/cadgen``)."""
+    if not os.path.islink(path):
+        return False
+    try:
+        target = os.readlink(path)
+    except OSError:
+        return False
+    parts = target.replace("\\", "/").rstrip("/").split("/")
+    return parts[-1:] == ["cadgen"] and parts[-2:-1] == ["bin"]
+
+
+def prune_legacy(where: str | None = None, windows: bool = WINDOWS) -> list[str]:
+    """Remove the per-version launchers earlier 0.8 builds published in the proxy's folder (``where``):
+    each ``cadgen-python-<version>`` carrying ``LEGACY_MARK``, and each ``cadgen-<version>`` symlink
+    into a cadgen environment (on Windows the ``.exe`` copy beside a marked ``.cmd``). Anything else
+    there -- the proxy, another program's file -- is left alone. The paths removed."""
+    folder = where or proxy_folder()
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return []
+    marked = set()
+    for name in names:
+        stem = name[:-4] if windows and name.lower().endswith(".cmd") else name
+        if stem.startswith("cadgen-python-") and VERSION.fullmatch(stem[len("cadgen-python-"):]) \
+                and _legacy_python(os.path.join(folder, name)):
+            marked.add(stem[len("cadgen-python-"):])
+    removed = []
+    for name in names:
+        path = os.path.join(folder, name)
+        stem = name[:-4] if windows and name.lower().endswith((".cmd", ".exe")) else name
+        if stem.startswith("cadgen-python-"):
+            legacy = stem[len("cadgen-python-"):] in marked
+        elif stem.startswith("cadgen-") and VERSION.fullmatch(stem[len("cadgen-"):]):
+            version = stem[len("cadgen-"):]
+            legacy = _legacy_console(path) or (windows and name.lower().endswith(".exe") and version in marked)
+        else:
+            legacy = False
+        if legacy:
+            try:
+                os.remove(path)
+            except OSError:
+                continue
+            removed.append(path)
+    return removed
+
+
 def forget(version: str, folder=None) -> None:
     """Remove the record of ``version`` (a development install's, as it is taken out)."""
     (folder or state()).remove(_inside(version))
