@@ -329,9 +329,9 @@ it again.
   program again. A decorated function in no saved file is refused, with these words.
 - `cadgen status` lists the workers and the documents the engine holds (`--json` as
   data); `cadgen stop` stops the engine and any older one still running. At most
-  `CADGEN_ENGINE_WORKERS` workers live (default: the machine's cores); a worker idle for
-  `CADGEN_ENGINE_WORKER_IDLE` seconds, or over `CADGEN_ENGINE_WORKER_RSS_MB` after a run,
-  is retired, and its script's next run starts cold. `CADGEN_ENGINE_DIR` moves the
+  `CADGEN_ENGINE_WORKERS` workers live (default: the machine's cores); a worker is retired only
+  when the workers' memory is over `CADGEN_ENGINE_WORKER_RSS_MB`, never for idleness,
+  and its script's next run starts cold. `CADGEN_ENGINE_DIR` moves the
   engine's door and lock (one engine per folder).
 
 ## Progress and the report
