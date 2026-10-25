@@ -252,7 +252,8 @@ with the same request ID joins the identical operation; changed arguments are
 refused. `action: "cancel"` cancels queued work. Running operations can write
 explicit destinations and are not cancellable. Disconnecting does not cancel. File outputs are not a multi-file transaction: a
 failed operation may have written earlier outputs or a called model's declarations.
-Failure results state this explicitly; reports over 2 MiB are explicitly marked
+Failure results state this explicitly (`outputsMayHaveBeenWritten`, false when it failed before
+anything was asked to write); reports over 2 MiB are explicitly marked
 truncated and can be obtained through the Python API or CLI.
 There is no separate job tool or generic HTTP jobs API.
 

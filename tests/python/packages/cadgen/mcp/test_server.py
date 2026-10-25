@@ -1005,7 +1005,9 @@ class ToolArgumentsTest(unittest.TestCase):
                  "preview, pose, width, height, size_profile, annotation, measurements, waitMs. To follow one: "
                  "{action: status or cancel, operationId, epoch}, optionally with afterSequence, waitMs.")
         for arguments, said in (({"path": str(self.model)}, "missing requestId, source, output; unknown path"),
-                                ({"id": DOCUMENT_ID, "out": str(self.tmp / "a.png")}, "missing requestId, source, output; unknown id, out")):
+                                ({"id": DOCUMENT_ID, "out": str(self.tmp / "a.png")}, "missing requestId, source, output; unknown id, out"),
+                                ({"requestId": "agreement-request-01", "packet": {}, "output": str(self.tmp / "a.png")},
+                                 "a packet declares its outputs; omit output")):
             refused = self.call(server, "cad_snapshot", arguments)
             self.assertTrue(refused["isError"])
             self.assertEqual(refused["structuredContent"]["error"], f"cad_snapshot: {said}. {shape}")
@@ -1025,6 +1027,32 @@ class ToolArgumentsTest(unittest.TestCase):
             done = self.call(server, "cad_inspect", {"requestId": "inspect-and-wait-01", "source": str(self.model),
                                                      "waitMs": 10000})["structuredContent"]
         self.assertEqual((done["state"], done["result"]), ("succeeded", {"inspection": {"faces": 6}}))
+
+    def test_a_snapshot_with_no_output_is_refused_at_its_start(self) -> None:
+        server = self.served("text")
+        refused = self.call(server, "cad_snapshot", {"requestId": "snapshot-no-output-1", "source": str(self.model)})
+        self.assertEqual(refused["structuredContent"]["state"], "rejected")
+        self.assertTrue(refused["structuredContent"]["error"].startswith("cad_snapshot: missing output. To start: "))
+        relative = self.call(server, "cad_snapshot", {"requestId": "snapshot-relative-01", "source": str(self.model),
+                                                      "output": "picture.png"})["structuredContent"]
+        self.assertEqual((relative["state"], relative["error"]), ("rejected", "Paths must be absolute on the engine host"))
+        self.assertEqual(server.operations.jobs, {})
+
+    def test_outputs_may_have_been_written_only_once_the_engine_was_asked(self) -> None:
+        from cadgen.engine.export import ExportRefused
+        from cadgen.engine.snapshot import SnapshotRefused
+
+        server = self.served("text")
+        out = str(self.tmp / "a.png")
+        engine_refusal = ExportRefused("the second destination is 3D")
+        engine_refusal._engine_refusal = True
+        for error, may in ((SnapshotRefused("refused before any render"), False), (engine_refusal, True),
+                           (RuntimeError("the renderer died"), True)):
+            with mock.patch("cadgen.engine.api.snapshot", side_effect=error):
+                failed = self.call(server, "cad_snapshot", {"requestId": f"snapshot-fails-{may}-{type(error).__name__}",
+                                                            "source": str(self.model), "output": out, "waitMs": 10000})
+            self.assertEqual(failed["structuredContent"]["state"], "failed")
+            self.assertEqual(failed["structuredContent"]["result"], {"outputsMayHaveBeenWritten": may}, error)
 
 class LocalPathTest(unittest.TestCase):
     def test_windows_reads_a_drive_path_however_a_host_spells_it(self) -> None:

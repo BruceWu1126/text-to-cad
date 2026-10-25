@@ -34,7 +34,10 @@ COMMON = {
 # What follows an operation: status or cancel, by the id and epoch its start returned.
 FOLLOW = ("action", "operationId", "epoch", "afterSequence", "waitMs")
 FOLLOW_REQUIRED = ("action", "operationId", "epoch")
-SNAPSHOT = {"source": STRING, "output": STRING, "packet": JSON_VALUE,
+SNAPSHOT = {"source": STRING,
+            "output": {**STRING, "description": "The PNG's absolute path; required with source unless a packet names the outputs."},
+            "packet": {**JSON_VALUE, "description": "A Quick Edit packet (its absolute path or object), which declares its outputs: "
+                                                    "give it in place of output; a source with it replaces its input."},
             "display": JSON_VALUE, "camera": JSON_VALUE, "grid": BOOL, "preview": BOOL,
             "pose": {"type": ["object", "string"]}, "width": {"type": "integer", "minimum": 1},
             "height": {"type": "integer", "minimum": 1}, "size_profile": STRING,
@@ -110,6 +113,8 @@ def check_arguments(name, values):
         group = min(given, key=lambda group: (sum(key not in values for key in group), -sum(key in values for key in group))) \
             if given else STARTS[name][0]
         required = ("requestId", *group)
+        if name == "cad_snapshot" and "packet" in values and "output" in values:
+            raise JobError(f"cad_snapshot: a packet declares its outputs; omit output. {takes(name)}")
     else:
         allowed = {key: COMMON[key] for key in FOLLOW}
         required = FOLLOW_REQUIRED
@@ -124,6 +129,17 @@ def check_arguments(name, values):
         return action
     if not re.fullmatch(r"[\w-]{16,100}", values["requestId"]):
         raise JobError("requestId must be 16–100 letters, digits, underscores or hyphens")
+    # Paths are checked here too, so nothing is queued that could only fail.
+    if "source" in values:
+        source(values["source"])
+    if "output" in values:
+        absolute(values["output"])
+    if name == "cad_export":
+        destinations = [absolute(path) for path in values["destinations"]]
+        from cadgen.engine.ids import is_id
+
+        if len(set(destinations)) != len(destinations) or (not is_id(values["source"]) and absolute(values["source"]) in destinations):
+            raise JobError("Export destinations must be distinct from each other and the source")
     return action
 
 
@@ -280,7 +296,15 @@ class Operations(Jobs):
                            "id": summary.get("id")}}
 
     def _failure(self, job, error):
-        return {"result": {"outputsMayHaveBeenWritten": job["operation"] in ("cad_export", "cad_snapshot")}}
+        """Whether a failed operation may have written: only once its export or snapshot was asked
+        for (``_perform``), and not where this process refused it -- the export's and the snapshot's
+        own checks, which run before the engine is asked for anything. A refusal the engine raised
+        (``api._failed`` marks it) may come after a destination was written."""
+        from cadgen.engine.export import ExportRefused
+        from cadgen.engine.snapshot import SnapshotRefused
+
+        refused_here = isinstance(error, (ExportRefused, SnapshotRefused)) and not getattr(error, "_engine_refusal", False)
+        return {"result": {"outputsMayHaveBeenWritten": bool(job.get("writing")) and not refused_here}}
 
     def _finished(self, job):
         job.pop("arguments", None)
@@ -294,17 +318,12 @@ class Operations(Jobs):
     def _perform(self, job, progress):
         from cadgen.engine import api
         name, args = job["operation"], dict(job["arguments"])
-        if "source" in args:
-            source(args["source"])
         progress({"label": name.removeprefix("cad_").capitalize() + " in progress"})
         if name == "cad_export":
             destinations = [absolute(path) for path in args.pop("destinations")]
-            from cadgen.engine.ids import is_id
-
-            if len(set(destinations)) != len(destinations) or (not is_id(args["source"]) and absolute(args["source"]) in destinations):
-                raise JobError("Export destinations must be distinct from each other and the source")
             # Keep the one Python operation: all destinations are validated and share a document read.
             src = args.pop("source")
+            job["writing"] = True
             result = {"files": serial(api.export(src, *destinations, **args, progress=progress))}
         elif name == "cad_snapshot":
             packet = args.pop("packet", None)
@@ -313,13 +332,11 @@ class Operations(Jobs):
                 if isinstance(args.get(field), str) and not args[field].lstrip().startswith(("{", "[")):
                     absolute(args[field])
             if packet is not None:
-                if output is not None:
-                    raise JobError("A packet declares its outputs; omit output")
                 packet = packet_paths(packet, args.get("source"))
+                job["writing"] = True
                 result = {"pictures": serial(api.snapshot(job=packet, **args))}
             else:
-                if output is None or "source" not in args:
-                    raise JobError("Snapshot requires source and output, or a packet")
+                job["writing"] = True
                 result = {"pictures": [serial(api.snapshot(**args, out=absolute(output)))]}
         elif name == "cad_inspect":
             result = {"inspection": serial(api.inspect(**args))}

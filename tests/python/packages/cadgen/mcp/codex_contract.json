@@ -886,10 +886,12 @@
         ]
        },
        "output": {
+        "description": "The PNG's absolute path; required with source unless a packet names the outputs.",
         "minLength": 1,
         "type": "string"
        },
        "packet": {
+        "description": "A Quick Edit packet (its absolute path or object), which declares its outputs: give it in place of output; a source with it replaces its input.",
         "type": [
          "object",
          "array",
@@ -1031,10 +1033,12 @@
       "type": "string"
      },
      "output": {
+      "description": "The PNG's absolute path; required with source unless a packet names the outputs.",
       "minLength": 1,
       "type": "string"
      },
      "packet": {
+      "description": "A Quick Edit packet (its absolute path or object), which declares its outputs: give it in place of output; a source with it replaces its input.",
       "type": [
        "object",
        "array",
