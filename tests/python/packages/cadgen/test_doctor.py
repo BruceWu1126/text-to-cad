@@ -95,6 +95,29 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(pruned, f"removed {record}\n")
         self.assertFalse(record.exists())
 
+    def test_doctor_through_the_proxy_names_a_development_installation_by_its_version(self) -> None:
+        """A development install run through the ``cadgen`` command, with nothing in its environment
+        naming it: the proxy tells it, so its header and its record are its own version."""
+        import subprocess
+
+        from cadgen._internal import installations
+
+        found = installations.targets()
+        if found is None:
+            self.skipTest("this interpreter has no console script to register")
+        installations.register("1.2.3-dev.1", found)
+        environment = {key: value for key, value in os.environ.items() if key != installations.NAME_ENV}
+        environment["PYTHONPATH"] = str(Path(cadgen.__file__).resolve().parent.parent)  # this cadgen, however installed
+        done = subprocess.run([sys.executable, "-P", "-m", "cadgen._internal.proxy", "+1.2.3-dev.1", "doctor",
+                               "--no-server", str(self.state)], capture_output=True, text=True, env=environment,
+                              timeout=300)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        lines = done.stdout.splitlines()
+        self.assertEqual(lines[0], "cadgen 1.2.3-dev.1")
+        record = self.state / "installations" / "1.2.3-dev.1.json"
+        self.assertEqual([line.strip() for line in lines if line.strip().startswith("registry")],
+                         [f"registry {record} OK"])
+
     @unittest.skipIf(os.name == "nt", "the legacy pair on POSIX: a symlink and an sh script")
     def test_prune_removes_the_per_version_launchers_earlier_builds_published(self) -> None:
         env = self.state / "env" / "bin"

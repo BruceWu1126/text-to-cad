@@ -231,12 +231,14 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
         return 0
 
     import cadgen
+    from cadgen._internal.installations import own_version
     from cadgen._internal.launch import launch_command
     from cadgen.cli import read_skill_pin
 
     installed = getattr(cadgen, "__version__", "unknown")
     location = Path(cadgen.__file__).resolve().parent
-    sys.stdout.write(f"cadgen {installed}\n")
+    # The version this installation runs as: a development install's own name, else its release.
+    sys.stdout.write(f"cadgen {own_version() or installed}\n")
     sys.stdout.write(f"  python   {sys.version.split()[0]} ({sys.executable})\n")
     sys.stdout.write(f"  install  {location}\n")
     # Its record and the command the skills run it by (`cadgen._internal.installations`).

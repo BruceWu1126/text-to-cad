@@ -19,6 +19,10 @@ Then ``cadgen [+V] run ARGS`` runs that installation's ``python ARGS`` (a model 
 ``-c``), and anything else its ``cadgen`` console script with the arguments: by ``exec``, so the
 proxy adds no process and no output of its own -- or, when the installation chosen is the one this
 interpreter is (the usual case: one installation), as its console script would, in this process.
+A development or source registration cannot know the version it is registered as (it reports its
+release's), so it runs with ``CADGEN_INSTALLATION_VERSION`` set to its record's
+(``installations.named``): its ``doctor``, its records and its engine name it rightly, and the
+processes it starts, the same installation, inherit it.
 """
 
 from __future__ import annotations
@@ -155,6 +159,12 @@ def main(argv: list[str] | None = None) -> int:
         print(refusal, file=sys.stderr)
         return 1
     run = command(record, args)
+    from cadgen._internal.installations import NAME_ENV, named as told
+
+    if told(record):  # an installation that cannot know its own name: told it
+        os.environ[NAME_ENV] = told(record)
+    else:  # a release knows its own, whatever another installation's process that ran this was told
+        os.environ.pop(NAME_ENV, None)
     if run[0] == record["cadgen"] and _same(sys.prefix, record["prefix"]):
         # The installation this interpreter is: its console script's work, here, without a second start.
         sys.argv = run
@@ -164,9 +174,9 @@ def main(argv: list[str] | None = None) -> int:
     if os.name == "nt":  # no exec on Windows: a child, and its exit code
         import subprocess
 
-        return subprocess.call(run)
+        return subprocess.call(run, env=os.environ)
     try:
-        os.execv(run[0], run)
+        os.execve(run[0], run, os.environ)
     except OSError as error:
         print(f"cadgen: cannot run {run[0]}: {error.strerror or error}", file=sys.stderr)
         return 1

@@ -224,9 +224,25 @@ class ResolutionTests(Fixture):
         self.assertEqual(proxy.command(self.old, ["run", "model.py", "--force"]), [self.old["python"], "model.py", "--force"])
         self.assertEqual(proxy.command(self.old, ["export", "a.xbf"]), [self.old["cadgen"], "export", "a.xbf"])
         with mock.patch.dict("os.environ", {"CADGEN_STATE_DIR": str(self.root / "state"), "CADGEN_VERSION": ""}), \
-                mock.patch.object(proxy, "engines", return_value=[]), mock.patch.object(proxy.os, "execv") as execv:
+                mock.patch.object(proxy, "engines", return_value=[]), mock.patch.object(proxy.os, "execve") as execve:
             proxy.main(["+0.8.0", "run", "model.py", "a"])
-        execv.assert_called_once_with(self.old["python"], [self.old["python"], "model.py", "a"])
+        execve.assert_called_once_with(self.old["python"], [self.old["python"], "model.py", "a"], mock.ANY)
+
+    def test_a_development_installation_is_told_its_version_and_a_release_is_not(self) -> None:
+        """A dev or source registration reports its release's version: the proxy names it, in the
+        environment of what it runs (and its children, the same installation). A release knows its
+        own, and a name a dev installation's process passed down is taken off."""
+        ran = {}
+        with mock.patch.dict("os.environ", {"CADGEN_STATE_DIR": str(self.root / "state"), "CADGEN_VERSION": "",
+                                            installations.NAME_ENV: "0.9.0-dev.1"}), \
+                mock.patch.object(proxy, "engines", return_value=[]), \
+                mock.patch.object(proxy.os, "execve", side_effect=lambda path, argv, env: ran.update({path: dict(env)})):
+            proxy.main(["+0.9.0-dev.20261024", "doctor"])
+            proxy.main(["+0.8.0", "doctor"])
+        self.assertEqual(ran[self.dev["cadgen"]][installations.NAME_ENV], "0.9.0-dev.20261024")
+        self.assertNotIn(installations.NAME_ENV, ran[self.old["cadgen"]])
+        self.assertEqual([installations.named(record) for record in (self.old, self.new, self.dev)],
+                         [None, None, "0.9.0-dev.20261024"])
 
     def test_the_shell_names_its_host(self) -> None:
         self.assertEqual(engine_host.shell({"CODEX_THREAD_ID": "t", "CLAUDECODE": "1"}), "codex")
