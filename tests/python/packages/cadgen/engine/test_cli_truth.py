@@ -120,6 +120,21 @@ class VerbsTest(unittest.TestCase):
         self.assertEqual(lines[-2:], ["AssertionError: blade count must be positive", "failed parts.py::bad"])
         self.assertEqual(self.failed.stderr.count("Traceback"), 1, self.failed.stderr)
 
+    def test_a_refused_pose_leaves_the_document_as_it_was(self) -> None:
+        """A snapshot refused before it draws -- a pose the document cannot take -- is the
+        request's refusal, never its document's build failure: status, export and inspect say
+        what they said before, and nothing says the last run failed."""
+        before = self.status_line(self.box)
+        self.assertNotIn("failed", before)
+        refused = self.cli("snapshot", self.box, str(self.folder / "posed.png"), "--pose", '{"ja": 45}')
+        self.assertEqual(refused.returncode, 2, refused.stderr)
+        self.assertIn("no joints to pose", refused.stderr)
+        self.assertEqual(self.status_line(self.box), before)
+        for verb, args in (("export", [str(self.folder / "after.stl")]), ("inspect", [])):
+            done = self.cli(verb, self.box, *args)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertNotIn("failed", done.stderr)
+
     def test_a_wrote_line_names_each_path_as_it_was_given(self) -> None:
         """An absolute path outside the working folder stays absolute, unresolved (macOS's /var is
         /private/var), and a relative one stays relative, for export and, where OCCT can draw,
