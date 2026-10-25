@@ -683,8 +683,8 @@ def status_text(answer: dict[str, Any]) -> str:
         lines.append(f"serving {serving['url']}{_port(serving)}: {opened} document{'' if opened == 1 else 's'} opened by a page or a command"
                      + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else "")
                      + (f" · {_gb(held / 2**20)} of {_gb(memory['budget'] / 2**20)} held" if memory.get("budget") else ""))
-        if serving.get("portNotice"):  # this engine's start moved the port: a roll, or the return to the default
-            lines.append(f"  {serving['portNotice']}")
+        # What this engine's start said: the older engines it retired, a move of its port.
+        lines.extend(f"  {said}" for said in (serving.get("portNotice") or "").splitlines())
     cache = answer.get("cache") or {}
     if cache.get("enabled"):
         failures = cache.get("failures") or []

@@ -255,8 +255,10 @@ def _exchange(connection: Connection, message: dict[str, Any], on_log: Callable[
                     on_progress(answer["progress"])
                 continue
             notice = answer.pop("notice", None)
-            if notice:  # the request that bound the engine's port, when that start moved it (``daemon.bind``)
-                print(f"cadgen: {notice}", file=sys.stderr)
+            # The request that bound the engine's port, when that start retired an older engine or
+            # moved the port (``daemon.bind``): a line each.
+            for said in (notice or "").splitlines():
+                print(f"cadgen: {said}", file=sys.stderr)
             return answer
     raise ConnectionError("the engine server closed the connection")
 

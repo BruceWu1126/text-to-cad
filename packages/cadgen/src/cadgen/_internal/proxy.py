@@ -24,7 +24,6 @@ interpreter is (the usual case: one installation), as its console script would, 
 from __future__ import annotations
 
 import os
-import re
 import sys
 
 ASK_SECONDS = 0.5
@@ -40,12 +39,14 @@ class Refused(Exception):
 
 
 def version_key(version: str) -> tuple:
-    """Newest last: the release numbers, then a release above its own pre-releases and development
-    builds (``0.8.0-dev.<time>``), which sort among themselves by their parts."""
-    release, _, suffix = version.partition("-")
-    numbers = tuple(int(part) if part.isdigit() else -1 for part in release.split("."))
-    parts = tuple((0, int(part), "") if part.isdigit() else (1, 0, part) for part in re.split(r"[.+_-]", suffix) if part)
-    return numbers, not suffix, parts
+    """Newest last, in the order an engine retires older installations' engines by
+    (``cadgen.engine.daemon.rank``, ``packaging.version``'s): a release above its own pre-releases
+    and development builds (``0.8.0-dev.<time>``), which sort by their time; a version that is no
+    PEP 440 version below every one that is."""
+    from cadgen.engine.daemon import rank
+
+    ranked = rank(version)
+    return (ranked is not None, ranked or ())
 
 
 def named(args: list[str], environ, cwd: str) -> tuple[str | None, list[str]]:
