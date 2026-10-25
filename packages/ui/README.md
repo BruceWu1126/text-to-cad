@@ -212,8 +212,8 @@ npm run check:boundaries
 and names no file format ([Kit](docs/cad-renderer.md#kit)).
 
 Rebuild shared packages after editing them; hosts resolve `dist`, never `src`.
-Install the npm Playwright browser even if Python's snapshot browser is already
-installed; they may require different Chromium revisions. On Linux, add
+Install the npm Playwright browser even if Python Playwright's (the viewer's launch
+smoke test's) is already installed; they may require different Chromium revisions. On Linux, add
 `--with-deps` to the browser install command if its system libraries are absent.
 The Node runner caps file concurrency at four so JSX transforms and Chromium
 setup do not compete with one process per host CPU. The UI suite includes Node
