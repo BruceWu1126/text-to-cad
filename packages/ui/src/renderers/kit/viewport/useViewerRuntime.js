@@ -540,6 +540,9 @@ export function useViewerRuntime({
         const cameraTransitionActive = stepCameraTransition(runtimeRef.current, timestamp);
         const keyboardOrbitMoved = stepKeyboardOrbit(runtimeRef.current, timestamp);
         const needsMoreFrames = updateOrbitControls(controls, timestamp, runtimeRef.current);
+        // Whether this frame's controls update still moved the camera (damping, autoRotate),
+        // which the `__cadCamera()` seam reports as `settling`.
+        if (runtimeRef.current) runtimeRef.current.controlsMovedLastFrame = needsMoreFrames;
         if (cameraTransitionActive || keyboardOrbitMoved) {
           emitPerspectiveChange(runtimeRef.current);
         }
