@@ -524,7 +524,11 @@ are measured, their outermost faces exactly (a cold walk of tom lists 5 of its 2
 measures no face exactly; juno's, 41 of 246 and 12 faces; measuring every part took 5.5 s and
 8.2 s), and a tree whose signature is its last build's is not walked again, so a warm no-op pays
 nothing measurable for it. A failed build
-raises; a successful call resumes the script. A body that fails in a kernel call with an OCCT exception (often bare: `Standard_Failure`,
+raises; a successful call resumes the script. A failed run's line says when the model's previous
+good build is still served (`failed parts.py::bad; serving its previous good build`), and, the
+error left uncaught, that the program stopped there: `the run stopped at bad: a model it calls
+after this one is not built`. Nothing builds those models for it: Python decides which calls run
+(law 11), so they say `stale` until the program runs again. A body that fails in a kernel call with an OCCT exception (often bare: `Standard_Failure`,
 `Standard_DomainError`, by OCCT build) has that call named on its failure line, as the memo saw it --
 `failed plate.py::plate at Solid.make_box(0, 60, 5): the kernel refused it` -- and in its report
 (`failedAt`; `memo.refused_call`). Put executable model calls under

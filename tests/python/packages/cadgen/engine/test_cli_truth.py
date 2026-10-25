@@ -117,7 +117,10 @@ class VerbsTest(unittest.TestCase):
         self.assertEqual(self.failed.returncode, 1)
         lines = self.failed.stderr.splitlines()
         self.assertEqual(lines[0], "Traceback (the model's frames):")
-        self.assertEqual(lines[-2:], ["AssertionError: blade count must be positive", "failed parts.py::bad"])
+        # Its previous good build is still served, and the program stopped there: the line after says so.
+        self.assertEqual(lines[-3:], ["AssertionError: blade count must be positive",
+                                      "failed parts.py::bad; serving its previous good build",
+                                      "the run stopped at bad: a model it calls after this one is not built"])
         self.assertEqual(self.failed.stderr.count("Traceback"), 1, self.failed.stderr)
 
     def test_a_refused_pose_leaves_the_document_as_it_was(self) -> None:

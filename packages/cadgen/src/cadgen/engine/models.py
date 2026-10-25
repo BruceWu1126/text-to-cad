@@ -79,6 +79,8 @@ class Models:
             return
         program = answer.get("program")
         for root in reports:
+            if not root.get("ok") and root.get("id") and self.held(root["id"]) is not None:
+                root["previous"] = True  # the failed run's line says its previous good build is served
             for report in [root, *(root.get("child_models") or {}).values()]:
                 ident, source = report.get("id"), report.get("source")
                 if not report.get("ok") or not ident or not source:

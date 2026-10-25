@@ -213,7 +213,10 @@ class Model:
         if not built.ok:
             error = api.EngineError(next(row.get("error", "model failed") for row in built.models if not row.get("ok")))
             if program:
-                _told(error)
+                # Said only if nothing catches it: the program stops here, and Python, not the
+                # engine, decides which calls run (law 11), so the models it calls after this one
+                # are not built -- and say ``stale`` until it runs again.
+                _told(error, f"the run stopped at {self.name}: a model it calls after this one is not built")
             raise error
         return api.Document(self.name, self.script, built.models[0], Path.cwd())
 

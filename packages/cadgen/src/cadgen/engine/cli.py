@@ -200,7 +200,8 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
                        for name, row in (report.get("child_models") or {}).items())
     if not report.get("ok"):
         refused = report.get("failedAt")  # an OCCT exception: the call the kernel refused
-        return f"failed {report.get('model')}" + (f" at {refused}: the kernel refused it" if refused else "") + children
+        return (f"failed {report.get('model')}" + (f" at {refused}: the kernel refused it" if refused else "")
+                + ("; serving its previous good build" if report.get("previous") else "") + children)
     timings = report.get("timings", {})
     memo = report.get("memo", {})
     bodies = list((report.get("bodies") or {}).values())
