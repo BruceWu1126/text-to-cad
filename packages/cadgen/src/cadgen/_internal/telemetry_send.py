@@ -3,8 +3,8 @@
 A command sends nothing itself: it keeps what it counted in the spool beside the settings
 (``analytics.spool``), which the CAD app's and the viewer's background sends take every window
 (``analytics.FLUSH_SECONDS``). With neither running, nothing would. So a command that finds the spool's
-oldest line older than a window, and no sender started within one (``STARTED``, beside the settings),
-starts this module detached (``start_if_due``): no window, a process group or session of its own, its
+oldest line older than a window, and no sender started within one (the time of the state folder's one
+lock, ``file_lock.STATE_LOCK``, which only a sender's start changes), starts this module detached (``start_if_due``): no window, a process group or session of its own, its
 output nowhere, the telemetry switches of the command's environment not inherited
 (``analytics.for_others``: it goes by the person's settings) -- and goes on without waiting for it.
 
@@ -21,36 +21,31 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-# Beside the settings: when the last sender was started (its time is the file's). A sender a window old is done
-# or stuck; either way the next is started.
-STARTED = "telemetry-sender"
 ROUNDS = 8  # the most batches one sender sends: a spool past ``analytics.MAX_EVENTS`` events takes several
 
 
 def start_if_due(path: Path | None = None, *, now: float | None = None,
                  spawn: Callable[[Path], Any] | None = None) -> bool:
     """Start the sender when the spool has waited longer than a window and none was started within one; whether
-    it was. Under the settings lock, so two commands at once start one. Never raises, never waits on it."""
+    it was. Under the state folder's one lock, whose time is when the last sender was started: so two commands
+    at once start one, and a sender a window old -- done or stuck -- is followed by the next. Never raises,
+    never waits on it."""
     try:
         import time
 
         from cadgen.analytics import FLUSH_SECONDS, SPOOL
-        from cadgen._internal.file_lock import exclusive
-        from cadgen.settings import LOCK, settings_path
+        from cadgen._internal.file_lock import STATE_LOCK, state
+        from cadgen.settings import settings_path
 
         settings = Path(path or settings_path())
         now = time.time() if now is None else now
         oldest = _oldest(settings.with_name(SPOOL))
         if oldest is None or now - oldest <= FLUSH_SECONDS:  # the common answer, read without the lock
             return False
-        started = settings.with_name(STARTED)
-        with exclusive(settings.with_name(LOCK)):
-            try:
-                if now - started.stat().st_mtime <= FLUSH_SECONDS:
-                    return False
-            except FileNotFoundError:
-                pass
-            started.touch()
+        with state(settings.parent):
+            started = settings.with_name(STATE_LOCK)
+            if now - started.stat().st_mtime <= FLUSH_SECONDS:
+                return False
             os.utime(started, (now, now))
         (spawn or _spawn)(settings)
         return True

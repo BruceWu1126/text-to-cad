@@ -340,6 +340,187 @@ class DoctorTests(unittest.TestCase):
                     self.assertIsNone(doctor._editable_source())
 
 
+class PrivateFolders(unittest.TestCase):
+    """A state, cache, engine and launcher folder of the test's own, and files in them written a month ago."""
+
+    OLD = 30 * 86400
+
+    def setUp(self) -> None:
+        patcher = mock.patch.object(doctor, "_probe_kernel", return_value=(doctor.KERNEL_OK, "/site/OCP.pyd"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        root = TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        self.root = Path(root.name).resolve()
+        self.state, self.cache, self.engines = self.root / "state", self.root / "cache", self.root / "engine"
+        self.engines.mkdir(mode=0o700)
+        environment = mock.patch.dict("os.environ", {"CADGEN_STATE_DIR": str(self.state), "CADGEN_CACHE_DIR": str(self.cache),
+                                                     "CADGEN_LAUNCHER_DIR": str(self.root / "bin"),
+                                                     "CADGEN_ENGINE_DIR": str(self.engines),
+                                                     "CADGEN_INSTALLATION_VERSION": "", "DO_NOT_TRACK": "1",
+                                                     "CODEX_SANDBOX_NETWORK_DISABLED": "1"})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def file(self, inside: str, data: str = "x", *, old: bool = True) -> Path:
+        path = self.root / inside
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(data, encoding="utf-8")
+        if old:
+            self.age(path)
+        return path
+
+    def age(self, path: Path) -> None:
+        """``path`` and everything up to the test's folder, last written a month ago."""
+        import time
+
+        then = time.time() - self.OLD
+        while path != self.root:
+            os.utime(path, (then, then))
+            path = path.parent
+
+    def mirror(self, environment: Path) -> str:
+        """Where Python files the bytecode of a library in ``environment`` under a pycache prefix."""
+        return os.path.splitdrive(str(environment / "lib" / "site.py"))[1].lstrip("\\/")
+
+    def tree(self) -> list[str]:
+        return sorted(path.relative_to(self.root).as_posix() for folder in (self.state / "engines", self.state / "documents",
+                                                                         self.cache) for path in folder.rglob("*"))
+
+
+
+class LeftoversTest(PrivateFolders):
+    """``cadgen doctor`` says what cadgen left behind that nothing needs, and ``--prune`` removes it, a
+    line per kind: never a live engine's bytecode, a registered installation's, a recorded document's
+    cache, nor anything written in the last seven days."""
+
+    def test_doctor_says_what_nothing_needs_and_prune_removes_it_but_what_is_live_registered_recorded_or_recent(self) -> None:
+        import json
+
+        from cadgen._internal import installations
+        from cadgen.engine import daemon
+
+        self.file("state/engines/aaaaaaaa.json", json.dumps({"schema": 2, "token": "an-earlier-builds"}))
+        trimmed = self.file("state/engines/bbbbbbbb.json", json.dumps({"schema": 3, "port": 3246, "token": "t" * 43}))
+        current = self.file("state/engines/cccccccc.json", json.dumps({"port": 3247, "schema": 3}))
+        recent_record = self.file("state/engines/dddddddd.json", json.dumps({"schema": 1}), old=False)
+        token = self.file("state/engines/token", "t" * 43)
+        # A registered installation, alive: its python and console script are there.
+        environment = self.root / "env"
+        for name in ("python", "cadgen"):
+            self.file(f"env/bin/{name}")
+        record = {"version": "1.0.0", "python": str(environment / "bin" / "python"),
+                  "cadgen": str(environment / "bin" / "cadgen"), "prefix": str(environment)}
+        self.file("state/installations/1.0.0.json", json.dumps(record))
+        registered = self.file(f"cache/pycache/aaaaaaaaaaaa/{self.mirror(environment)}/x.pyc").parents[0]
+        self.file(f"cache/pycache/bbbbbbbbbbbb/{self.mirror(self.root / 'uninstalled')}/x.pyc", "y" * 2048)
+        live = self.file(f"cache/pycache/cccccccccccc/{self.mirror(self.root / 'editable')}/x.pyc")
+        held = daemon.lock(self.engines / "cccccccccccc.lock")  # its engine runs
+        self.addCleanup(held.close)
+        recent_bytecode = self.file(f"cache/pycache/dddddddddddd/{self.mirror(self.root / 'other')}/x.pyc", old=False)
+        recorded, forgotten, fresh = ("11111111-1111-5111-8111-111111111111", "22222222-2222-5222-8222-222222222222",
+                                      "33333333-3333-5333-8333-333333333333")
+        self.file(f"state/documents/{recorded}/document.json", "{}")
+        self.file(f"cache/documents/{recorded}/document.xbf")
+        self.file(f"cache/documents/{forgotten}/document.xbf", "z" * 4096)
+        self.file(f"cache/documents/{fresh}/document.xbf", old=False)
+        self.file("cache/documents/not-a-document/notes.txt")
+        stamp = self.file("state/telemetry-sender", "")  # an earlier 0.8 build's sender's start
+        before = self.tree()
+
+        with mock.patch.object(installations, "targets", return_value=None):
+            code, out, _ = _run(["--no-server", str(self.root)])
+        self.assertEqual(code, 0)
+        self.assertIn("  leftover 2 engine records of an older format, 1 bytecode folder of installations no longer "
+                      "registered (2.0 KB), 1 cache folder with no record (4.0 KB), 1 file an earlier 0.8 build kept "
+                      "(telemetry-sender): cadgen doctor --prune removes them\n", out)
+        self.assertEqual(self.tree(), before, "nothing is removed without --prune")
+
+        code, out, _ = _run(["--prune"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "no registered installation has lost its interpreter\n"
+                              "removed 1 engine record of an older format\n"
+                              "removed the page token 1 engine record still carried (the port each rolled to is kept)\n"
+                              "removed 1 bytecode folder of installations no longer registered (2.0 KB)\n"
+                              "removed 1 cache folder with no record (4.0 KB)\n"
+                              f"removed {stamp}, a file an earlier 0.8 build kept\n")
+        self.assertFalse((self.state / "engines" / "aaaaaaaa.json").exists())
+        self.assertEqual(json.loads(trimmed.read_text(encoding="utf-8")), {"port": 3246, "schema": 3})
+        for kept in (current, recent_record, token, registered, live, recent_bytecode,
+                     self.cache / "documents" / recorded / "document.xbf", self.cache / "documents" / fresh,
+                     self.cache / "documents" / "not-a-document"):
+            self.assertTrue(kept.exists(), kept)
+        self.assertFalse((self.cache / "pycache" / "bbbbbbbbbbbb").exists())
+        self.assertFalse((self.cache / "documents" / forgotten).exists())
+        code, out, _ = _run(["--prune"])
+        self.assertEqual(out, "no registered installation has lost its interpreter\n", "nothing is left to remove")
+
+
+class SevenLeftoversTest(PrivateFolders):
+    """cadgen 0.7's store and state files retire themselves: ``cadgen doctor`` says they are there,
+    ``--prune`` removes them once nothing has written them for seven days, ``--all-versions`` at
+    once; a folder of that name that is not 0.7's store, and 0.8's own files, are never touched."""
+
+    def seven(self, *, recent: str | None = None) -> list[Path]:
+        made = [self.file("cache/objects/ab/" + "c" * 62, "o" * 4089), self.file("cache/index/model/" + "d" * 64, "{}"),
+                self.file("state/sidebar-views/views.json", "[]"), self.file("state/snapshot-browser.lock", ""),
+                self.file("state/recents/recents.jsonl", "{}\n"), self.file("state/install-channels.json.lock", "")]
+        if recent:
+            made.append(self.file(recent, "written now", old=False))
+        return made
+
+    def ours(self) -> list[Path]:
+        """0.8's own files beside 0.7's, which nothing here touches."""
+        return [self.file("state/settings.json", "{}"), self.file("state/settings.lock", ""),
+                self.file("state/install-channels.json", "{}"), self.file("state/recents/thumbnails/" + "e" * 32 + ".png", "p"),
+                self.file("cache/pycache/aaaaaaaaaaaa/x.pyc", old=False),
+                self.file("cache/documents/11111111-1111-5111-8111-111111111111/document.xbf", old=False)]
+
+    def last(self, paths: list[Path]) -> str:
+        import time
+
+        return time.strftime("%Y-%m-%d", time.localtime(max(os.lstat(path).st_mtime for path in paths)))
+
+    def test_a_quiet_0_7_is_said_with_its_size_and_age_and_pruned(self) -> None:
+        made, ours = self.seven(), self.ours()
+        said = f"cadgen 0.7's store and 4 state files (4.0 KB), last written {self.last(made)}"
+        code, out, _ = _run(["--no-server", str(self.root)])
+        self.assertEqual(code, 0)
+        self.assertIn(f"  0.7      {said}: cadgen doctor --prune removes it\n", out)
+        self.assertTrue(all(path.exists() for path in made), "nothing is removed without --prune")
+        code, out, _ = _run(["--prune"])
+        self.assertEqual(out, f"no registered installation has lost its interpreter\nremoved {said}\n")
+        for gone in ("cache/objects", "cache/index", "state/sidebar-views", "state/snapshot-browser.lock",
+                     "state/recents/recents.jsonl", "state/install-channels.json.lock"):
+            self.assertFalse((self.root / gone).exists(), gone)
+        self.assertTrue(all(path.exists() for path in ours), "0.8's own files stay")
+        self.assertNotIn("0.7", _run(["--no-server", str(self.root)])[1])
+
+    def test_a_0_7_written_in_the_last_week_stays_until_all_versions_says_none_needs_it(self) -> None:
+        made, ours = self.seven(recent="state/viewer.log"), self.ours()
+        said = f"cadgen 0.7's store and 5 state files (4.0 KB), last written {self.last(made)}"
+        code, out, _ = _run(["--no-server", str(self.root)])
+        self.assertIn(f"  0.7      {said}: cadgen doctor --prune removes it once nothing has written it for 7 days, "
+                      "or now with --all-versions\n", out)
+        code, out, _ = _run(["--prune"])
+        self.assertEqual(out, f"no registered installation has lost its interpreter\nkept {said}: a cadgen 0.7 still "
+                              "installed may use it; it goes once nothing has written it for 7 days, or now with "
+                              "--all-versions\n")
+        self.assertTrue(all(path.exists() for path in made), "a 0.7 written this week may be in use")
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            doctor.main(["--all-versions"])  # with --prune alone
+        code, out, _ = _run(["--prune", "--all-versions"])
+        self.assertEqual(out, f"no registered installation has lost its interpreter\nremoved {said}\n")
+        self.assertFalse(any(path.exists() for path in made))
+        self.assertTrue(all(path.exists() for path in ours), "0.8's own files stay")
+
+    def test_a_folder_of_the_store_s_name_that_is_not_0_7_s_store_is_left_alone(self) -> None:
+        theirs = [self.file("cache/objects/notes.txt", "another program's"), self.file("cache/index/README", "")]
+        code, out, _ = _run(["--prune", "--all-versions"])
+        self.assertEqual(out, "no registered installation has lost its interpreter\n")
+        self.assertTrue(all(path.exists() for path in theirs))
+
+
 class KernelProbeTest(unittest.TestCase):
     """The real probe, once: this interpreter's kernel imports in a child."""
 

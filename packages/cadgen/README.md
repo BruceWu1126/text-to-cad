@@ -3,9 +3,11 @@
 The published distribution: CAD models written as Python, built by cadgen's engine
 (`cadgen.engine`) into live XCAF documents and the files those models declare (XBF, STEP, GLB, STL,
 3MF, DXF), and the tools that show and check them. One PyPI package carrying the Python under
-`src/cadgen/` and what it serves that is not Python under `src/cadgen/_runtime/`: the CAD
-Viewer's client, the CAD app page, and a headless browser bundle of the viewer's scene, built
-from their JavaScript packages and bundled in at build time (the JS *source* never ships).
+`src/cadgen/` and what it ships that is not Python under `src/cadgen/_runtime/`: the CAD
+Viewer's client and the CAD app page, which it serves, and a headless browser bundle of the
+viewer's scene, which nothing in it loads (its snapshots are drawn by OCCT, never in a
+browser), built from their JavaScript packages and bundled in at build time (the JS *source*
+never ships).
 
 ```python
 from cadgen import step, xbf
@@ -337,7 +339,8 @@ src/cadgen/
                          #   kernel loads on first use; cadgen-lazy-kernel.pth, at the root
                          #   of site-packages, installs it at interpreter start),
                          #   the engine observer and the telemetry sender, the install
-                         #   channel, atomic replace, file locks, the CLI derivation
+                         #   channel, atomic replace, file locks (the state folder's one
+                         #   lock: `file_lock.state`), the CLI derivation
   _runtime/              # BUILT: the CAD Viewer client, the CAD app page and the headless
                          #   browser bundle -- produced when the wheel is packaged, never
                          #   committed, never edited
@@ -346,8 +349,10 @@ src/cadgen/
 Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and
 `server` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
 snapshot for those files alone; `cadgen urdf|sdf|srdf validate` the validators; `cadgen
-doctor` the setup (the installation registered, the `cadgen` command written, the engine started) and
-a skill's pin; `cadgen run` a model script by the installation's python; `cadgen viewer` the engine page launcher;
+doctor` the setup (the installation registered, the `cadgen` command written, the engine started),
+a skill's pin and what cadgen left behind that nothing needs, which `cadgen doctor --prune` removes
+(`_internal/leftovers.py`: engine records of an older format, the bytecode of installations no longer
+registered, cache folders no record names; none written in the last seven days); `cadgen run` a model script by the installation's python; `cadgen viewer` the engine page launcher;
 `cadgen mcp` the stateless proxy an agent host starts; and `cadgen telemetry` the person's answer. A
 model builds by running its script: `python model.py`, or `cadgen +<version> run model.py` through
 the `cadgen` command, which picks the installation by the first that names one, in this order
@@ -357,12 +362,16 @@ first), and the newest installation registered.
 
 Coming from 0.7: cadgen 0.7.x kept a cache store, which can hold gigabytes, at
 `~/.cache/cadgen` (macOS and Linux; `$XDG_CACHE_HOME/cadgen` when that is set),
-`%LOCALAPPDATA%\cadgen` (Windows) or the folder `CADGEN_CACHE_DIR` named. 0.8 keeps its
-document cache in that folder's `documents/` and its engine's bytecode in `pycache/`, and
-neither reads, writes nor removes 0.7's store beside it. Once no 0.7 install is left on the machine, delete that folder by hand; an
-agent may do it when asked. 0.8 loses nothing by it: its documents are built again by the next
-run of their scripts. Settings, the telemetry answer and recents live in the state directory,
-not there.
+`%LOCALAPPDATA%\cadgen` (Windows) or the folder `CADGEN_CACHE_DIR` named: its `objects/` and
+`index/`. 0.8 keeps its document cache in that folder's `documents/` and its engine's bytecode in
+`pycache/`, and neither reads nor writes 0.7's store beside it, nor the state files only 0.7 writes
+(its sidebar views, its snapshot browser's lock, its viewer's log, its Recents log). Whether a 0.7
+is still installed cannot be told from here (0.7 never registered itself; it lives in uv's
+environments and the agent apps' plugin configs), so they retire themselves: `cadgen doctor` says
+they are there, with their size and when they were last written, and `cadgen doctor --prune`
+removes them once nothing has written them for seven days -- a 0.7 in use writes its store at
+every build -- or at once with `--all-versions`, once no 0.7 is left in any agent app. 0.8 loses
+nothing by it. Settings, the telemetry answer and recents live in the state directory, and stay.
 
 The viewer exposes `POST /__cad/clipboard` for explicit viewport PNG copies. It
 uses the same host and custom-header POST gates as other mutation routes, limits

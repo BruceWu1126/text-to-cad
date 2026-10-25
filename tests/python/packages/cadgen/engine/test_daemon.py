@@ -887,6 +887,140 @@ class SweepTest(unittest.TestCase):
         self.assertEqual((done.returncode, json.loads(done.stdout)), (0, {"ok": True, "stopped": []}))
 
 
+class OwnFilesTest(unittest.TestCase):
+    """A stopping engine removes its own files from the engine folder; a starting one removes every
+    dead engine's, never a live engine's nor anything in the folder that is not an engine's."""
+
+    def setUp(self) -> None:
+        self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
+        self.addCleanup(shutil.rmtree, self.state, True)
+        own = Path(tempfile.mkdtemp(prefix="own-"))
+        self.addCleanup(shutil.rmtree, own, True)
+        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
+                                          "CADGEN_STATE_DIR": str(own / "state"), "CADGEN_CACHE_DIR": str(own / "cache"),
+                                          "CADGEN_ENGINE_STANDBY": "0"}, self.addCleanup)
+        patch = mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def started(self) -> subprocess.Popen:
+        from cadgen.engine import client
+
+        server = subprocess.Popen([sys.executable, "-m", "cadgen.engine.daemon"], env=self.env,
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: server.poll() is None and server.kill())
+        deadline = time.monotonic() + 60
+        while (found := client._connect()) is None:
+            self.assertIsNone(server.poll(), "the engine exited before it listened")
+            self.assertLess(time.monotonic(), deadline, "the engine listened")
+            time.sleep(0.05)
+        found.close()
+        return server
+
+    def left(self) -> list[str]:
+        return sorted(path.name for path in self.state.iterdir() if path.name != "clients")
+
+    def until(self, condition, what: str) -> None:
+        deadline = time.monotonic() + 60
+        while not condition():
+            self.assertLess(time.monotonic(), deadline, what)
+            time.sleep(0.05)
+
+    def test_an_engine_removes_its_files_as_it_stops_and_dead_engines_files_as_it_starts(self) -> None:
+        from cadgen.engine import client, daemon
+
+        ours = daemon._tag()
+        daemon.failure_path().write_text('{"reason": "an earlier start"}', encoding="utf-8")
+        dead = self.state / "aaaaaaaaaaaa.lock"
+        dead.write_text("", encoding="utf-8")  # a killed engine's: nobody holds it
+        live = self.state / "cccccccccccc.lock"
+        held = daemon.lock(live)  # another engine's, running
+        self.addCleanup(held.close)
+        (self.state / "cccccccccccc.port").write_text("1 token\n", encoding="utf-8")
+        server = self.started()
+        self.until(lambda: not dead.exists(), "the starting engine removed the dead engine's lock")
+        self.assertTrue(live.exists() and (self.state / "cccccccccccc.port").exists(), "a live engine's files stay")
+        self.assertIn(f"{ours}.failed", self.left(), "its own note is not a dead engine's")
+        self.assertEqual(client.request({"op": "stop"}, start=False), {"ok": True})
+        self.assertEqual(server.wait(timeout=60), 0)
+        self.assertEqual(self.left(), ["cccccccccccc.lock", "cccccccccccc.port"],
+                         "its lock, door and failure note went with it")
+        if os.name != "nt":  # a terminate stops it as ``stop`` does; Windows' terminate is a kill
+            server = self.started()
+            server.terminate()
+            self.assertEqual(server.wait(timeout=60), 0)
+            self.assertEqual(self.left(), ["cccccccccccc.lock", "cccccccccccc.port"])
+
+    @unittest.skipIf(os.name == "nt", "doors and sockets are a POSIX engine's")
+    def test_the_sweep_takes_a_dead_engine_s_files_and_leaves_a_live_one_s_and_what_is_no_engine_s(self) -> None:
+        import socket
+
+        from cadgen.engine import daemon
+
+        def fifo(name: str, *, read: bool = False) -> None:
+            os.mkfifo(self.state / name, 0o600)
+            if read:  # an engine reads it: it answers
+                reader = os.open(self.state / name, os.O_RDONLY | os.O_NONBLOCK)
+                self.addCleanup(os.close, reader)
+
+        old = time.time() - 600
+        for name in ("aaaaaaaaaaaa.lock", "aaaaaaaaaaaa.port", "aaaaaaaaaaaa.failed", "eeeeeeeeeeee.lock",
+                     "eeeeeeeeeeee.failed", "cccccccccccc.lock", "cccccccccccc.failed", f"{daemon._tag()}.failed",
+                     "cadgen-open-0123456789abcdef.html", "notes.txt", "ABCDEFABCDEF.lock", "aaaaaaaaaaaa.lock.bak"):
+            (self.state / name).write_text("", encoding="utf-8")
+        for name in ("aaaaaaaaaaaa.failed", "cccccccccccc.failed"):
+            os.utime(self.state / name, (old, old))
+        (self.state / "clients").mkdir()
+        fifo("aaaaaaaaaaaa.door")  # killed: nobody reads it
+        fifo("cccccccccccc.door", read=True)
+        fifo("dddddddddddd.door", read=True)  # an engine with no lock file here answers: it is live
+        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stale.bind(str(self.state / "bbbbbbbbbbbbbbbb.sock"))  # an early engine's, bound and gone
+        stale.close()
+        listening = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listening.bind(str(self.state / "ffffffffffff.sock"))
+        listening.listen(16)
+        self.addCleanup(listening.close)
+        held = daemon.lock(self.state / "cccccccccccc.lock")
+        self.addCleanup(held.close)
+
+        removed = daemon.sweep_dead(self.state)
+        self.assertEqual(sorted(Path(path).name for path in removed),
+                         ["aaaaaaaaaaaa.door", "aaaaaaaaaaaa.failed", "aaaaaaaaaaaa.lock", "aaaaaaaaaaaa.port",
+                          "bbbbbbbbbbbbbbbb.sock", "eeeeeeeeeeee.lock"])
+        self.assertEqual(self.left(), sorted(["ABCDEFABCDEF.lock", "aaaaaaaaaaaa.lock.bak", "cadgen-open-0123456789abcdef.html",
+                                              "cccccccccccc.door", "cccccccccccc.failed", "cccccccccccc.lock",
+                                              "dddddddddddd.door", "eeeeeeeeeeee.failed", f"{daemon._tag()}.failed",
+                                              "ffffffffffff.sock", "notes.txt"]),
+                         "a live engine's files, a note its client may still read, this engine's and no engine's stay")
+        self.assertEqual(daemon.sweep_dead(self.state), [], "nothing is removed twice")
+
+    @unittest.skipIf(os.name == "nt", "an open file is never removed on Windows")
+    def test_a_lock_whose_file_is_removed_as_it_is_taken_takes_the_file_its_name_names(self) -> None:
+        import builtins
+
+        from cadgen.engine import daemon
+
+        path = self.state / "aaaaaaaaaaaa.lock"
+        path.write_text("", encoding="utf-8")
+        real = builtins.open
+        opened: list[str] = []
+
+        def opener(file, *args, **kwargs):
+            handle = real(file, *args, **kwargs)
+            if not opened:
+                opened.append(str(file))
+                os.unlink(file)  # its last holder removed it as this one opened it
+            return handle
+
+        with mock.patch("builtins.open", opener):
+            held = daemon.lock(path)
+        self.addCleanup(held.close)
+        self.assertEqual(opened, [str(path)])
+        self.assertTrue(daemon._names(held, path), "the lock is on the file the name names")
+        self.assertIsNone(daemon.lock(path), "and it is held: no second daemon takes it")
+
+
 class StateDirSpellingTest(unittest.TestCase):
     def test_a_server_started_under_a_dotted_spelling_is_found_and_stopped_under_the_plain_one(self) -> None:
         from unittest import mock

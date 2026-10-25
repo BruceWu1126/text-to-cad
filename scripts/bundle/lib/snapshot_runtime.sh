@@ -3,9 +3,10 @@
 # into the packaged runtime (packages/cadgen/src/cadgen/_runtime/browser). Sourced by
 # scripts/bundle/cadgen-runtime.sh.
 #
-# The snapshot CLI drives this bundle in a Playwright page. It is built from the same
-# @text-to-cad/core entrypoint the CAD Viewer uses, so the picture a snapshot produces matches the
-# viewport; STEP models, meshes and drawings all render through it.
+# cadgen's snapshots are drawn by OCCT and never load this bundle. The OCCT parity bench
+# (scripts/bench/occt_parity.py) drives it in a headless Chromium to compare OCCT's stills
+# with the viewer's: it is built from the same @text-to-cad/core entrypoint the CAD Viewer
+# uses, so its picture is the viewport's; STEP models, meshes and drawings all render through it.
 #
 # Callers set SNAPSHOT_RUNTIME_BUILD_DEPS_DIR (npm scratch) before sourcing, or accept the
 # default. Everything else is passed per call.

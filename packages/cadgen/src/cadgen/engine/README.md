@@ -836,7 +836,15 @@ shown first (`daemon._admitted`).
 - **Leftovers.** A client killed before its greeting leaves its pair: the daemon sweeps pairs no
   connection of its own holds once they are two minutes old, looking at their names and ages
   alone, never opening one, so a sweep never waits. A stopping daemon takes its door away first:
-  a client waiting on a greeting it will never send sees the door go and stops waiting.
+  a client waiting on a greeting it will never send sees the door go and stops waiting. Once its
+  workers have stopped it removes the rest of its files -- its port file, its failure note (but a
+  failure's, which its client reads) and last its lock, removed while still held (`daemon.let_go`)
+  -- whether it stopped on `stop`, a terminate, a retirement or its door gone. An engine killed
+  leaves its files; a daemon starting removes every dead engine's (`daemon.sweep_dead`): its lock
+  free, taken while they go, and nothing answering at its door, port file or an early engine's
+  socket, never a live engine's, and a failure note only once it is two minutes old. A lock is
+  taken on the file its name names (`daemon.lock`), so a lock file removed under a daemon starting
+  is never two daemons' lock.
 - **Reads.** What a client used to ask of the loopback port, `inspect`'s document reads, goes
   through the door too (`{"op": "read"}`, `serve.Server.read`, answered in process), so a
   sandboxed shell needs no socket at all. The HTTP listener serves pages, the CAD app and the
@@ -950,7 +958,8 @@ folder. The bytes are the hold's (`document.to_bytes`: the document, its closure
 compiled animations), the engine's own file always: a declared `@xbf` or an exported xbf is the
 author's, never used as the cache nor pointed at by it. The folder is shared with any 0.7 install's
 store: the engine's cache reads, writes, sizes and evicts only under `documents/` (its processes'
-bytecode is under `pycache/`), and lists, counts and removes nothing else there. It is written never on the run path:
+bytecode is under `pycache/`), and lists, counts and removes nothing else there (`cadgen doctor
+--prune` removes 0.7's store once nothing has written it for seven days). It is written never on the run path:
 
 - after `CACHE_IDLE_SECONDS` (10 s) with no build and no read of the document: the daemon asks the
   worker that holds it to save it (`Worker.save`), which the worker does only when no request waits

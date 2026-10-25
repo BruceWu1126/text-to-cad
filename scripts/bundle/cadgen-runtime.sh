@@ -3,9 +3,11 @@ set -euo pipefail
 
 # Build cadgen's non-Python runtime INTO THE PACKAGE (packages/cadgen/src/cadgen/_runtime).
 #
-# cadgen serves three things it does not write in Python: a headless browser bundle of
-# the viewer's scene (`_runtime/browser`), the CAD Viewer's built client (`cadgen viewer`
-# serves it), and the one-file CAD app an agent host renders (`cadgen mcp` serves it).
+# cadgen ships three things it does not write in Python: a headless browser bundle of
+# the viewer's scene (`_runtime/browser`: cadgen's snapshots are OCCT's and never load it;
+# scripts/bench/occt_parity.py does, to compare them with the viewer's), the CAD Viewer's
+# built client (`cadgen viewer` serves it), and the one-file CAD app an agent host renders
+# (`cadgen mcp` serves it).
 # cadgen resolves them inside the distribution, so there is one copy and one builder of
 # that copy: this script. scripts/bundle/bundle.sh is the entry point that calls it (after
 # stamping derived version metadata); call this directly only when debugging one stage.

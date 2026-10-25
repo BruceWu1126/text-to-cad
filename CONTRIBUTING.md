@@ -569,16 +569,20 @@ bundled assets without the repository. Run `scripts/bundle/bundle.sh` after
 editing build inputs to refresh all packaged outputs.
 
 The self-contained browser suite creates tiny inputs and owns its project,
-viewer and cache. It never reads the sample-model corpus. Install the npm
-Playwright Chromium for UI/web tests and Python Playwright's headless shell for
-the viewer's launch smoke test; their revisions can differ:
+viewer and cache. It never reads the sample-model corpus. cadgen itself needs no
+browser: OCCT draws its snapshots, and the wheel depends on no Playwright. The
+tests do: the UI/web tests and the browser suite drive npm Playwright's Chromium,
+and the viewer's launch smoke test (`scripts/test/test-viewer-launch.sh`) drives
+Python Playwright's headless shell, the one Python package `requirements-dev.txt`
+installs for a browser. Install both; their revisions can differ:
 
 ```bash
-npx --no-install playwright install chromium
-.venv/bin/python -m playwright install --only-shell chromium
+npx --no-install playwright install chromium                  # UI/web tests, browser suite
+.venv/bin/python -m playwright install --only-shell chromium  # the launch smoke test
 scripts/bundle/bundle.sh
 scripts/test/test-viewer-browser.sh
 scripts/test/test-viewer-browser.sh --only camera
+scripts/test/test-viewer-launch.sh
 ```
 
 Use `--with-deps` when installing browsers on Linux. The browser suite runs

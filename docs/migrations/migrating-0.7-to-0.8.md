@@ -507,20 +507,30 @@ too, for `cadgen inspect` and build123d's selectors in the body, and
   by nothing. Delete them once each model is ported.
 - **Old exports**: STEP, STL, 3MF and GLB files 0.7 runs wrote stay where they were and
   nothing rewrites them. Export them again from the ported models, or delete them.
-- **The 0.7 store.** cadgen 0.7 kept a cache store that can hold gigabytes. 0.8 keeps its
-  own document cache in the same folder, under `documents/` alone, and neither reads,
-  writes nor removes 0.7's store beside it. Once no 0.7 install is left on the machine
-  (no 0.7 plugin in any agent app), delete the folder by hand (0.8 loses nothing: the
-  next run of each script builds its document again):
+- **The 0.7 store.** cadgen 0.7 kept a cache store that can hold gigabytes (`objects/` and
+  `index/` in its cache folder), and a few state files of its own (its sidebar views, its
+  snapshot browser's lock, its viewer's log, its Recents log). 0.8 keeps its own document cache
+  in the same folder, under `documents/`, and never reads or writes 0.7's. Whether a 0.7 is
+  still installed cannot be told (0.7 never registered itself), so they retire themselves:
+  `cadgen doctor` says they are there, with their size and when they were last written, and
+  `cadgen doctor --prune` removes them once nothing has written them for 7 days -- a 0.7 in use
+  writes its store at every build:
 
-  | Platform | Folder |
+  ```
+  removed cadgen 0.7's store and 2 state files (92.0 MB), last written 2026-10-14
+  ```
+
+  Once no 0.7 is left in any agent app (no 0.7 plugin anywhere), `cadgen doctor --prune
+  --all-versions` removes them at once, however recently written. 0.8 loses nothing either way.
+
+  | Platform | 0.7's store is in |
   | --- | --- |
   | macOS, Linux | `~/.cache/cadgen`, or `$XDG_CACHE_HOME/cadgen` when `XDG_CACHE_HOME` is set |
   | Windows | `%LOCALAPPDATA%\cadgen` |
   | anywhere | the folder `CADGEN_CACHE_DIR` named, if you set it for 0.7 |
 
-  Your settings, telemetry answer, recent files and documents' records live elsewhere, in
-  cadgen's state folder, and deleting the store does not touch them.
+  Your settings, telemetry answer, recent files and documents' records live in cadgen's state
+  folder and stay.
 
 - **Quick Edit's preference**: Quick Edit is always available; a `features.quickEdit:
   false` left in settings does nothing.
@@ -591,4 +601,4 @@ opt in.
 - [ ] No `.step.json` or `.params.js` file remains.
 - [ ] Every root script runs clean and prints a page for each model; each page has been
       opened and reviewed.
-- [ ] The 0.7 store is deleted, once no 0.7 install remains.
+- [ ] `cadgen doctor` names no 0.7 store, or says when `--prune` removes it.
