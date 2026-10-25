@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import base64
 import os
-import platform
 import secrets
 import threading
 import time
@@ -52,13 +51,6 @@ def revision(report: dict[str, Any]) -> str:
     any process), else a token of this build's own."""
     key = (report.get("closure") or {}).get("key")
     return str(key) if key else f"t{secrets.token_hex(8)}"
-
-
-def runtime() -> dict[str, str]:
-    """What a recorded document was built on, by version only."""
-    from cadgen.engine import previous
-
-    return {"python": platform.python_version(), "cadgen": previous.version(), **previous._libraries()}
 
 
 class Models:
@@ -182,24 +174,18 @@ class Models:
             return
         ident, source = report["id"], report["source"]
         script = Path(source["script"])
-        closure = report.get("closure") or {}
         old = held.get(ident) or {}
         main = Path(program or script)
         root = os.path.commonpath([str(script.parent), str(main.parent)]) if script.anchor == main.anchor else str(script.parent)
         home, run = registering.relative(script, root), ["python", registering.relative(main, root)]
-        base = Path(root)
-        rows = [[row[0], *([registering.relative(row[1], base)] if row[0] in ("file", "read") else
-                           [row[1], registering.relative(row[2], base) if row[2] else None, row[3]]), row[-1]]
-                for row in closure.get("inputs") or []]
+        # What a restart needs of it and no more: what it is (``id``, ``key``), where its code is
+        # (``root``, ``home``, ``entry``, ``run``), the revision the cache and the delta compare, when
+        # it was built (the home's order). What the build read is the cache's (``cache.read``), and
+        # the closure its document's own (``previous``).
         found: dict[str, Any] = {
             "id": ident, "kind": "model", "store": "pointer", "root": root, "home": home,
-            "entry": source["name"], "label": source["name"], "run": run,
-            "revision": recorded,
-            "built": old["built"] if old.get("revision") == recorded and old.get("built") else time.time(),
-            "closure": {"key": closure.get("key"),
-                        "modules": [[registering.relative(path, base), digest] for path, digest in closure.get("modules") or []],
-                        "inputs": rows},
-            "runtime": runtime()}
+            "entry": source["name"], "run": run, "revision": recorded,
+            "built": old["built"] if old.get("revision") == recorded and old.get("built") else time.time()}
         if report.get("key"):
             found["key"] = report["key"]
         if facts is not None:
@@ -260,10 +246,10 @@ class Models:
             previous = held.get(ident) or {}
             found: dict[str, Any] = {
                 "id": ident, "kind": "model", "store": "shape", "root": root,
-                "home": registering.relative(scope, root), "entry": name, "label": name, "run": [],
+                "home": registering.relative(scope, root), "entry": name, "run": [],
                 "shown": self.shown(program), "revision": recorded,
                 "built": previous["built"] if previous.get("revision") == recorded and previous.get("built")
-                else time.time(), "runtime": runtime()}
+                else time.time()}
             if request.get("key"):
                 found["key"] = request["key"]
             for key in ("opened", "pinned", "preview", "cache"):
@@ -381,7 +367,7 @@ class Models:
         found = held.get(ident) if held is not None else None
         if found is None or found.get("kind") != "model":
             return None
-        name = found.get("label") or found.get("entry") or ident
+        name = found.get("entry") or ident
         if found.get("store") == "shape":
             return {"error": f"{name} ({ident}) is no longer held: it is {found.get('shown') or self.shown(None)}; "
                              "run that program again to hand it over again", "state": "evicted", "rebuild": None}
@@ -623,7 +609,7 @@ class Models:
         program = registering.program(held, record)
         row = {"id": ident, "source": {"script": str(registering.home(held, record)), "name": record["entry"]},
                "worker": None, "program": str(program) if program else None, "store": record.get("store") or "pointer",
-               "builtAt": record.get("built") or meta.get("written_at"), "version": secrets.token_hex(8),
+               "builtAt": record.get("built"), "version": secrets.token_hex(8),
                "files": [], "revision": meta["revision"],
                "read": [[kind, os.path.normpath(root / path), digest] for kind, path, digest in meta.get("read") or []]}
         with self.lock:

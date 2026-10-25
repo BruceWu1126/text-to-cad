@@ -33,7 +33,7 @@ from cadgen.engine.registry import Registry  # noqa: E402
 
 def _record(ident: str, root: Path, **extra) -> dict:
     return {"id": ident, "kind": "model", "store": "pointer", "root": str(root), "home": "parts.py", "entry": "cube",
-            "label": "cube", "run": ["python", "caller.py"], **extra}
+            "run": ["python", "caller.py"], **extra}
 
 
 class RegistryTest(unittest.TestCase):
@@ -215,6 +215,9 @@ class RegistryDaemonTest(unittest.TestCase):
         record = self.records()[cube]
         self.assertEqual((record["store"], record["home"], record["run"], Path(record["root"])),
                          ("pointer", "parts.py", ["python", "caller.py"], project))
+        # What a restart needs and no more: no closure (the document's own), no versions, no stamps.
+        self.assertEqual(set(record), {"schema", "id", "kind", "store", "root", "home", "entry", "run", "revision",
+                                       "built", "facts"})
         self.assertEqual(sorted(os.listdir(self.state / "documents" / cube)), ["document.json"], "it points: no geometry")
         self.assertNotIn(scratch, self.records(), "a memory document has no record")
         self.assertEqual(listed(), before, "nothing beside the script")

@@ -918,13 +918,14 @@ it is refused: a body returns its shape.
 `documents/<id>/document.json` in the user's state folder ([registry.py](registry.py); the
 distribution names the folder, `cadgen.viewer.recents.state_dir`): it points; a document's bytes
 are the cache's, in the cache folder (**The cache**).
-A model's record holds its store, its script and function (`home`, `entry`), the command that
-builds it again (`run`, `["python", program]`), its revision and when it was built, its closure
-(modules and inputs, with their digests) and the versions it was built on; a file's its path,
-its format, when it was opened and whether it is pinned; either's Recents picture (`preview`, UI
-state: the PNG under `recents/thumbnails`), and a model's `cache` once the cache holds it (**The
-cache**). Every path in it is relative to its one `root`, so a record moves by one field. It is written synchronously
-as a build registers, and only when a field but `changed` differs: an unchanged build rewrites
+A model's record holds what a restart needs and no more: its store, its script and function
+(`home`, `entry`), the program that ran it (`run`, `["python", program]`), its revision and when
+it was built, its `key=` and its last build's facts (what the delta says against); a file's its path,
+when it was opened and whether it is pinned; either's Recents picture (`preview`, UI state: the PNG
+under `recents/thumbnails`), and a model's `cache` once the cache holds it (**The cache**). What a
+build read is the cache's (`cache.read`), and its closure is its document's own (**Build
+closure**): neither is copied here. Every path in it is relative to its one `root`, so a record moves by one field. It is written synchronously
+as a build registers, and only when a field differs: an unchanged build rewrites
 nothing; each write is then told to `registry.OBSERVERS`, never waited on. It is read on demand,
 never at start: an id the engine does not hold (after a restart) is answered from its record,
 `evicted` with its command, or `detached`, and nothing runs. The registry is the ids' reverse map,
@@ -959,7 +960,7 @@ bytecode is under `pycache/`), and lists, counts and removes nothing else there.
 - at shutdown (`cadgen stop`, a terminate), best effort within 10 s (`cache.SHUTDOWN_SECONDS`), for
   the documents built or read in the last idle window.
 
-Once per revision: the record gains `cache: {revision, bytes, written_at, read}`, and a document
+Once per revision: the record gains `cache: {revision, bytes, read}`, and a document
 whose revision is the cache's is never written again. A restart indexes the cache files (a listing
 and a stat, nothing read); a document with one is `held` and answers every verb -- page, export,
 snapshot, inspect, `cad_show` -- by reading its bytes through the documents worker, as a held

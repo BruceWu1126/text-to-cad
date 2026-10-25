@@ -27,7 +27,7 @@ bytecode is under ``pycache/``, ``daemon.bytecode``), and never
 lists, counts or removes anything else there. The record is authoritative: a cache file missing,
 or not the size its record says, is simply not cached.
 
-Once per revision: the record gains ``cache: {revision, bytes, written_at, read}``, and a document
+Once per revision: the record gains ``cache: {revision, bytes, read}``, and a document
 whose revision is the cache's is never written again. ``read`` is what the build read, with digests
 (``reads``): the script and every module its model reached (each file's bytes, SHA-256) and the
 files its bodies read (the closure's own digests), which is what staleness compares (``changes``).
@@ -412,7 +412,7 @@ class Cache:
         from cadgen.engine.registry import relative
 
         root = held.root(record)
-        meta = {"revision": revision, "bytes": len(data), "written_at": time.time(),
+        meta = {"revision": revision, "bytes": len(data),
                 "read": [[kind, relative(path, root), digest] for kind, path, digest in read or []]}
         held.cache.write(self.inside(ident), data)
         held.update(ident, lambda found: {**found, "cache": meta}

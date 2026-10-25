@@ -6,7 +6,7 @@ program handed over (``kind: "model"``, ``store: "shape"``: the script that hand
 folder it was handed over in, its name, and no command that builds it again -- ``run`` empty, and
 ``shown`` says so in words), or an on-disk CAD file the person opened (``kind: "file"``). The registry POINTS: no geometry, no
 mesh, no xbf and no memo is ever written here. A model's record may say that the engine's cache
-holds its document (``cache``: ``{revision, bytes, written_at, read}``), whose bytes live in the
+holds its document (``cache``: ``{revision, bytes, read}``), whose bytes live in the
 cache folder, not here (``Registry.cache``: ``<cache>/documents/<id>/document.xbf``, the engine's
 ``cache`` module): regenerable, wiped at no loss, never the source of anything; the record is
 authoritative, and a cache file missing or unreadable is simply not cached. A ``memory`` document
@@ -22,7 +22,7 @@ out) and ``update`` (a read and a write under one lock). The filesystem implemen
 hosted store would implement. Every byte written under the state folder by this module goes
 through ``Folder``, and every write commits through ``atomic_replace.replace_atomic`` -- but a file
 made only where none is (``Folder.create``: the page token), which is linked into place. A record is
-written synchronously, and only when a field but ``changed`` differs from the one on disk; then
+written synchronously, and only when a field differs from the one on disk; then
 each of ``OBSERVERS`` is told (a mirror uploads in the background: nothing waits on the network).
 The cache folder is a second ``Folder``, written the same way; forgetting a document
 (``delete``) forgets its cache file too.
@@ -49,7 +49,6 @@ import shutil
 import stat
 import subprocess
 import threading
-import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -207,19 +206,15 @@ class Registry:
         return record
 
     def put(self, record: dict[str, Any]) -> bool:
-        """Write ``record`` (its ``id`` names it); False, and nothing written, when every field but
-        ``changed`` is what is on disk. ``created`` is kept from the record it replaces."""
+        """Write ``record`` (its ``id`` names it); False, and nothing written, when every field is
+        what is on disk."""
         ident = record["id"]
         if not is_id(ident):
             raise ValueError(f"{ident!r} is not a document id")
         with self._lock(ident):
-            old = self.get(ident)
-            now = time.time()
-            record = {**record, "schema": SCHEMA,
-                      "created": (old or {}).get("created") or record.get("created") or now}
-            if old is not None and _same(old, record):
+            record = {**record, "schema": SCHEMA}
+            if self.get(ident) == record:
                 return False
-            record["changed"] = now
             text = json.dumps(record, indent=1, sort_keys=True, ensure_ascii=False) + "\n"
             self.state.write(f"{DOCUMENTS}/{ident}/{RECORD}", text.encode("utf-8"))
         for observer in list(OBSERVERS):
@@ -343,11 +338,6 @@ def _unreadable(path: Path, error: OSError) -> str:
     if hasattr(os, "getuid") and found.st_uid != os.getuid():
         said += f", owned by uid {found.st_uid}, not this user ({os.getuid()})"
     return said
-
-
-def _same(old: dict[str, Any], new: dict[str, Any]) -> bool:
-    return ({key: value for key, value in old.items() if key != "changed"}
-            == {key: value for key, value in new.items() if key != "changed"})
 
 
 def relative(path: Path | str, root: Path | str) -> str:

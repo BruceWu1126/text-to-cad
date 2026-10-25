@@ -279,6 +279,8 @@ class HandleTest(unittest.TestCase):
         record = Registry(self.state).get(ident)
         self.assertEqual((record["store"], record["run"], record["entry"]), ("shape", [], "crate"))
         self.assertIn("a program the engine did not run: no script to rerun", record["shown"])
+        self.assertEqual(set(record) - {"cache"}, {"schema", "id", "kind", "store", "root", "home", "entry", "run",
+                                                   "shown", "revision", "built"}, "a model's shape, and its words")
         # From a REPL: the working folder is its scope.
         repl = self.run_python("-", cwd=project, input="import json, build123d as bd\nfrom cadgen import model\n"
                                "h = model(bd.Box(2, 2, 2), name='scratch')\nprint('RESULT ' + json.dumps(h.id))\n")
