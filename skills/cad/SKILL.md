@@ -192,17 +192,18 @@ times faster than parsing the STEP.
 ## Pictures
 
 After every run, read its line and the delta under it; a contradiction with what you
-intended is fixed before anything else. A number the person gave is asserted in the body; a
-derived number they asked for is a check script; neither is ever read off a picture. A
-structural or appearance change, new parts, placements, colours or a mechanism, gets the
-snapshots it takes to judge it, usually one from the angle that shows the change, more when
-a view leaves the question open, and a posed one for a mechanism state; never several angles
-by habit. After a Quick Edit, the picture to take is the person's own view replayed
-(`--camera authored` with the packet), not a fresh angle. For a large assembly, isolate the
-parts the edit touched or hide what covers them and frame them, instead of drawing the whole
-model. Resolve a reference with `cadgen inspect` only when a prompt names one. Never
-screenshot the card to confirm your own work, never check a number nobody asked for, never
-show a model again after a rebuild.
+intended is fixed before anything else. A number the person gave is checked by an assert on
+what the geometry measures, a bound, a distance or a volume, never by restating the
+constant; a derived number they asked for is a check script; neither is ever read off a
+picture. A structural or appearance change, new parts, placements, colours or a mechanism,
+gets the snapshots it takes to judge it, usually one from the angle that shows the change,
+more when a view leaves the question open, and a posed one for a mechanism state; never
+several angles by habit. After a Quick Edit, the picture to take is the person's own view
+replayed (`--camera authored` with the packet), not a fresh angle. For a large assembly,
+isolate the parts the edit touched or hide what covers them and frame them, instead of
+drawing the whole model. Resolve a reference with `cadgen inspect` only when a prompt names
+one. Never screenshot the card to confirm your own work, never check a number nobody asked
+for, never show a model again after a rebuild.
 
 ```bash
 cadgen snapshot "$ID" tmp/review.png
