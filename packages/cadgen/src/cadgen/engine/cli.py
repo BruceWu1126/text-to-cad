@@ -166,6 +166,25 @@ def _shown(path: Any) -> str:
         return str(path)
 
 
+def _given(path: Any, given: Any = ()) -> str:
+    """A path a ``wrote`` line names, as the command was given it: the argument that names it,
+    as typed (absolute stays absolute, a relative one stays relative to the working folder);
+    one no argument names, relative where it lies under the working folder and whole where it
+    does not. A job's pictures are named whole: its packet, not the command, gave them."""
+    for typed in [given] if isinstance(given, (str, os.PathLike)) else given:
+        try:
+            if os.path.realpath(os.path.expanduser(typed)) == os.path.realpath(path):
+                return os.fspath(typed)
+        except (TypeError, ValueError, OSError):
+            continue
+    text = os.fspath(path)
+    try:
+        relative = os.path.relpath(text)
+    except ValueError:
+        return text
+    return text if relative == os.pardir or relative.startswith(os.pardir + os.sep) else relative
+
+
 def _files(report: dict[str, Any]) -> list[str]:
     found = []
     for path, row in (report.get("files") or {}).items():
@@ -358,7 +377,7 @@ def _export(args: argparse.Namespace, prog: str) -> int:
                                     for row in written]}))
         return 0
     for row in written:
-        print(f"wrote {_shown(row.path)} ({row.bytes / 1e6:.1f} MB) in {row.seconds:.2f}s")
+        print(f"wrote {_given(row.path, args.destinations)} ({row.bytes / 1e6:.1f} MB) in {row.seconds:.2f}s")
     return 0
 
 

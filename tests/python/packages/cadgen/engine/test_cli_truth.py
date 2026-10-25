@@ -117,6 +117,18 @@ class VerbsTest(unittest.TestCase):
         self.assertEqual(lines[-2:], ["AssertionError: blade count must be positive", "failed parts.py::bad"])
         self.assertEqual(self.failed.stderr.count("Traceback"), 1, self.failed.stderr)
 
+    def test_a_wrote_line_names_each_path_as_it_was_given(self) -> None:
+        """An absolute path outside the working folder stays absolute (unresolved: macOS's /var is
+        /private/var), and a relative one stays relative, for export and snapshot alike."""
+        elsewhere = Path(tempfile.mkdtemp(prefix="engine-wrote-"))
+        self.addCleanup(shutil.rmtree, elsewhere, True)
+        small = ["--width", "64", "--height", "48"]
+        for verb, out, extra in (("export", str(elsewhere / "box.stl"), []), ("export", "box.stl", []),
+                                 ("snapshot", str(elsewhere / "box.png"), small), ("snapshot", "box.png", small)):
+            done = self.cli(verb, self.box, out, *extra)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertTrue(done.stdout.startswith(f"wrote {out} ("), f"{verb} {out}: {done.stdout}")
+
     def test_a_step_cadgen_exported_holds_no_closure_because_the_format_carries_none(self) -> None:
         self.assertEqual(self.cli("export", self.box, str(self.folder / "box.step")).returncode, 0)
         closure = self.cli("inspect", "box.step", "--query", "closure")
