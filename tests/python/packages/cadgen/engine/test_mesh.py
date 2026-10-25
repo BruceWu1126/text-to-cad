@@ -1,4 +1,4 @@
-"""The mesh contract: FreeCAD's default tolerance, BRepMesh as it is, every edge classed
+"""The mesh contract: a quarter per cent tolerance, BRepMesh as it is, every edge classed
 from the B-rep, every vertex in the buffer, a face the mesher cannot mesh named with the
 kernel's verdict on it, and the facts of any element measured on request."""
 
@@ -42,12 +42,13 @@ def bowtie_part():
 
 
 class MeshContractTest(unittest.TestCase):
-    def test_the_tolerance_is_freecads_default(self) -> None:
+    def test_the_tolerance_is_a_quarter_per_cent_and_freecads_angle(self) -> None:
         import build123d as bd
 
         part = mesh.mesh_shape(bd.Box(10, 20, 30).wrapped)
-        self.assertAlmostEqual(part.linear, (10 + 20 + 30) / 300 * 0.5, places=6)
+        self.assertAlmostEqual(part.linear, (10 + 20 + 30) / 300 * 0.25, places=6)
         self.assertAlmostEqual(part.angular, math.radians(28.5), places=6)
+        self.assertEqual(mesh.TESSELLATION, "0.25-28.5")
 
     def test_an_extrusions_far_cap_edges_are_drawn_where_they_are(self) -> None:
         import build123d as bd
@@ -211,6 +212,16 @@ class FactsTest(unittest.TestCase):
     def get(self, path: str) -> bytes:
         with urllib.request.urlopen(self.server.url + path, timeout=120) as response:
             return response.read()
+
+    def test_a_part_is_served_immutable_under_its_tessellation(self) -> None:
+        structure = json.loads(self.get(f"/api/doc/{self.ident}"))
+        self.assertEqual(structure["tessellation"], mesh.TESSELLATION, "what the page puts in a part's URL")
+        key = structure["prototypes"][0]["key"]
+        url = f"{self.server.url}/api/doc/{self.ident}/part/{key}?tessellation={mesh.TESSELLATION}"
+        with urllib.request.urlopen(url, timeout=120) as response:
+            self.assertEqual(response.headers["Cache-Control"], "max-age=31536000, immutable")
+            # The box and the crossed face beside it: 6.5 x 2 x 3.
+            self.assertAlmostEqual(mesh.Mesh.from_bytes(response.read()).linear, (6.5 + 2 + 3) / 300 * mesh.DEVIATION, places=6)
 
     def test_the_structure_names_the_unmeshed_face_and_why(self) -> None:
         key = json.loads(self.get(f"/api/doc/{self.ident}"))["prototypes"][0]["key"]

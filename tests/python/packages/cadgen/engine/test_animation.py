@@ -28,6 +28,7 @@ import numpy as np
 from cadgen.engine import build as engine_build
 from cadgen.engine import document, mechanism
 from cadgen.engine.export import keys
+from cadgen.engine.mesh_format import DEVIATION
 from tests.python.support.paths import REPO_ROOT
 
 FIXTURES = REPO_ROOT / "packages/core/src/lib/render/fixtures"
@@ -452,7 +453,9 @@ class GlbTest(_Folder):
             turned = _rotation(at("lid", "rotation", t)).T @ truth[:3, :3]
             worst[1] = max(worst[1], math.acos(max(-1.0, min(1.0, (np.trace(turned) - 1) / 2))))
             # The latch: out 20 mm and back, linearly, turning once about its own axis at constant speed.
-            np.testing.assert_allclose(at("latch", "translation", t), [42 + 20 * (1 - abs(1 - t)), 0, 30], atol=1e-3)
+            # Its node stands at its mesh's box centre: off the axis by up to its deflection (8 x 8 x 8).
+            np.testing.assert_allclose(at("latch", "translation", t), [42 + 20 * (1 - abs(1 - t)), 0, 30],
+                                       atol=24 / 300 * DEVIATION)
             spun = _rotation(at("latch", "rotation", t))
             angle = math.atan2(spun[1, 0], spun[0, 0]) % (2 * math.pi)
             self.assertLess(min(abs(angle - (math.pi * t) % (2 * math.pi)),

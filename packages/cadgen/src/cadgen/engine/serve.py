@@ -1494,9 +1494,13 @@ class Server:
                     return self.json(handler, {"version": doc.version, "patch": doc.patch, **build})
                 doc = self.document(ident)
                 if len(parts) == 3:
+                    from cadgen.engine.mesh_format import TESSELLATION
+
                     self.prefetch(doc)  # a page is about to ask for every part
                     found = self.posed(doc, pose)
                     stale = self.stale(ident) if ident in self.model_loaders else None
+                    # A part's buffer is sent immutable: its URL names the tessellation it was made at.
+                    found = {**found, "tessellation": TESSELLATION}
                     return self.json(handler, {**found, "stale": stale} if stale else found)
                 if len(parts) == 4 and parts[3] == "pose" and method == "POST":
                     return self.pose(handler, doc)

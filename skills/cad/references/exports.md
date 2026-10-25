@@ -146,8 +146,8 @@ geometry, names, colours and materials. Keep the xbf beside the STEP, and read t
 - **xbf**: of a model, or of a STEP (converting a vendor file).
 - **DXF**: of a planar document only (`$dxf`); a solid is refused.
 
-Mesh exports and the viewer draw the same meshes, made at one tolerance: FreeCAD's
-default (a chord deviation of 0.5% of the mean side of each part's bounding box, and
+Mesh exports and the viewer draw the same meshes, made at one tolerance
+(a chord deviation of 0.25% of the mean side of each part's bounding box, and
 28.5 degrees), configurable nowhere. A face the mesher leaves without triangles is left
 out, so a mesh export has a hole there; a snapshot names such faces in a warning, and
 they are usually slivers a boolean left. Repair the face in the model.

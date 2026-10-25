@@ -464,7 +464,7 @@ only, and a file's id is derived again from its path after a restart.
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
 | `refs.py` | references to geometry: the ref grammar, occurrence paths, resolution by name in the latest build, for `inspect` and the viewer (**References**) |
 | `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); a mesh file read as a document of triangles, no kernel (`mesh_file`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a planar document's drawing through build123d's DXF exporter, with the drawing checks (`dxf`); a motion baked into a glTF clip (`motion`); a view made a document again, for a STEP of a document held without its XCAF document and an xbf written from a STEP (`tree`) |
-| `mesh.py`, `mesh_format.py` | per-part tessellation at FreeCAD's default tolerance, element facts; the part buffer, its wire format and edge classes (`mesh_format`, kernel-free) |
+| `mesh.py`, `mesh_format.py` | per-part tessellation at a quarter per cent tolerance, element facts; the part buffer, its wire format and edge classes (`mesh_format`, kernel-free) |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a STEP read in a reader process, held by its bytes; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
 | `snapshot.py` | `cadgen snapshot`: one dispatcher by suffix -- a document, a mesh file, a robot or a DXF drawn by OCCT (`render/`) into a PNG; a script's model drawn from its worker's memory |
@@ -1993,9 +1993,10 @@ materials apart are prototypes apart, the second its own topology over the same 
 
 ## Mesh
 
-One tolerance, FreeCAD's default, configurable nowhere: a linear deflection of
-`(Lx + Ly + Lz) / 300 * 0.5` of the part's own bounding box (FreeCAD's
-Deviation of 0.5 %) and an angular deflection of 28.5 degrees, both absolute,
+One tolerance, configurable nowhere: a linear deflection of
+`(Lx + Ly + Lz) / 300 * 0.25` of the part's own bounding box (0.25 %, half
+FreeCAD's default Deviation of 0.5 %, so a large arc's outline is not drawn
+in corners) and FreeCAD's angular deflection of 28.5 degrees, both absolute,
 with the kernel's face parallelism on, through `IMeshTools_Parameters` with
 `EnableControlSurfaceDeflectionAllSurfaces` set (analytic faces held to the
 deflection; every other knob stays at its default). `BRepMesh_IncrementalMesh`
@@ -2086,7 +2087,9 @@ bytes: the meshes' buffers, then the shapes' binary shape bytes, in the order
 listed.
 
 `GET /api/doc/<id>/part/<key>` returns one part's buffer. A client reads it
-with typed-array views, without parsing. The header grew from 64 to 80 bytes in
+with typed-array views, without parsing. It is sent immutable, so a page asks
+for it with the structure's `tessellation` (`?tessellation=0.25-28.5`, the
+mesh constants by name) and never draws a buffer an engine made at others. The header grew from 64 to 80 bytes in
 `XBM2` (the vertex table's count and offset did not fit). The 80-byte
 little-endian header is:
 

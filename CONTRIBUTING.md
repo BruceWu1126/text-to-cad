@@ -444,8 +444,9 @@ by side on the same models, each on a daemon of its own (`CADGEN_ENGINE_DIR`), c
 and warm. The benchmarks are manual and write under `tmp/` (`scripts/bench/`); their
 output is never committed.
 
-A part is meshed at one tolerance, FreeCAD's default, by `BRepMesh_IncrementalMesh`
-as it is (`engine/mesh.py`): no check before it, no second pass, no repair. A change
+A part is meshed at one tolerance, 0.25 % of its size and 28.5 degrees, by
+`BRepMesh_IncrementalMesh` as it is (`engine/mesh.py`): no check before it, no
+second pass, no repair. A change
 to that opens its PR with what it does to the faces left unmeshed and the triangle
 counts across the sample corpus, `main` against the branch; the engine's mesh tests
 (`tests/python/packages/cadgen/engine/test_mesh.py`) assert the contract on small

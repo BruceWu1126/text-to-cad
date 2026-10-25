@@ -200,7 +200,7 @@ pass:
 | `python model.py --json` | `bracket.build()` from Python returns the report as data |
 | `python model.py --profile` | `bracket.build(profile=True)` |
 | `python model.py --no-daemon`, `CADGEN_DAEMON=0` | nothing: every run goes through the engine. `Model.build(daemon=False)` remains as a seam for tests and debugging (cold, in your process, nothing served) |
-| `@stl(mesh_tolerance=...)`, `--mesh-tolerance` | nothing: every mesh is made at FreeCAD's default tolerance |
+| `@stl(mesh_tolerance=...)`, `--mesh-tolerance` | nothing: every mesh is made at one tolerance, 0.25 % of each part's size and 28.5 degrees |
 
 ### 3. Move files out of the model: exports on request, or `exports.py`
 

@@ -47,7 +47,7 @@ function engine({ structure = STRUCTURE, parts = {}, version = null, base = "htt
     if (url === `${base}/api/look`) return new Response(JSON.stringify(ENGINE_LOOK));
     if (url === `${base}/api/look/environment`) return new Response(ENGINE_ENVIRONMENT);
     if (!url.startsWith(`${base}/api/doc/abc123`)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
-    const rest = url.slice(`${base}/api/doc/abc123`.length);
+    const rest = url.slice(`${base}/api/doc/abc123`.length).replace(/\?tessellation=[^&]*$/, "");
     if (rest === "") return new Response(JSON.stringify(structure));
     if (rest.startsWith("/version")) return new Response(JSON.stringify(version || { version: structure.version, patch: null }));
     const part = /^\/part\/([^/]+)$/.exec(rest);
@@ -150,6 +150,19 @@ test("a new version fetches the parts it changed and keeps the rest, buffers and
   scene2.dispose();
   v2.release();
   assert.equal(disposed, 1, "the last holder releases it");
+});
+
+test("a part's URL names the tessellation it is made at, and a part of another tessellation is not kept", async () => {
+  const coarse = engine({ structure: { ...STRUCTURE, tessellation: "0.5-28.5" } });
+  const v1 = await loadXbfDocument(URL_BASE, { fetch: coarse.fetch });
+  assert.deepEqual(coarse.asked.filter(url => url.includes("/part/")).sort(),
+    [PLATE.key, PEG.key].map(key => `${URL_BASE}/part/${key}?tessellation=0.5-28.5`).sort());
+  const fine = engine({ structure: { ...STRUCTURE, tessellation: "0.25-28.5" } });
+  const v2 = await loadXbfDocument(URL_BASE, { fetch: fine.fetch, previous: v1 });
+  assert.deepEqual(v2.load.kept, [], "an engine of another tessellation: every part fetched again");
+  assert.deepEqual(v2.load.fetched.sort(), [PLATE.key, PEG.key].sort());
+  v1.release();
+  v2.release();
 });
 
 test("the scene: a group per instance over one geometry per prototype, colours, paints and edges by class", async () => {

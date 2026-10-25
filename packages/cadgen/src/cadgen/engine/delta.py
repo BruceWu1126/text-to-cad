@@ -170,7 +170,7 @@ class _Box:
 
 def _tolerance(quick: tuple[float, ...]) -> float:
     """A part's mesh tolerance: the linear deflection its display mesh is made at (``mesh.deflection``:
-    FreeCAD's ``(Lx + Ly + Lz) / 300 * DEVIATION`` of its box), from its quick box. A side found is no
+    ``(Lx + Ly + Lz) / 300 * DEVIATION`` of its box), from its quick box. A side found is no
     farther from the part's than the mesh's faces are from its surface."""
     from cadgen.engine.mesh import DEVIATION
 
