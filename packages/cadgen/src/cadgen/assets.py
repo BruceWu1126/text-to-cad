@@ -1,15 +1,13 @@
 """Where cadgen's non-Python runtime assets live.
 
 cadgen serves JavaScript it does not write in Python: the CAD Viewer's built client
-(``cadgen viewer`` serves it), the CAD app page (``cadgen mcp`` serves it), and a headless
-browser bundle of the viewer's scene (``_runtime/browser``). They ship inside the
-distribution under ``cadgen/_runtime``, and can be pointed elsewhere for development.
-Nothing cadgen runs needs Node.
+(``cadgen viewer`` serves it) and the CAD app page (``cadgen mcp`` serves it). They ship
+inside the distribution under ``cadgen/_runtime``, and can be pointed elsewhere for
+development. Nothing cadgen runs needs Node.
 
-**Every resolver here is CALL-TIME.** Nothing at import time touches the filesystem:
-``pip install cadgen`` must succeed on a machine with no browser, and the CAD Viewer's
-long-lived server must import light. A format that needs an asset asks for it at the
-moment it needs it, and gets an actionable error if it is absent.
+**Every resolver here is CALL-TIME.** Nothing at import time touches the filesystem: the
+CAD Viewer's long-lived server must import light, and a page that needs an asset asks for
+it at the moment it needs it, with an actionable message if it is absent.
 
 In a source checkout the Viewer resolves to ``apps/web/dist``. An installed wheel has
 no source tree and falls through to its bundled ``_runtime`` copy: a checkout is the exact
@@ -22,10 +20,7 @@ import os
 from pathlib import Path
 
 __all__ = [
-    "AssetMissing",
-    "browser_runtime_dir",
     "checkout_root",
-    "require_browser_runtime",
     "runtime_build_hint",
     "runtime_root",
     "viewer_dist_dir",
@@ -33,10 +28,6 @@ __all__ = [
 
 # Data-only; deliberately no __init__.py, so this is a path lookup rather than an import.
 _RUNTIME = Path(__file__).resolve().parent / "_runtime"
-
-
-class AssetMissing(RuntimeError):
-    """A runtime asset cadgen needs is not present in this installation."""
 
 
 def runtime_build_hint(path: Path | str, *, overridable: bool = True) -> str:
@@ -84,24 +75,6 @@ def _in_source_checkout() -> bool:
     return checkout_root() is not None
 
 
-def require_browser_runtime(directory: Path | str) -> Path:
-    """The snapshot browser runtime, or :class:`AssetMissing` naming how to get it.
-
-    It has no live source to fall back on: ``render.html`` is written by the bundler and
-    ``snapshot-render.js`` is an esbuild of @text-to-cad/core, so a checkout that has never
-    bundled cannot render at all. Without this the failure was a 404 inside a headless
-    browser page.
-    """
-    path = Path(directory)
-    missing = [name for name in ("render.html", "snapshot-render.js") if not (path / name).is_file()]
-    if missing:
-        raise AssetMissing(
-            "cadgen's snapshot browser runtime is missing "
-            f"{', '.join(missing)}. " + runtime_build_hint(path)
-        )
-    return path
-
-
 def runtime_root() -> Path:
     """The packaged ``_runtime`` directory. May not exist in a source checkout."""
     return _RUNTIME
@@ -119,21 +92,6 @@ def _dev_viewer_dist_dir() -> Path | None:
         return None
     dist = root / "apps" / "web" / "dist"
     return dist if (dist / "index.html").is_file() else None
-
-
-def browser_runtime_dir(explicit: Path | str | None = None) -> Path:
-    """Directory holding ``snapshot-render.js`` + ``render.html``.
-
-    ``explicit`` is a caller-supplied directory (``run_snapshot(runtime_dir=...)``),
-    which a skill used to have to pass because the runtime was vendored beside it. It
-    still wins when given; otherwise the packaged copy is used.
-    """
-    override = _env_dir("CADGEN_BROWSER_RUNTIME_DIR")
-    if override:
-        return override
-    if explicit:
-        return Path(explicit).expanduser().resolve()
-    return _RUNTIME / "browser"
 
 
 def viewer_dist_dir() -> Path:

@@ -2,9 +2,9 @@
 
 ``packages/cadgen/src/cadgen/_runtime`` is built, never committed, so the ordinary state
 of a fresh clone is that it does not exist. Every failure downstream of that is opaque --
-a headless page 404ing on its own script -- so the resolvers that reach for it answer
-with the fix instead, and the fix differs by where cadgen is running from: a checkout
-builds, an installation reinstalls.
+a page 404ing on its own script -- so what reaches for it answers with the fix instead,
+and the fix differs by where cadgen is running from: a checkout builds, an installation
+reinstalls.
 
 The assertion is on the ACTIONABLE half of the message, not its wording: what must never
 regress is that a developer is told the command and a user is told it is a bad install.
@@ -28,40 +28,16 @@ BUNDLER = "scripts/bundle/bundle.sh"
 
 
 class MissingRuntimeNamesTheBundler(unittest.TestCase):
-    def setUp(self) -> None:
-        self.empty = Path(tempfile.mkdtemp(prefix="cadgen-empty-runtime-"))
-        self.addCleanup(self.empty.rmdir)
-
-    def test_a_missing_browser_runtime_names_the_bundler_in_a_checkout(self) -> None:
-        with self.assertRaises(assets.AssetMissing) as caught:
-            assets.require_browser_runtime(self.empty)
-        message = str(caught.exception)
-        # Both files, so a bundle that wrote one and lost the other is not reported as if
-        # the whole stage were absent.
-        self.assertIn("render.html", message)
-        self.assertIn("snapshot-render.js", message)
-        self.assertIn(BUNDLER, message)
-
-    def test_a_half_built_browser_runtime_names_only_what_is_missing(self) -> None:
-        (self.empty / "render.html").write_text("<!doctype html>", encoding="utf-8")
-        self.addCleanup((self.empty / "render.html").unlink)
-        with self.assertRaises(assets.AssetMissing) as caught:
-            assets.require_browser_runtime(self.empty)
-        message = str(caught.exception)
-        self.assertIn("snapshot-render.js", message)
-        self.assertNotIn("render.html,", message)
-
-    def test_a_complete_browser_runtime_is_returned_unchanged(self) -> None:
-        for name in ("render.html", "snapshot-render.js"):
-            (self.empty / name).write_text("built", encoding="utf-8")
-            self.addCleanup((self.empty / name).unlink)
-        self.assertEqual(self.empty, assets.require_browser_runtime(self.empty))
+    def test_a_checkout_is_told_to_run_the_bundler(self) -> None:
+        with mock.patch.object(assets, "_in_source_checkout", return_value=True):
+            hint = assets.runtime_build_hint(Path("_runtime") / "mcp" / "index.html")
+        self.assertIn(BUNDLER, hint)
 
     def test_an_installed_cadgen_is_told_to_reinstall_not_to_run_a_repo_script(self) -> None:
         # A wheel has no repository around it, so naming the bundler there would be advice
         # nobody can follow. The source-checkout anchor is what decides.
         with mock.patch.object(assets, "_in_source_checkout", return_value=False):
-            hint = assets.runtime_build_hint(self.empty / "snapshot-render.js")
+            hint = assets.runtime_build_hint(Path("_runtime") / "mcp" / "index.html")
         self.assertNotIn(BUNDLER, hint)
         self.assertIn("Reinstall cadgen", hint)
 
@@ -72,9 +48,8 @@ class ExplicitRuntimeAssets(unittest.TestCase):
             packaged = Path(tmp) / "cadgen" / "_runtime"
             with mock.patch.object(assets, "_RUNTIME", packaged), \
                     mock.patch.object(assets, "_dev_viewer_dist_dir", return_value=None), \
-                    mock.patch.dict(os.environ, {"CADGEN_VIEWER_DIST": "", "CADGEN_BROWSER_RUNTIME_DIR": ""}):
+                    mock.patch.dict(os.environ, {"CADGEN_VIEWER_DIST": ""}):
                 self.assertEqual(assets.viewer_dist_dir(), packaged / "viewer")
-                self.assertEqual(assets.browser_runtime_dir(), packaged / "browser")
 
     def test_a_checkout_serves_its_own_web_build(self):
         root = Path(__file__).resolve().parents[4]
@@ -110,10 +85,8 @@ class ExplicitRuntimeAssets(unittest.TestCase):
     def test_development_overrides_are_explicit(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
-            overrides = {"CADGEN_VIEWER_DIST": str(root / "web"), "CADGEN_BROWSER_RUNTIME_DIR": str(root / "browser")}
-            with mock.patch.dict(os.environ, overrides):
+            with mock.patch.dict(os.environ, {"CADGEN_VIEWER_DIST": str(root / "web")}):
                 self.assertEqual(assets.viewer_dist_dir(), root / "web")
-                self.assertEqual(assets.browser_runtime_dir(), root / "browser")
 
 
 if __name__ == "__main__":
