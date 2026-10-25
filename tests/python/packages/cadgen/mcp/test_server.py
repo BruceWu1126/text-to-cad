@@ -1054,6 +1054,19 @@ class ToolArgumentsTest(unittest.TestCase):
             self.assertEqual(failed["structuredContent"]["state"], "failed")
             self.assertEqual(failed["structuredContent"]["result"], {"outputsMayHaveBeenWritten": may}, error)
 
+    def test_an_export_of_a_script_says_to_run_it_and_export_its_document_by_id(self) -> None:
+        server = self.served("text")
+        script = self.tmp / "l_bracket.py"
+        script.write_text("print(1)\n", encoding="utf-8")
+        failed = self.call(server, "cad_export", {"requestId": "export-a-script-001", "source": str(script),
+                                                  "destinations": [str(self.tmp / "l_bracket.step")], "waitMs": 10000})
+        answer = failed["structuredContent"]
+        self.assertEqual(answer["state"], "failed")
+        self.assertEqual(answer["error"], "l_bracket.py is no document: an export reads an .xbf, a .step, a mesh (.glb, "
+                                          f".stl, .3mf) or a document id; run `cadgen run {script}` first, then export "
+                                          "its document by id")
+        self.assertEqual(answer["result"], {"outputsMayHaveBeenWritten": False})  # refused before the engine was asked
+
     def test_the_text_catalog_says_the_model_opens_in_the_browser_and_never_in_the_chat(self) -> None:
         server = self.served("text")
         instructions = server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {},

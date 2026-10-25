@@ -428,8 +428,11 @@ def _source(source: Any) -> dict[str, Any]:
         return {"id": text}
     path = Path(text).resolve()
     if path.suffix.lower() not in SOURCES + MESHES:
+        # A script is the commonest such source: its run makes the document, and prints its id.
+        run = (f"; run `cadgen run {text}` first, then export its document by id"
+               if path.suffix.lower() == ".py" else "")
         raise ExportRefused(f"{path.name} is no document: an export reads an .xbf, a .step, a mesh "
-                            f"({', '.join(MESHES)}) or a document id")
+                            f"({', '.join(MESHES)}) or a document id{run}")
     if not path.is_file():
         raise ExportRefused(f"no document {path}")
     return {"path": str(path)}
