@@ -346,8 +346,10 @@ src/cadgen/
 Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and
 `server` are the engine's verbs; `cadgen dxf snapshot`, `urdf snapshot` and `sdf snapshot` its
 snapshot for those files alone; `cadgen urdf|sdf|srdf validate` the validators; `cadgen
-doctor` the setup (the installation registered, the `cadgen` command written, the engine started) and
-a skill's pin; `cadgen run` a model script by the installation's python; `cadgen viewer` the engine page launcher;
+doctor` the setup (the installation registered, the `cadgen` command written, the engine started),
+a skill's pin and what cadgen left behind that nothing needs, which `cadgen doctor --prune` removes
+(`_internal/leftovers.py`: engine records of an older format, the bytecode of installations no longer
+registered, cache folders no record names; none written in the last seven days); `cadgen run` a model script by the installation's python; `cadgen viewer` the engine page launcher;
 `cadgen mcp` the stateless proxy an agent host starts; and `cadgen telemetry` the person's answer. A
 model builds by running its script: `python model.py`, or `cadgen +<version> run model.py` through
 the `cadgen` command, which picks the installation by the first that names one, in this order

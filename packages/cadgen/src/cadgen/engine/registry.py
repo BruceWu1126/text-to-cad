@@ -56,7 +56,7 @@ from typing import Any, Callable
 from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.ids import is_id
 
-__all__ = ["DOCUMENTS", "ENGINES", "ENGINE_SCHEMA", "FACTORY", "Folder", "OBSERVERS", "RECORD", "Registry", "SCHEMA", "TOKEN", "command", "current",
+__all__ = ["DOCUMENTS", "ENGINES", "ENGINE_FIELDS", "ENGINE_SCHEMA", "FACTORY", "Folder", "OBSERVERS", "RECORD", "Registry", "SCHEMA", "TOKEN", "command", "current",
            "detached", "home", "program", "relative"]
 
 SCHEMA = 1
@@ -66,6 +66,8 @@ ENGINES = "engines"
 # The engine records' own schema: 3 holds, while the default port is another's, the port the
 # installation rolled to (and held the installation's token, which is the user's now: ``TOKEN``).
 ENGINE_SCHEMA = 3
+# What an engine record holds (``put_engine``): one carrying anything else is an earlier build's.
+ENGINE_FIELDS = ("port", "schema")
 # The user's page token, one for every installation's engine: a link outlives an upgrade.
 TOKEN = f"{ENGINES}/token"
 
@@ -318,7 +320,7 @@ class Registry:
         this user's alone."""
         if not installation.isalnum():
             raise ValueError(f"{installation!r} is not an installation")
-        kept = {"port": record["port"]} if record.get("port") else {}
+        kept = {key: record[key] for key in ENGINE_FIELDS if key != "schema" and record.get(key)}
         text = json.dumps({**kept, "schema": ENGINE_SCHEMA}, indent=1, sort_keys=True) + "\n"
         self.state.write(f"{ENGINES}/{installation}.json", text.encode("utf-8"), mode=0o600)
 
