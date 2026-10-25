@@ -777,7 +777,7 @@ def _outputs(plan: list, report: dict[str, Any], log: Callable[[str], None],
     first (``save``: the document's own bytes, and the viewer woken with it, before any derived file
     is written), then each derived file translated from the document (``source``:
     ``export.translate``) -- every one landed only where the file does not hold its bytes already
-    (``atomic_replace.land``), as ``cadgen export`` writes. Nothing remembers what was written: every
+    (``atomic_replace.put``), as ``cadgen export`` writes. Nothing remembers what was written: every
     run that reaches a declared file translates it and compares, so a file someone deleted or edited
     is written again from the document, and one nobody touched keeps its bytes and its time. The
     report's ``files``: each file's kind, whether it was written, the seconds and its bytes. ``log``

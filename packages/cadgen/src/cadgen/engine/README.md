@@ -1524,7 +1524,7 @@ keeps its document as any (a later build of it takes that, **Build closure**); a
 unchanged is kept. A declared file is an export appended to the run: translated from the document
 every time the model runs or is taken -- an xbf from the document's own bytes, serialised before any
 export meshes its shapes -- compared with the file, and written only where it differs or is missing
-(`atomic_replace.land`, the one writer `cadgen export` lands its files with too), nothing remembered
+(`atomic_replace.put`, the one writer `cadgen export` writes its files with too), nothing remembered
 of what was written. A child called
 twice is one model, written once; a child that is also a target of the build writes as the
 target; a child run inside a replayed body writes as one its caller ran; one that ran before its
