@@ -4,7 +4,7 @@ it remembers, in the worker's memory for the worker's life.
 Installed in the worker beside ``determinism.install()``, idempotently, the layer
 patches every kernel construction build123d's topology modules offer -- primitives,
 booleans, fillets and chamfers, sweeps and lofts, faces and wires, copies and moves,
-``clean``, ``is_valid``, ``split``, ``project_faces``, the constructors that build a
+``clean``, ``split``, ``project_faces``, the constructors that build a
 face from wires, a wire from edges, a shell from faces, a solid from a shell and a
 compound from shapes, and the file importers -- so that every call made from a
 model's own code inside a run (``run()``) is seen once, at the boundary.
@@ -292,7 +292,6 @@ _INSTANCE_TARGETS = (
     ("Edge", "reversed", "reversed"),
     ("Edge", "close", "close"),
 )
-_PROPERTY_TARGETS = (("Shape", "is_valid", "is_valid"),)
 _CLASSMETHOD_TARGETS = tuple(
     (cls, name, name)
     for cls, names in (
@@ -384,8 +383,6 @@ def install() -> bool:
 
         for cls_name, attr, label in _INSTANCE_TARGETS:
             _patch(getattr(topology, cls_name), attr, label, "instance")
-        for cls_name, attr, label in _PROPERTY_TARGETS:
-            _patch(getattr(topology, cls_name), attr, label, "property")
         for cls_name, attr, label in _CLASSMETHOD_TARGETS:
             _patch(getattr(topology, cls_name), attr, label, "classmethod")
         for cls_name, _slot in _CONSTRUCTOR_TARGETS:
@@ -721,7 +718,7 @@ def uninstall() -> bool:
         from build123d import importers, topology
         from build123d.topology import two_d
 
-        targets = (_INSTANCE_TARGETS + _PROPERTY_TARGETS + _CLASSMETHOD_TARGETS
+        targets = (_INSTANCE_TARGETS + _CLASSMETHOD_TARGETS
                    + tuple((cls_name, "__init__", cls_name) for cls_name, _slot in _CONSTRUCTOR_TARGETS)
                    + tuple((cls_name, attr, slot) for cls_name, attr, slot in _HELPER_CLASSMETHODS))
         for cls_name, attr, _label in targets:
@@ -786,6 +783,7 @@ def uninstall() -> bool:
 
 _QUERY_TARGETS: tuple[tuple[str, str], ...] = (
     ("Shape", "bounding_box"),
+    ("Shape", "is_valid"), ("Shape", "is_manifold"),
 )
 # The answers one shape's record keeps, the oldest dropped past them: a model asking one
 # shape about many points keeps the last of them.
@@ -1293,7 +1291,51 @@ class _CheckSpec(_Spec):
         cls.Perform(instance)
 
 
-_ANALYSES: tuple[_Spec, ...] = (_CheckSpec(),)
+@functools.cache
+def _idle_vertex() -> Any:
+    """A vertex at the origin: what an analyzer the memo answered was constructed on, since
+    ``BRepCheck_Analyzer`` has no constructor that does not run."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
+    from OCP.gp import gp_Pnt
+
+    return BRepBuilderAPI_MakeVertex(gp_Pnt(0, 0, 0)).Vertex()
+
+
+class _AnalyzerSpec(_Spec):
+    """``BRepCheck_Analyzer``: whether a shape is valid (its topology, and with the geometric
+    controls its edges' curves on their faces, its wires, its faces' orientation). Its verdict
+    reads the shape -- its geometry, tolerances and its edges' SameParameter and SameRange
+    flags, which its memo key holds (each sub-shape's state: tolerance, flags,
+    representations) -- whether the geometric controls run, and the exact method. The
+    parallel mode only spreads the sub-shapes over threads; keyed all the same. Nothing else:
+    no global tolerance, no randomness, and it writes nothing into the shape."""
+
+    module, name = "OCP.BRepCheck", "BRepCheck_Analyzer"
+    answers = ("IsValid",)
+    runs = ("Init",)
+    settings = (("IsParallel", "SetParallel", None), ("IsExactMethod", "SetExactMethod", None))
+
+    def parse(self, args: tuple) -> tuple[tuple | None, dict]:
+        if not args or len(args) > 4:
+            raise _Unkeyable("not an analyzer's arguments")
+        shape, geometric, parallel, exact = (*args, *(True, False, False)[len(args) - 1:])
+        return (_shape_argument(shape), _flag(geometric)), {"SetParallel": (_flag(parallel),),
+                                                            "SetExactMethod": (_flag(exact),)}
+
+    def idle(self, cls: type, instance: Any, settings: dict) -> None:
+        cls.__init__(instance, _idle_vertex(), False, settings["SetParallel"][0], settings["SetExactMethod"][0])
+
+    def data(self, method: str, args: tuple, current: tuple | None) -> tuple:
+        if not args or len(args) > 2:
+            raise _Unkeyable("not Init's arguments")
+        shape, geometric = (*args, *(True,)[len(args) - 1:])
+        return (_shape_argument(shape), _flag(geometric))
+
+    def run(self, cls: type, instance: Any, data: tuple) -> None:
+        cls.Init(instance, *data)
+
+
+_ANALYSES: tuple[_Spec, ...] = (_CheckSpec(), _AnalyzerSpec())
 
 
 def _patch(cls: type, attr: str, label: str, kind: str) -> None:
@@ -1304,11 +1346,6 @@ def _patch(cls: type, attr: str, label: str, kind: str) -> None:
         function = static.__func__
         if not getattr(function, "__kernel_memo__", False):
             setattr(cls, attr, classmethod(_wrap(label, function, kind)))
-    elif kind == "property":
-        if not isinstance(static, property):
-            raise TypeError(f"{cls.__name__}.{attr} is not a property")
-        if not getattr(static.fget, "__kernel_memo__", False):
-            setattr(cls, attr, property(_wrap(label, static.fget, kind), static.fset, static.fdel))
     else:
         if not inspect.isfunction(static):
             raise TypeError(f"{cls.__name__}.{attr} is not a plain method")
@@ -2710,7 +2747,7 @@ def _shown_call(op: str, kind: str, args: tuple, kwargs: dict) -> str:
             return f"[{len(value)} {kinds[0] if len(kinds) == 1 else 'items'}]"
         return type(value).__name__
 
-    if kind in ("instance", "property") and args:
+    if kind == "instance" and args:
         name, given = f"{type(args[0]).__name__}.{op}", args[1:]
     elif kind in ("classmethod", "constructor"):
         name, given = op, args[1:]

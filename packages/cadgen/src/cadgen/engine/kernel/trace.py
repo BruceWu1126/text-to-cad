@@ -158,8 +158,6 @@ _EXECUTIONS = itertools.count(1)
 _FILE_READS = frozenset({"read_step", "read_xbf", "import_step", "import_brep", "import_stl"})
 # What a STEP writer names an element it gives no name ('NONE' is the schema's empty name).
 _UNNAMED = frozenset({"", "NONE", "NULL"})
-# The operations that answer a question of a shape and make nothing of it.
-_QUERIES = frozenset({"is_valid"})
 # The operations that only place or hold the shapes they are given: an element of an
 # input no name reaches stays unnamed in what they return, never theirs.
 _PLACEMENTS = frozenset({"moved", "located", "compound", "copy", "deepcopy"})
@@ -878,7 +876,7 @@ class Trace:
         # when something is made of what it made in turn: an attempt the model threw away (a
         # fillet it found wanting) branches nothing.
         real = [feature for feature in self.features if through(feature.index) == feature.index]
-        used = {through(up) for feature in real if feature.operation not in _QUERIES
+        used = {through(up) for feature in real
                 for up in feature.inputs if up is not None and through(up) != feature.index}
         consumers: Counter = Counter()
         for feature in real:

@@ -383,6 +383,48 @@ class QueryTest(MemoCase):
         self.assertEqual(warm, cold)
         self.assertEqual(len(runs), 2, "Result() runs the check the memo answered")
 
+    def test_validity_is_answered_by_geometry_whatever_the_shape_is_labelled(self) -> None:
+        from build123d.topology import shape_core
+
+        def model(label):
+            part = self._part(3.0)
+            part.label = label
+            return part.is_valid, part.is_manifold, part
+
+        counted, runs = _counted(shape_core.BRepCheck_Analyzer, "IsValid")
+        with counted:
+            (valid, manifold, part), _, cold = _run(model, "a")
+            self.assertEqual((len(runs), cold.tally["queries_run"]), (1, 2))
+            (again, again_manifold, _), _, warm = _run(model, "b")
+            self.assertEqual((len(runs), warm.tally["queries_answered"]), (1, 2), "a label is no input of a query")
+        self.assertEqual((again, again_manifold), (valid, manifold))
+        part.label = "c"
+        self.assertEqual((valid, manifold), (part.is_valid, part.is_manifold), "outside a run: a fresh answer")
+
+    def test_an_analyzer_s_run_is_keyed_by_its_settings(self) -> None:
+        from OCP import BRepCheck
+
+        own = BRepCheck.BRepCheck_Analyzer.__kernel_memo_class__
+
+        def model(exact):
+            part = self._part(3.0)
+            return BRepCheck.BRepCheck_Analyzer(part.wrapped, True, False, exact).IsValid(), part
+
+        counted, runs = _counted(own, "Init")
+        with counted:
+            (cold, part), _, _ = _run(model, False)
+            (warm, _), _, run = _run(model, False)
+            self.assertEqual((len(runs), run.tally["queries_answered"]), (1, 1))
+            _run(model, True)
+            self.assertEqual(len(runs), 2, "the exact method is another key")
+        self.assertEqual(warm, cold)
+        self.assertEqual(warm, own(part.wrapped).IsValid())
+        loose = self._part(3.0)
+        with counted:
+            for _ in range(2):
+                _run(lambda: BRepCheck.BRepCheck_Analyzer(loose.wrapped).IsValid())
+        self.assertEqual(len(runs), 4, "a shape made past the memo is analysed every time")
+
 
 class VertexTest(MemoCase):
     def test_a_point_placed_by_a_model_is_keyed(self) -> None:
