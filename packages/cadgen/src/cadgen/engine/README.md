@@ -1124,8 +1124,9 @@ the daemon:
   rerun after its client was killed (a shell's time limit) waits for the build that client left
   running, nothing cancelled. Its client says so on stderr at once ("waiting for the build of
   turbine.py started 21 s ago"), the frames follow as its own build's would, and its report's
-  `waited` (`{"script", "ago", "seconds"}`) ends its line: "replayed the build of turbine.py it
-  waited 206s for".
+  `waited` (`{"script", "ago", "seconds"}`) ends its line: "took the build of turbine.py it
+  waited 206s for" when it takes the document that build made from its key, "replayed ..." when
+  the memo replays it.
 
 Each model's report holds its last frame (`progress`), so a failed build
 says where it was; a worker that dies during a build fails it with where it was in the words.

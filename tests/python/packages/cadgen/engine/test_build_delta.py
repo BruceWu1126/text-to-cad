@@ -184,6 +184,21 @@ class RunLineTest(unittest.TestCase):
         report["memo"] = {"misses": 2, "hits": 0}
         self.assertEqual(cli._describe(report, 0.1, None), "built m.py::m in 0.10s: bodies 1 run; 2 misses, 0 hits")
 
+    def test_a_build_that_waited_for_its_scripts_running_one_says_what_it_did_with_it(self) -> None:
+        from cadgen.engine import cli
+
+        waited = {"script": "turbine.py", "ago": 21, "seconds": 206}
+        took = {"ok": True, "model": "turbine.py::turbine", "memo": {"bodies_loaded": 1}, "timings": {},
+                "bodies": {"turbine.py::turbine": "loaded"}, "cache": {"used": True, "from": "memory"}, "waited": waited}
+        self.assertEqual(cli._describe(took, 3.61, False),
+                         "took turbine.py::turbine warm in 3.61s: its document in memory holds the model's key, "
+                         "1 bodies loaded, nothing ran; took the build of turbine.py it waited 206s for")
+        replayed = {"ok": True, "model": "turbine.py::turbine", "memo": {"misses": 0, "hits": 0}, "timings": {},
+                    "bodies": {"turbine.py::turbine": "replayed"}, "waited": waited}
+        self.assertEqual(cli._describe(replayed, 3.61, False),
+                         "built turbine.py::turbine warm in 3.61s: bodies 1 replayed; 0 misses, 0 hits; replayed "
+                         "the build of turbine.py it waited 206s for")
+
 
 if __name__ == "__main__":
     unittest.main()
