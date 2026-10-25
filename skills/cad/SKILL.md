@@ -285,9 +285,9 @@ print(closest_points(plate, post).distance)   # 0: the standoff sits on the plat
   on purpose, and a part meant to rest on another touches it when their
   `closest_points` distance is 0. Both describe the parts as built, not a pose
   ([measurements](references/inspection-and-validation.md#measurements)).
-- `cadgen inspect "$ID" <assembly name>` weighs an assembly (its name as the build line
-  prints it): each part's volume times its material's density, and the parts that have
-  no material.
+- `cadgen inspect "$ID" <assembly label>` weighs an assembly (the label it was given, which
+  is also the root name `inspect "$ID"` prints): each part's volume times its material's
+  density, and the parts that have no material.
 - A snapshot shows arrangement, not dimensions: a number the person asked for is
   measured, never read off a picture.
 - A check that fails or cannot decide has shown nothing about the design.
