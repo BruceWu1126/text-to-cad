@@ -246,7 +246,7 @@ class Registry:
         if not isinstance(record, dict) or record.get("schema") != ENGINE_SCHEMA:
             return {}
         found: dict[str, Any] = {}
-        if isinstance(record.get("port"), int) and 0 < record["port"] < 65536:
+        if type(record.get("port")) is int and 0 < record["port"] < 65536:  # a JSON true is no port
             found["port"] = record["port"]
         return found
 
