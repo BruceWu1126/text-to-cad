@@ -12,7 +12,11 @@ e. any installation whose engine runs, the newest version first;
 f. the newest installation registered.
 
 A version named (a-c) that is not registered, or whose interpreter is gone, fails in one line that
-names the command that installs it. The engines are found by their doors in the engine folder,
+names the command that installs it. So only a version (``installations.VERSION``: a digit, then
+letters, digits and ``.+_-``) is named: anything else -- a ``cadgen.toml`` of a downloaded project
+whose ``version`` carries spaces, shell or uv options -- is refused without building a command of
+it. A ``cadgen.toml`` another user owns, or that everyone may write (one in a shared folder above
+this one), names nothing: it is passed over. The engines are found by their doors in the engine folder,
 each asked its ``status`` at once and waited for ``ASK_SECONDS`` at most: only (d) and (e) ask.
 
 Then ``cadgen [+V] run ARGS`` runs that installation's ``python ARGS`` (a model script, ``-m``,
@@ -49,28 +53,51 @@ def version_key(version: str) -> tuple:
 
 
 def named(args: list[str], environ, cwd: str) -> tuple[str | None, list[str]]:
-    """The version the command names (a-c), and the arguments left to run."""
+    """The version the command names (a-c), and the arguments left to run. ``Refused`` for one
+    that is no version: never echoed into the command the refusal names."""
     if args and args[0].startswith("+") and len(args[0]) > 1:
-        return args[0][1:], args[1:]
+        return _version(args[0][1:], "its first argument"), args[1:]
     if environ.get("CADGEN_VERSION"):
-        return environ["CADGEN_VERSION"], args
+        return _version(environ["CADGEN_VERSION"], "CADGEN_VERSION"), args
     folder = os.path.abspath(cwd)
     while True:
         config = os.path.join(folder, CONFIG)
-        if os.path.isfile(config):
+        if os.path.isfile(config) and _users_own(config):
             import tomllib
 
             try:
                 with open(config, "rb") as handle:
                     version = tomllib.load(handle).get("version")
-            except (OSError, ValueError) as error:
+            except (OSError, ValueError, RecursionError) as error:
                 raise Refused(f"cadgen: {config}: {error}") from None
             if isinstance(version, str) and version:
-                return version, args
+                return _version(version, config), args
         parent = os.path.dirname(folder)
         if parent == folder:
             return None, args
         folder = parent
+
+
+def _version(version: str, source: str) -> str:
+    """``version`` when it is one (``installations.VERSION``), else ``Refused``, saying where it came from."""
+    from cadgen._internal.installations import VERSION
+
+    if not VERSION.fullmatch(version):
+        raise Refused(f"cadgen: {source} names no cadgen version: {ascii(version[:64])}")
+    return version
+
+
+def _users_own(config: str) -> bool:
+    """Whether ``config`` is this user's: on POSIX a file of this user's that not everyone may
+    write. A ``cadgen.toml`` in a shared folder above the current one (``/tmp``, say) is another
+    user's to plant. Windows: any."""
+    if os.name == "nt":
+        return True
+    try:
+        found = os.stat(config)
+    except OSError:
+        return False
+    return found.st_uid == os.getuid() and not found.st_mode & 0o002
 
 
 def _same(one: str, other: str) -> bool:
