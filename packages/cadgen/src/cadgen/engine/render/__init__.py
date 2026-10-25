@@ -14,5 +14,5 @@ OCCT's own; a file no document (a mesh file, a robot) from the buffers its reade
 - ``explode.py``: the viewer's Explode, ported (held to the viewer by one golden).
 - ``shapes.py``: a part's buffer as triangulation-only faces and polygon edges, in one kernel read.
 - ``context.py``: the headless OpenGL context, per platform.
-- ``meshes.py``, ``compare.py``: the prototype's harness (buffers from a server, side-by-side sheets).
+- ``meshes.py``: where the prototype's CLI and the parity bench get the engine's buffers.
 """

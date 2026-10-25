@@ -3,8 +3,6 @@
 - ``from_daemon``: the daemon serves the document and meshes every part in its warm pool
   (``POST /api/doc/<id>/mesh``), then hands each part's XBM buffer (``GET .../part/<key>``) --
   the bytes the viewer draws.
-- ``from_server``: the same from a server of this process (``serve.Server``), as
-  ``snapshot(..., daemon=False)`` meshes.
 - ``save``/``load``: those buffers kept in a folder, a cold run's pre-built cache (prototype
   only: the engine itself writes no mesh to disk).
 """
@@ -47,18 +45,6 @@ def from_daemon(path: Path) -> tuple[dict[str, Any], dict[str, bytes], dict[str,
     parsed = urlparse(answer["url"])
     url = f"{parsed.scheme}://{parsed.netloc}/api/doc/{parse_qs(parsed.query)['doc'][0]}"
     return _fetch(url)
-
-
-def from_server(path: Path) -> tuple[dict[str, Any], dict[str, bytes], dict[str, float]]:
-    from cadgen.engine.serve import Server
-
-    server = Server(port=0)
-    server.start()
-    try:
-        ident = server.add(Path(path).resolve())
-        return _fetch(f"{server.url}/api/doc/{ident}")
-    finally:
-        server.stop()
 
 
 def save(folder: Path, buffers: dict[str, bytes]) -> None:
