@@ -243,8 +243,10 @@ test('a page whose engine is gone says so in its language, over the page, until 
     assert.equal(snapshot() !== undefined, true, 'the page stays under it');
     catalog = 'restarted';
     await act(() => client.refresh({ file: ONE }).catch(() => {}));
-    assert.match(alert()?.textContent ?? '', /エンジンが動いていません。/);
-    assert.doesNotMatch(alert()?.textContent ?? '', /engine token required/);
+    // An engine that refuses the token runs: the page's link was replaced (`cadgen server --rotate-token`).
+    assert.match(alert()?.textContent ?? '', /このページのリンクは置き換えられました。/);
+    assert.match(alert()?.textContent ?? '', /cadgen viewer を実行し、表示されたリンクを開いてください。/);
+    assert.doesNotMatch(alert()?.textContent ?? '', /engine token required|エンジンが動いていません/);
     catalog = 'back';
     await act(() => client.refresh({ file: ONE }));
     assert.equal(alert() === null, true, 'gone with the first read that answers');
@@ -264,6 +266,9 @@ test('the notice says the page reconnects, and how to start the engine', async (
     await act(() => root.render(createElement(EngineStopped, { locale: 'en' })));
     assert.equal(dom.window.document.querySelector('[role="alert"]')?.textContent,
       'The engine is not running; the page reconnects when it is back.Run python <model>.py or cadgen viewer to start it.');
+    await act(() => root.render(createElement(EngineStopped, { locale: 'en', refused: true })));
+    assert.equal(dom.window.document.querySelector('[role="alert"]')?.textContent,
+      "This page's link was replaced; the page reconnects once its new link is opened.Run cadgen viewer and open the link it prints.");
   } finally {
     await act(() => root.unmount());
     dom.window.close();

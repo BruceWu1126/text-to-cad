@@ -1,6 +1,6 @@
 import { createExportService } from './exports.js';
 import { encodeBase64 } from './base64.js';
-import { isEngineGone, requestViewerJson, ViewerRequestError } from "./request.js";
+import { isEngineGone, isEngineRefused, requestViewerJson, ViewerRequestError } from "./request.js";
 import { retainGlbMeshWorker } from '../lib/render/glbMeshWorkerClient.js';
 import { retainStlMeshWorker } from '../lib/render/stlMeshWorkerClient.js';
 import { applyViewerOriginToEntries, normalizeViewerOrigin, viewerOriginUrl } from './origin.js';
@@ -67,7 +67,7 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
   let disposed = false;
   const resourceLifetime = new AbortController();
   const resources = scopeCadResources(resourceProvider || createHttpCadResourceProvider({ origin, fetch: fetchImpl }), resourceLifetime.signal);
-  let snapshot = { entries: [], revision: 0, hydrated: false, refreshing: false, error: '', engineGone: false, catalogRevision: '' };
+  let snapshot = { entries: [], revision: 0, hydrated: false, refreshing: false, error: '', engineGone: false, engineRefused: false, catalogRevision: '' };
   const listeners = new Set();
   const requests = new Set();
   const sessions = new Set();
@@ -145,7 +145,7 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     const catalogRevision = typeof catalog?.revision === 'string' ? catalog.revision : snapshot.catalogRevision;
     const changed = entries.length !== snapshot.entries.length || entries.some((entry, index) => entry !== snapshot.entries[index]);
     if (changed || !snapshot.hydrated || snapshot.refreshing || snapshot.error || snapshot.engineGone || catalogRevision !== snapshot.catalogRevision) {
-      publish({ entries: changed ? entries : snapshot.entries, hydrated: true, refreshing: false, error: '', engineGone: false, catalogRevision });
+      publish({ entries: changed ? entries : snapshot.entries, hydrated: true, refreshing: false, error: '', engineGone: false, engineRefused: false, catalogRevision });
     }
   }
 
@@ -165,7 +165,7 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
       } catch (error) {
         if (!disposed && !signal?.aborted && error?.name !== 'AbortError' && sequence === refreshSequence) {
           publish({ hydrated: true, refreshing: false, error: error instanceof Error ? error.message : String(error),
-            engineGone: isEngineGone(error) });
+            engineGone: isEngineGone(error), engineRefused: isEngineRefused(error) });
         }
         throw error;
       }

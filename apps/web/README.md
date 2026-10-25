@@ -139,7 +139,10 @@ link past its day says it has expired, any other (no link, a session 30 days unu
 cookie from before `cadgen server --rotate-token`) that the page needs its link, and both say to
 run `cadgen viewer` and open the link it prints. A
 loaded page whose engine stops under it says the engine is not running, in the person's
-language, over the page until a read answers again.
+language, over the page until a read answers again. One whose engine runs and refuses its token
+(after `cadgen server --rotate-token`) says instead that its link was replaced, and to run `cadgen
+viewer` and open the link it prints; it keeps asking, never reloads for the refusal, and heals
+once that link, opened beside it, has left the new cookie.
 
 A page closing never stops the engine, and no timer does: it runs until `cadgen stop`.
 Code changes in a checkout require

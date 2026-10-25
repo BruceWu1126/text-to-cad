@@ -35,6 +35,8 @@ export default {
   "app.start.notAnswering": "The CAD Viewer is not answering",
   "app.engine.notRunning": "The engine is not running; the page reconnects when it is back.",
   "app.engine.startIt": "Run python <model>.py or cadgen viewer to start it.",
+  "app.engine.linkReplaced": "This page's link was replaced; the page reconnects once its new link is opened.",
+  "app.engine.openNewLink": "Run cadgen viewer and open the link it prints.",
 
   // The file view: opening, and the states where it stops.
   "file.opening": "Opening…",

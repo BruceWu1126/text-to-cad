@@ -32,6 +32,8 @@ export default {
   "app.start.notAnswering": "CAD 查看器没有响应",
   "app.engine.notRunning": "引擎没有运行；它恢复后页面会重新连接。",
   "app.engine.startIt": "运行 python <model>.py 或 cadgen viewer 来启动它。",
+  "app.engine.linkReplaced": "此页面的链接已被替换；打开新链接后页面会重新连接。",
+  "app.engine.openNewLink": "运行 cadgen viewer 并打开它打印出的链接。",
 
   "file.opening": "正在打开…",
   "file.missing": "文件不存在",
