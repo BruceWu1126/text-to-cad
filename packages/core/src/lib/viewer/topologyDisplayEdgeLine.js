@@ -136,10 +136,6 @@ function syncRecordEdgeLineTransforms(runtime, group, displayRecords = []) {
   return changed;
 }
 
-export function syncRecordTopologyDisplayEdgeTransforms(runtime, displayRecords = []) {
-  return syncRecordEdgeLineTransforms(runtime, runtime?.topologyDisplayEdgeLine, displayRecords);
-}
-
 export function createRecordTopologyDisplayEdgeGroup(runtime, sourceRuntime, {
   edgeSettings = {},
   focusedPartIds = [],
