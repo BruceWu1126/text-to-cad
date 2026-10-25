@@ -694,7 +694,9 @@ def status_text(answer: dict[str, Any]) -> str:
     resident = answer.get("rssMb")
     memory = (f"RSS {_gb(resident)} of {_gb(cap)}" if resident is not None else f"RSS cap {_gb(cap)}") if cap \
         else "no RSS cap"
-    lines = [" · ".join([f"engine server {answer.get('pid')}, up {_span(answer.get('up'))}", workers_text(answer),
+    version = answer.get("installation") or answer.get("version")  # the installation's: two are told apart
+    lines = [" · ".join([f"engine server {answer.get('pid')}" + (f" (cadgen {version})" if version else "")
+                         + f", up {_span(answer.get('up'))}", workers_text(answer),
                          *([f"held by {answer['holders']} app server{'' if answer['holders'] == 1 else 's'}"]
                            if answer.get("holders") else []),
                          memory])]

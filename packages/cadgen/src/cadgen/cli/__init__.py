@@ -183,9 +183,12 @@ def _main(argv: list[str] | None) -> int:
         return 0
 
     if argv[0] in {"-V", "--version"}:
+        # The installation's own version, as doctor's header says it: a development install's
+        # name (0.8.0-dev.<stamp>), so two installations are told apart; else the package's.
         from cadgen import __version__
+        from cadgen._internal.installations import own_version
 
-        sys.stdout.write(f"cadgen {__version__}\n")
+        sys.stdout.write(f"cadgen {own_version() or __version__}\n")
         return 0
 
     # Longest match first, so `dxf snapshot` is dispatched as one command.

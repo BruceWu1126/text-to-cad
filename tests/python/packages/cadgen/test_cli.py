@@ -62,9 +62,31 @@ class Dispatch(unittest.TestCase):
     def test_version_flag_reports_the_distribution_version(self):
         from cadgen import __version__
 
-        code, out, _ = self._run(["--version"])
+        from unittest import mock
+
+        from cadgen._internal import installations
+
+        with mock.patch.dict("os.environ", {installations.NAME_ENV: ""}), \
+                mock.patch.object(installations, "editable", return_value=False):
+            code, out, _ = self._run(["--version"])
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), f"cadgen {__version__}")
+
+    def test_version_flag_names_a_development_installation_by_its_own_version(self):
+        # Two installations are told apart: a dev install says its stamped name, as doctor's header does.
+        from unittest import mock
+
+        from cadgen._internal import installations
+
+        with mock.patch.dict("os.environ", {installations.NAME_ENV: "0.8.0-dev.20261025032350"}):
+            code, out, _ = self._run(["--version"])
+        self.assertEqual((code, out.strip()), (0, "cadgen 0.8.0-dev.20261025032350"))
+
+    def test_status_names_the_engine_s_installation(self):
+        from cadgen.engine.cli import status_text
+
+        text = status_text({"pid": 7, "up": 5, "workers": [], "installation": "0.8.0-dev.20261025032350"})
+        self.assertTrue(text.startswith("engine server 7 (cadgen 0.8.0-dev.20261025032350), up "), text)
 
     def test_unknown_command_exits_two_and_names_it_on_stderr(self):
         code, _, err = self._run(["nope"])
