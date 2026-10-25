@@ -12,8 +12,8 @@ repository link is only for provenance and release review.
 
 ## Setup
 
-Run cadgen by the launchers its installation publishes, so this skill's commands share
-one installation, and its engine server, with the CAD app's:
+Run cadgen through the `cadgen` command its installation writes, so this skill's commands
+share one installation, and its engine server, with the CAD app's:
 
 - `cadgen` below means `cadgen +0.8.0` (`~/.local/bin/cadgen +0.8.0` where `~/.local/bin` is not on your PATH)
 - `python` below means `cadgen +0.8.0 run`
@@ -28,7 +28,7 @@ outside the sandbox once.
 
 `cadgen doctor <skill-dir>` reports the installation in use and checks that it is
 the one this skill pins, that the CAD kernel loads, and whether the engine every
-build runs in is running; use it for installation or kernel load errors.
+build runs in is running, starting it when none is; use it for installation or kernel load errors.
 
 Drawings are build123d geometry, so a drawing builds in the engine's warm worker
 like any model: the first run of a script loads the CAD kernel (a few seconds),

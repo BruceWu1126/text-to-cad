@@ -35,8 +35,8 @@ Use the corresponding robot-description skill for URDF, SRDF or SDF.
 
 ## Setup and paths
 
-Run cadgen by the launchers its installation publishes, so this skill's commands share
-one installation, and its engine server, with the CAD app's:
+Run cadgen through the `cadgen` command its installation writes, so this skill's commands
+share one installation, and its engine server, with the CAD app's:
 
 - `cadgen` below means `cadgen +0.8.0` (`~/.local/bin/cadgen +0.8.0` where `~/.local/bin` is not on your PATH)
 - `python` below means `cadgen +0.8.0 run`
@@ -50,7 +50,8 @@ shell cannot start the engine; when a command says no engine is running, run `ca
 outside the sandbox once.
 
 `cadgen doctor <skill-dir>` reports the installation in use, whether it is the one
-this skill pins, whether the CAD kernel loads, and whether the engine is running. Each
+this skill pins, whether the CAD kernel loads, and whether the engine is running, starting
+it when none is. Each
 command's `--help` lists its flags. The first launch downloads cadgen and may outlast a
 host's server start timeout (Claude Code: 30 s unless `MCP_TIMEOUT` is raised; Codex: the
 plugin asks for 300 s); a restart resumes the download.

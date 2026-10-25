@@ -24,8 +24,8 @@ patterns, which are toolpaths, not documents; the two are different jobs.
 
 ## Setup
 
-Run cadgen by the launchers its installation publishes, so this skill's commands share
-one installation, and its engine server, with the CAD app's:
+Run cadgen through the `cadgen` command its installation writes, so this skill's commands
+share one installation, and its engine server, with the CAD app's:
 
 - `cadgen` below means `cadgen +0.8.0` (`~/.local/bin/cadgen +0.8.0` where `~/.local/bin` is not on your PATH)
 - `python` below means `cadgen +0.8.0 run`
