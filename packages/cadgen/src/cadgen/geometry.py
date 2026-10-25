@@ -13,7 +13,7 @@ from math import isfinite
 from typing import TYPE_CHECKING, Iterable
 
 if TYPE_CHECKING:
-    from build123d import Edge, Shape, Shell, Solid, Vector
+    from build123d import Compound, Edge, Shape, Shell, Solid, Vector
 
 __all__ = [
     "GeometryError", "GeometryIssue", "ClosestPoints", "MassProperties",
@@ -180,20 +180,49 @@ def closest_points(a: Shape, b: Shape) -> ClosestPoints:
         raise GeometryError(f"closest point computation failed: {exc}") from exc
 
 
-def overlap_volume(a: Solid, b: Solid) -> float:
-    """Intersection volume of two finite, positively oriented solids.
+def overlap_volume(a: Solid | Compound, b: Solid | Compound) -> float:
+    """Intersection volume of two finite, positively oriented solids, or of
+    compounds of them: an assembly's leaf part is often a Compound.
 
-    Contact has zero volume. Assembly pair selection, intentional overlaps
-    and acceptance thresholds belong to the caller. Inputs are never fused
-    or modified; a failed boolean is an error, never a zero-volume answer.
+    A compound is its solids, each placed as the compound places it, and the
+    answer is the sum of every pair's overlap (one solid of ``a``, one of
+    ``b``): solids of one compound that overlap each other count their shared
+    region once per solid, and are never fused. Contact has zero volume.
+    Assembly pair selection, intentional overlaps and acceptance thresholds
+    belong to the caller. Inputs are never fused or modified; a failed boolean
+    is an error, never a zero-volume answer.
     """
-    from build123d import Solid
+    lefts, rights = _solids(a), _solids(b)
+    return sum((_overlap(left, right) for left in lefts for right in rights), 0.0)
+
+
+def _solids(shape) -> list:
+    """A Solid's native solid, or a Compound's solids, each with the
+    compound's placement; ``TypeError`` for anything else, and for a compound
+    that holds no solid."""
+    from build123d import Compound, Solid
+    from OCP.TopAbs import TopAbs_SOLID
+    from OCP.TopExp import TopExp_Explorer
+
+    if isinstance(shape, Solid):
+        return [_wrapped(shape, Solid)]
+    if not isinstance(shape, Compound):
+        raise TypeError(f"expected Solid or Compound, got {type(shape).__name__}")
+    explorer, found = TopExp_Explorer(_wrapped(shape, Compound), TopAbs_SOLID), []
+    while explorer.More():
+        found.append(explorer.Current())
+        explorer.Next()
+    if not found:
+        raise TypeError(f"expected Solid or a Compound of solids, got a {type(shape).__name__} with no solid")
+    return found
+
+
+def _overlap(left, right) -> float:
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
     from OCP.BRepBndLib import BRepBndLib
     from OCP.BRepCheck import BRepCheck_Analyzer
     from OCP.Bnd import Bnd_Box
 
-    left, right = _wrapped(a, Solid), _wrapped(b, Solid)
     try:
         if _properties(left).Mass() <= 0 or _properties(right).Mass() <= 0:
             raise ValueError("overlap_volume requires positively oriented solids with positive volume")
