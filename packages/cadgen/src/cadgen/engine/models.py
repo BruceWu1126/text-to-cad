@@ -325,7 +325,7 @@ class Models:
     def rebuild(self, ident: str) -> dict[str, Any] | None:
         """What the engine knows of a model document it does not hold: its state (``evicted``,
         ``expired``), the command that builds it again -- the program that built it, run with
-        ``python`` -- and why, in words (the page's ``error``). None for a document it holds or
+        ``cadgen run`` -- and why, in words (the page's ``error``). None for a document it holds or
         never built. The engine never runs the command."""
         self.adopt(ident)
         with self.lock:
@@ -354,7 +354,7 @@ class Models:
                 "state": "evicted", "rebuild": command}
 
     def command(self, ident: str) -> str | None:
-        """The command that builds model document ``ident`` again: ``python`` and the program that
+        """The command that builds model document ``ident`` again: ``cadgen run`` and the program that
         built it (else its script), from this process's book or the registry's record. None for an id
         the engine never built."""
         with self.lock:
@@ -364,7 +364,9 @@ class Models:
             return known["rebuild"] if known is not None else None
         if found.get("store") == "shape":
             return None  # handed over by a program the engine did not run: nothing builds it again
-        return f"python {shlex.quote(str(found.get('program') or found['source']['script']))}"
+        from cadgen.engine.registry import rerun
+
+        return rerun(found.get("program") or found["source"]["script"])
 
     def recorded(self, ident: str) -> dict[str, Any] | None:
         """What the registry knows of a model document this process never built (one built before a

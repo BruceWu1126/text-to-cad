@@ -293,11 +293,17 @@ def program(registry: Registry, record: dict[str, Any]) -> Path | None:
     return Path(os.path.normpath(registry.root(record) / run[-1])) if run else None
 
 
+def rerun(program: Any) -> str:
+    """The command that runs ``program`` again, as a person types it: ``cadgen run`` and the
+    program, absolute. The engine that says it is the one ``cadgen run`` reaches, and its python
+    has the kernel a bare ``python`` may not."""
+    return f"cadgen run {shlex.quote(str(program))}"
+
+
 def command(registry: Registry, record: dict[str, Any]) -> str | None:
-    """The command that builds a model's document again, as a person types it: ``python`` and the
-    program, absolute. The engine never runs it."""
+    """The command that builds a model's document again (``rerun``). The engine never runs it."""
     found = program(registry, record)
-    return None if found is None else f"python {shlex.quote(str(found))}"
+    return None if found is None else rerun(found)
 
 
 def detached(registry: Registry, record: dict[str, Any]) -> bool:

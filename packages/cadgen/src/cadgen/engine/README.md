@@ -471,7 +471,7 @@ cadgen status [--json] | stop [--json] | server [--port N] [--rotate-token]
 Every `SRC` and `DOC` is an on-disk CAD file's path or a document's id (`ids`): a model's id is
 what `python SCRIPT.py` prints for it (`id:`, beside its page, `view: <engine>/<id>`). A document
 id is read as the engine holds it, never built: one it does not hold is refused with the command
-that builds it again, `python <the program that built it>`. A script is never a source: `x.py`
+that builds it again, `cadgen run <the program that built it>`. A script is never a source: `x.py`
 and `x.py::fn` are refused as any other file that is no document is.
 
 Every build and every verb goes through the engine: no command runs one in its own process. A
@@ -740,7 +740,7 @@ documents:
   live      tom      8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12
   held      bracket  3e9b7c21-55aa-5f0e-8d11-6c2a9b4e7d30  memory and disk
   held      lid      0a6f2d94-7c1e-5b38-9e40-1d5c7a2b8f63  disk
-  evicted   arm      71d0c4e8-9b2a-5c13-a6f4-0e8d2b5c9a17  run `python /work/assemble.py`
+  evicted   arm      71d0c4e8-9b2a-5c13-a6f4-0e8d2b5c9a17  run `cadgen run /work/assemble.py`
 ```
 
 A worker's memory is as it measured it after its last build; a busy one's build is where its
@@ -940,9 +940,9 @@ current model; changed, it shows the last built state, with a badge -- "The code
 was built" and the rebuild command -- and `inspect` answers `stale`. Nothing reruns. Every verb
 that reads a document by its id (`export`, `snapshot`, `inspect`, with a ref or without) says once
 on stderr what it reads when that is not what the code makes now (`cli.told_state`, from
-`model_info`): "exporting the build of turbine from before turbine.py changed; run `python
+`model_info`): "exporting the build of turbine from before turbine.py changed; run `cadgen run
 …/turbine.py` to update it", or, for a document whose last run failed, "the last run of turbine
-failed; exporting its previous good build; fix it and run `python …/turbine.py` to update it". It
+failed; exporting its previous good build; fix it and run `cadgen run …/turbine.py` to update it". It
 goes on: a notice, never a refusal. `cadgen status` ends such a document's line with the word: stale
 and the command, or "serving its previous good build". A font is named by a family, not checked.
 
@@ -1002,8 +1002,9 @@ mark, half the budget:
 Where none can be read, the budget alone applies. `Pressure.simulate` is the tests' hook.
 
 **The rebuild command.** A document that is not held -- `evicted`, `expired` -- names the exact
-command that builds it again: `python` and the program whose call built it (its `__main__`
-file, else the model's script), from the daemon's record of it, or after a
+command that builds it again: `cadgen run` and the program whose call built it (its `__main__`
+file, else the model's script) -- the engine that says it is the one `cadgen run` reaches, and its
+python has the kernel a bare `python` may lack -- from the daemon's record of it, or after a
 restart the registry's. A shape handed over has none: its words say that a program the engine did
 not run showed it, and that only running that program again hands it over again. A child model's is its parent's program, whose run builds it. The page
 reads it from its document's 404 (`GET /api/doc/<id>`: `{"error", "state", "rebuild"}`),
@@ -2492,7 +2493,7 @@ inspect ID 'face 1'` take the id; `cadgen inspect 'ID#face 1'` uses the same ref
 Each reads the document the engine holds, as it is: editing the script changes nothing until
 Python runs it again, and no verb imports, runs or builds a script. An id the engine no longer
 holds (evicted, expired) is refused with its state and the command that builds it again
-(`python <the program that built it>`; **Document lifetime**).
+(`cadgen run <the program that built it>`; **Document lifetime**).
 `--query build` returns saved-file metadata/closure or live-build metadata; `--query closure` and
 `--query geometry` select the other queries explicitly. In the CAD Viewer a model's page is
 `/<id>`; it has no file of its own, so no Select File and no file menu.

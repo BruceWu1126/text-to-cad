@@ -231,7 +231,7 @@ class CacheTest(unittest.TestCase):
         # The code changes: the page and inspect say so, with the command; nothing reruns.
         self.write("cube", width=5.0)
         (self.project / "cube.ran").unlink(missing_ok=True)
-        command = f"python {self.project / 'cube.py'}"
+        command = f"cadgen run {self.project / 'cube.py'}"
         status, structure = self.page(ident)
         self.assertEqual(status, 200)
         self.assertEqual((structure["stale"]["changes"], structure["stale"]["rebuild"]), (["cube.py changed"], command))

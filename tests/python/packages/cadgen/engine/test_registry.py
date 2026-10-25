@@ -57,7 +57,7 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual([record["revision"] for record in heard], ["a", "b"])
         self.assertEqual([record["id"] for record in self.registry.list()], [self.ident])
         self.assertEqual(registry.command(self.registry, self.registry.get(self.ident)),
-                         f"python {self.state / 'caller.py'}")
+                         f"cadgen run {self.state / 'caller.py'}")
         self.assertTrue(self.registry.delete(self.ident))
         self.assertEqual((self.registry.get(self.ident), self.registry.list()), (None, []))
 
@@ -208,9 +208,9 @@ class RegistryDaemonTest(unittest.TestCase):
         self.assertEqual(self.cli("stop").returncode, 0)
         inspected = self.cli("inspect", cube)
         self.assertEqual(inspected.returncode, 2, inspected.stderr)
-        self.assertIn(f"run `python {project / 'caller.py'}`", inspected.stderr)
+        self.assertIn(f"run `cadgen run {project / 'caller.py'}`", inspected.stderr)
         answer = self.ask({"op": "state", "id": cube})
-        self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", f"python {project / 'caller.py'}"))
+        self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", f"cadgen run {project / 'caller.py'}"))
         self.assertEqual(self.ask({"op": "state", "id": scratch})["state"], "evicted", "a memory id is unknown")
         from cadgen.viewer.recents import RecentStore
 

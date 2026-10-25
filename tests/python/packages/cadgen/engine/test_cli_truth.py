@@ -77,7 +77,7 @@ class VerbsTest(unittest.TestCase):
         cls.failed = cls.run_("parts.py")
         with script.open("a", encoding="utf-8") as handle:
             handle.write("# an edit\n")
-        cls.command = f"python {script}"
+        cls.command = f"cadgen run {script}"
 
     @classmethod
     def run_(cls, *args: str):

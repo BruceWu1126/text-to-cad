@@ -309,12 +309,12 @@ def told_state(source: Any, doing: str) -> None:
 def state_notice(model: dict[str, Any], doing: str) -> str | None:
     """The words ``told_state`` says of a model document (``model_info``'s record), or None when it
     is what its code makes now."""
-    import shlex
+    from cadgen.engine.registry import rerun
 
     name = (model.get("source") or {}).get("name") or model.get("id")
     if model.get("state") == "failed":
         program = model.get("program") or (model.get("source") or {}).get("script")
-        fix = f"; fix it and run `python {shlex.quote(str(program))}` to update it" if program else ""
+        fix = f"; fix it and run `{rerun(program)}` to update it" if program else ""
         return f"the last run of {name} failed; {doing} its previous good build{fix}"
     stale = model.get("stale")
     if stale:
