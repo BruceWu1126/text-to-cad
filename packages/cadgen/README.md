@@ -242,6 +242,8 @@ the engine holds it. Export names absolute server-host destinations; snapshot na
 Quick Edit packet.
 
 Start with a unique `requestId` (16–100 letters, digits, underscores or hyphens).
+A start is checked whole before anything is queued: a refusal names every argument
+missing and every one the tool does not take, and the shape it takes, in one line.
 The result carries `id`, `epoch`, `state`, `sequence`, stage/progress and, when done,
 `result` or `error`. Use the same tool with `action: "status"`, `operationId` and
 `epoch`; `afterSequence` and `waitMs` (up to 25000) provide bounded waiting. A retry

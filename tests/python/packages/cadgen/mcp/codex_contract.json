@@ -382,13 +382,13 @@
    "inputSchema": {
     "additionalProperties": false,
     "properties": {
-     "path": {
+     "source": {
       "description": "A CAD file's absolute path, or a document id (a model's, which running its script prints).",
       "type": "string"
      }
     },
     "required": [
-     "path"
+     "source"
     ],
     "type": "object"
    },
@@ -414,7 +414,7 @@
    "inputSchema": {
     "additionalProperties": false,
     "properties": {
-     "path": {
+     "source": {
       "description": "A CAD file's absolute path, or a document id (a model's, which running its script prints).",
       "type": "string"
      },
@@ -424,7 +424,7 @@
      }
     },
     "required": [
-     "path"
+     "source"
     ],
     "type": "object"
    },
@@ -642,7 +642,7 @@
     "openWorldHint": true,
     "readOnlyHint": false
    },
-   "description": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf). The source is an absolute CAD file path or a document id (a model's, which running its script prints); a document id is exported as the engine holds it. A mesh source (.glb/.stl/.3mf) exports to the other two mesh kinds only, each holding what its format carries. Reuses the Python export operation. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
+   "description": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf). The source is an absolute CAD file path or a document id (a model's, which running its script prints); a document id is exported as the engine holds it. A mesh source (.glb/.stl/.3mf) exports to the other two mesh kinds only, each holding what its format carries. Reuses the Python export operation. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts. To start: {requestId, source, destinations}. To follow one: {action: status or cancel, operationId, epoch}, optionally with afterSequence, waitMs. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
    "inputSchema": {
     "additionalProperties": false,
     "anyOf": [
@@ -829,7 +829,7 @@
     "openWorldHint": true,
     "readOnlyHint": false
    },
-   "description": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. The source is an absolute CAD file path or a document id; paths must be absolute on the engine host. A failed snapshot or packet leaves existing pictures unchanged. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
+   "description": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. The source is an absolute CAD file path or a document id; paths must be absolute on the engine host. A failed snapshot or packet leaves existing pictures unchanged. To start: {requestId, source, output} or {requestId, packet}, optionally with display, camera, grid, preview, pose, width, height, size_profile, annotation, measurements. To follow one: {action: status or cancel, operationId, epoch}, optionally with afterSequence, waitMs. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
    "inputSchema": {
     "additionalProperties": false,
     "anyOf": [
@@ -1122,7 +1122,7 @@
     "openWorldHint": false,
     "readOnlyHint": true
    },
-   "description": "Read closure, geometry (requires ref), or build metadata of an existing CAD file or a document id. Never builds a model or writes its declared outputs; a document the engine no longer holds is refused with the command that builds it again. Defaults to geometry with a ref, otherwise closure. Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
+   "description": "Read closure, geometry (requires ref), or build metadata of an existing CAD file or a document id. Never builds a model or writes its declared outputs; a document the engine no longer holds is refused with the command that builds it again. Defaults to geometry with a ref, otherwise closure. To start: {requestId, source}, optionally with ref, query. To follow one: {action: status or cancel, operationId, epoch}, optionally with afterSequence, waitMs. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
    "inputSchema": {
     "additionalProperties": false,
     "anyOf": [

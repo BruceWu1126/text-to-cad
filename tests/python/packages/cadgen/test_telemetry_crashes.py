@@ -374,12 +374,12 @@ class ServerCrashTest(_Recording):
         from cadgen.mcp.server import Server
 
         server = self.serve()
-        self.assertTrue(self.call(server, "cad_show", {"path": str(self.tmp / "missing.step")}).get("isError"))  # its own failure
+        self.assertTrue(self.call(server, "cad_show", {"source": str(self.tmp / "missing.step")}).get("isError"))  # its own failure
         with self.assertRaises(RpcError):
             self.call(server, "cad_no_such_tool")  # the client's mistake
         with mock.patch.object(Server, "_tool_cad_show", side_effect=KeyError("secret part")):
             with self.assertRaises(KeyError):  # the protocol answers it as an internal error (protocol.Connection)
-                self.call(server, "cad_show", {"path": "a.step"})
+                self.call(server, "cad_show", {"source": "a.step"})
         [crash] = self.crashes()
         self.assertEqual((crash["where"], crash["tool"], crash["type"], crash["count"]), ("tool", "cad_show", "KeyError", 1))
         self.assertNotIn("secret", json.dumps(self.sent))

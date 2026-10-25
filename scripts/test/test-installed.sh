@@ -204,7 +204,7 @@ if "missing from this install" in page or "<script" not in page:
 mesh = os.path.join(sys.argv[2], "shown.stl")
 with open(mesh, "w", encoding="utf-8") as handle:
     handle.write("solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid t\n")
-shown = call(4, "tools/call", {"name": "cad_show", "arguments": {"path": mesh}})
+shown = call(4, "tools/call", {"name": "cad_show", "arguments": {"source": mesh}})
 launch = (shown.get("structuredContent") or {}).get("launch") or {}
 if shown.get("isError") or launch.get("version") != cadgen.__version__ or launch.get("model") != os.path.abspath(mesh):
     sys.exit(f"FAIL: cad_show answered {shown}")

@@ -59,11 +59,11 @@ def converse(tmp: Path) -> dict:
         "read": {key: value for key, value in server.handle("resources/read", {"uri": uri}, None)["contents"][0].items()},
         "launches": {
             "cad_home": call("cad_home"),
-            "cad_open": call("cad_open", {"path": str(bracket)}),
+            "cad_open": call("cad_open", {"source": str(bracket)}),
             "cad_tab": call("cad_tab"),
             "cad_file": call("cad_file", {"file": {"name": "bracket.stl", "resourceUri": "x"}}, {"openai/resource": {"path": str(bracket)}}),
             # The tab cad_open launched, still opening: the show waits for it, then says so.
-            "cad_show": unwaited("cad_show", {"path": str(bracket)}),
+            "cad_show": unwaited("cad_show", {"source": str(bracket)}),
             "cad_view": call("cad_view"),
             # A tab cad_open opened and that never syncs: what the capture answers once it stops waiting for it.
             "cad_screenshot": unwaited("cad_screenshot"),

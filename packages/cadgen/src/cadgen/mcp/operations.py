@@ -30,6 +30,9 @@ COMMON = {
     "afterSequence": {"type": "integer", "minimum": 0},
     "waitMs": {"type": "integer", "minimum": 0, "maximum": 25000},
 }
+# What follows an operation: status or cancel, by the id and epoch its start returned.
+FOLLOW = ("action", "operationId", "epoch", "afterSequence", "waitMs")
+FOLLOW_REQUIRED = ("action", "operationId", "epoch")
 SNAPSHOT = {"source": STRING, "output": STRING, "packet": JSON_VALUE,
             "display": JSON_VALUE, "camera": JSON_VALUE, "grid": BOOL, "preview": BOOL,
             "pose": {"type": ["object", "string"]}, "width": {"type": "integer", "minimum": 1},
@@ -41,6 +44,9 @@ START = {
     "cad_snapshot": obj(SNAPSHOT),
     "cad_inspect": obj({"source": STRING, "ref": STRING, "query": {"type": "string", "enum": ["closure", "geometry", "build"]}}, ("source",)),
 }
+# The arguments each start requires, beside requestId: one set, or (a snapshot) one of several.
+STARTS = {"cad_export": (("source", "destinations"),), "cad_snapshot": (("source", "output"), ("packet",)),
+          "cad_inspect": (("source",),)}
 DESCRIPTIONS = {
     "cad_export": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf). The source is an absolute CAD file path or a document id (a model's, which running its script prints); a document id is exported as the engine holds it. A mesh source (.glb/.stl/.3mf) exports to the other two mesh kinds only, each holding what its format carries. Reuses the Python export operation. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts.",
     "cad_snapshot": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. The source is an absolute CAD file path or a document id; paths must be absolute on the engine host. A failed snapshot or packet leaves existing pictures unchanged.",
@@ -50,13 +56,11 @@ DESCRIPTIONS = {
 
 def catalog():
     return [{"name": name, "title": name.removeprefix("cad_").capitalize() + " CAD",
-             "description": description + " Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
+             "description": description + " " + takes(name) + " Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
              "inputSchema": {**obj({**COMMON, **START[name]["properties"]}), "anyOf": [
-                 obj({"action": {"type": "string", "enum": ["start"]}, "requestId": COMMON["requestId"],
-                      **START[name]["properties"]}, ("requestId", *START[name]["required"])),
-                 obj({**{k: COMMON[k] for k in ("operationId", "epoch", "afterSequence", "waitMs")},
-                      "action": {"type": "string", "enum": ["status", "cancel"]}},
-                     ("action", "operationId", "epoch"))]},
+                 obj({"action": {"type": "string", "enum": ["start"]}, **_start(name)}, ("requestId", *START[name]["required"])),
+                 obj({**{k: COMMON[k] for k in FOLLOW}, "action": {"type": "string", "enum": ["status", "cancel"]}},
+                     FOLLOW_REQUIRED)]},
              "outputSchema": {"type": "object", "required": ["state"], "properties": {
                  "state": {"type": "string", "enum": ["queued", "running", "succeeded", "failed", "cancelled", "rejected"]},
                  "id": STRING, "epoch": STRING, "requestId": STRING, "operation": STRING,
@@ -65,6 +69,61 @@ def catalog():
              "annotations": {"readOnlyHint": name == "cad_inspect", "destructiveHint": name != "cad_inspect",
                              "idempotentHint": True, "openWorldHint": name != "cad_inspect"}}
             for name, description in DESCRIPTIONS.items()]
+
+
+def _start(name):
+    """What a start takes: its request ID and the tool's own arguments."""
+    return {"requestId": COMMON["requestId"], **START[name]["properties"]}
+
+
+def _shape(groups, optional):
+    said = " or ".join("{" + ", ".join(group) + "}" for group in groups)
+    return said + (f", optionally with {', '.join(optional)}" if optional else "")
+
+
+def takes(name):
+    """The arguments a tool takes, in one line: what starts it, and what follows one it started."""
+    groups = [("requestId", *group) for group in STARTS[name]]
+    named = {key for group in groups for key in group}
+    start = _shape(groups, [key for key in _start(name) if key not in named])
+    follow = _shape([("action: status or cancel", "operationId", "epoch")],
+                    [key for key in FOLLOW if key not in FOLLOW_REQUIRED])
+    return f"To start: {start}. To follow one: {follow}."
+
+
+def refusal(tool, missing=(), unknown=(), takes_line=""):
+    """A call's arguments refused in words: what is missing, what the tool does not take, and what it takes."""
+    said = ([f"missing {', '.join(missing)}"] if missing else []) + ([f"unknown {', '.join(unknown)}"] if unknown else [])
+    return f"{tool}: {'; '.join(said)}. {takes_line}".strip()
+
+
+def check_arguments(name, values):
+    """A call's arguments checked against what its action takes, before anything is queued: the action.
+    Refused (``JobError``) with every argument missing and every one unknown, and the tool's shape."""
+    action = values.get("action", "start")
+    checked(action, COMMON["action"], "action")
+    if action == "start":
+        allowed = _start(name)
+        # The set the call reaches for (the one it gives the most of, missing the fewest), else the first.
+        given = [group for group in STARTS[name] if any(key in values for key in group)]
+        group = min(given, key=lambda group: (sum(key not in values for key in group), -sum(key in values for key in group))) \
+            if given else STARTS[name][0]
+        required = ("requestId", *group)
+    else:
+        allowed = {key: COMMON[key] for key in FOLLOW}
+        required = FOLLOW_REQUIRED
+    missing = [key for key in required if key not in values]
+    unknown = sorted(key for key in values if key not in allowed and key != "action")
+    if missing or unknown:
+        raise JobError(refusal(name, missing, unknown, takes(name)))
+    for key, item in values.items():
+        if key != "action":
+            checked(item, allowed[key], key)
+    if action != "start":
+        return action
+    if not re.fullmatch(r"[\w-]{16,100}", values["requestId"]):
+        raise JobError("requestId must be 16–100 letters, digits, underscores or hyphens")
+    return action
 
 
 def checked(value, schema, label="arguments"):
@@ -173,11 +232,8 @@ class Operations(Jobs):
 
     def call(self, name, arguments):
         try:
-            checked(arguments, obj({**COMMON, **START[name]["properties"]}))
-            action = arguments.get("action", "start")
+            action = check_arguments(name, arguments)
             if action != "start":
-                checked(arguments, obj({k: COMMON[k] for k in ("action", "operationId", "epoch", "afterSequence", "waitMs")},
-                                       ("action", "operationId", "epoch")))
                 if arguments["epoch"] != self.epoch:
                     raise JobError("Operation session restarted", 409)
                 ident = arguments["operationId"]
@@ -188,11 +244,7 @@ class Operations(Jobs):
                     if action == "cancel":
                         return self.cancel(ident)
                     return self.get(ident, arguments.get("afterSequence"), arguments.get("waitMs", 0) / 1000)
-            checked(arguments, obj({"action": COMMON["action"], "requestId": COMMON["requestId"], **START[name]["properties"]},
-                                   ("requestId", *START[name]["required"])))
             request_id = arguments["requestId"]
-            if not re.fullmatch(r"[\w-]{16,100}", request_id):
-                raise JobError("requestId must be 16–100 letters, digits, underscores or hyphens")
             args = {k: v for k, v in arguments.items() if k not in ("action", "requestId")}
             normalized = hashlib.sha256(json.dumps([name, args], sort_keys=True, allow_nan=False).encode()).hexdigest()
             with self.changed:

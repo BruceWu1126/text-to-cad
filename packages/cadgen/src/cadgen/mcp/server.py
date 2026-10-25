@@ -119,7 +119,7 @@ FOLLOWS = ("The page follows the model: rebuilds for a document, saves for a fil
 
 TEXT_INSTRUCTIONS = (
     f"CAD opens models and local CAD files ({FORMATS}) in the CAD Viewer in the user's browser: "
-    "this app cannot show CAD views itself. Call cad_show with path set to a model's document id (running its "
+    "this app cannot show CAD views itself. Call cad_show with source set to a model's document id (running its "
     "script prints it) or a file's absolute path: it opens the page in the user's browser, or says it is open "
     "already, and answers with its URL; give the user that URL. " + FOLLOWS
 )
@@ -170,7 +170,12 @@ def _object(properties: dict[str, Any] | None = None, required: list[str] | None
     return schema
 
 
-_PATH = {"type": "string", "description": "A CAD file's absolute path, or a document id (a model's, which running its script prints)."}
+# What names a model, the one argument name every tool gives it: cad_show and cad_open as cad_export,
+# cad_snapshot and cad_inspect do.
+_SOURCE = {"type": "string", "description": "A CAD file's absolute path, or a document id (a model's, which running its script prints)."}
+# The tools the agent calls with a model or a view, whose arguments are checked against what they take
+# (``_arguments``): the host's own surfaces (``cad_file``, ...) are called with what the host sends.
+_AGENT_TOOLS = ("cad_open", "cad_show", "cad_view", "cad_screenshot")
 _VIEW = {"type": "string", "description": "A view id from cad_view; defaults to the most recently used viewer."}
 # What a view watches: its model's catalog entry.
 _WATCH = _object({"file": {"type": ["string", "null"]}})
@@ -431,11 +436,11 @@ class Server:
              "description": (f"Open a NEW CAD viewer tab beside the chat showing a local model ({FORMATS}). "
                              "Every call opens another tab, so call it only when cad_show reports that no "
                              "viewer is open, and never again after a rebuild: open viewers refresh by themselves."),
-             "inputSchema": _object({"path": _PATH}, ["path"])},
+             "inputSchema": _object({"source": _SOURCE}, ["source"])},
             {"name": "cad_show", "title": "Show in CAD", "icons": [ICON], "annotations": _READ_ONLY,
              "description": ("Show a model in the CAD viewer already open in this thread, switching it if another model "
                              "is showing. Never opens a tab. Reports whether a viewer took it; if none is open, call cad_open."),
-             "inputSchema": _object({"path": _PATH, "view": _VIEW}, ["path"])},
+             "inputSchema": _object({"source": _SOURCE, "view": _VIEW}, ["source"])},
             {"name": "cad_view", "title": "Read CAD view", "icons": [ICON], "annotations": _READ_ONLY,
              "description": ("Describe the CAD viewers open in this thread: each one's model and revision, what the user "
                              "has selected (as references you can quote back), and the camera."),
@@ -455,7 +460,7 @@ class Server:
                              "chat. Each call adds a viewer and pauses the earlier ones. A viewer refreshes by itself when "
                              "its file changes, so show a model once, not after every rebuild. The result names the view: "
                              "pass it to cad_view or cad_screenshot."),
-             "inputSchema": _object({"path": _PATH}, ["path"])},
+             "inputSchema": _object({"source": _SOURCE}, ["source"])},
             {"name": "cad_view", "title": "Read CAD view", "icons": [ICON], "annotations": _READ_ONLY,
              "description": ("Describe a CAD viewer in this chat: its model and revision, what the user has selected (as "
                              "references you can quote back), and the camera."),
@@ -472,10 +477,10 @@ class Server:
         return [
             {"name": "cad_show", "title": "Show in CAD", "icons": [ICON], "annotations": _READ_ONLY,
              "description": ("Open a model in the CAD Viewer in the user's browser, unless its page is open there "
-                             "already; this app cannot show CAD views itself. path is a model's document id (running "
+                             "already; this app cannot show CAD views itself. source is a model's document id (running "
                              f"its script prints it) or a local CAD file's absolute path ({FORMATS}). Answers with the "
                              "page's URL: give it to the user. " + FOLLOWS),
-             "inputSchema": _object({"path": _PATH}, ["path"])},
+             "inputSchema": _object({"source": _SOURCE}, ["source"])},
             _HTTP_TOOL,
         ]
 
@@ -514,6 +519,8 @@ class Server:
         started = time.monotonic()
         ok, reason = False, "bug"  # anything a handler raises but ToolFailed is cadgen's own (``handle`` reports it)
         try:
+            if name in _AGENT_TOOLS:
+                self._arguments(name, arguments)
             result = handler(arguments, context)
             if not self.text and isinstance(result.get("structuredContent", {}).get("launch"), dict):
                 # MCP result metadata is delivered to the app, never put in the model's context.
@@ -527,6 +534,30 @@ class Server:
             self.analytics.called(name, ok, reason)
             if name not in ("cad_sync", "cad_http"):
                 LOG.info("%s %.0fms", name, (time.monotonic() - started) * 1000)
+
+    def _arguments(self, name: str, arguments: dict[str, Any]) -> None:
+        """An agent tool's arguments against the schema this client was listed: one it does not take is
+        refused in words, with every one missing and what the tool takes (``operations.refusal``). One
+        only missing is the handler's to refuse, in its own words."""
+        from .operations import refusal
+
+        schema = next(tool["inputSchema"] for tool in self.tools() if tool["name"] == name)
+        unknown = sorted(key for key in arguments if key not in schema["properties"])
+        if not unknown:
+            return
+        required = schema.get("required", [])
+        missing = [key for key in required if key not in arguments]
+        optional = [key for key in schema["properties"] if key not in required]
+        takes = (f"{name} takes {' and '.join(required) or 'nothing'}"
+                 + (f", optionally {' and '.join(optional)}" if optional else "")
+                 + ("; source is a document id (running a model's script prints it) or a CAD file's absolute path"
+                    if "source" in schema["properties"] else "") + ".")
+        said = refusal(name, missing, unknown, takes)
+        if "source" in missing:
+            raise ToolFailed(said, "no_path")
+        if "view" in missing:
+            raise ToolFailed(said, "no_view")
+        raise ToolFailed(said, "bad_request")
 
     def _operation(self, name, arguments):
         result = self.operations.call(name, arguments)
@@ -573,7 +604,7 @@ class Server:
         """An existing CAD file, from the absolute path a caller named; or a document the engine holds,
         from its id: a model's id stays itself, a file's is its path. Nothing is built."""
         if not isinstance(value, str) or not value.strip():
-            raise ToolFailed('Name the model in "path": a document id (running a model\'s script prints it) or a '
+            raise ToolFailed('Name the model in "source": a document id (running a model\'s script prints it) or a '
                              "CAD file's absolute path.", "no_path")
         from cadgen.engine.ids import is_id
 
@@ -642,7 +673,7 @@ class Server:
             LOG.info("a view reached this server: its host shows CAD views")
 
     def _tool_cad_open(self, arguments, context):
-        model = self._model_path(arguments.get("path"))
+        model = self._model_path(arguments.get("source"))
         cards = self._cards(context)
         if cards is False:
             return self._show_in_browser(model)
@@ -684,7 +715,7 @@ class Server:
         return views
 
     def _tool_cad_show(self, arguments, context):
-        stale = _say_not_held(arguments.get("path"))
+        stale = _say_not_held(arguments.get("source"))
         shown = self._show(arguments, context)
         if stale and shown.get("content"):
             # The view shows the last built state, with its badge; the agent reads the same words.
@@ -693,11 +724,11 @@ class Server:
 
     def _show(self, arguments, context):
         if self._no_app(context):
-            return self._show_in_browser(self._model_path(arguments.get("path")))
+            return self._show_in_browser(self._model_path(arguments.get("source")))
         if not self.tabs:
-            launch = self._mounted(self._launch(self._model_path(arguments.get("path")), surface="inline"))
+            launch = self._mounted(self._launch(self._model_path(arguments.get("source")), surface="inline"))
             return _text(f"Showing {launch['model']} in CAD (view {launch['view']}).", {"launch": launch})
-        model = self._model_path(arguments.get("path"))
+        model = self._model_path(arguments.get("source"))
         # A model shown goes beside this thread: Codex keeps the sidebar page running while the
         # person is in a thread, so a model sent there lands where nobody is looking. The sidebar
         # takes one only when the agent names its view.

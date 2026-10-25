@@ -266,7 +266,7 @@ class ServerCountsTest(_Tmp):
         secret, plate = self.tmp / "secret-bracket.step", self.tmp / "secret-plate.STL"
         secret.write_text("ISO-10303-21;", encoding="utf-8")
         plate.write_bytes(b"solid t\nendsolid t\n")
-        self.call(server, "cad_open", {"path": str(secret)})  # the agent opens one
+        self.call(server, "cad_open", {"source": str(secret)})  # the agent opens one
         # The view adds the models it shows to the library (one a person browsed to as well): files
         # worked on. The home's re-reads of the library are plumbing, never counted.
         for model in (secret, plate):
@@ -396,11 +396,11 @@ class ServerCountsTest(_Tmp):
         self.consent(server, True)
         notes = self.tmp / "secret-notes.txt"
         notes.write_text("not CAD", encoding="utf-8")
-        for arguments in ({}, {"path": "secret.step"}, {"path": str(self.tmp / "secret-missing.step")}, {"path": str(notes)}):
+        for arguments in ({}, {"source": "secret.step"}, {"source": str(self.tmp / "secret-missing.step")}, {"source": str(notes)}):
             self.assertTrue(self.call(server, "cad_open", arguments)["isError"])
         self.assertTrue(self.call(server, "cad_screenshot", {"view": "cad-1-gone"})["isError"])  # no viewer in this thread
         with mock.patch.object(Server, "_tool_cad_view", side_effect=KeyError("secret")), self.assertRaises(KeyError):
-            self.call(server, "cad_view", {"view": "v"})  # cadgen's own bug: a crash, and a reason
+            self.call(server, "cad_view", {})  # cadgen's own bug: a crash, and a reason
         self.assertTrue(server.analytics.flush())
         [payload] = sent
         failures = {(event["tool"], event["reason"]): event["count"] for event in payload["events"] if event["name"] == "tool_failure"}
@@ -517,7 +517,7 @@ class ServerCountsTest(_Tmp):
 
     def test_counts_go_from_the_notice_on_without_a_restart(self) -> None:
         server, sent = self.serve("claude-github")
-        self.call(server, "cad_show", {"path": "a.step"})
+        self.call(server, "cad_show", {"source": "a.step"})
         self.assertEqual(self.consent(server), {"sharing": False, "reason": "untold", "policy": PRIVACY_URL})
         self.assertFalse(server.analytics.flush())
         self.call(server, "cad_view")  # noted before anyone was told
@@ -795,7 +795,7 @@ class NeverInTheWayTest(_Tmp):
             self.assertFalse(self.http(server, "GET", "/__cad/analytics", agent=True)[1]["sharing"])
             self.assertFalse(self.http(server, "POST", "/__cad/analytics", {"share": False}, agent=True)[1]["sharing"])
             # CAD's own tools are untouched, and the recorder's own methods return quietly.
-            self.assertIn("isError", self.call(server, "cad_show", {"path": "missing.step"}))
+            self.assertIn("isError", self.call(server, "cad_show", {"source": "missing.step"}))
             server.analytics.called("cad_show", True)
             self.assertFalse(server.analytics.flush())
             server.analytics.close()
