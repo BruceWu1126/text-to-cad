@@ -588,7 +588,11 @@ const ShellViewport = forwardRef(function ShellViewport({
         // The depth range the viewport last fitted to what is PLACED in the scene: a
         // scene that grew in place has a new one, and only a commit re-reads it.
         near: Number(camera.near), far: Number(camera.far),
-        originalBounds: active.zeroPoseBounds
+        originalBounds: active.zeroPoseBounds,
+        // The camera is still moving by itself: a gesture, a transition, a held key, Preview's
+        // orbit, or the controls' damping (their last update moved it).
+        settling: Boolean(active.interactionState?.active || active.cameraTransition || active.previewOrbitEnabled
+          || active.keyboardOrbitState?.pressedKeys?.size || active.controlsMovedLastFrame)
       };
     };
     // Beside it: where the STAGE stands. The ground's size comes from the rest placement and
