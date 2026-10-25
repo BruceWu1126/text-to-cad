@@ -112,11 +112,6 @@ function hiddenPartsOf(job) {
   return Array.isArray(hide) ? hide.map(String) : [];
 }
 
-function jointValuesOf(job) {
-  const values = job?.jointValues ?? job?.resolved?.jointValues ?? null;
-  return values && typeof values === "object" && !Array.isArray(values) ? values : {};
-}
-
 const FAMILY_BY_KIND = Object.freeze({
   glb: GLB_FAMILY,
   stl: MESH_FAMILY,

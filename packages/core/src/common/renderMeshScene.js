@@ -192,10 +192,6 @@ function configureRenderer(width, height, job, context) {
   });
 }
 
-function shouldBurnInViewLabels(job = {}) {
-  return sharedShouldBurnInViewLabels(job);
-}
-
 function rendererDataUrlWithOptionalLabel(renderer, label, job, size) {
   return sharedRendererDataUrlWithOptionalLabel(renderer, label, job, size);
 }
