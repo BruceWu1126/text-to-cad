@@ -51,7 +51,7 @@ the two disagree, the engine's README is right.
 
 | Document | What it is for | Go there when |
 |---|---|---|
-| [`src/cadgen/engine/README.md`](src/cadgen/engine/README.md) | The engine: models and decorators, the engine server and its workers, the door, progress, the viewer and the snapshot, exports, kinematics, couplings and configuration sequences, materials, imports, placements, the mesh and its wire format, element names, references, body retention, memo functions and the build closure | changing anything a build, an export, a snapshot or a served document does |
+| [`src/cadgen/engine/README.md`](src/cadgen/engine/README.md) | The engine: models and decorators, the engine server and its workers, the door, progress, the viewer and the snapshot, exports, kinematics, couplings and configuration sequences, materials, imports, placements, the mesh and its wire format, element names, references, body retention, queries, memo functions and the build closure | changing anything a build, an export, a snapshot or a served document does |
 
 ## The design laws
 
@@ -99,8 +99,9 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    an assembly's mechanism. STEP, GLB, STL, 3MF and, of a planar document, DXF are translations
    of it; `cadgen export` writes any of them from the xbf alone.
 5. **The memo is the only build cache, and it lives in the worker.** Every kernel operation a model
-   runs is keyed by its inputs. A hit hands back the objects the first run made, and a miss
-   makes everything downstream of it miss. So an edit costs what it changed, and an element
+   runs is keyed by its inputs, and so is every question it asks of what they made: a validity
+   check, a volume, a distance. A hit hands back the objects the first run made, or the answer it
+   gave, and a miss makes everything downstream of it miss. So an edit costs what it changed, and an element
    keeps the name its feature history gave it across edits. Across a restart, a model's build
    is cold but for its document in the cache -- every model's alike, taken whole by its key or not
    at all; a declared file, its xbf too, is never a source -- and what a restart shows without a build
