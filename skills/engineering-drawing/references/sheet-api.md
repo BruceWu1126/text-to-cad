@@ -48,7 +48,7 @@ argument list carries that, so the decorator is the whole surface.
 ## The part
 
 Call the model: `enclosure()` is built by cadgen's engine, a replay when the engine
-already holds it, and returns the part as a build123d tree. A part with no model is
+already holds it, and its `.shape` is the part as a build123d tree. A part with no model is
 read from its file instead:
 
 ```python
