@@ -389,7 +389,7 @@ class TokenTests(unittest.TestCase):
             path = Path(scratch) / "engines" / "token"
             if os.name != "nt":
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            path.write_text("short\n", encoding="utf-8")
+            path.write_bytes(b"short\n")
             with self.assertRaisesRegex(ValueError, rf"^the page token {re.escape(str(path))} holds no token "
                                                     r"\(6 bytes\): remove it to make a new one"):
                 held.token()  # a token too short to guard anything is refused, never taken for none
