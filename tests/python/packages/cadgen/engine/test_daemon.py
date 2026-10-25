@@ -555,7 +555,8 @@ class WindowsTokenFirstTest(unittest.TestCase):
         from cadgen.engine import daemon
 
         handled = []
-        engine = types.SimpleNamespace(token="ab" * 16, handle=lambda request, send: handled.append(request) or send({"ok": True}))
+        engine = types.SimpleNamespace(token="ab" * 16, refusal=None,
+                                       handle=lambda request, send: handled.append(request) or send({"ok": True}))
         server_side, client_side = socket.socketpair()
         self.addCleanup(client_side.close)
         with mock.patch.object(daemon, "WINDOWS", True):
