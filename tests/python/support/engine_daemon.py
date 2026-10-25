@@ -34,6 +34,24 @@ TIMEOUT_SECONDS = 300.0
 STACK_LINES = 30  # a thread's innermost frames: where it waits
 
 
+def isolate(cleanup: Callable[..., Any]) -> dict[str, str]:
+    """A state and a cache folder of the caller's own (``CADGEN_STATE_DIR``, ``CADGEN_CACHE_DIR``)
+    in ``os.environ`` until ``cleanup`` (a module's ``unittest.addModuleCleanup``, a test's
+    ``addCleanup``) puts it back and removes them: so an engine a test starts, and every
+    environment built from ``os.environ`` after, records and caches its documents there, never in
+    the developer's. The runner gives each file its own (``scripts/test/unittest_files.py``); this
+    is the same for a file run directly. The variables set."""
+    from unittest import mock
+
+    folder = tempfile.mkdtemp(prefix="cadgen-test-")
+    given = {"CADGEN_STATE_DIR": os.path.join(folder, "state"), "CADGEN_CACHE_DIR": os.path.join(folder, "cache")}
+    patch = mock.patch.dict(os.environ, given)
+    patch.start()
+    cleanup(shutil.rmtree, folder, True)
+    cleanup(patch.stop)
+    return given
+
+
 def watched(env: dict[str, str], cleanup: Callable[..., Any]) -> dict[str, str]:
     """``env`` with a journal of its own; ``cleanup`` (a test's ``addCleanup`` or
     ``addClassCleanup``) removes it."""

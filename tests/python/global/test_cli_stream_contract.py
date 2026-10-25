@@ -86,6 +86,9 @@ def _env() -> dict[str, str]:
     own_cadgen = str(REPO / "packages" / "cadgen" / "src")
     env["PYTHONPATH"] = os.pathsep.join([own_cadgen, *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])])
     env["CADGEN_ENGINE_DIR"] = ENGINE
+    # Its registry of documents and its cache too: what the builds record never reaches the developer's.
+    env["CADGEN_STATE_DIR"] = str(Path(ENGINE).parent / "state")
+    env["CADGEN_CACHE_DIR"] = str(Path(ENGINE).parent / "cache")
     return env
 
 
