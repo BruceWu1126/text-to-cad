@@ -275,11 +275,16 @@ class LifetimeDaemonTest(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-lifetime-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
-        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
+        # Its engine, its registry of documents and its cache are its own, never the developer's.
+        own = Path(tempfile.mkdtemp(prefix="engine-own-"))  # beside the project: nothing lands in it
+        self.addCleanup(shutil.rmtree, own, True)
+        private = {"CADGEN_ENGINE_DIR": str(self.state), "CADGEN_STATE_DIR": str(own / "state"),
+                   "CADGEN_CACHE_DIR": str(own / "cache")}
+        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), **private,
                                           "CADGEN_ENGINE_MESH": "inline",
                                           "CADGEN_ENGINE_WORKER_RSS_MB": "1"}, self.addCleanup)
         # This process asks the test's daemon (``status``, ``export``), never starting one.
-        self.enterContext(mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)}))
+        self.enterContext(mock.patch.dict(os.environ, private))
         self.addCleanup(self._stop)
 
     def _stop(self) -> None:

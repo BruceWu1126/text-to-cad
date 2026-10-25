@@ -310,5 +310,13 @@ finally:
         return int((request({"op": "status"}, start=False) or {}).get("pid") or 0)
 
 
+def setUpModule() -> None:
+    # The registry and cache of every engine this module starts are its own, never the developer's
+    # (``engine_daemon.isolate``); each test still names its own engine folder.
+    from tests.python.support import engine_daemon
+
+    engine_daemon.isolate(unittest.addModuleCleanup)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -111,3 +111,11 @@ class ProfilingTest(unittest.TestCase):
         ordinary = build_script(script, ["pin"], daemon=False, progress=False).models[0]
         self.assertNotIn("profile", ordinary)
         self.assertEqual([path.name for path in self.folder.iterdir()], ["pin.py"])
+
+
+def setUpModule() -> None:
+    # The registry and cache of every engine this module starts are its own, never the developer's
+    # (``engine_daemon.isolate``); each test still names its own engine folder.
+    from tests.python.support import engine_daemon
+
+    engine_daemon.isolate(unittest.addModuleCleanup)
