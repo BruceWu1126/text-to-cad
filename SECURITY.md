@@ -32,14 +32,15 @@ machine by its path, list folders, export, and use every Viewer action. So keep
 the launch URL private. Do not bind a non-loopback `--host` unless you mean to
 offer exactly that to everyone who can reach the port.
 
-**The token lasts.** It belongs to your installation, not to one run of the
-engine: it is made once, kept in a file only you can read in your state folder,
-and reused at every start, on the same port (3245 unless you name another; when
+**The token lasts.** It belongs to you, not to one run of the engine or one
+installation of cadgen: it is made once, kept in a file only you can read in
+your state folder (`engines/token`), and reused at every start of every
+installation's engine, so a link survives an upgrade, on the same port (3245 unless you name another; when
 another program holds 3245, the next free port, which your installation keeps and
 names in `cadgen status`). So a shared link keeps working on this machine, across restarts and
 reboots, until you rotate it. It reaches your folders whenever the engine runs.
-`cadgen server --rotate-token`, with the engine stopped (`cadgen stop`),
-replaces it and retires every link shared before.
+`cadgen server --rotate-token`, with every engine stopped (`cadgen stop`, with
+each version that runs one), replaces it and retires every link shared before.
 
 **The CAD app in agent hosts.** The page's own tools (`cad_sync`,
 `cad_capture_reply`) and its full `cad_http` access need a per-session

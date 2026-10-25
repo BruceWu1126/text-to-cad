@@ -58,27 +58,47 @@ class DoctorTests(unittest.TestCase):
         # A plugin's install outside CI, where telemetry's default holds.
         environment = mock.patch.dict("os.environ", {"CADGEN_STATE_DIR": state.name, "DO_NOT_TRACK": "", "CADGEN_TELEMETRY": "",
                                                      "CADGEN_INSTALL_CHANNEL": "claude-github", "CI": "",
-                                                     # Launchers go to a folder of the test's, never ~/.local/bin.
+                                                     # The cadgen command goes to a folder of the test's, never ~/.local/bin.
                                                      "CADGEN_LAUNCHER_DIR": str(self.state / "bin"),
-                                                     "CADGEN_LAUNCHER_VERSION": ""})
+                                                     "CADGEN_INSTALLATION_VERSION": "",
+                                                     # And no engine starts: a private folder, in a shell
+                                                     # whose sandbox refuses one (`engine_host.SANDBOXES`).
+                                                     "CADGEN_ENGINE_DIR": str(self.state / "engine"),
+                                                     "CODEX_SANDBOX_NETWORK_DISABLED": "1"})
         environment.start()
         self.addCleanup(environment.stop)
 
-    def test_the_report_publishes_the_launchers_and_says_so(self) -> None:
-        from cadgen._internal import launchers
+    def test_the_report_registers_and_writes_the_command_and_says_so(self) -> None:
+        from cadgen._internal import installations
 
         env = self.state / "env"
         env.mkdir()
-        found = tuple(str(env / name) for name in ("cadgen.exe" if launchers.WINDOWS else "cadgen", "python"))
-        for path in found:
+        found = tuple(str(env / name) for name in ("cadgen.exe" if installations.WINDOWS else "cadgen", "python", ""))
+        for path in found[:2]:
             Path(path).write_text("", encoding="utf-8")
-        with TemporaryDirectory() as tmp, mock.patch.object(launchers, "targets", return_value=found), \
-                mock.patch.dict("os.environ", {"CADGEN_LAUNCHER_VERSION": "1.2.3-dev.1"}):
+        record = self.state / "installations" / "1.2.3-dev.1.json"
+        command = installations.proxy_path(str(self.state / "bin"))
+        with TemporaryDirectory() as tmp, mock.patch.object(installations, "targets", return_value=found), \
+                mock.patch.dict("os.environ", {"CADGEN_INSTALLATION_VERSION": "1.2.3-dev.1"}):
             _, out, _ = _run([tmp])
             again = _run([tmp])[1]
-        for name in launchers.names("1.2.3-dev.1"):
-            self.assertIn(f"launcher {self.state / 'bin' / name} published (was missing)\n", out)
-            self.assertIn(f"launcher {self.state / 'bin' / name} OK\n", again)
+            for path in found[:2]:
+                Path(path).unlink()
+            gone = _run([tmp])[1]
+            pruned = _run(["--prune"])[1]
+        self.assertIn(f"registry {record} registered\n", out)
+        self.assertIn(f"command  {command} written (was missing)\n", out)
+        self.assertIn(f"registry {record} OK\n", again)
+        self.assertIn(f"command  {command} OK\n", again)
+        self.assertIn(f"registry {record} dangling: its interpreter {found[1]} is gone", gone)
+        self.assertEqual(pruned, f"removed {record}\n")
+        self.assertFalse(record.exists())
+
+    def test_a_source_tree_registers_nothing_unless_named(self) -> None:
+        with TemporaryDirectory() as tmp:
+            _, out, _ = _run([tmp])
+        self.assertIn("registry not registered: a source tree registers only as a version it is named", out)
+        self.assertFalse((self.state / "bin").exists())
 
     def test_the_report_says_what_cads_apps_share(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -90,18 +110,22 @@ class DoctorTests(unittest.TestCase):
             _, out, _ = _run([tmp])
         self.assertRegex(out, r"sharing  on: by default, since cadgen said so on \d{4}-\d{2}-\d{2}\n")
 
-    def test_the_report_says_where_the_engine_daemon_is_and_whether_it_runs(self) -> None:
-        # Asked, never started: a doctor that started the daemon would leave one running.
-        with TemporaryDirectory() as tmp, TemporaryDirectory() as engine, \
-                mock.patch.dict("os.environ", {"CADGEN_ENGINE_DIR": engine}):
+    def test_the_report_starts_the_engine_when_none_runs(self) -> None:
+        # In a sandbox that cannot start one, the client's own line, and nothing started.
+        with TemporaryDirectory() as tmp:
             code, out, _ = _run([tmp])
-            self.assertEqual(code, 0)
-            self.assertRegex(out, r"server   not running \(.+\); the first build starts it\n")
-            self.assertEqual([path for path in Path(engine).iterdir()], [], "nothing started")
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"server   not running \(.+\): no engine server is running, and this shell's sandbox cannot start one")
+        self.assertFalse((self.state / "engine").exists(), "nothing started")
+        # Running: said. None running: started, by the client's start (a request that may start one).
         answer = {"pid": 4242, "workers": [{"script": "a.py"}, {"script": "b.py"}]}
         with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request", return_value=answer):
             _, out, _ = _run([tmp])
         self.assertRegex(out, r"server   running, pid 4242, 2 workers \(.+\)\n")
+        with TemporaryDirectory() as tmp, mock.patch("cadgen.engine.client.request", side_effect=[None, answer]) as asked:
+            _, out, _ = _run([tmp])
+        self.assertEqual([call.kwargs["start"] for call in asked.call_args_list], [False, True])
+        self.assertRegex(out, r"server   started, pid 4242, 2 workers \(.+\)\n")
 
     def test_the_report_names_the_kernel_it_loaded(self) -> None:
         with TemporaryDirectory() as tmp:

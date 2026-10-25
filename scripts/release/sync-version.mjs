@@ -24,10 +24,10 @@ const tomlTargets = [
   "packages/cadgen/pyproject.toml",
 ];
 
-// Every skill that runs cadgen names the launchers the server's installation publishes
-// (`~/.local/bin/cadgen-<version>`, `cadgen-python-<version>`) and the command that installs it
-// (`uvx ... --from cadgen==<version> cadgen doctor`) in its SKILL.md, pinned like the server's so
-// the two share one installation.
+// Every skill that runs cadgen names the version the server's installation registers as
+// (`cadgen +<version>`, run by the `cadgen` command it writes, and "it says <version> is not
+// installed") and the command that installs it (`uvx ... --from cadgen==<version> cadgen doctor`) in
+// its SKILL.md, pinned like the server's so the two share one installation.
 function skillLaunchTargets() {
   const skills = path.join(repoRoot, "skills");
   if (!existsSync(skills)) {
@@ -43,7 +43,7 @@ function skillLaunchTargets() {
 
 // Files that pin the cadgen runtime by a requirement string rather than a version field: the
 // commands the agent apps run to start CAD's MCP server, the README's Claude Desktop config,
-// and every cadgen skill's install command and launchers. A file may also be a JSON target (the Gemini
+// and every cadgen skill's install command and `cadgen +<version>`. A file may also be a JSON target (the Gemini
 // extension carries both); its pin is stamped on top of that change, not over it.
 export const pinTargets = [
   "codex.mcp.json",
@@ -206,8 +206,9 @@ function syncTomlTarget(relativePath, version) {
   };
 }
 
-// A skill's launchers carry the version in their names: `~/.local/bin/cadgen-0.8.0`.
-export const launcherPattern = /(~\/\.local\/bin\/cadgen-(?:python-)?)(\d[^\s`"'\\]*)/g;
+// A skill runs its version by the `cadgen` command (`cadgen +0.8.0`), and says it in the
+// command's refusal ("it says 0.8.0 is not installed").
+export const skillVersionPattern = /(cadgen \+|it says )(\d[^\s`"'\\)]*)/g;
 
 function syncPinTarget(relativePath, version, text = readRequiredText(relativePath)) {
   const pin = /(cadgen(?:\[[a-z0-9_,.-]+\])?==)([^"\s]+)/g;
@@ -215,13 +216,13 @@ function syncPinTarget(relativePath, version, text = readRequiredText(relativePa
   if (matches.length === 0) {
     throw new Error(`${relativePath} must pin cadgen==<version>`);
   }
-  const launchers = [...text.matchAll(launcherPattern)];
+  const named = [...text.matchAll(skillVersionPattern)];
   const labels = [];
   if (!matches.every((match) => match[2] === version)) {
     labels.push("cadgen pin");
   }
-  if (!launchers.every((match) => match[2] === version)) {
-    labels.push("cadgen launchers");
+  if (!named.every((match) => match[2] === version)) {
+    labels.push("cadgen +<version>");
   }
   if (labels.length === 0) {
     return null;
@@ -231,7 +232,7 @@ function syncPinTarget(relativePath, version, text = readRequiredText(relativePa
     labels,
     text: text
       .replace(pin, (_, prefix) => `${prefix}${version}`)
-      .replace(launcherPattern, (_, prefix) => `${prefix}${version}`),
+      .replace(skillVersionPattern, (_, prefix) => `${prefix}${version}`),
   };
 }
 

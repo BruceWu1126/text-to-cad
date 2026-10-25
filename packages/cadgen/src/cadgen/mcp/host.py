@@ -181,6 +181,14 @@ def launcher() -> dict[str, Any] | None:
     return host_of(ancestors())
 
 
+def family(found: Any) -> str | None:
+    """The host a launcher (``launcher``) names, as its shells name it (``engine_host.shell``):
+    ``codex`` for each of Codex's programs, ``claude code``, else the host's own name; None where none
+    is known."""
+    name = str(found.get("host") or "") if isinstance(found, dict) else ""
+    return "codex" if name.startswith("codex") else (name or None)
+
+
 def presentation(client: dict[str, Any], offered: dict[str, Any], launched: Any) -> tuple[str, bool | None, str]:
     """How a host presents CAD, from its initialize: ``(presentation, renders, why)``. ``presentation``
     is ``tabs``, ``inline`` or ``text``, the catalog the host is listed; ``renders`` whether it shows

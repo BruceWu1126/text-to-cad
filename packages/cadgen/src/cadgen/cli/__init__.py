@@ -28,7 +28,8 @@ import sys
 # Two-word names are intentional where a noun has several verbs. Dispatch joins
 # argv[0:2] before argv[0], so the two-word form wins where it exists.
 #
-# A model script builds by running it (``python <model>.py``): no command takes its place.
+# A model script builds by running it (``python <model>.py``, or ``cadgen run <model>.py`` with this
+# installation's python): no command takes its place.
 _COMMANDS: dict[str, tuple[str, str]] = {
     # The engine (cadgen.engine): documents exported, drawn and served, its server.
     "export": ("cadgen.cli.export", "write an .xbf or a .step to STEP, GLB, STL, 3MF, DXF or xbf"),
@@ -47,7 +48,8 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     "sdf snapshot": ("cadgen.cli.sdf_snapshot", "render an SDF to an image"),
     "srdf validate": ("cadgen.cli.srdf_validate", "validate an SRDF against its URDF"),
     # Generic / services
-    "doctor": ("cadgen.cli.doctor", "print installed cadgen and verify a skill's pin"),
+    "run": ("cadgen.cli.run", "run a model script (or -m, -c) with this installation's python"),
+    "doctor": ("cadgen.cli.doctor", "install: register, write the cadgen command, start the engine"),
     # A page session on the installation engine; the launcher exits.
     "viewer": ("cadgen.cli.viewer", "open a viewer page on the installation engine"),
     # CAD inside an agent host's panels. The host starts a stateless stdio peer per session.
@@ -56,7 +58,7 @@ _COMMANDS: dict[str, tuple[str, str]] = {
 }
 
 # A skill's pin is the version its SKILL.md's install command names
-# (`uvx ... --from cadgen==1.2.3 cadgen doctor`), stamped by the release with its launchers' names.
+# (`uvx ... --from cadgen==1.2.3 cadgen doctor`), stamped by the release with its `cadgen +1.2.3`.
 _PIN_RE = re.compile(r"--from\s+cadgen==(?P<pin>[^\s`'\"]+)")
 
 
@@ -235,8 +237,9 @@ def _report(error: Exception) -> None:
 
 
 # Commands that never carry the analytics notice: a CAD app's server, whose output only the host's log
-# reads; the engine's server, writing nowhere; and `telemetry`, which says it its own way.
-_UNTOLD = frozenset({"mcp", "server", "telemetry"})
+# reads; the engine's server, writing nowhere; `telemetry`, which says it its own way; and `run`, which is
+# only the python it runs, as the `cadgen` command's `run` is.
+_UNTOLD = frozenset({"mcp", "server", "telemetry", "run"})
 
 
 def _tell() -> None:
