@@ -672,8 +672,8 @@ tessellations, is under one memory budget: **Document lifetime**.)
   it idle processes are retired, least recently used first within each rank: the standby, render
   processes, the workers no page watches, then the watched ones, only when no other is left; a
   worker is drained to the held tier first. Under the system's memory pressure (the server's
-  `serve.Pressure`, polled every two seconds), the standby goes at once and the rest down to half
-  the cap. A busy process is never retired, and an idle worker under the cap lives as long as the
+  `serve.Pressure`, polled every two seconds), the standby goes at once, none starts while it lasts, and
+  the rest go down to half the cap. A busy process is never retired, and an idle worker under the cap lives as long as the
   engine. A worker alone over the cap after a build is retired at once: the report says so
   (`retired`), and once it has answered the daemon drains it and closes its stdin.
 - **Collected when idle.** A worker builds with Python's cyclic collector off and collects once

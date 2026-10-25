@@ -713,6 +713,9 @@ class Pool:
         self.drain = drain
         self.memory = memory
         self.spare: Callable[[dict[str, str]], Any] | None = None
+        # Whether the system is under memory pressure now (the daemon's ``serve.Pressure``): no
+        # standby is started under it, which ``shed`` would retire at its next look.
+        self.pressed: Callable[[], bool] = lambda: False
         self.renders: Any = None
         self.lock = threading.Condition()
         self.live: dict[str, Any] = {}  # by key
@@ -808,10 +811,11 @@ class Pool:
     def stand(self, environment: dict[str, str]) -> None:
         """A standby started in ``environment``, off the caller's thread, when the daemon gave the
         pool one to start (``spare``) and the pool has none, a slot for it under the cap and room
-        for it under the memory cap (the last standby's measure). A build that needs a worker of
+        for it under the memory cap (the last standby's measure), and the system not under memory
+        pressure (``pressed``). A build that needs a worker of
         its own meanwhile, in an environment of the same interpreter, waits for it rather than start
         another."""
-        if self.spare is None:
+        if self.spare is None or self.pressed():
             return
         cap, drawing = self.memory(), self._drawing()
         with self.lock:
@@ -1410,6 +1414,7 @@ class Daemon:
         # The system's memory-pressure signal, the server's too once it runs (``serve``): under it the
         # pool sheds its standby and its least recently used workers (``Pool.shed``).
         self.pressure = Pressure()
+        self.pool.pressed = self.pressure.under
         self.workers_lock = threading.Lock()  # each worker's ``held``
         self.born = time.time()
         self.last = time.monotonic()
