@@ -80,6 +80,8 @@ def communicate(process: subprocess.Popen, env: dict[str, str],
             if not any(reader.is_alive() for reader in readers):
                 for stream in (process.stdout, process.stderr):
                     stream.close()
+                if process.returncode:
+                    _say_stacks(env)
                 return _text(b"".join(read["out"])), _text(b"".join(read["err"]))
             if now - exited > HELD_SECONDS:
                 why = (f"exited with {process.returncode} but its output stayed open {HELD_SECONDS:.0f} s: a process "
@@ -93,6 +95,33 @@ def communicate(process: subprocess.Popen, env: dict[str, str],
     for reader in readers:
         reader.join(5)
     raise AssertionError(f"{process.args!r} {why}.\n" + report(env, started, read))
+
+
+def stacks(env: dict[str, str]) -> str:
+    """The stacks the journal holds of every process that died and of each daemon (its own as it
+    stood): a native fault's (``faulthandler.enable``) and the last periodic dump. Empty when none
+    wrote any -- a command that exits failing on its own (a refusal) leaves none."""
+    folder = env.get(JOURNAL)
+    lines: list[str] = []
+    for role, pid in sorted(_processes(env)):
+        path = Path(folder or "") / f"{role}-{pid}.stacks.txt"
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+        if text and (role == "daemon" or not _alive(pid)):
+            lines.append(f"--- {role} {pid} ({'alive' if _alive(pid) else 'gone'}): its stacks")
+            lines.extend(text.splitlines()[-200:])
+    return "\n".join(lines)
+
+
+def _say_stacks(env: dict[str, str]) -> None:
+    """A failed command's stacks, on the test's stderr, before the journal goes with the test."""
+    said = stacks(env)
+    if said:
+        import sys
+
+        print(f"engine journal stacks after a failed command:\n{said}", file=sys.stderr)
 
 
 def _text(data: bytes) -> str:

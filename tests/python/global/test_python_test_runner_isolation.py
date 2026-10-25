@@ -121,6 +121,54 @@ class HangGuard(unittest.TestCase):
                 engine_daemon.communicate(process, {})
         process.kill.assert_called_once()
 
+    def test_a_failed_command_prints_the_stacks_of_the_processes_that_died(self):
+        # A worker that died in native code wrote its stack to the journal, which goes with the test:
+        # the failed command's output carries it now. One that fails on its own says nothing more.
+        import sys
+
+        from tests.python.support import engine_daemon
+
+        stub = ("import os, sys\n"
+                "path = os.path.join(os.environ['CADGEN_TEST_JOURNAL'], f'process-{os.getpid()}.stacks.txt')\n"
+                "with open(path, 'a', encoding='utf-8') as handle:\n"
+                "    handle.write('Fatal Python error: Segmentation fault\\n  File \"stub.py\", line 7 in load\\n')\n"
+                "sys.exit(1)\n")
+        cleanups: list = []
+        env = engine_daemon.watched(dict(os.environ), lambda *call: cleanups.append(call))
+        try:
+            for script, said in ((stub, True), ("import sys; sys.exit(2)", False)):
+                with self.subTest(said=said), mock.patch.object(sys, "stderr", io.StringIO()) as err:
+                    done = engine_daemon.run([sys.executable, "-c", script], env=env)
+                    self.assertNotEqual(done.returncode, 0)
+                    printed = err.getvalue()
+                    if said:
+                        self.assertIn("engine journal stacks after a failed command", printed)
+                        self.assertRegex(printed, r"--- process \d+ \(gone\): its stacks")
+                        self.assertIn('File "stub.py", line 7 in load', printed)
+                    else:
+                        self.assertNotIn("engine journal stacks", printed, "a refusal leaves no stacks to say")
+                for path in Path(env[engine_daemon.JOURNAL]).glob("*.stacks.txt"):
+                    path.unlink()
+        finally:
+            for function, *args in cleanups:
+                function(*args)
+
+    def test_the_journal_names_the_distribution_s_daemon_a_daemon(self):
+        import sys
+
+        from tests.python.support import engine_daemon
+
+        cleanups: list = []
+        env = engine_daemon.watched(dict(os.environ), lambda *call: cleanups.append(call))
+        try:
+            # Its argv names the module as the distribution starts it; it imports nothing of it.
+            done = engine_daemon.run([sys.executable, "-c", "import sys", "cadgen._internal.engine_daemon"], env=env)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual([role for role, _pid in engine_daemon._processes(env)], ["daemon"])
+        finally:
+            for function, *args in cleanups:
+                function(*args)
+
     def test_a_hung_file_fails_by_name_with_its_stack(self):
         # A hung file once held a CI job silent for 42 minutes, until it was cancelled.
         with tempfile.TemporaryDirectory() as scratch:
