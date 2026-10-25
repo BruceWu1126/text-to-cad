@@ -30,12 +30,8 @@ from typing import TYPE_CHECKING as _TYPE_CHECKING
 # Cost where nothing is wrong: one str.endswith per glob call. CADGEN_FONT_GUARD=0
 # opts out.
 from cadgen._internal.font_scan import install_font_guard as _install_font_guard
-from cadgen._internal.kernel_import_site import install as _install_kernel_import_site
 from cadgen._internal.lazy_kernel import install as _install_lazy_kernel
 from cadgen._internal.engine_telemetry import install as _install_engine_telemetry
-
-_install_kernel_import_site()
-del _install_kernel_import_site
 
 # ``import build123d as bd`` binds a module the kernel loads into on its first attribute
 # (``_internal/lazy_kernel.py``). The wheel's cadgen-lazy-kernel.pth installs it at interpreter

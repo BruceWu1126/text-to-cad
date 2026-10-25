@@ -287,7 +287,7 @@ src/cadgen/
                          #   threemf, dxf), memo, Material, materials, paint, read_step,
                          #   read_xbf, read_mesh, and the operations on documents (export,
                          #   snapshot, inspect), every name loaded on first use; the font
-                         #   guard, the kernel-import recorder and the lazy kernel, first
+                         #   guard and the lazy kernel, first
   ap242.py               # the mechanism's AP242 names: mechanism_state,
                          #   configuration_sequence, gear_pair, rack_and_pinion_pair,
                          #   screw_pair (product and manufacturing information to join them)
@@ -333,7 +333,7 @@ src/cadgen/
                          #   it writes (installations: ~/.local/bin/cadgen, which the
                          #   skills run as `cadgen +<version>`; written as `cadgen mcp`
                          #   starts and by `cadgen doctor`, never by another command), the
-                         #   proxy's resolver (proxy), the font guard, the kernel-import recorder,
+                         #   proxy's resolver (proxy), the font guard,
                          #   the lazy kernel (lazy_kernel: `import build123d` binds, the
                          #   kernel loads on first use; cadgen-lazy-kernel.pth, at the root
                          #   of site-packages, installs it at interpreter start),
