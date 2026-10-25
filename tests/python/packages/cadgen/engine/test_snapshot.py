@@ -362,7 +362,7 @@ class SnapshotTest(unittest.TestCase):
         [top] = (folder / "tops").iterdir()
         self.assertRegex(top.name, r"^stand_j2_1_\d{8}T\d{6}Z\.png$")
         self.assertEqual([line.split(" (")[0] for line in done.stdout.splitlines()],
-                         [f"wrote {os.path.relpath(found)}" for found in (folder / "view-1.png", top, folder / "front.png")])
+                         [f"wrote {found}" for found in (folder / "view-1.png", top, folder / "front.png")])
 
         def rgba(found: Path) -> np.ndarray:
             with Image.open(found) as image:

@@ -166,6 +166,25 @@ def _shown(path: Any) -> str:
         return str(path)
 
 
+def _given(path: Any, given: Any = ()) -> str:
+    """A path a ``wrote`` line names, as the command was given it: the argument that names it,
+    as typed (absolute stays absolute, a relative one stays relative to the working folder);
+    one no argument names, relative where it lies under the working folder and whole where it
+    does not. A job's pictures are named whole: its packet, not the command, gave them."""
+    for typed in [given] if isinstance(given, (str, os.PathLike)) else given:
+        try:
+            if os.path.realpath(os.path.expanduser(typed)) == os.path.realpath(path):
+                return os.fspath(typed)
+        except (TypeError, ValueError, OSError):
+            continue
+    text = os.fspath(path)
+    try:
+        relative = os.path.relpath(text)
+    except ValueError:
+        return text
+    return text if relative == os.pardir or relative.startswith(os.pardir + os.sep) else relative
+
+
 def _files(report: dict[str, Any]) -> list[str]:
     found = []
     for path, row in (report.get("files") or {}).items():
@@ -180,7 +199,8 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
                        + "".join(f"\n    {text}" for text in _files(row))
                        for name, row in (report.get("child_models") or {}).items())
     if not report.get("ok"):
-        return f"failed {report.get('model')}" + children
+        refused = report.get("failedAt")  # an OCCT exception with no words: the call the kernel refused
+        return f"failed {report.get('model')}" + (f" at {refused}: the kernel refused it" if refused else "") + children
     timings = report.get("timings", {})
     memo = report.get("memo", {})
     bodies = list((report.get("bodies") or {}).values())
@@ -217,7 +237,9 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
 def _delta(found: dict[str, Any] | None) -> str:
     """The line under the run line: the model's parts, bounds, joints, configuration sequences and
     warnings, each with what it was where the build before it held another (``delta.delta``,
-    the engine's); warnings only where there are or were some. Nothing without one."""
+    the engine's); warnings only where there are or were some; then how many parts' geometry
+    changed (``changed N``), or ``materials changed`` when only colours or materials did, so an
+    edit that keeps the bounds is still seen. Nothing without one."""
     if not found:
         return ""
     times, dot = " × ", " · "
@@ -242,6 +264,11 @@ def _delta(found: dict[str, Any] | None) -> str:
         else:
             text = f"{name} {now}" + (f" ({now - (row['was'] or 0):+d})" if changed else "")
         said.append(text)
+    changed = found.get("changed") or {}
+    if changed.get("parts"):
+        said.append(f"changed {changed['parts']}")
+    elif changed.get("looks"):
+        said.append("materials changed")
     return "\n  " + dot.join(said)
 
 
@@ -350,7 +377,7 @@ def _export(args: argparse.Namespace, prog: str) -> int:
                                     for row in written]}))
         return 0
     for row in written:
-        print(f"wrote {_shown(row.path)} ({row.bytes / 1e6:.1f} MB) in {row.seconds:.2f}s")
+        print(f"wrote {_given(row.path, args.destinations)} ({row.bytes / 1e6:.1f} MB) in {row.seconds:.2f}s")
     return 0
 
 

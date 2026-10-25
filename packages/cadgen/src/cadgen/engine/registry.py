@@ -309,20 +309,21 @@ def program(registry: Registry, record: dict[str, Any]) -> Path | None:
     return Path(os.path.normpath(registry.root(record) / run[-1])) if run else None
 
 
-def command(registry: Registry, record: dict[str, Any]) -> str | None:
-    """The command that builds a model's document again, as a person types it: ``python`` and the
-    program, absolute (``rerun``). The engine never runs it."""
-    found = program(registry, record)
-    return None if found is None else rerun(found)
-
-
 def rerun(program: str | os.PathLike) -> str:
-    """``python`` and ``program`` as a person pastes them into this platform's shell: quoted for a
+    """The command that runs ``program`` again, as a person pastes it into this platform's shell:
+    ``cadgen run`` and the program, absolute. The engine that says it is the one ``cadgen run``
+    reaches, and its python has the kernel a bare ``python`` may not. The program is quoted for a
     POSIX shell (``shlex.quote``); on Windows in the double quotes cmd.exe and PowerShell both read,
     and only where a space or a quote needs them (``subprocess.list2cmdline``) -- to cmd.exe a
     single quote is part of the path."""
     text = os.fspath(program)
-    return f"python {subprocess.list2cmdline([text]) if WINDOWS else shlex.quote(text)}"
+    return f"cadgen run {subprocess.list2cmdline([text]) if WINDOWS else shlex.quote(text)}"
+
+
+def command(registry: Registry, record: dict[str, Any]) -> str | None:
+    """The command that builds a model's document again (``rerun``). The engine never runs it."""
+    found = program(registry, record)
+    return None if found is None else rerun(found)
 
 
 def detached(registry: Registry, record: dict[str, Any]) -> bool:

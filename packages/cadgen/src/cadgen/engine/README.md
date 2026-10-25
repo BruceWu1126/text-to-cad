@@ -438,7 +438,7 @@ only, and a file's id is derived again from its path after a restart.
 | `colors.py` | a colour as the author gives it (sRGB hex, 0-255 integers, a build123d `Color`) held linear, and the way back (**Materials**) |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`gear_pair`, `rack_and_pinion_pair`, `screw_pair`), mechanism states (`mechanism_state`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground; `posed`, an assembly copied at a state), and configuration sequences (`configuration_sequence`, a function's samples, `Timeline`: a sequence's pair values over time) |
 | `build.py` | one build: load the script afresh (as Python imports it: a package's module by its dotted name), one memo run, document, element names, files: every model's that ran |
-| `delta.py` | the line under the run line: a built tree's facts (`facts`: its occurrences, its world bounds from each part's quick box, kept by its geometry key, and its joints, configuration sequences and warnings), worked out in the worker, and the daemon's delta of them against the build before (`delta`), kept beside each record and in the registry's |
+| `delta.py` | the line under the run line: a built tree's facts (`facts`: its occurrences, its world bounds from each part's quick box, kept by its geometry key, its parts' geometry keys and looks, and its joints, configuration sequences and warnings), worked out in the worker, and the daemon's delta of them against the build before (`delta`), kept beside each record and in the registry's |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
@@ -485,7 +485,7 @@ cadgen status [--json] | stop [--json] | server [--port N] [--rotate-token]
 Every `SRC` and `DOC` is an on-disk CAD file's path or a document's id (`ids`): a model's id is
 what `python SCRIPT.py` prints for it (`id:`, beside its page, `view: <engine>/<id>`). A document
 id is read as the engine holds it, never built: one it does not hold is refused with the command
-that builds it again, `python <the program that built it>`. A script is never a source: `x.py`
+that builds it again, `cadgen run <the program that built it>`. A script is never a source: `x.py`
 and `x.py::fn` are refused as any other file that is no document is.
 
 Every build and every verb goes through the engine: no command runs one in its own process. A
@@ -513,12 +513,18 @@ build that model and the children its body calls, prints its report -- its `id:`
 or `took …` for a model taken from its key) is followed by the model's delta against its build
 before, which the daemon says from the facts the worker's tree held (`delta`): `parts 21 (+2) ·
 bounds 461.4 × 152 × 709.3 mm (was 504.9 × 152 × 709.3) · joints 1 · sequences 1`, with `warnings
-N` where there are or were some, what a changed value was beside it, nothing to compare on a first
+N` where there are or were some, what a changed value was beside it, then `changed 2` when that
+many parts have a geometry the build before had none of (by the geometry keys the build already
+has, so an edit that keeps the bounds -- a hole, a thickness, a fillet -- is still seen) or
+`materials changed` when only colours or materials did, nothing to compare on a first
 build and no line for a failed one, and the report carries it as data (`delta`). Its bounds are
 the kernel's quick boxes, a free-form face's from its edges (31 ms cold on juno's 246 parts, within
 0.1 mm of `inspect`'s exact boxes, which took 8.6-12 s), and a tree whose signature is its last
 build's is not walked again, so a warm no-op pays nothing measurable for it. A failed build
-raises; a successful call resumes the script. Put executable model calls under
+raises; a successful call resumes the script. A body that fails in a kernel call whose OCCT exception carries no words
+(`Standard_Failure`, bare) has that call named on its failure line, as the memo saw it --
+`failed plate.py::plate at Solid.make_box(0, 60, 5): the kernel refused it` -- and in its report
+(`failedAt`; `memo.refused_call`). Put executable model calls under
 `if __name__ == "__main__":` so other models can import their definitions.
 `Model.build(verify=, profile=, daemon=)`, the debug seam, explicitly requests a build and returns its report.
 No watcher selects, suppresses or introduces calls in a Python script.
@@ -757,7 +763,7 @@ documents:
   live      tom      8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12
   held      bracket  3e9b7c21-55aa-5f0e-8d11-6c2a9b4e7d30  memory and disk
   held      lid      0a6f2d94-7c1e-5b38-9e40-1d5c7a2b8f63  disk
-  evicted   arm      71d0c4e8-9b2a-5c13-a6f4-0e8d2b5c9a17  run `python /work/assemble.py`
+  evicted   arm      71d0c4e8-9b2a-5c13-a6f4-0e8d2b5c9a17  run `cadgen run /work/assemble.py`
 ```
 
 A worker's memory is as it measured it after its last build; a busy one's build is where its
@@ -957,9 +963,9 @@ current model; changed, it shows the last built state, with a badge -- "The code
 was built" and the rebuild command -- and `inspect` answers `stale`. Nothing reruns. Every verb
 that reads a document by its id (`export`, `snapshot`, `inspect`, with a ref or without) says once
 on stderr what it reads when that is not what the code makes now (`cli.told_state`, from
-`model_info`): "exporting the build of turbine from before turbine.py changed; run `python
+`model_info`): "exporting the build of turbine from before turbine.py changed; run `cadgen run
 …/turbine.py` to update it", or, for a document whose last run failed, "the last run of turbine
-failed; exporting its previous good build; fix it and run `python …/turbine.py` to update it". It
+failed; exporting its previous good build; fix it and run `cadgen run …/turbine.py` to update it". It
 goes on: a notice, never a refusal. `cadgen status` ends such a document's line with the word: stale
 and the command, or "serving its previous good build". A font is named by a family, not checked.
 
@@ -1019,9 +1025,13 @@ mark, half the budget:
 Where none can be read, the budget alone applies. `Pressure.simulate` is the tests' hook.
 
 **The rebuild command.** A document that is not held -- `evicted`, `expired` -- names the exact
-command that builds it again: `python` and the program whose call built it (its `__main__`
-file, else the model's script), from the daemon's record of it, or after a
-restart the registry's. A shape handed over has none: its words say that a program the engine did
+command that builds it again: `cadgen run` and the program whose call built it (its `__main__`
+file, else the model's script) -- the engine that says it is the one `cadgen run` reaches, and its
+python has the kernel a bare `python` may lack -- from the daemon's record of it, or after a
+restart the registry's. The program is quoted for the shell a person pastes it into (`registry.rerun`):
+`shlex.quote` on POSIX; on Windows the double quotes cmd.exe and PowerShell both read, only where a
+space or a quote needs them (`subprocess.list2cmdline`), since to cmd.exe a single quote is part of
+the path. A shape handed over has none: its words say that a program the engine did
 not run showed it, and that only running that program again hands it over again. A child model's is its parent's program, whose run builds it. The page
 reads it from its document's 404 (`GET /api/doc/<id>`: `{"error", "state", "rebuild"}`),
 `cadgen inspect` and `cad_show` of its id refuse with it, and `cadgen status` lists it. A `memory`
@@ -2509,7 +2519,7 @@ inspect ID 'face 1'` take the id; `cadgen inspect 'ID#face 1'` uses the same ref
 Each reads the document the engine holds, as it is: editing the script changes nothing until
 Python runs it again, and no verb imports, runs or builds a script. An id the engine no longer
 holds (evicted, expired) is refused with its state and the command that builds it again
-(`python <the program that built it>`; **Document lifetime**).
+(`cadgen run <the program that built it>`; **Document lifetime**).
 `--query build` returns saved-file metadata/closure or live-build metadata; `--query closure` and
 `--query geometry` select the other queries explicitly. In the CAD Viewer a model's page is
 `/<id>`; it has no file of its own, so no Select File and no file menu.

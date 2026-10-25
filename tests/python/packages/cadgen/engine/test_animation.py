@@ -257,7 +257,7 @@ class HarvestTest(_Folder):
                 ('show.translation("wheel*", by=(1, 0, 0))', "the glob 'wheel\\*' matches no part or assembly"),
                 ('show.channel("latch", path="translation", keys=[(1.5, (0, 0, 0)), (2, (1, 0, 0))])',
                  "both drive the translation of channels/latch"),
-                ('show.pose(at={1.5: "shut"})', "no configuration 'shut'"),
+                ('show.pose(at={1.5: "shut"})', "no mechanism state 'shut'"),
                 ('show.translation("knob", by=(0, 0, 5), start=0, end=1)',
                  "the translation of channels/knob is STEP by .* and CUBICSPLINE by"),
                 ('show.rotation("latch", axis=(1, 0, 0), to=10, start=1, end=2)',

@@ -356,7 +356,7 @@ navbar draws no arrows of its own here). Under Recents the home lists the folder
 recent launch (`serverInfo.start`, read again each time the home is shown): its subfolders and CAD
 files, a file opening by its id. A `/<id>` the server knows no file for, and no model the engine
 holds, shows "This model is no longer held" with the engine's words -- the command that builds it
-again, `python <the program that built it>` -- and Go home; a file that is not there shows "File
+again, `cadgen run <the program that built it>` -- and Go home; a file that is not there shows "File
 does not exist".
 
 A file is opened by its path (Select File, the home) and shown by its id: the page asks the

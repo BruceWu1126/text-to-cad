@@ -1085,7 +1085,7 @@ def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
     if _by_id(args.document):
         return _run_held(args, prog)
     from cadgen.engine import api
-    from cadgen.engine.cli import _shown
+    from cadgen.engine.cli import _given
 
     try:
         # The verb as a function (``api.snapshot``), which checks the flags as ``snapshot`` does.
@@ -1103,7 +1103,7 @@ def run(args: argparse.Namespace, prog: str = "cadgen snapshot") -> int:
         print(json.dumps(report))
     else:
         timings = report["timings"]
-        print(f"wrote {_shown(report['output'])} ({report['width']}x{report['height']}, {report['displayMode']}"
+        print(f"wrote {_given(report['output'], args.out)} ({report['width']}x{report['height']}, {report['displayMode']}"
               f"{', preview' if report['preview'] else ''}) in {timings['totalMs'] / 1000:.2f}s")
     return 0
 
@@ -1112,7 +1112,7 @@ def _run_held(args: argparse.Namespace, prog: str) -> int:
     """``cadgen snapshot ID OUT.png``: the document the engine holds of that id, drawn from the
     memory of the worker holding it (``api.snapshot``); nothing is built."""
     from cadgen.engine import api
-    from cadgen.engine.cli import Failed, _shown, told_state
+    from cadgen.engine.cli import Failed, _given, told_state
 
     try:
         drawn = api.snapshot(args.document, args.out, display=args.display, camera=args.camera, grid=args.grid,
@@ -1127,7 +1127,7 @@ def _run_held(args: argparse.Namespace, prog: str) -> int:
     if args.json:
         print(json.dumps(drawn.report))
     else:
-        print(f"wrote {_shown(drawn.path)} ({drawn.width}x{drawn.height}) in "
+        print(f"wrote {_given(drawn.path, args.out)} ({drawn.width}x{drawn.height}) in "
               f"{drawn.report['timings']['totalMs'] / 1000:.2f}s")
     return 0
 
@@ -1136,7 +1136,7 @@ def _run_job(args: argparse.Namespace, prog: str) -> int:
     """``cadgen snapshot --job PACKET [SRC]``: every picture the job names (``api.snapshot(job=)``),
     a line each; with ``--json``, ``{"ok": true, "pictures": [what each drew]}``."""
     from cadgen.engine import api
-    from cadgen.engine.cli import Failed, _shown
+    from cadgen.engine.cli import Failed
 
     if args.out is not None:
         raise Failed(f"--job writes the pictures its outputs name, so it takes no OUT ({args.out})", 2)
@@ -1156,6 +1156,6 @@ def _run_job(args: argparse.Namespace, prog: str) -> int:
     else:
         for picture in drawn:
             report = picture.report
-            print(f"wrote {_shown(picture.path)} ({report['width']}x{report['height']}, {report['displayMode']}"
+            print(f"wrote {os.fspath(picture.path)} ({report['width']}x{report['height']}, {report['displayMode']}"
                   f"{', preview' if report['preview'] else ''}) in {report['timings']['totalMs'] / 1000:.2f}s")
     return 0
