@@ -99,6 +99,26 @@ if [ "$CLEAN" -eq 1 ]; then
   rm -rf "$RUNTIME_DIR"
 fi
 
+# What _runtime holds is what this script builds and nothing else: an entry no stage owns (one a
+# stage this script no longer has left behind) would otherwise ship in the next wheel, since
+# package-data takes the whole tree. It goes whatever stages this run builds.
+STAGE_DIRS=(viewer mcp)
+prune_stale_runtime() {
+  local entry name stage known
+  [ -d "$RUNTIME_DIR" ] || return 0
+  for entry in "$RUNTIME_DIR"/* "$RUNTIME_DIR"/.[!.]*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    name="${entry##*/}"
+    known=0
+    for stage in "${STAGE_DIRS[@]}"; do [ "$name" = "$stage" ] && known=1; done
+    if [ "$known" -eq 0 ]; then
+      rm -rf "$entry"
+      echo "Removed packages/cadgen/src/cadgen/_runtime/$name: no stage builds it."
+    fi
+  done
+}
+prune_stale_runtime
+
 require_dir() {
   [ -d "$1" ] || { echo "Missing $2: $1" >&2; exit 1; }
 }
