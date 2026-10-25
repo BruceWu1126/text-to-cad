@@ -953,7 +953,8 @@ folder. The bytes are the hold's (`document.to_bytes`: the document, its closure
 compiled animations), the engine's own file always: a declared `@xbf` or an exported xbf is the
 author's, never used as the cache nor pointed at by it. The folder is shared with any 0.7 install's
 store: the engine's cache reads, writes, sizes and evicts only under `documents/` (its processes'
-bytecode is under `pycache/`), and lists, counts and removes nothing else there. It is written never on the run path:
+bytecode is under `pycache/`), and lists, counts and removes nothing else there (`cadgen doctor
+--prune` removes 0.7's store once nothing has written it for seven days). It is written never on the run path:
 
 - after `CACHE_IDLE_SECONDS` (10 s) with no build and no read of the document: the daemon asks the
   worker that holds it to save it (`Worker.save`), which the worker does only when no request waits

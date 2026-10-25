@@ -1,7 +1,7 @@
 """What cadgen leaves behind that no cadgen running now needs, which ``cadgen doctor`` reports and
 ``cadgen doctor --prune`` removes. Nothing here removes anything by itself.
 
-Three classes, each found by what it is, never by a guess:
+Four classes, each found by what it is, never by a guess:
 
 - **Engine records of an older format**: ``<state>/engines/<installation>.json`` that the engine
   does not read (``registry.Registry.engine``: another ``schema``, or not a record), removed; one
@@ -14,15 +14,22 @@ Three classes, each found by what it is, never by a guess:
   answering, in the engine folder).
 - **Cache folders with no record**: ``<cache>/documents/<id>/`` whose document has no record
   (``<state>/documents/<id>/document.json``): a document the registry forgot.
+- **cadgen 0.7's leftovers**: its store in the cache folder (``objects/``, ``index/``, each of the
+  store's own shape) and the files of the state folder only 0.7 writes (``SEVEN_STATE``). 0.8
+  never reads them; a 0.7 still installed (a plugin not yet updated) does, and nothing tells from
+  here whether one is -- 0.7 never registered itself -- so they go once nothing in them has been
+  written for ``QUIET_DAYS`` days, or at once when the person says no version needs them
+  (``cadgen doctor --prune --all-versions``).
 
-Nothing written in the last ``QUIET_DAYS`` days is removed, of any class: a write that recent may
-be a cadgen at work.
+Nothing written in the last ``QUIET_DAYS`` days is removed, of any class (but 0.7's with
+``--all-versions``): a write that recent may be a cadgen at work.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -33,6 +40,15 @@ ENGINES = "engines"
 PYCACHE = "pycache"
 DOCUMENTS = "documents"
 RECORD = "document.json"
+# cadgen 0.7's store, in the cache folder: content-addressed objects in two-hex shards, and its
+# index, a folder per kind (the kinds it defined, and one it retired).
+SEVEN_STORE = ("objects", "index")
+SEVEN_KINDS = frozenset({"model", "document", "output", "component", "surface", "bounds", "mesh", "drawing", "op"})
+_SHARD = re.compile(r"[0-9a-f]{2}")
+# The state folder's files only cadgen 0.7 writes: the sidebar's views, the snapshot browser's
+# install lock and marker, a detached viewer's log, Recents' log and its lock.
+SEVEN_STATE = ("sidebar-views", "snapshot-browser.lock", "snapshot-browser.installing", "viewer.log",
+               "recents/recents.jsonl", "recents/recents.lock")
 
 
 @dataclass
@@ -45,6 +61,20 @@ class Found:
     recent: list[Path] = field(default_factory=list)
     # Engine records only: those of this schema to write again without what the engine does not read.
     trimmed: list[Path] = field(default_factory=list)
+
+
+@dataclass
+class Seven:
+    """cadgen 0.7's leftovers: its store's folders, its state files, their size and newest write."""
+
+    store: list[Path] = field(default_factory=list)
+    state: list[Path] = field(default_factory=list)
+    bytes: int = 0
+    newest: float | None = None
+
+    @property
+    def paths(self) -> list[Path]:
+        return [*self.store, *self.state]
 
 
 def _quiet(newest: float | None, now: float) -> bool:
@@ -231,6 +261,45 @@ def unrecorded(state: Path, cache: Path, now: float | None = None) -> Found:
     return found
 
 
+# --- cadgen 0.7's leftovers ----------------------------------------------------------------------
+
+
+def _store_shaped(path: Path, kind: str) -> bool:
+    """Whether ``path`` is 0.7's store's ``objects/`` (two-hex shards) or ``index/`` (a folder per
+    kind it knew): in a cache folder a person named, another program's folder of that name is not."""
+    try:
+        names = [name for name in os.listdir(path) if not name.startswith(".")]
+    except OSError:
+        return False
+    if kind == "objects":
+        return all(_SHARD.fullmatch(name) for name in names)
+    return all(name in SEVEN_KINDS for name in names)
+
+
+def seven(state: Path, cache: Path | None) -> Seven:
+    """cadgen 0.7's leftovers in the state and cache folders, their size and their newest write."""
+    found = Seven()
+    for name in SEVEN_STORE if cache is not None else ():
+        path = cache / name
+        if path.is_dir() and not path.is_symlink() and _store_shaped(path, name):
+            found.store.append(path)
+    for inside in SEVEN_STATE:
+        path = state / inside
+        if os.path.lexists(path):
+            found.state.append(path)
+    for path in found.paths:
+        size, newest = _walk(path)
+        found.bytes += size
+        if newest is not None:
+            found.newest = newest if found.newest is None else max(found.newest, newest)
+    return found
+
+
+def quiet(found: Seven, now: float | None = None) -> bool:
+    """Whether nothing of 0.7's leftovers has been written for ``QUIET_DAYS`` days."""
+    return _quiet(found.newest, time.time() if now is None else now)
+
+
 # --- words ---------------------------------------------------------------------------------------
 
 
@@ -244,3 +313,13 @@ def size(count: int) -> str:
 
 def count(number: int, one: str, many: str) -> str:
     return f"{number} {one if number == 1 else many}"
+
+
+def seven_text(found: Seven) -> str:
+    """0.7's leftovers in words, with their size and when they were last written: ``cadgen 0.7's
+    store and 2 of its state files (92.0 MB), last written 2026-10-24``."""
+    files = count(len(found.state), "state file", "state files")
+    what = (f"cadgen 0.7's store and {files}" if found.store and found.state
+            else "cadgen 0.7's store" if found.store else f"cadgen 0.7's {files}")
+    when = "" if found.newest is None else f", last written {time.strftime('%Y-%m-%d', time.localtime(found.newest))}"
+    return f"{what} ({size(found.bytes)}){when}"

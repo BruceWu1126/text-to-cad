@@ -359,12 +359,16 @@ first), and the newest installation registered.
 
 Coming from 0.7: cadgen 0.7.x kept a cache store, which can hold gigabytes, at
 `~/.cache/cadgen` (macOS and Linux; `$XDG_CACHE_HOME/cadgen` when that is set),
-`%LOCALAPPDATA%\cadgen` (Windows) or the folder `CADGEN_CACHE_DIR` named. 0.8 keeps its
-document cache in that folder's `documents/` and its engine's bytecode in `pycache/`, and
-neither reads, writes nor removes 0.7's store beside it. Once no 0.7 install is left on the machine, delete that folder by hand; an
-agent may do it when asked. 0.8 loses nothing by it: its documents are built again by the next
-run of their scripts. Settings, the telemetry answer and recents live in the state directory,
-not there.
+`%LOCALAPPDATA%\cadgen` (Windows) or the folder `CADGEN_CACHE_DIR` named: its `objects/` and
+`index/`. 0.8 keeps its document cache in that folder's `documents/` and its engine's bytecode in
+`pycache/`, and neither reads nor writes 0.7's store beside it, nor the state files only 0.7 writes
+(its sidebar views, its snapshot browser's lock, its viewer's log, its Recents log). Whether a 0.7
+is still installed cannot be told from here (0.7 never registered itself; it lives in uv's
+environments and the agent apps' plugin configs), so they retire themselves: `cadgen doctor` says
+they are there, with their size and when they were last written, and `cadgen doctor --prune`
+removes them once nothing has written them for seven days -- a 0.7 in use writes its store at
+every build -- or at once with `--all-versions`, once no 0.7 is left in any agent app. 0.8 loses
+nothing by it. Settings, the telemetry answer and recents live in the state directory, and stay.
 
 The viewer exposes `POST /__cad/clipboard` for explicit viewport PNG copies. It
 uses the same host and custom-header POST gates as other mutation routes, limits

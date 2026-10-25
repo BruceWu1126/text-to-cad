@@ -340,10 +340,8 @@ class DoctorTests(unittest.TestCase):
                     self.assertIsNone(doctor._editable_source())
 
 
-class LeftoversTest(unittest.TestCase):
-    """``cadgen doctor`` says what cadgen left behind that nothing needs, and ``--prune`` removes it, a
-    line per kind: never a live engine's bytecode, a registered installation's, a recorded document's
-    cache, nor anything written in the last seven days. Every folder is the test's own."""
+class PrivateFolders(unittest.TestCase):
+    """A state, cache, engine and launcher folder of the test's own, and files in them written a month ago."""
 
     OLD = 30 * 86400
 
@@ -388,6 +386,13 @@ class LeftoversTest(unittest.TestCase):
     def tree(self) -> list[str]:
         return sorted(path.relative_to(self.root).as_posix() for folder in (self.state / "engines", self.state / "documents",
                                                                          self.cache) for path in folder.rglob("*"))
+
+
+
+class LeftoversTest(PrivateFolders):
+    """``cadgen doctor`` says what cadgen left behind that nothing needs, and ``--prune`` removes it, a
+    line per kind: never a live engine's bytecode, a registered installation's, a recorded document's
+    cache, nor anything written in the last seven days."""
 
     def test_doctor_says_what_nothing_needs_and_prune_removes_it_but_what_is_live_registered_recorded_or_recent(self) -> None:
         import json
@@ -446,6 +451,70 @@ class LeftoversTest(unittest.TestCase):
         self.assertFalse((self.cache / "documents" / forgotten).exists())
         code, out, _ = _run(["--prune"])
         self.assertEqual(out, "no registered installation has lost its interpreter\n", "nothing is left to remove")
+
+
+class SevenLeftoversTest(PrivateFolders):
+    """cadgen 0.7's store and state files retire themselves: ``cadgen doctor`` says they are there,
+    ``--prune`` removes them once nothing has written them for seven days, ``--all-versions`` at
+    once; a folder of that name that is not 0.7's store, and 0.8's own files, are never touched."""
+
+    def seven(self, *, recent: str | None = None) -> list[Path]:
+        made = [self.file("cache/objects/ab/" + "c" * 62, "o" * 4089), self.file("cache/index/model/" + "d" * 64, "{}"),
+                self.file("state/sidebar-views/views.json", "[]"), self.file("state/snapshot-browser.lock", ""),
+                self.file("state/recents/recents.jsonl", "{}\n")]
+        if recent:
+            made.append(self.file(recent, "written now", old=False))
+        return made
+
+    def ours(self) -> list[Path]:
+        """0.8's own files beside 0.7's, which nothing here touches."""
+        return [self.file("state/settings.json", "{}"), self.file("state/recents/thumbnails/" + "e" * 32 + ".png", "p"),
+                self.file("cache/pycache/aaaaaaaaaaaa/x.pyc", old=False),
+                self.file("cache/documents/11111111-1111-5111-8111-111111111111/document.xbf", old=False)]
+
+    def last(self, paths: list[Path]) -> str:
+        import time
+
+        return time.strftime("%Y-%m-%d", time.localtime(max(os.lstat(path).st_mtime for path in paths)))
+
+    def test_a_quiet_0_7_is_said_with_its_size_and_age_and_pruned(self) -> None:
+        made, ours = self.seven(), self.ours()
+        said = f"cadgen 0.7's store and 3 state files (4.0 KB), last written {self.last(made)}"
+        code, out, _ = _run(["--no-server", str(self.root)])
+        self.assertEqual(code, 0)
+        self.assertIn(f"  0.7      {said}: cadgen doctor --prune removes it\n", out)
+        self.assertTrue(all(path.exists() for path in made), "nothing is removed without --prune")
+        code, out, _ = _run(["--prune"])
+        self.assertEqual(out, f"no registered installation has lost its interpreter\nremoved {said}\n")
+        for gone in ("cache/objects", "cache/index", "state/sidebar-views", "state/snapshot-browser.lock",
+                     "state/recents/recents.jsonl"):
+            self.assertFalse((self.root / gone).exists(), gone)
+        self.assertTrue(all(path.exists() for path in ours), "0.8's own files stay")
+        self.assertNotIn("0.7", _run(["--no-server", str(self.root)])[1])
+
+    def test_a_0_7_written_in_the_last_week_stays_until_all_versions_says_none_needs_it(self) -> None:
+        made, ours = self.seven(recent="state/viewer.log"), self.ours()
+        said = f"cadgen 0.7's store and 4 state files (4.0 KB), last written {self.last(made)}"
+        code, out, _ = _run(["--no-server", str(self.root)])
+        self.assertIn(f"  0.7      {said}: cadgen doctor --prune removes it once nothing has written it for 7 days, "
+                      "or now with --all-versions\n", out)
+        code, out, _ = _run(["--prune"])
+        self.assertEqual(out, f"no registered installation has lost its interpreter\nkept {said}: a cadgen 0.7 still "
+                              "installed may use it; it goes once nothing has written it for 7 days, or now with "
+                              "--all-versions\n")
+        self.assertTrue(all(path.exists() for path in made), "a 0.7 written this week may be in use")
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            doctor.main(["--all-versions"])  # with --prune alone
+        code, out, _ = _run(["--prune", "--all-versions"])
+        self.assertEqual(out, f"no registered installation has lost its interpreter\nremoved {said}\n")
+        self.assertFalse(any(path.exists() for path in made))
+        self.assertTrue(all(path.exists() for path in ours), "0.8's own files stay")
+
+    def test_a_folder_of_the_store_s_name_that_is_not_0_7_s_store_is_left_alone(self) -> None:
+        theirs = [self.file("cache/objects/notes.txt", "another program's"), self.file("cache/index/README", "")]
+        code, out, _ = _run(["--prune", "--all-versions"])
+        self.assertEqual(out, "no registered installation has lost its interpreter\n")
+        self.assertTrue(all(path.exists() for path in theirs))
 
 
 class KernelProbeTest(unittest.TestCase):

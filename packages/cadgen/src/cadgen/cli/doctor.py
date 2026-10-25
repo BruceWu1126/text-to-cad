@@ -8,10 +8,12 @@ proxy, ``~/.local/bin/cadgen`` (``cadgen._internal.installations``), through whi
 write (a sandbox's), the records of installations whose interpreter is gone, a file in the
 proxy's place that is not cadgen's, and what cadgen left behind that no cadgen running now needs
 (``cadgen._internal.leftovers``: engine records of an older format, the bytecode of installations no
-longer registered, cache folders no record names). ``--prune`` removes those records, the
-per-version launchers (``cadgen-<version>``, ``cadgen-python-<version>``) earlier builds published
-beside the proxy (``installations.prune_legacy``) and those leftovers, but any written in the last
-seven days, a line for each kind; nothing is removed without it. Then it starts the engine
+longer registered, cache folders no record names), and cadgen 0.7's store and state files, with
+their size and when they were last written. ``--prune`` removes those records, the per-version
+launchers (``cadgen-<version>``, ``cadgen-python-<version>``) earlier builds published beside the
+proxy (``installations.prune_legacy``) and those leftovers, but any written in the last seven days,
+a line for each kind; ``--all-versions`` with it removes 0.7's however recently written. Nothing is
+removed without ``--prune``. Then it starts the engine
 when none runs (``cadgen.engine.client``): in a sandbox that cannot start one it says so in its usual
 line. ``--no-server`` does all of it but start the engine, saying whether one runs: a CI job's
 smoke check, which must leave no engine behind. Run pointed at a skill (its directory or SKILL.md), it also says whether this is the cadgen the
@@ -235,7 +237,8 @@ def _leftovers():
     state, cache = state_dir(), cache_dir()
     prefixes = [record["prefix"] for record in installations.records()]
     return (state, cache, leftovers.engine_records(state),
-            leftovers.bytecode_folders(cache, prefixes, daemon.state_dir()), leftovers.unrecorded(state, cache))
+            leftovers.bytecode_folders(cache, prefixes, daemon.state_dir()), leftovers.unrecorded(state, cache),
+            leftovers.seven(state, cache))
 
 
 def _leftover_words(records, bytecode, cached) -> list[str]:
@@ -255,21 +258,31 @@ def _leftover_words(records, bytecode, cached) -> list[str]:
 
 
 def _report_leftovers() -> list[str]:
-    """The report's line of what ``--prune`` would remove, when there is any."""
+    """The report's lines of what ``--prune`` would remove, when there is any, and of cadgen 0.7's
+    leftovers, when there are any: their size, when they were last written, and when they go."""
+    from cadgen._internal import leftovers
+
     try:
-        _state, _cache, records, bytecode, cached = _leftovers()
+        _state, _cache, records, bytecode, cached, seven = _leftovers()
     except Exception as error:  # noqa: BLE001 - a report line, never a reason for the report to fail
         return [f"leftover unknown ({type(error).__name__}: {error})"]
     said = _leftover_words(records, bytecode, cached)
-    return [f"leftover {', '.join(said)}: cadgen doctor --prune removes them"] if said else []
+    lines = [f"leftover {', '.join(said)}: cadgen doctor --prune removes them"] if said else []
+    if seven.paths:
+        when = ("cadgen doctor --prune removes it" if leftovers.quiet(seven) else
+                f"cadgen doctor --prune removes it once nothing has written it for {leftovers.QUIET_DAYS} days, "
+                "or now with --all-versions")
+        lines.append(f"0.7      {leftovers.seven_text(seven)}: {when}")
+    return lines
 
 
-def _prune_leftovers() -> list[str]:
-    """What cadgen left behind that no cadgen needs, removed: a line for each class it removed."""
+def _prune_leftovers(all_versions: bool = False) -> list[str]:
+    """What cadgen left behind that no cadgen needs, removed: a line for each class it removed, and
+    for cadgen 0.7's leftovers, removed or kept (``all_versions``: removed whenever last written)."""
     from cadgen._internal import leftovers
     from cadgen._internal.leftovers import count, size
 
-    state, _cache, records, bytecode, cached = _leftovers()
+    state, _cache, records, bytecode, cached, seven = _leftovers()
     lines = []
     removed, trimmed = leftovers.remove_engine_records(state, records)
     if removed:
@@ -284,6 +297,12 @@ def _prune_leftovers() -> list[str]:
     gone = leftovers.remove(cached.paths)
     if gone:
         lines.append(f"removed {count(gone, 'cache folder', 'cache folders')} with no record ({size(cached.bytes)})")
+    if seven.paths and (all_versions or leftovers.quiet(seven)):
+        left = [path for path in seven.paths if leftovers.remove([path]) == 0]
+        lines.append(f"removed {leftovers.seven_text(seven)}" + "".join(f"; could not remove {path}" for path in left))
+    elif seven.paths:
+        lines.append(f"kept {leftovers.seven_text(seven)}: a cadgen 0.7 still installed may use it; it goes once "
+                     f"nothing has written it for {leftovers.QUIET_DAYS} days, or now with --all-versions")
     return lines
 
 
@@ -303,8 +322,15 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
         action="store_true",
         help="Remove the record of every registered installation whose interpreter is gone, the "
              "per-version launchers earlier builds published beside the cadgen command, engine records of an "
-             "older format, the bytecode folders of installations no longer registered and cache folders with "
-             "no record (none written in the last 7 days), and exit.",
+             "older format, the bytecode folders of installations no longer registered, cache folders with "
+             "no record and cadgen 0.7's store and state files (none written in the last 7 days), and exit.",
+    )
+    parser.add_argument(
+        "--all-versions",
+        action="store_true",
+        help="With --prune: remove cadgen 0.7's store and state files too, however recently they were written "
+             "(without it they go once nothing has written them for 7 days). Only once no cadgen 0.7 is "
+             "installed in any agent app.",
     )
     parser.add_argument(
         "--no-server",
@@ -312,6 +338,8 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
         help="Do everything but start the engine: say only whether one is running.",
     )
     args = parser.parse_args(argv)
+    if args.all_versions and not args.prune:
+        parser.error("--all-versions goes with --prune")
 
     if args.prune:
         from cadgen._internal import installations
@@ -325,7 +353,7 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
         for path in installations.prune_legacy():
             sys.stdout.write(f"removed {path}, a launcher the cadgen command replaces\n")
         # And what no cadgen needs any more: old engine records, bytecode, cache folders no record names.
-        for line in _prune_leftovers():
+        for line in _prune_leftovers(args.all_versions):
             sys.stdout.write(f"{line}\n")
         return 0
 
