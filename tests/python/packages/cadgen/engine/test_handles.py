@@ -161,7 +161,7 @@ class HandleTest(unittest.TestCase):
         cls.addClassCleanup(shutil.rmtree, cls.engine, True)
         cls.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(cls.engine),
                                          "CADGEN_STATE_DIR": str(cls.state), "CADGEN_CACHE_DIR": str(cls.cache),
-                                         "CADGEN_ENGINE_IDLE": "120", "CADGEN_ENGINE_MESH": "inline"},
+                                         "CADGEN_ENGINE_MESH": "inline"},
                                         cls.addClassCleanup)
         cls.addClassCleanup(cls.cli, "stop")
 

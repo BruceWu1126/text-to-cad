@@ -49,9 +49,9 @@ import unittest
 # Hung, not slow: the slowest file CI has run took about four minutes. Without this a
 # hang runs out the CI job's timeout and says nothing about where it is.
 FILE_HANG_SECONDS = 15 * 60
-# A file's engine daemon goes when the file ends (``stop_engine``); one a killed run leaves
-# behind goes away on its own after this long idle.
-ENGINE_IDLE_SECONDS = 300
+# A file's engine daemon goes when the file ends (``stop_engine``): an engine never stops on a
+# timer, so one a killed run leaves behind runs until it is stopped (``cadgen stop`` with its folder).
+
 # Stopping a file's daemon waits for its workers to exit.
 ENGINE_STOP_SECONDS = 120
 
@@ -219,8 +219,7 @@ def run_files(files: list[str], top: str, jobs: int, verbose: bool, print_weight
                 # never reaches the person's.
                 env = {**os.environ, "CADGEN_ENGINE_DIR": os.path.join(engines, f"e{index}"),
                        "CADGEN_STATE_DIR": os.path.join(engines, f"s{index}"),
-                       "CADGEN_CACHE_DIR": os.path.join(engines, f"c{index}"),
-                       "CADGEN_ENGINE_IDLE": str(ENGINE_IDLE_SECONDS)}
+                       "CADGEN_CACHE_DIR": os.path.join(engines, f"c{index}")}
                 futures.append(pool.submit(_run_one_file, path, top, verbose, env))
             for future in concurrent.futures.as_completed(futures):
                 path, code, output, seconds = future.result()

@@ -217,7 +217,7 @@ class ThroughTheDaemonTest(unittest.TestCase):
         self.engine = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.state = self.folder / "state"
         self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_STATE_DIR": str(self.state),
-                                          "CADGEN_ENGINE_DIR": str(self.engine), "CADGEN_ENGINE_IDLE": "60",
+                                          "CADGEN_ENGINE_DIR": str(self.engine),
                                           "CADGEN_ENGINE_MESH": "inline", "DO_NOT_TRACK": "", "CADGEN_TELEMETRY": ""},
                                          self.addCleanup)
         self.addCleanup(self._stop)

@@ -140,7 +140,7 @@ class WhereTest(unittest.TestCase):
         cls.folder = Path(tempfile.mkdtemp(prefix="engine-where-")).resolve()
         cls.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         cls.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(cls.state),
-                                         "CADGEN_ENGINE_IDLE": "60", "CADGEN_ENGINE_MESH": "inline"}, cls.addClassCleanup)
+                                         "CADGEN_ENGINE_MESH": "inline"}, cls.addClassCleanup)
         (cls.folder / "hand.py").write_text(textwrap.dedent(HAND), encoding="utf-8")
         (report,) = engine_build.build(cls.folder / "hand.py", cwd=cls.folder)
         assert report["ok"], report

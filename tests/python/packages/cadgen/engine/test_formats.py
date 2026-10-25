@@ -928,7 +928,7 @@ class DaemonFileTest(unittest.TestCase):
         self.folder = Path(tempfile.mkdtemp(prefix="engine-formats-daemon-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         source = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
-        env = {**os.environ, "PYTHONPATH": str(source), "CADGEN_ENGINE_DIR": str(self.state), "CADGEN_ENGINE_IDLE": "60"}
+        env = {**os.environ, "PYTHONPATH": str(source), "CADGEN_ENGINE_DIR": str(self.state)}
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
         self.addCleanup(shutil.rmtree, self.state, ignore_errors=True)
 

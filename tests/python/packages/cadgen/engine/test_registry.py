@@ -155,7 +155,7 @@ class RegistryDaemonTest(unittest.TestCase):
         # The registry alone, with no cache (``CADGEN_ENGINE_CACHE_GB=0``): a restart knows an id by its
         # record and its command. What the cache adds is ``test_cache``'s.
         cls.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(cls.engine),
-                                         "CADGEN_STATE_DIR": str(cls.state), "CADGEN_ENGINE_IDLE": "120",
+                                         "CADGEN_STATE_DIR": str(cls.state),
                                          "CADGEN_ENGINE_MESH": "inline", "CADGEN_ENGINE_CACHE_GB": "0"},
                                         cls.addClassCleanup)
         cls.addClassCleanup(cls.cli, "stop")

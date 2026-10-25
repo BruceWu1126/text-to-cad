@@ -175,7 +175,7 @@ class PackageScriptRunTest(unittest.TestCase):
         self.root = Path(tempfile.mkdtemp(prefix="engine-package-run-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
-                                          "CADGEN_ENGINE_IDLE": "60", "CADGEN_ENGINE_MESH": "inline"}, self.addCleanup)
+                                          "CADGEN_ENGINE_MESH": "inline"}, self.addCleanup)
         self.addCleanup(self._stop)
 
     def _stop(self) -> None:

@@ -611,7 +611,7 @@ class DaemonRenderTest(unittest.TestCase):
         gl()
         self.folder = Path(tempfile.mkdtemp(prefix="engine-render-daemon-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
-        self.env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state), "CADGEN_ENGINE_IDLE": "60",
+        self.env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
                     "CADGEN_ENGINE_MESH": "inline"}
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
         self.addCleanup(shutil.rmtree, self.state, ignore_errors=True)

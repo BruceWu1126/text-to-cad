@@ -121,7 +121,7 @@ class CacheTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.engine, True)
         self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.engine),
                                           "CADGEN_STATE_DIR": str(state), "CADGEN_CACHE_DIR": str(cache),
-                                          "CADGEN_ENGINE_IDLE": "120", "CADGEN_ENGINE_MESH": "inline",
+                                          "CADGEN_ENGINE_MESH": "inline",
                                           "CADGEN_ENGINE_CACHE_IDLE": str(IDLE), **extra}, self.addCleanup)
         self.addCleanup(self.cli, "stop", env=dict(self.env))
 
