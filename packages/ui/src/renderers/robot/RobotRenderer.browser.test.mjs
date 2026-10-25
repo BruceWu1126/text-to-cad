@@ -84,7 +84,9 @@ async function open(t, file, { panel = true } = {}) {
     window.Worker = undefined;
     for (const name of ['localStorage', 'sessionStorage']) Object.defineProperty(window, name, { get() { throw new Error(`Renderer accessed ${name}`); } });
   });
-  await page.goto(`http://127.0.0.1:${server.address().port}/?file=${file}`);
+  // Committed, not loaded: what follows waits for the view itself (its canvas, its tiles, its text),
+  // never for the page's every resource under one fixed bound.
+  await page.goto(`http://127.0.0.1:${server.address().port}/?file=${file}`, { waitUntil: 'commit' });
   const pane = page.getByTestId('one');
   const tools = pane.getByRole('group', { name: 'Interaction tools' });
   const robot = {
@@ -613,6 +615,9 @@ test('a reload of the tab brings the pose and the hidden visuals back, and nothi
   // for the home, drops its view instead: `cad-viewer/CadViewerFileViews.test.tsx`.
   await robot.openDisplay();
   await page.evaluate(() => window.cadHarness.mounted(false));
+  // It has gone before it comes back: a busy React can take the two calls in one render, and a view
+  // that never went keeps its sidebar open, for the press on its tile to close.
+  await pane.getByRole('group', { name: 'File sidebar' }).waitFor({ state: 'detached' });
   await page.waitForFunction(() => Object.values(window.cadHarness.state.renderers || {}).some(record => record?.renderer?.pose?.value?.jointValues?.nod === 12));
   const record = await page.evaluate(() => window.cadHarness.state.renderers[JSON.stringify(['/models/arm.urdf', 'robot'])]);
   assert.deepEqual([record.renderer.pose.value.jointValues.shoulder, record.renderer.pose.value.jointValues.lift], [25, 0.2]);
@@ -638,6 +643,7 @@ test('a reload of the tab brings the pose and the hidden visuals back, and nothi
   // A record written against another revision is not restored. (A new revision behind the mounted robot
   // keeps its pose only while its controls and named poses are unchanged: `RobotTools.test.tsx`.)
   await page.evaluate(() => window.cadHarness.mounted(false));
+  await pane.getByRole('group', { name: 'File sidebar' }).waitFor({ state: 'detached' });
   revision += 1;
   t.after(() => { revision = 1; });
   await page.evaluate(() => window.cadHarness.a.client.refresh());
