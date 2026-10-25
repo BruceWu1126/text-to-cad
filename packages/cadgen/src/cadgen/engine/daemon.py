@@ -624,6 +624,9 @@ builds no script until a build takes it (``adopt``)."""
             self.process.kill()
 
 
+# The requests that serve (``Daemon.serve``: the HTTP server bound on the first), each counted busy
+# while it is underway (``Daemon.handle``).
+SERVING = frozenset({"serve", "viewer", "http", "read", "warm"})
 # The type a worker answers bytes of a held document that do not read with (``build.Unreadable``),
 # as ``worker.refusal`` names it.
 UNREADABLE = "cadgen.engine.build:Unreadable"
@@ -1819,6 +1822,22 @@ class Daemon:
             self.touch()
 
     def handle(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
+        """One request, answered through ``send``. One that serves -- binding the HTTP server, a
+        launch, a page's read -- counts in ``status``'s ``busy`` until it is answered, as builds and
+        draws do: another installation's engine starting meanwhile never retires this one under it
+        (``_holder``)."""
+        if request.get("op") not in SERVING:
+            return self._handle(request, send)
+        with self.busy_lock:
+            self.busy += 1
+        try:
+            self._handle(request, send)
+        finally:
+            with self.busy_lock:
+                self.busy -= 1
+            self.touch()
+
+    def _handle(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
         self.touch()
         op = request.get("op")
         if op == "models":

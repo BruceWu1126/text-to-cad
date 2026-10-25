@@ -647,6 +647,43 @@ class NoTimerTest(unittest.TestCase):
         self.assertTrue(engine.stopping.is_set())
 
 
+class BusyTest(unittest.TestCase):
+    """What another installation's engine asks before it retires this one (``status``): a request that
+    serves, binding the HTTP server, is in use until it is answered."""
+
+    def test_a_launch_binding_its_server_is_busy_until_it_is_answered(self) -> None:
+        import threading
+
+        from cadgen.engine import daemon
+
+        engine = daemon.Daemon(cap=1)
+        self.addCleanup(engine.pool.stop)
+        binding, release = threading.Event(), threading.Event()
+
+        def bind(*_args, **_kwargs):
+            binding.set()
+            release.wait(30)
+            raise ValueError("cannot listen on 127.0.0.1:0")
+
+        answered: list = []
+
+        def launch() -> None:
+            try:
+                engine.handle({"op": "viewer"}, answered.append)
+            except ValueError as error:  # the connection says it (``_serve``)
+                answered.append(str(error))
+
+        with mock.patch.object(daemon, "bind", bind):
+            asking = threading.Thread(target=launch)
+            asking.start()
+            self.assertTrue(binding.wait(30))
+            self.assertEqual(engine.status()["busy"], 1, "binding: in use, so never retired under the launch")
+            release.set()
+            asking.join(30)
+        self.assertEqual(answered, ["cannot listen on 127.0.0.1:0"])
+        self.assertEqual(engine.status()["busy"], 0)
+
+
 class StandbyStartTest(unittest.TestCase):
     def test_the_daemon_s_start_stands_one_by_in_its_starter_s_environment(self) -> None:
         from unittest import mock
