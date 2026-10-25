@@ -607,21 +607,23 @@ class WindowsTokenFirstTest(unittest.TestCase):
 
 
 class NoTimerTest(unittest.TestCase):
-    """The engine never stops on a timer: idleness sheds memory (an idle worker is retired), and
-    only ``stop`` stops it."""
+    """The engine never stops on a timer, nor retires a worker on one: memory alone does, and only
+    ``stop`` stops it."""
 
-    def test_a_day_idle_unheld_retires_the_idle_worker_and_only_stop_stops_the_engine(self) -> None:
+    def test_a_day_idle_unheld_keeps_the_idle_worker_and_only_stop_stops_the_engine(self) -> None:
         import types
+        from unittest import mock
 
         from cadgen.engine import daemon
 
         engine = daemon.Daemon(cap=1)
         stopped: list[str] = []
-        worker = types.SimpleNamespace(key="/w/block.py", script="/w/block.py", pid=1, leased=False,
-                                       used=time.monotonic(), stop=lambda: stopped.append("worker"))
+        worker = types.SimpleNamespace(key="/w/block.py", script="/w/block.py", pid=1, leased=False, rss=100.0,
+                                       used=time.monotonic(), alive=lambda: True, stop=lambda: stopped.append("worker"))
         engine.pool.live[worker.key] = worker
-        engine.tend(now=time.monotonic() + 24 * 3600)  # no holder, nothing to do, a day on
-        self.assertEqual((stopped, engine.pool.live), (["worker"], {}), "its idle worker is retired")
+        with mock.patch("time.monotonic", return_value=worker.used + 24 * 3600):
+            engine.tend()  # no holder, nothing to do, a day on
+        self.assertEqual((stopped, list(engine.pool.live)), ([], [worker.key]), "its idle worker stays")
         self.assertFalse(engine.stopping.is_set(), "the engine stays")
         sent: list[dict] = []
         engine.handle({"op": "stop"}, sent.append)
@@ -637,31 +639,30 @@ class NoTimerTest(unittest.TestCase):
         door.write_bytes(b"")
         engine = daemon.Daemon(cap=1)
         engine.reached_by(door)
-        engine.tend(now=time.monotonic() + 24 * 3600)
+        with mock.patch("time.monotonic", return_value=time.monotonic() + 24 * 3600):
+            engine.tend()
         self.assertFalse(engine.stopping.is_set(), "its door stands: it stays, however long idle")
         door.unlink()  # its folder cleaned up: no one can reach it
         engine.tend()
         self.assertTrue(engine.stopping.is_set())
 
 
-class KernelWarmUpTest(unittest.TestCase):
-    def test_a_host_s_first_hold_http_or_warm_loads_the_kernel_once(self) -> None:
-        import io
+class StandbyStartTest(unittest.TestCase):
+    def test_the_daemon_s_start_stands_one_by_in_its_starter_s_environment(self) -> None:
         from unittest import mock
 
         from cadgen.engine import daemon
 
-        for first in ("hold", "http", "warm"):
-            with self.subTest(first=first), mock.patch.object(daemon, "warm", return_value=None) as warm:
-                engine = daemon.Daemon()
-                self.addCleanup(engine.pool.stop)
-                if first == "hold":  # an MCP server holds the engine from its start, asking nothing else
-                    engine.hold(io.BytesIO(b""), lambda _message: None)
-                else:
-                    with mock.patch.object(engine, "serve"):
-                        engine.handle({"op": first}, lambda _message: None)
-                engine.hold(io.BytesIO(b""), lambda _message: None)
-                self.assertEqual(warm.call_count, 1, "once per engine, whichever came first")
+        engine = daemon.Daemon()
+        self.addCleanup(engine.pool.stop)
+        asked: list[dict] = []
+        root = daemon.engine_root()
+        with mock.patch.object(engine.pool, "stand", side_effect=asked.append), \
+                mock.patch.dict(os.environ, {"PYTHONPATH": os.pathsep.join((root, "/mine"))}):
+            engine.stand()
+        self.assertEqual(engine.pool.spare, engine._spare)
+        self.assertEqual(len(asked), 1)
+        self.assertEqual(asked[0]["PYTHONPATH"], "/mine", "without the engine's folder its starter put first")
 
 
 class DaemonEnvironmentTest(unittest.TestCase):

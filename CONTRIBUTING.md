@@ -153,8 +153,8 @@ build runs the new code. Never stop one you did not start.
 
 The engine's switches are environment variables, never script options (the
 engine's README, **The engine server and its workers** and **Body retention**):
-`CADGEN_ENGINE_WORKERS`, `CADGEN_ENGINE_WORKER_IDLE`,
-`CADGEN_ENGINE_WORKER_RSS_MB`, `CADGEN_ENGINE_MEMORY_MB` (the daemon's one memory budget,
+`CADGEN_ENGINE_WORKERS`, `CADGEN_ENGINE_WORKER_RSS_MB` (the workers' memory cap, together; no timer
+retires a worker), `CADGEN_ENGINE_MEMORY_MB` (the daemon's one memory budget,
 **Document lifetime**), `CADGEN_ENGINE_CACHE_GB` (the document cache's size, `0` for none;
 `CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, the tests' seam), `CADGEN_ENGINE_PORT` (its HTTP port,
 `0` for any free one; 3245 by default, refused when held), `CADGEN_ENGINE_MEMO=0` (no memo

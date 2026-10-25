@@ -10,22 +10,35 @@ script with a live worker waits for it while it is busy. One for a script with n
 when fewer than the cap are alive; at the cap the least recently used idle worker no page
 watches is retired first (its stdin closed: it exits), and when every idle worker is watched the
 new one starts past the cap; with every worker busy, the build waits, first come first served,
-for the first to come free. Nothing is refused, and nothing is predicted: no admission. A
-worker idle ``CADGEN_ENGINE_WORKER_IDLE`` seconds (by default an hour, ``WORKER_IDLE_SECONDS``)
-is retired, and so is one over its memory cap after a build (``worker.retirement``).
-Before a worker is stopped, every ``pointer`` document of it the server does not hold is taken
-from it (``models.Models.drain``): a document outlives its worker. A retired script's next build
-is a fresh worker's, a restart. Each such document is also kept in the engine's cache once it is
-idle, at its drain and at shutdown (``cache``), so a restart of the daemon opens it at once.
+for the first to come free. Nothing is refused, and nothing is predicted: no admission.
+
+No timer retires a worker: memory alone does (``Pool.shed``). The workers' resident memory --
+each one's as it measured it at its start and after each build, the standby's and the render
+processes' with them -- is held to one cap (``CADGEN_ENGINE_WORKER_RSS_MB``, ``worker.rss_cap_mb``).
+Past it, or under the system's memory-pressure signal (``serve.Pressure``), idle processes are
+retired, least recently used first: the standby, then render processes, then the workers no page
+watches, and a watched one only when no other is left. A worker alone over the cap after its build
+is retired at once (``worker.retirement``). Before a worker is stopped, every ``pointer`` document
+of it the server does not hold is taken from it (``models.Models.drain``): a document outlives its
+worker. A retired script's next build is a fresh worker's, a restart. Each such document is also
+kept in the engine's cache once it is idle, at its drain and at shutdown (``cache``), so a restart
+of the daemon opens it at once.
+
+One worker stands by with the kernel loaded (``Pool.stand``): started with the daemon, and again
+each time a build takes it or starts a worker of its own while the pool has room for it. A build
+for a script with no live worker takes the standby when its environment shapes the interpreter as
+the standby's does (``RESTARTS``), and starts a fresh worker otherwise; taken, the standby is that
+script's worker from then on (``Worker.adopt``), so a new script's first build pays no kernel load.
+The standby counts toward the cap, is the first retired for room or memory, and is never a
+script's worker in ``status``.
 
 It also serves documents over HTTP (``serve``), holding each loaded document and its
 parts' tessellations in its memory under one budget (``serve.memory_budget``,
 ``CADGEN_ENGINE_MEMORY_MB``; past it, or on the system's memory-pressure signal, what is held
 is evicted: ``serve.Server.trim``), and draws them (``draw``): each served document a
 snapshot asks for gets a render process of its own (``render/service.py``), started on its
-first picture, sent every version the document is patched to, gone with the daemon or after
-the workers' idle time, and held to their memory cap; render processes are not workers, and
-do not count toward the cap.
+first picture, sent every version the document is patched to, gone with the daemon or under the
+workers' memory cap; render processes are not workers, and do not count toward the count cap.
 
 Its only files are the operating system's coordination, in its own folder, ``state_dir``: a lock,
 and on POSIX its door, a named pipe (``door_path``), and the pipes of the connections being opened
@@ -60,14 +73,19 @@ from typing import Any, Callable
 from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.ids import canonical, file_id, is_id
 
-__all__ = ["DEFAULT_PORT", "WORKER_IDLE_SECONDS", "Endpoint", "Pool", "PortHeld", "address", "door_path", "endpoints",
-           "failure_path", "lock", "lock_path", "main", "port_holder", "state_dir", "worker_cap", "worker_idle"]
+__all__ = ["DEFAULT_PORT", "Endpoint", "Pool", "PortHeld", "address", "door_path", "endpoints",
+           "failure_path", "lock", "lock_path", "main", "port_holder", "state_dir", "worker_cap"]
 
 HTTP_FACTORY = None  # optional application supplied by the enclosing distribution
 
-# How long a worker sits idle before it is retired (``worker_idle``): its memory is shed, the
-# engine stays.
-WORKER_IDLE_SECONDS = 3600.0
+# How often the daemon tends itself (``Daemon.tend``): its door, its pipes, and the workers'
+# memory against its cap. The server's pressure poller asks the system's signal more often.
+TEND_SECONDS = 30.0
+# Under the system's memory pressure, the workers' resident memory is brought down to this share of
+# its cap, as the server's documents are of their budget (``serve.LOW_WATER``).
+PRESSURE_SHARE = 0.5
+# The standby's name where a worker's script would be (``Pool.stand``): it builds no script yet.
+STANDBY = "standby"
 # The engine's HTTP port when nothing names one (0xCAD): ``--port`` on ``cadgen server`` (or a
 # request's own), then ``CADGEN_ENGINE_PORT``, then this (``bind``). Held, it is refused, never moved.
 DEFAULT_PORT = 3245
@@ -90,8 +108,6 @@ BYTECODE = ("PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE")
 # one folder per installation in it (``_tag``), and one no daemon started in this many days goes.
 PYCACHE = "pycache"
 PYCACHE_UNUSED_DAYS = 30
-# What a kernel load is (``warm``): its libraries imported, and one shape made.
-WARM = "import OCP.TopoDS, build123d; build123d.Box(1, 1, 1)"
 
 
 def bytecode(env: dict[str, str]) -> dict[str, str]:
@@ -137,29 +153,14 @@ def _pycache() -> str | None:
     return str(folder)
 
 
-def warm() -> subprocess.Popen | None:
-    """When a host first asks the engine for its page, holds it or warms it (``Daemon.warm_kernel``:
-    ``http``, ``hold``, an MCP server's from its start, and ``warm``, the viewer's launch), once per
-    installation: the kernel loaded in a process of its own (``WARM``), so the first build pays
-    neither the compilation of
-    its libraries, which that process caches, nor the operating system's first look at a fresh
-    installation's native libraries (macOS checks each once: 43 s measured on a new uvx
-    environment, against 2.5 s loaded again). A build that starts the engine loads the kernel
-    itself at once: nothing is warmed for it. Nothing either when the kernel's bytecode is cached
-    already, or the engine caches none; and the folders of installations no daemon started in
-    ``PYCACHE_UNUSED_DAYS`` go, in the background."""
-    import importlib.machinery
-    import importlib.util
-
+def prune_bytecode() -> None:
+    """The bytecode folders of installations no daemon started in ``PYCACHE_UNUSED_DAYS``, removed in
+    the background, when the daemon caches its own (``bytecode``): never a caller's folder, which is
+    not the engine's to judge."""
     ours = _pycache()
     if ours is None or os.path.realpath(sys.pycache_prefix or "") != os.path.realpath(ours):
-        return None  # none cached, or the caller's own folder: neither ours to judge or prune
+        return
     threading.Thread(target=_prune, args=(Path(ours),), daemon=True).start()
-    found = importlib.machinery.PathFinder.find_spec("build123d")
-    if found is None or not found.origin or os.path.exists(importlib.util.cache_from_source(found.origin)):
-        return None
-    return subprocess.Popen([sys.executable, "-P", "-c", WARM], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, env=dict(os.environ), cwd=str(state_dir()), **windowless())
 
 
 def _prune(ours: Path) -> None:
@@ -187,16 +188,6 @@ def worker_cap() -> int:
     except ValueError:
         given = 0
     return given if given > 0 else (os.cpu_count() or 1)
-
-
-def worker_idle() -> float:
-    """How long a worker may sit idle before it is retired: ``CADGEN_ENGINE_WORKER_IDLE``
-    seconds, else ``WORKER_IDLE_SECONDS``."""
-    try:
-        given = float(os.environ.get("CADGEN_ENGINE_WORKER_IDLE", "").strip() or -1)
-    except ValueError:
-        given = -1.0
-    return given if given > 0 else WORKER_IDLE_SECONDS
 
 
 def state_dir() -> Path:
@@ -393,14 +384,17 @@ class Worker:
 one element of a document it built (``worker``): a request of its own, answered on the
 same pipe, even while a build runs. Requests reach the worker on its original stdin, which it
 reads on a handle of its own; its standard input is the null device, so nothing a model loads
-or reads ever touches the request pipe (on Windows a DLL's C runtime would wait on it)."""
+or reads ever touches the request pipe (on Windows a DLL's C runtime would wait on it).
+
+A ``standby`` worker loads the kernel before it says it is ready (``worker.load_kernel``) and
+builds no script until a build takes it (``adopt``)."""
 
     def __init__(self, script: str, environment: dict[str, str],
                  on_patch: Callable[[dict[str, Any], bytes, float], None] = lambda *_args: None,
                  on_settled: Callable[..., None] = lambda _worker, _every=False: None, cwd: str | None = None,
                  on_progress: Callable[["Worker", dict[str, Any]], None] = lambda _worker, _frame: None,
-                 on_saved: Callable[["Worker", dict[str, Any], bytes], None] = lambda _worker, _header, _payload: None
-                 ) -> None:
+                 on_saved: Callable[["Worker", dict[str, Any], bytes], None] = lambda _worker, _header, _payload: None,
+                 standby: bool = False) -> None:
         self.script = script
         self.environment = environment
         env = dict(environment)
@@ -413,7 +407,8 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
         env = {name: value for name, value in env.items() if name not in BYTECODE}
         env.update(own or bytecode({}))
         env["CADGEN_ENGINE_WORKER"] = "1"
-        self.process = subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.worker"], stdin=subprocess.PIPE,
+        self.process = subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.worker",
+                                         *(["--standby"] if standby else [])], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
                                         cwd=cwd or str(Path(script).parent), **windowless())
         self.lock = threading.Lock()
@@ -438,7 +433,7 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
         self.started = time.time()
         self.builds = 0
         # Its place in the pool (``Pool``): its key, whether a request holds it, since when, and
-        # when it was last let go; its resident memory after its last build, in MiB.
+        # when it was last let go; its resident memory at its start and after its last build, in MiB.
         self.key = os.path.normcase(script)
         self.leased = False
         self.since = 0.0
@@ -453,6 +448,16 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
         if ready is None or "ready" not in ready:
             raise WorkerGone(f"the worker for {script} did not start")
         self.pid = ready["ready"]
+        self.rss = ready.get("rssMb")
+
+    def adopt(self, script: str, environment: dict[str, str], cwd: str | None) -> None:
+        """The standby taken by a build of ``script``: from now on that script's worker, with its
+        key, the environment it was asked in and the folder a fresh worker of it starts in (its
+        script's, or ``cwd``), as if started for it. Its next request adopts the run's environment
+        as every request does (``worker.adopt``)."""
+        self._write({"op": "adopt", "home": os.path.abspath(cwd or str(Path(script).parent))})
+        self.script, self.environment, self.key = script, environment, os.path.normcase(script)
+        self.started = time.time()
 
     def _tell(self, message: dict[str, Any]) -> None:
         """``message`` to the client the running build answers, while it is there. A client gone
@@ -646,7 +651,8 @@ def _read_exactly(stream: Any, size: int) -> bytes:
 @dataclass(eq=False)
 class _Ticket:
     """A request waiting for a worker: granted the live worker of its key (``worker``), or a
-    slot to start one in (``start``), retiring ``victim`` first."""
+    slot to start one in (``start``), retiring ``victim`` first -- or to take the standby
+    (``standby``) as its worker."""
 
     key: str
     environment: dict[str, str]
@@ -654,6 +660,7 @@ class _Ticket:
     worker: Any = None
     start: bool = False
     victim: Any = None
+    standby: Any = None
 
     @property
     def granted(self) -> bool:
@@ -670,33 +677,50 @@ class Pool:
     """The daemon's live workers, one per key (a script's path, ``documents``),
     at most ``cap`` of them but for watched ones (see the module): ``lease`` a key's worker for one
     request, and ``release`` it after. Requests are granted first come first served: one whose key
-    has a live worker takes it when it is free; one that needs a worker of its own takes a slot
-    under the cap, else the slot of the least recently used idle worker no page watches -- one no
-    request waits for, if there is one -- which is retired. When every idle worker is watched, the
+    has a live worker takes it when it is free; one that needs a worker of its own takes the standby
+    when its interpreter's environment is the standby's (``interpreter``), else a slot under the cap,
+    else the slot of the standby, else of the least recently used idle worker no page watches -- one
+    no request waits for, if there is one -- which is retired. When every idle worker is watched, the
     new worker starts past the cap: the count cap never retires a watched worker (connected means
-    warm); its memory cap may. With every worker busy the request waits, and so does every request
-    that needs a slot after it. A worker idle ``idle`` seconds is retired (``retire_idle``), as is one that is
-    gone or over its memory cap when let go. ``start(key, environment, cwd)`` starts a worker;
-    ``drain(worker)`` is asked of every worker retired, out of the pool and before it is stopped
-    (the daemon's: its documents taken from it, ``models.Models.drain``)."""
+    warm). With every worker busy the request waits, and so does every request that needs a slot
+    after it. ``start(key, environment, cwd)`` starts a worker; ``drain(worker)`` is asked of every
+    worker retired, out of the pool and before it is stopped (the daemon's: its documents taken from
+    it, ``models.Models.drain``).
 
-    def __init__(self, cap: int, idle: float, start: Callable[[str, dict[str, str], str | None], Any],
+    No timer retires a worker; memory does (``shed``): ``memory()`` is the cap on the resident memory
+    of the pool's processes together, in MiB (None: none), against each one's last measure (``rss``).
+    ``spare(environment)``, when the daemon sets it, starts a standby: a worker with the kernel loaded
+    and no script (``stand``). ``renders``, when the daemon sets it, is its render processes
+    (``render.service.Renders``), counted with the workers and retired by the same rule."""
+
+    def __init__(self, cap: int, start: Callable[[str, dict[str, str], str | None], Any],
                  connected: Callable[[Any], bool] = lambda worker: False,
-                 drain: Callable[[Any], None] = lambda worker: None) -> None:
+                 drain: Callable[[Any], None] = lambda worker: None,
+                 memory: Callable[[], float | None] = lambda: None) -> None:
         self.cap = max(1, int(cap))
-        self.idle = idle
         self.start = start
         self.connected = connected
         self.drain = drain
+        self.memory = memory
+        self.spare: Callable[[dict[str, str]], Any] | None = None
+        self.renders: Any = None
         self.lock = threading.Condition()
         self.live: dict[str, Any] = {}  # by key
         self.starting: set[str] = set()  # the keys whose worker is being started, each holding a slot
         self.queue: list[_Ticket] = []
         self.retired: collections.deque = collections.deque(maxlen=RETIRED_KEPT)
+        # The standby (``stand``): ready, or being started in the environment given; either holds a slot.
+        self.standby: Any = None
+        self.readying: dict[str, str] | None = None
+        self.standby_mb: float | None = None  # the last standby's memory once ready: the room a next one needs
+        # The environment of a build that started a worker of another interpreter while the standby
+        # was being started: the standby, once ready, is replaced by one of it.
+        self.follow: dict[str, str] | None = None
+        self.stopped = False
 
     def lease(self, script: str, environment: dict[str, str], cwd: str | None = None) -> Any:
         """The worker of ``script`` for one request, waiting its turn (see the class); started
-        when it has none. ``release`` it after."""
+        when it has none, or the standby taken for it. ``release`` it after."""
         ticket = _Ticket(os.path.normcase(script), environment, cwd)
         with self.lock:
             self.queue.append(ticket)
@@ -708,7 +732,7 @@ class Pool:
         if ticket.victim is not None:
             self._stop(ticket.victim)  # the worker whose slot this is exits before the new one starts
         try:
-            worker = self.start(script, environment, cwd)
+            worker = self._adopted(ticket, script) or self.start(script, environment, cwd)
         except BaseException:
             with self.lock:
                 self.starting.discard(ticket.key)
@@ -718,11 +742,36 @@ class Pool:
             self.starting.discard(ticket.key)
             worker.leased, worker.since = True, time.monotonic()
             self.live[ticket.key] = worker
+            # A worker of another interpreter's started: the standby follows the latest caller's, now
+            # or once it is ready.
+            other = self.standby if ticket.standby is None and self.standby is not None and \
+                interpreter(self.standby.environment) != interpreter(environment) else None
+            if other is not None:
+                self.standby = None
+            elif ticket.standby is None and self.readying is not None and \
+                    interpreter(self.readying) != interpreter(environment):
+                self.follow = dict(environment)
+        if other is not None:
+            self._stop(other)
+        self.stand(environment)
         return worker
+
+    def _adopted(self, ticket: _Ticket, script: str) -> Any:
+        """The standby a ticket was granted, taken as ``script``'s worker (``Worker.adopt``); None when
+        it has none, or the standby is gone: a fresh worker starts instead."""
+        spare = ticket.standby
+        if spare is None:
+            return None
+        try:
+            spare.adopt(script, ticket.environment, ticket.cwd)
+            return spare
+        except (OSError, ValueError):
+            spare.stop()
+            return None
 
     def release(self, worker: Any) -> None:
         """A request is done with its worker: it is free again, or retired when it is gone or
-        over its memory cap."""
+        over its memory cap; then the pool's memory is held to its cap (``shed``)."""
         gone = False
         with self.lock:
             worker.leased, worker.used = False, time.monotonic()
@@ -734,6 +783,7 @@ class Pool:
             self._grant()
         if gone:
             self._stop(worker)
+        self.shed()
 
     def _stop(self, worker: Any) -> None:
         """A worker retired: drained (``drain``), then stopped. A drain that fails stops it all the same."""
@@ -743,20 +793,115 @@ class Pool:
             pass
         worker.stop()
 
-    def retire_idle(self, now: float | None = None) -> list[Any]:
-        """Retire workers idle ``idle`` seconds with no connected document; the retired."""
-        now = time.monotonic() if now is None else now
+    # --- the standby ---------------------------------------------------------------------
+
+    def stand(self, environment: dict[str, str]) -> None:
+        """A standby started in ``environment``, off the caller's thread, when the daemon gave the
+        pool one to start (``spare``) and the pool has none, a slot for it under the cap and room
+        for it under the memory cap (the last standby's measure). A build that needs a worker of
+        its own meanwhile, in an environment of the same interpreter, waits for it rather than start
+        another."""
+        if self.spare is None:
+            return
+        cap, drawing = self.memory(), self._drawing()
         with self.lock:
-            gone = [worker for worker in self.live.values()
-                    if not worker.leased and now - worker.used >= self.idle and not self.connected(worker)]
-            for worker in gone:
-                del self.live[worker.key]
-                self._note(worker, "idle")
-            if gone:
+            if self.stopped or self.standby is not None or self.readying is not None:
+                return
+            if len(self.live) + len(self.starting) >= self.cap:
+                return
+            if cap is not None and self._resident(drawing) + (self.standby_mb or 0.0) > cap:
+                return
+            self.readying = dict(environment)
+        threading.Thread(target=self._ready, args=(dict(environment),), name="cadgen-standby", daemon=True).start()
+
+    def _ready(self, environment: dict[str, str]) -> None:
+        """The standby being started (``stand``): ready, it waits for a build; failed, the build
+        waiting for it starts a worker of its own."""
+        spare = None
+        try:
+            spare = self.spare(environment) if self.spare is not None else None
+        except Exception:  # noqa: BLE001 - no standby: the next build starts its own worker
+            spare = None
+        with self.lock:
+            self.readying = None
+            follow, self.follow = self.follow, None
+            if follow is not None and interpreter(follow) == interpreter(environment):
+                follow = None
+            kept = spare is not None and not self.stopped and follow is None
+            if kept:
+                self.standby, self.standby_mb = spare, spare.rss
+            elif spare is not None:
+                self.standby_mb = spare.rss
+            self._grant()
+            self.lock.notify_all()
+        if spare is not None and not kept:
+            spare.stop()
+        if follow is not None:
+            self.stand(follow)
+        elif kept:
+            self.shed()
+
+    # --- memory ----------------------------------------------------------------------------
+
+    def _drawing(self) -> list[Any]:
+        """The render processes alive now (``renders``): asked before the lock is taken."""
+        return self.renders.processes_now() if self.renders is not None else []
+
+    def _resident(self, drawing: list[Any]) -> float:
+        """The resident memory of the pool's processes, in MiB, as each last measured it (call with
+        the lock held): every live worker's, the standby's and the render processes' (``drawing``)."""
+        held = [*self.live.values(), *([self.standby] if self.standby is not None else [])]
+        return float(sum(process.rss or 0 for process in [*held, *drawing]))
+
+    def resident(self) -> float:
+        drawing = self._drawing()
+        with self.lock:
+            return self._resident(drawing)
+
+    def shed(self, pressure: bool = False) -> list[Any]:
+        """The memory rule: while the pool's resident memory is over its cap -- under the system's
+        memory pressure (``pressure``), over ``PRESSURE_SHARE`` of it, and the standby retired at once
+        -- idle processes are retired, least recently used first within each rank: the standby, then
+        render processes (each holds a document the daemon sends again), then the workers no page
+        watches, then the watched ones, which go only when no other is left. A busy process is never
+        retired. A worker retired is drained to the held tier first (``drain``). The retired."""
+        cap, renders, drawing = self.memory(), self.renders, self._drawing()
+        with self.lock:
+            if self.stopped or (cap is None and not (pressure and self.standby is not None)):
+                return []
+            total = self._resident(drawing)
+            target = None if cap is None else cap * (PRESSURE_SHARE if pressure else 1.0)
+            idle = sorted((worker for worker in self.live.values() if not worker.leased), key=lambda w: w.used)
+            unwatched = [worker for worker in idle if not self.connected(worker)]
+            order = [*([self.standby] if self.standby is not None else []),
+                     *sorted((render for render in drawing if not render.busy()), key=lambda r: r.used),
+                     *unwatched, *[worker for worker in idle if worker not in unwatched]]
+            chosen: list[Any] = []
+            for held in order:
+                standby = held is self.standby
+                if not (standby and pressure) and (target is None or total <= target):
+                    break
+                if not held.rss and not standby:
+                    continue  # unmeasured: retiring it frees nothing the rule can count
+                total -= held.rss or 0.0
+                chosen.append(held)
+                reason = "pressure" if pressure else "RSS"
+                if standby:
+                    self.standby = None
+                    self._note(held, reason)
+                elif held in drawing:
+                    pass  # a render process: the daemon's ``Renders`` lets it go
+                else:
+                    del self.live[held.key]
+                    self._note(held, reason)
+            if chosen:
                 self._grant()
-        for worker in gone:
-            self._stop(worker)
-        return gone
+        for held in chosen:
+            if held in drawing:
+                renders.retire(held)
+            else:
+                self._stop(held)
+        return chosen
 
     def holds(self, worker: Any) -> bool:
         """Whether ``worker`` is live in the pool: neither retired nor gone."""
@@ -773,8 +918,10 @@ class Pool:
 
     def stop(self) -> None:
         with self.lock:
-            every = list(self.live.values())
+            self.stopped = True
+            every = [*self.live.values(), *([self.standby] if self.standby is not None else [])]
             self.live.clear()
+            self.standby = None
         for worker in every:
             worker.stop()
 
@@ -789,9 +936,12 @@ class Pool:
             if not worker.leased and not worker.alive():
                 del self.live[key]
                 self._note(worker, "exited")
+        if self.standby is not None and not self.standby.alive():
+            self.standby = None
         wanted = {ticket.key for ticket in self.queue if ticket.key in self.live}
         taken: set[int] = set()  # the workers this pass granted or retired
         blocked = False  # a request before found no slot: no later one takes one
+        awaited = False  # a request before waits for the standby being started
         granted = False
         for ticket in self.queue:
             worker = self.live.get(ticket.key)
@@ -816,8 +966,26 @@ class Pool:
                 continue
             if blocked:
                 continue
-            if len(self.live) + len(self.starting) < self.cap:
+            same = interpreter(ticket.environment)
+            if self.standby is not None and interpreter(self.standby.environment) == same:
+                # The standby, of this request's interpreter: its slot and its loaded kernel are the
+                # new worker's.
+                ticket.standby, self.standby = self.standby, None
                 self._slot(ticket, None)
+                granted = True
+                continue
+            if self.readying is not None and not awaited and interpreter(self.readying) == same:
+                awaited = True
+                continue  # the standby being started is this request's once it is ready
+            occupied = len(self.live) + len(self.starting) + (self.standby is not None) + (self.readying is not None)
+            if occupied < self.cap:
+                self._slot(ticket, None)
+                granted = True
+                continue
+            if self.standby is not None:
+                # Another interpreter's standby: the first to make room.
+                victim, self.standby = self.standby, None
+                self._slot(ticket, victim)
                 granted = True
                 continue
             idle = [held for held in self.live.values() if not held.leased and id(held) not in taken]
@@ -1115,12 +1283,18 @@ def rotate_token() -> str | None:
 
 
 class Daemon:
-    def __init__(self, cap: int | None = None, retire_after: float | None = None, port: int | None = None) -> None:
+    def __init__(self, cap: int | None = None, port: int | None = None) -> None:
         self.port = port  # ``cadgen server --port``: the HTTP port this engine must take, or None
         self.port_source = ""  # where the HTTP port the server took came from (``bind``)
         self.refusal: PortHeld | None = None  # its port held by another process: it stops (``serve``)
-        self.pool = Pool(cap or worker_cap(), retire_after if retire_after is not None else worker_idle(),
-                         self._start, self.connected, lambda worker: self.models.drain(worker))
+        from cadgen.engine.serve import Pressure
+        from cadgen.engine.worker import rss_cap_mb
+
+        self.pool = Pool(cap or worker_cap(), self._start, self.connected, lambda worker: self.models.drain(worker),
+                         rss_cap_mb)
+        # The system's memory-pressure signal, the server's too once it runs (``serve``): under it the
+        # pool sheds its standby and its least recently used workers (``Pool.shed``).
+        self.pressure = Pressure()
         self.workers_lock = threading.Lock()  # each worker's ``held``
         self.born = time.time()
         self.last = time.monotonic()
@@ -1142,7 +1316,6 @@ class Daemon:
         self.builders: dict[str, Worker] = {}
         self.renders = None  # the served documents' render processes (``render.service.Renders``)
         self.serving = threading.Lock()
-        self.warming: Any = None  # the kernel's warm process (``warm``), False once none was needed
         from cadgen.engine.models import Models
 
         self.models = Models(self)
@@ -1150,19 +1323,42 @@ class Daemon:
     def touch(self) -> None:
         self.last = time.monotonic()
 
-    def warm_kernel(self) -> None:
-        """The kernel loaded once in a process of its own (``warm``), on a host's first ``http``,
-        ``warm`` or ``hold``: an MCP server holds the engine from its start."""
-        if self.warming is None:
-            with self.busy_lock:
-                if self.warming is None:
-                    self.warming = warm() or False
+    def stand(self) -> None:
+        """At the daemon's start: the pool's standby, a worker with the kernel loaded
+        (``Pool.stand``), so a new script's first build pays no kernel load -- nor, on a fresh
+        installation, the operating system's first look at its native libraries (macOS checks each
+        once: 43 s measured on a new uvx environment, against 2.5 s loaded again), which the standby
+        pays while nobody waits. Started in the environment of the client that started the daemon
+        (``environment``); each standby after it in that of the build that took the last one. And
+        the bytecode folders of installations no daemon started in ``PYCACHE_UNUSED_DAYS`` go, in
+        the background (``prune_bytecode``)."""
+        prune_bytecode()
+        self.pool.spare = self._spare
+        self.pool.stand(self.environment())
+
+    @staticmethod
+    def environment() -> dict[str, str]:
+        """The environment of the client that started the daemon, as near as the daemon can tell:
+        its own, without the engine's folder its starter put first on ``PYTHONPATH``
+        (``client._start``), so a caller's run shapes the interpreter as the standby's does."""
+        env = dict(os.environ)
+        root = engine_root()
+        rest = [item for item in env.get("PYTHONPATH", "").split(os.pathsep) if item and item != root]
+        if rest:
+            env["PYTHONPATH"] = os.pathsep.join(rest)
+        else:
+            env.pop("PYTHONPATH", None)
+        return env
+
+    def _spare(self, environment: dict[str, str]) -> Worker:
+        """A standby (``Pool.stand``): a worker of no script yet, standing in the daemon's folder."""
+        return Worker(STANDBY, environment, self.patched, self.settled, cwd=os.getcwd(), on_progress=self.progressed,
+                      on_saved=self.models.cache.saved, standby=True)
 
     def hold(self, reader: Any, send: Callable[[dict[str, Any]], None]) -> None:
         """A hold on the engine (``{"op": "hold"}``): answered, then kept until its client goes (its
         end of file). While any is kept, another installation's engine that needs the port refuses
         to start rather than retire this one (``bind``)."""
-        self.warm_kernel()
         with self.busy_lock:
             self.holders += 1
         try:
@@ -1297,6 +1493,9 @@ class Daemon:
                     self.refusal = refusal
                     _note(str(refusal))
                     raise
+                # One pressure signal: under it the server trims its documents and the pool its workers.
+                self.server.pressure = self.pressure
+                self.server.pressed = lambda: self.pool.shed(True)
                 self.server.lost = self.models.rebuild
                 self.server.revive = self.models.adopt
                 self.server.stale = self.models.stale
@@ -1409,7 +1608,7 @@ class Daemon:
                         # evict it (a different one starts a fresh worker, which holds nothing).
                         with self.pool.lock:
                             held = self.pool.live.get(os.path.normcase(key))
-                            environment = held.environment if held else dict(os.environ)
+                            environment = held.environment if held else self.environment()
                         ordered = order
                         if held is None and "script" in request["source"]:
                             named = request["source"].get("held")
@@ -1462,8 +1661,6 @@ class Daemon:
     def handle(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
         self.touch()
         op = request.get("op")
-        if op in ("http", "warm"):
-            self.warm_kernel()
         if op == "models":
             send({"ok": True, "models": self.models.listing()})
             return
@@ -1703,7 +1900,7 @@ class Daemon:
             server = self.serve(request)
             with self.serving:
                 if self.renders is None:
-                    self.renders = Renders(server)
+                    self.renders = self.pool.renders = Renders(server)
             try:
                 data, report = self.renders.draw(Path(request["path"]), request["still"])
             except Refused as error:
@@ -1717,11 +1914,14 @@ class Daemon:
             with self.busy_lock:
                 self.busy -= 1
             self.touch()
+            self.pool.shed()  # its render process measured again: the workers' memory to its cap
 
     def status(self) -> dict[str, Any]:
         """The daemon, its workers (each its script, its builds, its memory after its last build
-        in MiB, how long it has been busy or idle, and a busy one's last progress frame), the
-        requests waiting for one, the last retirements, and what it serves and draws."""
+        in MiB, how long it has been busy or idle, and a busy one's last progress frame), its
+        standby (never a script's worker: its process, its memory, how long it has stood by), the
+        pool's memory against its cap, the requests waiting for one, the last retirements, and what
+        it serves and draws."""
         from cadgen.engine.previous import version
         from cadgen.engine.worker import rss_cap_mb
 
@@ -1731,11 +1931,16 @@ class Daemon:
                     "busy": w.leased, "rssMb": None if w.rss is None else round(w.rss),
                     "seconds": round(now - (w.since if w.leased else w.used), 1),
                     "progress": w.progress if w.leased else None} for w in self.pool.workers()]
+        with self.pool.lock:
+            spare, readying = self.pool.standby, self.pool.readying is not None
+        standby = ({"pid": spare.pid, "rssMb": None if spare.rss is None else round(spare.rss),
+                    "seconds": round(time.time() - spare.started, 1)} if spare is not None
+                   else {"pid": None, "rssMb": None, "seconds": None, "starting": True} if readying else None)
         # What uses it, which another installation's engine asks before it retires this one (``bind``):
         # its holds, the documents pages watch, its builds and draws, and HTTP work underway.
         return {"ok": True, "pid": os.getpid(), "version": version(), "up": round(time.time() - self.born, 1),
-                "workers": workers, "cap": self.pool.cap, "waiting": self.pool.waiting(), "workerIdle": self.pool.idle,
-                "rssCapMb": rss_cap_mb(), "retired": list(self.pool.retired),
+                "workers": workers, "standby": standby, "cap": self.pool.cap, "waiting": self.pool.waiting(),
+                "rssMb": round(self.pool.resident()), "rssCapMb": rss_cap_mb(), "retired": list(self.pool.retired),
                 "idle": round(now - self.last, 1), "holders": self.holders, "busy": self.busy,
                 "watched": 0 if server is None else len(server.watched()),
                 "active": server is not None and bool(server.clients_active()),
@@ -1751,35 +1956,31 @@ class Daemon:
                              and hasattr(self.server.http, "app") else [])}
 
     def watch(self) -> None:
-        period = min(30.0, max(self.pool.idle / 10, 0.2))
-        while not self.stopping.wait(period):
+        while not self.stopping.wait(TEND_SECONDS):
             self.tend()
 
     def reached_by(self, address: Path) -> None:
         """Clients reach this engine at ``address`` from now on (``tend`` watches it)."""
         self.address, self.address_id = address, _identity(address)
 
-    def tend(self, now: float | None = None) -> None:
-        """What idleness costs the engine, at ``now``: memory, never the process. Each worker idle
-        its time with no page watching is retired (its documents drained to the held tier first),
-        each idle render process too, and a killed client's pipes swept; the memory budget evicts
-        unwatched documents to the cache as they are loaded (``serve.Server.trim``). The engine
-        stops on ``stop``, a terminate, another installation's retiring it (``bind``), and here
-        when its door is gone (its folder removed, a temporary folder cleaned up) or another's:
-        no one can reach it, so it stops as ``stop`` does, saving what it holds to the cache."""
+    def tend(self) -> None:
+        """What the engine looks after, each ``TEND_SECONDS``: never the process, and nothing by how
+        long anything has been idle. A killed client's pipes are swept, and the workers' memory is
+        held to its cap and the system's pressure (``Pool.shed``: its documents drained to the held
+        tier first); the memory budget evicts unwatched documents to the cache as they are loaded
+        (``serve.Server.trim``). The engine stops on ``stop``, a terminate, another installation's
+        retiring it (``bind``), and here when its door is gone (its folder removed, a temporary
+        folder cleaned up) or another's: no one can reach it, so it stops as ``stop`` does, saving
+        what it holds to the cache."""
         if self.address is not None and _identity(self.address) != self.address_id:
             self.stopping.set()
             return
         if self.door is not None:
             self.door.sweep()
-        self.pool.retire_idle(now)
+        self.pool.shed(self.pressure.under())
         self.models.prune()
-        if self.renders is not None:
-            self.renders.retire_idle(self.pool.idle)
 
     def shutdown(self) -> None:
-        if self.warming and self.warming.poll() is None:
-            self.warming.kill()  # its bytecode is regenerable; the engine's processes end with it
         # The documents built or read in the last idle window, saved first, best effort (``cache``).
         self.models.cache.final()
         self.pool.stop()
@@ -1959,6 +2160,7 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
         held.close()
         return 1
     daemon = Daemon(port=port)
+    daemon.stand()
     if foreground:
         try:
             daemon.serve({})

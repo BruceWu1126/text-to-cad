@@ -588,20 +588,27 @@ def _port(serving: dict[str, Any]) -> str:
 
 
 def status_text(answer: dict[str, Any]) -> str:
-    """``cadgen status``: the server and its pool's rules, a line per worker -- busy or idle,
-    its script, process, builds and memory after its last build, where a busy one's build is
-    (its last progress frame), how long it has been busy or idle -- the builds waiting for a
-    worker, the last retirements, what it serves and holds under its memory budget, and each
-    model document's state, with the command that builds again one not held."""
+    """``cadgen status``: the server and its pool's rules -- its workers against their count cap,
+    their memory against its cap -- a line per worker -- busy or idle, its script, process, builds
+    and memory after its last build, where a busy one's build is (its last progress frame), how long
+    it has been busy or idle -- the standby's line (its process and memory: no script), the builds
+    waiting for a worker, the last retirements, what it serves and holds under its memory budget,
+    and each model document's state, with the command that builds again one not held."""
     import time
 
     workers = answer.get("workers") or []
+    standby = answer.get("standby")
     cap = answer.get("rssCapMb")
+    resident = answer.get("rssMb")
+    memory = (f"RSS {_gb(resident)} of {_gb(cap)}" if resident is not None else f"RSS cap {_gb(cap)}") if cap \
+        else "no RSS cap"
+    # The standby holds a slot of the count cap: counted with the workers, never one of them.
+    counted = len(workers) + (1 if standby else 0)
     lines = [" · ".join([f"engine server {answer.get('pid')}, up {_span(answer.get('up'))}",
-                         f"workers {len(workers)}/{answer.get('cap')}",
+                         f"workers {counted}/{answer.get('cap')}" + (" with the standby" if standby else ""),
                          *([f"held by {answer['holders']} app server{'' if answer['holders'] == 1 else 's'}"]
                            if answer.get("holders") else []),
-                         f"RSS cap {_gb(cap)}" if cap else "no RSS cap"])]
+                         memory])]
     names = [Path(str(worker["script"])).name for worker in workers]
     width = max((len(name) for name in names), default=0)
     for worker, name in zip(workers, names):
@@ -615,6 +622,11 @@ def status_text(answer: dict[str, Any]) -> str:
             doing = f"building {frame.get('model')} · {describe(frame)} · {doing}"
         lines.append(f"  {'busy' if worker.get('busy') else 'idle'}  {name:<{width}}  {str(worker.get('pid')):>6}  "
                      f"{builds:>10}  {_gb(worker.get('rssMb')):>7}  {doing}")
+    if standby:
+        # The kernel loaded and no script: the next new script's worker.
+        lines.append(f"  standby  {'':<{width}}  {str(standby.get('pid') or ''):>6}  {'':>10}  "
+                     f"{_gb(standby.get('rssMb')):>7}  "
+                     + ("starting" if standby.get("starting") else f"kernel loaded · {_span(standby.get('seconds'))}"))
     if answer.get("waiting"):
         waiting = answer["waiting"]
         lines.append(f"  waiting  {waiting} build{'' if waiting == 1 else 's'}, first come first served")

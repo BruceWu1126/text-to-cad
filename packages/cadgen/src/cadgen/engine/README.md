@@ -242,14 +242,13 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
    patched with an attribute of cadgen's own: it is dropped, or refused by name at document
    time (`test_kinematics`' conformance test walks the subtree and holds it).
 
-14. **Connected means warm.** A worker is not retired for idleness while any served
-    document it built has a version wait outstanding or completed a sync within `serve.LIVE`
-    seconds. Heartbeats use the document's id (`ids`): a file's `file_id`, a model's
-    `model_id` or `key_id`; they never turn a model into a file path. The worker-count
-    cap never retires a worker whose document a page watches; it is exceeded instead. The memory
-    cap may retire it. Memory may evict a worker's document only when nothing watches it
-    (**Document lifetime**). Closing a page never stops the engine or its worker; once its last
-    sync expires, ordinary idle retirement applies.
+14. **Connected means warm.** A page watches a document while it has a version wait outstanding
+    or completed a sync within `serve.LIVE` seconds. Heartbeats use the document's id (`ids`): a
+    file's `file_id`, a model's `model_id` or `key_id`; they never turn a model into a file path.
+    No timer retires a worker: memory does, and it retires a worker whose document a page watches
+    only when no other is left to retire. The worker-count cap never retires a watched worker; it
+    is exceeded instead. Memory may evict a worker's document only when nothing watches it
+    (**Document lifetime**). Closing a page never stops the engine or its worker.
 
 15. **One HTTP owner per installation.** The daemon serves its one page and document
     reads on one authenticated listener. Both `serve` and `viewer` start or reuse it;
@@ -314,11 +313,11 @@ process's key, not a document's.
 
 The daemon maps each built document to its worker. HTTP watcher accounting has its
 own lock, independent of document reads and pool admission. Outstanding version
-waits and recent syncs preserve that worker from idle retirement. To admit a new script at the worker-count cap, the least recently used
-unwatched idle worker is retired. When every idle worker is watched, the new worker
-starts past the cap instead: a build never waits on an open page, and never costs one
-its warm worker. The per-worker memory cap remains enforced after each build, watched
-or not. A retired worker's documents stay served: the daemon takes them from it first, and
+waits and recent syncs mark its documents watched. To admit a new script at the worker-count cap, the
+standby goes first, then the least recently used unwatched idle worker. When every idle worker is
+watched, the new worker starts past the cap instead: a build never waits on an open page, and never
+costs one its warm worker. The workers' memory cap retires a watched worker only when no unwatched one
+is left to retire. A retired worker's documents stay served: the daemon takes them from it first, and
 holds them under one memory budget that never evicts a watched one (**Document lifetime**).
 
 The installation's door (**The door**) supplies its HTTP token. Page URLs exchange it
@@ -508,10 +507,9 @@ start compiled build123d and the pure-Python libraries it loads: measured on a f
 environment of the wheel, a fresh daemon's first build of a one-body model took 5.2-6.2 s with
 none cached and 2.4-2.9 s cached. A folder no daemon started in 30 days goes
 (`PYCACHE_UNUSED_DAYS`). With no cache folder that is this user's alone, nothing is written.
-The first request of a host (`http`: an MCP server's first call; `warm`: the viewer's launch)
-warms the kernel once per installation, in a process of its own (`daemon.warm`): the first load
-of a fresh installation on macOS also waits on the system's first look at each native library,
-43 s measured, which the host's first build then does not pay.
+The daemon's standby (**The engine server and its workers**) loads the kernel at the daemon's
+start: the first load of a fresh installation on macOS also waits on the system's first look at
+each native library, 43 s measured, which the standby pays while nobody waits.
 A warm build does not make the document again: the worker holds the XCAF
 document it last wrote and patches it (`document.Kept`). A prototype whose label
 holds what a cold build would make of it keeps that label untouched; one that
@@ -604,11 +602,11 @@ person may be using a page or the CAD app for hours without a build. It stops in
 nothing uses it (**A link outlives its engine**); when its door is gone -- its folder removed, a
 temporary folder cleaned up, or another file put in the door's place -- so that no one can reach it
 (`Daemon.tend` sees it within a round, and it stops as `stop` does, saving what it holds to the
-cache); and with the machine. Idleness costs it memory instead
-(`Daemon.tend`): idle workers are retired, idle render processes stop, idle documents are saved
-to the cache, and past the memory budget what no page watches is evicted (**Document lifetime**). It holds a pool of warm workers, one per model script (and one for the documents no
-worker built), each a process whose memo lives as long as
-it does. Its rules are a standard pool's, and nothing else: no admission guess, no refusal;
+cache); and with the machine. **No timer retires a worker either**: memory alone does. Idle
+documents are saved to the cache, past the memory budget what no page watches is evicted
+(**Document lifetime**), and past the workers' memory cap, or under the system's memory pressure,
+idle workers go (below). It holds a pool of warm workers, one per model script (and one for the
+documents no worker built), each a process whose memo lives as long as it does, and one standby. Its rules are a standard pool's, and nothing else: no admission guess, no refusal;
 the operating system does the rest. (What the daemon itself holds, the documents and their
 tessellations, is under one memory budget: **Document lifetime**.)
 
@@ -622,13 +620,30 @@ tessellations, is under one memory budget: **Document lifetime**.)
   build that waits for its own script's busy worker takes no slot.
 - **The cap never retires a watched worker.** When every idle worker has a document a page
   watches, the new worker starts past the cap. The memory cap may still retire a watched one.
-- **Unwatched idle workers go.** A worker idle `CADGEN_ENGINE_WORKER_IDLE` seconds (default:
-  an hour, `daemon.WORKER_IDLE_SECONDS`) is retired, its documents drained to the held tier first, only when none of its served documents has
-  an outstanding version wait or a sync within `serve.LIVE` (90 seconds).
-- **A memory cap.** A worker whose resident memory is over `CADGEN_ENGINE_WORKER_RSS_MB` after
-  a build (default: a quarter of the machine's memory, at least 2 GiB; `0` for no cap) is
-  retired: the report says so (`retired`), and once it has answered the daemon drains it and
-  closes its stdin.
+- **A standby.** One worker stands by with the kernel loaded and no script (`Pool.stand`): started
+  with the daemon, and again each time a build takes it or starts a worker of its own, while the
+  pool has a slot for it under the cap and room for it under the memory cap. A build for a script
+  with no live worker takes it when the build's environment shapes the interpreter as the
+  standby's does (`daemon.RESTARTS`), and starts a fresh worker otherwise -- after which the
+  standby, of another interpreter, is replaced by one of the build's. Taken, it is that script's
+  worker (`Worker.adopt`): its key, the environment it was asked in and the folder a fresh worker
+  of it would start in, its run's environment adopted as every run's is (`worker.adopt`). A build
+  arriving while the standby starts, of its interpreter, waits for it rather than start another.
+  It counts toward the cap, is the first retired for room at the cap or for memory, and is never a
+  script's worker in `status`. Measured on a 10-core Mac (one-box models, an installed bytecode
+  cache): a new script's first build took 2.5-2.6 s in a fresh worker and 0.15-0.23 s in the
+  standby; the standby holds 440 MB, a one-box model's worker 450-520 MB.
+- **Memory retires, never a timer.** The workers' resident memory -- each one's as it measured it at
+  its start and after each build, the standby's and the render processes' with it -- is held to one
+  cap, `CADGEN_ENGINE_WORKER_RSS_MB` (default: a quarter of the machine's memory, at least 2 GiB;
+  `0` for no cap; `Pool.shed`). After each build and picture, and each `Daemon.tend` round, past
+  it idle processes are retired, least recently used first within each rank: the standby, render
+  processes, the workers no page watches, then the watched ones, only when no other is left; a
+  worker is drained to the held tier first. Under the system's memory pressure (the server's
+  `serve.Pressure`, polled every two seconds), the standby goes at once and the rest down to half
+  the cap. A busy process is never retired, and an idle worker under the cap lives as long as the
+  engine. A worker alone over the cap after a build is retired at once: the report says so
+  (`retired`), and once it has answered the daemon drains it and closes its stdin.
 - **Collected when idle.** A worker builds with Python's cyclic collector off and collects once
   no request has come for half a second, so a script's calls one after another never wait on
   it. A worker over its memory cap collects before it measures again.
@@ -649,8 +664,9 @@ a first page about 0.8 s, less the time the page takes to load after the warm.
 A retired script's next build is a fresh worker's: a restart, which takes the xbf whole when
 its closure is unchanged (**Build closure**) -- a model with no file, its cached document (**The
 cache**) -- and else builds the model cold. A render
-process (**The viewer and the snapshot**) is no worker and does not count toward the cap; it
-is held to the same memory cap after each picture, and retired after the same idle time.
+process (**The viewer and the snapshot**) is no worker and does not count toward the count cap; its
+memory counts toward the workers' memory cap, which retires an idle one before any worker, and one
+alone over it after a picture is retired at once.
 
 On Windows every process the engine starts -- each worker, STEP reader and render process --
 has a console of its own and no window (`daemon.windowless`: `CREATE_NO_WINDOW`), and the daemon
@@ -682,11 +698,12 @@ agent's shell may give each turn its own `PATH` (Codex puts a temporary folder o
 `cadgen status` says what the server holds (`--json`: the same as data, `api.status()`):
 
 ```
-engine server 98307, up 2h10m · workers 2/10 · held by 1 app server · RSS cap 16.0 GB
+engine server 98307, up 2h10m · workers 3/10 with the standby · held by 1 app server · RSS 4.7 GB of 16.0 GB
   busy  tom.py         98310   12 builds   3.7 GB  building tom.py::tom · Building geometry · 3/7 stages · 41s
   idle  motorbike.py   98410    3 builds   0.6 GB  4m
+  standby              98512               0.4 GB  kernel loaded · 4m
   waiting  2 builds, first come first served
-retired: finger_01.py (LRU) 3m ago · qdd_actuator.py (idle) 41m ago · tom.py (RSS) 2h ago
+retired: finger_01.py (LRU) 3m ago · qdd_actuator.py (pressure) 41m ago · tom.py (RSS) 2h ago
 serving http://127.0.0.1:52811: 3 documents · 2.1 GB of 16.0 GB held
 cache /Users/me/.cache/cadgen: 14 documents · 212.4 MB of 4.0 GB
 documents:
@@ -697,8 +714,11 @@ documents:
 ```
 
 A worker's memory is as it measured it after its last build; a busy one's build is where its
-last progress frame says (**Progress**); the time is how long it has been busy, or idle. A
-retirement's reason is `LRU` (room at the cap), `idle`, `RSS` (over its memory cap),
+last progress frame says (**Progress**); the time is how long it has been busy, or idle. The
+standby's line has no script: its process, its memory and how long it has stood by (`starting`
+while it loads the kernel); it counts toward the workers' count (`with the standby`) and the RSS
+the header gives against the cap (`--json`: `standby`, `rssMb`, `rssCapMb`). A retirement's reason is
+`LRU` (room at the cap), `RSS` (over the workers' memory cap), `pressure` (the system's memory pressure),
 `environment` (a build asked for the script with another `PYTHONPATH`, or another of the variables
 that shape the interpreter's import system: its worker is replaced in its slot) or `exited` (it died). The `documents:` lines are each model
 document, its state and, for one not held, the command that builds it again (**Document
@@ -899,8 +919,8 @@ or a page watches; the record stays, without `cache`. Removing a detached docume
 removes its cache file with its record. A save that fails is logged and listed by `cadgen status`,
 never raised: with the cache folder read-only the engine behaves as with no cache.
 
-**Drain.** Before the pool stops a worker -- idle past `CADGEN_ENGINE_WORKER_IDLE`, the count cap's
-least recently used, replaced for another environment, over its memory cap -- the daemon asks it
+**Drain.** Before the pool stops a worker -- the count cap's least recently used, replaced for
+another environment, retired for memory -- the daemon asks it
 (the `result` request with `whole`, nothing meshed) for every `pointer` document of it the server
 does not hold whole at its version (`Models.drain`), out of the pool, then closes its stdin. The
 worker serializes the document in memory (`document.to_bytes`: `TDocStd_Application.SaveAs` to a
@@ -915,7 +935,7 @@ document's structure (as JSON), its shape bytes, the bytes made from live shapes
 document's xbf bytes, its records among them (`Served.size`), and every tessellation (`MeshCache`, which has no cap of its
 own in the daemon). Evicting a document drops all of it.
 Bytes are counted as they are put, never sampled. Workers and render processes are processes of
-their own, held to their own memory cap. The budget is `CADGEN_ENGINE_MEMORY_MB`, else a quarter
+their own, held together to the workers' memory cap (**The engine server and its workers**). The budget is `CADGEN_ENGINE_MEMORY_MB`, else a quarter
 of the machine's physical memory (`serve.memory_budget`: macOS `hw.memsize`, Linux
 `sysconf(SC_PHYS_PAGES)` or the cgroup's `memory.max` when that is less, Windows
 `GlobalMemoryStatusEx`). Past it, what is held is evicted down to 80 % of it (`Server.trim`):

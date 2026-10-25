@@ -25,12 +25,12 @@ the buffers of the parts it lacks) answered ``{"held": {...}}``; ``{"op": "frame
 answered ``{"done": report, "bytes"}`` and the PNG, ``{"refused": why}`` (a request the document
 does not offer, before anything is drawn) or ``{"failed": why}``. When the served document is
 patched -- a build of it, or its file rewritten -- the daemon sends the new version at once, with
-the buffers of the parts the process lacks: the next picture is warm. It goes with the daemon,
-after drawing nothing for as long as a worker may sit idle (``Renders.retire_idle``, the daemon's
-``CADGEN_ENGINE_WORKER_IDLE``), and after a frame that leaves it over the workers' memory cap
-(``CADGEN_ENGINE_WORKER_RSS_MB``, ``worker.rss_cap_mb``), when it says so (``retired``) and exits;
-the next snapshot starts another. A render process is no worker: it does not count toward the
-workers' cap.
+the buffers of the parts the process lacks: the next picture is warm. No timer stops it: it goes
+with the daemon, under the workers' memory cap (``CADGEN_ENGINE_WORKER_RSS_MB``, ``worker.rss_cap_mb``),
+which counts its memory with theirs and retires an idle one, least recently drawn first, before any
+worker (``daemon.Pool.shed``, ``Renders.retire``), and after a frame that leaves it alone over that
+cap, when it says so (``retired``) and exits; the next snapshot starts another. A render process is
+no worker: it does not count toward the workers' count cap.
 
 **In process** (``draw_here``): ``daemon=False`` and a model drawn from its worker's memory serve
 the document from a server of this process, and draw it once.
@@ -612,7 +612,7 @@ class RenderProcess:
         self.frames = 0
         self.rss: int | None = None
         self.retired = False
-        self.used = time.monotonic()  # when it last drew: idle as long as a worker may be, it is stopped
+        self.used = time.monotonic()  # when it last drew: the memory cap retires the least recently drawn first
         self.meshed: dict[str, Any] | None = None  # the engine's account of the meshing its last version took
         self.held: dict[str, Any] | None = None  # what it made and kept of its last version's parts
         self.files: dict[str, Any] = {}  # a file no document: every file its reader read, stamped
@@ -636,6 +636,10 @@ class RenderProcess:
 
     def alive(self) -> bool:
         return self.process.poll() is None and not self.retired
+
+    def busy(self) -> bool:
+        """Whether it is drawing or being sent a version now: never retired then."""
+        return self.lock.locked()
 
     def ask(self, request: dict[str, Any], payload: bytes = b"") -> tuple[dict[str, Any], bytes]:
         """One request and its answer (call with ``lock`` held)."""
@@ -807,17 +811,20 @@ class Renders:
                  "frames": render.frames, "rssMb": render.rss, "alive": render.alive(), "busy": render.lock.locked()}
                 for render in self.processes.values()]
 
-    def retire_idle(self, seconds: float) -> None:
-        """Stop each render process that has drawn nothing for ``seconds``: the next snapshot of
-        its document starts another."""
-        now = time.monotonic()
+    def processes_now(self) -> list[RenderProcess]:
+        """The render processes alive now, whose memory the workers' cap counts (``daemon.Pool.shed``):
+        read without the lock, which is held while a process starts."""
+        return [render for render in list(self.processes.values()) if render.alive()]
+
+    def retire(self, render: RenderProcess) -> None:
+        """One render process stopped for memory (``daemon.Pool.shed``), unless it is drawing: the next
+        snapshot of its document starts another."""
         with self.lock:
-            idle = {ident: render for ident, render in self.processes.items()
-                    if not render.lock.locked() and now - render.used >= seconds}
-            for ident in idle:
-                del self.processes[ident]
-        for render in idle.values():
-            render.stop()
+            ident = next((ident for ident, found in self.processes.items() if found is render), None)
+            if ident is None or render.busy():
+                return
+            del self.processes[ident]
+        render.stop()
 
     def stop(self) -> None:
         with self.lock:

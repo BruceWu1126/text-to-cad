@@ -270,14 +270,14 @@ def get(url: str, token: str) -> tuple[int, dict]:
 
 
 class LifetimeDaemonTest(unittest.TestCase):
-    """Through a daemon, its workers real processes retired after a second idle."""
+    """Through a daemon, its workers real processes retired after each build, over a memory cap of 1 MB."""
 
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-lifetime-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
                                           "CADGEN_ENGINE_MESH": "inline",
-                                          "CADGEN_ENGINE_WORKER_IDLE": "1"}, self.addCleanup)
+                                          "CADGEN_ENGINE_WORKER_RSS_MB": "1"}, self.addCleanup)
         # This process asks the test's daemon (``status``, ``export``), never starting one.
         self.enterContext(mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)}))
         self.addCleanup(self._stop)
@@ -330,7 +330,7 @@ class LifetimeDaemonTest(unittest.TestCase):
                                       cwd=self.folder, env=self.env)
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
         self.assertIn("source", json.loads(inspected.stdout)["closure"], "its closure, from the held document")
-        # The documents worker read the held bytes (it may have idled out since: its idle is a second).
+        # The documents worker read the held bytes (it may have retired since: the memory cap is 1 MB).
         self.assertNotIn("bracket.py", [Path(w["script"]).name for w in self.ask({"op": "status"})["workers"]],
                          "no worker of its script started")
         self.assertFalse((self.folder / "bracket.ran").exists(), "nothing ran the script")
@@ -344,7 +344,7 @@ class LifetimeDaemonTest(unittest.TestCase):
     def test_a_child_model_is_live_and_answers_by_its_id_from_the_worker_that_built_it(self) -> None:
         (self.folder / "part.py").write_text(textwrap.dedent(PART), encoding="utf-8")
         (self.folder / "assembly.py").write_text(textwrap.dedent(ASSEMBLY), encoding="utf-8")
-        env = {**self.env, "CADGEN_ENGINE_WORKER_IDLE": "120"}  # the assembly's worker holds both
+        env = {**self.env, "CADGEN_ENGINE_WORKER_RSS_MB": ""}  # no small cap: the assembly's worker holds both
         for _ in range(2):  # the second run: the child's body marks it building, and the run's end built
             done = engine_daemon.run([sys.executable, "assembly.py"], cwd=self.folder, env=env)
             self.assertEqual(done.returncode, 0, done.stderr)

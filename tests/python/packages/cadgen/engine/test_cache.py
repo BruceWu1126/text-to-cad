@@ -342,8 +342,9 @@ class CacheTest(unittest.TestCase):
         self.run_script("first")
         size = self.cached(first)["bytes"]
         self.assertEqual(self.cli("stop").returncode, 0)
-        # Room for two and a half documents, and a second engine bound by it: its workers go when idle.
-        self.use(self.state, self.cache, CADGEN_ENGINE_CACHE_GB=str(2.6 * size / 2**30), CADGEN_ENGINE_WORKER_IDLE="1")
+        # Room for two and a half documents, and a second engine bound by it: its workers go after each
+        # build, over a memory cap of 1 MB.
+        self.use(self.state, self.cache, CADGEN_ENGINE_CACHE_GB=str(2.6 * size / 2**30), CADGEN_ENGINE_WORKER_RSS_MB="1")
         second = self.write("second")
         self.run_script("second")
         self.cached(second)

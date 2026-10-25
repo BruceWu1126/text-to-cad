@@ -192,9 +192,10 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
     wait above.
 
 19. **Connected means warm.** A served document's outstanding version wait or recent
-    sync protects the worker that built it from idle retirement. The engine outlives its
-    clients; a page closing never stops a worker. The worker-count cap never retires a worker
-    whose document a page watches; it is exceeded instead. The memory cap may retire it (the
+    sync marks it watched. No timer retires a worker: memory does, and it retires one whose
+    document a page watches only when no other is left. The engine outlives its clients; a page
+    closing never stops a worker. The worker-count cap never retires a worker whose document a
+    page watches; it is exceeded instead. The memory cap may retire it (the
     engine's **Architecture** and **The engine server and its workers**). Memory may evict a worker's
     document only when nothing watches it (the engine's **Document lifetime**).
 

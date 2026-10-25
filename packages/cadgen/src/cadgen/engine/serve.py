@@ -639,6 +639,8 @@ class Server:
         self.trim_lock = threading.Lock()
         self.evictions = 0
         self.pressure = Pressure()
+        # Told after each trim under pressure: the daemon's pool sheds its workers too (``daemon.Pool.shed``).
+        self.pressed: Callable[[], Any] = lambda: None
         self.stopping = threading.Event()
         # What the engine knows of a document it no longer holds (``NotHeld.payload``), else None.
         self.lost: Callable[[str], dict[str, Any] | None] = lambda _ident: None
@@ -724,7 +726,7 @@ class Server:
 
     def _pressured(self) -> None:
         """The pressure poller: each ``PRESSURE_PERIOD`` (or when woken), the system's signal; under
-        pressure, what is held is evicted down to the low-water mark."""
+        pressure, what is held is evicted down to the low-water mark, and ``pressed`` is told."""
         while not self.stopping.is_set():
             self.pressure.wake.wait(PRESSURE_PERIOD)
             self.pressure.wake.clear()
@@ -732,6 +734,10 @@ class Server:
                 return
             if self.pressure.under():
                 self.trim(int(self.budget * LOW_WATER))
+                try:
+                    self.pressed()
+                except Exception:  # noqa: BLE001 - the poller outlives what it tells
+                    pass
 
     def warm(self) -> None:
         """The processes a first document waits on, started now (a viewer's launch and an app's

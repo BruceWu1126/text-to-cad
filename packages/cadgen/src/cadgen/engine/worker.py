@@ -14,7 +14,13 @@ its exports -- one ``{"id", "done", "rssMb"}`` (the build's reports, and the wor
 memory after it, in MiB) or ``{"id", "failed"}`` (with ``kind`` where it is a refusal: ``refusal``),
 and last ``{"id", "settled"}``. What the
 model prints goes to the worker's stderr, which the daemon passes on. The worker exits when
-its stdin closes: the daemon's pool closes it to retire the worker (``daemon.Pool``).
+its stdin closes: the daemon's pool closes it to retire the worker (``daemon.Pool``). Its first
+frame, ``{"ready": pid, "rssMb"}``, says it is up and its resident memory then.
+
+A worker started with ``--standby`` is the pool's standby: it loads the kernel before it says it is
+ready (``load_kernel``) and builds nothing until a build takes it, when the daemon sends
+``{"op": "adopt", "home"}`` -- the folder a fresh worker of that script would have started in, where
+a request with no ``cwd`` runs -- and the build after it; it answers nothing to the adoption.
 
 A ``{"id", "op": "where", "doc", "key", "kind", "ordinal"}`` request asks what made one
 element of a document this worker built (``doc``, its id) (``build.made_by``): it is answered at once,
@@ -37,8 +43,9 @@ parts of a served one the build did not change are meshed by the daemon's pool, 
 are asked for -- the build's answer never waits on a whole document's mesh. Each report
 says how many parts the build meshed (``meshed``).
 
-A worker whose resident memory is over its cap after a build (``CADGEN_ENGINE_WORKER_RSS_MB``,
-by default a quarter of the machine's memory) is retired: its reports say so (``retired``),
+A worker whose resident memory alone is over the workers' memory cap after a build
+(``CADGEN_ENGINE_WORKER_RSS_MB``, by default a quarter of the machine's memory, which the daemon holds
+all its workers to together: ``daemon.Pool.shed``) is retired: its reports say so (``retired``),
 and the daemon, once it has taken the worker's documents from it (``models.Models.drain``),
 closes its stdin. The daemon starts a fresh one for the next build, a restart: a model whose
 xbf holds its closure unchanged is taken in seconds.
@@ -263,8 +270,10 @@ def _physical_mb() -> float | None:
 
 
 def rss_cap_mb() -> float | None:
-    """The resident memory a worker may hold after a build: ``CADGEN_ENGINE_WORKER_RSS_MB``
-    (``0`` for no cap), else a quarter of the machine's memory, at least 2 GiB. None: no cap."""
+    """The resident memory the daemon's workers, its standby and its render processes may hold
+    together (``daemon.Pool.shed``), and so one of them alone after a build or a frame:
+    ``CADGEN_ENGINE_WORKER_RSS_MB`` (``0`` for no cap), else a quarter of the machine's memory, at
+    least 2 GiB. None: no cap."""
     given = os.environ.get("CADGEN_ENGINE_WORKER_RSS_MB", "").strip()
     if given:
         try:
@@ -301,6 +310,20 @@ def resident_after_build() -> float | None:
         gc.collect()
         resident = resident_mb()
     return resident
+
+
+def load_kernel() -> None:
+    """The kernel loaded, as a standby loads it before it is ready: OCP's native libraries and
+    build123d imported, the engine's kernel layer with them (imported, never installed: a build
+    installs it in its run's environment, ``build._build``), and one shape made. A fresh
+    worker pays this in its first build; the operating system's first look at a fresh
+    installation's native libraries (macOS checks each once) is paid here, while nobody waits."""
+    import build123d
+    import OCP.TopoDS  # noqa: F401
+
+    from cadgen.engine.kernel import determinism, history, memo, trace  # noqa: F401
+
+    build123d.Box(1, 1, 1)
 
 
 def kept() -> dict[str, str]:
@@ -573,7 +596,10 @@ def main() -> int:
         except OSError:
             pass
 
-    send({"ready": os.getpid()})
+    if "--standby" in sys.argv[1:]:
+        load_kernel()
+    resident = resident_mb()
+    send({"ready": os.getpid(), "rssMb": None if resident is None else round(resident)})
     gc.disable()
     threading.Thread(target=read, daemon=True).start()
     owed = False  # a collection, since the last request answered
@@ -638,6 +664,9 @@ def main() -> int:
                 leave()
                 send({"id": ident, "settled": True, "op": op})
             owed = True
+            continue
+        if op == "adopt":
+            home = str(request.get("home") or home)  # the standby, taken: its script's folder from now on
             continue
         if op != "build":
             send({"id": ident, "failed": f"unknown request {op!r}"})
