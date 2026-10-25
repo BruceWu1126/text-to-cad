@@ -1028,6 +1028,38 @@ class ToolArgumentsTest(unittest.TestCase):
                                                      "waitMs": 10000})["structuredContent"]
         self.assertEqual((done["state"], done["result"]), ("succeeded", {"inspection": {"faces": 6}}))
 
+    def test_inspecting_a_file_without_a_ref_answers_what_cadgen_inspect_prints(self) -> None:
+        from cadgen.engine.cli import summary_text
+
+        server = self.served("text")
+        step = self.tmp / "box.step"
+        step.write_text("ISO-10303-21;\n", encoding="utf-8")
+        # What `cadgen inspect --json box.step` answered for a 10 x 20 x 30 mm box (``api._summary``).
+        summary = {"name": "COMPOUND", "id": DOCUMENT_ID, "state": {"state": "file", "path": str(step)},
+                   "parts": {"occurrences": 1, "distinct": 1, "root": "COMPOUND"},
+                   "bounds": {"min": [-5.0, -10.0, -15.0], "max": [5.0, 10.0, 15.0], "size": [10.0, 20.0, 30.0]},
+                   "volume": 6000.0, "materials": [], "mass": None, "unweighed": [], "joints": [], "states": [],
+                   "sequences": [], "animations": [], "files": []}
+        asked = []
+
+        def inspect(**arguments):
+            asked.append(arguments)
+            return {"summary": summary, "closure": None} if arguments.get("query") == "summary" else {"volume": 6000.0}
+
+        with mock.patch("cadgen.engine.api.inspect", side_effect=inspect):
+            whole = self.call(server, "cad_inspect", {"requestId": "inspect-a-file-0001", "source": str(step),
+                                                      "waitMs": 10000})["structuredContent"]
+            part = self.call(server, "cad_inspect", {"requestId": "inspect-a-part-0001", "source": f"{step}#COMPOUND",
+                                                     "waitMs": 10000})["structuredContent"]
+        self.assertEqual(asked, [{"source": str(step), "query": "summary"}, {"source": f"{step}#COMPOUND"}])
+        inspection = whole["result"]["inspection"]
+        self.assertEqual((inspection["summary"], inspection["text"]), (summary, summary_text(summary)))
+        self.assertIn("volume      6,000 mm^3", inspection["text"])
+        self.assertEqual(part["result"]["inspection"], {"volume": 6000.0})
+        cad_inspect = next(tool for tool in server.handle("tools/list", {}, None)["tools"] if tool["name"] == "cad_inspect")
+        self.assertIn("Without a ref it answers what `cadgen inspect SOURCE` prints", cad_inspect["description"])
+        self.assertIn("summary", cad_inspect["inputSchema"]["properties"]["query"]["enum"])
+
     def test_a_snapshot_with_no_output_is_refused_at_its_start(self) -> None:
         server = self.served("text")
         refused = self.call(server, "cad_snapshot", {"requestId": "snapshot-no-output-1", "source": str(self.model)})
