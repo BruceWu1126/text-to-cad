@@ -2105,15 +2105,16 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
 
 @contextlib.contextmanager
 def _refusal(op: str, kind: str, args: tuple, kwargs: dict) -> Iterator[None]:
-    """A kernel call the model made, which an OCCT exception with no words of its own leaves: the
-    exception is given the call, as the model wrote it at a glance (``kernel_call``, read by
-    ``refused_call``), so the build's failure names where the kernel refused. The innermost call
-    the memo saw is kept: one whose exception already names one is left as it is."""
+    """A kernel call the model made, which an OCCT exception leaves -- whatever its class, which
+    differs by OCCT build (a zero-size box is ``Standard_Failure`` on macOS, ``Standard_DomainError``
+    on Linux and Windows), and words or none: the exception is given the call, as the model wrote
+    it at a glance (``kernel_call``, read by ``refused_call``), so the build's failure names where
+    the kernel refused. The innermost call the memo saw is kept: one whose exception already names
+    one is left as it is."""
     try:
         yield
     except Exception as error:
-        if type(error).__module__.startswith("OCP") and not str(error).strip() and \
-                getattr(error, "kernel_call", None) is None:
+        if type(error).__module__.startswith("OCP") and getattr(error, "kernel_call", None) is None:
             try:
                 error.kernel_call = _shown_call(op, kind, args, kwargs)
             except Exception:  # noqa: BLE001 - naming the call never hides the failure
@@ -2122,16 +2123,11 @@ def _refusal(op: str, kind: str, args: tuple, kwargs: dict) -> Iterator[None]:
 
 
 def refused_call(error: BaseException) -> str | None:
-    """The kernel call an exception, or one it was raised from, says the kernel refused
-    (``_refusal``), or None."""
-    seen: set[int] = set()
-    while error is not None and id(error) not in seen:
-        seen.add(id(error))
-        found = getattr(error, "kernel_call", None)
-        if isinstance(found, str):
-            return found
-        error = error.__cause__ or error.__context__
-    return None
+    """The kernel call the exception a build failed with says the kernel refused (``_refusal``),
+    or None. Only that exception's own: one build123d raised in its own words from an OCCT one
+    (a fillet's ``ValueError``) already says what went wrong, whatever it was raised from."""
+    found = getattr(error, "kernel_call", None)
+    return found if isinstance(found, str) else None
 
 
 def _shown_call(op: str, kind: str, args: tuple, kwargs: dict) -> str:

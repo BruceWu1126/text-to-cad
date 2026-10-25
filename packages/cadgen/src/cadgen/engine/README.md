@@ -521,8 +521,8 @@ build and no line for a failed one, and the report carries it as data (`delta`).
 the kernel's quick boxes, a free-form face's from its edges (31 ms cold on juno's 246 parts, within
 0.1 mm of `inspect`'s exact boxes, which took 8.6-12 s), and a tree whose signature is its last
 build's is not walked again, so a warm no-op pays nothing measurable for it. A failed build
-raises; a successful call resumes the script. A body that fails in a kernel call whose OCCT exception carries no words
-(`Standard_Failure`, bare) has that call named on its failure line, as the memo saw it --
+raises; a successful call resumes the script. A body that fails in a kernel call with an OCCT exception (often bare: `Standard_Failure`,
+`Standard_DomainError`, by OCCT build) has that call named on its failure line, as the memo saw it --
 `failed plate.py::plate at Solid.make_box(0, 60, 5): the kernel refused it` -- and in its report
 (`failedAt`; `memo.refused_call`). Put executable model calls under
 `if __name__ == "__main__":` so other models can import their definitions.

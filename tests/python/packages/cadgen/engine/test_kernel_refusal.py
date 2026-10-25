@@ -1,6 +1,6 @@
-"""A build that fails inside a kernel call with an OCCT exception carrying no words of its own
-(``Standard_Failure``, bare) names that call on its failure line, as the memo saw it; a failure
-that says what went wrong is left to say it."""
+"""A build that fails inside a kernel call with an OCCT exception -- often bare, its class by OCCT
+build (``Standard_Failure`` on macOS, ``Standard_DomainError`` on Linux and Windows) -- names that
+call on its failure line, as the memo saw it; a failure build123d words itself names none."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ class KernelRefusalTest(unittest.TestCase):
 
     def test_a_zero_size_box_names_the_call_the_kernel_refused(self) -> None:
         report = self.built("plate")
-        self.assertIn("Standard_Failure", report["error"])
+        self.assertRegex(report["error"], r"OCP\.OCP\.Standard\.Standard_\w+")
         self.assertEqual(report["failedAt"], "Solid.make_box(0, 60, 5)")
         self.assertEqual(cli._describe(report, 0.1, None),
                          "failed parts.py::plate at Solid.make_box(0, 60, 5): the kernel refused it")
