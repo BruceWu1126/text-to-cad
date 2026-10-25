@@ -297,16 +297,16 @@ it again.
   retires (`cadgen status`: `live` with its worker, `held` without one, where `made_by`
   is null), under one memory budget (`CADGEN_ENGINE_MEMORY_MB`, default a quarter of the
   machine's) that never drops a document a page watches.
-- **The engine never reruns code.** A document it no longer holds (the engine restarted,
-  or it dropped the document under its memory budget) is refused with the command that
+- **The engine never reruns code.** A document it no longer holds (its file in the engine's
+  cache deleted, or never saved) is refused with the command that
   brings it back, `cadgen run <the script that defines it>`, by the page, `cadgen inspect`
-  and `cad_show` alike (`cadgen status`: `evicted`, `expired`, or `detached` once its
-  script is gone). Running it updates the same document and its open pages.
+  and `cad_show` alike (`cadgen status`: `unsaved`, or `detached` once its script is gone).
+  Running it updates the same document and its open pages.
 - **Each document has a record** in cadgen's state folder (`documents/<uuid>/document.json`:
-  the script and function that build it, its store, the rebuild command; never
+  the script and function that build it (the rebuild command is always `cadgen run` of that script); never
   geometry). The home's Recents lists the records, most recent first. A record whose
   script is gone is detached: listed, saying so, with no rebuild command. Nothing else is
-  written beside your files: no cache folder, and no record of a run.
+  written beside your files: no record of a run.
 - **A restart reopens what was built.** The engine keeps each model document's bytes in
   the platform's cache folder (`~/.cache/cadgen/documents/`), once it is idle, so after a
   restart its id answers every verb as last built (`cadgen status`: `held`, on `disk`).
@@ -315,10 +315,7 @@ it again.
   verb that reads it says what it read ("exporting the build of arm from before arm.py
   changed; run `cadgen run /work/arm.py` to update it"), and `cadgen status` marks it stale; nothing
   reruns.
-  The cache is bounded (`CADGEN_ENGINE_CACHE_GB`, default 4) and safe to delete.
-- **`@model(store="memory")`** keeps a document in its worker's memory alone: no record,
-  no Recents entry, gone when its worker retires or the engine exits. It suits a
-  throwaway probe, and needs a saved script.
+  The cache keeps every document until you delete it (`cadgen delete <id>`, or Delete on the home); nothing evicts from it.
 - **A shape with no script** (a notebook cell, a REPL, a script that only holds a
   shape) is handed over: `model(shape, name="plate")` makes a document of it, held,
   cached, served on its page and exported like any other, and returns the same handle,
