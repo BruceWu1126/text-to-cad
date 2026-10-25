@@ -199,6 +199,25 @@ class EnginePortTest(unittest.TestCase):
             self.assertIn(f" (pid {os.getpid()}): ", said)
         self.answering()
 
+    def test_a_request_s_own_held_port_is_refused_and_the_running_engine_goes_on(self) -> None:
+        # An engine already running for other clients (no page yet): one viewer's --port, held by
+        # another program, refuses that viewer and never stops the engine under the others.
+        own = free_port()
+        before = engine_daemon.run([sys.executable, "-c", "from cadgen.engine import client; "
+                                    "print(client.request({'op': 'pid'})['pid'])"],
+                                   env={**self.env, "CADGEN_ENGINE_PORT": str(own)})
+        self.assertEqual(before.returncode, 0, before.stderr)
+        port = held_port(self)
+        done = engine_daemon.run([sys.executable, "-m", "cadgen.viewer", "--api-only", "--json", "--port", str(port)],
+                                 env=self.env, cwd=self.root)
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertRegex(done.stderr.strip().splitlines()[-1],
+                         rf"^CAD Viewer: port {port} is held by .+: stop it, or pass another --port$")
+        after = engine_daemon.run([sys.executable, "-c", "from cadgen.engine import client; "
+                                   "print((client.request({'op': 'pid'}, start=False) or {}).get('pid'))"], env=self.env)
+        self.assertEqual(after.stdout.strip(), before.stdout.strip(), "the same engine answers")
+        self.assertEqual(self.launch()["port"], own, "and serves the next page on its own port")
+
     def test_cadgen_server_on_a_held_port_fails_at_once_and_leaves_no_engine(self) -> None:
         port = held_port(self)
         done = self.cli("server", "--port", str(port))  # no request is ever sent: it binds at its start
@@ -206,6 +225,21 @@ class EnginePortTest(unittest.TestCase):
         self.assertRegex(done.stderr.strip().splitlines()[-1],
                          rf"^cadgen: port {port} is held by .+: stop it, or pass another --port$")
         self.answering()
+
+    def test_cadgen_server_beside_a_running_engine_says_so_and_a_port_it_cannot_take_fails(self) -> None:
+        running = self.launch(CADGEN_ENGINE_PORT=str(free_port()))
+        asked = free_port()
+        done = self.cli("server", "--port", str(asked))
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("this installation's engine server is already running", done.stderr)
+        self.assertFalse(listening(asked), "nothing serves the port it named")
+        plain = self.cli("server")
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        self.assertIn("already running", plain.stderr)
+        self.assertEqual(self.launch()["pid"], running["pid"])
+        bad = self.cli("server", "--port", "70000")
+        self.assertEqual(bad.returncode, 2)
+        self.assertRegex(bad.stderr.strip(), r"^[^:]*server: --port must be between 0 and 65535$", "its name said once")
 
     def test_a_held_default_rolls_to_the_next_free_port_says_so_once_and_keeps_it(self) -> None:
         mine = not listening(3245)

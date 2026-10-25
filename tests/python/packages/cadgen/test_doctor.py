@@ -114,6 +114,11 @@ class DoctorTests(unittest.TestCase):
                 folder / "cadgen-python-1.0": "#!/bin/sh\nexec python \"$@\"\n"}  # no marker: not ours
         for path, text in kept.items():
             path.write_text(text, encoding="utf-8")
+        theirs = self.state / "theirs" / "bin"  # a person's own venv, registered nowhere
+        theirs.mkdir(parents=True)
+        (theirs / "cadgen").write_text("", encoding="utf-8")
+        own = folder / "cadgen-0.7"
+        own.symlink_to(theirs / "cadgen")
         code, out, _ = _run(["--prune"])
         self.assertEqual(code, 0)
         for path in (console, python, gone):
@@ -121,6 +126,7 @@ class DoctorTests(unittest.TestCase):
             self.assertFalse(os.path.lexists(path), path)
         for path, text in kept.items():
             self.assertEqual(path.read_text(encoding="utf-8"), text, "anything else is left alone")
+        self.assertTrue(os.path.islink(own), "a person's own cadgen-<v> into a venv of theirs is left alone")
 
     def test_a_source_tree_registers_nothing_unless_named(self) -> None:
         with TemporaryDirectory() as tmp:

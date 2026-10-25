@@ -276,6 +276,20 @@ class StandbyTest(unittest.TestCase):
         self.assertEqual(pool.retired[0]["reason"], "pressure")
 
 
+    def test_under_memory_pressure_no_standby_starts_to_be_retired_again(self) -> None:
+        pool = self.pool()
+        under = [True]
+        pool.pressed = lambda: under[0]
+        pool.stand({})
+        worker = pool.lease("a.py", {})  # a build under pressure: its own worker, and no standby after it
+        pool.release(worker)
+        self.assertEqual(self.started, ["a.py"])
+        self.assertIsNone(pool.readying, "no kernel loaded for the pressure poller to retire")
+        self.assertIsNone(pool.standby)
+        under[0] = False
+        pool.release(pool.lease("b.py", {}))
+        self.standing(pool)
+
     def test_status_shows_the_standby_with_its_memory_and_never_as_a_script_s_worker(self) -> None:
         from cadgen.engine.cli import status_text
 

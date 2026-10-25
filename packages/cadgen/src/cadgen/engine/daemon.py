@@ -713,6 +713,9 @@ class Pool:
         self.drain = drain
         self.memory = memory
         self.spare: Callable[[dict[str, str]], Any] | None = None
+        # Whether the system is under memory pressure now (the daemon's ``serve.Pressure``): no
+        # standby is started under it, which ``shed`` would retire at its next look.
+        self.pressed: Callable[[], bool] = lambda: False
         self.renders: Any = None
         self.lock = threading.Condition()
         self.live: dict[str, Any] = {}  # by key
@@ -808,10 +811,11 @@ class Pool:
     def stand(self, environment: dict[str, str]) -> None:
         """A standby started in ``environment``, off the caller's thread, when the daemon gave the
         pool one to start (``spare``) and the pool has none, a slot for it under the cap and room
-        for it under the memory cap (the last standby's measure). A build that needs a worker of
+        for it under the memory cap (the last standby's measure), and the system not under memory
+        pressure (``pressed``). A build that needs a worker of
         its own meanwhile, in an environment of the same interpreter, waits for it rather than start
         another."""
-        if self.spare is None:
+        if self.spare is None or self.pressed():
             return
         cap, drawing = self.memory(), self._drawing()
         with self.lock:
@@ -1410,6 +1414,7 @@ class Daemon:
         # The system's memory-pressure signal, the server's too once it runs (``serve``): under it the
         # pool sheds its standby and its least recently used workers (``Pool.shed``).
         self.pressure = Pressure()
+        self.pool.pressed = self.pressure.under
         self.workers_lock = threading.Lock()  # each worker's ``held``
         self.born = time.time()
         self.last = time.monotonic()
@@ -1616,7 +1621,13 @@ class Daemon:
                                                    provenance=self.provenance, cache=MESHES, isolated=True, host=host,
                                                    http_factory=HTTP_FACTORY, budget=memory_budget(), token=token))
                 except PortHeld as refusal:
-                    # An engine that cannot serve serves no build: it says why and stops, once the
+                    if request.get("port"):
+                        # The request's own port (``cadgen viewer --port``): that request is refused,
+                        # and the engine -- the builds and warm workers of its other clients -- runs
+                        # on, unbound, for the next request that serves.
+                        raise
+                    # An engine whose own port is held (``cadgen server --port``, its
+                    # ``CADGEN_ENGINE_PORT``) can never serve: it says why and stops, once the
                     # request that found it has its answer (``_serve``).
                     self.refusal = refusal
                     _note(str(refusal))
@@ -2276,6 +2287,11 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
             print("cadgen: an engine server is running; run cadgen stop first, then cadgen server --rotate-token",
                   file=sys.stderr)
             return 1
+        if foreground:  # ``cadgen server``: said, never a silent success that serves nothing it asked
+            print("cadgen: this installation's engine server is already running: `cadgen status` says where it "
+                  "serves, `cadgen stop` stops it" + (f" (to serve on {port})" if port is not None else ""),
+                  file=sys.stderr)
+            return 1 if port is not None else 0
         return 0  # another daemon is up
     if rotate:
         others = others_running()

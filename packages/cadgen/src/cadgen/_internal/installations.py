@@ -44,7 +44,7 @@ WINDOWS = os.name == "nt"
 # The line that makes a file the proxy, and the proxy's revision: a later one is never replaced by an
 # earlier, so an older installation's server starting never undoes a newer one's proxy.
 MARK = "cadgen proxy: "
-REVISION = 1
+REVISION = 2
 VERSION = re.compile(r"[0-9][0-9A-Za-z.+_-]*")
 
 OK = "ok"
@@ -150,7 +150,16 @@ def register(version: str, found: tuple[str, str, str] | None = None, folder=Non
     # One key a line, the python's alone: the proxy's sh reads that line (``script``).
     text = json.dumps(record, indent=1, sort_keys=True, ensure_ascii=False) + "\n"
     folder.write(inside, text.encode("utf-8"))
+    # An environment holds one cadgen: the record of another version in it (an upgrade in place,
+    # ``pip install -U``, ``uv tool upgrade``) names code that is gone, and would run this one as it.
+    for other in records(folder):
+        if other["version"] != version and _same_place(other["prefix"], prefix):
+            folder.remove(_inside(other["version"]))
     return path, REGISTERED
+
+
+def _same_place(one: str, other: str) -> bool:
+    return os.path.normcase(os.path.realpath(one)) == os.path.normcase(os.path.realpath(other))
 
 
 def records(folder=None) -> list[dict]:
@@ -209,6 +218,15 @@ def _legacy_console(path: str) -> bool:
     return parts[-1:] == ["cadgen"] and parts[-2:-1] == ["bin"]
 
 
+def _registered_environment(path: str) -> bool:
+    """Whether the symlink ``path`` leads into the environment of a registered installation."""
+    place = os.path.dirname(os.path.dirname(os.path.realpath(path)))
+    try:
+        return any(_same_place(record["prefix"], place) for record in records())
+    except OSError:
+        return False
+
+
 def prune_legacy(where: str | None = None, windows: bool = WINDOWS) -> list[str]:
     """Remove the per-version launchers earlier 0.8 builds published in the proxy's folder (``where``):
     each ``cadgen-python-<version>`` carrying ``LEGACY_MARK``, and each ``cadgen-<version>`` symlink
@@ -233,7 +251,12 @@ def prune_legacy(where: str | None = None, windows: bool = WINDOWS) -> list[str]
             legacy = stem[len("cadgen-python-"):] in marked
         elif stem.startswith("cadgen-") and VERSION.fullmatch(stem[len("cadgen-"):]):
             version = stem[len("cadgen-"):]
-            legacy = _legacy_console(path) or (windows and name.lower().endswith(".exe") and version in marked)
+            # A symlink into a cadgen environment is an earlier build's only beside its marked python,
+            # or pointing nowhere now, or into an environment registered here: a person's own
+            # ``cadgen-0.7`` into a venv of theirs is theirs.
+            legacy = (_legacy_console(path) and (version in marked or not os.path.exists(path)
+                                                 or _registered_environment(path))) \
+                or (windows and name.lower().endswith(".exe") and version in marked)
         else:
             legacy = False
         if legacy:
@@ -262,8 +285,11 @@ elif [ "$(uname -s)" = Darwin ]; then state="$HOME/Library/Application Support/c
 else state="${{XDG_STATE_HOME:-$HOME/.local/state}}/cadgen"
 fi
 for name in $(CDPATH= cd "$state/installations" 2>/dev/null && ls -t -- *.json 2>/dev/null); do
-  python=$(sed -n 's/^ *"python": "\\(.*\\)",\\{{0,1\\}}$/\\1/p' "$state/installations/$name")
-  [ -x "$python" ] && exec "$python" -P -m cadgen._internal.proxy "$@"
+  record="$state/installations/$name"
+  python=$(sed -n 's/^ *"python": "\\(.*\\)",\\{{0,1\\}}$/\\1/p' "$record")
+  console=$(sed -n 's/^ *"cadgen": "\\(.*\\)",\\{{0,1\\}}$/\\1/p' "$record")
+  # Alive as ``alive`` says it: its python and its console script (an uninstalled cadgen leaves the python).
+  [ -x "$python" ] && [ -f "$console" ] && exec "$python" -P -m cadgen._internal.proxy "$@"
 done
 case $1 in +?*) version=${{1#+}} ;; *) version= ;; esac
 echo "cadgen${{version:+ $version}} is not installed: run \\`uvx --no-config --managed-python --python 3.13 \\
@@ -277,6 +303,7 @@ rem The cadgen command: runs the installation of cadgen that +<version>, CADGEN_
 rem cadgen.toml or a running engine names (cadgen._internal.proxy), through the one registered last.\r
 setlocal EnableDelayedExpansion\r
 if defined CADGEN_STATE_DIR (set "state=!CADGEN_STATE_DIR!") else if defined LOCALAPPDATA (set "state=!LOCALAPPDATA!\\cadgen-state") else (set "state=!USERPROFILE!\\AppData\\Local\\cadgen-state")\r
+rem A record's python line is: space "python": "PATH", -- split at each quote, PATH is its fourth piece.\r
 for /f "delims=" %%n in ('dir /b /o-d "!state!\\installations\\*.json" 2^>nul') do (\r
   for /f usebackq^ tokens^=4^ delims^=^" %%p in (`findstr /c:"\\"python\\":" "!state!\\installations\\%%n"`) do (\r
     set "python=%%p"\r

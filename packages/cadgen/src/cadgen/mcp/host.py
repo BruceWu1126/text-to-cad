@@ -73,7 +73,7 @@ def classify(argv: list[str]) -> dict[str, Any] | None:
     it shows CAD cards, False where it shows none, None for a program this does not know; or None
     where the process is not a host but what launched this server for one (a launcher, a Python)."""
     if not argv:
-        return {"host": "unknown", "renders": None}
+        return None  # a parent read with no command line (a zombie, one exiting): its parent says
     program, args = _name(argv[0]), argv[1:]
     if program in ("node", "bun") and args:
         # An npm install of a host runs its script under node: the script names it.
@@ -91,6 +91,9 @@ def classify(argv: list[str]) -> dict[str, Any] | None:
         if sub is None or sub in _CODEX_TEXT:
             return {"host": f"codex {sub}" if sub else "codex", "renders": False}
         return {"host": f"codex {sub}", "renders": None}
+    if "/Claude.app/Contents/" in argv[0] and os.path.basename(argv[0]) == "Claude":
+        # The desktop app's own program, whose name is Claude Code's but for its case.
+        return {"host": "claude desktop", "renders": True}
     if program == "claude":
         # Claude Code: its terminal, and the desktop app's code sessions, which run this program too.
         # It shows no cards unless it declares the extension (``CLAUDE_CODE_MCP_APPS_HOST=1``).

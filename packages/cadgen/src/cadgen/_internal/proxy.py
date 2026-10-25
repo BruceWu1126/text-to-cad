@@ -52,13 +52,16 @@ def version_key(version: str) -> tuple:
     return numbers, not suffix, parts
 
 
-def named(args: list[str], environ, cwd: str) -> tuple[str | None, list[str]]:
+def named(args: list[str], environ, cwd: str | None) -> tuple[str | None, list[str]]:
     """The version the command names (a-c), and the arguments left to run. ``Refused`` for one
-    that is no version: never echoed into the command the refusal names."""
+    that is no version: never echoed into the command the refusal names. ``cwd`` None: a shell
+    whose folder was removed, where no ``cadgen.toml`` is looked for."""
     if args and args[0].startswith("+") and len(args[0]) > 1:
         return _version(args[0][1:], "its first argument"), args[1:]
     if environ.get("CADGEN_VERSION"):
         return _version(environ["CADGEN_VERSION"], "CADGEN_VERSION"), args
+    if cwd is None:
+        return None, args
     folder = os.path.abspath(cwd)
     while True:
         config = os.path.join(folder, CONFIG)
@@ -175,7 +178,11 @@ def main(argv: list[str] | None = None) -> int:
         from cadgen._internal.installations import records
         from cadgen._internal.engine_host import shell
 
-        version, args = named(args, os.environ, os.getcwd())
+        try:
+            cwd: str | None = os.getcwd()
+        except OSError:  # its folder removed under the shell (a pruned worktree)
+            cwd = None
+        version, args = named(args, os.environ, cwd)
         record = choose(version, records(), engines, shell())
     except Refused as refusal:
         print(refusal, file=sys.stderr)
