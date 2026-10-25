@@ -145,7 +145,7 @@ class ViewerExportHttpTest(unittest.TestCase):
             self.assertEqual(len(data), job['bytes'])
             self.assertGreater(len(data), 84)
             self.assertIn('attachment;', headers['content-disposition'])
-            http(f"/__cad/exports/{job['id']}/release", {})
+            self.assertEqual(http(f"/__cad/exports/{job['id']}/release", {})[0], 200)
             self.assertEqual(http(f"/__cad/exports/{job['id']}/file")[0], 410)
             # Even a rebuild with identical geometry is a different displayed generation.
             api.build_script(script, ['export_http'])
