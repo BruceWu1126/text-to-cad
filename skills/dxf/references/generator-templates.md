@@ -104,7 +104,7 @@ KERF = 0.0
 @model
 def drawing():
     return flatten.flat_pattern(
-        <name>(),
+        <name>().shape,
         coordinate=THICKNESS_MM,   # TODO: which face plane defines the profile
         kerf=KERF,
     )

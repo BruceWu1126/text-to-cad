@@ -103,7 +103,7 @@ cadgen export "$ID" DXF/gasket.dxf         # ID: the id: line it printed
   change.
 - **Drawings delivered after every change** go in an `exports.py` beside them that
   imports each drawing and calls `export(drawing, path)` (the model function itself,
-  not its call):
+  or the handle its call returns):
 
   ```python
   # src/exports.py
