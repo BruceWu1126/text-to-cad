@@ -670,9 +670,10 @@ class Server:
         # Whether a model document no worker holds was built from code that changed since
         # (``models.Models.stale``): ``{"text", "changes", "rebuild"}``, said in its structure, or None.
         self.stale: Callable[[str], dict[str, Any] | None] = lambda _ident: None
-        # Each model document whose cache file is at the version held (``cache``): read again from
-        # disk when evicted, it is in the budget's first tier with the files.
-        self.on_disk: dict[str, Any] = {}
+        # Told of a model document as the budget takes it out of memory, its id, its generation and
+        # its xbf bytes (``Served.xbf``): the daemon's cache keeps them when it does not hold them
+        # yet (``models.Models.leaving``), so the document is read again from there.
+        self.leaving: Callable[[str, Any, bytes], None] = lambda _ident, _version, _xbf: None
         if budget is not None:
             self.cache.cap = None
             self.cache.grown = self._grown
@@ -897,7 +898,6 @@ class Server:
             self.model_loaders.pop(ident, None)
             self.model_versions.pop(ident, None)
             self.used.pop(ident, None)
-            self.on_disk.pop(ident, None)
         self._changed()
 
     def listing(self, every: bool = False) -> list[dict[str, Any]]:
@@ -933,21 +933,14 @@ class Server:
         if self.budget is not None and self.holding() > self.budget:
             self.trim(int(self.budget * TRIM), spare)
 
-    def _tier(self, ident: str) -> int:
-        """A document's eviction tier: 0 one the engine reads again itself -- a file, or a model
-        document whose cache file is at the version held (``on_disk``) -- 1 everything else."""
-        doc = self.served.get(ident)
-        if doc is not None and isinstance(doc.path, Path) and ident not in self.model_loaders:
-            return 0
-        version = self.on_disk.get(ident)
-        return 0 if version is not None and version == self.model_versions.get(ident) else 1
-
     def trim(self, target: int, spare: str | None = None) -> list[str]:
-        """Evict until what is held is ``target`` bytes or less (the engine's **Document
-        lifetime**): tessellations first, least recently used first, then documents -- files the
-        engine reads again itself, then every other, least recently used first within each --
-        never a document a page watches, nor its tessellations, nor ``spare``. The ids evicted."""
+        """Evict from memory until what is held is ``target`` bytes or less (the engine's **Document
+        lifetime**): tessellations first, least recently used first, then documents, least recently
+        used first -- never a document a page watches, nor its tessellations, nor ``spare``. Every
+        document is read again from where it is kept (a file from its file, a model's from the
+        engine's cache, which is handed its bytes as it leaves: ``leaving``). The ids evicted."""
         evicted: list[str] = []
+        leaving: list[tuple[str, Any, bytes]] = []
         with self.trim_lock:
             watched = self.watched()
             with self.load_lock:
@@ -963,11 +956,13 @@ class Server:
                     total -= self.cache.evict(key)
             with self.load_lock:
                 order = sorted((ident for ident in self.served if ident not in kept),
-                               key=lambda ident: (self._tier(ident), self.used.get(ident, 0)))
+                               key=lambda ident: self.used.get(ident, 0))
                 for ident in order:
                     if total <= target:
                         break
                     doc = self.served.pop(ident)
+                    if doc.xbf is not None:
+                        leaving.append((ident, self.model_versions.get(ident), doc.xbf))
                     self.model_versions.pop(ident, None)
                     self.used.pop(ident, None)
                     self.evictions += 1
@@ -977,6 +972,11 @@ class Server:
                     # A STEP read is held by its bytes for the documents served of it: theirs go with them.
                     with self.foreign_lock:
                         self.foreign.clear()
+        for ident, version, xbf in leaving:
+            try:
+                self.leaving(ident, version, xbf)
+            except Exception:  # noqa: BLE001 - a save never fails the trim that asked it
+                pass
         if evicted:
             self._changed()
         return evicted

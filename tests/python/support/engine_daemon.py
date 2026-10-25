@@ -52,6 +52,17 @@ def isolate(cleanup: Callable[..., Any]) -> dict[str, str]:
     return given
 
 
+def unwritable(folder: Path | str) -> str:
+    """A cache folder (``CADGEN_CACHE_DIR``) no one can write, under ``folder``: a file in its place,
+    which refuses a folder below it on every platform and to root too. The engine keeps no document
+    there and does everything else as ever (an unwritable cache saves nothing): what a test names
+    whose restart must find no document kept. Its path."""
+    path = Path(folder) / "cache-unwritable"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+    return str(path)
+
+
 def watched(env: dict[str, str], cleanup: Callable[..., Any]) -> dict[str, str]:
     """``env`` with a journal of its own; ``cleanup`` (a test's ``addCleanup`` or
     ``addClassCleanup``) removes it."""

@@ -160,10 +160,6 @@ class Folder:
         except OSError:
             return None
 
-    def touch(self, inside: str) -> None:
-        """A file's modification time, now: when it was last used (the cache's least recently used)."""
-        os.utime(self.path(inside))
-
     def remove(self, inside: str) -> None:
         """A file or a folder, whole; nothing when it is not there."""
         target = self.path(inside)

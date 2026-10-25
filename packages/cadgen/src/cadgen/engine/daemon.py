@@ -899,7 +899,7 @@ class Pool:
         -- idle processes are retired, least recently used first within each rank: the standby, then
         render processes (each holds a document the daemon sends again), then the workers no page
         watches, then the watched ones, which go only when no other is left. A busy process is never
-        retired. A worker retired is drained to the held tier first (``drain``). The retired."""
+        retired. A worker retired is drained first (``drain``): its documents stay ``held``. The retired."""
         cap, renders, drawing = self.memory(), self.renders, self._drawing()
         with self.lock:
             if self.stopped or (cap is None and not (pressure and self.standby is not None)):
@@ -1834,6 +1834,7 @@ class Daemon:
                 self.server.lost = self.models.rebuild
                 self.server.revive = self.models.adopt
                 self.server.stale = self.models.stale
+                self.server.leaving = self.models.leaving
                 self.server.start()
                 started = True
             elif ((request.get("port") and int(request["port"]) != self.server.port)
@@ -2330,9 +2331,9 @@ class Daemon:
     def tend(self) -> None:
         """What the engine looks after, each ``TEND_SECONDS``: never the process, and nothing by how
         long anything has been idle. A killed client's pipes are swept, and the workers' memory is
-        held to its cap and the system's pressure (``Pool.shed``: its documents drained to the held
-        tier first); the memory budget evicts unwatched documents to the cache as they are loaded
-        (``serve.Server.trim``). The engine stops on ``stop``, a terminate, another installation's
+        held to its cap and the system's pressure (``Pool.shed``: its documents drained first, so they
+        stay held); the memory budget sends unwatched documents out of memory, least recently used
+        first, to the cache, as they are loaded (``serve.Server.trim``). The engine stops on ``stop``, a terminate, another installation's
         retiring it (``bind``), and here when its door is gone (its folder removed, a temporary
         folder cleaned up) or another's: no one can reach it, so it stops as ``stop`` does, saving
         what it holds to the cache."""

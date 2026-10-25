@@ -1,5 +1,5 @@
-"""The engine's document cache: each model document it held, kept in its own state folder, so a
-restart opens every project at once -- with the code still the only source of truth.
+"""The engine's document cache: each model document it held, kept in the cache folder until a person
+deletes it, so a restart opens every project at once -- with the code still the only source of truth.
 
 For every ``pointer`` and ``shape`` model document (never a file's document: that is its own file),
 the engine keeps ``<cache>/documents/<id>/document.xbf`` -- ``<cache>`` the platform's cache folder
@@ -22,7 +22,7 @@ When it is written, never on the run path:
   built or read in the last idle window -- are saved, best effort, within ``SHUTDOWN_SECONDS``.
 
 The cache folder is shared: a cadgen 0.7 installation keeps its store there too, in folders of its
-own. The cache reads, writes, sizes and evicts only under ``documents/`` (``DOCUMENTS``; the engine's
+own. The cache reads, writes, sizes and removes only under ``documents/`` (``DOCUMENTS``; the engine's
 bytecode is under ``pycache/``, ``daemon.bytecode``), and never
 lists, counts or removes anything else there. The record is authoritative: a cache file missing,
 or not the size its record says, is simply not cached.
@@ -34,17 +34,17 @@ files its bodies read (the closure's own digests), which is what staleness compa
 
 Read: at start the daemon indexes which records have a cache file (``Cache.ensure_index``: a listing
 and a stat each, no record and no byte read). A document with one answers every verb by loading its
-bytes through the documents worker, as a held document does; loaded, it is in the memory budget's
-first tier (read again from disk: evicted first). A run reads it too: a build is handed the folder
-(``folder``), and a fresh worker takes a model with no file from its cache file when the key it holds
-is the model's (``build._previous``), with nothing run. Bound, as 0.7's store was: past ``cap()`` bytes
-(``CADGEN_ENGINE_CACHE_GB``, default ``CACHE_GB``; ``0``: no cache at all), the least recently used
-files go down to ``LOW_WATER`` of it, so a pass does not run on every save; never the file of a
-document a live worker holds or a page watches. A shape handed over (``store: "shape"``) is a
-document like any: its file goes for the bound too, and its id then answers that it is no longer
-held, and to run the program that handed it over again. A save that fails is
-logged and listed in ``cadgen status``, never raised to anyone: with the state folder read-only the
-engine does everything it did, and caches nothing.
+bytes through the documents worker, as a held document does. A run reads it too: a build is handed
+the folder (``folder``), and a fresh worker takes a model with no file from its cache file when the
+key it holds is the model's (``build._previous``), with nothing run.
+
+Kept: nothing removes a cache file on its own -- no size cap, no least recently used, no age. A
+document's file goes only with the document, when a person deletes it (its record and its file
+together, ``registry.Registry.delete``), or when its bytes do not read (``models.Models.unreadable``:
+its next build writes it again). The memory budget is another thing (``serve.Server.trim``): a
+document that leaves memory for it is read again from here. A save that fails is logged and listed in
+``cadgen status``, never raised to anyone: with the cache folder read-only, or not writable at all,
+the engine does everything it did, and saves nothing.
 """
 from __future__ import annotations
 
@@ -57,19 +57,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-__all__ = ["CACHE_GB", "CACHE_IDLE_SECONDS", "FILE", "SHUTDOWN_SECONDS", "Cache", "cap", "changes", "idle", "reads"]
+__all__ = ["CACHE_IDLE_SECONDS", "FILE", "SHUTDOWN_SECONDS", "Cache", "changes", "idle", "reads"]
 
 FILE = "document.xbf"
 # How long a document sits with no build and no read before it is saved: past the gap between a
 # script's calls and between an edit loop's runs (each run a new revision, saved for nothing), and
 # short enough that a model a person stops at is on disk before they close the laptop.
 CACHE_IDLE_SECONDS = 10.0
-# The cache's size before its least recently used documents go: a few large assemblies.
-CACHE_GB = 4.0
 # How long a stop waits on the documents built in the last idle window to be saved.
 SHUTDOWN_SECONDS = 10.0
-# Past the cap, eviction goes down to this share of it.
-LOW_WATER = 0.8
 # The failed saves ``status`` lists, the latest first.
 FAILURES_KEPT = 12
 
@@ -81,15 +77,6 @@ def idle() -> float:
     except ValueError:
         given = -1.0
     return given if given > 0 else CACHE_IDLE_SECONDS
-
-
-def cap() -> int:
-    """The cache's size cap in bytes: ``CADGEN_ENGINE_CACHE_GB`` (``0``: no cache), else ``CACHE_GB``."""
-    try:
-        given = float(os.environ.get("CADGEN_ENGINE_CACHE_GB", "").strip() or -1)
-    except ValueError:
-        given = -1.0
-    return int((given if given >= 0 else CACHE_GB) * 2**30)
 
 
 # --- what a build read, and whether it is what it was -----------------------------------------
@@ -165,11 +152,10 @@ class Cache:
 
     def __init__(self, models: Any) -> None:
         self.models = models
-        self.cap = cap()
         self.idle = idle()
         self.lock = threading.Condition()
         self.indexed = False
-        # Each cache file: its bytes, its revision once known, when it was last used (for LRU).
+        # Each cache file: its bytes, and its revision once known.
         self.index: dict[str, dict[str, Any]] = {}
         self.due: dict[str, float] = {}  # each document's idle deadline (monotonic)
         self.writes: collections.deque = collections.deque()  # (id, revision, bytes) to write, in order
@@ -177,16 +163,13 @@ class Cache:
         self.working = 0  # writes taken from the queue and not yet done
         self.failures: collections.deque = collections.deque(maxlen=FAILURES_KEPT)
         self.written = 0
-        self.evictions = 0
         self.thread: threading.Thread | None = None
 
     # --- where -------------------------------------------------------------------------
 
     def registry(self) -> Any:
-        """The registry whose records the cache's files belong to, or None: no state folder, no
-        cache folder, or the cache is off (``cap`` 0). Its ``cache`` is the folder the bytes are in."""
-        if self.cap <= 0:
-            return None
+        """The registry whose records the cache's files belong to, or None: no state folder, or no
+        cache folder. Its ``cache`` is the folder the bytes are in."""
         found = self.models.registry()
         return found if found is not None and found.cache is not None else None
 
@@ -229,7 +212,7 @@ class Cache:
                 stat = held.cache.path(self.inside(ident)).stat()
             except OSError:
                 continue
-            found[ident] = {"bytes": stat.st_size, "revision": None, "used": stat.st_mtime}
+            found[ident] = {"bytes": stat.st_size, "revision": None}
         with self.lock:
             for ident, entry in found.items():
                 self.index.setdefault(ident, entry)
@@ -268,7 +251,7 @@ class Cache:
 
     def current(self, ident: str, revision: str | None) -> bool:
         """Whether the cache file of document ``ident`` is at ``revision``."""
-        if not revision or self.cap <= 0:
+        if not revision:
             return False
         self.ensure_index()
         with self.lock:
@@ -282,31 +265,18 @@ class Cache:
         return known == revision
 
     def read(self, ident: str) -> bytes | None:
-        """The bytes of document ``ident``'s cache file, its use noted (least recently used goes
-        first); None when it is gone."""
+        """The bytes of document ``ident``'s cache file; None when it is gone."""
         held = self.registry()
         data = held.cache.read(self.inside(ident)) if held is not None else None
         if data is None:
             with self.lock:
                 self.index.pop(ident, None)
-            return None
-        now = time.time()
-        with self.lock:
-            entry = self.index.get(ident)
-            if entry is not None:
-                entry["used"] = now
-        try:
-            held.cache.touch(self.inside(ident))  # its recency outlives the process
-        except OSError:
-            pass
         return data
 
     # --- when ----------------------------------------------------------------------------
 
     def touch(self, ident: str) -> None:
         """A build or a read of document ``ident``: its idle timer starts again."""
-        if self.cap <= 0:
-            return
         with self.lock:
             self.due[ident] = time.monotonic() + self.idle
             self._start()
@@ -315,7 +285,7 @@ class Cache:
     def keep(self, ident: str, revision: str, data: bytes) -> None:
         """Document ``ident``'s bytes at ``revision`` to write (the drain's, or the daemon's own
         hold): once, unless the cache is at that revision already."""
-        if self.cap <= 0 or not data or self.current(ident, revision):
+        if not data or self.current(ident, revision):
             return
         with self.lock:
             self.writes.append((ident, revision, data))
@@ -396,17 +366,13 @@ class Cache:
             self.keep(ident, row["revision"], data)
 
     def _write(self, ident: str, revision: str, data: bytes) -> None:
-        """The file and its record's ``cache`` field, when the record is still at ``revision``; then
-        the least recently used past the cap go."""
+        """The file and its record's ``cache`` field, when the record is still at ``revision``."""
         held = self.registry()
         if held is None or self.current(ident, revision):
             return
         record = held.get(ident)
         if record is None or record.get("revision") != revision:
             return  # a build since recorded a newer revision: its own save follows
-        if len(data) > self.cap:
-            self.failed(ident, f"{len(data)} bytes is past the cache's cap ({self.cap} bytes)")
-            return
         row = self.models.row(ident)
         read = (row or {}).get("read") if (row or {}).get("revision") == revision else None
         from cadgen.engine.registry import relative
@@ -418,45 +384,19 @@ class Cache:
         held.update(ident, lambda found: {**found, "cache": meta}
                     if found is not None and found.get("revision") == revision else None)
         with self.lock:
-            self.index[ident] = {"bytes": len(data), "revision": revision, "used": time.time()}
+            self.index[ident] = {"bytes": len(data), "revision": revision}
             self.written += 1
-        self.models.on_disk(ident, revision)
-        self._bound(ident)
-
-    def _bound(self, spare: str) -> None:
-        """Past the cap, the least recently used cache files go down to ``LOW_WATER`` of it -- never
-        ``spare`` (just written), nor the file of a document a live worker holds or a page watches; a
-        shape handed over's goes as any document's does."""
-        with self.lock:
-            total = sum(entry["bytes"] for entry in self.index.values())
-            if total <= self.cap:
-                return
-            order = sorted((ident for ident in self.index if ident != spare), key=lambda ident: self.index[ident]["used"])
-        kept = self.models.in_use()
-        for ident in order:
-            if total <= int(self.cap * LOW_WATER):
-                break
-            if ident in kept:
-                continue
-            with self.lock:
-                entry = self.index.get(ident)
-            if entry is None:
-                continue
-            with self.lock:
-                self.evictions += 1  # counted before its file goes: a file gone is an eviction counted
-            self.remove(ident)
-            total -= entry["bytes"]
 
     def remove(self, ident: str) -> None:
-        """Document ``ident``'s cache file, gone; its record kept, saying so (no ``cache``). The record
-        stops naming the file before the file goes, so no record ever names a file that is not there
-        (``_write`` writes the file before its record names it)."""
+        """Document ``ident``'s cache file, gone, because its bytes do not read; its record kept,
+        saying so (no ``cache``), so its next build writes it again. The record stops naming the file
+        before the file goes, so no record ever names a file that is not there (``_write`` writes the
+        file before its record names it)."""
         held = self.registry()
         with self.lock:
             self.index.pop(ident, None)
         if held is None:
             return
-        self.models.on_disk(ident, None)
         held.update(ident, lambda found: {key: value for key, value in found.items() if key != "cache"}
                     if found is not None and "cache" in found else None)
         held.cache.remove(f"{self.inside(ident).rsplit('/', 1)[0]}")  # documents/<id>, nothing outside it
@@ -472,8 +412,6 @@ class Cache:
     def final(self, seconds: float = SHUTDOWN_SECONDS) -> None:
         """At shutdown: every document whose idle timer has not fired yet -- built or read in the last
         window -- saved now, best effort, for ``seconds`` at most."""
-        if self.cap <= 0:
-            return
         deadline = time.monotonic() + seconds
         with self.lock:
             pending = list(self.due)
@@ -489,11 +427,11 @@ class Cache:
                 self.lock.wait(max(0.01, min(0.2, deadline - time.monotonic())))
 
     def status(self) -> dict[str, Any]:
-        """What ``cadgen status`` says of the cache: on or off, its cap, the documents and bytes in it,
-        the saves done and the documents evicted for room since start, and the failed saves."""
+        """What ``cadgen status`` says of the cache: whether there is one, its folder, the documents and
+        bytes in it, the saves done since start, and the failed saves."""
         held = self.registry()
-        found = {"enabled": False, "root": None if held is None else str(held.cache.root), "capBytes": self.cap, "documents": 0, "bytes": 0, "written": self.written,
-                 "evictions": self.evictions, "failures": list(self.failures), "idleSeconds": self.idle}
+        found = {"enabled": False, "root": None if held is None else str(held.cache.root), "documents": 0, "bytes": 0,
+                 "written": self.written, "failures": list(self.failures), "idleSeconds": self.idle}
         if held is None:
             return found
         self.ensure_index()

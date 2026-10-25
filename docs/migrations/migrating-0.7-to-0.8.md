@@ -425,7 +425,9 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   geometry), and the home's Recents lists them, most recent first. 0.7's Recents are not
   read: they start empty after the upgrade.
 - **Documents reopen after a restart** from the engine's cache, as last built; the code
-  stays the source, and a document whose code changed since says so.
+  stays the source, and a document whose code changed since says so. The cache
+  (`documents/<uuid>/document.xbf` in the cache folder, `~/.cache/cadgen` by 0.7's rule)
+  keeps every document until you delete it: it has no size cap, and nothing evicts from it.
 - **A model lives in a `.py` file.** Its record points at the script (`pointer`).
   `@model(store="memory")` keeps a document in its worker's memory alone, unrecorded and
   out of Recents: for throwaway probes.
@@ -567,7 +569,7 @@ opt in.
 | Materials | `materials=` definitions and assignments | `part.material = ...` in the body |
 | Colours | linear floats, `srgb(...)` | sRGB hex or 0-255 integers |
 | Refs | `#o1.2.f7` | `<id>#path/to/part/f:function.feature.n` |
-| The cache | the store in `~/.cache/cadgen` | the warm worker's memory; nothing on disk |
+| The cache | the store in `~/.cache/cadgen` | the warm worker's memory, and each document as last built in `~/.cache/cadgen/documents`, kept until deleted |
 | The viewer | its own process, `?file=` links, page sessions | the engine's one page, `/<uuid>` |
 
 ## Troubleshooting a half-migrated project

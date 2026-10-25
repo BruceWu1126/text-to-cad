@@ -575,19 +575,16 @@ class Models:
         disk = self.cache.current(ident, record.get("revision"))
         return "memory and disk" if memory and disk else "memory" if memory else "disk" if disk else None
 
-    def on_disk(self, ident: str, revision: str | None) -> None:
-        """The cache file of document ``ident`` is at ``revision`` now (None: gone): held in memory at
-        that revision, it is read again from disk once evicted, in the budget's first tier."""
-        server = self.daemon.server
-        if server is None:
-            return
+    def leaving(self, ident: str, version: Any, data: bytes) -> None:
+        """Document ``ident``'s xbf bytes at generation ``version``, leaving the server's memory for
+        its budget (``serve.Server.trim``): kept by the cache when it does not hold that revision yet,
+        so the document is read again from there. Bytes of a generation the book no longer holds (a
+        build since made a newer one) are dropped: that build's save follows."""
         with self.lock:
             record = self.records.get(ident)
-            version = record["version"] if record is not None and revision and record.get("revision") == revision else None
-        if version is None:
-            server.on_disk.pop(ident, None)
-        else:
-            server.on_disk[ident] = version
+            revision = record["revision"] if record is not None and record["version"] == version else None
+        if revision is not None:
+            self.cache.keep(ident, revision, data)
 
     def adopt(self, ident: str) -> None:
         """A model document this process never built whose cache file is there (after a restart),
@@ -620,7 +617,6 @@ class Models:
             self.records[ident] = row
         if self.daemon.server is not None:
             self.register_page(ident)
-            self.on_disk(ident, row["revision"])
 
     def attach(self, server: Any) -> None:
         """The daemon's server, started after documents were taken up from the cache: each is
@@ -631,15 +627,6 @@ class Models:
             row = self.row(ident)
             if row is not None and self.cache.current(ident, row.get("revision")):
                 server.register_model(ident, row["source"]["name"], lambda ident=ident: self.load(ident), row["version"])
-                self.on_disk(ident, row["revision"])
-
-    def in_use(self) -> set[str]:
-        """The documents whose cache file the cache's bound never evicts: those a live worker holds,
-        and those a page watches."""
-        server = self.daemon.server
-        with self.lock:
-            live = {ident for ident, row in self.records.items() if self._working(row["worker"])}
-        return live | (server.watched() if server is not None else set())
 
     def held_bytes(self, ident: str, version: str) -> bytes | None:
         """The whole document's xbf bytes the server holds of document ``ident`` at ``version``, else None."""

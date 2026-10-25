@@ -681,6 +681,14 @@ def _port(serving: dict[str, Any]) -> str:
                    }.get(source, f"not the default {default}") + ")"
 
 
+def cache_text(root: Any, documents: Any, size: Any) -> str:
+    """The engine's document cache as ``cadgen status`` and ``cadgen doctor`` say it, after the word
+    ``cache``: its folder, and the documents and bytes it keeps, which stay until a person deletes
+    them (no cap)."""
+    return (f"{root}: {documents or 0} document{'' if documents == 1 else 's'} · {_bytes(size)}, "
+            "kept until deleted")
+
+
 def workers_text(answer: dict[str, Any]) -> str:
     """The workers against their count cap, as ``cadgen status`` (and ``cadgen doctor``) says them:
     the standby holds a slot of the cap, counted with the workers, never one of them."""
@@ -751,13 +759,10 @@ def status_text(answer: dict[str, Any]) -> str:
     cache = answer.get("cache") or {}
     if cache.get("enabled"):
         failures = cache.get("failures") or []
-        lines.append(f"cache {cache.get('root')}: {cache.get('documents', 0)} document"
-                     f"{'' if cache.get('documents') == 1 else 's'} · {_bytes(cache.get('bytes'))} of "
-                     f"{_bytes(cache.get('capBytes'))}"
-                     + (f" · {cache['evictions']} evicted" if cache.get("evictions") else "")
+        lines.append("cache " + cache_text(cache.get("root"), cache.get("documents"), cache.get("bytes"))
                      + (f" · last save failed: {failures[0]['error']}" if failures else ""))
     elif cache:
-        lines.append("cache off (CADGEN_ENGINE_CACHE_GB=0)" if not cache.get("capBytes") else "cache off: no cache folder")
+        lines.append("cache off: no cache folder")
     models = answer.get("models") or []
     if models:
         # Each model document, its state, and for one not held the command that builds it again.

@@ -135,8 +135,8 @@ class DeltaTest(unittest.TestCase):
         cls.addClassCleanup(shutil.rmtree, engine, True)
         cls.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(engine),
                                          "CADGEN_STATE_DIR": str(cls.folder / "state"),
-                                         "CADGEN_CACHE_DIR": str(cls.folder / "cache"),
-                                         "CADGEN_ENGINE_MESH": "inline", "CADGEN_ENGINE_CACHE_GB": "0"},
+                                         "CADGEN_CACHE_DIR": engine_daemon.unwritable(cls.folder),
+                                         "CADGEN_ENGINE_MESH": "inline"},
                                         cls.addClassCleanup)
         cls.addClassCleanup(cls.run_, "-m", "cadgen.engine", "stop")
 

@@ -471,7 +471,7 @@ only, and a file's id is derived again from its path after a restart.
 | `door.py` | how a client reaches the daemon on POSIX: the door, a named pipe, and a pair of pipes per connection (**The door**) |
 | `progress.py` | where a build is: the engine's stages heard where they begin, each body a model's body runs by name, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
-| `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads, staleness (`changes`) and the LRU bound (`Cache`) |
+| `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads, staleness (`changes`); kept until a person deletes it, with no cap (`Cache`) |
 | `registry.py` | the registry of documents in the user's state folder (`Registry`: `get`, `put`, `list`, `delete`), the user's page token (`token`, `put_token`), each installation's engine record (`engine`, `put_engine`: its rolled port), and the one owner of every write under that folder (`Folder`); where the folder is, the distribution's (`FACTORY`) |
 | `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `server` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
@@ -602,9 +602,9 @@ start one, a folder refused, its port held -- raises its `ConnectionError` or `E
 same way: left uncaught, its one line on stderr (`cadgen: <why>`, as a `cadgen` verb says it) and
 status 1, no traceback; caught, nothing said. Builds run in the daemon's warm workers, at most one per core alive
 (**The engine server and its workers**). `CADGEN_ENGINE_DIR` moves its door and lock; the client and the server resolve it alike (`daemon.state_dir`: a `..`, a symlink or a trailing slash names the same folder). On POSIX the folder must be the user's own and closed to writing by anyone else (`daemon.folder_refusal`): whoever owns or can write the folder could take the door's place, so a client refuses to connect or start there and the daemon refuses to lock there, saying why.
-`CADGEN_ENGINE_MEMORY_MB` sets the server's memory budget, and `CADGEN_ENGINE_CACHE_GB` the
-document cache's size (`0`: no cache; `CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, is the tests'
-seam) (**Document lifetime**).
+`CADGEN_ENGINE_MEMORY_MB` sets the server's memory budget (**Document lifetime**); the document
+cache has no size to set, keeping every document until a person deletes it
+(`CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, is the tests' seam).
 `CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_VIEWER_WARM=0` keeps `cadgen viewer`
 from warming the engine at its launch (**The viewer and the snapshot**). `CADGEN_ENGINE_MESH=processes|inline`
 picks how parts are meshed. The default, `processes`, uses a warm pool of
@@ -677,7 +677,7 @@ port, and retires it while nothing uses it (**A link outlives its engine**); whe
 temporary folder cleaned up, or another file put in the door's place -- so that no one can reach it
 (`Daemon.tend` sees it within a round, and it stops as `stop` does, saving what it holds to the
 cache); and with the machine. **No timer retires a worker either**: memory alone does. Idle
-documents are saved to the cache, past the memory budget what no page watches is evicted
+documents are saved to the cache, past the memory budget what no page watches leaves memory for it
 (**Document lifetime**), and past the workers' memory cap, or under the system's memory pressure,
 idle workers go (below). It holds a pool of warm workers, one per model script (and one for the
 documents no worker built), each a process whose memo lives as long as it does, and one standby. Its rules are a standard pool's, and nothing else: no admission guess, no refusal;
@@ -716,7 +716,7 @@ tessellations, is under one memory budget: **Document lifetime**.)
   `0` for no cap; `Pool.shed`). After each build and picture, and each `Daemon.tend` round, past
   it idle processes are retired, least recently used first within each rank: the standby, render
   processes, the workers no page watches, then the watched ones, only when no other is left; a
-  worker is drained to the held tier first. Under the system's memory pressure (the server's
+  worker is drained first, so its documents stay held. Under the system's memory pressure (the server's
   `serve.Pressure`, polled every two seconds), the standby goes at once, none starts while it lasts, and
   the rest go down to half the cap (`CADGEN_ENGINE_PRESSURE`: `0` never under it, `1` always, unset
   measured; a test's seam, `Pressure.from_environment`). A busy process is never retired, and an idle worker under the cap lives as long as the
@@ -785,7 +785,7 @@ engine server 98307, up 2h10m · workers 3/10 with the standby · held by 1 app 
   waiting  2 builds, first come first served
 retired: finger_01.py (LRU) 3m ago · qdd_actuator.py (pressure) 41m ago · tom.py (RSS) 2h ago
 serving http://127.0.0.1:52811: 3 documents · 2.1 GB of 16.0 GB held
-cache /Users/me/.cache/cadgen: 14 documents · 212.4 MB of 4.0 GB
+cache /Users/me/.cache/cadgen: 14 documents · 212.4 MB, kept until deleted
 documents:
   live      tom      8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12
   held      bracket  3e9b7c21-55aa-5f0e-8d11-6c2a9b4e7d30  memory and disk
@@ -803,8 +803,9 @@ the header gives against the cap (`--json`: `standby`, `rssMb`, `rssCapMb`). A r
 that shape the interpreter's import system: its worker is replaced in its slot) or `exited` (it died). The `documents:` lines are each model
 document, its state and, for one not held, the command that builds it again (**Document
 lifetime**), and a held one where it is held: in memory, on disk (the cache), or both. The
-`cache` line is the cache folder, the documents and bytes in it against its cap, the files evicted
-for room and the last save that failed. `--json` lists the documents as `models`, the cache as
+`cache` line is the cache folder, the documents and bytes in it -- no cap: they stay until a person
+deletes them -- and the last save that failed (`cadgen doctor` says the same line, counted from the
+folder, with no engine asked). `--json` lists the documents as `models`, the cache as
 `cache`, and `serving.documents` the files served, each `held` or `evicted`, with the bytes it holds. It
 also says its `version` (its release), its `installation` (the version it runs as) and what uses it -- `holders`, `watched` (the documents pages watch), `busy`
 (builds and draws running) and `active` (HTTP work underway) -- which another installation's engine
@@ -960,7 +961,7 @@ used), written through a `registry.Folder` with `replace_atomic`, its record sta
 folder. The bytes are the hold's (`document.to_bytes`: the document, its closure record and its
 compiled animations), the engine's own file always: a declared `@xbf` or an exported xbf is the
 author's, never used as the cache nor pointed at by it. The folder is shared with any 0.7 install's
-store: the engine's cache reads, writes, sizes and evicts only under `documents/` (its processes'
+store: the engine's cache reads, writes, sizes and removes only under `documents/` (its processes'
 bytecode is under `pycache/`), and lists, counts and removes nothing else there (`cadgen doctor
 --prune` removes 0.7's store once nothing has written it for seven days). It is written never on the run path:
 
@@ -978,9 +979,9 @@ Once per revision: the record gains `cache: {revision, bytes, read}`, and a docu
 whose revision is the cache's is never written again. A restart indexes the cache files (a listing
 and a stat, nothing read); a document with one is `held` and answers every verb -- page, export,
 snapshot, inspect, `cad_show` -- by reading its bytes through the documents worker, as a held
-document does; no worker of its script starts and nothing runs. Loaded, it sits in the memory
-budget's first tier. The record is authoritative: a cache file missing, or not the size its
-record says, is not cached.
+document does; no worker of its script starts and nothing runs. Loaded, it is under the memory
+budget like any document, and leaves memory for its file again when the budget needs the room. The
+record is authoritative: a cache file missing, or not the size its record says, is not cached.
 
 A run takes it too. A build is handed the cache's `documents/` folder, and a fresh worker -- after
 a restart, or once the script's worker retired -- asked for a `pointer` model that declares no file
@@ -1007,14 +1008,13 @@ failed; exporting its previous good build; fix it and run `cadgen run …/turbin
 goes on: a notice, never a refusal. `cadgen status` ends such a document's line with the word: stale
 and the command, or "serving its previous good build". A font is named by a family, not checked.
 
-**The bound.** Past `CADGEN_ENGINE_CACHE_GB` (default 4 GB; `0`: no cache at all), the least
-recently used cache files go down to 80 % of it, as 0.7's store did, never one a live worker holds
-or a page watches; the record stays, without `cache`. A shape handed over (`store: "shape"`) is a
-document like any: its file goes for the bound as a model's does, and its id then answers `evicted`,
-saying to run the program that handed it over again (nothing the engine runs makes it). Removing a
-detached document from the home
-removes its cache file with its record. A save that fails is logged and listed by `cadgen status`,
-never raised: with the cache folder read-only the engine behaves as with no cache.
+**Kept until deleted.** Nothing removes a cache file on its own: the cache has no size cap, no
+least recently used and no age, and keeps every model document -- a shape handed over's as a
+model's -- until a person deletes it, its record and its file together (**Delete**). The one other
+removal is a file whose bytes do not read: it goes, its record kept without `cache`, and the next
+build writes it again (`Models.unreadable`). A save that fails is logged and listed by `cadgen
+status`, never raised: with the cache folder read-only, or not writable at all, the engine saves
+nothing and does everything else as it would.
 
 **Drain.** Before the pool stops a worker -- the count cap's least recently used, replaced for
 another environment, retired for memory -- the daemon asks it
@@ -1035,18 +1035,14 @@ Bytes are counted as they are put, never sampled. Workers and render processes a
 their own, held together to the workers' memory cap (**The engine server and its workers**). The budget is `CADGEN_ENGINE_MEMORY_MB`, else a quarter
 of the machine's physical memory (`serve.memory_budget`: macOS `hw.memsize`, Linux
 `sysconf(SC_PHYS_PAGES)` or the cgroup's `memory.max` when that is less, Windows
-`GlobalMemoryStatusEx`). Past it, what is held is evicted down to 80 % of it (`Server.trim`):
-tessellations first, least recently used first (a tessellation is made again from its shape);
-then documents, in two tiers, least recently used first within each:
-
-1. documents the engine reads again itself: files on disk, and model documents whose cache file
-   is at the version held, read again under the same id on their next access (reading runs no
-   code);
-2. every other: model documents, `pointer`, `shape` and `memory` together.
-
-A document a page watches is never evicted, nor its tessellations (connected means warm), nor
-the document being served as it is put. The STEP reads held by their bytes go with the first
-document evicted.
+`GlobalMemoryStatusEx`). Past it, what is held is evicted from memory down to 80 % of it
+(`Server.trim`): tessellations first, least recently used first (a tessellation is made again from
+its shape); then documents, least recently used first, in one order: every document is read again
+from where it is kept, under the same id, on its next access, and reading runs no code -- a file
+from its file, a model's document from the cache, which is handed its bytes as it leaves when it
+does not hold them yet (`Server.leaving`, `Models.leaving`). A document a page watches is never
+evicted, nor its tessellations (connected means warm), nor the document being served as it is put.
+The STEP reads held by their bytes go with the first document evicted.
 
 **Pressure.** The daemon's server asks the operating system's memory-pressure signal every two
 seconds (`serve.Pressure`) and, under pressure, evicts in the same order down to the low-water
