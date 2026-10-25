@@ -515,5 +515,63 @@ class ClosureTest(unittest.TestCase):
             self.assertEqual(previous._libraries(), {"build123d": "1.0", "OCP": "7.9.3.1"})
 
 
+# A script whose module reads its environment as it is imported.
+ENVIRONED = """
+import os
+
+import build123d as bd
+from cadgen.engine import xbf
+
+WIDTH = float(os.environ.get("ENGINE_TEST_WIDTH", "10"))
+
+
+@xbf("XBF/strip.xbf")
+def strip():
+    return bd.Box(WIDTH, 4, 1)
+"""
+
+
+class LoadTest(unittest.TestCase):
+    """One run's calls of a script are served from one load of it (``build._Load``) only while
+    what the load read stands: its files, and the environment it ran in."""
+
+    def setUp(self) -> None:
+        from cadgen.engine.kernel import memo
+
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-load-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.script = self.folder / "strip.py"
+        self.script.write_text(textwrap.dedent(ENVIRONED), encoding="utf-8")
+        self.restart()
+        self.addCleanup(self.restart)
+        memo.install()
+
+    def restart(self) -> None:
+        from cadgen.engine.kernel import memo
+
+        memo.clear()
+        engine_build._WRITTEN.clear()
+        engine_build._PARTS.clear()
+        engine_build._BUILT.clear()
+        engine_build._LOAD.clear()
+
+    def strip(self, width: str) -> dict:
+        """One call of the run's: ``strip`` built with the environment saying ``width``."""
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"ENGINE_TEST_WIDTH": width}):
+            (report,) = engine_build.build(self.script, ["strip"], cwd=self.folder, run="one run")
+        self.assertTrue(report["ok"], report)
+        return report
+
+    def test_a_call_in_another_environment_loads_the_script_again(self) -> None:
+        self.assertEqual(self.strip("10")["facts"]["bounds"], [10.0, 4.0, 1.0])
+        self.assertEqual(self.strip("10")["cache"], {"used": True, "from": "memory"}, "taken: its load is kept")
+        # The program changed its environment between two calls: the import reads another width.
+        report = self.strip("20")
+        self.assertEqual(report["cache"]["changed"], ["../strip.py: WIDTH changed"])
+        self.assertEqual(report["facts"]["bounds"], [20.0, 4.0, 1.0])
+
+
 if __name__ == "__main__":
     unittest.main()

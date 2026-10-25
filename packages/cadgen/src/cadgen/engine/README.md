@@ -721,7 +721,9 @@ tessellations, is under one memory budget: **Document lifetime**.)
   no request has come for half a second, so a script's calls one after another never wait on
   it. A worker over its memory cap collects before it measures again.
 - **One load per run.** The calls one `python model.py` process makes of its script are served
-  from one load of it while every file the load read stands as it was, the load made no kernel
+  from one load of it while every file the load read stands as it was, the call comes in the
+  environment the load ran in (a run is its caller's environment, and a program that changes its
+  own between two calls changes what an import of its script reads), the load made no kernel
   call and every call since took its models from their keys. Anything else loads the script
   again: another run, an edit, a body that ran.
 

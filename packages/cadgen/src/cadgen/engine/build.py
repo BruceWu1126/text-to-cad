@@ -245,18 +245,21 @@ def load_script(script: Path) -> Any:
 # once: only a load that made no kernel call (its module holds no shape a run made), and only after
 # a build that ran nothing (each model taken from its key: no body ran, so the module is as its
 # import left it), while every file the load read -- each first-party module and its folder, and
-# each file or folder the import opened or listed -- stands as the load found it. Anything else
+# each file or folder the import opened or listed -- stands as the load found it, and the call comes
+# in the environment the load ran in (a run is its caller's environment, ``worker.adopt``: a program
+# that changes its own between two calls changes what an import of its script reads). Anything else
 # loads again, as every build did: a later run, an edit, a verification, a build that ran a body.
 
 
 @dataclass
 class _Load:
     """A script's load kept for its run's later calls: the module and the models it defined, the
-    first-party modules it imported, the stat of every file it read, and the build's key
-    resolution (``sources.Symbols``), made against that module."""
+    first-party modules it imported, the stat of every file it read, the environment it ran in, and
+    the build's key resolution (``sources.Symbols``), made against that module."""
 
     key: tuple
     stats: dict[str, tuple | None]
+    environment: dict[str, str]
     module: Any
     models: dict[str, Any]
     loaded: set[str]
@@ -320,12 +323,14 @@ def _made(run: Any) -> tuple:
 
 
 def _kept_load(key: tuple) -> _Load | None:
-    """The load kept for ``key``'s run, when every file it read stands as it found it; taken, so
-    a build that does not end as ``_keep_load`` keeps it leaves none kept."""
+    """The load kept for ``key``'s run, when every file it read stands as it found it and the
+    environment is the one it ran in; taken, so a build that does not end as ``_keep_load`` keeps
+    it leaves none kept."""
     if not _LOAD:
         return None
     kept = _LOAD.pop()
-    if kept.key != key or any(_stat(Path(path)) != stat for path, stat in kept.stats.items()):
+    if (kept.key != key or kept.environment != dict(os.environ)
+            or any(_stat(Path(path)) != stat for path, stat in kept.stats.items())):
         return None
     return kept
 
@@ -426,6 +431,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
         else:
             _LOAD.clear()  # this load replaces the modules any kept one held
             made, began, heard = _made(run), time.time_ns(), []
+            environment = dict(os.environ)  # the one the load runs in, before its import changes any
             if run_token and not verify:
                 _hear()
                 _HEARD[0] = heard
@@ -443,7 +449,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
                 sources = [stats.get(getattr(sys.modules.get(name), "__file__", None) or "") for name in context.loaded]
                 # A module edited while it loaded: the load may hold either version, so it is not kept.
                 if all(stat is None or stat[0] < began for stat in sources):
-                    fresh = _Load(load_key, stats, module, dict(_MODELS), context.loaded)
+                    fresh = _Load(load_key, stats, environment, module, dict(_MODELS), context.loaded)
         loaded = time.perf_counter()
         context.base = script.parent
         context.script = script
