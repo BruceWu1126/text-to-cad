@@ -9,6 +9,7 @@ import react from '@vitejs/plugin-react';
 import { buildId } from '@text-to-cad/ui/build-id';
 import { stampDebugId } from '@text-to-cad/core/chunk-ids';
 import { packageSourceMaps } from '@text-to-cad/core/source-maps';
+import { thirdPartyLicenses } from '@text-to-cad/core/third-party-licenses';
 
 // An MCP App is one HTML resource with no asset directory behind it: the host renders it in a
 // sandboxed frame whose only other origins are data: and blob:. So everything the page needs --
@@ -173,13 +174,17 @@ function inlineDocument() {
 const appRoot = fileURLToPath(new URL('.', import.meta.url));
 const { version } = JSON.parse(fs.readFileSync(new URL('package.json', import.meta.url), 'utf8'));
 
+// The third-party notice beside index.html, of every package the page and its workers inline: the
+// runtime bundler ships it with the page (@text-to-cad/core/third-party-licenses).
+const licenses = thirdPartyLicenses();
+
 export default defineConfig({
   define: { __TEXT_TO_CAD_BUILD__: JSON.stringify(buildId({ version, cwd: appRoot })) },
-  plugins: [packageSourceMaps(['@text-to-cad/core', '@text-to-cad/ui']), inlineWorkers(), react(), inlineDocument()],
+  plugins: [packageSourceMaps(['@text-to-cad/core', '@text-to-cad/ui']), inlineWorkers(), react(), inlineDocument(), licenses.plugin()],
   resolve: { dedupe: ['react', 'react-dom', 'three', 'lucide-react'] },
   build: {
     assetsInlineLimit: Infinity, cssCodeSplit: false, modulePreload: false,
     sourcemap: 'hidden', rolldownOptions: { output: { sourcemapDebugIds: true } },
   },
-  worker: { format: 'es', rolldownOptions: { output: { codeSplitting: false } } },
+  worker: { format: 'es', plugins: licenses.worker, rolldownOptions: { output: { codeSplitting: false } } },
 });

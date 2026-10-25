@@ -313,7 +313,9 @@ jobs:
           echo "$listing" | grep -E 'cadgen/_runtime/' || true
           for required in \
             cadgen/_runtime/viewer/index.html \
-            cadgen/_runtime/mcp/index.html; do
+            cadgen/_runtime/viewer/THIRD_PARTY_LICENSES.txt \
+            cadgen/_runtime/mcp/index.html \
+            cadgen/_runtime/mcp/THIRD_PARTY_LICENSES.txt; do
             if ! printf '%s\n' "$listing" | grep -qF " $required"; then
               echo "$(basename "$wheel") does not contain $required" >&2
               echo "scripts/bundle/bundle.sh produces it; [tool.setuptools.package-data] ships it." >&2

@@ -75,11 +75,14 @@ REQUIRED=(
   "cadgen/engine/page/viewer.js"
   "cadgen/engine/render/studio.hdr"
   "cadgen/_runtime/viewer/index.html"
+  # Each page's third-party notice, written by its build: the wheel redistributes what they inline.
+  "cadgen/_runtime/viewer/THIRD_PARTY_LICENSES.txt"
   # CAD in an agent host: the server `cadgen mcp` runs and the one page it serves.
   "cadgen/cli/mcp.py"
   "cadgen/mcp/server.py"
   "cadgen/mcp/tunnel.py"
   "cadgen/_runtime/mcp/index.html"
+  "cadgen/_runtime/mcp/THIRD_PARTY_LICENSES.txt"
 )
 
 echo "Building cadgen wheel for content check..."

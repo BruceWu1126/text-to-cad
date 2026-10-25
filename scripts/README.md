@@ -29,7 +29,8 @@ where those files ship, so these scripts are what produces them.
 - `cadgen-runtime.sh` — builds the two runtime stages: `--viewer` (vite build of
   `apps/web`) and `--mcp` (vite build of `apps/mcp`, one `index.html`).
   `--print-outputs` lists the directories a bundle always produces; `--check`
-  builds both and asserts each stage's `index.html`. Called by `bundle.sh` and
+  builds both and asserts each stage's `index.html` and the `THIRD_PARTY_LICENSES.txt` its
+  build writes (`@text-to-cad/core/third-party-licenses`). Called by `bundle.sh` and
   `check-builds.sh`; pinned by `test_js_runtime_reproducibility.py`. Call it
   directly only to debug one stage.
 - `lib/snapshot_runtime.sh [OUT_DIR]` — the OCCT parity bench's snapshot page,
@@ -118,8 +119,8 @@ where those files ship, so these scripts are what produces them.
   lockfile and `pyproject.toml` metadata, the cadgen pins and the skills' `cadgen +VERSION`) from
   `VERSION`. Called by `bump-version.sh`, `bundle.sh`, `test.yml` (Version Check), `release-publish.yml`.
 - `check-wheel-contents.sh` — builds the wheel and asserts the Python modules,
-  the engine's page, environment image and README, and `_runtime/{viewer,mcp}`
-  are inside it, the runtime with bytes identical to the bundled source, and that
+  the engine's page, environment image and README, and `_runtime/{viewer,mcp}` with each
+  one's third-party notice are inside it, the runtime with bytes identical to the bundled source, and that
   no engine test golden is. The only gate on package data, which fails quietly. Called by
   `test.yml` and `release-publish.yml`.
 - `plugin_zip.py --out PATH | --check` — builds the plugin ZIP OpenAI's plugin

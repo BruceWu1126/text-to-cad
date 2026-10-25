@@ -191,7 +191,10 @@ at most. A page's build stamps each chunk with the id its text and its source ma
 which names the code alone: PostHog keeps one map an id. That map leads into the shared
 packages' `src/`, not their `dist/`: the build loads their modules with the maps their own
 builds wrote (`@text-to-cad/core/source-maps`), and fails if a chunk's map still ends in
-compiled code. `dispose()` stops polling, aborts
+compiled code. Each page's build also writes `THIRD_PARTY_LICENSES.txt` beside it
+(`@text-to-cad/core/third-party-licenses`): every `node_modules` package its chunks and its
+workers' chunks hold, by name, version and declared licence, with the licence text the package
+ships, and a build fails on a bundled package that declares no licence. `dispose()` stops polling, aborts
 requests and disposes render sessions. Each render session owns its abort signal and
 worker leases. A body longer than a host's transport carries in one reply is the
 transport's to carry in parts, and the client sees it whole. Request

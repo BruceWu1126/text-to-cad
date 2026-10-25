@@ -608,7 +608,8 @@ scripts/bundle/bundle.sh --check
 
 `--clean` removes old runtime outputs before building. `--check` builds and
 asserts the required outputs (the Viewer client's and the CAD app's
-`index.html`); wheel validation checks the complete packaged runtime too. Per-stage `cadgen-runtime.sh` flags are for
+`index.html`, and the `THIRD_PARTY_LICENSES.txt` each build writes beside its page of the
+packages it inlines); wheel validation checks the complete packaged runtime too. Per-stage `cadgen-runtime.sh` flags are for
 debugging; normal iteration goes through `bundle.sh`.
 
 ## Branch Layout

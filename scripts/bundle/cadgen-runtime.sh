@@ -37,9 +37,11 @@ MCP_APP_DIR="$REPO_ROOT/apps/mcp"
 VIEWER_PACKAGE_MANAGER="${CAD_VIEWER_PACKAGE_MANAGER:-}"
 
 # What each stage owes, checked after a --check build. A stage that emits nothing is the
-# failure this catches before a wheel carries the hole to a user.
-VIEWER_OUTPUTS=(index.html)
-MCP_OUTPUTS=(index.html)
+# failure this catches before a wheel carries the hole to a user. Each page ships beside it the
+# third-party notice its build wrote of the packages it inlines (THIRD_PARTY_LICENSES.txt,
+# @text-to-cad/core/third-party-licenses): shipping them in a wheel is redistribution.
+VIEWER_OUTPUTS=(index.html THIRD_PARTY_LICENSES.txt)
+MCP_OUTPUTS=(index.html THIRD_PARTY_LICENSES.txt)
 
 MODE="write"
 CLEAN=0
@@ -164,7 +166,7 @@ build_viewer_client() {
 
 # --- the CAD app an agent host renders ------------------------------------------------
 # One self-contained index.html (its vite build inlines scripts, styles, workers and
-# fonts), so the stage owes exactly that file.
+# fonts), so the stage owes that file and the notice beside it.
 build_mcp_app() {
   local target="$1" package_manager
   require_command node
@@ -186,6 +188,7 @@ build_mcp_app() {
   rm -rf "$target"
   mkdir -p "$target"
   cp "$MCP_APP_DIR/dist/index.html" "$target/index.html"
+  cp "$MCP_APP_DIR/dist/THIRD_PARTY_LICENSES.txt" "$target/THIRD_PARTY_LICENSES.txt"
 }
 
 build_stage_packages() {
