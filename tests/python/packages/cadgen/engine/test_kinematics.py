@@ -7,6 +7,7 @@ build; a document served at a pose; the mechanism subtree AP242's names and noth
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import json
 import math
@@ -861,38 +862,73 @@ def _cut_record(data: bytes) -> tuple[bytes, int, bytes]:
     return data[:at], length, data[at + length:].lstrip(b"\x00")
 
 
-_NEGATIVE_ZERO = b"\x00" * 7 + b"\x80"  # -0.0, an IEEE double little-endian
+def _close(new: Any, old: Any, where: str = "document") -> None:
+    """``new`` is ``old`` to a rounding: every float within 1e-9 of it, everything else equal. A
+    platform's arithmetic leaves its own last bits in a computed frame: the golden, written on macOS
+    arm64, holds 1e-15 in three pairs' link frames where Linux and Windows write 0.0 (the same bytes
+    on both), and some zeros as -0.0. On macOS the renamed functions write the golden's bytes exactly."""
+    if dataclasses.is_dataclass(new) and not isinstance(new, type):
+        new, old = dataclasses.asdict(new), dataclasses.asdict(old)
+    if isinstance(new, np.ndarray):
+        new, old = new.tolist(), np.asarray(old).tolist()
+    if isinstance(new, dict):
+        assert isinstance(old, dict) and set(new) == set(old), f"{where}: keys {sorted(new)} != {sorted(old)}"
+        for key in new:
+            _close(new[key], old[key], f"{where}.{key}")
+    elif isinstance(new, (list, tuple)):
+        assert isinstance(old, (list, tuple)) and len(new) == len(old), f"{where}: {new!r} != {old!r}"
+        for at, (a, b) in enumerate(zip(new, old)):
+            _close(a, b, f"{where}[{at}]")
+    elif isinstance(new, float) and isinstance(old, (int, float)) and not isinstance(old, bool):
+        assert math.isclose(new, old, rel_tol=1e-12, abs_tol=1e-9), f"{where}: {new!r} != {old!r}"
+    else:
+        assert new == old, f"{where}: {new!r} != {old!r}"
 
 
-def _signless(data: bytes) -> bytes:
-    """``data`` with each -0.0 double written as 0.0. The golden was written on macOS arm64, whose
-    OCCT writes some of the placements' matrix zeros as -0.0 where Linux's and Windows' write 0.0:
-    one transform either way, and no part of what a name changes."""
-    return data.replace(_NEGATIVE_ZERO, bytes(8))
+def _topology(shape: Any) -> dict[str, Any]:
+    """A part's shape as the document holds it: how many of each sub-shape, and its vertices."""
+    from OCP.BRep import BRep_Tool
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID, TopAbs_VERTEX
+    from OCP.TopExp import TopExp
+    from OCP.TopoDS import TopoDS
+    from OCP.TopTools import TopTools_IndexedMapOfShape
 
-
-def _differences(new: bytes, old: bytes) -> str:
-    """Where two bodies of one length differ, by the 8-byte word each difference is in."""
-    words = sorted({at // 8 for at, (a, b) in enumerate(zip(new, old)) if a != b})
-    return ", ".join(f"{8 * word}: {new[8 * word:8 * word + 8].hex()} != {old[8 * word:8 * word + 8].hex()}"
-                     for word in words[:12]) + (f" ... {len(words)} words" if len(words) > 12 else "")
+    found: dict[str, Any] = {}
+    for name, kind in (("solids", TopAbs_SOLID), ("shells", TopAbs_SHELL), ("faces", TopAbs_FACE),
+                       ("edges", TopAbs_EDGE), ("vertices", TopAbs_VERTEX)):
+        mapped = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(shape, kind, mapped)
+        found[name] = mapped.Extent()
+        if kind == TopAbs_VERTEX:
+            points = [BRep_Tool.Pnt_s(TopoDS.Vertex_s(mapped.FindKey(at))) for at in range(1, mapped.Extent() + 1)]
+            found["points"] = [[point.X(), point.Y(), point.Z()] for point in points]  # in the file's order
+    return found
 
 
 class AuthoringNamesTest(_Folder):
     def test_the_document_is_the_one_the_old_names_wrote_but_for_its_provenance(self) -> None:
-        # The functions' names are no part of the document: renamed, every byte but the
-        # provenance record's (and the length and the two section offsets its size moves) is
-        # what the old names wrote.
+        # The functions' names are no part of the document: renamed, it is what the old names
+        # wrote -- every name, part, placement and the whole mechanism, read back -- and its header
+        # moves only where its provenance record's size does. Its bytes past the record are the
+        # golden's on the platform that wrote it (macOS) alone: a frame the mechanism computes keeps
+        # that platform's last bits (``_close``), so the documents are compared read, not as bytes.
         self.build("mechanism", NAMED)
-        new_head, new_length, new_body = _cut_record((self.folder / "XBF/mechanism.xbf").read_bytes())
+        written = self.folder / "XBF/mechanism.xbf"
+        new_head, new_length, new_body = _cut_record(written.read_bytes())
         old_head, old_length, old_body = _cut_record(NAMED_GOLDEN.read_bytes())
+        self.assertEqual(len(new_body), len(old_body))
+        new, old = document.Loaded(written), document.Loaded(NAMED_GOLDEN)
+        _close({key: value for key, value in new.structure().items() if key not in ("path", "version")},
+               {key: value for key, value in old.structure().items() if key not in ("path", "version")})
+        self.assertIsNotNone(new.mechanism)
+        _close(new.mechanism, old.mechanism, "mechanism")
+        self.assertEqual(len(new.prototypes), len(old.prototypes))
+        for made, golden in zip(new.prototypes, old.prototypes):
+            _close(_topology(made.shape), _topology(golden.shape), f"part {made.name}")
         # The golden's writer names the format it was written in; a format bump since moves that name alone.
         from cadgen.engine.previous import FORMAT
 
         old_head = old_head.replace(b"cadgen.engine xbf/5 ", f"cadgen.engine {FORMAT} ".encode())
-        self.assertEqual(len(new_body), len(old_body))
-        self.assertEqual(_signless(new_body), _signless(old_body),
-                         _differences(_signless(new_body), _signless(old_body)))
         self.assertEqual(len(new_head), len(old_head))
         # The header's words end where the record starts (its length is the last of them).
         moved = sorted({len(new_head) - 4 * -(-(len(new_head) - at) // 4)
