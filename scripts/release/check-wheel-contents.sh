@@ -133,6 +133,17 @@ fi
 # count too: it distinguishes "one file moved" from "package-data is not matching".
 runtime_count="$(grep -c '^cadgen/_runtime/' "$listing" || true)"
 
+# The runtime is exactly the stages the bundler builds: an entry beside them (a folder a retired
+# stage left in a checkout, which package-data ships whole) is a file the wheel carries that
+# nothing builds, and the byte comparison below would pass it, since it is in the source too.
+expected_runtime="$("$REPO_ROOT/scripts/bundle/cadgen-runtime.sh" --print-outputs | sed 's|.*/||' | sort -u)"
+shipped_runtime="$(sed -n 's|^cadgen/_runtime/\([^/]*\).*|\1|p' "$listing" | sort -u)"
+if [ "$shipped_runtime" != "$expected_runtime" ]; then
+  echo "The cadgen wheel's cadgen/_runtime holds $(echo $shipped_runtime); the bundler builds $(echo $expected_runtime)." >&2
+  echo "Rebuild it with scripts/bundle/bundle.sh, which removes what no stage builds." >&2
+  exit 1
+fi
+
 if [ -n "$missing" ]; then
   echo "" >&2
   echo "The cadgen wheel is missing required runtime assets:" >&2
