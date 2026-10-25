@@ -217,7 +217,9 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
 def _delta(found: dict[str, Any] | None) -> str:
     """The line under the run line: the model's parts, bounds, joints, configuration sequences and
     warnings, each with what it was where the build before it held another (``delta.delta``,
-    the engine's); warnings only where there are or were some. Nothing without one."""
+    the engine's); warnings only where there are or were some; then how many parts' geometry
+    changed (``changed N``), or ``materials changed`` when only colours or materials did, so an
+    edit that keeps the bounds is still seen. Nothing without one."""
     if not found:
         return ""
     times, dot = " × ", " · "
@@ -242,6 +244,11 @@ def _delta(found: dict[str, Any] | None) -> str:
         else:
             text = f"{name} {now}" + (f" ({now - (row['was'] or 0):+d})" if changed else "")
         said.append(text)
+    changed = found.get("changed") or {}
+    if changed.get("parts"):
+        said.append(f"changed {changed['parts']}")
+    elif changed.get("looks"):
+        said.append("materials changed")
     return "\n  " + dot.join(said)
 
 
