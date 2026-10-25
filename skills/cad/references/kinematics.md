@@ -42,7 +42,8 @@ bakes each configuration sequence into an animation clip of its name.
 ## Joints place parts and make the mechanism
 
 Build each part where it stands, give the parent the moving joint on an `Axis`, and give
-the child a `RigidJoint` on the plane of that same axis. Connected at 0, the child stays
+the child a `RigidJoint` on the plane of that same axis, or, for a `LinearJoint`, at the
+axis's position with no rotation (below). Connected at 0, the child stays
 where it was built; connected at another value, it moves there, and that value is as
 built. A joint's `Axis` and a `RigidJoint`'s location are in world coordinates, not the
 part's own frame: an axis written in the part's frame is `axis.located(part.location)`, and
@@ -75,6 +76,39 @@ def hinge():
 
 if __name__ == "__main__":
     hinge()
+```
+
+A slide places its child by position alone. build123d's `LinearJoint` turns the child by
+nothing but the inverse of the child's `RigidJoint` orientation, so that joint is
+`bd.Location(slide.position)`, the slide's position with no rotation; one on the plane of a
+slide along +Y would stand the child on end:
+
+```python
+# src/linear_guide.py
+import build123d as bd
+from cadgen import model
+from cadgen.ap242 import configuration_sequence, mechanism_state
+
+SLIDE = ((0, -50, 10), (0, 1, 0))   # the slide's origin and direction: +position runs the carriage along +Y
+
+
+@model
+def linear_guide():
+    rail = bd.Box(30, 140, 10, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    carriage = bd.Pos(0, -50, 10) * bd.Box(40, 30, 15, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    rail.label, carriage.label = "rail", "carriage"
+    slide = bd.Axis(*SLIDE)
+    bd.LinearJoint("slide", rail, axis=slide, linear_range=(0, 100))
+    bd.RigidJoint("slide", carriage, bd.Location(slide.position))   # the slide's position, no rotation
+    rail.joints["slide"].connect_to(carriage.joints["slide"], position=20)   # as built: slide 20
+    assembly = bd.Compound(children=[rail, carriage], label="linear_guide")
+    mechanism_state(assembly, "home", slide=0)
+    mechanism_state(assembly, "end", slide=100)
+    return configuration_sequence(assembly, "stroke", [(0, "home"), (2, "end"), (4, "home")])
+
+
+if __name__ == "__main__":
+    linear_guide()
 ```
 
 - **`connect_to` on the joint that stays**:
