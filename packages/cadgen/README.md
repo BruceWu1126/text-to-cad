@@ -324,7 +324,8 @@ src/cadgen/
                          #   `import build123d`
   _internal/             # the launch command and the launchers it publishes (launchers:
                          #   ~/.local/bin/cadgen-<version>, cadgen-python-<version>, what
-                         #   the skills run), the font guard, the kernel-import recorder,
+                         #   the skills run; written as `cadgen mcp` starts and by `cadgen
+                         #   doctor`, never by another command), the font guard, the kernel-import recorder,
                          #   the lazy kernel (lazy_kernel: `import build123d` binds, the
                          #   kernel loads on first use; cadgen-lazy-kernel.pth, at the root
                          #   of site-packages, installs it at interpreter start),

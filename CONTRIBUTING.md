@@ -117,8 +117,9 @@ reported number drift further from the code than it has to.
 
 Skills run cadgen by the launchers `~/.local/bin/cadgen-<VERSION>` and
 `cadgen-python-<VERSION>`, which the RELEASE's installation (`uvx ... --from
-cadgen==<VERSION>`, from PyPI) publishes; a checkout's editable cadgen publishes none
-of its own. To run your working copy, use the checkout's
+cadgen==<VERSION>`, from PyPI) publishes as its CAD app server (`cadgen mcp`) starts
+or `cadgen doctor` runs, and at no other command; a checkout's editable cadgen
+publishes none of its own. To run your working copy, use the checkout's
 `.venv` (`requirements-dev.txt`), or `scripts/install/dev_install.py`, which points a
 dev install's server and skills at it (see [Test In Agent Apps](#test-in-agent-apps)).
 
