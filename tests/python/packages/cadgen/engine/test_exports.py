@@ -380,6 +380,44 @@ class BuildFilesTest(unittest.TestCase):
         [report] = engine_build.build(script, ["board"], cwd=self.folder)
         self.assertEqual([Path(path).name for path, row in report["files"].items() if row["written"]], ["board.stl"])
 
+    @unittest.skipIf(os.name == "nt", "a folder's mode 0555 does not make it read-only on Windows")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root writes into a read-only folder")
+    def test_a_read_only_folder_takes_its_unchanged_files_and_refuses_a_change_in_one_line(self) -> None:
+        text = """
+            import build123d as bd
+            from cadgen.engine import step, xbf
+
+
+            @xbf("out/plate.xbf")
+            @step("out/plate.step")
+            def plate():
+                return bd.Box(4, 5, {height})
+        """
+        script = self.write("plate.py", text.format(height=6))
+        [report] = engine_build.build(script, ["plate"], cwd=self.folder)
+        self.assertTrue(report["ok"], report)
+        out = self.folder / "out"
+        stats = {path: path.stat().st_mtime_ns for path in out.iterdir()}
+        out.chmod(0o555)
+        self.addCleanup(out.chmod, 0o755)
+        engine_build._WRITTEN.clear()  # a fresh process: the files are compared, not remembered
+        engine_build._PARTS.clear()
+        [report] = engine_build.build(script, ["plate"], cwd=self.folder)
+        self.assertTrue(report["ok"], report)
+        self.assertFalse(any(row["written"] for row in report["files"].values()), report["files"])
+        source = engine_build.held(script, "plate")  # what ``cadgen export`` translates
+        self.assertEqual(translate(source, None, out / "plate.step"), (out / "plate.step").stat().st_size)
+        self.assertEqual({path: path.stat().st_mtime_ns for path in out.iterdir()}, stats)
+        refusal = f"its folder {out} is read-only (mode 0555)"
+        with self.assertRaises(PermissionError) as raised:
+            translate(source, None, out / "plate.glb")
+        self.assertEqual(str(raised.exception), f"plate.glb is new and cannot be written: {refusal}")
+        self.write("plate.py", text.format(height=7))
+        [report] = engine_build.build(script, ["plate"], cwd=self.folder)
+        self.assertFalse(report["ok"])
+        self.assertIn(f"plate.xbf changed and cannot be written: {refusal}", report["error"])
+        self.assertEqual({path: path.stat().st_mtime_ns for path in out.iterdir()}, stats)
+
     def test_a_derived_decorator_alone_writes_its_one_file(self) -> None:
         script = self.write("solo.py", """
             import build123d as bd

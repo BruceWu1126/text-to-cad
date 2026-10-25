@@ -1353,7 +1353,10 @@ The xbf is the model's result; STEP, GLB, STL, 3MF and DXF are exports of a docu
 xbf can be one too. One writer, `export.translate(document, kind, path)`,
 writes every one, whether a decorator declares the file or `cadgen export` asks for it: the
 same document writes the same bytes. The file holds what the code built (law 22). Every file is written beside its
-target and moved over it; a DXF only when its bytes change.
+target and moved over it, and only when its bytes change (`atomic_replace.put`): a target that
+holds them already is left as it is (`cadgen export` says `unchanged`). In a folder that takes no
+new file (read-only), the bytes are made aside and compared, so an unchanged file passes, and a
+changed or new one fails in one line naming the folder and its mode.
 
 - **Sources are documents**: an `.xbf` or a `.step` (read into a document first), or a
   document's id (written from what the engine holds of it -- its worker's document, or the whole

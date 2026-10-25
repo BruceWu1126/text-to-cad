@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from cadgen.engine.atomic_replace import replace_atomic, staging
+from cadgen.engine.atomic_replace import put
 
 __all__ = ["KINDS", "ExportRefused", "Kind", "Source", "View", "kind_of", "refused", "translate"]
 
@@ -357,8 +357,5 @@ def translate(document: Any, kind: str | None, path: Any) -> int:
     if not spec.atomic:
         spec.write(view, path)
         return path.stat().st_size
-    with staging(path) as temporary:
-        spec.write(view, temporary)
-        size = temporary.stat().st_size
-        replace_atomic(temporary, path)
+    _written, size = put(path, lambda temporary: spec.write(view, temporary))
     return size

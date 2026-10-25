@@ -432,14 +432,16 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         progress = current()
         if progress is not None:
             progress.stage("write", detail=target.name)
+        before = _stat(target)
         if request.get("original"):
             from cadgen.engine.export.viewer import original
             size = original(source, target, request["expected"])
         else:
             size = export.translate(source, None, target)
         seconds = time.perf_counter() - clock
+        # A file that held these bytes already is left as it was (``atomic_replace.put``): unchanged.
         files.append({"path": str(target), "kind": export.kind_of(target), "bytes": size,
-                      "seconds": round(seconds, 4)})
+                      "seconds": round(seconds, 4), "written": before is None or _stat(target) != before})
     drawn = None
     if request.get("draw"):
         from cadgen.engine import snapshot
@@ -458,6 +460,14 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         drawn = _occt(source.path or out.with_suffix(".xbf"), out, Still.from_json(options["still"]),
                       False, source, time.perf_counter())
     return {"reports": built, "files": files, "drawn": drawn}
+
+
+def _stat(path: Path) -> tuple[int, int, int] | None:
+    try:
+        found = path.stat()
+    except OSError:
+        return None
+    return found.st_ino, found.st_size, found.st_mtime_ns
 
 
 def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:

@@ -85,12 +85,14 @@ class Report:
 
 @dataclass
 class Written:
-    """One file an export wrote."""
+    """One file an export wrote, or found holding its bytes already and left as it was
+    (``written`` False)."""
 
     path: Path
     kind: str
     bytes: int
     seconds: float
+    written: bool = True
 
 
 @dataclass
@@ -471,7 +473,8 @@ def export(source: Any, *destinations: Any,
     shown = log or (lambda _text: None)
     order = {"op": "export", "source": spec, "destinations": [str(path) for path in resolved], "cwd": cwd}
     done = _exported(order, spec, shown, daemon, progress)
-    return [Written(Path(row["path"]), row["kind"], row["bytes"], row["seconds"]) for row in done["files"]]
+    return [Written(Path(row["path"]), row["kind"], row["bytes"], row["seconds"], row.get("written", True))
+            for row in done["files"]]
 
 
 def _called(source: Any, daemon: bool) -> Any:
