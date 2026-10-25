@@ -22,7 +22,7 @@ from cadgen._internal.picker import FilePicker
 from cadgen.mcp.shim import initialize_params
 from cadgen.mcp.protocol import RequestContext, RpcError
 from cadgen.viewer.recents import RecentStore
-from cadgen.mcp.server import _AGENT_TOOLS, Server, local_path
+from cadgen.mcp.server import _AGENT_TOOLS, FOLLOWS, Server, local_path
 from cadgen.mcp.operations import START, STARTS, check_arguments
 from cadgen.mcp.tunnel import MAX_REPLY_BYTES
 from cadgen.mcp.ui import AppPage
@@ -1053,6 +1053,22 @@ class ToolArgumentsTest(unittest.TestCase):
                                                             "source": str(self.model), "output": out, "waitMs": 10000})
             self.assertEqual(failed["structuredContent"]["state"], "failed")
             self.assertEqual(failed["structuredContent"]["result"], {"outputsMayHaveBeenWritten": may}, error)
+
+    def test_the_text_catalog_says_the_model_opens_in_the_browser_and_never_in_the_chat(self) -> None:
+        server = self.served("text")
+        instructions = server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {},
+                                                                      "clientInfo": TEXT_CLIENT}, None), None)["instructions"]
+        tools = server.handle("tools/list", {}, None)["tools"]
+        said = [instructions] + [tool["description"] for tool in tools] + [
+            schema.get("description", "") for tool in tools for schema in tool["inputSchema"]["properties"].values()]
+        for words in said:
+            for wrong in ("chat", "card", "viewer tab"):
+                self.assertNotIn(wrong, words.lower())
+        cad_show = next(tool for tool in tools if tool["name"] == "cad_show")
+        for words in (instructions, cad_show["description"]):
+            self.assertIn("in the user's browser", words)
+            self.assertIn(FOLLOWS, words)
+
 
 class LocalPathTest(unittest.TestCase):
     def test_windows_reads_a_drive_path_however_a_host_spells_it(self) -> None:
