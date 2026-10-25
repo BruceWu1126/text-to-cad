@@ -1086,6 +1086,22 @@ class ToolArgumentsTest(unittest.TestCase):
             self.assertEqual(failed["structuredContent"]["state"], "failed")
             self.assertEqual(failed["structuredContent"]["result"], {"outputsMayHaveBeenWritten": may}, error)
 
+    def test_a_pose_the_engine_refuses_wrote_nothing_and_is_said_in_the_tool_s_arguments(self) -> None:
+        from cadgen.engine.snapshot import SnapshotRefused
+
+        server = self.served("text")
+        # As the engine's renderer refuses it (``render/service.py``), raised here as its own type (``api._failed``).
+        refusal = SnapshotRefused("--pose: the document has no mechanism state 'spin'; its states: parked; its "
+                                  "joints: hinge: pose one by value, --pose '{\"hinge\": 90}'")
+        refusal._engine_refusal = True
+        with mock.patch("cadgen.engine.api.snapshot", side_effect=refusal):
+            failed = self.call(server, "cad_snapshot", {"requestId": "snapshot-bad-pose-01", "source": str(self.model),
+                                                        "output": str(self.tmp / "a.png"), "pose": "spin",
+                                                        "waitMs": 10000})["structuredContent"]
+        self.assertEqual((failed["state"], failed["result"]), ("failed", {"outputsMayHaveBeenWritten": False}))
+        self.assertEqual(failed["error"], "pose: the document has no mechanism state 'spin'; its states: parked; its "
+                                          "joints: hinge: pose one by value, pose {\"hinge\": 90}")
+
     def test_an_export_of_a_script_says_to_run_it_and_export_its_document_by_id(self) -> None:
         server = self.served("text")
         script = self.tmp / "l_bracket.py"

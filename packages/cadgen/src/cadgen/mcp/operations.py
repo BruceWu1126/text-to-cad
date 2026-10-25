@@ -170,6 +170,18 @@ def checked(value, schema, label="arguments"):
             checked(item, schema["items"], label + "[]")
 
 
+# The snapshot's words name its command's flags (``--pose '{"hinge": 90}'``); a cad_snapshot's caller
+# gave arguments: the same words with each flag named as the argument it is.
+_FLAG_VALUE = re.compile(r"--(pose|display|camera) '([^']*)'")
+_FLAG = re.compile(r"--(pose|display|camera|annotation|measurements|width|height|grid|preview|size-profile)\b")
+
+
+def arguments_named(text):
+    """A snapshot's refusal in the words of cad_snapshot's arguments, not the command's flags."""
+    text = _FLAG_VALUE.sub(lambda found: f"{found[1]} {found[2]}", text)
+    return _FLAG.sub(lambda found: found[1].replace("-", "_"), text)
+
+
 def absolute(value):
     if not isinstance(value, str) or not Path(value).is_absolute():
         raise JobError("Paths must be absolute on the engine host")
@@ -286,6 +298,8 @@ class Operations(Jobs):
 
     def public(self, job):
         result = super().public(job)
+        if job.get("operation") == "cad_snapshot" and isinstance(result.get("error"), str):
+            result["error"] = arguments_named(result["error"])
         if len(json.dumps(result).encode()) <= REPORT_BYTES:
             return result
         # MCP transports have bounded messages. Never silently omit a long report.
@@ -297,14 +311,19 @@ class Operations(Jobs):
 
     def _failure(self, job, error):
         """Whether a failed operation may have written: only once its export or snapshot was asked
-        for (``_perform``), and not where this process refused it -- the export's and the snapshot's
-        own checks, which run before the engine is asked for anything. A refusal the engine raised
-        (``api._failed`` marks it) may come after a destination was written."""
+        for (``_perform``), and not where it was refused before any output was opened. A snapshot's
+        refusal is that wherever it was raised, here or in the engine (``api._failed`` raises the
+        engine's as its own type): ``SnapshotRefused`` is a request the snapshot will not draw,
+        refused before it renders, and a picture is written whole or not at all
+        (``snapshot.write_png``, ``draw_pictures``). An export's refusal is that only where this
+        process raised it, before the engine was asked; one the engine raised may come after a
+        destination was written (a DXF's checks, after a STEP beside it)."""
         from cadgen.engine.export import ExportRefused
         from cadgen.engine.snapshot import SnapshotRefused
 
-        refused_here = isinstance(error, (ExportRefused, SnapshotRefused)) and not getattr(error, "_engine_refusal", False)
-        return {"result": {"outputsMayHaveBeenWritten": bool(job.get("writing")) and not refused_here}}
+        refused_before = isinstance(error, SnapshotRefused) or (
+            isinstance(error, ExportRefused) and not getattr(error, "_engine_refusal", False))
+        return {"result": {"outputsMayHaveBeenWritten": bool(job.get("writing")) and not refused_before}}
 
     def _finished(self, job):
         job.pop("arguments", None)
