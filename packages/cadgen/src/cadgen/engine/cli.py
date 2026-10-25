@@ -425,10 +425,10 @@ def _inspect(args: argparse.Namespace, prog: str) -> int:
     told_state(args.document, "inspecting")
     if "mesh" in found and not args.json:
         mesh = found["mesh"]
-        print(f"{mesh['name']}  a mesh (GLB)")
+        print(plain(f"{mesh['name']}  a mesh (GLB)"))
         print(f"nodes       {mesh['nodes']}")
         print(f"meshes      {mesh['meshes']}")
-        rows = [f"{row['name']}  {_number(row['duration'])} s" for row in mesh["animations"]]
+        rows = [plain(f"{row['name']}  {_number(row['duration'])} s") for row in mesh["animations"]]
         print("animations" + "".join(f"\n  {row}" for row in rows) if rows else "animations  none")
         print("closure     none: a mesh carries none, only an .xbf does")
     elif query == "summary" and not args.json:
@@ -517,7 +517,18 @@ def summary_text(summary: dict[str, Any]) -> str:
     listed("animations", [f"{row['name']}  {_number(row['duration'])} s" for row in summary["animations"]])
     # The files the model's decorators declare, not what an export wrote beside it.
     listed("declared files", summary["files"])
-    return "\n".join(lines)
+    return "\n".join(plain(line) for line in lines)
+
+
+# The control characters a name read from a file may carry (C0 but tab, DEL, C1), each shown as its
+# escape: a terminal reads ESC and its kin as commands (clear the screen, write the clipboard).
+_CONTROLS = {code: f"\\x{code:02x}" for code in (*range(0x00, 0x09), *range(0x0a, 0x20), *range(0x7f, 0xa0))}
+
+
+def plain(text: str) -> str:
+    """``text`` as a terminal may print it: names a document carries (a STEP's product, a GLB's
+    node or animation, a material, a joint) are anyone's who wrote the file."""
+    return text.translate(_CONTROLS)
 
 
 def _server(args: argparse.Namespace, prog: str) -> int:
