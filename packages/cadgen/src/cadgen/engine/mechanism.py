@@ -2099,13 +2099,26 @@ def _no_state(kinematics: dict[str, Any], pose: str) -> str:
     if pose in sequences:
         said += f" ({pose!r} is a configuration sequence, which plays over time: a pose is a state or joint values)"
     said += f"; its states: {states}; its sequences: {', '.join(sorted(sequences)) or 'none'}"
-    joint = pose if pose in pairs else next(iter(sorted(pairs)), None)
-    if joint is None:
+    if not pairs:
         return said
-    values = [_example(limits) for limits in pairs[joint].get("limits") or [[None, None]]]
-    value: Any = values[0] if len(values) == 1 else values
-    return (said + f"; {'it is a joint' if joint == pose else 'its joints: ' + ', '.join(sorted(pairs))}: pose "
-            f"{'it' if joint == pose else 'one'} by value, --pose '{json.dumps({joint: value})}'")
+    couplings = kinematics.get("couplings") or {}
+    locked = _locked(couplings)
+    if pose in locked:  # a coupling's joint moves only through it: the coupling is what poses it
+        name = locked[pose]
+        return (said + f"; it is a joint its coupling {name!r} moves: pose the coupling by value, "
+                f"--pose '{json.dumps({name: _example(tuple(couplings[name].get('range') or (None, None)))})}'")
+    free = [label for label in sorted(pairs) if label not in locked]
+    listed = ", ".join(sorted(pairs)) + "".join(f"; {', '.join(sorted(label for label in locked if locked[label] == name))} "
+                                                f"moved by their coupling {name!r}" for name in sorted(couplings))
+    if pose in pairs or free:
+        joint = pose if pose in pairs else free[0]
+        values = [_example(limits) for limits in pairs[joint].get("limits") or [[None, None]]]
+        value: Any = values[0] if len(values) == 1 else values
+        return (said + f"; {'it is a joint' if joint == pose else 'its joints: ' + listed}: pose "
+                f"{'it' if joint == pose else 'one'} by value, --pose '{json.dumps({joint: value})}'")
+    name = sorted(couplings)[0]
+    return (said + f"; its joints: {listed}: pose a coupling by value, "
+            f"--pose '{json.dumps({name: _example(tuple(couplings[name].get('range') or (None, None)))})}'")
 
 
 def _example(limits: Any) -> float | int:
