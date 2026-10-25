@@ -30,8 +30,8 @@ from .http_app import CadApp, RAW_FILE_HEADERS, host_is_allowed
 # ``cadgen.engine.daemon.bind``), which only the user's own clients present, as a Bearer header: the
 # door hands it to them. Every URL a launch prints or opens carries a link instead,
 # ``?token=<expires>.<mac>``, good for a day (``LINK_SECONDS``), and a browser that opens one is given
-# the session cookie, ``<expires>.<mac>`` too, good for 30 days from the page's last load, which
-# renews it (``SESSION_SECONDS``). A mac is the token's HMAC of the credential's kind and expiry, so
+# the session cookie, ``<expires>.<mac>`` too, good for 30 days from its last use, which renews it
+# (``SESSION_SECONDS``, ``EngineApp._admitted``). A mac is the token's HMAC of the credential's kind and expiry, so
 # each is checked by recomputing it: no engine keeps a session, every engine of this user -- on any
 # port, of any installation, after any restart -- admits what another issued, and ``cadgen server
 # --rotate-token`` ends every link and session at once. The cookie is named for the token too
@@ -294,7 +294,7 @@ class EngineApp:
         # the link of the URL a launch just printed.
         offered = {named(request.header('authorization').removeprefix('Bearer ')),
                    named(request.query.get('token', ''))}
-        session = bool(saved) and standing(self.token, 'session', saved) == 'ok'
+        session = saved if saved and standing(self.token, 'session', saved) == 'ok' else ''
         if 'ok' not in offered and not session:
             return self._refused(request, response, 'expired' in offered)
         if 'ok' not in offered and request.header('sec-fetch-site') not in ('', 'same-origin', 'none'):
@@ -321,7 +321,8 @@ class EngineApp:
                               f'Max-Age={SESSION_SECONDS}; HttpOnly; SameSite=Strict')
 
     def _admitted(self, request, response, session):
-        """A request past the Host and token gates: by a credential it names, else by its ``session``."""
+        """A request past the Host and token gates: by a credential it names, else by its ``session``
+        cookie's value."""
         if 'token' in request.query and request.method == 'GET':
             # A link (or the token) is exchanged for a session and dropped from the address; one past
             # its day that the session admitted is just dropped.
@@ -337,8 +338,10 @@ class EngineApp:
             return response.send_bytes(200, bounce_page(location), 'text/html; charset=utf-8', [cookie,
                 ('referrer-policy', 'no-referrer'), ('cache-control', 'no-store'),
                 ('content-security-policy', "default-src 'none'; frame-ancestors 'self'")])
-        if session and _navigation(request):
-            response.also = (self._session_cookie(),)  # each page load renews it: 30 days from the last
+        if session and (_navigation(request) or int(session.partition('.')[0]) < time.time() + SESSION_SECONDS - 86400):
+            # Each page load renews it, and any request once it is a day old, so a tab left open
+            # keeps it too: 30 days from the last use.
+            response.also = (self._session_cookie(),)
         if request.path == '/mcp' and self.session_factory is not None:
             return self.mcp().handle(request, response)
         if request.method == 'GET' and (request.path.startswith('/s/') or request.path == '/s'

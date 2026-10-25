@@ -36,8 +36,8 @@ credentials, all made from one token:
   `cadgen viewer` for a new one.
 - **The session cookie** is what a browser is given for a link: HttpOnly,
   SameSite=Strict, one name for every port of this host, holding the token's
-  signature of its own expiry, never the token. It lasts 30 days from the last
-  page load, and every page load renews it.
+  signature of its own expiry, never the token. It lasts 30 days from its last
+  use: every page load renews it, and so does any request once it is a day old.
 
 An engine checks a link or a cookie by signing it again, so it keeps no
 sessions: links and cookies outlive a restart, a reboot, a port that moved and

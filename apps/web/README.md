@@ -128,7 +128,7 @@ shows), `documents` (`{id, file, url}` for each FILE) and `action` (`started` or
 referring to the page). Each URL, and `token`, carries a fresh link, good for a day
 (`--api-only`'s `token` is the user's token itself, for the dev proxy). The URL is usable
 as soon as it is printed. Its link is exchanged for an HttpOnly, SameSite=Strict session cookie,
-one for every port of the host, that lasts 30 days from the last page load, and is removed from the
+one for every port of the host, that lasts 30 days from its last use, and is removed from the
 address bar. Programmatic clients send the link or the token as a Bearer header. Every route,
 including documents, requires one. The loopback Host check,
 cross-site POST guard and raw-file response headers remain. Binding `--host`

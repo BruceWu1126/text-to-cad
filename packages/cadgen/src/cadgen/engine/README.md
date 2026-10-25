@@ -325,9 +325,9 @@ holds them under one memory budget that never evicts a watched one (**Document l
 The installation's door (**The door**) supplies its HTTP token, which programmatic clients send as a
 Bearer header; no URL carries it. A page URL the engine prints or opens carries a link instead, good
 for a day, which a browser exchanges for a SameSite=Strict session cookie, one name on every port of
-the host, that lasts 30 days from its last page load, each of which renews it: both are the token's
-signatures of an expiry, checked by signing again, so no engine keeps a session
-(`viewer.engine_app`: `EngineApp.link`, `sign`, `standing`). All routes
+the host, that lasts 30 days from its last use (a page load renews it, as any request does once it
+is a day old): both are the token's signatures of an expiry, checked by signing again, so no engine
+keeps a session (`viewer.engine_app`: `EngineApp.link`, `sign`, `standing`). All routes
 retain the application's Host and cross-site mutation checks. Explicit host/port
 requests must match an existing listener. A second installed version has a different
 installation identity and therefore a different engine -- in another environment, and in the same
@@ -400,7 +400,7 @@ every installation's engine serves with (`registry.Registry.token`; both this us
 so a link outlives an upgrade too. So a page link
 -- the `cadgen viewer` output, a model's `view:` line, the CAD app's card -- works across `cadgen
 stop`, a crash and a reboot for its day, the session it left in a browser for 30 days past that
-browser's last page load, on any port, and a page that lost its engine keeps asking the same address
+browser's last use of it, on any port, and a page that lost its engine keeps asking the same address
 and reloads itself when the engine answers again. Whoever holds a live link or session reaches the
 user's folders whenever the engine runs. `cadgen server --rotate-token` replaces the token, with no
 engine running (it refuses while this installation's or another's runs), and every link and session

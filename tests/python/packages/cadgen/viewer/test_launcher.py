@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -169,11 +170,13 @@ class LauncherTest(unittest.TestCase):
         for body in (TOKEN_NEEDED_PAGE, LINK_EXPIRED_PAGE):
             self.assertNotIn(b'<script', body)
             self.assertNotIn(b'?token=', body)
-        # Each page load the session admits renews it, 30 days from then; a read does not.
+        # Each page load the session admits renews it, 30 days from then; a read only once it is a day old.
         status, headers, _ = self.get(launch, '/', token=False, headers={**cookie, **navigation})
         self.assertEqual(status, 200)
         self.session(headers)
         self.assertNotIn('set-cookie', self.get(launch, '/__cad/server', token=False, headers=cookie)[1])
+        old = {'Cookie': f'{name}={sign(master, "session", 30 * 86400, now=time.time() - 2 * 86400)}'}
+        self.session(self.get(launch, '/__cad/server', token=False, headers=old)[1])
         # A sibling cookie that another page on this host set (cookies are host-scoped, not
         # port-scoped), even one a strict parser rejects, must not drop the engine's own cookie.
         for header in (f"x=y z; {cookie['Cookie']}", f"{cookie['Cookie']}; a[b]=1"):
