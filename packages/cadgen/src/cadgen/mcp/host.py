@@ -73,7 +73,7 @@ def classify(argv: list[str]) -> dict[str, Any] | None:
     it shows CAD cards, False where it shows none, None for a program this does not know; or None
     where the process is not a host but what launched this server for one (a launcher, a Python)."""
     if not argv:
-        return {"host": "unknown", "renders": None}
+        return None  # a parent read with no command line (a zombie, one exiting): its parent says
     program, args = _name(argv[0]), argv[1:]
     if program in ("node", "bun") and args:
         # An npm install of a host runs its script under node: the script names it.
