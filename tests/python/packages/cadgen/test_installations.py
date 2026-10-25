@@ -282,6 +282,8 @@ class ResolutionTests(Fixture):
 
 class TokenTests(unittest.TestCase):
     def test_the_page_token_is_one_file_the_users_alone(self) -> None:
+        import re
+
         with TemporaryDirectory() as scratch:
             held = Registry(scratch)
             self.assertIsNone(held.token())
@@ -291,7 +293,45 @@ class TokenTests(unittest.TestCase):
             if os.name != "nt":
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             path.write_text("short\n", encoding="utf-8")
-            self.assertIsNone(held.token(), "a token too short to guard anything is none")
+            with self.assertRaisesRegex(ValueError, rf"^the page token {re.escape(str(path))} holds no token "
+                                                    r"\(6 bytes\): remove it to make a new one"):
+                held.token()  # a token too short to guard anything is refused, never taken for none
+
+    def test_the_first_engine_makes_the_token_and_another_starting_with_it_serves_that_one(self) -> None:
+        from cadgen.engine import daemon
+
+        with TemporaryDirectory() as scratch:
+            held = Registry(scratch)
+            self.assertTrue(held.make_token("a" * 43))
+            self.assertFalse(held.make_token("b" * 43), "never made over one that is there")
+            self.assertEqual(held.token(), "a" * 43)
+            if os.name != "nt":
+                self.assertEqual((Path(scratch) / "engines" / "token").stat().st_mode & 0o777, 0o600)
+            # An engine that found none, then lost the making to this one: it serves this one's.
+            self.assertEqual(daemon._new_token(held), "a" * 43)
+            self.assertEqual(held.token(), "a" * 43)
+            self.assertEqual(os.listdir(Path(scratch) / "engines"), ["token"], "nothing of its own left beside it")
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "a file's mode is POSIX's, and refuses no one running as root")
+    def test_a_token_that_cannot_be_read_is_refused_by_name_and_never_replaced(self) -> None:
+        import re
+
+        from cadgen.engine import daemon
+
+        with TemporaryDirectory() as scratch:
+            held = Registry(scratch)
+            held.put_token("a" * 43)
+            path = Path(scratch) / "engines" / "token"
+            path.chmod(0)
+            try:
+                for call in (held.token, lambda: daemon._new_token(held)):
+                    with self.assertRaisesRegex(ValueError, rf"^the page token {re.escape(str(path))} cannot be read "
+                                                            r"\(Permission denied, mode 0000\): make it this user's"):
+                        call()
+            finally:
+                path.chmod(0o600)
+            self.assertEqual(path.read_text(encoding="utf-8"), "a" * 43 + "\n", "left as it was: every link still works")
 
 
 if __name__ == "__main__":

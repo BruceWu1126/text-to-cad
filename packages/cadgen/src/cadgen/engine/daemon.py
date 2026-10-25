@@ -1086,7 +1086,8 @@ def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tup
     refused by name (``PortHeld``). Else the installation's port: 3245 (``DEFAULT_PORT``) when it is
     free, else the port it remembers, else the one it rolls to (``_installation_port``). Either way
     another installation's engine that nothing uses is retired for it (``_listen``). The page token
-    is the user's (``registry.TOKEN``), one for every installation, made by the first engine to start.
+    is the user's (``registry.TOKEN``), one for every installation, made by the first engine to start
+    (``_new_token``); one there that cannot be read is refused by name, and nothing is served.
 
     ``where``: ``source`` (``--port``, ``CADGEN_ENGINE_PORT``, ``default`` or ``rolled``), for a
     rolled port ``because`` (who holds 3245), and ``notice``, the one line a start that moved the
@@ -1115,16 +1116,23 @@ def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tup
 
 
 def _new_token(held: Any) -> str:
-    """A new page token, kept as the user's (``registry.TOKEN``) when there is a state folder: the one
-    on disk after the write, so two engines starting at once serve with one."""
+    """A new page token, made the user's (``registry.TOKEN``) when there is a state folder: made only
+    where there is none (``Registry.make_token``), so of two engines starting at once one makes it and
+    the other serves the one it reads. One that is there but cannot be read is refused by name
+    (``Registry.token``), never replaced."""
     token = secrets.token_urlsafe(32)
     if held is None:
         return token
-    try:
-        held.put_token(token)
-    except OSError:
-        return token  # a state folder it cannot write: this start's links work, the next start's are new
-    return held.token() or token
+    for _attempt in range(3):
+        try:
+            if held.make_token(token):
+                return token
+        except OSError:
+            return token  # a state folder it cannot write: this start's links work, the next start's are new
+        found = held.token()  # another engine's, made first
+        if found is not None:
+            return found
+    return token  # made and removed again, each time it was read: this start's links work
 
 
 def _installation_port(host: str, remembered: int | None, token: str,

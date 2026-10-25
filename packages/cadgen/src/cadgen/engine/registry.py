@@ -20,14 +20,15 @@ the file) and ``run`` (the command that builds it again, ``["python", program]``
 The interface is the ``Registry``'s: ``get``, ``put``, ``list``, ``delete`` (records in, records
 out) and ``update`` (a read and a write under one lock). The filesystem implementation here is the only one; it is the seam a
 hosted store would implement. Every byte written under the state folder by this module goes
-through ``Folder``, and every write commits through ``atomic_replace.replace_atomic``. A record is
+through ``Folder``, and every write commits through ``atomic_replace.replace_atomic`` -- but a file
+made only where none is (``Folder.create``: the page token), which is linked into place. A record is
 written synchronously, and only when a field but ``changed`` differs from the one on disk; then
 each of ``OBSERVERS`` is told (a mirror uploads in the background: nothing waits on the network).
 The cache folder is a second ``Folder``, written the same way; forgetting a document
 (``delete``) forgets its cache file too.
 
 Beside the documents, ``<state>/engines/token`` is the user's page token, which every
-installation's engine serves with (``Registry.token``, ``put_token``), and
+installation's engine serves with (``Registry.token``; the first engine makes it, ``make_token``), and
 ``<state>/engines/<installation>.json`` each installation's engine record (``Registry.engine``,
 ``put_engine``, its own ``ENGINE_SCHEMA``): while the default port is another program's, the port
 the engine rolled to (``port``). Both are written this user's alone (0600). Links stay valid across
@@ -44,6 +45,7 @@ import json
 import os
 import shlex
 import shutil
+import stat
 import threading
 import time
 from pathlib import Path
@@ -103,6 +105,29 @@ class Folder:
                 out.write(data)
 
         return self._land(inside, fill)
+
+    def create(self, inside: str, data: bytes, mode: int = 0o600) -> bool:
+        """``data`` at ``inside`` when nothing is there, made with ``mode`` from its first byte; False,
+        and nothing written, when something is. Exclusive and whole: the bytes go to a file of a fresh
+        name first, which is then linked to ``inside`` (on Windows renamed, which refuses a name that
+        is taken), so of two writers at once exactly one makes it, and no reader meets half of it."""
+        target = self.path(inside)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(f"{target.name}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
+        handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), mode)
+        try:
+            with os.fdopen(handle, "wb") as out:
+                out.write(data)
+            try:
+                (os.rename if os.name == "nt" else os.link)(temporary, target)
+            except FileExistsError:
+                return False
+            return True
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def copy_in(self, inside: str, source: Path | str) -> Path:
         """``source``'s bytes at ``inside``, landed whole."""
@@ -226,13 +251,33 @@ class Registry:
     # --- the installation's engine -------------------------------------------------------------
 
     def token(self) -> str | None:
-        """The user's page token (``TOKEN``), or None before the first engine has made one."""
-        data = self.state.read(TOKEN)
-        token = data.decode("ascii", "replace").strip() if data is not None else ""
-        return token if len(token) >= 32 and token.isascii() and " " not in token else None
+        """The user's page token (``TOKEN``), or None before the first engine has made one. A token
+        file that is there but cannot be read (its mode, its owner) or holds no token is refused
+        (``ValueError``), naming the file and what is wrong with it: never taken for none, so never
+        replaced, which would end every link shared before."""
+        path = self.state.path(TOKEN)
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise ValueError(f"the page token {path} cannot be read ({_unreadable(path, error)}): make it this "
+                             "user's to read (mode 0600) or remove it to make a new one, which ends every link "
+                             "shared before") from None
+        token = data.decode("ascii", "replace").strip()
+        if len(token) >= 32 and token.isascii() and " " not in token:
+            return token
+        raise ValueError(f"the page token {path} holds no token ({len(data)} bytes): remove it to make a new one, "
+                         "which ends every link shared before")
+
+    def make_token(self, token: str) -> bool:
+        """Make the user's page token ``token`` where there is none, this user's alone; False, and
+        nothing written, when there is one (``Folder.create``): of two engines starting at once, one
+        makes it and the other serves the one it reads."""
+        return self.state.create(TOKEN, (token + "\n").encode("ascii"), mode=0o600)
 
     def put_token(self, token: str) -> None:
-        """Write the user's page token, this user's alone."""
+        """Replace the user's page token (``cadgen server --rotate-token``), this user's alone."""
         self.state.write(TOKEN, (token + "\n").encode("ascii"), mode=0o600)
 
     def engine(self, installation: str) -> dict[str, Any]:
@@ -266,6 +311,20 @@ class Registry:
     def _lock(self, ident: str) -> threading.RLock:
         with _LOCKS_LOCK:
             return _LOCKS.setdefault(f"{self.state.root}|{ident}", threading.RLock())
+
+
+def _unreadable(path: Path, error: OSError) -> str:
+    """Why a file is there and cannot be read, in words: the system's, and where it can say them,
+    the file's mode and its owner when that is another user."""
+    said = error.strerror or type(error).__name__
+    try:
+        found = os.stat(path)
+    except OSError:
+        return said
+    said += f", mode {stat.S_IMODE(found.st_mode):04o}"
+    if hasattr(os, "getuid") and found.st_uid != os.getuid():
+        said += f", owned by uid {found.st_uid}, not this user ({os.getuid()})"
+    return said
 
 
 def _same(old: dict[str, Any], new: dict[str, Any]) -> bool:
