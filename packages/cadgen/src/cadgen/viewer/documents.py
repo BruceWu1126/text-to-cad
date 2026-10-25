@@ -63,11 +63,6 @@ class EngineDocuments:
         self._lock = threading.Lock()
         self._serves: dict[str, _Serve] = {}  # by document id
 
-    def any_in_flight(self) -> bool:
-        """Whether a serve is running: a page is waiting on it."""
-        with self._lock:
-            return any(not serve.done.is_set() for serve in self._serves.values())
-
     # --- the serve -------------------------------------------------------------------------
 
     def response(self, file_ref) -> tuple[int, dict]:

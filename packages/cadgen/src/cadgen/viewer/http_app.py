@@ -234,7 +234,6 @@ class CadApp:
         # dist_dir is compared as a string prefix, so resolve it ONCE here and
         # never re-resolve at request time.
         self.dist_dir = os.path.abspath(dist_dir) if dist_dir else ""
-        self.viewer_version = read_viewer_version()
         # Computed ONCE, at start (or handed in by the launcher, which computed it to ask the port):
         # the identity this instance announces is the identity of the code it is actually running.
         self.identity_token = identity if identity is not None else identity_token(self.dist_dir)
