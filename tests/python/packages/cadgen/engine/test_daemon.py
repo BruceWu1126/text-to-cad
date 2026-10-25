@@ -883,7 +883,11 @@ class InstallationTest(unittest.TestCase):
             folder = os.path.realpath(folder)
             relative = os.path.relpath(sys.executable, folder) if os.path.splitdrive(sys.executable)[0].lower() \
                 == os.path.splitdrive(folder)[0].lower() else sys.executable
+            # A shell finds a relative command from its own folder; Windows' CreateProcess would look
+            # from this process's, so there the test finds it as cmd.exe does (a full path).
             found = {subprocess.run([command, "-c", probe], cwd=folder, env=env, capture_output=True, text=True,
+                                    executable=os.path.normpath(os.path.join(folder, command)) if os.name == "nt"
+                                    else None,
                                     timeout=60).stdout.strip() for command in (relative, sys.executable)}
         self.assertEqual(len(found), 1, found)
 
