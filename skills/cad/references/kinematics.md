@@ -46,8 +46,9 @@ the child a `RigidJoint` on the plane of that same axis. Connected at 0, the chi
 where it was built; connected at another value, it moves there, and that value is as
 built. A joint's `Axis` and a `RigidJoint`'s location are in world coordinates, not the
 part's own frame: an axis written in the part's frame is `axis.located(part.location)`, and
-a moving joint's axis that passes farther from its part than the part's own size is warned
-as a local one, since `connect_to` moves the child onto whatever axis it is given:
+a moving joint's axis that passes farther from its part, and from every part rigidly joined
+to it, than each one's own size is warned as a local one, since `connect_to` moves the child
+onto whatever axis it is given:
 
 ```python
 # src/hinge.py

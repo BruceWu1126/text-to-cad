@@ -125,6 +125,34 @@ def rotor():
     return bd.Compound(children=[base, disc], label="rotor")
 """
 
+# tom's wrist pitch: a forearm built 500 mm out, a small servo near its elbow end ({mount}: fastened
+# to the tube by rigid joints) holding the wrist's joint, on {axis}. In world coordinates the axis
+# crosses the tube's far end, 162 mm from the servo; in the forearm's own, it lands by the origin.
+WRIST = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf("XBF/forearm.xbf")
+def forearm():
+    at = bd.Pos(500, 0, 300)
+    tube = at * bd.Box(200, 30, 30, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.CENTER))
+    tube.label = "tube"
+    servo = at * bd.Pos(20, 0, 25) * bd.Box(20, 10, 15)
+    servo.label = "servo"
+    hand = at * bd.Pos(200, 0, 0) * bd.Box(40, 20, 20, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.CENTER))
+    hand.label = "hand"
+    {mount}
+    wrist = {axis}
+    bd.RevoluteJoint("wrist", servo, axis=wrist, angular_range=(-90, 90))
+    bd.RigidJoint("wrist", hand, bd.Plane(origin=wrist.position, z_dir=wrist.direction).location)
+    servo.joints["wrist"].connect_to(hand.joints["wrist"], angle=0)
+    return bd.Compound(children=[tube, servo, hand], label="forearm")
+"""
+MOUNT = """bd.RigidJoint("mount", tube, at * bd.Location((20, 0, 15)))
+    bd.RigidJoint("mount", servo, at * bd.Location((20, 0, 15)))
+    tube.joints["mount"].connect_to(servo.joints["mount"])"""
+
 
 def _arm_tip(q: float) -> np.ndarray:
     """The arm's corner (120, 10, 10) of its own frame, at elbow ``q``, in closed form: the joint
@@ -668,6 +696,24 @@ class RefusalTest(_Folder):
             "there; give the world axis, axis.located(part.location)"])
         report = self.build("rotor", ROTOR.format(axis="bd.Axis((0, 0, 5), (0, 0, 1)).located(base.location)"))
         self.assertNotIn("kinematics", report)
+
+    def test_a_joint_axis_on_the_body_its_part_is_fixed_to_is_no_local_axis(self) -> None:
+        world, local = "bd.Axis((680, 0, 300), (0, 1, 0))", "bd.Axis((180, 0, 0), (0, 1, 0))"
+        warning = ("Axis is in world coordinates, so a local one lands near the origin and connect_to moves the other "
+                   "part there; give the world axis, axis.located(part.location)")
+        # The servo alone: the axis passes far from it.
+        report = self.build("forearm", WRIST.format(mount="pass", axis=world))
+        self.assertEqual(report["kinematics"]["warnings"], [
+            "joint 'wrist''s axis passes 162 mm from forearm/servo, which holds it, farther than the part's own size: an "
+            + warning])
+        # Fastened to the tube, the servo holds the axis through the tube's end, as tom's does.
+        report = self.build("forearm", WRIST.format(mount=MOUNT, axis=world))
+        self.assertNotIn("kinematics", report)
+        # Given in the forearm's own frame, the axis passes near neither the servo nor the tube.
+        report = self.build("forearm", WRIST.format(mount=MOUNT, axis=local))
+        self.assertEqual(report["kinematics"]["warnings"], [
+            "joint 'wrist''s axis passes 470 mm from forearm/servo, which holds it, farther than the part's own size, "
+            "and near no part fixed to it: an " + warning])
 
     def test_two_unmoved_parts_with_a_revolute_between_them_are_two_links(self) -> None:
         report = self.build("bike", PIVOT.format(at=ON_AXIS, extra="pass"))

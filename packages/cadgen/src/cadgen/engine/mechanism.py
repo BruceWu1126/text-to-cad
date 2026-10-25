@@ -1035,6 +1035,16 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
     worlds = {path: _numpy(_occurrence(tree, path)[0]) for path in parent}
     frames = [worlds[link.members[0]] if link.members else np.eye(4) for link in links]
     scale = max([1.0] + [float(np.abs(matrix[:3, 3]).max()) for matrix in worlds.values()])
+    # The tree's parts (its leaves), each part's bounding sphere once: what a joint's axis is
+    # measured against (``_axis_off``, ``_fixed``).
+    nodes = {path[:-1] for path in by_path if path != root_path}
+    leaves = [path for path in sorted(by_path) if path not in nodes]
+    spheres: dict[tuple[int, ...], tuple[np.ndarray, float] | None] = {}
+
+    def sphere(path: tuple[int, ...]) -> tuple[np.ndarray, float] | None:
+        if path not in spheres:
+            spheres[path] = _sphere(by_path[path])
+        return spheres[path]
 
     # The pairs, named by their moving joints' labels; a label two share takes its part's path.
     counts: dict[str, int] = {}
@@ -1074,12 +1084,22 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         as_built[label] = value
         pairs.append(pair)
         joint_labels.append((moving.label, held_by))
-        off = _axis_off(by_path[held_by], moving) if kind != "spherical" else None
-        if off is not None:
+        # A moving joint's axis far from the part holding it and from every part fixed to it is a
+        # local axis (``_axis_off``): ``item_1`` in the holder's frame, and in a fixed part's, that
+        # part's placement as built over the holder's.
+        body = sphere(held_by) if kind != "spherical" else None
+        off = None if body is None else _axis_off(body, item_1)
+        fixed = _fixed(held_by, leaves, parent, find) if off is not None else []
+        axis = worlds[held_by] @ item_1
+        if off is not None and not any(
+                (other := sphere(leaf)) is not None
+                and _axis_off(other, np.linalg.inv(_numpy(_occurrence(tree, leaf)[0])) @ axis) is None
+                for leaf in fixed):
+            beside = ", and near no part fixed to it" if fixed else ""
             warnings.append(f"joint {label!r}'s axis passes {off:.0f} mm from {name_of(held_by)}, which holds it, "
-                            "farther than the part's own size: an Axis is in world coordinates, so a local one lands "
-                            "near the origin and connect_to moves the other part there; give the world axis, "
-                            "axis.located(part.location)")
+                            f"farther than the part's own size{beside}: an Axis is in world coordinates, so a local "
+                            "one lands near the origin and connect_to moves the other part there; give the world "
+                            "axis, axis.located(part.location)")
 
     couplings, controls = _couplings(coupled, pairs, joint_labels, name_of, warnings, as_built)
     found = Mechanism(tree.root.name, links, 0, pairs, as_built, {}, warnings, couplings=couplings)
@@ -1339,10 +1359,9 @@ def _convert(values: dict[str, Any], where: str, mechanism: Mechanism, naming: d
     return {pair.label: found[pair.label] for pair in mechanism.pairs if pair.label in found}, problems
 
 
-def _axis_off(part: Any, joint: Any) -> float | None:
-    """How far a moving joint's axis passes from the part that holds it, in the part's own frame,
-    when that is more than the part's own size (its bounding box's diagonal) beyond its box: a
-    local axis given where build123d reads a world one. None for an axis that passes near."""
+def _sphere(part: Any) -> tuple[np.ndarray, float] | None:
+    """A part's bounding sphere in its own frame, from its geometry (never a mesh): its box's
+    centre and half its diagonal. None for a part with no geometry."""
     from OCP.Bnd import Bnd_Box
     from OCP.BRepBndLib import BRepBndLib
 
@@ -1353,13 +1372,38 @@ def _axis_off(part: Any, joint: Any) -> float | None:
     if box.IsVoid():
         return None
     low, high = (np.array([corner.X(), corner.Y(), corner.Z()]) for corner in (box.CornerMin(), box.CornerMax()))
-    centre, radius = (low + high) / 2, float(np.linalg.norm(high - low)) / 2
-    axis = joint.relative_axis
-    point = np.array([axis.position.X, axis.position.Y, axis.position.Z])
-    direction = np.array([axis.direction.X, axis.direction.Y, axis.direction.Z])
-    offset = centre - point
+    return (low + high) / 2, float(np.linalg.norm(high - low)) / 2
+
+
+def _axis_off(sphere: tuple[np.ndarray, float], axis: np.ndarray) -> float | None:
+    """How far an axis -- ``axis``'s Z through its origin, in the frame of a part's bounding
+    ``sphere`` -- passes from the part, when that is more than the part's own size (its box's
+    diagonal) beyond its box: a local axis given where build123d reads a world one. None for an
+    axis that passes near."""
+    centre, radius = sphere
+    offset = centre - axis[:3, 3]
+    direction = axis[:3, 2]
     distance = float(np.linalg.norm(offset - offset.dot(direction) * direction))
     return distance if distance - radius > 2 * radius else None
+
+
+def _fixed(holder: tuple[int, ...], leaves: list[tuple[int, ...]], parent: dict,
+           find: Callable[[tuple[int, ...]], tuple[int, ...]]) -> list[tuple[int, ...]]:
+    """The parts fixed to ``holder``, the rigid body its joint is held by: each part of the tree
+    (``leaves``) outside it whose deepest joint-holding node, itself or above it, is of
+    ``holder``'s class -- fastened to it by rigid joints, or carried with it -- the node
+    ``block`` places an instance on a link by. The ground's other bodies, and parts no joint
+    places, are not fixed to it; nor is the pair's other part, which ``connect_to`` puts on the
+    axis wherever the axis is."""
+    own = find(holder)
+    found = []
+    for leaf in leaves:
+        if leaf[:len(holder)] == holder:
+            continue
+        above = next((leaf[:depth] for depth in range(len(leaf), -1, -1) if leaf[:depth] in parent), None)
+        if above is not None and find(above) == own:
+            found.append(leaf)
+    return found
 
 
 def _size(result: Any) -> float:
