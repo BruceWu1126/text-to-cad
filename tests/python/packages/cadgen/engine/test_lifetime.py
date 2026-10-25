@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -467,7 +468,7 @@ class LifetimeDaemonTest(unittest.TestCase):
         self.assertIn(f"unsaved   arm  {unsaved}  run `{command}`", listed.stdout)
         from cadgen.mcp.server import ToolFailed, _say_not_held
 
-        with self.assertRaisesRegex(ToolFailed, f"run `{command}`"):
+        with self.assertRaisesRegex(ToolFailed, re.escape(f"run `{command}`")):
             _say_not_held(unsaved)
         self.assertFalse((self.folder / "arm.ran").exists(), "nothing ran the script to restore it")
 
