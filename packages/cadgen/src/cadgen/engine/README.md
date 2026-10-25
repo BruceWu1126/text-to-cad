@@ -357,7 +357,9 @@ than itself, wherever it serves, waiting until each has gone (`daemon.RETIRE_SEC
 `packaging.version` gives and the `cadgen` command picks by): an installation's version is its
 `installation` in `status` (`CADGEN_INSTALLATION_VERSION`, a development install's
 `<version>-dev.<time>`, else its release), a release ranks above its own `-dev.*` builds, and a
-version that does not parse is older only when that engine's release (`version`) is lower. It says
+version that does not parse is older only when that engine's release (`version`) is lower. An
+engine whose `status` has no `installation` was built before engines said it, and is older than any
+that does, whatever its release. It says
 each, once, as it says a roll: `retired cadgen 0.8.0's idle engine (pid N) for this newer
 installation`. Then it binds as above. Another installation's engine still on the port is retired
 the same way when nothing uses it and it is not newer, and its port taken once it has gone, whether

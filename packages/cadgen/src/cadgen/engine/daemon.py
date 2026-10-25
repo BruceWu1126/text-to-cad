@@ -1137,10 +1137,15 @@ def rank(version: Any) -> tuple | None:
 
 def _standing(status: dict[str, Any]) -> int | None:
     """How another installation's engine, by its ``status``, ranks against this one: -1 older, 0 the
-    same version, 1 newer; None when it cannot be said. Its installation's version first (``rank``);
-    one either side cannot parse is older only when its release (``version``) is lower than this one's."""
+    same version, 1 newer; None when it cannot be said. An engine whose ``status`` has no
+    ``installation`` was built before engines said it: older than any that does, whatever its
+    release (a ``0.8.0`` that would outrank every ``0.8.0-dev.*`` build). Else its installation's
+    version (``rank``); one either side cannot parse is older only when its release (``version``)
+    is lower than this one's."""
     from cadgen.engine.previous import version
 
+    if "installation" not in status:
+        return -1
     ours, theirs = rank(installation()), rank(status.get("installation") or status.get("version"))
     if ours is None or theirs is None:
         ours, theirs = rank(version()), rank(status.get("version"))

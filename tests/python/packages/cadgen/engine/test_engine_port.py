@@ -446,8 +446,13 @@ class EnginePortTest(unittest.TestCase):
             self.assertEqual(sorted(reversed(ordered), key=Version), ordered)
         with mock.patch.dict(os.environ, {"CADGEN_INSTALLATION_VERSION": "0.9.0"}):
             self.assertEqual(daemon._standing({"installation": "0.9.0-dev.1"}), -1, "a release above its builds")
-            self.assertEqual(daemon._standing({"version": "0.9.0"}), 0)
+            self.assertEqual(daemon._standing({"installation": "0.9.0", "version": "0.9.0"}), 0)
             self.assertEqual(daemon._standing({"installation": "1.0.0-dev.1"}), 1)
+        with mock.patch.dict(os.environ, {"CADGEN_INSTALLATION_VERSION": "0.8.0-dev.1"}):
+            # An engine that says no installation was built before engines said it: older than any
+            # that does, though its release (0.8.0) outranks this development build.
+            self.assertEqual(daemon._standing({"version": "0.8.0"}), -1)
+            self.assertEqual(daemon._standing({"version": "9.9.9"}), -1)
         with mock.patch.dict(os.environ, {"CADGEN_INSTALLATION_VERSION": "mine"}):
             # A version it cannot parse: older only when its door answers with a lower release.
             self.assertEqual(daemon._standing({"installation": "theirs", "version": "0.0.1"}), -1)
