@@ -188,16 +188,23 @@ times faster than parsing the STEP.
 
 ## Pictures
 
-Look only when it changes what you do. When a viewer is open (the CAD card or tab, or the
-page URL the person has), the person is looking at the model: after an edit, report the
-run's one line and stop. Take a snapshot only when no viewer is open, or when you must see
-something the person has not asked about, and then one picture from one angle. Write a
-check script only when the person asks for a dimension, a fit or a mass, or when the change
-is numeric and the number matters. Resolve a reference with `cadgen inspect` only when a
-prompt names one. Never screenshot the card to confirm your own work.
+After every run, read its line and the delta under it; a contradiction with what you
+intended is fixed before anything else. A number the person gave is asserted in the body; a
+derived number they asked for is a check script; neither is ever read off a picture. A
+structural or appearance change, new parts, placements, colours or a mechanism, gets the
+snapshots it takes to judge it, usually one from the angle that shows the change, more when
+a view leaves the question open, and a posed one for a mechanism state; never several angles
+by habit. After a Quick Edit, the picture to take is the person's own view replayed
+(`--camera authored` with the packet), not a fresh angle. For a large assembly, isolate the
+parts the edit touched or hide what covers them and frame them, instead of drawing the whole
+model. Resolve a reference with `cadgen inspect` only when a prompt names one. Never
+screenshot the card to confirm your own work, never check a number nobody asked for, never
+show a model again after a rebuild.
 
 ```bash
 cadgen snapshot "$ID" tmp/review.png
+cadgen snapshot "$ID" tmp/top.png --camera top --display hidden-line
+cadgen snapshot "$ID" tmp/open.png --pose open
 ```
 
 A snapshot draws the document as the viewer does, rendered by OCCT, and writes nothing
@@ -239,7 +246,7 @@ cadgen snapshot "$ID" tmp/quick_edit.png --annotation tmp/bracket.snapshot.json 
 
 Inspect supplied annotations before editing. Without annotations, the captured view is
 optional context; render it when useful to the request. After editing, run the script and
-report its line: the person's viewer shows the change
+draw it again to check the change
 ([annotations and Quick Edit views](references/snapshot-review.md#annotations-and-quick-edit-views)).
 
 A reference into a file that is not a document names what the viewer picked in it, in
@@ -296,9 +303,8 @@ every assumption or departure from the request.
 ### Show the model
 
 Show the user each model and file you create or change, and any they ask to see.
-Snapshots and validation don't replace this. Once a viewer is open, the person is looking
-at the model: after an edit, report the run's one line and stop. Never screenshot the
-viewer to confirm your own work.
+Snapshots and validation don't replace this. Never screenshot the viewer to confirm your
+own work; review with `cadgen snapshot`.
 
 - If your tools include `cad_show` (your host may prefix it), call it with the model's id
   or the file's absolute path, and follow its description for when to call it again.

@@ -2,9 +2,9 @@
 
 Read this file when choosing visual checks for a model or a file the viewer opens.
 
-This is the catalogue of what a snapshot can draw. Take one only when no viewer is open or you must
-see something the person has not asked about, then one picture from one angle; with a viewer open,
-report the run and stop ([Pictures](../SKILL.md#pictures)).
+This is the catalogue of what a snapshot can draw. Take the snapshots a change needs to judge it,
+usually one from the angle that shows it; with a viewer open the person is looking too, so never
+screenshot the card to confirm your own work ([Pictures](../SKILL.md#pictures)).
 
 ## Contents
 
