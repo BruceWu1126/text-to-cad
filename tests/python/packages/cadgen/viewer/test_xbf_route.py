@@ -262,7 +262,7 @@ finally:
         copy = self.base / "tunnelled.step"
         shutil.copyfile(self.step, copy)
 
-        token = proxy.handle('tools/call', {'name': 'cad_show', 'arguments': {'path': str(copy)}}, context)['_meta']['dev.texttocad/httpToken']
+        token = proxy.handle('tools/call', {'name': 'cad_show', 'arguments': {'source': str(copy)}}, context)['_meta']['dev.texttocad/httpToken']
 
         def get(url: str):
             reply = proxy.handle('tools/call', {'name': 'cad_http', 'arguments':

@@ -438,7 +438,8 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
 - **No page sessions.** `/s/<session>/...`, `?file=` and `?doc=` links open the home.
   The home shows Recents and the folder of the most recent `cadgen viewer` launch.
 - **The CAD app** shows a model by its id or a file by its path (`cad_show`), and its
-  card has an Open in browser button at the right of its navbar.
+  card has an Open in browser button at the right of its navbar. Every CAD tool names
+  the model in `source` (`cad_show` and `cad_open` took `path` in 0.7).
 
 | 0.7 | 0.8 |
 | --- | --- |

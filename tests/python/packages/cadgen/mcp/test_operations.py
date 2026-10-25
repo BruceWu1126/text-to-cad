@@ -53,9 +53,11 @@ class OperationsTest(unittest.TestCase):
         jobs = Operations()
         invalid = jobs.call('cad_inspect', {'requestId': 'request-0000000001', 'source': 'relative.xbf', 'build': True})
         self.assertEqual(invalid['state'], 'rejected')
-        answer = jobs.call('cad_inspect', {'requestId': 'request-0000000001', 'source': 'relative.xbf'})
         with patch('cadgen.engine.api.inspect', side_effect=AssertionError('must not inspect')):
-            self.assertEqual(self.finish(jobs, answer)['state'], 'failed')
+            answer = jobs.call('cad_inspect', {'requestId': 'request-0000000001', 'source': 'relative.xbf'})
+        # Refused as it starts: nothing is queued that could only fail.
+        self.assertEqual((answer['state'], answer['error']), ('rejected', 'Paths must be absolute on the engine host'))
+        self.assertEqual(jobs.jobs, {})
 
     def test_a_result_never_leaks_the_viewer_token(self):
         jobs = Operations()

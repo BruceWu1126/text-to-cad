@@ -28,9 +28,16 @@ COMMON = {
     "operationId": STRING,
     "epoch": {**STRING, "description": "Session epoch returned by start; required for status/cancel."},
     "afterSequence": {"type": "integer", "minimum": 0},
-    "waitMs": {"type": "integer", "minimum": 0, "maximum": 25000},
+    "waitMs": {"type": "integer", "minimum": 0, "maximum": 25000,
+               "description": "Milliseconds to wait before answering: for the operation to finish, or with afterSequence for its next change."},
 }
-SNAPSHOT = {"source": STRING, "output": STRING, "packet": JSON_VALUE,
+# What follows an operation: status or cancel, by the id and epoch its start returned.
+FOLLOW = ("action", "operationId", "epoch", "afterSequence", "waitMs")
+FOLLOW_REQUIRED = ("action", "operationId", "epoch")
+SNAPSHOT = {"source": STRING,
+            "output": {**STRING, "description": "The PNG's absolute path; required with source unless a packet names the outputs."},
+            "packet": {**JSON_VALUE, "description": "A Quick Edit packet (its absolute path or object), which declares its outputs: "
+                                                    "give it in place of output; a source with it replaces its input."},
             "display": JSON_VALUE, "camera": JSON_VALUE, "grid": BOOL, "preview": BOOL,
             "pose": {"type": ["object", "string"]}, "width": {"type": "integer", "minimum": 1},
             "height": {"type": "integer", "minimum": 1}, "size_profile": STRING,
@@ -41,6 +48,9 @@ START = {
     "cad_snapshot": obj(SNAPSHOT),
     "cad_inspect": obj({"source": STRING, "ref": STRING, "query": {"type": "string", "enum": ["closure", "geometry", "build"]}}, ("source",)),
 }
+# The arguments each start requires, beside requestId: one set, or (a snapshot) one of several.
+STARTS = {"cad_export": (("source", "destinations"),), "cad_snapshot": (("source", "output"), ("packet",)),
+          "cad_inspect": (("source",),)}
 DESCRIPTIONS = {
     "cad_export": "Export a document to explicit absolute destinations on the engine host (.xbf/.step/.glb/.stl/.3mf/.dxf). The source is an absolute CAD file path or a document id (a model's, which running its script prints); a document id is exported as the engine holds it. A mesh source (.glb/.stl/.3mf) exports to the other two mesh kinds only, each holding what its format carries. Reuses the Python export operation. Viewer downloads instead choose a destination in the user's browser and use temporary artifacts.",
     "cad_snapshot": "Render an explicit source/output PNG or a Quick Edit packet, using the Python snapshot operation. The source is an absolute CAD file path or a document id; paths must be absolute on the engine host. A failed snapshot or packet leaves existing pictures unchanged.",
@@ -50,13 +60,11 @@ DESCRIPTIONS = {
 
 def catalog():
     return [{"name": name, "title": name.removeprefix("cad_").capitalize() + " CAD",
-             "description": description + " Start requires requestId. Returns an asynchronous operation: call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
+             "description": description + " " + takes(name) + " A start returns an asynchronous operation (waitMs waits for its result): call this same tool with action=status, operationId and epoch (optionally afterSequence and waitMs) for progress/result, or action=cancel while queued. Disconnect does not cancel. Status of this MCP session's 64 most recent finished operations lasts up to 24 hours; restart loses it. Running file writes cannot be cancelled.",
              "inputSchema": {**obj({**COMMON, **START[name]["properties"]}), "anyOf": [
-                 obj({"action": {"type": "string", "enum": ["start"]}, "requestId": COMMON["requestId"],
-                      **START[name]["properties"]}, ("requestId", *START[name]["required"])),
-                 obj({**{k: COMMON[k] for k in ("operationId", "epoch", "afterSequence", "waitMs")},
-                      "action": {"type": "string", "enum": ["status", "cancel"]}},
-                     ("action", "operationId", "epoch"))]},
+                 obj({"action": {"type": "string", "enum": ["start"]}, **_start(name)}, ("requestId", *START[name]["required"])),
+                 obj({**{k: COMMON[k] for k in FOLLOW}, "action": {"type": "string", "enum": ["status", "cancel"]}},
+                     FOLLOW_REQUIRED)]},
              "outputSchema": {"type": "object", "required": ["state"], "properties": {
                  "state": {"type": "string", "enum": ["queued", "running", "succeeded", "failed", "cancelled", "rejected"]},
                  "id": STRING, "epoch": STRING, "requestId": STRING, "operation": STRING,
@@ -65,6 +73,74 @@ def catalog():
              "annotations": {"readOnlyHint": name == "cad_inspect", "destructiveHint": name != "cad_inspect",
                              "idempotentHint": True, "openWorldHint": name != "cad_inspect"}}
             for name, description in DESCRIPTIONS.items()]
+
+
+def _start(name):
+    """What a start takes: its request ID, the tool's own arguments, and how long to wait for its result."""
+    return {"requestId": COMMON["requestId"], **START[name]["properties"], "waitMs": COMMON["waitMs"]}
+
+
+def _shape(groups, optional):
+    said = " or ".join("{" + ", ".join(group) + "}" for group in groups)
+    return said + (f", optionally with {', '.join(optional)}" if optional else "")
+
+
+def takes(name):
+    """The arguments a tool takes, in one line: what starts it, and what follows one it started."""
+    groups = [("requestId", *group) for group in STARTS[name]]
+    named = {key for group in groups for key in group}
+    start = _shape(groups, [key for key in _start(name) if key not in named])
+    follow = _shape([("action: status or cancel", "operationId", "epoch")],
+                    [key for key in FOLLOW if key not in FOLLOW_REQUIRED])
+    return f"To start: {start}. To follow one: {follow}."
+
+
+def refusal(tool, missing=(), unknown=(), takes_line=""):
+    """A call's arguments refused in words: what is missing, what the tool does not take, and what it takes."""
+    said = ([f"missing {', '.join(missing)}"] if missing else []) + ([f"unknown {', '.join(unknown)}"] if unknown else [])
+    return f"{tool}: {'; '.join(said)}. {takes_line}".strip()
+
+
+def check_arguments(name, values):
+    """A call's arguments checked against what its action takes, before anything is queued: the action.
+    Refused (``JobError``) with every argument missing and every one unknown, and the tool's shape."""
+    action = values.get("action", "start")
+    checked(action, COMMON["action"], "action")
+    if action == "start":
+        allowed = _start(name)
+        # The set the call reaches for (the one it gives the most of, missing the fewest), else the first.
+        given = [group for group in STARTS[name] if any(key in values for key in group)]
+        group = min(given, key=lambda group: (sum(key not in values for key in group), -sum(key in values for key in group))) \
+            if given else STARTS[name][0]
+        required = ("requestId", *group)
+        if name == "cad_snapshot" and "packet" in values and "output" in values:
+            raise JobError(f"cad_snapshot: a packet declares its outputs; omit output. {takes(name)}")
+    else:
+        allowed = {key: COMMON[key] for key in FOLLOW}
+        required = FOLLOW_REQUIRED
+    missing = [key for key in required if key not in values]
+    unknown = sorted(key for key in values if key not in allowed and key != "action")
+    if missing or unknown:
+        raise JobError(refusal(name, missing, unknown, takes(name)))
+    for key, item in values.items():
+        if key != "action":
+            checked(item, allowed[key], key)
+    if action != "start":
+        return action
+    if not re.fullmatch(r"[\w-]{16,100}", values["requestId"]):
+        raise JobError("requestId must be 16–100 letters, digits, underscores or hyphens")
+    # Paths are checked here too, so nothing is queued that could only fail.
+    if "source" in values:
+        source(values["source"])
+    if "output" in values:
+        absolute(values["output"])
+    if name == "cad_export":
+        destinations = [absolute(path) for path in values["destinations"]]
+        from cadgen.engine.ids import is_id
+
+        if len(set(destinations)) != len(destinations) or (not is_id(values["source"]) and absolute(values["source"]) in destinations):
+            raise JobError("Export destinations must be distinct from each other and the source")
+    return action
 
 
 def checked(value, schema, label="arguments"):
@@ -173,11 +249,9 @@ class Operations(Jobs):
 
     def call(self, name, arguments):
         try:
-            checked(arguments, obj({**COMMON, **START[name]["properties"]}))
-            action = arguments.get("action", "start")
+            action = check_arguments(name, arguments)
+            wait = min(25, arguments.get("waitMs", 0) / 1000)
             if action != "start":
-                checked(arguments, obj({k: COMMON[k] for k in ("action", "operationId", "epoch", "afterSequence", "waitMs")},
-                                       ("action", "operationId", "epoch")))
                 if arguments["epoch"] != self.epoch:
                     raise JobError("Operation session restarted", 409)
                 ident = arguments["operationId"]
@@ -187,21 +261,28 @@ class Operations(Jobs):
                         raise JobError("Use the tool that started this operation", 409)
                     if action == "cancel":
                         return self.cancel(ident)
-                    return self.get(ident, arguments.get("afterSequence"), arguments.get("waitMs", 0) / 1000)
-            checked(arguments, obj({"action": COMMON["action"], "requestId": COMMON["requestId"], **START[name]["properties"]},
-                                   ("requestId", *START[name]["required"])))
+                    if arguments.get("afterSequence") is None:
+                        return self._settled(ident, wait)
+                    return self.get(ident, arguments.get("afterSequence"), wait)
             request_id = arguments["requestId"]
-            if not re.fullmatch(r"[\w-]{16,100}", request_id):
-                raise JobError("requestId must be 16–100 letters, digits, underscores or hyphens")
-            args = {k: v for k, v in arguments.items() if k not in ("action", "requestId")}
+            args = {k: v for k, v in arguments.items() if k not in ("action", "requestId", "waitMs")}
             normalized = hashlib.sha256(json.dumps([name, args], sort_keys=True, allow_nan=False).encode()).hexdigest()
             with self.changed:
                 # Join retries before re-reading a packet or source that may have changed.
                 if request_id in self.requests:
-                    return self._submit(request_id, normalized)
-                return self._submit(request_id, normalized, operation=name, arguments=args)
+                    started = self._submit(request_id, normalized)
+                else:
+                    started = self._submit(request_id, normalized, operation=name, arguments=args)
+                return self._settled(started["id"], wait) if wait else started
         except (ValueError, TypeError, OSError, KeyError) as error:
             return {"state": "rejected", "error": str(error), "status": getattr(error, "status", 400)}
+
+    def _settled(self, ident, wait):
+        """Under changed's lock: the operation once it finished, or as it is after ``wait`` seconds."""
+        job = self.jobs.get(ident)
+        if job is not None and wait:
+            self.changed.wait_for(lambda: job["state"] in TERMINAL, timeout=wait)
+        return self.get(ident)
 
     def public(self, job):
         result = super().public(job)
@@ -215,7 +296,15 @@ class Operations(Jobs):
                            "id": summary.get("id")}}
 
     def _failure(self, job, error):
-        return {"result": {"outputsMayHaveBeenWritten": job["operation"] in ("cad_export", "cad_snapshot")}}
+        """Whether a failed operation may have written: only once its export or snapshot was asked
+        for (``_perform``), and not where this process refused it -- the export's and the snapshot's
+        own checks, which run before the engine is asked for anything. A refusal the engine raised
+        (``api._failed`` marks it) may come after a destination was written."""
+        from cadgen.engine.export import ExportRefused
+        from cadgen.engine.snapshot import SnapshotRefused
+
+        refused_here = isinstance(error, (ExportRefused, SnapshotRefused)) and not getattr(error, "_engine_refusal", False)
+        return {"result": {"outputsMayHaveBeenWritten": bool(job.get("writing")) and not refused_here}}
 
     def _finished(self, job):
         job.pop("arguments", None)
@@ -229,17 +318,12 @@ class Operations(Jobs):
     def _perform(self, job, progress):
         from cadgen.engine import api
         name, args = job["operation"], dict(job["arguments"])
-        if "source" in args:
-            source(args["source"])
         progress({"label": name.removeprefix("cad_").capitalize() + " in progress"})
         if name == "cad_export":
             destinations = [absolute(path) for path in args.pop("destinations")]
-            from cadgen.engine.ids import is_id
-
-            if len(set(destinations)) != len(destinations) or (not is_id(args["source"]) and absolute(args["source"]) in destinations):
-                raise JobError("Export destinations must be distinct from each other and the source")
             # Keep the one Python operation: all destinations are validated and share a document read.
             src = args.pop("source")
+            job["writing"] = True
             result = {"files": serial(api.export(src, *destinations, **args, progress=progress))}
         elif name == "cad_snapshot":
             packet = args.pop("packet", None)
@@ -248,13 +332,11 @@ class Operations(Jobs):
                 if isinstance(args.get(field), str) and not args[field].lstrip().startswith(("{", "[")):
                     absolute(args[field])
             if packet is not None:
-                if output is not None:
-                    raise JobError("A packet declares its outputs; omit output")
                 packet = packet_paths(packet, args.get("source"))
+                job["writing"] = True
                 result = {"pictures": serial(api.snapshot(job=packet, **args))}
             else:
-                if output is None or "source" not in args:
-                    raise JobError("Snapshot requires source and output, or a packet")
+                job["writing"] = True
                 result = {"pictures": [serial(api.snapshot(**args, out=absolute(output)))]}
         elif name == "cad_inspect":
             result = {"inspection": serial(api.inspect(**args))}

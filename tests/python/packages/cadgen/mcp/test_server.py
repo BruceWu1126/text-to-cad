@@ -22,8 +22,8 @@ from cadgen._internal.picker import FilePicker
 from cadgen.mcp.shim import initialize_params
 from cadgen.mcp.protocol import RequestContext, RpcError
 from cadgen.viewer.recents import RecentStore
-from cadgen.mcp.server import Server, local_path
-from cadgen.mcp.operations import START
+from cadgen.mcp.server import _AGENT_TOOLS, FOLLOWS, Server, local_path
+from cadgen.mcp.operations import START, STARTS, check_arguments
 from cadgen.mcp.tunnel import MAX_REPLY_BYTES
 from cadgen.mcp.ui import AppPage
 
@@ -257,7 +257,7 @@ class TabServerTest(_Session):
         self.assertEqual(self.launch("cad_home")["notice"], notice)
 
     def test_an_agent_names_a_model_by_its_absolute_path_and_a_tab_reopens_on_it(self) -> None:
-        opened = self.launch("cad_open", {"path": self.bracket})
+        opened = self.launch("cad_open", {"source": self.bracket})
         self.assertEqual({key: opened[key] for key in ("protocol", "page", "model", "surface")},
                          {"protocol": 9, "page": "viewer", "model": self.bracket, "surface": "agent"})
         # No tolerance: the page reads each part's one display mesh by its key.
@@ -265,7 +265,7 @@ class TabServerTest(_Session):
                                           "version"])
         # The thread's tab reopens on what the thread last opened.
         self.assertEqual(self.launch("cad_tab")["model"], self.bracket)
-        refused = self.call("cad_open", {"path": "parts/bracket.stl"})
+        refused = self.call("cad_open", {"source": "parts/bracket.stl"})
         self.assertTrue(refused["isError"])
         self.assertIn("is not an absolute path", refused["content"][0]["text"])
         # A file the host hands over is shown alone: the host's own file tree is its navigation.
@@ -276,23 +276,23 @@ class TabServerTest(_Session):
         self.assertEqual(self.server.recents.list(), [])
 
     def test_a_bad_path_is_the_tools_answer_not_a_protocol_error(self) -> None:
-        missing = self.call("cad_open", {"path": str(self.workspace / "parts" / "nope.step")})
+        missing = self.call("cad_open", {"source": str(self.workspace / "parts" / "nope.step")})
         self.assertTrue(missing["isError"])
         self.assertIn("No file at", missing["content"][0]["text"])
         (self.workspace / "notes.txt").write_text("x", encoding="utf-8")
-        self.assertIn("is not one", self.call("cad_open", {"path": str(self.workspace / "notes.txt")})["content"][0]["text"])
+        self.assertIn("is not one", self.call("cad_open", {"source": str(self.workspace / "notes.txt")})["content"][0]["text"])
         # A script is no document: refused as any file CAD does not open is, by cad_open and cad_show.
         script = self.workspace / "parts.py"
         script.write_text("print(1)\n", encoding="utf-8")
         for tool in ("cad_open", "cad_show"):
-            self.assertIn("is not one", self.call(tool, {"path": str(script)})["content"][0]["text"], tool)
-            self.assertIn("No file at", self.call(tool, {"path": f"{script}::cube"})["content"][0]["text"], tool)
+            self.assertIn("is not one", self.call(tool, {"source": str(script)})["content"][0]["text"], tool)
+            self.assertIn("No file at", self.call(tool, {"source": f"{script}::cube"})["content"][0]["text"], tool)
 
     def test_cad_show_reaches_the_polling_view_without_opening_one(self) -> None:
-        self.assertEqual(self.call("cad_show", {"path": self.bracket})["structuredContent"], {"delivered": 0})
+        self.assertEqual(self.call("cad_show", {"source": self.bracket})["structuredContent"], {"delivered": 0})
         # A sync answers at once: the first registers the view, the next carries what was sent since.
         self.assertEqual(self.call("cad_sync", {"view": "v1", "surface": "tab"})["structuredContent"], {"events": []})
-        shown = self.call("cad_show", {"path": self.bracket})
+        shown = self.call("cad_show", {"source": self.bracket})
         self.assertEqual(shown["structuredContent"], {"delivered": 1, "view": "v1"})
         (event,) = self.call("cad_sync", {"view": "v1", "surface": "tab"})["structuredContent"]["events"]
         self.assertEqual((event["type"], event["launch"]["model"]), ("show", self.bracket))
@@ -304,11 +304,11 @@ class TabServerTest(_Session):
         self.assertEqual((view["view"], view["surface"]), ("f1", "file"))
         # ...but shows nothing in it: unnamed, a show finds no viewer; named, it is refused, unless
         # the view shows that file already.
-        self.assertEqual(self.call("cad_show", {"path": self.loose})["structuredContent"], {"delivered": 0})
-        refused = self.call("cad_show", {"path": self.loose, "view": "f1"})
+        self.assertEqual(self.call("cad_show", {"source": self.loose})["structuredContent"], {"delivered": 0})
+        refused = self.call("cad_show", {"source": self.loose, "view": "f1"})
         self.assertTrue(refused["isError"])
         self.assertIn("shows that file alone", refused["content"][0]["text"])
-        self.assertEqual(self.call("cad_show", {"path": self.bracket, "view": "f1"})["structuredContent"], {"delivered": 0, "view": "f1"})
+        self.assertEqual(self.call("cad_show", {"source": self.bracket, "view": "f1"})["structuredContent"], {"delivered": 0, "view": "f1"})
         self.assertEqual(self.call("cad_sync", {"view": "f1", "surface": "file", "model": self.bracket})["structuredContent"]["events"], [])
 
     def test_the_agent_reads_and_captures_what_the_open_view_shows(self) -> None:
@@ -327,7 +327,7 @@ class TabServerTest(_Session):
     def test_a_capture_right_after_cad_open_waits_for_the_tab_to_open(self) -> None:
         # An agent opens a tab and captures it at once, before the host has loaded it: the capture
         # waits for its first sync rather than saying no viewer is open.
-        self.call("cad_open", {"path": self.bracket})
+        self.call("cad_open", {"source": self.bracket})
         self.opens_later("v1", "agent", self.bracket)
         shot = self.call("cad_screenshot")
         self.assertNotIn("isError", shot)
@@ -457,7 +457,7 @@ class SidebarAcrossThreadsTest(_Session):
     def test_an_agent_with_no_tab_opens_one_and_reads_and_captures_the_sidebar(self) -> None:
         self.sync_sidebar(state={"model": self.model, "selection": [f"{self.model}#o1.f1"]}, focused=True)
         # No tab in this thread: the agent is told to open one, and the sidebar is sent nothing.
-        shown = self.call("cad_show", {"path": self.loose})
+        shown = self.call("cad_show", {"source": self.loose})
         self.assertEqual(shown["structuredContent"], {"delivered": 0})
         self.assertIn("call cad_open", shown["content"][0]["text"].lower())
         self.assertEqual(self.sync_sidebar()["events"], [])
@@ -465,7 +465,7 @@ class SidebarAcrossThreadsTest(_Session):
         (view,) = self.call("cad_view")["structuredContent"]["views"]
         self.assertEqual((view["view"], view["surface"], view["selection"]), ("s1", "sidebar", [f"{self.model}#o1.f1"]))
         # Named, the sidebar takes another model on its next sync.
-        self.assertEqual(self.call("cad_show", {"path": self.loose, "view": "s1"})["structuredContent"],
+        self.assertEqual(self.call("cad_show", {"source": self.loose, "view": "s1"})["structuredContent"],
                          {"delivered": 1, "view": "s1", "sidebar": True})
         (event,) = self.sync_sidebar()["events"]
         self.assertEqual((event["type"], event["launch"]["model"]), ("show", self.loose))
@@ -491,7 +491,7 @@ class SidebarAcrossThreadsTest(_Session):
         self.sync_sidebar(focused=True)
         # The sidebar was touched last, so it is what the agent reads; a model it shows goes to its tab.
         self.assertEqual(self.call("cad_view")["structuredContent"]["views"][0]["view"], "s1")
-        self.assertEqual(self.call("cad_show", {"path": self.loose})["structuredContent"]["view"], "t1")
+        self.assertEqual(self.call("cad_show", {"source": self.loose})["structuredContent"]["view"], "t1")
         self.assertEqual(self.sync_sidebar()["events"], [])
         # The sidebar's process sees no thread's tab: only sidebar views are shared.
         self.assertEqual([view["view"] for view in self.on_sidebar("cad_view", {})["views"]], ["s1"])
@@ -500,11 +500,11 @@ class SidebarAcrossThreadsTest(_Session):
         self.sync_sidebar(focused=True)
         self.sidebar.sidebar_views.registry._clock = lambda: time.monotonic() + 120
         self.assertEqual(self.call("cad_view")["structuredContent"]["views"], [])
-        self.assertEqual(self.call("cad_show", {"path": self.bracket, "view": "s1"})["structuredContent"], {"delivered": 0})
+        self.assertEqual(self.call("cad_show", {"source": self.bracket, "view": "s1"})["structuredContent"], {"delivered": 0})
 
     def test_sidebar_sync_and_capture_create_no_disk_registry(self):
         self.sync_sidebar(focused=True)
-        self.call("cad_show", {"path": self.loose, "view": "s1"})
+        self.call("cad_show", {"source": self.loose, "view": "s1"})
         (event,) = self.sync_sidebar()["events"]
         self.assertEqual(event["launch"]["model"], self.loose)
         self.assertFalse((self.tmp / "state" / "sidebar-views").exists())
@@ -540,7 +540,7 @@ class InlineServerTest(_Session):
     offered = RENDERS_APPS
 
     def test_a_host_that_renders_apps_never_has_a_browser_opened(self) -> None:
-        self.assertIn("launch", self.call("cad_show", {"path": self.bracket}, CODEX_EXEC_TURN)["structuredContent"])
+        self.assertIn("launch", self.call("cad_show", {"source": self.bracket}, CODEX_EXEC_TURN)["structuredContent"])
         self.assertEqual(self.opened, [])
 
     def test_an_inline_host_shows_models_with_one_tool_and_is_told_so(self) -> None:
@@ -637,16 +637,16 @@ class InlineServerTest(_Session):
         # The engine starts its pool with the first view, never with a build (law 19).
         warmed = []
         self.server.warm = lambda: warmed.append(True)
-        self.launch("cad_show", {"path": self.bracket})
+        self.launch("cad_show", {"source": self.bracket})
         self.assertEqual(warmed, [True])
 
     def test_each_show_mounts_a_new_view_named_and_ordered(self) -> None:
-        first = self.launch("cad_show", {"path": self.bracket})
-        second = self.launch("cad_show", {"path": self.loose})
+        first = self.launch("cad_show", {"source": self.bracket})
+        second = self.launch("cad_show", {"source": self.loose})
         self.assertNotEqual(first["view"], second["view"])
         self.assertLess((first["order"]["createdAt"], first["order"]["seq"]), (second["order"]["createdAt"], second["order"]["seq"]))
         self.assertEqual((first["page"], first["surface"], second["model"]), ("viewer", "inline", self.loose))
-        shown = self.call("cad_show", {"path": self.bracket})
+        shown = self.call("cad_show", {"source": self.bracket})
         self.assertIn(shown["structuredContent"]["launch"]["view"], shown["content"][0]["text"])
 
     def test_a_step_and_an_engine_document_are_shown_and_the_agent_is_told_so(self) -> None:
@@ -658,12 +658,12 @@ class InlineServerTest(_Session):
             model = self.workspace / "parts" / name
             model.write_bytes(b"\0")
             with self.subTest(model=name):
-                shown = self.launch("cad_show", {"path": str(model)})
+                shown = self.launch("cad_show", {"source": str(model)})
                 self.assertEqual((shown["page"], shown["model"]), ("viewer", str(model)))
 
     def test_the_agent_reads_only_the_view_it_names(self) -> None:
         model = self.bracket
-        view = self.launch("cad_show", {"path": model})["view"]
+        view = self.launch("cad_show", {"source": model})["view"]
         self.assertIn("pass the view", self.call("cad_view")["content"][0]["text"])
         viewer = self.poll_as(view, "inline", 1, model)
         # Another chat's view, served by the same process and touched since, is never the one read.
@@ -678,11 +678,11 @@ class InlineServerTest(_Session):
 
 
     def test_a_capture_right_after_cad_show_waits_for_the_card_and_says_when_it_never_opens(self) -> None:
-        view = self.launch("cad_show", {"path": self.bracket})["view"]
+        view = self.launch("cad_show", {"source": self.bracket})["view"]
         self.opens_later(view, "inline", self.bracket)
         self.assertEqual(self.call("cad_screenshot", {"view": view})["content"][0]["data"], "iVBORw0KGgo=")
         # A card the chat never draws (the person has not allowed it, or it is collapsed) is said so, not "closed".
-        unseen = self.launch("cad_show", {"path": self.loose})["view"]
+        unseen = self.launch("cad_show", {"source": self.loose})["view"]
         with mock.patch("cadgen.mcp.server.OPENING_SECONDS", 0.2):
             shot = self.call("cad_screenshot", {"view": unseen})
         self.assertTrue(shot["isError"])
@@ -697,7 +697,7 @@ class InlineServerTest(_Session):
         def agent(method, url, body=b"", headers=None):
             return self.call("cad_http", {"method": method, "url": url, "headers": headers or {},
                                           "body": base64.b64encode(body).decode("ascii")})
-        shown = self.call("cad_show", {"path": self.bracket})
+        shown = self.call("cad_show", {"source": self.bracket})
         token = shown["_meta"]["dev.texttocad/httpToken"]
         self.assertGreaterEqual(len(token), 40)
         self.assertNotIn(token, json.dumps({k: v for k, v in shown.items() if k != "_meta"}))
@@ -732,7 +732,7 @@ class TextServerTest(_Session):
     viewer_url = staticmethod(lambda model=None: "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab")
 
     def test_a_client_with_no_page_has_no_app_capability(self) -> None:
-        self.assertNotIn("_meta", self.call("cad_show", {"path": self.bracket}))
+        self.assertNotIn("_meta", self.call("cad_show", {"source": self.bracket}))
         refused = self.call("cad_http", {"method": "GET", "url": "/__cad/server",
                                          "headers": {"x-cadgen-app": self.server._app_token}})
         self.assertTrue(refused["isError"])
@@ -743,7 +743,7 @@ class TextServerTest(_Session):
         self.assertIn("cannot show CAD views", self.initialized["instructions"])
         told = []
         self.server._browser_opened = told.append
-        shown = self.call("cad_show", {"path": self.bracket})
+        shown = self.call("cad_show", {"source": self.bracket})
         # Text alone: Claude Code shows a result's structured content in place of its text.
         self.assertNotIn("structuredContent", shown)
         self.assertEqual(shown["content"][0]["text"],
@@ -759,18 +759,19 @@ class TextServerTest(_Session):
 
     def test_cad_show_takes_a_path_or_a_document_id_and_says_so(self) -> None:
         cad_show = {tool["name"]: tool for tool in self.server.handle("tools/list", {}, None)["tools"]}["cad_show"]
-        for said in (cad_show["description"], cad_show["inputSchema"]["properties"]["path"]["description"],
+        for said in (cad_show["description"], cad_show["inputSchema"]["properties"]["source"]["description"],
                      self.initialized["instructions"]):
             self.assertIn("document id", said)
             self.assertIn("absolute path", said)
         refused = self.call("cad_show", {"id": "6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"})
         self.assertTrue(refused["isError"])
-        self.assertEqual(refused["content"][0]["text"], 'Name the model in "path": a document id (running a model\'s '
-                                                        "script prints it) or a CAD file's absolute path.")
+        self.assertEqual(refused["content"][0]["text"], "cad_show: missing source; unknown id. cad_show takes source; source "
+                                                        "is a document id (running a model's script prints it) or a CAD "
+                                                        "file's absolute path.")
 
     def test_a_model_a_browser_page_shows_already_is_not_opened_again(self) -> None:
         self.server._in_browser = lambda model: model == self.bracket
-        shown = self.call("cad_show", {"path": self.bracket})["content"][0]["text"]
+        shown = self.call("cad_show", {"source": self.bracket})["content"][0]["text"]
         self.assertTrue(shown.startswith("bracket.stl is already open in your browser at "
                                          "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab; nothing was opened."), shown)
         self.assertIn("give the user this URL", shown)
@@ -780,7 +781,7 @@ class TextServerTest(_Session):
         from cadgen.viewer import browser_open
 
         with mock.patch.object(browser_open, "display_refusal", return_value="there is no display to open a browser on"):
-            shown = self.call("cad_show", {"path": self.bracket})["content"][0]["text"]
+            shown = self.call("cad_show", {"source": self.bracket})["content"][0]["text"]
         self.assertTrue(shown.startswith("No browser can be opened from here (there is no display to open a browser on); "
                                          "bracket.stl's page is http://127.0.0.1:3245/"), shown)
         self.assertEqual(self.opened, [])
@@ -793,10 +794,10 @@ class TextServerTest(_Session):
 
     def test_a_newer_release_comes_with_the_first_cad_show_and_only_the_first(self) -> None:
         offer_an_update(self)
-        first = self.call("cad_show", {"path": self.bracket})["content"]
+        first = self.call("cad_show", {"source": self.bracket})["content"]
         self.assertIn('Ask your agent to update to the latest version ("Update text-to-cad to 99.0.0 from '
                       'https://github.com/earthtojake/text-to-cad"), or install manually', first[-1]["text"])
-        self.assertEqual(len(self.call("cad_show", {"path": self.bracket})["content"]), 1)
+        self.assertEqual(len(self.call("cad_show", {"source": self.bracket})["content"]), 1)
 
     def test_a_viewer_that_will_not_start_leaves_the_command_to_run(self) -> None:
         from cadgen.mcp.browser import ViewerUnavailable
@@ -805,7 +806,7 @@ class TextServerTest(_Session):
             raise ViewerUnavailable("no port")
 
         self.server._viewer_url = refuse
-        failed = self.call("cad_show", {"path": self.bracket})
+        failed = self.call("cad_show", {"source": self.bracket})
         self.assertTrue(failed["isError"])
         self.assertIn(f"`cadgen viewer --host 127.0.0.1 --json {self.bracket}`", failed["content"][0]["text"])
 
@@ -841,7 +842,7 @@ class CodexExecTest(_Session):
         pages: set[str] = set()
         self.server._in_browser = lambda model: model in pages
         self.server._browser_opened = pages.add
-        opened = self.call("cad_open", {"path": self.bracket}, self.EXEC)
+        opened = self.call("cad_open", {"source": self.bracket}, self.EXEC)
         self.assertNotIn("structuredContent", opened)
         self.assertNotIn("_meta", opened)
         text = opened["content"][0]["text"]
@@ -850,7 +851,7 @@ class CodexExecTest(_Session):
         self.assertEqual(len(self.opened), 1)
         # The next turn (`codex exec resume`, a new server process: the engine still knows the page).
         again = self.greet(None, in_browser=lambda model: model in pages)
-        shown = again.handle("tools/call", {"name": "cad_show", "arguments": {"path": self.bracket}},
+        shown = again.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}},
                              RequestContext(1, {"threadId": "t", **self.EXEC}))["content"][0]["text"]
         self.assertTrue(shown.startswith("bracket.stl is already open in your browser at http://127.0.0.1:3245/"), shown)
         self.assertEqual(len(self.opened), 1)
@@ -859,27 +860,27 @@ class CodexExecTest(_Session):
         # codex-cli 0.153 sends no turn metadata: the launcher alone says it.
         server = self.greet(CODEX_EXEC)
         self.assertEqual([tool["name"] for tool in server.handle("tools/list", {}, None)["tools"]][:2], ["cad_show", "cad_http"])
-        shown = server.handle("tools/call", {"name": "cad_show", "arguments": {"path": self.bracket}},
+        shown = server.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}},
                               RequestContext(1, {"threadId": "t"}))["content"][0]["text"]
         self.assertTrue(shown.startswith("bracket.stl opened in your browser at http://127.0.0.1:3245/"), shown)
         self.assertEqual(len(self.opened), 1)
 
     def test_the_codex_apps_own_turns_keep_their_tabs_and_open_no_browser(self) -> None:
-        opened = self.call("cad_open", {"path": self.bracket}, self.APP)
+        opened = self.call("cad_open", {"source": self.bracket}, self.APP)
         self.assertEqual(opened["content"][0]["text"],
                          f"{self.bracket} is open in a new CAD tab. From now on, use cad_show to show models in it.")
         self.assertEqual(opened["structuredContent"]["launch"]["model"], self.bracket)
         # A show in the same turn goes to the tab cad_open launched, which the host is still opening.
         self.syncs_later("tab-1", "agent", self.bracket)
-        self.assertEqual(self.call("cad_show", {"path": self.loose}, self.APP)["content"][0]["text"], f"Showing {self.loose} in CAD.")
+        self.assertEqual(self.call("cad_show", {"source": self.loose}, self.APP)["content"][0]["text"], f"Showing {self.loose} in CAD.")
         events = self.call("cad_sync", {"view": "tab-1", "surface": "agent", "model": self.bracket})["structuredContent"]["events"]
         self.assertEqual([(event["type"], event["launch"]["model"]) for event in events], [("show", self.loose)])
         self.assertEqual(self.opened, [])
 
     def test_a_tab_still_opening_is_said_so_and_shown_the_model_once_it_opens(self) -> None:
-        self.call("cad_open", {"path": self.bracket}, self.APP)
+        self.call("cad_open", {"source": self.bracket}, self.APP)
         with mock.patch("cadgen.mcp.server.OPENING_SECONDS", 0.1):
-            shown = self.call("cad_show", {"path": self.loose}, self.APP)
+            shown = self.call("cad_show", {"source": self.loose}, self.APP)
         self.assertEqual(shown["content"][0]["text"], f"The CAD tab cad_open opened is still opening; it shows {self.loose} once it opens.")
         self.assertNotIn("No CAD viewer", shown["content"][0]["text"])
         events = self.call("cad_sync", {"view": "tab-1", "surface": "agent", "model": self.bracket})["structuredContent"]["events"]
@@ -895,7 +896,7 @@ class UnconfirmedCodexTest(_Session):
     viewer_url = staticmethod(lambda model=None: "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab?token=t")
 
     def test_cad_open_says_where_the_model_is_either_way_and_opens_no_browser(self) -> None:
-        opened = self.call("cad_open", {"path": self.bracket})
+        opened = self.call("cad_open", {"source": self.bracket})
         self.assertEqual(opened["content"][0]["text"],
                          f"Where this app shows CAD tabs, {self.bracket} opens in a new CAD tab with this answer; where it "
                          "shows none, the user can see it in their browser at http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-"
@@ -905,19 +906,207 @@ class UnconfirmedCodexTest(_Session):
         self.assertEqual(self.opened, [])
 
     def test_a_tab_that_never_comes_means_this_host_shows_none(self) -> None:
-        self.call("cad_open", {"path": self.bracket})
+        self.call("cad_open", {"source": self.bracket})
         with mock.patch("cadgen.mcp.server.OPENING_SECONDS", 0.1):
-            shown = self.call("cad_show", {"path": self.bracket})["content"][0]["text"]
+            shown = self.call("cad_show", {"source": self.bracket})["content"][0]["text"]
         self.assertTrue(shown.startswith("bracket.stl opened in your browser at http://127.0.0.1:3245/"), shown)
         self.assertEqual(len(self.opened), 1)
-        self.assertNotIn("tab", self.call("cad_open", {"path": self.loose})["content"][0]["text"])
+        self.assertNotIn("tab", self.call("cad_open", {"source": self.loose})["content"][0]["text"])
 
     def test_a_view_reaching_the_server_proves_tabs_over_a_turn_that_says_exec(self) -> None:
-        self.call("cad_open", {"path": self.bracket})
+        self.call("cad_open", {"source": self.bracket})
         self.syncs_later("tab-1", "agent", self.bracket)
-        self.assertEqual(self.call("cad_show", {"path": self.loose})["content"][0]["text"], f"Showing {self.loose} in CAD.")
-        self.assertIn("in a new CAD tab. From now on", self.call("cad_open", {"path": self.loose}, CODEX_EXEC_TURN)["content"][0]["text"])
+        self.assertEqual(self.call("cad_show", {"source": self.loose})["content"][0]["text"], f"Showing {self.loose} in CAD.")
+        self.assertIn("in a new CAD tab. From now on", self.call("cad_open", {"source": self.loose}, CODEX_EXEC_TURN)["content"][0]["text"])
         self.assertEqual(self.opened, [])
+
+
+TEXT_CLIENT = {"name": "some-cli", "version": "1"}
+# Each catalog a host is listed, by the greeting that lists it.
+CATALOGS = {"tabs": (CODEX, {}), "inline": (CLAUDE, RENDERS_APPS), "text": (TEXT_CLIENT, {})}
+DOCUMENT_ID = "6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"
+
+
+class ToolArgumentsTest(unittest.TestCase):
+    """What every tool takes, in every catalog: the schema a host is listed and what its handler takes
+    agree, a model is named by ``source`` everywhere, and a refusal says what is missing and unknown."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(os.path.realpath(tempfile.mkdtemp()))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.model = self.tmp / "bracket.stl"
+        self.model.write_bytes(STL)
+
+    def served(self, catalog: str) -> Server:
+        client, offered = CATALOGS[catalog]
+        page = self.tmp / "app"
+        page.mkdir(exist_ok=True)
+        (page / "index.html").write_text("<!doctype html><title>CAD</title>", encoding="utf-8")
+        server = Server(page=AppPage(page), recents=RecentStore(self.tmp / "state"))
+        server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": offered,
+                                                       "clientInfo": client}, None), None)
+        return server
+
+    def call(self, server: Server, name: str, arguments: dict) -> dict:
+        return server.handle("tools/call", {"name": name, "arguments": arguments}, RequestContext(1, {"threadId": "t"}))
+
+    def sample(self, key: str, schema: dict):
+        """A value the schema takes for ``key``, as an agent would send it."""
+        named = {"requestId": "agreement-request-01", "operationId": "operation", "epoch": "epoch", "view": "v",
+                 "source": str(self.model), "destinations": [str(self.tmp / "out.step")]}
+        if key in named:
+            return named[key]
+        if "enum" in schema:
+            return schema["enum"][0]
+        kind = schema.get("type")
+        kind = kind[0] if isinstance(kind, list) else kind
+        return {"string": str(self.tmp / "out.png"), "integer": schema.get("minimum", 0), "boolean": False,
+                "object": {}, "array": []}[kind]
+
+    def test_every_schema_property_is_one_its_handler_takes(self) -> None:
+        for catalog in CATALOGS:
+            server = self.served(catalog)
+            for tool in server.handle("tools/list", {}, None)["tools"]:
+                name, schema = tool["name"], tool["inputSchema"]
+                if name in START:
+                    branches = schema["anyOf"]
+                    self.assertEqual(set(schema["properties"]), {key for branch in branches for key in branch["properties"]}, name)
+                    # An agent reads the whole list: all but what names an operation to follow is a start's too.
+                    [start] = [branch for branch in branches if "start" in branch["properties"]["action"]["enum"]]
+                    self.assertEqual(set(schema["properties"]) - set(start["properties"]), {"operationId", "epoch", "afterSequence"}, name)
+                    for branch in branches:
+                        for key, property_schema in branch["properties"].items():
+                            if "start" in branch["properties"]["action"]["enum"]:
+                                # The set of arguments that names this one, else the first: what a start needs beside it.
+                                group = next((group for group in STARTS[name] if key in group), STARTS[name][0])
+                                base = {need: self.sample(need, branch["properties"][need]) for need in ("requestId", *group)}
+                            else:
+                                base = {"action": "status", "operationId": "operation", "epoch": "epoch"}
+                            arguments = {**base, key: self.sample(key, property_schema)}
+                            with self.subTest(catalog=catalog, tool=name, argument=key):
+                                check_arguments(name, arguments)  # raises where the handler refuses one
+                elif name in _AGENT_TOOLS:
+                    base = {need: self.sample(need, schema["properties"][need]) for need in schema.get("required", [])}
+                    for key, property_schema in schema["properties"].items():
+                        with self.subTest(catalog=catalog, tool=name, argument=key):
+                            server._arguments(name, {**base, key: self.sample(key, property_schema)})
+
+    def test_every_tool_names_its_model_source(self) -> None:
+        for catalog in CATALOGS:
+            for tool in self.served(catalog).handle("tools/list", {}, None)["tools"]:
+                properties = tool["inputSchema"]["properties"]
+                self.assertNotIn("path", properties, (catalog, tool["name"]))
+                if tool["name"] in ("cad_open", "cad_show", *START):
+                    self.assertIn("source", properties, (catalog, tool["name"]))
+
+    def test_a_refusal_names_every_argument_missing_and_unknown_and_what_the_tool_takes(self) -> None:
+        server = self.served("text")
+        shape = ("To start: {requestId, source, output} or {requestId, packet}, optionally with display, camera, grid, "
+                 "preview, pose, width, height, size_profile, annotation, measurements, waitMs. To follow one: "
+                 "{action: status or cancel, operationId, epoch}, optionally with afterSequence, waitMs.")
+        for arguments, said in (({"path": str(self.model)}, "missing requestId, source, output; unknown path"),
+                                ({"id": DOCUMENT_ID, "out": str(self.tmp / "a.png")}, "missing requestId, source, output; unknown id, out"),
+                                ({"requestId": "agreement-request-01", "packet": {}, "output": str(self.tmp / "a.png")},
+                                 "a packet declares its outputs; omit output")):
+            refused = self.call(server, "cad_snapshot", arguments)
+            self.assertTrue(refused["isError"])
+            self.assertEqual(refused["structuredContent"]["error"], f"cad_snapshot: {said}. {shape}")
+        followed = self.call(server, "cad_inspect", {"action": "status", "source": str(self.model)})["structuredContent"]["error"]
+        self.assertTrue(followed.startswith("cad_inspect: missing operationId, epoch; unknown source. To start: "
+                                            "{requestId, source}, optionally with ref, query, waitMs."), followed)
+        shown = self.call(server, "cad_show", {"path": str(self.model)})
+        self.assertTrue(shown["isError"])
+        self.assertEqual(shown["content"][0]["text"], "cad_show: missing source; unknown path. cad_show takes source; source "
+                                                      "is a document id (running a model's script prints it) or a CAD file's "
+                                                      "absolute path.")
+        self.assertEqual(server.operations.jobs, {})  # nothing refused was queued
+
+    def test_a_start_waits_for_its_result_as_long_as_wait_ms_says(self) -> None:
+        server = self.served("text")
+        with mock.patch("cadgen.engine.api.inspect", return_value={"faces": 6}):
+            done = self.call(server, "cad_inspect", {"requestId": "inspect-and-wait-01", "source": str(self.model),
+                                                     "waitMs": 10000})["structuredContent"]
+        self.assertEqual((done["state"], done["result"]), ("succeeded", {"inspection": {"faces": 6}}))
+
+    def test_a_snapshot_with_no_output_is_refused_at_its_start(self) -> None:
+        server = self.served("text")
+        refused = self.call(server, "cad_snapshot", {"requestId": "snapshot-no-output-1", "source": str(self.model)})
+        self.assertEqual(refused["structuredContent"]["state"], "rejected")
+        self.assertTrue(refused["structuredContent"]["error"].startswith("cad_snapshot: missing output. To start: "))
+        relative = self.call(server, "cad_snapshot", {"requestId": "snapshot-relative-01", "source": str(self.model),
+                                                      "output": "picture.png"})["structuredContent"]
+        self.assertEqual((relative["state"], relative["error"]), ("rejected", "Paths must be absolute on the engine host"))
+        self.assertEqual(server.operations.jobs, {})
+
+    def test_outputs_may_have_been_written_only_once_the_engine_was_asked(self) -> None:
+        from cadgen.engine.export import ExportRefused
+        from cadgen.engine.snapshot import SnapshotRefused
+
+        server = self.served("text")
+        out = str(self.tmp / "a.png")
+        engine_refusal = ExportRefused("the second destination is 3D")
+        engine_refusal._engine_refusal = True
+        for error, may in ((SnapshotRefused("refused before any render"), False), (engine_refusal, True),
+                           (RuntimeError("the renderer died"), True)):
+            with mock.patch("cadgen.engine.api.snapshot", side_effect=error):
+                failed = self.call(server, "cad_snapshot", {"requestId": f"snapshot-fails-{may}-{type(error).__name__}",
+                                                            "source": str(self.model), "output": out, "waitMs": 10000})
+            self.assertEqual(failed["structuredContent"]["state"], "failed")
+            self.assertEqual(failed["structuredContent"]["result"], {"outputsMayHaveBeenWritten": may}, error)
+
+    def test_an_export_of_a_script_says_to_run_it_and_export_its_document_by_id(self) -> None:
+        server = self.served("text")
+        script = self.tmp / "l_bracket.py"
+        script.write_text("print(1)\n", encoding="utf-8")
+        failed = self.call(server, "cad_export", {"requestId": "export-a-script-001", "source": str(script),
+                                                  "destinations": [str(self.tmp / "l_bracket.step")], "waitMs": 10000})
+        answer = failed["structuredContent"]
+        self.assertEqual(answer["state"], "failed")
+        self.assertEqual(answer["error"], "l_bracket.py is no document: an export reads an .xbf, a .step, a mesh (.glb, "
+                                          f".stl, .3mf) or a document id; run `cadgen run {script}` first, then export "
+                                          "its document by id")
+        self.assertEqual(answer["result"], {"outputsMayHaveBeenWritten": False})  # refused before the engine was asked
+
+    def test_a_snapshot_of_a_held_document_names_it_by_its_id_and_never_a_file_that_is_not_there(self) -> None:
+        from types import SimpleNamespace
+        from cadgen.engine import snapshot
+
+        server = self.served("text")
+        out = self.tmp / "_probe" / "mcp.png"
+        out.parent.mkdir()
+
+        reports = []
+
+        def worker(order, spec, shown, daemon, progress=None):
+            # What the worker holding the document does with the order: draws it from memory, no file of it.
+            reports.append(snapshot.draw(SimpleNamespace(path=None), Path(order["draw"]["out"])))
+            return {"reports": [], "files": [], "drawn": dict(reports[-1])}
+
+        png = (b"\x89PNG\r\n\x1a\n" + b"\0" * 16, {"width": 4, "height": 3, "timings": {}})
+        with mock.patch("cadgen.engine.api._exported", side_effect=worker), \
+                mock.patch("cadgen.engine.render.service.draw_here", return_value=png):
+            done = self.call(server, "cad_snapshot", {"requestId": "snapshot-held-doc-01", "source": DOCUMENT_ID,
+                                                      "output": str(out), "waitMs": 10000})["structuredContent"]
+        self.assertEqual(done["state"], "succeeded", done)
+        [picture] = done["result"]["pictures"]
+        self.assertEqual(picture["report"]["document"], DOCUMENT_ID)
+        self.assertNotIn("document", reports[0])  # the worker's report names no file it drew from
+        self.assertNotIn("mcp.xbf", json.dumps(done))
+
+    def test_the_text_catalog_says_the_model_opens_in_the_browser_and_never_in_the_chat(self) -> None:
+        server = self.served("text")
+        instructions = server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {},
+                                                                      "clientInfo": TEXT_CLIENT}, None), None)["instructions"]
+        tools = server.handle("tools/list", {}, None)["tools"]
+        said = [instructions] + [tool["description"] for tool in tools] + [
+            schema.get("description", "") for tool in tools for schema in tool["inputSchema"]["properties"].values()]
+        for words in said:
+            for wrong in ("chat", "card", "viewer tab"):
+                self.assertNotIn(wrong, words.lower())
+        cad_show = next(tool for tool in tools if tool["name"] == "cad_show")
+        for words in (instructions, cad_show["description"]):
+            self.assertIn("in the user's browser", words)
+            self.assertIn(FOLLOWS, words)
 
 
 class LocalPathTest(unittest.TestCase):

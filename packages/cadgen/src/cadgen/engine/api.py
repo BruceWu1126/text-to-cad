@@ -428,8 +428,11 @@ def _source(source: Any) -> dict[str, Any]:
         return {"id": text}
     path = Path(text).resolve()
     if path.suffix.lower() not in SOURCES + MESHES:
+        # A script is the commonest such source: its run makes the document, and prints its id.
+        run = (f"; run `cadgen run {text}` first, then export its document by id"
+               if path.suffix.lower() == ".py" else "")
         raise ExportRefused(f"{path.name} is no document: an export reads an .xbf, a .step, a mesh "
-                            f"({', '.join(MESHES)}) or a document id")
+                            f"({', '.join(MESHES)}) or a document id{run}")
     if not path.is_file():
         raise ExportRefused(f"no document {path}")
     return {"path": str(path)}
@@ -549,6 +552,8 @@ def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, 
         order = {"op": "export", "source": spec, "destinations": [], "draw": draw,
                  "cwd": str(source.cwd) if isinstance(source, Document) else os.getcwd()}
         found = _exported(order, spec, lambda _text: None, daemon)["drawn"]
+        if "id" in spec:
+            found["document"] = spec["id"]  # what was drawn, by the id it was named by
         return Drawn(out, found["width"], found["height"], found)
     shown, framed, size = drawing.options(display, camera, grid, width, height, size_profile)
     found = drawing.snapshot(Path(os.fspath(source)), out, display=shown, camera=framed, preview=preview,
