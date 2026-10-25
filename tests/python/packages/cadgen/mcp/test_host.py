@@ -41,6 +41,7 @@ class LauncherTest(unittest.TestCase):
                 ([["codex", "app-server"]], "codex app-server", True),
                 ([UVX, *CLAUDE_CODE], "claude code", False),
                 (CLAUDE_DESKTOP, "claude desktop", True),
+                (CLAUDE_DESKTOP[1:], "claude desktop", True),  # its own program nearest: never Claude Code
                 ([["/opt/homebrew/bin/python3.13", "-m", "unittest"], *CLAUDE_CODE], "python3.13", None)):
             with self.subTest(named=named, nearest=chain[0][0]):
                 found = host.host_of(chain)

@@ -91,6 +91,9 @@ def classify(argv: list[str]) -> dict[str, Any] | None:
         if sub is None or sub in _CODEX_TEXT:
             return {"host": f"codex {sub}" if sub else "codex", "renders": False}
         return {"host": f"codex {sub}", "renders": None}
+    if "/Claude.app/Contents/" in argv[0] and os.path.basename(argv[0]) == "Claude":
+        # The desktop app's own program, whose name is Claude Code's but for its case.
+        return {"host": "claude desktop", "renders": True}
     if program == "claude":
         # Claude Code: its terminal, and the desktop app's code sessions, which run this program too.
         # It shows no cards unless it declares the extension (``CLAUDE_CODE_MCP_APPS_HOST=1``).
