@@ -7,8 +7,7 @@ through its tunnel).
 Recents is a view of the registry (``cadgen.engine.registry``, ``<state>/documents/<id>/document.json``):
 a CAD file opened on a page is a record of its own (``kind: "file"``: its path, when it was opened,
 whether it is pinned), and every model a script built is one already (``kind: "model"``, which the
-engine writes when it registers the build). ``memory`` documents have none, so they are never
-listed. The home's picture of each is UI state on its record (``preview``), the PNG under
+engine writes when it registers the build). The home's picture of each is UI state on its record (``preview``), the PNG under
 ``recents/thumbnails`` named by its content. Removing a file's entry forgets its record, the file
 untouched; a model's entry is deleted with its document (``cadgen.engine.models.delete``: its record
 and its document in the engine's cache). Nothing goes on its own: a model whose script is gone stays

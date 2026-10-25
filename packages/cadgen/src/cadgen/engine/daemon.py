@@ -2030,7 +2030,7 @@ class Daemon:
             self.models.prune()
             ident = str(request.get("id"))
             with self.models.lock:
-                record = self.models.records.get(ident) or self.models.expired.get(ident)
+                record = self.models.records.get(ident)
             if record is None:
                 self.models.adopt(ident)  # held on disk (the engine's cache), after a restart
                 with self.models.lock:

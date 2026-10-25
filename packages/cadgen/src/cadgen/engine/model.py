@@ -134,9 +134,6 @@ class Model:
                              f"REPL), build the shape and hand it over: model(shape, name={self.name!r})")
         self.script = Path(canonical(filename))
         self.outputs: list[Output] = []
-        # Where its document is kept (``STORES``): ``pointer``, or ``memory`` when its declaration asks.
-        self.store = "pointer"
-        self._store_given: str | None = None
         # The ``key=`` its declaration gives (``ids.key_id``), else None: its id is derived.
         self.key: str | None = None
         self._bare = False  # declared by ``@model``
@@ -219,17 +216,6 @@ class Model:
                 _told(error, f"the run stopped at {self.name}: a model it calls after this one is not built")
             raise error
         return api.Document(self.name, self.script, built.models[0], Path.cwd())
-
-    def stored(self, store: str | None) -> "Model":
-        """The store a decorator gives (``store=``): one store per model (``STORES``)."""
-        if store is None:
-            return self
-        if store not in STORES:
-            raise ValueError(f"store is one of {', '.join(map(repr, STORES))}, not {store!r}")
-        if self._store_given is not None and self._store_given != store:
-            raise TypeError(f"model {self.name!r} declares two stores, {self._store_given!r} and {store!r}")
-        self.store = self._store_given = store
-        return self
 
     def _path(self, kind: str, out: Any) -> Path:
         if out is None:
@@ -329,7 +315,6 @@ def as_package_module(main: Any) -> None:
 # points at and knows the program that builds it again; ``memory``, kept in its worker's memory only,
 # gone when the worker is. A shape handed over (``model(shape, name=...)``) is a third, ``shape``: its
 # document is the bytes handed over, held and cached as a drained document is, with nothing to run.
-STORES = ("pointer", "memory")
 
 # Each key a declaration in this process gives, and the declaration (``script::function``, or a
 # shape's ``scope::name``) that gave it: one key names one document. A build forgets them before
@@ -355,27 +340,22 @@ def _no_shape_options(name: Any, animations: Any) -> None:
                         "(animation(...)); animations= goes with a shape handed over, model(shape, name=...)")
 
 
-def model(target: Any = None, /, *, store: str | None = None, key: str | None = None, name: str | None = None,
+def model(target: Any = None, /, *, key: str | None = None, name: str | None = None,
           animations: Any = None) -> Any:
-    """Declare a model without an output file: ``@model``, or ``@model(store="memory")`` for a
-    document kept in its worker's memory only, ``@model(key="arm")`` for an id of its key's
-    (``ids.key_id``). A call builds its document. ``model(shape, name="arm")`` instead hands a shape
+    """Declare a model without an output file: ``@model``, or ``@model(key="arm")`` for an id of its
+    key's (``ids.key_id``). A call builds its document. ``model(shape, name="arm")`` instead hands a shape
     over: a document made of it, held by the engine as a built one is, its handle returned
     (``api.hand_over``); ``key=`` and ``animations=[...]`` (the ``animation()`` builders of the GLB's
     choreography) go with it."""
     if target is None:
         _no_shape_options(name, animations)
-        if store is not None and store not in STORES:
-            raise ValueError(f"store is one of {', '.join(map(repr, STORES))}, not {store!r}")
         if key is not None:
             check_key(key)
-        return lambda function: model(function, store=store, key=key)
+        return lambda function: model(function, key=key)
     if isinstance(target, Model) or inspect.isfunction(target):
         _no_shape_options(name, animations)
         found = target if isinstance(target, Model) else Model(target)
-        return found.declared("model").stored(store).keyed(key)
-    if store is not None:
-        raise TypeError("a shape handed over takes no store=: its document is the shape's, held by the engine")
+        return found.declared("model").keyed(key)
     from cadgen.engine import api
 
     caller = sys._getframe(1)
@@ -385,12 +365,10 @@ def model(target: Any = None, /, *, store: str | None = None, key: str | None = 
 
 
 def _decorator(kind: str) -> Callable[..., Any]:
-    def decorate(out: Any, *, store: str | None = None, key: str | None = None) -> Any:
+    def decorate(out: Any, *, key: str | None = None) -> Any:
         if out is None:
             raise TypeError(f"@{kind} requires an output path")
         check_output(kind, out, f"@{kind}(out=...)")
-        if store is not None and store not in STORES:
-            raise ValueError(f"store is one of {', '.join(map(repr, STORES))}, not {store!r}")
         if key is not None:
             check_key(key)
 
@@ -400,15 +378,14 @@ def _decorator(kind: str) -> Callable[..., Any]:
             if any(output.kind == kind for output in model.outputs):
                 raise TypeError(f"model {model.name!r} declares @{kind} twice")
             model.outputs.insert(0, Output(kind, os.fspath(out)))
-            return model.stored(store).keyed(key)
+            return model.keyed(key)
 
         return apply
 
     decorate.__name__ = kind
     decorate.__qualname__ = kind
-    decorate.__doc__ = (f"Declare an explicit output: @{kind}(out='path{SUFFIXES[kind]}'), where its "
-                        "document is kept with store= (pointer or memory), its id given by key=. "
-                        "The output path is required; decoration builds nothing.")
+    decorate.__doc__ = (f"Declare an explicit output: @{kind}(out='path{SUFFIXES[kind]}'), its document's id "
+                        "given by key=. The output path is required; decoration builds nothing.")
     return decorate
 
 

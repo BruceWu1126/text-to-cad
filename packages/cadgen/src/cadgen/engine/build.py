@@ -563,7 +563,6 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
     for report, (model, result, body, children) in zip(reports, results):
         report["id"] = model.id
         report["source"] = {"script": str(model.script), "name": model.name}
-        report["store"] = model.store
         report["key"] = model.key
         if result is not None:
             report["timings"] = {"load": round(load_seconds, 4), "body": round(body, 4)}
@@ -792,7 +791,6 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
     report["files"] = {str(target.path): written[str(target.path)] for target in plan}
     report["id"] = model.id
     report["source"] = {"script": str(model.script), "name": model.name}
-    report["store"] = model.store
     report["key"] = model.key
 
 
@@ -931,9 +929,9 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
     remembered = _WRITTEN.get(name)
     cached = None
     if xbf is None and (targets or remembered is None):
-        # No xbf, and no record of its own here of a model with no file: the engine's cache of a
-        # ``pointer`` one is in the xbf's place; anything else has nothing that says what it was.
-        if targets or cache is None or getattr(model, "store", "pointer") != "pointer":
+        # No xbf, and no record of its own here of a model with no file: the engine's cache of it is
+        # in the xbf's place; a model with a file and no xbf has nothing that says what it was.
+        if targets or cache is None:
             return {"used": False, "reason": "the model declares no xbf"}, None
         from cadgen.engine.cache import FILE
 

@@ -347,7 +347,7 @@ class Cache:
         """Document ``ident`` has been idle: saved by the worker that holds it, or from the bytes the
         daemon holds; nothing when the cache is at its revision already."""
         row = self.models.row(ident)
-        if row is None or row["store"] == "memory" or self.current(ident, row["revision"]):
+        if row is None or self.current(ident, row["revision"]):
             return
         worker = row["worker"]
         if worker is not None and self.models._working(worker):

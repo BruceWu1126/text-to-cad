@@ -431,9 +431,8 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   `cadgen delete <id>` (or a model's script, or a file's path), or Delete on a model's row of
   the home, deletes a document: its record and its cached document. Your script and its files
   stay.
-- **A model lives in a `.py` file.** Its record points at the script (`pointer`).
-  `@model(store="memory")` keeps a document in its worker's memory alone, unrecorded and
-  out of Recents: for throwaway probes.
+- **A model lives in a `.py` file.** Its record points at the script, and every model's
+  document is recorded and kept alike: no decorator takes a store.
 - **A notebook hands its shape over.** In a notebook cell or a REPL, build the shape and
   call `model(shape, name="bracket")`: the engine holds, caches and serves a document of
   it, exports it like any other, and returns the same handle (`.shape` is your shape).

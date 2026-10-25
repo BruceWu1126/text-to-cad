@@ -361,7 +361,7 @@ class Pressure:
 
 
 class NotHeld(ValueError):
-    """A document the engine knows but no longer holds: its ``state`` (``evicted``, ``expired``)
+    """A document the engine knows but no longer holds: its ``state`` (``evicted``, ``detached``)
     and the command that builds it again (``rebuild``), which the engine never runs."""
 
     def __init__(self, text: str, state: str = "evicted", rebuild: str | None = None) -> None:

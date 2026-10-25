@@ -139,7 +139,7 @@ ICON = {
 
 
 def _say_not_held(named: Any) -> str | None:
-    """A document id the engine knows but holds no more (evicted, expired): refused with the command
+    """A document id the engine knows but holds no more (evicted, detached): refused with the command
     that builds it again, which nothing here runs. One held as last built though its code changed
     since (the engine's cache, after a restart): those words, to say beside it."""
     from cadgen.engine.ids import is_id

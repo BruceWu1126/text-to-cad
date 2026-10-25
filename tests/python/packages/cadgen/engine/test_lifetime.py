@@ -146,18 +146,25 @@ class NotHeldRefusalTest(unittest.TestCase):
         from cadgen.engine import api, daemon
         from cadgen.engine.serve import NotHeld
 
+        folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="engine-refusal-")))
+        self.addCleanup(shutil.rmtree, folder, True)
+        script = folder / "cell.py"
+        script.write_text("", encoding="utf-8")
         engine = daemon.Daemon()
         self.addCleanup(engine.pool.stop)
-        ident = model_id(Path("/nowhere/cell.py"), "cell")
-        engine.models.expired[ident] = {"id": ident, "source": {"script": "/nowhere/cell.py", "name": "cell"},
-                                        "program": "/nowhere/caller.py", "store": "memory", "version": 1, "builtAt": 0}
+        ident = model_id(script, "cell")
+        # Built before, its worker crashed before anything kept it: no worker, no bytes, no cache file.
+        engine.models.records[ident] = {"id": ident, "source": {"script": str(script), "name": "cell"}, "worker": None,
+                                        "program": str(script), "store": "pointer", "version": "g1", "builtAt": 0,
+                                        "files": [], "revision": "r1", "read": []}
         answers: list[dict] = []
         engine.handle({"op": "document", "id": ident}, answers.append)
         (answer,) = answers
-        self.assertEqual((answer["state"], answer["rebuild"]), ("expired", "cadgen run /nowhere/cell.py"))
+        command = f"cadgen run {script}"
+        self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", command))
         error = api._failed(answer)
         self.assertIsInstance(error, NotHeld, "raised as its type: the CLI exits 2 for a ValueError")
-        self.assertEqual((error.state, error.rebuild, str(error)), ("expired", "cadgen run /nowhere/cell.py", answer["failed"]))
+        self.assertEqual((error.state, error.rebuild, str(error)), ("evicted", command, answer["failed"]))
         answers.clear()
         engine.handle({"op": "document", "id": model_id(Path("/nowhere/other.py"), "other")}, answers.append)
         self.assertIsInstance(api._failed(answers[0]), NotHeld, "an id it never built is refused the same")
@@ -191,7 +198,7 @@ from cadgen.engine import model
 pathlib.Path(__file__).with_suffix(".ran").write_text("ran", encoding="utf-8")
 
 
-@model{store}
+@model
 def {name}():
     return bd.Box(3, 2, 1)
 """
@@ -307,9 +314,9 @@ class LifetimeDaemonTest(unittest.TestCase):
         return await_(lambda: (lambda row: row if row.get("state") == state else None)(found()),
                       f"{ident} {state}") if state else found()
 
-    def built(self, name: str, store: str = "", env: dict | None = None, script: str = SCRIPT) -> str:
+    def built(self, name: str, env: dict | None = None, script: str = SCRIPT) -> str:
         """``python caller_NAME.py`` builds model ``name`` of ``NAME.py``: its id, once its worker retired."""
-        (self.folder / f"{name}.py").write_text(textwrap.dedent(script.format(name=name, store=store)), encoding="utf-8")
+        (self.folder / f"{name}.py").write_text(textwrap.dedent(script.format(name=name)), encoding="utf-8")
         caller = self.folder / f"caller_{name}.py"
         caller.write_text(textwrap.dedent(CALLER.format(name=name)), encoding="utf-8")
         done = engine_daemon.run([sys.executable, caller.name], cwd=self.folder, env=env or self.env)
@@ -441,11 +448,10 @@ class LifetimeDaemonTest(unittest.TestCase):
         self.assert_documents_worker_alone("hinge.py")
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
 
-    def test_an_evicted_and_an_expired_document_name_their_rebuild_and_nothing_runs_it(self) -> None:
+    def test_a_document_no_cache_keeps_names_its_rebuild_and_nothing_runs_it(self) -> None:
         # Every document leaves memory once drained, and no cache can keep it on disk (``test_cache``'s).
         tiny = {**self.env, "CADGEN_ENGINE_MEMORY_MB": "0.001", "CADGEN_CACHE_DIR": engine_daemon.unwritable(self.folder)}
         evicted = self.built("arm", env=tiny)
-        expired = self.built("cell", store='(store="memory")', env=tiny)
         command = f"cadgen run {self.folder / 'arm.py'}"
         row = self.row(evicted, "evicted")
         self.assertEqual(row["rebuild"], command, "the script that defines it, not the program that called it")
@@ -455,21 +461,13 @@ class LifetimeDaemonTest(unittest.TestCase):
                                       cwd=self.folder, env=self.env)
         self.assertEqual(inspected.returncode, 2, "a document not held is a refusal, not a failure")
         self.assertIn(f"run `{command}`", inspected.stderr)
-        row = self.row(expired, "expired")
-        self.assertEqual(row["rebuild"], f"cadgen run {self.folder / 'cell.py'}")
-        status, body = self.page(expired)
-        self.assertEqual((status, body["state"]), (404, "expired"))
-        self.assertIn("it is kept in memory only", body["error"])
         listed = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "status"], cwd=self.folder, env=self.env)
-        self.assertIn(f"evicted   arm   {evicted}  run `{command}`", listed.stdout)
-        self.assertIn(f"expired   cell  {expired}", listed.stdout)
+        self.assertIn(f"evicted   arm  {evicted}  run `{command}`", listed.stdout)
         from cadgen.mcp.server import ToolFailed, _say_not_held
 
-        with self.assertRaisesRegex(ToolFailed, "kept in memory only"):
-            _say_not_held(expired)
+        with self.assertRaisesRegex(ToolFailed, f"run `{command}`"):
+            _say_not_held(evicted)
         self.assertFalse((self.folder / "arm.ran").exists(), "nothing ran the script to restore it")
-        self.assertFalse((self.folder / "cell.ran").exists())
-
 
 if __name__ == "__main__":
     unittest.main()

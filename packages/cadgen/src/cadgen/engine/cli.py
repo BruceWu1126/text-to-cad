@@ -798,7 +798,7 @@ def status_text(answer: dict[str, Any]) -> str:
             if row.get("held"):
                 line += f"  {row['held']}"  # where: memory, disk (the cache), or both
             if row.get("rebuild"):
-                line += f"  run `{row['rebuild']}`" + (" (kept in memory only)" if row.get("store") == "memory" else "")
+                line += f"  run `{row['rebuild']}`"
             elif row.get("store") == "shape":
                 line += "  a shape handed over: no script to rerun"
             if row.get("state") == "failed":

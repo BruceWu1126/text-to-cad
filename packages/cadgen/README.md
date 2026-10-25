@@ -111,16 +111,16 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    no name (`ids.file_id`, inside the engine only: its public name stays its path), a shape handed
    over its calling script, or the working folder, and its name -- the same in every process,
    worked out without asking the engine. `key="..."` replaces it with `uuid5(NAMESPACE, "key::" +
-   key)`, global, and refused, naming the other, when another declaration claims the key. The
-   store rule: a function in a file is a `pointer` (the registry points at its script),
-   `store="memory"` a throwaway (nothing is recorded), and a shape is handed over
-   (`model(shape, name=...)`: held and cached, never rebuilt). A function is declared by `@model`
-   (no file) or by its file decorators (those files), never both; file decorators write only
-   their named outputs. No xbf, mesh, memo,
-   provenance or derived file is written for a document beyond what it declares. A document
-   lives until the engine exits or memory evicts it; its worker retiring does not end it,
-   except a `memory` document's. A document that is not held names the command that builds it
-   again; the engine never runs it (the engine's **Document lifetime**).
+   key)`, global, and refused, naming the other, when another declaration claims the key. A
+   function in a file is a model (the registry points at its script), and a shape is handed over
+   (`model(shape, name=...)`: held and kept, never rebuilt); every one is recorded and kept in
+   the engine's document cache alike. A function is declared by `@model` (no file) or by its file
+   decorators (those files), never both; file decorators write only their named outputs. No xbf,
+   mesh, memo, provenance or derived file is written for a document beyond what it declares. A
+   document lives until a person deletes it (`cadgen delete`, the home's Delete); its worker
+   retiring does not end it, nor does memory, which reads it again from the cache. A document
+   that is not held names the command that builds it again; the engine never runs it (the
+   engine's **Document lifetime**).
 7. **Provenance is served live, never written.** What made an element -- the feature, its
    operation, the function, file and line of its call -- lives in the trace of the worker that
    built the document, and is asked of it while it lives (`made_by`, `cadgen inspect`). A document
@@ -271,7 +271,7 @@ before starting. An agent's explicit host path is a different destination contra
 
 `cadgen inspect`, `cadgen.inspect()` and `cad_inspect` read existing files or the
 documents the engine holds by id. They never execute source to obtain a missing model or write
-its declared outputs. An unbuilt, evicted or expired model requires an explicit build: one
+its declared outputs. An unbuilt or evicted model requires an explicit build: one
 the engine built before names the command (`cadgen run` and the script that defines it). With no reference,
 `cadgen inspect` prints what the document holds -- its state, parts, bounds, volume, materials,
 joints, couplings (name, kind, ratio, joints), states, sequences, animations and declared files -- then its build closure (`--json`:

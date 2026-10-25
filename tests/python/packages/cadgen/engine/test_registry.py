@@ -106,13 +106,17 @@ class StoreTest(unittest.TestCase):
         source = "from cadgen.engine import model\n\n@model\ndef cell():\n    return None\n"
         saved = folder / "cell.py"
         saved.write_text(source, encoding="utf-8")
-        self.assertEqual(self.define(source, str(saved)).store, "pointer")
-        self.assertEqual(self.define(source.replace("@model", "@model(store='memory')"), str(saved)).store, "memory")
+        self.assertEqual(self.define(source, str(saved)).name, "cell")
+        self.assertFalse(hasattr(self.define(source, str(saved)), "store"), "no store to choose")
         for nowhere in ("<stdin>", str(folder / "ipykernel_1" / "2.py")):  # a REPL's, a notebook cell's
             with self.subTest(file=nowhere), self.assertRaisesRegex(ValueError, r"model\(shape, name='cell'\)"):
                 self.define(source, nowhere)
-        with self.assertRaisesRegex(ValueError, "store is one of 'pointer', 'memory', not 'copy'"):
-            self.define(source.replace("@model", "@model(store='copy')"), str(saved))
+        # store= is gone: an unexpected keyword argument, as any name that never was (law 15).
+        for given in ("@model(store='memory')", "@xbf('XBF/cell.xbf', store='memory')"):
+            with self.subTest(given=given), self.assertRaisesRegex(
+                    TypeError, r"^(model|xbf)\(\) got an unexpected keyword argument 'store'$"):
+                self.define(source.replace("from cadgen.engine import model", "from cadgen.engine import model, xbf")
+                            .replace("@model", given), str(saved))
         with self.assertRaisesRegex(TypeError, "no name="):
             self.define(source.replace("@model", "@model(name='other')"), str(saved))
 
@@ -139,11 +143,6 @@ from cadgen import model
 @model
 def cube():
     return bd.Box(3, 2, 1)
-
-
-@model(store="memory")
-def scratch():
-    return bd.Box(1, 1, 1)
 """
 
 # Two scripts whose models claim one key.
@@ -205,14 +204,14 @@ class RegistryDaemonTest(unittest.TestCase):
 
     def test_a_build_writes_its_record_alone_and_a_restart_knows_it_by_its_command(self) -> None:
         project = self.project("pointer", {"parts.py": PARTS,
-                                           "caller.py": "import parts\n\nparts.cube()\nparts.scratch()\n"})
+                                           "caller.py": "import parts\n\nparts.cube()\n"})
         def listed() -> list[str]:  # the interpreter's own bytecode cache of parts.py is not cadgen's
             return sorted(name for name in os.listdir(project) if name != "__pycache__")
 
         before = listed()
         done = self.run_python("caller.py", cwd=project)
         self.assertEqual(done.returncode, 0, done.stderr)
-        cube, scratch = model_id(project / "parts.py", "cube"), model_id(project / "parts.py", "scratch")
+        cube = model_id(project / "parts.py", "cube")
         record = self.records()[cube]
         self.assertEqual((record["store"], record["home"], record["run"], Path(record["root"])),
                          ("pointer", "parts.py", ["python", "caller.py"], project))
@@ -220,7 +219,6 @@ class RegistryDaemonTest(unittest.TestCase):
         self.assertEqual(set(record), {"schema", "id", "kind", "store", "root", "home", "entry", "run", "revision",
                                        "built", "facts"})
         self.assertEqual(sorted(os.listdir(self.state / "documents" / cube)), ["document.json"], "it points: no geometry")
-        self.assertNotIn(scratch, self.records(), "a memory document has no record")
         self.assertEqual(listed(), before, "nothing beside the script")
         written = (self.state / "documents" / cube / "document.json").stat().st_mtime_ns
         again = self.run_python("caller.py", cwd=project)
@@ -234,12 +232,10 @@ class RegistryDaemonTest(unittest.TestCase):
         self.assertIn(f"run `cadgen run {project / 'parts.py'}`", inspected.stderr)
         answer = self.ask({"op": "state", "id": cube})
         self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", f"cadgen run {project / 'parts.py'}"))
-        self.assertEqual(self.ask({"op": "state", "id": scratch})["state"], "evicted", "a memory id is unknown")
         from cadgen.viewer.recents import RecentStore
 
         listed = {entry.path: entry.public() for entry in RecentStore(self.state).list()}
         self.assertEqual((listed[cube]["name"], listed[cube]["missing"]), ("cube", False))
-        self.assertNotIn(scratch, listed)
         # The script moved: detached, listed and saying so, until it is removed.
         (project / "parts.py").rename(project / "moved.py")
         self.assertEqual(self.ask({"op": "state", "id": cube})["state"], "detached")

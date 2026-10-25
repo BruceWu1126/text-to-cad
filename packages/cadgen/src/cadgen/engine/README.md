@@ -195,15 +195,15 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
    `@model`, a file decorator or `model(shape, ...)` replaces it with `uuid5(NAMESPACE, "key::" +
    key)` (`ids.key_id`): global and readable, and refused, naming the other, when another
    declaration claims the key in this process or in the engine's records. A key or a shape's name
-   holding `::`, the formula's separator, is refused at declaration. The store rule: a
-   function in a file is a `pointer` (the registry points at its script), `store="memory"` a
-   throwaway (nothing is recorded), and a shape is handed over (`shape`: its bytes held and cached,
-   nothing to run again). A function in no file is refused: hand its shape over. File
-   decorators imply a model and write only their named outputs. No xbf, mesh, memo,
-   provenance or derived file is written for a document beyond what it declares. A document
-   lives until the engine exits or memory evicts it; its worker retiring does not end it,
-   except a `memory` document's. A document that is not held names the command that builds it
-   again; the engine never runs it (**Document lifetime**).
+   holding `::`, the formula's separator, is refused at declaration. A function in a file is a
+   model (the registry points at its script), and a shape is handed over (its bytes held and
+   kept, nothing to run again); both are recorded and kept in the document cache alike. A
+   function in no file is refused: hand its shape over. File decorators imply a model and write
+   only their named outputs. No xbf, mesh, memo, provenance or derived file is written for a
+   document beyond what it declares. A document lives until a person deletes it (**Delete**); its
+   worker retiring does not end it, nor does memory, which reads it again from the cache. A
+   document that is not held names the command that builds it again; the engine never runs it
+   (**Document lifetime**).
 7. **Provenance is served live, never written.** What made an element -- the
    feature, its operation, the function, file and line of its call -- lives in
    the trace of the worker that built the document, and is asked of it while it
@@ -449,7 +449,7 @@ only, and a file's id is derived again from its path after a restart.
 
 | Module | What it is |
 | --- | --- |
-| `model.py` | the decorators (`out`, `store=`, `key=`), `@model` or file decorators and never both; `Model` (the function, `.id`, `.build` the debug seam); its id (`ids.model_id` of its script and function, or `ids.key_id` of its key; `claim`: one key per declaration), and a build's report of every model a program's call builds, wherever the model is defined; a call returning the document's handle; a child model called in a body is a sub-assembly built in the same run, its call its handle with the result in the worker, and the models a target's run ran (`BuildContext.children`); `model(shape, name=)` handing a shape over; `@memo` and its calls; a script's module and package (`module_of`); `paint`, `mechanism_state`, `configuration_sequence`; `read_step`, `read_xbf` |
+| `model.py` | the decorators (`out`, `key=`), `@model` or file decorators and never both; `Model` (the function, `.id`, `.build` the debug seam); its id (`ids.model_id` of its script and function, or `ids.key_id` of its key; `claim`: one key per declaration), and a build's report of every model a program's call builds, wherever the model is defined; a call returning the document's handle; a child model called in a body is a sub-assembly built in the same run, its call its handle with the result in the worker, and the models a target's run ran (`BuildContext.children`); `model(shape, name=)` handing a shape over; `@memo` and its calls; a script's module and package (`module_of`); `paint`, `mechanism_state`, `configuration_sequence`; `read_step`, `read_xbf` |
 | `api.py` | the verbs as functions, through the daemon: `export`, `snapshot`, `inspect` (the root's `cadgen.export`, ...), and `serve`, `status`, `stop`, `delete`, `server`, which only the CLI calls (process control and deletion are the CLI's alone), and `build_script`, a script's models built by `Model.build()`; `Document`, the handle a model call returns (`.shape` transferred by id on first access: `result`); `hand_over`, a shape made a document in the caller and handed to the daemon; `observers`, told after each build, export and snapshot what it did, as plain facts (kinds, counts, times, the worker's part, an error's type and frames): the engine counts nothing, and cadgen's telemetry is an observer cadgen appends |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
 | `colors.py` | a colour as the author gives it (sRGB hex, 0-255 integers, a build123d `Color`) held linear, and the way back (**Materials**) |
@@ -885,9 +885,9 @@ installation that host's server holds.
 
 ## Document lifetime
 
-A document outlives the worker that built it, and lives until the engine exits or memory
-evicts it ([models.py](models.py), [serve.py](serve.py)). Its state (`models.STATES`, what
-`cadgen status` lists):
+A document outlives the worker that built it, the engine's memory and the engine itself, and lives
+until a person deletes it (**Delete**; [models.py](models.py), [serve.py](serve.py)). Its state
+(`models.STATES`, what `cadgen status` lists):
 
 - `live`: a live worker holds it, with its memo and its trace.
 - `held`: no worker holds it and the engine answers it all the same: in memory, on disk (**The
@@ -904,18 +904,16 @@ evicts it ([models.py](models.py), [serve.py](serve.py)). Its state (`models.STA
 - `building`, `failed`: its build now, or its last one.
 - `evicted`: the daemon holds it no more -- memory evicted its bytes, or its worker crashed
   before it was drained.
-- `expired`: a `store="memory"` document whose worker went.
 - `detached`: not held, and the script it points at is gone (moved, deleted): listed in Recents,
-  saying so, until the person removes it. Nothing removes it on its own. A shape handed over is
+  saying so, until the person deletes it. Nothing removes it on its own. A shape handed over is
   never detached: nothing of it can go missing, and nothing builds it again.
 
-**Store.** The rule: a function in a file is a `pointer`, the default -- the registry points at
-its script; `store="memory"` is a throwaway -- `@model(store="memory")`, `@xbf("XBF/a.xbf",
-store="memory")` (any file decorator) keeps a document in its worker's memory only: no record, it
-is forgotten when the worker goes, and its id answers `expired` from then on; a shape is handed
-over (`shape`, **Shapes handed over**). A function in no saved file (a notebook cell, a REPL,
-`python -c`) is refused, with the words that hand its shape over instead (`model(shape,
-name=...)`). Any other `store=` is refused, naming the two.
+**Two kinds.** A function in a file is a model: the registry points at its script. A shape is
+handed over (**Shapes handed over**). Nothing else is kept, and how is not the author's to choose:
+every document is recorded and kept in the cache alike, and the decorators and `model(shape, ...)`
+take no store (`store=` is an unexpected keyword argument, as any other). A function in no saved
+file (a notebook cell, a REPL, `python -c`) is refused, with the words that hand its shape over
+instead (`model(shape, name=...)`).
 
 **Shapes handed over.** `model(shape, name="plate")` (`api.hand_over`) makes a document of any
 build123d shape a program holds, from a script or a REPL. In the caller, the shape is made a
@@ -1074,7 +1072,7 @@ mark, half the budget:
 
 Where none can be read, the budget alone applies. `Pressure.simulate` is the tests' hook.
 
-**The rebuild command.** A document that is not held -- `evicted`, `expired` -- names the exact
+**The rebuild command.** A document that is not held -- `evicted` -- names the exact
 command that builds it again: `cadgen run` and the script that defines its model -- never a
 program that imported it and called it, a check script, whose next run may do something else -- the engine that says it is the one `cadgen run` reaches, and its
 python has the kernel a bare `python` may lack -- from the daemon's record of it, or after a
@@ -1084,8 +1082,7 @@ space or a quote needs them (`subprocess.list2cmdline`), since to cmd.exe a sing
 the path. A shape handed over has none: its words say that a program the engine did
 not run showed it, and that only running that program again hands it over again. A child model's is its own script too. The page
 reads it from its document's 404 (`GET /api/doc/<id>`: `{"error", "state", "rebuild"}`),
-`cadgen inspect` and `cad_show` of its id refuse with it, and `cadgen status` lists it. A `memory`
-document's words add that it is kept in memory only. The engine never runs it: no access, no start
+`cadgen inspect` and `cad_show` of its id refuse with it, and `cadgen status` lists it. The engine never runs it: no access, no start
 and no restart runs code to bring a document back.
 Asked of the server, a document it does not hold is a refusal (`serve.NotHeld`): the server answers
 its type, state and command with its words (`daemon.refused`) and the caller raises it as that
@@ -2575,7 +2572,7 @@ of ids is saved.
 inspect ID 'face 1'` take the id; `cadgen inspect 'ID#face 1'` uses the same reference syntax.
 Each reads the document the engine holds, as it is: editing the script changes nothing until
 Python runs it again, and no verb imports, runs or builds a script. An id the engine no longer
-holds (evicted, expired) is refused with its state and the command that builds it again
+holds (evicted, detached) is refused with its state and the command that builds it again
 (`cadgen run <the script that defines it>`; **Document lifetime**).
 `--query build` returns saved-file metadata/closure or live-build metadata; `--query closure` and
 `--query geometry` select the other queries explicitly. In the CAD Viewer a model's page is

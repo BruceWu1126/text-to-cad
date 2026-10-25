@@ -140,8 +140,7 @@ class Document:
     @classmethod
     def inside(cls, model: Any, shape: Any) -> "Document":
         """A child's handle inside the build that runs it: its id, and its result in this process."""
-        report = {"ok": True, "id": model.id, "source": {"script": str(model.script), "name": model.name},
-                  "store": model.store}
+        report = {"ok": True, "id": model.id, "source": {"script": str(model.script), "name": model.name}}
         return cls(model.name, model.script, report, Path.cwd(), shape=shape, inside=True)
 
     @property
@@ -274,7 +273,7 @@ def hand_over(shape: Any, name: Any, *, key: str | None = None, animations: Any 
     answer = _ask({"op": "shape", "id": ident, "name": name, "scope": scope, "key": key, "program": _program(),
                    "cwd": os.getcwd(), "xbf": base64.b64encode(data).decode("ascii")})
     report = {"ok": True, "model": name, "id": ident, "url": (answer.get("done") or {}).get("url"),
-              "source": {"script": scope, "name": name}, "store": "shape", "key": key, "bytes": len(data)}
+              "source": {"script": scope, "name": name}, "kind": "shape", "key": key, "bytes": len(data)}
     if frame is not None and frame.f_globals.get("__name__") == "__main__":
         print(f"{name}: handed over ({len(data) / 1e6:.1f} MB)")
         print(f"  id: {ident}")
