@@ -3,8 +3,7 @@
 One engine serves one page, at its origin. Every document is addressed by path, ``/<id>``
 (``cadgen.engine.ids``): a model's id, or a file's once a launcher or the page registers it. The
 home is ``/``: Recents, and the folder of the most recent launch (``launch``), which each launch
-replaces. There are no page sessions and no per-launch folders: an old ``/s/...`` link, or a ``/``
-naming a document by query (``?doc=``, ``?file=``), is answered with the home.
+replaces. There are no page sessions and no per-launch folders.
 """
 from __future__ import annotations
 
@@ -344,10 +343,6 @@ class EngineApp:
             response.also = (self._session_cookie(),)
         if request.path == '/mcp' and self.session_factory is not None:
             return self.mcp().handle(request, response)
-        if request.method == 'GET' and (request.path.startswith('/s/') or request.path == '/s'
-                                         or request.path == '/' and ('doc' in request.query or 'file' in request.query)):
-            # A page session's link, or a document named by query: forms that are gone. The home.
-            return response.send_bytes(302, b'', '', [('location', '/'), ('referrer-policy', 'no-referrer')])
         if request.method == 'GET' and is_id(request.path[1:]) and self.server.holds(request.path[1:]):
             self.server.warm()  # a build's view link opened: its meshing pool starts as the page loads
         return self.default_app().handle(request, response)

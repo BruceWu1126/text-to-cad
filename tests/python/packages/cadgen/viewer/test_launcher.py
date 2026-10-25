@@ -113,10 +113,6 @@ class LauncherTest(unittest.TestCase):
         self.assertIn('is held', json.loads(data)['missing'])
         (self.root / 'model.py').write_text('print(1)\n', encoding='utf-8')
         self.assertIn('no CAD file', self.launch('model.py', ok=False))
-        # A page session's link and a document named by query are forms that are gone: the home.
-        for route in ('/s/abc/', '/s/abc/?file=/m/a.step', '/?doc=' + ident, '/?file=' + str(part)):
-            status, headers, _ = self.get(launched, route)
-            self.assertEqual((status, headers.get('location')), (302, '/'), route)
 
     def test_every_route_requires_token_and_keeps_host_and_post_gates(self):
         launch = self.launch()

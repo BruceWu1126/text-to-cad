@@ -290,8 +290,7 @@ Every successful build registers its document by id and gives it a URL, `/<id>`;
 A model's worker is a separate process, holding its memo and live kernel objects.
 The distribution injects its HTTP application through `daemon.HTTP_FACTORY`; this
 standalone engine imports no application module. The application serves the built
-viewer's one page on that listener, every document at `/<id>`; an old page session's link
-(`/s/...`) and a document named by query (`/?doc=`, `/?file=`) are answered with the home. Document routes run in
+viewer's one page on that listener, every document at `/<id>`. Document routes run in
 process, with no network relay. Kernel reads, topology, poses and meshes run in
 reader/mesh subprocesses; even an inline-mesh request stays outside the daemon.
 

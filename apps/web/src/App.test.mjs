@@ -188,27 +188,6 @@ test('the web host keeps the URL, the history, the title and the appearance, and
   }
 });
 
-test('an old link -- a page session, a document named by query -- is the home, and the URL says /', async () => {
-  const dom = new JSDOM('<div id="root"></div>', { url: 'http://cad.local/s/abc/?file=/m/one.step' });
-  const { window } = dom;
-  const matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-  for (const [key, value] of Object.entries({ window, document: window.document, navigator: window.navigator, localStorage: window.localStorage, sessionStorage: window.sessionStorage, matchMedia, IS_REACT_ACT_ENVIRONMENT: true })) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  window.matchMedia = matchMedia;
-  const fetchBefore = globalThis.fetch;
-  globalThis.fetch = async (url) => new Response(JSON.stringify(url === '/__cad/recents' ? { recents: [] } : url === '/__cad/analytics' ? { sharing: false, reason: 'untold', policy: 'p' } : { ok: true }), { headers: { 'content-type': 'application/json' } });
-  const client = { ...createWebCadClient({ document: window.document }), serverInfo: async () => ({ start: '/m' }) };
-  const root = createRoot(window.document.getElementById('root'));
-  try {
-    await act(() => root.render(createElement(App, { client, server: { start: '/m' }, tabStore: createTabStore(sessionTabRecord(window.sessionStorage)) })));
-    assert.equal(snapshot().file, '');
-    assert.equal(`${window.location.pathname}${window.location.search}`, '/');
-  } finally {
-    globalThis.fetch = fetchBefore;
-    await act(() => root.unmount());
-    dom.window.close();
-  }
-});
-
 test('a page whose engine is gone says so in its language, over the page, until the engine answers', async () => {
   const dom = new JSDOM('<div id="root"></div>', { url: `http://cad.local/${ONE}` });
   const { window } = dom;
