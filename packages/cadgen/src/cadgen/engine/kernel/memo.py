@@ -102,20 +102,24 @@ shape a root already holds, so registering a container of registered parts costs
 direct children, not the parts' sub-shapes.
 
 **Queries.** A query answers a question of shapes and makes nothing of them: a bounding
-box (``_QUERY_TARGETS``). It is no operation and no feature, but a model asks it of the same
-unchanged shapes on every build, and the precise box build123d takes by default costs
-milliseconds a shape. Its answer is a plain value -- a bool, a number, a point, a box's
-corners, a tuple or list of them (``_kept``) -- and a function of the shapes it reads and of
-its arguments alone: build123d measures the bare geometry (it clears any mesh first and
-takes no tolerance). So a query is keyed by its name, the class it is asked of, the memo key
-of every shape it reads -- the operation that made its TShape and the effects applied to it
-since, its location and orientation, never its label or colour (``_query_shape``) -- and its
-other arguments; its answer is kept on the first shape's record (``_Made.answers``), for as
-long as the memo holds that shape, and handed back, as a new object, when the same key is
-asked of the very same TShapes (``_ask``). A query of a shape no operation made, or with an
-argument no key names, is computed, as is one with the memo off, and keeps nothing it
-cannot be keyed by. Its own kernel calls are cadgen's, so a run's trace is the same whether
-it was answered or ran.
+box, a validity check, a volume, an area, a length, a centre, inertia, a distance, a point
+test (build123d's: ``_QUERY_TARGETS``), and the OCCT analyses a model may run itself past
+build123d -- ``BRepAlgoAPI_Check``, ``BRepCheck_Analyzer``, ``BRepExtrema_DistShapeShape``
+(``_ANALYSES``, each the layer's subclass, ``_analysis_class``). It is no operation and no
+feature, but a model asks it of the same unchanged shapes on every build, and one BOP check
+of a big casting costs seconds. Its answer is a plain value -- a bool, a number, a point, a
+box's corners, a tuple or list of them (``_kept``) -- and a function of the shapes it reads
+and its settings alone (each target says why). So a query is keyed by its name, the class it
+is asked of, the memo key of every shape it reads -- the operation that made its TShape and
+the effects applied to it since, its location and orientation, never its label or colour
+(``_query_shape``, ``_query_handle``) -- and every argument and setting that can change its
+answer; its answer is kept on the first shape's record (``_Made.answers``), for as long as
+the memo holds that shape, and handed back, as a new object, when the same key is asked of
+the very same TShapes (``_ask``, ``_analyse``). A query of a shape no operation made, or
+with an argument no key names, runs and keeps nothing; with the memo off every query runs.
+Its own kernel calls are cadgen's, so a run's trace is the same whether it was answered or
+ran. An OCCT analysis the memo answered has not run: anything asked of it but the answers
+kept runs it first, as it was given then (``_materialize``).
 
 **Bodies.** A model's body is one coarse entry above its calls (``body``): keyed by the
 bytes it is made of -- the source its caller names, the files it read, by their bytes -- it
