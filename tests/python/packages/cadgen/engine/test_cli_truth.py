@@ -154,6 +154,8 @@ class VerbsTest(unittest.TestCase):
             done = self.cli(verb, self.box, out, *extra)
             self.assertEqual(done.returncode, 0, done.stderr)
             self.assertTrue(done.stdout.startswith(f"wrote {out} ("), f"{verb} {out}: {done.stdout}")
+            if verb == "export":  # a small file's size in KB (or bytes), never "0.0 MB"
+                self.assertRegex(done.stdout, r"\((\d+ B|\d+\.\d KB)\) in ", done.stdout)
 
     def test_a_step_cadgen_exported_holds_no_closure_because_the_format_carries_none(self) -> None:
         self.assertEqual(self.cli("export", self.box, str(self.folder / "box.step")).returncode, 0)

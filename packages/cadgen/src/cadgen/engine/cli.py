@@ -189,7 +189,7 @@ def _files(report: dict[str, Any]) -> list[str]:
     found = []
     for path, row in (report.get("files") or {}).items():
         state = "written" if row.get("written") else "kept"
-        found.append(f"{_shown(path)} ({state}, {row.get('bytes', 0) / 1e6:.1f} MB)")
+        found.append(f"{_shown(path)} ({state}, {_bytes(row.get('bytes'))})")
     return found
 
 
@@ -378,7 +378,7 @@ def _export(args: argparse.Namespace, prog: str) -> int:
                                     for row in written]}))
         return 0
     for row in written:
-        print(f"wrote {_given(row.path, args.destinations)} ({row.bytes / 1e6:.1f} MB) in {row.seconds:.2f}s")
+        print(f"wrote {_given(row.path, args.destinations)} ({_bytes(row.bytes)}) in {row.seconds:.2f}s")
     return 0
 
 
