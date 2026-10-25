@@ -156,10 +156,8 @@ def _launchers() -> list[str]:
 
     try:
         version = launchers.own_version()
-        if version:  # this command's start may have published them already: say so
-            done = launchers.last
-            fresh = done is not None and done[:2] == (version, launchers.folder())
-            results = done[2] if fresh else launchers.publish(version)
+        if version:
+            results = launchers.publish(version)
         else:  # a source tree: says what the release's launchers are, writes nothing
             from cadgen import __version__
 

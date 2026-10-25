@@ -18,12 +18,15 @@ is a copy of the console script's launcher (it names its python by absolute path
 tool install can copy it too) and ``cadgen-python-<version>.cmd`` runs the environment's
 ``python.exe``.
 
-Publishing is lazy and quiet (:func:`startup`). Every ``cadgen`` command but the engine's own
-server checks both launchers, an ``lstat`` and a compare, and writes one only when it is missing,
-dangling or another installation's. A folder it cannot write (a sandbox's) is skipped silently and
-the command goes on. The CAD app's server is the writer that matters: the host starts it outside
-any sandbox. The engine's daemon and its workers never publish. A launcher of another version is
-never touched; ``cadgen doctor --prune-launchers`` removes those whose environment is gone.
+Launchers are written at install moments only, in two places. The CAD app's server
+(``cadgen mcp``) publishes them as it starts (:func:`startup`): the host starts it outside any
+sandbox, at the moment it installs or updates the plugin. ``cadgen doctor``, the skills' one-time
+step and the repair command, publishes them and says what it found. Either checks both launchers,
+an ``lstat`` and a compare, and writes one only when it is missing, dangling or another
+installation's; a folder it cannot write (a sandbox's) is skipped, silently by the server and said
+by ``doctor``. No other command publishes or repairs anything: a dangling launcher is ``doctor``'s
+to report and fix. A launcher of another version is never touched; ``cadgen doctor
+--prune-launchers`` removes those whose environment is gone.
 
 An editable install (a checkout's environment) publishes nothing by itself: it reports the
 release's version, and its launchers would take a user's place. A development install names its
@@ -49,9 +52,6 @@ DANGLING = "dangling"  # its environment is gone
 OTHER = "other"  # another installation of this version
 FOREIGN = "foreign"  # a file of that name that cadgen did not write: left alone
 REPAIRABLE = (MISSING, DANGLING, OTHER)
-# What this process's startup did, ``(version, folder, results)``, for ``cadgen doctor`` to report
-# rather than find it done.
-last: tuple[str, str, list[tuple[str, str, str | None]]] | None = None
 
 
 def folder() -> str:
@@ -277,11 +277,11 @@ def own_version() -> str | None:
 
 
 def startup() -> None:
-    """At a command's start: publish this installation's launchers if they need it, silently."""
-    global last
+    """As the CAD app's server starts: publish this installation's launchers if they need it,
+    silently."""
     try:
         version = own_version()
         if version:
-            last = (version, folder(), publish(version))
-    except Exception:  # noqa: BLE001 - a launcher never fails the command it rides on
+            publish(version)
+    except Exception:  # noqa: BLE001 - a launcher never fails the server it rides on
         pass

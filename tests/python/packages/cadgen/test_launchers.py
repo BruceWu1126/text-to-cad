@@ -75,14 +75,45 @@ class LauncherTests(unittest.TestCase):
             path = self.bin / name
             self.assertEqual(os.readlink(path) if path.is_symlink() else path.read_text(encoding="utf-8"), content)
 
+    def installed(self, where: Path):
+        """This process as an installation named 1.2.3, publishing into ``where``."""
+        found = self.environment("env", windows=launchers.WINDOWS)
+        return found, mock.patch.dict("os.environ", {launchers.DIR_ENV: str(where), launchers.NAME_ENV: "1.2.3"}), \
+            mock.patch.object(launchers, "targets", return_value=found)
+
+    def test_only_the_cad_apps_server_and_doctor_publish(self) -> None:
+        from cadgen import cli
+        from cadgen.cli import doctor
+        from cadgen.mcp import shim
+
+        found, environment, targets = self.installed(self.bin)
+        with environment, targets:
+            # An ordinary command leaves a missing launcher missing.
+            with mock.patch.object(cli, "_run", return_value=0), mock.patch.object(cli, "_tell"):
+                self.assertEqual(cli._main(["status"]), 0)
+            self.assertFalse(self.bin.exists())
+            # The server's start publishes them; doctor repairs one gone dangling, and says so.
+            shim.start()
+            self.assertEqual(self.states(found, windows=launchers.WINDOWS), [OK, OK])
+            console = self.bin / launchers.names("1.2.3")[0]
+            console.unlink()
+            lines = doctor._launchers()
+            self.assertIn(f"{console} published (was missing)", lines)
+            self.assertEqual(self.states(found, windows=launchers.WINDOWS), [OK, OK])
+
     def test_a_folder_it_cannot_write_is_skipped_silently(self) -> None:
         blocked = self.root / "a-file"
         blocked.write_text("", encoding="utf-8")
-        results = launchers.publish("1.2.3", str(blocked / "bin"), self.environment("env"), False)
+        results = launchers.publish("1.2.3", str(blocked / "bin"), self.environment("other"), False)
         self.assertTrue(all(error for _, _, error in results))
-        # What every command runs at its start says nothing and raises nothing.
-        with mock.patch.dict("os.environ", {launchers.DIR_ENV: str(blocked / "bin"), launchers.NAME_ENV: "1.2.3"}):
-            launchers.startup()
+        from cadgen.cli import doctor
+        from cadgen.mcp import shim
+
+        _, environment, targets = self.installed(blocked / "bin")
+        with environment, targets:
+            shim.start()  # the server says nothing and raises nothing
+            lines = doctor._launchers()  # doctor says why, and goes on
+        self.assertTrue(all("cannot write it here" in line for line in lines), lines)
         self.assertFalse((blocked / "bin").exists())
 
     @POSIX

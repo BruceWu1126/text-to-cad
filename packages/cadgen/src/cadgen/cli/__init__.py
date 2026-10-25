@@ -206,13 +206,6 @@ def _main(argv: list[str] | None) -> int:
         sys.stderr.write(f"cadgen: unknown command {noun!r}\n\n" + _usage())
         return 2
 
-    # Every command but the engine's own server keeps this installation's launchers published, the
-    # paths a skill runs it by inside a sandbox (`cadgen/_internal/launchers.py`): a check in well
-    # under a millisecond, a write only when one is missing or another's, never a failure.
-    if command != "server":
-        from cadgen._internal.launchers import startup
-
-        startup()
     # No command says a newer text-to-cad is out: it cannot tell which plugin, if any, it came
     # with, so the CAD app and the CAD Viewer say it (`cadgen/updates.py`). What a command does say,
     # once and before its work, is what those two send by default (`cadgen/analytics.py`).

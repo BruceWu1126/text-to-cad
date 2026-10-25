@@ -200,8 +200,16 @@ class Proxy:
                 pass
 
 
+def start():
+    """What this server does first, as the host installs or starts it outside any sandbox: publish
+    this installation's launchers, the paths the skills run it by (``cadgen._internal.launchers``)."""
+    from cadgen._internal.launchers import startup
+    startup()
+
+
 def serve(argv=None):
     logging.basicConfig(stream=sys.stderr, level=logging.INFO, format='cadgen mcp: %(message)s')
+    start()
     output = claim_stdout()
     requests = claim_stdin()
     from cadgen._internal.channel import remember
