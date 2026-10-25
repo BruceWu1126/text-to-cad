@@ -243,6 +243,11 @@ class ResolutionTests(Fixture):
         engines = [self.engine(self.new, claude_code=1), self.engine(self.old, codex=2)]
         self.assertEqual(self.choose(["status"], engines=engines, shell="codex")[0], "0.8.0")
         self.assertEqual(self.choose(["status"], engines=engines, shell="claude code")[0], "0.9.0")
+        # An engine that says its hosts as a list (no counts) is read so too; anything else names none.
+        listed = [{**self.engine(self.new), "hosts": ["claude code"]}, {**self.engine(self.old), "hosts": ["codex"]}]
+        self.assertEqual(self.choose(["status"], engines=listed, shell="codex")[0], "0.8.0")
+        odd = [{**self.engine(self.new), "hosts": "codex"}, {**self.engine(self.old), "hosts": None}]
+        self.assertEqual(self.choose(["status"], engines=odd, shell="codex")[0], "0.9.0", "(e): the newest running")
 
     def test_e_then_any_running_engine_newest_first(self) -> None:
         engines = [self.engine(self.old), self.engine(self.dev, codex=1)]
