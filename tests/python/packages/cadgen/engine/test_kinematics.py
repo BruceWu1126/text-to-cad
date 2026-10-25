@@ -2,7 +2,8 @@
 ground and configurations) and read back; a chain's links and a prismatic pair; a pair the
 built tree contradicts refused by name; ``posed`` by a configuration's name and by joint values
 placing a part where the closed form and the sampler say, a model of its own whose STEP carries no
-mechanism and whose xbf keeps it at the asked values; what a pose names wrong refused by name; the structure's ``kinematics`` the same from the file and from the
+mechanism and whose xbf keeps it at the asked values; what a pose names wrong refused by name; a
+mechanism state outside its joint's range failing the build in one line, one on a bound built; the structure's ``kinematics`` the same from the file and from the
 build; a document served at a pose; the mechanism subtree AP242's names and nothing else."""
 
 from __future__ import annotations
@@ -84,6 +85,27 @@ def lift():
     return root
 """
 
+# A wheel steered about its kingpin, the joint's range the steering lock, and a state of the
+# model's own turning it to {turned} degrees.
+CAR = """
+import build123d as bd
+from cadgen.ap242 import mechanism_state
+from cadgen.engine import xbf
+
+
+@xbf("XBF/car.xbf")
+def car():
+    body = bd.Box(400, 200, 50)
+    body.label = "body"
+    wheel = bd.Pos(150, 120, 0) * bd.Cylinder(30, 20, rotation=(90, 0, 0))
+    wheel.label = "wheel"
+    kingpin = bd.Axis((150, 120, 0), (0, 0, 1))
+    bd.RevoluteJoint("steer", body, axis=kingpin, angular_range=(-30, 30))
+    bd.RigidJoint("steer", wheel, bd.Plane(origin=kingpin.position, z_dir=kingpin.direction).location)
+    body.joints["steer"].connect_to(wheel.joints["steer"], angle=0)
+    return mechanism_state(bd.Compound(children=[body, wheel], label="car"), "turned_left", steer={turned})
+"""
+
 
 # A base built 300 mm out and a rotor on its joint's axis, given in world coordinates ({axis}).
 ROTOR = """
@@ -102,6 +124,34 @@ def rotor():
     base.joints["spin"].connect_to(disc.joints["hub"], angle=0)
     return bd.Compound(children=[base, disc], label="rotor")
 """
+
+# tom's wrist pitch: a forearm built 500 mm out, a small servo near its elbow end ({mount}: fastened
+# to the tube by rigid joints) holding the wrist's joint, on {axis}. In world coordinates the axis
+# crosses the tube's far end, 162 mm from the servo; in the forearm's own, it lands by the origin.
+WRIST = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf("XBF/forearm.xbf")
+def forearm():
+    at = bd.Pos(500, 0, 300)
+    tube = at * bd.Box(200, 30, 30, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.CENTER))
+    tube.label = "tube"
+    servo = at * bd.Pos(20, 0, 25) * bd.Box(20, 10, 15)
+    servo.label = "servo"
+    hand = at * bd.Pos(200, 0, 0) * bd.Box(40, 20, 20, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.CENTER))
+    hand.label = "hand"
+    {mount}
+    wrist = {axis}
+    bd.RevoluteJoint("wrist", servo, axis=wrist, angular_range=(-90, 90))
+    bd.RigidJoint("wrist", hand, bd.Plane(origin=wrist.position, z_dir=wrist.direction).location)
+    servo.joints["wrist"].connect_to(hand.joints["wrist"], angle=0)
+    return bd.Compound(children=[tube, servo, hand], label="forearm")
+"""
+MOUNT = """bd.RigidJoint("mount", tube, at * bd.Location((20, 0, 15)))
+    bd.RigidJoint("mount", servo, at * bd.Location((20, 0, 15)))
+    tube.joints["mount"].connect_to(servo.joints["mount"])"""
 
 
 def _arm_tip(q: float) -> np.ndarray:
@@ -251,15 +301,10 @@ class HingeTest(_Folder):
                 self.assertIn(word, report["error"], state)
             self.assertFalse((self.folder / "refused.step").exists(), state)
 
-    def test_a_configuration_naming_no_joint_fails_the_build_and_one_out_of_range_warns(self) -> None:
-        # The one harvest error: a configuration naming a joint its assembly does not hold.
+    def test_a_configuration_naming_no_joint_fails_the_build(self) -> None:
         report = self.hinge(flat="elbw=0", ok=False)
         self.assertIn("names no joint 'elbw'", report["error"])
         self.assertIn("elbow", report["error"])
-        report = self.hinge(flat="elbow=200")
-        self.assertIn("'elbow' at 200 deg is outside its range [-10, 120] deg: the value is left out",
-                      " ".join(report["kinematics"]["warnings"]))
-        self.assertEqual(document.Loaded(self.folder / "XBF/hinge.xbf").mechanism.configurations["flat"], {})
 
     def test_a_part_moved_after_it_was_connected_is_refused_by_name(self) -> None:
         # Connected after the compound holding the arm was made: the arm is not where the joint
@@ -347,6 +392,44 @@ class HingeTest(_Folder):
             with self.assertRaises(urllib.error.HTTPError) as gone:
                 call(f"/api/doc/{made[0]}")
             self.assertEqual(gone.exception.code, 404)
+
+
+class RangeTest(_Folder):
+    def test_a_state_outside_its_joint_s_range_fails_the_build_in_one_line_and_one_on_a_bound_builds(self) -> None:
+        self.build("car", CAR.format(turned=30))  # the lock itself: within the range
+        xbf = self.folder / "XBF/car.xbf"
+        self.assertEqual(document.Loaded(xbf).mechanism.configurations, {"turned_left": {"steer": (30.0,)}})
+        before = xbf.read_bytes()
+        report = self.build("car", CAR.format(turned=32), ok=False)
+        self.assertEqual(report["error"].splitlines()[-1],
+                         "cadgen.engine.mechanism.KinematicsError: mechanism state 'turned_left' of car puts joint "
+                         "'steer' at 32 deg, outside its range -30 to 30")
+        self.assertEqual(xbf.read_bytes(), before, "the refused build leaves the file the build before wrote")
+        # Past a bound by less than the six digits a value shows: every digit.
+        report = self.build("car", CAR.format(turned=-30.0000002), ok=False)
+        self.assertIn("puts joint 'steer' at -30.0000002 deg, outside its range -30 to 30", report["error"])
+        self.build("car", CAR.format(turned=-30))
+        self.assertEqual(document.Loaded(xbf).mechanism.configurations, {"turned_left": {"steer": (-30.0,)}})
+
+    def test_a_pose_outside_its_joint_s_range_keeps_its_refusal(self) -> None:
+        from cadgen.engine.snapshot import SnapshotRefused, snapshot
+
+        self.build("car", CAR.format(turned=30))
+        path = self.folder / "XBF/car.xbf"
+        refusal = "the pose: joint 'steer' at 32 deg is outside its range [-30, 30] deg"
+        with self.assertRaises(mechanism.KinematicsError) as refused:
+            mechanism.resolve(document.Loaded(path).structure()["kinematics"], {"steer": 32})
+        self.assertEqual(str(refused.exception), refusal)
+        previous = os.environ.get("CADGEN_ENGINE_MESH")
+        os.environ["CADGEN_ENGINE_MESH"] = "inline"  # one part at a time on this thread: no pool
+        self.addCleanup(lambda: os.environ.pop("CADGEN_ENGINE_MESH") if previous is None
+                        else os.environ.__setitem__("CADGEN_ENGINE_MESH", previous))
+        out = self.folder / "stale.png"
+        out.write_bytes(b"before")
+        with self.assertRaises(SnapshotRefused) as refused:
+            snapshot(path, out, pose={"steer": 32}, size=(160, 120), daemon=False)
+        self.assertEqual(str(refused.exception), f"--pose: {refusal}")
+        self.assertEqual(out.read_bytes(), b"before", "a refused snapshot keeps the picture at OUT")
 
 
 class JointMemoTest(_Folder):
@@ -613,6 +696,24 @@ class RefusalTest(_Folder):
             "there; give the world axis, axis.located(part.location)"])
         report = self.build("rotor", ROTOR.format(axis="bd.Axis((0, 0, 5), (0, 0, 1)).located(base.location)"))
         self.assertNotIn("kinematics", report)
+
+    def test_a_joint_axis_on_the_body_its_part_is_fixed_to_is_no_local_axis(self) -> None:
+        world, local = "bd.Axis((680, 0, 300), (0, 1, 0))", "bd.Axis((180, 0, 0), (0, 1, 0))"
+        warning = ("Axis is in world coordinates, so a local one lands near the origin and connect_to moves the other "
+                   "part there; give the world axis, axis.located(part.location)")
+        # The servo alone: the axis passes far from it.
+        report = self.build("forearm", WRIST.format(mount="pass", axis=world))
+        self.assertEqual(report["kinematics"]["warnings"], [
+            "joint 'wrist''s axis passes 162 mm from forearm/servo, which holds it, farther than the part's own size: an "
+            + warning])
+        # Fastened to the tube, the servo holds the axis through the tube's end, as tom's does.
+        report = self.build("forearm", WRIST.format(mount=MOUNT, axis=world))
+        self.assertNotIn("kinematics", report)
+        # Given in the forearm's own frame, the axis passes near neither the servo nor the tube.
+        report = self.build("forearm", WRIST.format(mount=MOUNT, axis=local))
+        self.assertEqual(report["kinematics"]["warnings"], [
+            "joint 'wrist''s axis passes 470 mm from forearm/servo, which holds it, farther than the part's own size, "
+            "and near no part fixed to it: an " + warning])
 
     def test_two_unmoved_parts_with_a_revolute_between_them_are_two_links(self) -> None:
         report = self.build("bike", PIVOT.format(at=ON_AXIS, extra="pass"))

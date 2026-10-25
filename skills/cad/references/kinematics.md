@@ -47,8 +47,9 @@ axis's position with no rotation (below). Connected at 0, the child stays
 where it was built; connected at another value, it moves there, and that value is as
 built. A joint's `Axis` and a `RigidJoint`'s location are in world coordinates, not the
 part's own frame: an axis written in the part's frame is `axis.located(part.location)`, and
-a moving joint's axis that passes farther from its part than the part's own size is warned
-as a local one, since `connect_to` moves the child onto whatever axis it is given:
+a moving joint's axis that passes farther from its part, and from every part rigidly joined
+to it, than each one's own size is warned as a local one, since `connect_to` moves the child
+onto whatever axis it is given:
 
 ```python
 # src/hinge.py
@@ -116,7 +117,11 @@ if __name__ == "__main__":
   moves the child's part. Connect parts before putting them in the compound that holds
   them.
 - **Values are degrees and millimetres.** A joint's `angular_range` or `linear_range` is
-  its limits; a pose or a mechanism state outside them is refused.
+  its limits, a value on a limit within them. A mechanism state that puts a joint outside
+  them fails the run, in one line naming the state, the joint, the value and the range; a
+  pose outside them is refused. A coupling's value outside its range is left out of a
+  mechanism state, and a configuration sequence that goes outside a joint's limits is left
+  out, each with a warning.
 - **A pair is named by its moving joint's label** (`elbow`). A label two pairs share
   takes the path of the part that holds it (`hand/left:knuckle`).
 - **Links are parts that move as one**: parts whose rigid joints are connected are one

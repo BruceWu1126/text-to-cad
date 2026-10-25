@@ -550,8 +550,9 @@ def mechanism_state(assembly: Any, name: str, **values: Any) -> Any:
     the as-built state, and a joint a mechanism state does not name stays as built. The
     document keeps every mechanism state; the viewer offers them as presets, ``--pose NAME``
     draws a snapshot at one, and a configuration sequence's waypoint may name
-    one. A mechanism state never changes the build: every file shows the model as built.
-    Returns ``assembly``."""
+    one. A mechanism state never changes the build: every file shows the model as built. A
+    value outside its joint's range fails the build, in one line naming the state, the joint,
+    the value and the range; one on a bound is within it. Returns ``assembly``."""
     from cadgen.engine import mechanism
 
     return mechanism.mechanism_state(assembly, name, **values)

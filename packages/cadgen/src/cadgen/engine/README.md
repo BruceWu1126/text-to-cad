@@ -1529,12 +1529,15 @@ tree contradicts fails the build by name: one whose part stands where it cannot 
 after `connect_to`, connected after its compound was made, a rigid joint off the joint's axis)
 or that joins two parts rigid joints make one body has no value the standard can hold. A moving
 joint matching two rigid joints alike, a linear joint connected to a revolute one (a pin in a
-slot, which no AP242 lower pair is) and a mechanism state's value a pair cannot take are left
+slot, which no AP242 lower pair is) and a mechanism state's value a pair cannot take (another
+count of numbers than the joint's, a coupling's value outside the coupling's range) are left
 out and warned; pairs that close a loop are kept and not posed. The warnings are the build's
 report (`kinematics.warnings`), never the document's. The harvest's errors are a mechanism state,
-a configuration sequence or a coupling naming a joint its assembly does not hold, a coupling
-named as a joint is, a coupling driving a joint its pair does not relate or no coupler can hold
-(below), and a joint two couplings drive.
+a configuration sequence or a coupling naming a joint its assembly does not hold, a mechanism
+state putting a joint outside the joint's range, said in one line (`mechanism state
+'turned_left' of car puts joint 'steer' at 32 deg, outside its range -30 to 30`; a value on a
+bound is within it), a coupling named as a joint is, a coupling driving a joint its pair does
+not relate or no coupler can hold (below), and a joint two couplings drive.
 
 **Couplings.** A coupling is a constraint, made by the function named after the AP242 pair it
 is written as:
