@@ -1,6 +1,6 @@
 ---
 name: cad
-description: Creates and edits parametric CAD parts and assemblies as Python build123d models that cadgen's engine builds and the CAD Viewer shows live; exports STEP, STL, 3MF, GLB and xbf files on request; resolves prompt references, measures geometry, and articulates or animates assemblies. Use for 3D CAD modeling, editing a model script, organizing a CAD project, exporting or converting CAD files, Quick Edit prompts, mechanisms, and explode or showcase animations. Opens and reviews existing XBF, STEP/STP, STL, 3MF and GLB files in the CAD Viewer.
+description: Creates and edits parametric CAD parts and assemblies as Python build123d models that cadgen's engine builds and the CAD Viewer shows live; exports STEP, STL, 3MF, GLB and xbf files on request; resolves prompt references, measures geometry, and articulates or animates assemblies. Use for 3D CAD modeling, editing a model script (any change to a part's or assembly's `.py`), organizing a CAD project, exporting or converting CAD files, Quick Edit prompts, mechanisms, and explode or showcase animations. Opens and reviews existing XBF, STEP/STP, STL, 3MF and GLB files in the CAD Viewer.
 license: MIT
 ---
 
@@ -158,7 +158,7 @@ run, and the open page follows every run.
   `model(shape, name="plate")` returns the same handle, and no command builds it again.
 - **The engine never reruns code.** When it no longer holds a document (it restarted, or
   dropped the document to free memory), the page, `cadgen inspect <id>` and `cad_show`
-  print the command that brings it back (`python src/bracket.py`). Run it.
+  print the command that brings it back (`cadgen run src/bracket.py`). Run it.
 - Model units are millimetres, +Z up. `$step-parts` finds real vendor models of
   purchasable parts such as fasteners, bearings and servos.
 - An image without a scale sets no fit dimension, and a drawing's units, projection and
@@ -168,7 +168,9 @@ run, and the open page follows every run.
 ## Files, when asked
 
 A file is an action on the document the engine holds, never part of the model: no code
-change and no rebuild, written at once. Write one when the person asks for it:
+change and no rebuild, written at once. It holds what the document held when it was
+written, a STEP its materials too, so a change made after it is in the file only once it
+is written again. Write one when the person asks for it:
 
 ```bash
 cadgen export "$ID" STEP/bracket.step STL/bracket.stl GLB/bracket.glb 3MF/bracket.3mf
@@ -283,8 +285,9 @@ print(closest_points(plate, post).distance)   # 0: the standoff sits on the plat
   on purpose, and a part meant to rest on another touches it when their
   `closest_points` distance is 0. Both describe the parts as built, not a pose
   ([measurements](references/inspection-and-validation.md#measurements)).
-- `cadgen inspect "$ID" assembly` weighs an assembly: each part's volume times its
-  material's density, and the parts that have no material.
+- `cadgen inspect "$ID" <assembly label>` weighs an assembly (the label it was given, which
+  is also the root name `inspect "$ID"` prints): each part's volume times its material's
+  density, and the parts that have no material.
 - A snapshot shows arrangement, not dimensions: a number the person asked for is
   measured, never read off a picture.
 - A check that fails or cannot decide has shown nothing about the design.

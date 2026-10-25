@@ -196,6 +196,7 @@ materials   0.324 kg in all
   no material: hinge/arm
 joints
   elbow  revolute  -10 to 120 deg, as built 30
+couplings   none
 states
   closed  elbow 0
   open  elbow 90

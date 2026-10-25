@@ -299,7 +299,7 @@ it again.
   machine's) that never drops a document a page watches.
 - **The engine never reruns code.** A document it no longer holds (the engine restarted,
   or it dropped the document under its memory budget) is refused with the command that
-  brings it back, `python <the program that built it>`, by the page, `cadgen inspect`
+  brings it back, `cadgen run <the script that defines it>`, by the page, `cadgen inspect`
   and `cad_show` alike (`cadgen status`: `evicted`, `expired`, or `detached` once its
   script is gone). Running it updates the same document and its open pages.
 - **Each document has a record** in cadgen's state folder (`documents/<uuid>/document.json`:
@@ -313,7 +313,7 @@ it again.
   When a file its build read changed since, whether or not its worker lives, the page and
   `cad_show` say "the code changed since this was built" with the rebuild command, every
   verb that reads it says what it read ("exporting the build of arm from before arm.py
-  changed; run `python arm.py` to update it"), and `cadgen status` marks it stale; nothing
+  changed; run `cadgen run /work/arm.py` to update it"), and `cadgen status` marks it stale; nothing
   reruns.
   The cache is bounded (`CADGEN_ENGINE_CACHE_GB`, default 4) and safe to delete.
 - **`@model(store="memory")`** keeps a document in its worker's memory alone: no record,

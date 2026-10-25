@@ -50,8 +50,8 @@ A project whose files are delivered again after each change (a print set, a STEP
 supplier) keeps one script beside its models that imports them and exports each. From
 Python the one spelling is `export(x, path, ...)`, where `x` is what a model call returns
 (the document's handle), a document id, or a file. The model function itself is taken
-too: it is called as the script's own call is -- taken from the engine's cache or replayed
-when nothing changed -- and the file written from that call's document.
+too: it is called as the script's own call is, so an unchanged model comes from the
+engine's cache or is replayed, and the file is written from that call's document.
 
 ```python
 # src/exports.py

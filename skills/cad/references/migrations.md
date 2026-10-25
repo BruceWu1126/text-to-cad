@@ -157,10 +157,11 @@ def arm():
 ```
 
 - `revolute` is a `RevoluteJoint` on the parent's part with its rigid partner on the
-  child's, `slider` a `LinearJoint` (`linear_range`), `cylindrical` a `CylindricalJoint`
-  (`(angle, distance)` where `.turn` and `.travel` were two DOFs), and `fastened` two
-  connected `RigidJoint`s. Targets were labels (`"#forearm"`); a joint is attached to
-  the part itself.
+  child's, `slider` a `LinearJoint` (`linear_range`; its rigid partner at the axis's
+  position with no rotation: [kinematics](kinematics.md#joints-place-parts-and-make-the-mechanism)),
+  `cylindrical` a `CylindricalJoint` (`(angle, distance)` where `.turn` and `.travel`
+  were two DOFs), and `fastened` two connected `RigidJoint`s. Targets were labels
+  (`"#forearm"`); a joint is attached to the part itself.
 - A rest value of 0 was the artifact as written; now the as-built state is the value
   each joint is connected at, so connecting at 0, with both frames on the axis, keeps the
   parts where they were built.
