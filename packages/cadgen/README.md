@@ -4,10 +4,9 @@ The published distribution: CAD models written as Python, built by cadgen's engi
 (`cadgen.engine`) into live XCAF documents and the files those models declare (XBF, STEP, GLB, STL,
 3MF, DXF), and the tools that show and check them. One PyPI package carrying the Python under
 `src/cadgen/` and what it ships that is not Python under `src/cadgen/_runtime/`: the CAD
-Viewer's client and the CAD app page, which it serves, and a headless browser bundle of the
-viewer's scene, which nothing in it loads (its snapshots are drawn by OCCT, never in a
-browser), built from their JavaScript packages and bundled in at build time (the JS *source*
-never ships).
+Viewer's client and the CAD app page, which it serves, built from their JavaScript packages
+and bundled in at build time (the JS *source* never ships). Its snapshots are drawn by OCCT,
+never in a browser.
 
 ```python
 from cadgen import step, xbf
@@ -341,9 +340,8 @@ src/cadgen/
                          #   the engine observer and the telemetry sender, the install
                          #   channel, atomic replace, file locks (the state folder's one
                          #   lock: `file_lock.state`), the CLI derivation
-  _runtime/              # BUILT: the CAD Viewer client, the CAD app page and the headless
-                         #   browser bundle -- produced when the wheel is packaged, never
-                         #   committed, never edited
+  _runtime/              # BUILT: the CAD Viewer client and the CAD app page -- produced
+                         #   when the wheel is packaged, never committed, never edited
 ```
 
 Commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop` and

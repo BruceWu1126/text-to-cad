@@ -236,8 +236,8 @@ jobs:
           playwright: "false"
           npm: packages/core packages/ui apps/web apps/mcp
 
-      # The bundle feeds the WHEEL, and it is the only thing that does: the snapshot
-      # browser bundle, the CAD Viewer client and the CAD app are all
+      # The bundle feeds the WHEEL, and it is the only thing that does: the CAD Viewer
+      # client and the CAD app are both
       # gitignored, so the release commit carries none of them. Nothing
       # here writes to git -- the wheel is the release asset. TEXT_TO_CAD_RELEASE names the
       # version this build releases, so the Viewer and the CAD app it bundles show it as it is;
@@ -312,8 +312,6 @@ jobs:
           listing="$(unzip -l "$wheel")"
           echo "$listing" | grep -E 'cadgen/_runtime/' || true
           for required in \
-            cadgen/_runtime/browser/snapshot-render.js \
-            cadgen/_runtime/browser/render.html \
             cadgen/_runtime/viewer/index.html \
             cadgen/_runtime/mcp/index.html; do
             if ! printf '%s\n' "$listing" | grep -qF " $required"; then

@@ -667,9 +667,9 @@ that rest box.
   carries, so its rows run down the tree from the root).
 
 It does not write files: its caller does. Consumers use compiled `@text-to-cad/core`
-exports; generated snapshot browser assets bundle this entrypoint into cadgen's packaged
-runtime (`cadgen/_runtime/browser`), which the OCCT parity bench loads in a headless Chromium
-to compare with OCCT's stills. cadgen's own snapshots are drawn by OCCT and never load it.
+exports; the OCCT parity bench bundles this entrypoint into a snapshot page of its own, built
+on demand outside the wheel, and loads it in a headless Chromium to compare with OCCT's stills.
+cadgen's own snapshots are drawn by OCCT and never load it.
 
 ### `common/headlessScene.js`
 

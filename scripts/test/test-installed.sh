@@ -136,9 +136,11 @@ echo "   $scratch_sp/cadgen-lazy-kernel.pth"
 step "Assets resolve to the packaged runtime"
 "$VENV/bin/python" - <<'PY' || exit 1
 import sys
-from cadgen.assets import browser_runtime_dir
+from cadgen.assets import viewer_dist_dir
+from cadgen.mcp.ui import app_dir
 for label, resolved in (
-    ("browser runtime", browser_runtime_dir()),
+    ("CAD Viewer client", viewer_dist_dir()),
+    ("CAD app page", app_dir()),
 ):
     if "site-packages" not in str(resolved):
         sys.exit(f"FAIL: {label} resolved outside the wheel: {resolved}")

@@ -3,59 +3,47 @@ set -euo pipefail
 
 # Build cadgen's non-Python runtime INTO THE PACKAGE (packages/cadgen/src/cadgen/_runtime).
 #
-# cadgen ships three things it does not write in Python: a headless browser bundle of
-# the viewer's scene (`_runtime/browser`: cadgen's snapshots are OCCT's and never load it;
-# scripts/bench/occt_parity.py does, to compare them with the viewer's), the CAD Viewer's
-# built client (`cadgen viewer` serves it), and the one-file CAD app an agent host renders
-# (`cadgen mcp` serves it).
+# cadgen ships two things it does not write in Python: the CAD Viewer's built client
+# (`cadgen viewer` serves it) and the one-file CAD app an agent host renders (`cadgen mcp`
+# serves it). (The OCCT parity bench's headless page of the viewer's scene is not one of
+# them: cadgen's snapshots are OCCT's, so lib/snapshot_runtime.sh builds that page into
+# tmp/ when the bench asks for it, never into the wheel.)
 # cadgen resolves them inside the distribution, so there is one copy and one builder of
 # that copy: this script. scripts/bundle/bundle.sh is the entry point that calls it (after
 # stamping derived version metadata); call this directly only when debugging one stage.
 #
-# Stages (default: all of them):
-#   --browser   snapshot browser bundle   -> _runtime/browser
+# Stages (default: both of them):
 #   --viewer    CAD Viewer client (vite)  -> _runtime/viewer
 #   --mcp       CAD app page (vite)       -> _runtime/mcp
 #
 # NOTHING here is committed. The whole _runtime tree is gitignored and built on demand:
-# the wheel is the only place these files ship, and a rebundle of the snapshot renderer
-# alone was 1.3 MB of churn per commit. So there is no committed copy to diff against,
+# the wheel is the only place these files ship, and a rebundle of a built page is
+# megabytes of churn per commit. So there is no committed copy to diff against,
 # and `--check` means "the runtime BUILDS and every required output is there" rather than
 # "the committed copy is fresh": it builds into _runtime like a normal run and then
 # asserts the files each stage owes. scripts/release/check-wheel-contents.sh is the gate
 # that proves the wheel got them.
 #
-# `--check` skips the viewer and mcp stages because they are the expensive ones (vite
-# builds of apps/web and apps/mcp, which need those apps' node_modules) and because a
-# checkout serves their dist directories directly -- cadgen prefers them, so nothing in a
-# checkout reads _runtime/viewer or _runtime/mcp. `--print-outputs` lists the directory a
-# bundle always produces.
+# `--print-outputs` lists the directories a bundle always produces.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BUNDLE_REPO_ROOT="$REPO_ROOT"
-# shellcheck source=lib/snapshot_runtime.sh
-source "$SCRIPT_DIR/lib/snapshot_runtime.sh"
 
 RUNTIME_DIR="$REPO_ROOT/packages/cadgen/src/cadgen/_runtime"
-BROWSER_DIR="$RUNTIME_DIR/browser"
 VIEWER_DIR="$RUNTIME_DIR/viewer"
 VIEWER_APP_DIR="$REPO_ROOT/apps/web"
 MCP_DIR="$RUNTIME_DIR/mcp"
 MCP_APP_DIR="$REPO_ROOT/apps/mcp"
 VIEWER_PACKAGE_MANAGER="${CAD_VIEWER_PACKAGE_MANAGER:-}"
 
-SNAPSHOT_BUILD_DEPS_DIR="${CADGEN_SNAPSHOT_BUILD_DEPS_DIR:-$REPO_ROOT/tmp/cadgen-snapshot-build}"
-
-# What each stage owes, checked after a --check build. A stage that emits nothing, or
-# emits one file and silently drops another, is the failure this catches before a wheel
-# carries the hole to a user.
-BROWSER_OUTPUTS=(snapshot-render.js render.html THIRD_PARTY_LICENSES.txt)
+# What each stage owes, checked after a --check build. A stage that emits nothing is the
+# failure this catches before a wheel carries the hole to a user.
+VIEWER_OUTPUTS=(index.html)
+MCP_OUTPUTS=(index.html)
 
 MODE="write"
 CLEAN=0
 PRINT_OUTPUTS=0
-STAGE_BROWSER=0
 STAGE_VIEWER=0
 STAGE_MCP=0
 ANY_STAGE=0
@@ -68,14 +56,12 @@ Usage:
 Builds cadgen's packaged runtime assets into packages/cadgen/src/cadgen/_runtime.
 None of it is committed; the wheel is where it ships.
 
-Stages (default: all):
-  --browser   snapshot browser bundle   -> _runtime/browser
+Stages (default: both):
   --viewer    CAD Viewer client (vite)  -> _runtime/viewer
   --mcp       CAD app page (vite)       -> _runtime/mcp
 
 Options:
-  --check          Build, then assert every required output exists. Skips the
-                   viewer and mcp stages (vite builds nothing in a checkout reads).
+  --check          Build, then assert every required output exists.
   --clean          Remove the _runtime tree first, so the build starts from nothing.
   --print-outputs  Print the generated output paths (repo-relative), then exit.
   -h, --help       Show this help.
@@ -87,7 +73,6 @@ while [ "$#" -gt 0 ]; do
     --check) MODE="check" ;;
     --clean) CLEAN=1 ;;
     --print-outputs) PRINT_OUTPUTS=1 ;;
-    --browser) STAGE_BROWSER=1; ANY_STAGE=1 ;;
     --viewer) STAGE_VIEWER=1; ANY_STAGE=1 ;;
     --mcp) STAGE_MCP=1; ANY_STAGE=1 ;;
     -h|--help) usage; exit 0 ;;
@@ -97,11 +82,11 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ "$ANY_STAGE" -eq 0 ]; then
-  STAGE_BROWSER=1; STAGE_VIEWER=1; STAGE_MCP=1
+  STAGE_VIEWER=1; STAGE_MCP=1
 fi
 
 if [ "$PRINT_OUTPUTS" -eq 1 ]; then
-  printf '%s\n' "${BROWSER_DIR#"$REPO_ROOT"/}"
+  printf '%s\n' "${VIEWER_DIR#"$REPO_ROOT"/}" "${MCP_DIR#"$REPO_ROOT"/}"
   exit 0
 fi
 
@@ -204,77 +189,17 @@ build_mcp_app() {
 }
 
 build_stage_packages() {
-  # The browser runtime stage consumes only @text-to-cad/core and must remain
-  # runnable in Python/core CI jobs that install that workspace alone. The
-  # Viewer and the CAD app are the stages that also need @text-to-cad/ui.
-  if { [ "$STAGE_VIEWER" -eq 1 ] || [ "$STAGE_MCP" -eq 1 ]; } && [ "$MODE" != "check" ]; then
-    npm --prefix "$REPO_ROOT" run build:packages
-  elif [ "$STAGE_BROWSER" -eq 1 ]; then
-    npm --prefix "$REPO_ROOT" run build -w @text-to-cad/core
-  fi
-}
-
-# --- third-party notices --------------------------------------------------------------
-# The browser bundle inlines three and meshoptimizer, and three-mesh-bvh too: the robot
-# scene it shares with the viewer picks through it.
-# Shipping them inside a wheel is redistribution, and all of them are MIT: the licence text
-# has to travel with the copy. esbuild keeps the per-file banners (--legal-comments=eof);
-# this is the human-readable summary beside them. A stage passes one line per package it
-# inlines beyond the two every stage does.
-write_third_party_notices() {
-  local target="$1"
-  shift
-  local extra=""
-  local line
-  for line in "$@"; do extra="$extra  $line"$'\n'; done
-  {
-    printf '%s\n\n' "The JavaScript in this directory is bundled output. It inlines third-party code:"
-    printf '%s\n' "  three          (MIT)  https://github.com/mrdoob/three.js"
-    printf '%s\n' "  meshoptimizer  (MIT)  https://github.com/zeux/meshoptimizer"
-    printf '%s' "$extra"
-    printf '\n'
-    cat <<'EOF'
-Each bundle carries the originating licence banners at end of file
-(esbuild --legal-comments=eof). Exact versions are pinned by
-package-lock.json at the commit that produced these files.
-
-MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-EOF
-  } > "$target/THIRD_PARTY_LICENSES.txt"
+  # Both stages bundle @text-to-cad/core and @text-to-cad/ui from their compiled exports.
+  npm --prefix "$REPO_ROOT" run build:packages
 }
 
 build_all() {
   local root="$1"
-  if [ "$STAGE_BROWSER" -eq 1 ]; then
-    ensure_snapshot_runtime_deps "$SNAPSHOT_BUILD_DEPS_DIR" 1
-    build_snapshot_runtime "$root/browser" "$SNAPSHOT_BUILD_DEPS_DIR"
-    write_third_party_notices "$root/browser" \
-      "three-mesh-bvh (MIT)  https://github.com/gkjohnson/three-mesh-bvh"
-    echo "Bundled ${root#"$REPO_ROOT"/}/browser"
-  fi
-  if [ "$STAGE_VIEWER" -eq 1 ] && [ "$MODE" != "check" ]; then
+  if [ "$STAGE_VIEWER" -eq 1 ]; then
     build_viewer_client "$root/viewer"
     echo "Bundled ${root#"$REPO_ROOT"/}/viewer"
   fi
-  if [ "$STAGE_MCP" -eq 1 ] && [ "$MODE" != "check" ]; then
+  if [ "$STAGE_MCP" -eq 1 ]; then
     build_mcp_app "$root/mcp"
     echo "Bundled ${root#"$REPO_ROOT"/}/mcp"
   fi
@@ -301,14 +226,17 @@ if [ "$MODE" = "check" ]; then
       echo "packages/cadgen/src/cadgen/_runtime/$stage built ($# files)."
     fi
   }
-  if [ "$STAGE_BROWSER" -eq 1 ]; then
-    check_stage_outputs browser "${BROWSER_OUTPUTS[@]}"
+  if [ "$STAGE_VIEWER" -eq 1 ]; then
+    check_stage_outputs viewer "${VIEWER_OUTPUTS[@]}"
+  fi
+  if [ "$STAGE_MCP" -eq 1 ]; then
+    check_stage_outputs mcp "${MCP_OUTPUTS[@]}"
   fi
   if [ "$missing" -ne 0 ]; then
     echo "" >&2
     echo "The bundler ran but did not produce everything cadgen needs. This is a bundler" >&2
     echo "or dependency failure, not a stale checkout: rerun scripts/bundle/bundle.sh --clean" >&2
-    echo "and read the esbuild output above." >&2
+    echo "and read the build output above." >&2
     exit 1
   fi
   echo "cadgen packaged runtime builds and is complete."

@@ -105,7 +105,7 @@ path, the rehearsal, and local/manual fallbacks.
 - `packages/ui`: `@text-to-cad/ui`, the shared FileViewer, renderers, controls and styles.
 - `packages/cadgen`: the published distribution — the engine (models built into
   documents it holds, and the XBF, STEP, GLB, STL, 3MF and DXF files written from them), the skill
-  CLI parsers, the CAD Viewer backend + client, and the browser runtime it serves.
+  CLI parsers, the CAD Viewer backend + client, and the CAD app page it serves.
 - `apps/docs/`: documentation site.
 - `apps/api/`: `api.texttocad.dev`, its own Vercel project: cadgen's version feed (read from PyPI) and the CAD app's consented analytics.
 - `tests/`: root-owned test suites for skills, packages, viewer services, and
@@ -189,8 +189,8 @@ path, the rehearsal, and local/manual fallbacks.
   interpreter; raising the declared minimum relaxes the check automatically.
 - Reserve `scripts/` for durable repo commands. Do not write temporary,
   one-off, or local-only helper scripts there; use `tmp/` or `/tmp` instead.
-- cadgen's packaged runtime (`_runtime/browser`, `_runtime/viewer` and
-  `_runtime/mcp`) is BUILT, never committed:
+- cadgen's packaged runtime (`_runtime/viewer` and `_runtime/mcp`) is BUILT,
+  never committed:
   the whole directory is gitignored and ships only inside the wheel. Build it with the one bundle
   entry point, `scripts/bundle/bundle.sh`; `bundle.sh --check` builds it and
   asserts every required output. Call `scripts/bundle/cadgen-runtime.sh`
