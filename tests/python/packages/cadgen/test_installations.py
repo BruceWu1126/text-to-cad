@@ -135,6 +135,23 @@ class ProxyFileTests(Fixture):
         installations.write_proxy(str(self.root / "bin"), windows=True)
         self.assertTrue((self.root / "bin" / "cadgen.cmd").is_file())
 
+    def test_the_cmd_takes_the_python_from_its_record_line(self) -> None:
+        # No Windows here to run it: for /f's split is simulated. With delims=" a run of quotes is
+        # one delimiter and none starts the line, so the line's leading space is token 1.
+        import re
+
+        python = "C:\\Users\\a b\\AppData\\Local\\uv\\env\\Scripts\\python.exe"
+        path, _status = installations.register("1.2.3", (python[:-10] + "cadgen.exe", python, "C:\\env"), self.state)
+        text = installations.script(True)
+        tokens, delimiter, needle = re.search(r'tokens\^=(\d+)\^ delims\^=\^(.) %%p in \(`findstr /c:"((?:\\"|[^"])*)" ',
+                                              text).groups()
+        needle = needle.replace('\\"', '"')  # findstr's escaped quote
+        (line,) = [line for line in Path(path).read_text(encoding="utf-8").splitlines() if needle in line]
+        fields = [field for field in line.split(delimiter) if field]
+        found = fields[int(tokens) - 1]
+        self.assertEqual(found.replace("\\\\", "\\"), python, "the cmd's !python:\\\\=\\! unescapes JSON's backslashes")
+        self.assertIn("!python:\\\\=\\!", text)
+
     @POSIX
     def test_the_sh_runs_the_installation_registered_last_and_names_a_missing_version(self) -> None:
         where = str(self.root / "bin")
