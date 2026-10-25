@@ -92,11 +92,14 @@ def check_output(kind: str, out: Any, where: str) -> None:
         raise ValueError(f"{where}: the file must end in {' or '.join(_ACCEPTED[kind])}, not {os.fspath(out)!r}")
 
 
-def _told(error: BaseException) -> None:
+def _told(error: BaseException, said: str | None = None) -> None:
     """A failed build the program's own call reported (its model's frames and the ``failed`` line,
-    ``cli._reported``): raised as ever, so a caller may catch it, and, left uncaught, ending the
-    program with status 1 and nothing more said -- not the same traceback again inside this one."""
+    ``cli._reported``), or a call the engine never served (none runs and none can start, a sandbox's
+    refusal, its port held) whose one line is ``said``: raised as ever, so a caller may catch it,
+    and, left uncaught, ending the program with status 1 and nothing more said than ``said`` on
+    stderr, as a ``cadgen`` verb says it -- not a traceback of this process's client code."""
     error._told = True  # type: ignore[attr-defined]
+    error._said = said  # type: ignore[attr-defined]
     hook = sys.excepthook
     if getattr(hook, "_cadgen_told", False):
         return
@@ -104,6 +107,8 @@ def _told(error: BaseException) -> None:
     def quiet(kind: type[BaseException], value: BaseException, trace: Any) -> None:
         if not getattr(value, "_told", False):
             hook(kind, value, trace)
+        elif getattr(value, "_said", None):
+            print(value._said, file=sys.stderr, flush=True)
 
     quiet._cadgen_told = True  # type: ignore[attr-defined]
     sys.excepthook = quiet
@@ -196,6 +201,11 @@ class Model:
         _CONTEXT.program = program
         try:
             built = self.build(log=_log if program else None)
+        except (ConnectionError, api.EngineError) as error:
+            # The engine not reached, or refusing the call before any build (``api._ask``): one line,
+            # said only if nothing catches it (``_told``).
+            _told(error, f"cadgen: {error}")
+            raise
         finally:
             _CONTEXT.program = previous
         if program:
