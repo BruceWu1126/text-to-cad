@@ -326,8 +326,8 @@ retain the application's Host and cross-site mutation checks. Explicit host/port
 requests must match an existing listener. A second installed version has a different
 installation identity and therefore a different engine.
 
-**A link outlives its engine.** The port and the page token are the installation's, not one
-engine's (`daemon.bind`). A port named -- `--port` (`cadgen server --port`, or a `serve`/`viewer`
+**A link outlives its engine.** The port is the installation's and the page token the user's, not
+one engine's (`daemon.bind`). A port named -- `--port` (`cadgen server --port`, or a `serve`/`viewer`
 request's), else `CADGEN_ENGINE_PORT` (0: any free port), read from the engine's own environment --
 is taken or refused. Else the installation's own port: 3245 (`daemon.DEFAULT_PORT`, 0xCAD) when it
 can, as Vite, Jupyter and Next.js take theirs; when another program holds it, the next free port
@@ -363,15 +363,17 @@ note (`daemon.failure_path`) and exits 1:
   refused by name the same way.
 
 The token is made at the installation's first start and every start serves with it, in the
-installation's record, `engines/<installation>.json` in the state folder (`token`, and `port`
-while the installation serves on a port it rolled to; this user's alone, 0600;
-`registry.Registry.engine`, its own `registry.ENGINE_SCHEMA`). So a page link
+installation's record, `engines/<installation>.json` in the state folder (`port` while the
+installation serves on a port it rolled to; `registry.Registry.engine`, its own
+`registry.ENGINE_SCHEMA`), and the token in the user's one file beside it, `engines/token`, which
+every installation's engine serves with (`registry.Registry.token`; both this user's alone, 0600),
+so a link outlives an upgrade too. So a page link
 -- the `cadgen viewer` output, a model's `view:` line, the CAD app's card -- works across `cadgen
 stop`, a crash and a reboot, and a page that lost its engine keeps asking the same address and
 reloads itself when the engine answers again. A stable token means a
 shared link keeps working on this machine until it is rotated: whoever holds it reaches the user's
 folders whenever the engine runs. `cadgen server --rotate-token` replaces it, with no engine running
-(it refuses while one runs), and every link shared before stops working. `cadgen status` says the
+(it refuses while this installation's or another's runs), and every link shared before stops working. `cadgen status` says the
 port and where it came from: the default, `--port`, `CADGEN_ENGINE_PORT`, or `rolled from 3245
 because <name> (pid N) holds it`.
 
@@ -439,7 +441,7 @@ only, and a file's id is derived again from its path after a restart.
 | `progress.py` | where a build is: the engine's stages heard where they begin, each body a model's body runs by name, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
 | `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads, staleness (`changes`) and the LRU bound (`Cache`) |
-| `registry.py` | the registry of documents in the user's state folder (`Registry`: `get`, `put`, `list`, `delete`), each installation's engine record (`engine`, `put_engine`: its page token), and the one owner of every write under that folder (`Folder`); where the folder is, the distribution's (`FACTORY`) |
+| `registry.py` | the registry of documents in the user's state folder (`Registry`: `get`, `put`, `list`, `delete`), the user's page token (`token`, `put_token`), each installation's engine record (`engine`, `put_engine`: its rolled port), and the one owner of every write under that folder (`Folder`); where the folder is, the distribution's (`FACTORY`) |
 | `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `server` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
 
@@ -814,7 +816,10 @@ is open, another installation that wants the engine's port never retires it: it 
 free port, or refuses where that port was named (**A link outlives its engine**). So a sandboxed shell an agent host runs finds an engine whenever
 the host runs. An engine that goes while
 held (`cadgen stop`, a crash) is held again at the host's next request, never at once: a stop is
-obeyed. `cadgen status` says how many hold it (`holders`).
+obeyed. A hold names the host it serves (`{"op": "hold", "host": "codex"}`, as `cadgen.mcp.host.family`
+names it), and `cadgen status --json` says how many hold it (`holders`), per host (`hosts`), and the
+environment it runs in (`prefix`): what the `cadgen` command reads to run, in a host's shell, the
+installation that host's server holds.
 
 ## Document lifetime
 

@@ -1077,19 +1077,17 @@ def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tup
     refused by name (``PortHeld``). Else the installation's port: 3245 (``DEFAULT_PORT``) when it is
     free, else the port it remembers, else the one it rolls to (``_installation_port``). Either way
     another installation's engine that nothing uses is retired for it (``_listen``). The page token
-    is the installation's (its record), made on its first start.
+    is the user's (``registry.TOKEN``), one for every installation, made by the first engine to start.
 
     ``where``: ``source`` (``--port``, ``CADGEN_ENGINE_PORT``, ``default`` or ``rolled``), for a
     rolled port ``because`` (who holds 3245), and ``notice``, the one line a start that moved the
     port says (a roll, or the return to 3245)."""
-    import secrets
-
     from cadgen.engine import registry
 
     held = registry.current()
     installation = _tag()
     record = held.engine(installation) if held is not None else {}
-    token = record.get("token") or secrets.token_urlsafe(32)
+    token = (held.token() if held is not None else None) or _new_token(held)
     remembered = record.get("port")
     if asked is not None:
         server, where = _listen(host, asked, "--port", token, listen), {"source": "--port"}
@@ -1098,13 +1096,26 @@ def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tup
     else:
         server, where = _installation_port(host, remembered, token, listen)
         remembered = server.port if where["source"] == "rolled" else None
-    kept = {"token": token, **({"port": remembered} if remembered else {})}
+    kept = {"port": remembered} if remembered else {}
     if held is not None and kept != record:
         try:
             held.put_engine(installation, kept)
         except OSError:
             pass  # a state folder it cannot write: this start's links work, the next start's are new
     return server, where
+
+
+def _new_token(held: Any) -> str:
+    """A new page token, kept as the user's (``registry.TOKEN``) when there is a state folder: the one
+    on disk after the write, so two engines starting at once serve with one."""
+    token = secrets.token_urlsafe(32)
+    if held is None:
+        return token
+    try:
+        held.put_token(token)
+    except OSError:
+        return token  # a state folder it cannot write: this start's links work, the next start's are new
+    return held.token() or token
 
 
 def _installation_port(host: str, remembered: int | None, token: str,
@@ -1356,8 +1367,9 @@ def _netstat_holder(port: int) -> tuple[int | None, str | None, str | None]:
 
 
 def rotate_token() -> str | None:
-    """Replace this installation's page token (``cadgen server --rotate-token``): every link shared
-    before stops working. The new token; None where there is no state folder to keep it in."""
+    """Replace the user's page token (``cadgen server --rotate-token``): every link shared before
+    stops working, whichever installation's engine served it. The new token; None where there is no
+    state folder to keep it in."""
     import secrets
 
     from cadgen.engine import registry
@@ -1366,8 +1378,21 @@ def rotate_token() -> str | None:
     if held is None:
         return None
     token = secrets.token_urlsafe(32)
-    held.put_engine(_tag(), {**held.engine(_tag()), "token": token})  # its rolled port kept
+    held.put_token(token)
     return token
+
+
+def others_running() -> list[Path]:
+    """The doors (on Windows, port files) of the other installations' engines that answer in this
+    engine folder: each serves with the token it read at its start."""
+    from cadgen.engine import client
+
+    ours = {_tag(protocol) for protocol in range(1, PROTOCOL + 1)}
+    try:
+        doors = sorted(state_dir().glob("*.port" if WINDOWS else "*.door"))
+    except OSError:
+        return []
+    return [door for door in doors if door.stem not in ours and client._answering(door)]
 
 
 class Daemon:
@@ -1394,6 +1419,7 @@ class Daemon:
         # The connections that hold the engine (``hold``: an agent host's MCP server, while the host
         # runs): while one is open, no other installation's engine retires this one (``bind``).
         self.holders = 0
+        self.hosts: dict[str, int] = {}  # the holders per agent host they serve (``hold``)
         self.door = None  # on POSIX, the door clients reach it by (``door.Door``)
         # Where clients reach it (its door; on Windows its port file) and that file's identity
         # (``reached_by``): once it is gone or another's, no one can reach this engine, and it stops.
@@ -1448,12 +1474,17 @@ class Daemon:
         return Worker(STANDBY, environment, self.patched, self.settled, cwd=os.getcwd(), on_progress=self.progressed,
                       on_saved=self.models.cache.saved, standby=True)
 
-    def hold(self, reader: Any, send: Callable[[dict[str, Any]], None]) -> None:
-        """A hold on the engine (``{"op": "hold"}``): answered, then kept until its client goes (its
-        end of file). While any is kept, another installation's engine that wants the port never
-        retires this one: it rolls past it, or refuses a port it was named (``bind``)."""
+    def hold(self, reader: Any, send: Callable[[dict[str, Any]], None], host: Any = None) -> None:
+        """A hold on the engine (``{"op": "hold", "host": ...}``): answered, then kept until its client
+        goes (its end of file). While any is kept, another installation's engine that wants the port
+        never retires this one: it rolls past it, or refuses a port it was named (``bind``). ``host``,
+        the agent host the holder serves (its MCP server says it), is counted in ``status``
+        (``hosts``): the ``cadgen`` command in that host's shell runs this installation."""
+        host = host if isinstance(host, str) and 0 < len(host) <= 64 else None
         with self.busy_lock:
             self.holders += 1
+            if host:
+                self.hosts[host] = self.hosts.get(host, 0) + 1
         try:
             send({"ok": True})
             while reader.read(4096):
@@ -1461,6 +1492,10 @@ class Daemon:
         finally:
             with self.busy_lock:
                 self.holders -= 1
+                if host:
+                    self.hosts[host] -= 1
+                    if not self.hosts[host]:
+                        del self.hosts[host]
             self.touch()
 
     def connected(self, worker: Worker) -> bool:
@@ -2038,7 +2073,8 @@ class Daemon:
         return {"ok": True, "pid": os.getpid(), "version": version(), "up": round(time.time() - self.born, 1),
                 "workers": workers, "standby": standby, "cap": self.pool.cap, "waiting": self.pool.waiting(),
                 "rssMb": round(self.pool.resident()), "rssCapMb": rss_cap_mb(), "retired": list(self.pool.retired),
-                "idle": round(now - self.last, 1), "holders": self.holders, "busy": self.busy,
+                "idle": round(now - self.last, 1), "holders": self.holders, "hosts": dict(self.hosts),
+                "busy": self.busy, "prefix": sys.prefix,
                 "watched": 0 if server is None else len(server.watched()),
                 "active": server is not None and bool(server.clients_active()),
                 "serving": None if self.server is None else {"url": self.server.url, "port": self.server.port,
@@ -2128,7 +2164,7 @@ def _serve(daemon: Daemon, reader: Any, writer: Any, prefix: bytes = b"") -> Non
             writer.flush()
 
     if request.get("op") == "hold":
-        daemon.hold(reader, send)
+        daemon.hold(reader, send, request.get("host"))
         return
     try:
         daemon.handle(request, send)
@@ -2242,6 +2278,12 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
             return 1
         return 0  # another daemon is up
     if rotate:
+        others = others_running()
+        if others:
+            print("cadgen: another installation's engine server is running, serving with the token: stop it "
+                  f"first ({', '.join(str(door) for door in others)}), then cadgen server --rotate-token", file=sys.stderr)
+            held.close()
+            return 1
         try:
             if rotate_token() is None:
                 raise OSError("no state folder")

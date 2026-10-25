@@ -1,7 +1,8 @@
 """An installation's page links outlive its engine: one HTTP port (``--port``, else
 ``CADGEN_ENGINE_PORT``, else 3245 or the port it rolled to when 3245 was another's, remembered) and
-one page token, the same at every start until ``cadgen server --rotate-token``. A named port another
-process holds is refused by name; another installation's engine that nothing uses is retired."""
+the user's one page token, every installation's, the same at every start until ``cadgen server
+--rotate-token``. A named port another process holds is refused by name; another installation's
+engine that nothing uses is retired."""
 
 from __future__ import annotations
 
@@ -144,10 +145,21 @@ class EnginePortTest(unittest.TestCase):
             found.close()
 
     def record(self) -> dict:
-        (found,) = (self.root / "state" / "engines").iterdir()
+        """This installation's engine record, or ``{}`` with none."""
+        found = [path for path in (self.root / "state" / "engines").glob("*.json")]
+        if not found:
+            return {}
+        (found,) = found
         if os.name != "nt":
             self.assertEqual(found.stat().st_mode & 0o777, 0o600)
         return json.loads(found.read_text(encoding="utf-8"))
+
+    def token(self) -> str:
+        """The user's page token, as its file holds it."""
+        found = self.root / "state" / "engines" / "token"
+        if os.name != "nt":
+            self.assertEqual(found.stat().st_mode & 0o777, 0o600)
+        return found.read_text(encoding="utf-8").strip()
 
     def bound(self, default: int) -> tuple[Listener, dict]:
         """``daemon.bind`` in this process, nothing named, its default ``default``: its listener
@@ -223,7 +235,8 @@ class EnginePortTest(unittest.TestCase):
         from cadgen.engine import daemon, registry
 
         default, remembered = held_port(self), free_port()
-        registry.Registry(self.root / "state").put_engine(daemon._tag(), {"token": "t" * 43, "port": remembered})
+        registry.Registry(self.root / "state").put_token("t" * 43)
+        registry.Registry(self.root / "state").put_engine(daemon._tag(), {"port": remembered})
         server, where = self.bound(default)  # the default held, the remembered port free: used, nothing said
         self.assertEqual((server.port, where["source"], "notice" in where), (remembered, "rolled", False))
         self.assertEqual(server.token, "t" * 43)
@@ -249,6 +262,8 @@ class EnginePortTest(unittest.TestCase):
         ours = self.launch(CADGEN_ENGINE_PORT=str(theirs["port"]))
         self.assertEqual(ours["port"], theirs["port"])
         self.assertNotEqual(ours["pid"], theirs["pid"])
+        # One token for every installation's engine: a link outlives an upgrade.
+        self.assertEqual((ours["token"], theirs["token"]), (self.token(), self.token()))
         self.answering(self.ours())
 
     def test_an_engine_of_another_installation_in_use_is_refused_when_named_and_else_rolled_from(self) -> None:
@@ -257,12 +272,17 @@ class EnginePortTest(unittest.TestCase):
         python, theirs, door = self.other()
         held = client._connect(door)  # an app server's hold on it, as ``client.hold`` asks one
         self.addCleanup(held.close)
-        message = {"op": "hold"}
+        message = {"op": "hold", "host": "codex"}  # held for Codex: the `cadgen` command in its shells runs it
         if os.name == "nt":
             message = {"token": door.read_text(encoding="utf-8").split()[1], **message}
         held.writer.write((json.dumps(message) + "\n").encode())
         held.writer.flush()
         self.assertEqual(json.loads(held.reader.readline()), {"ok": True})
+        from cadgen.engine import daemon
+
+        status = daemon._ask(door, {"op": "status"})
+        self.assertEqual((status["holders"], status["hosts"]), (1, {"codex": 1}))
+        self.assertEqual(os.path.realpath(status["prefix"]), os.path.realpath(str(Path(python).parent.parent)))
         done = self.started(CADGEN_ENGINE_PORT=str(theirs["port"]))
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertEqual(done.stderr.strip().splitlines()[-1],
@@ -275,12 +295,17 @@ class EnginePortTest(unittest.TestCase):
         self.assertEqual(where["notice"], f"{theirs['port']} is held by cadgen {previous.version()}'s engine (pid "
                                           f"{theirs['pid']}); this installation serves on {server.port} and keeps it")
         self.assertEqual(self.launch(python)["pid"], theirs["pid"], "theirs runs on")
+        # It serves with the token it started with: a new one is refused while it runs.
+        refused = self.cli("server", "--rotate-token")
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("another installation's engine server is running", refused.stderr)
 
     def test_a_named_port_wins_and_rotate_token_replaces_the_token(self) -> None:
         named = free_port()
         first = self.launch(CADGEN_ENGINE_PORT=str(named))
         self.assertEqual(first["port"], named)
-        self.assertEqual(set(self.record()), {"schema", "token"}, "a named port is never remembered")
+        self.assertNotIn("port", self.record(), "a named port is never remembered")
+        self.assertEqual(first["token"], self.token())
         self.stop()
         # --port on ``cadgen server`` outranks CADGEN_ENGINE_PORT; --rotate-token retires every link.
         other = free_port()
@@ -289,12 +314,12 @@ class EnginePortTest(unittest.TestCase):
         rotated = self.launch()
         self.assertEqual(rotated["port"], other)
         self.assertNotEqual(rotated["token"], first["token"])
-        self.assertEqual(self.record()["token"], rotated["token"])
+        self.assertEqual(self.token(), rotated["token"])
         # Refused while an engine runs, which keeps the token it started with.
         refused = self.cli("server", "--rotate-token")
         self.assertEqual(refused.returncode, 1)
         self.assertIn("run cadgen stop first", refused.stderr)
-        self.assertEqual(self.record()["token"], rotated["token"])
+        self.assertEqual(self.token(), rotated["token"])
 
 
 if __name__ == "__main__":

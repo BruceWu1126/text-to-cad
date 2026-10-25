@@ -26,11 +26,13 @@ each of ``OBSERVERS`` is told (a mirror uploads in the background: nothing waits
 The cache folder is a second ``Folder``, written the same way; forgetting a document
 (``delete``) forgets its cache file too.
 
-Beside the documents, ``<state>/engines/<installation>.json`` is each installation's engine record
-(``Registry.engine``, ``put_engine``, its own ``ENGINE_SCHEMA``): the page token every start serves
-with (``token``) and, while the default port is another program's, the port the engine rolled to
-(``port``), written this user's alone (0600). Links stay valid across restarts because of it
-(``daemon.bind``); ``cadgen server --rotate-token`` replaces the token.
+Beside the documents, ``<state>/engines/token`` is the user's page token, which every
+installation's engine serves with (``Registry.token``, ``put_token``), and
+``<state>/engines/<installation>.json`` each installation's engine record (``Registry.engine``,
+``put_engine``, its own ``ENGINE_SCHEMA``): while the default port is another program's, the port
+the engine rolled to (``port``). Both are written this user's alone (0600). Links stay valid across
+restarts and upgrades because of them (``daemon.bind``); ``cadgen server --rotate-token`` replaces
+the token.
 
 The engine imports nothing outside itself (law 3): where the state folder is is the
 distribution's to say, through ``FACTORY`` (``cadgen._internal.engine_host``). With none, the
@@ -50,16 +52,18 @@ from typing import Any, Callable
 from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.ids import is_id
 
-__all__ = ["DOCUMENTS", "ENGINES", "ENGINE_SCHEMA", "FACTORY", "Folder", "OBSERVERS", "RECORD", "Registry", "SCHEMA", "command", "current",
+__all__ = ["DOCUMENTS", "ENGINES", "ENGINE_SCHEMA", "FACTORY", "Folder", "OBSERVERS", "RECORD", "Registry", "SCHEMA", "TOKEN", "command", "current",
            "detached", "home", "program", "relative"]
 
 SCHEMA = 1
 DOCUMENTS = "documents"
 RECORD = "document.json"
 ENGINES = "engines"
-# The engine records' own schema: 3 holds the token and, while the default port is another's, the
-# port the installation rolled to (2 held the token alone).
+# The engine records' own schema: 3 holds, while the default port is another's, the port the
+# installation rolled to (and held the installation's token, which is the user's now: ``TOKEN``).
 ENGINE_SCHEMA = 3
+# The user's page token, one for every installation's engine: a link outlives an upgrade.
+TOKEN = f"{ENGINES}/token"
 
 # Told of every record written (one that changed), after it is on disk; never waited on for more.
 OBSERVERS: list[Callable[[dict[str, Any]], None]] = []
@@ -221,10 +225,19 @@ class Registry:
 
     # --- the installation's engine -------------------------------------------------------------
 
+    def token(self) -> str | None:
+        """The user's page token (``TOKEN``), or None before the first engine has made one."""
+        data = self.state.read(TOKEN)
+        token = data.decode("ascii", "replace").strip() if data is not None else ""
+        return token if len(token) >= 32 and token.isascii() and " " not in token else None
+
+    def put_token(self, token: str) -> None:
+        """Write the user's page token, this user's alone."""
+        self.state.write(TOKEN, (token + "\n").encode("ascii"), mode=0o600)
+
     def engine(self, installation: str) -> dict[str, Any]:
-        """The engine record of ``installation`` (``daemon._tag``): its ``token`` (str) and the
-        ``port`` (int) it rolled to from a held default, where it has them; ``{}`` with none, or one
-        this schema does not read."""
+        """The engine record of ``installation`` (``daemon._tag``): the ``port`` (int) it rolled to
+        from a held default, where it has one; ``{}`` with none, or one this schema does not read."""
         data = self.state.read(f"{ENGINES}/{installation}.json")
         try:
             record = json.loads(data) if data is not None else {}
@@ -235,16 +248,14 @@ class Registry:
         found: dict[str, Any] = {}
         if isinstance(record.get("port"), int) and 0 < record["port"] < 65536:
             found["port"] = record["port"]
-        if isinstance(record.get("token"), str) and len(record["token"]) >= 32:
-            found["token"] = record["token"]
         return found
 
     def put_engine(self, installation: str, record: dict[str, Any]) -> None:
-        """Write the engine record of ``installation`` (its ``token``, and the ``port`` it rolled to
-        when it has one), this user's alone."""
+        """Write the engine record of ``installation`` (the ``port`` it rolled to when it has one),
+        this user's alone."""
         if not installation.isalnum():
             raise ValueError(f"{installation!r} is not an installation")
-        kept = {"token": record["token"], **({"port": record["port"]} if record.get("port") else {})}
+        kept = {"port": record["port"]} if record.get("port") else {}
         text = json.dumps({**kept, "schema": ENGINE_SCHEMA}, indent=1, sort_keys=True) + "\n"
         self.state.write(f"{ENGINES}/{installation}.json", text.encode("utf-8"), mode=0o600)
 
