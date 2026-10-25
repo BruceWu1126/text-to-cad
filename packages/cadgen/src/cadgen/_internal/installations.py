@@ -44,7 +44,7 @@ WINDOWS = os.name == "nt"
 # The line that makes a file the proxy, and the proxy's revision: a later one is never replaced by an
 # earlier, so an older installation's server starting never undoes a newer one's proxy.
 MARK = "cadgen proxy: "
-REVISION = 1
+REVISION = 2
 VERSION = re.compile(r"[0-9][0-9A-Za-z.+_-]*")
 
 OK = "ok"
@@ -262,8 +262,11 @@ elif [ "$(uname -s)" = Darwin ]; then state="$HOME/Library/Application Support/c
 else state="${{XDG_STATE_HOME:-$HOME/.local/state}}/cadgen"
 fi
 for name in $(CDPATH= cd "$state/installations" 2>/dev/null && ls -t -- *.json 2>/dev/null); do
-  python=$(sed -n 's/^ *"python": "\\(.*\\)",\\{{0,1\\}}$/\\1/p' "$state/installations/$name")
-  [ -x "$python" ] && exec "$python" -P -m cadgen._internal.proxy "$@"
+  record="$state/installations/$name"
+  python=$(sed -n 's/^ *"python": "\\(.*\\)",\\{{0,1\\}}$/\\1/p' "$record")
+  console=$(sed -n 's/^ *"cadgen": "\\(.*\\)",\\{{0,1\\}}$/\\1/p' "$record")
+  # Alive as ``alive`` says it: its python and its console script (an uninstalled cadgen leaves the python).
+  [ -x "$python" ] && [ -f "$console" ] && exec "$python" -P -m cadgen._internal.proxy "$@"
 done
 case $1 in +?*) version=${{1#+}} ;; *) version= ;; esac
 echo "cadgen${{version:+ $version}} is not installed: run \\`uvx --no-config --managed-python --python 3.13 \\
@@ -277,8 +280,9 @@ rem The cadgen command: runs the installation of cadgen that +<version>, CADGEN_
 rem cadgen.toml or a running engine names (cadgen._internal.proxy), through the one registered last.\r
 setlocal EnableDelayedExpansion\r
 if defined CADGEN_STATE_DIR (set "state=!CADGEN_STATE_DIR!") else if defined LOCALAPPDATA (set "state=!LOCALAPPDATA!\\cadgen-state") else (set "state=!USERPROFILE!\\AppData\\Local\\cadgen-state")\r
+rem A record's python line is: space "python": "PATH", -- split at each quote, PATH is its fourth piece.\r
 for /f "delims=" %%n in ('dir /b /o-d "!state!\\installations\\*.json" 2^>nul') do (\r
-  for /f usebackq^ tokens^=3^ delims^=^" %%p in (`findstr /c:"\\"python\\":" "!state!\\installations\\%%n"`) do (\r
+  for /f usebackq^ tokens^=4^ delims^=^" %%p in (`findstr /c:"\\"python\\":" "!state!\\installations\\%%n"`) do (\r
     set "python=%%p"\r
     set "python=!python:\\\\=\\!"\r
     if exist "!python!" goto run\r

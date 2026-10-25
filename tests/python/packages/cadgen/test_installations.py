@@ -154,6 +154,34 @@ class ProxyFileTests(Fixture):
         self.assertEqual(ran.stdout, "1.0.0 -P -m cadgen._internal.proxy +2.0.0 a b\n")
 
 
+    def test_the_windows_proxy_reads_the_python_a_record_names(self) -> None:
+        # No Windows runner executes the cmd: its for /f is checked against the record's own line.
+        # With delims set to a quote alone, cmd skips empty pieces and keeps the indent as one.
+        import re
+
+        record = self.registered("1.0.0")
+        (line,) = [row for row in Path(record["path"]).read_text(encoding="utf-8").splitlines()
+                   if '"python":' in row]
+        (taken,) = re.findall(r"tokens\^=(\d+)\^ delims\^=\^\" %%p", installations.script(True))
+        pieces = [piece for piece in line.split('"') if piece]
+        self.assertEqual(pieces[int(taken) - 1].replace("\\\\", "\\"), record["python"])
+
+    @POSIX
+    def test_the_sh_passes_over_an_installation_whose_cadgen_is_gone(self) -> None:
+        where = str(self.root / "bin")
+        installations.write_proxy(where, windows=False)
+        environment = {"PATH": os.environ.get("PATH", ""), "HOME": str(self.root), "CADGEN_STATE_DIR": str(self.root / "state")}
+        for version in ("1.0.0", "2.0.0"):
+            record = self.registered(version)
+            Path(record["python"]).write_text(f'#!/bin/sh\necho "{version}"\n', encoding="utf-8")
+            os.chmod(record["python"], 0o755)
+        os.utime(self.root / "state/installations/1.0.0.json", (1, 1))  # 2.0.0 registered last...
+        os.remove(record["cadgen"])  # ...and uninstalled from its environment: its python stays
+        ran = subprocess.run([installations.proxy_path(where, windows=False), "status"], capture_output=True,
+                             text=True, env=environment, cwd=self.root)
+        self.assertEqual(ran.stdout, "1.0.0\n", ran.stderr)
+
+
 class ResolutionTests(Fixture):
     def setUp(self) -> None:
         super().setUp()
