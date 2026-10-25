@@ -79,8 +79,9 @@ def w16():
     # The staged explode, 12 s with the engine running throughout, and the running
     # cutaway, 24 s: the bodywork off, held and back on while the engine runs, ending where
     # it starts: GLB animations (`lib/explode.py`).
-    explode.explode_animation(engine, turbo_tags)
-    explode.running_reveal_animation(engine, turbo_tags)
+    poses: dict = {}
+    explode.explode_animation(engine, turbo_tags, poses)
+    explode.running_reveal_animation(engine, turbo_tags, poses)
     return engine
 
 
