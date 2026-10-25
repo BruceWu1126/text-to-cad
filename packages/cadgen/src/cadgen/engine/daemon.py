@@ -1616,7 +1616,13 @@ class Daemon:
                                                    provenance=self.provenance, cache=MESHES, isolated=True, host=host,
                                                    http_factory=HTTP_FACTORY, budget=memory_budget(), token=token))
                 except PortHeld as refusal:
-                    # An engine that cannot serve serves no build: it says why and stops, once the
+                    if request.get("port"):
+                        # The request's own port (``cadgen viewer --port``): that request is refused,
+                        # and the engine -- the builds and warm workers of its other clients -- runs
+                        # on, unbound, for the next request that serves.
+                        raise
+                    # An engine whose own port is held (``cadgen server --port``, its
+                    # ``CADGEN_ENGINE_PORT``) can never serve: it says why and stops, once the
                     # request that found it has its answer (``_serve``).
                     self.refusal = refusal
                     _note(str(refusal))

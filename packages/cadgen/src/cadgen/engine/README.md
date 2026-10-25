@@ -351,9 +351,11 @@ holder.
 
 A named port another process holds is refused in one line naming the holder (`daemon.PortHeld`).
 `cadgen server` binds at its start, so the command fails at once with that line on stderr and exits
-1, no engine left. An engine a client starts binds on the first request that serves (that request
-may name its own port: `cadgen viewer --port`), which fails with the line; the engine leaves its
-note (`daemon.failure_path`) and exits 1:
+1, no engine left. An engine a client starts binds on the first request that serves. A port that
+request names (`cadgen viewer --port`) refuses that request alone, with the line: the engine runs
+on, unbound, for its other clients' builds and the next request that serves. Its own port held
+(`CADGEN_ENGINE_PORT` in the environment it started in) fails that request with the line, and the
+engine, which can never serve, leaves its note (`daemon.failure_path`) and exits 1:
 
 - another program: `port 3245 is held by <name> (pid N): stop it, or start cadgen with another
   CADGEN_ENGINE_PORT` (`…or pass another --port` for a port `--port` named);
