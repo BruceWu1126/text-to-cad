@@ -54,6 +54,12 @@ class BuildError(Exception):
     """A request the build cannot run: no such script, no such model."""
 
 
+class Unreadable(ValueError):
+    """Bytes the engine held of a document -- its cache file's, a retired worker's -- that do not
+    read as one (``held_source``): answered by this type, so the daemon drops that cache file
+    (``models.Models.unreadable``) and the next build writes it again."""
+
+
 @dataclass
 class _Written:
     signature: tuple
@@ -829,7 +835,10 @@ def held_source(payload: bytes, name: str) -> Any:
     key = (hashlib.blake2b(payload, digest_size=20).hexdigest(), name)
     found = _HELD.pop(key, None)
     if found is None:
-        found = _read_held(payload, name)
+        try:
+            found = _read_held(payload, name)
+        except Exception as error:  # noqa: BLE001 - bytes that do not read are said so, by their type
+            raise Unreadable(str(error)) from error
     _HELD[key] = found  # the most recent last
     while len(_HELD) > _HELD_KEPT:
         _HELD.pop(next(iter(_HELD)))
@@ -983,10 +992,12 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None],
             doc = document.read_bytes(data)
             held = previous.read_record(doc)
         except Exception as error:  # noqa: BLE001 - a cache that does not read is built again
-            return {"used": False, "reason": f"its cache does not read: {error}"}, None
+            # ``unreadable``: the daemon drops the file, so this build's document is cached again.
+            return {"used": False, "reason": f"its cache does not read: {error}", "unreadable": True}, None
         del doc
         if document.written_format(held[0]) != previous.FORMAT or held[1] != text:
-            return {"used": False, "reason": "its cache does not hold the closure its head shows"}, None
+            return {"used": False, "reason": "its cache does not hold the closure its head shows",
+                    "unreadable": True}, None
         timings["read"] = round(time.perf_counter() - keyed, 4)
         _WRITTEN[name] = _Written(("loaded", found["key"]), stats, None, text, data=data)
     else:

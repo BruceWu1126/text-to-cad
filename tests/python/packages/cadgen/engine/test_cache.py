@@ -272,6 +272,47 @@ class CacheTest(unittest.TestCase):
         self.assertIn("built cube.py::cube warm", rebuilt.stdout)
         self.assertIn("the body ran", rebuilt.stderr)
 
+    def corrupt(self, ident: str) -> None:
+        """The document's cache file broken where its bytes are read, its size and its head (the writer
+        and the closure a build compares) as they were: what an earlier test of this left behind."""
+        path = self.file(ident)
+        data = bytearray(path.read_bytes())
+        from cadgen.engine import previous
+
+        kept = data.find(previous._PREFIX)
+        kept = data.find(b"\x00", kept) if kept >= 0 else 0
+        self.assertLess(kept + 64, len(data) - 1024, "room past the head to break")
+        data[-1024:] = bytes(1024)
+        path.write_bytes(bytes(data))
+
+    def test_a_cache_file_that_does_not_read_is_dropped_and_written_again(self) -> None:
+        ident = self.said()
+        self.assertIn("the body ran", self.run_script("cube").stderr)
+        meta = self.cached(ident)
+        whole = self.file(ident).read_bytes()
+        self.assertEqual(self.cli("stop").returncode, 0)
+        self.corrupt(ident)
+        # After a restart, a verb that reads it fails once, says why and what builds it again, and drops
+        # the file: it is not offered again, broken, after every restart.
+        out = self.folder / "cube.step"
+        exported = self.cli("export", ident, str(out))
+        self.assertEqual(exported.returncode, 2, exported.stderr)
+        self.assertIn(f"the engine's cache of {ident} does not read", exported.stderr)
+        self.assertIn(f"run `python {self.project / 'cube.py'}` to build it again", exported.stderr)
+        self.assertFalse(out.exists())
+        self.assertNotIn("cache", self.record(ident))
+        self.assertFalse(self.file(ident).exists())
+        self.assertIn("the body ran", self.run_script("cube").stderr)
+        self.assertEqual(self.cached(ident, meta["revision"])["bytes"], len(whole), "written again, whole")
+        # A build that finds it broken (no verb read it first) runs the body, and the file is written again.
+        self.assertEqual(self.cli("stop").returncode, 0)
+        self.corrupt(ident)
+        self.assertIn("the body ran", self.run_script("cube").stderr)
+        self.cached(ident, meta["revision"])
+        self.assertEqual(self.cli("stop").returncode, 0)
+        self.assertEqual(self.cli("export", ident, str(out)).returncode, 0, "the next restart reads it")
+        self.assertGreater(out.stat().st_size, 0)
+
     def test_failed_revisions_before_a_restart_leave_the_cache_to_take(self) -> None:
         self.use(self.state, self.cache, CADGEN_ENGINE_CACHE_IDLE="600")  # saved at the stop, as a person's is
         self.said()

@@ -112,6 +112,8 @@ class Models:
                 self.daemon.builders[ident] = worker
                 server = self.register_page(ident)
                 report["url"] = self.url(server, ident)
+                if (report.get("cache") or {}).get("unreadable"):
+                    self.cache.remove(ident)  # this build found its cache file broken: the idle save writes it again
                 self.cache.touch(ident)
 
     def facts(self, ident: str, report: dict[str, Any], recorded: str) -> tuple[dict | None, dict | None]:
@@ -656,6 +658,20 @@ class Models:
         with server.load_lock:
             doc = server.served.get(ident)
             return doc.xbf if doc is not None and server.model_versions.get(ident) == version else None
+
+    def unreadable(self, ident: str, why: str) -> Exception:
+        """Document ``ident``'s held bytes did not read (``build.Unreadable``, ``why``): its cache file
+        removed, with its record's ``cache`` (``Cache.remove``), so it is no longer held on disk and its
+        next build writes it again -- rather than every restart offering the same bytes and failing
+        on them. The refusal to answer with: that, and the command that builds it again."""
+        from cadgen.engine.serve import NotHeld
+
+        self.cache.remove(ident)
+        said = f"the engine's cache of {ident} does not read ({why}), and is removed"
+        found = self.rebuild(ident)
+        if found is None:
+            return NotHeld(said, "evicted", self.command(ident))
+        return NotHeld(f"{said}: {found['error']}", found["state"], found["rebuild"])
 
     def disk_bytes(self, ident: str) -> bytes | None:
         """The bytes of document ``ident``'s cache file when it is at the revision the book holds, its
