@@ -741,8 +741,8 @@ def _usages(doc) -> dict[tuple, dict]:
 class StepUsagesTest(unittest.TestCase):
     """A prototype used under two parents of other names keeps one product name and each usage
     its own NEXT_ASSEMBLY_USAGE_OCCURRENCE name, placement and instance colour; a coloured part of
-    several solids keeps its colour. Read back through OCCT's XCAF reader alone, a third party's
-    read."""
+    several solids keeps its colour. Read back through the engine's readers and OCCT's XCAF reader
+    alone, a third party's read."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -794,6 +794,27 @@ class StepUsagesTest(unittest.TestCase):
         self.assertEqual(sorted(re.findall(r"NEXT_ASSEMBLY_USAGE_OCCURRENCE\('\d+','([^']*)'", text)), sorted(
             ["arm_left", "arm_right", *(f"{side}_{part}" for side in ("left", "right")
                                         for part in ("ring", "ring_top", "body"))]), "a usage, a name")
+
+    def test_the_engine_s_readers_read_each_usage_s_name_and_a_part_of_solids_its_colour(self) -> None:
+        built, read = document.Loaded(self.xbf), document.Loaded(self.step)
+        self.assertEqual([i.path for i in read.instances], [i.path for i in built.instances])
+        self.assertEqual([i.path[-1] for i in read.instances],
+                         ["left_ring", "left_ring_top", "left_body", "right_ring", "right_ring_top", "right_body"])
+        self.assertEqual([p.name for p in read.prototypes], [p.name for p in built.prototypes])
+        for mine, theirs in zip(read.prototypes, built.prototypes):
+            self.assert_colour(mine.color, theirs.color, mine.name)
+            self.assertEqual(mine.face_colors, {}, mine.name)
+        for mine, theirs in zip(read.instances, built.instances):
+            np.testing.assert_allclose(mine.matrix, theirs.matrix, atol=1e-9)
+        imported = document.read_step_shape(self.step)
+        leaves = {(arm.label, leaf.label): tuple(leaf.color) for arm in imported.children for leaf in arm.children}
+        self.assertEqual(sorted(leaves), sorted(
+            (f"arm_{side}", f"{side}_{part}") for side in ("left", "right") for part in ("ring", "ring_top", "body")))
+        for (_arm, label), rgba in leaves.items():
+            want = (0.2, 0.2, 0.9) if label == "right_ring" else (0.8, 0.3, 0.1) if label.endswith("body") else (
+                0.1, 0.7, 0.2)
+            for got, value in zip(rgba, want):
+                self.assertAlmostEqual(got, value, delta=1e-3, msg=label)
 
     @classmethod
     def components(cls) -> list:
