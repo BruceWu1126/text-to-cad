@@ -316,13 +316,23 @@ class PreviousTest(unittest.TestCase):
         self.assertEqual(self.xbf.read_bytes(), first)
 
     def export(self, name: str) -> bytes:
-        """The kit's STEP as ``cadgen export`` writes it, in a process of its own."""
+        """The kit's STEP as ``cadgen export`` writes it, in a process of its own, through an engine
+        of the test's own -- its folders, no port of its own choosing -- stopped once the test ends:
+        never the developer's engine, state or cache, however the file is run."""
         import subprocess
         import sys
 
+        if not hasattr(self, "engine_env"):
+            engine = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
+            self.addCleanup(shutil.rmtree, engine, True)
+            self.engine_env = {**os.environ, "CADGEN_ENGINE_DIR": str(engine), "CADGEN_STATE_DIR": str(engine / "state"),
+                               "CADGEN_CACHE_DIR": str(engine / "cache"), "CADGEN_ENGINE_PORT": "0",
+                               "CADGEN_ENGINE_STANDBY": "0"}
+            self.addCleanup(subprocess.run, [sys.executable, "-m", "cadgen.engine", "stop"], env=self.engine_env,
+                            capture_output=True)
         out = self.folder / name
         done = subprocess.run([sys.executable, "-m", "cadgen.engine", "export", str(self.xbf), str(out)],
-                              cwd=self.folder, capture_output=True, text=True)
+                              cwd=self.folder, capture_output=True, text=True, env=self.engine_env)
         self.assertEqual(done.returncode, 0, done.stderr)
         # The STEP header's time stamp is the second it was written: masked.
         return re.sub(rb"'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d'", b"'T'", out.read_bytes(), count=1)
