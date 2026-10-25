@@ -32,6 +32,19 @@ def _bytes(shape) -> bytes:
     return stream.getvalue()
 
 
+def _counted(cls, name):
+    """Count the runs of an OCCT class's own method ``name`` (the class the memo's subclass
+    wraps): what an answered query never calls."""
+    original = getattr(cls, name)
+    calls = []
+
+    def counting(self, *args):
+        calls.append(1)
+        return original(self, *args)
+
+    return mock.patch.object(cls, name, counting), calls
+
+
 class MemoCase(unittest.TestCase):
     def setUp(self) -> None:
         memo.install()
@@ -302,6 +315,73 @@ class QueryTest(MemoCase):
             edited, _, _ = _run(model, 5.0)
             self.assertEqual(add.call_count, 1, "a new shape is measured")
         self.assertAlmostEqual(edited[3] - edited[0], 5.0, places=5)
+
+    @staticmethod
+    def _part(radius):
+        from build123d import Solid
+
+        return Solid.make_box(10, 10, 10) - Solid.make_cylinder(radius, 20)
+
+    def test_a_bop_check_of_a_shape_the_memo_handed_back_is_not_run_again(self) -> None:
+        from OCP import BRepAlgoAPI
+
+        own = BRepAlgoAPI.BRepAlgoAPI_Check.__kernel_memo_class__
+
+        def model(radius, fuzzy=None):
+            part = self._part(radius)
+            check = BRepAlgoAPI.BRepAlgoAPI_Check()
+            if fuzzy is not None:
+                check.SetFuzzyValue(fuzzy)
+            check.SetData(part.wrapped)
+            check.Perform()
+            return BRepAlgoAPI.BRepAlgoAPI_Check(part.wrapped).IsValid(), check.IsValid(), part
+
+        counted, runs = _counted(own, "Perform")
+        with counted:
+            (cold, _, part), _, cold_run = _run(model, 3.0)
+            self.assertEqual((len(runs), cold_run.tally["queries_answered"]), (1, 1), "one key, asked twice")
+            (warm, warm_set, again), _, warm_run = _run(model, 3.0)
+            self.assertIs(again, part)
+            self.assertEqual((len(runs), warm_run.tally["queries_answered"]), (1, 2), "the same shape: answered")
+            _run(model, 3.0, 1e-3)
+            self.assertEqual(len(runs), 2, "another fuzzy value is another key")
+            _run(model, 3.0, 1e-3)
+            self.assertEqual(len(runs), 2)
+            _run(model, 3.5)
+            self.assertEqual(len(runs), 3, "a new shape is checked")
+        self.assertEqual((warm, warm_set), (cold, cold))
+        self.assertEqual(warm, own(part.wrapped).IsValid(), "the kept verdict is a fresh check's")
+
+    def test_a_check_of_a_shape_made_past_the_memo_runs_every_time(self) -> None:
+        from OCP import BRepAlgoAPI
+
+        own = BRepAlgoAPI.BRepAlgoAPI_Check.__kernel_memo_class__
+        part = self._part(3.0)  # outside a run: no operation of the memo made it
+        counted, runs = _counted(own, "Perform")
+        with counted:
+            for _ in range(2):
+                verdict, _, run = _run(lambda: BRepAlgoAPI.BRepAlgoAPI_Check(part.wrapped).IsValid())
+                self.assertEqual(run.tally["queries_answered"], 0)
+        self.assertEqual(len(runs), 2)
+        self.assertTrue(verdict)
+
+    def test_an_answered_check_asked_for_more_runs_as_it_was_given(self) -> None:
+        from OCP import BRepAlgoAPI
+
+        own = BRepAlgoAPI.BRepAlgoAPI_Check.__kernel_memo_class__
+
+        def model():
+            part = self._part(3.0)
+            check = BRepAlgoAPI.BRepAlgoAPI_Check(part.wrapped)
+            check.SetFuzzyValue(0.5)  # after its run: not what it ran with
+            return check.IsValid(), check.Result().Size(), check.FuzzyValue()
+
+        counted, runs = _counted(own, "Perform")
+        with counted:
+            cold, _, _ = _run(model)
+            warm, _, _ = _run(model)
+        self.assertEqual(warm, cold)
+        self.assertEqual(len(runs), 2, "Result() runs the check the memo answered")
 
 
 class VertexTest(MemoCase):
