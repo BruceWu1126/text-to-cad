@@ -114,10 +114,11 @@ the installation's engine and all its clients; never stop an engine you did not 
 `cadgen serve DOC` also starts or reuses this engine, prints the document URL and
 exits. It has no `--foreground` or standalone server mode.
 
-The engine binds loopback on an OS-assigned port. `--port N` pins its HTTP port
-and `--host ADDRESS` pins its bind address. If the running engine has a different
+The engine binds loopback on 3245, or, when another program holds it, the next free
+port, which the installation keeps (`cadgen status` says which and why). `--port N`
+pins its HTTP port and `--host ADDRESS` pins its bind address. If the running engine has a different
 port or address, the launch fails with that conflict; it never replaces a server
-or starts a second engine. A taken port fails. There are no page sessions: every launch
+or starts a second engine. A taken port that `--port` names fails, naming its holder. There are no page sessions: every launch
 reuses the one page, and its folder replaces the last launch's as the one the home shows.
 An old page session's link (`/s/...`) and a document named by query (`/?doc=`, `/?file=`)
 are answered with the home. `--dist DIR` (or `CADGEN_VIEWER_DIST`) selects a built client.

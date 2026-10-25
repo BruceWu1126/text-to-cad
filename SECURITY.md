@@ -35,7 +35,8 @@ offer exactly that to everyone who can reach the port.
 **The token lasts.** It belongs to your installation, not to one run of the
 engine: it is made once, kept in a file only you can read in your state folder,
 and reused at every start, on the same port (3245 unless you name another; when
-another program holds it, the engine refuses to start and names that program). So a shared link keeps working on this machine, across restarts and
+another program holds 3245, the next free port, which your installation keeps and
+names in `cadgen status`). So a shared link keeps working on this machine, across restarts and
 reboots, until you rotate it. It reaches your folders whenever the engine runs.
 `cadgen server --rotate-token`, with the engine stopped (`cadgen stop`),
 replaces it and retires every link shared before.

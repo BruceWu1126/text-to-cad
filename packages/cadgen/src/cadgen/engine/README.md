@@ -144,7 +144,7 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
    temporary folder -- and, in the user's state folder its host names,
    the registry: one record per document it has built, been handed or a page opened, pointing at
    its script or file (**Document lifetime**), and the installation's engine record, its page
-   token (**Architecture**); never geometry and never source. In the cache folder its host names (the platform's: `~/.cache/cadgen`) it
+   token and the port it rolled to while 3245 is another's (**Architecture**); never geometry and never source. In the cache folder its host names (the platform's: `~/.cache/cadgen`) it
    keeps, under `documents/` alone, each model document's bytes as it last built them (**The
    cache**): its own file, never a declared or exported xbf, regenerable and wiped at no loss,
    so a restart opens every project at once; and under `pycache/` the bytecode its own processes
@@ -327,37 +327,53 @@ requests must match an existing listener. A second installed version has a diffe
 installation identity and therefore a different engine.
 
 **A link outlives its engine.** The port and the page token are the installation's, not one
-engine's (`daemon.bind`). The listener takes one port, never another: `--port` (`cadgen server
---port`, or a `serve`/`viewer` request's), else `CADGEN_ENGINE_PORT` (0: any free port), read from
-the engine's own environment, else 3245 (`daemon.DEFAULT_PORT`, 0xCAD). When another process holds
-it, the engine does not start, and says so in one line naming the holder (`daemon.PortHeld`).
+engine's (`daemon.bind`). A port named -- `--port` (`cadgen server --port`, or a `serve`/`viewer`
+request's), else `CADGEN_ENGINE_PORT` (0: any free port), read from the engine's own environment --
+is taken or refused. Else the installation's own port: 3245 (`daemon.DEFAULT_PORT`, 0xCAD) when it
+can, as Vite, Jupyter and Next.js take theirs; when another program holds it, the next free port
+(`daemon.PORTS_TRIED` above it, then any), which the installation remembers in its record and takes
+at every later start, so its links stay what they were. The start that rolls says so once, on the
+stderr of the client whose request bound the port (or `cadgen server`'s) and in `cadgen status`:
+`3245 is held by <name> (pid N); this installation serves on 3246 and keeps it`. A remembered port
+that is free is used, and one held is rolled from the same way. When 3245 is free again at a start,
+the engine takes it back and forgets the port it rolled to: `back on the default port 3245: links
+made on 3246 no longer work` -- the one time a link changes. Who holds a port is named as the
+system says it (`daemon.port_holder`: `lsof` on macOS, `/proc` on Linux, `netstat` on Windows), or
+`another process` where it does not say; a cadgen this one cannot reach is `another cadgen (<name>,
+pid N)`.
+
+Another installation's engine (an older version, after an upgrade) on the port is found by its door
+in the same engine folder and asked its `status`: when nothing uses it -- no hold, no page watching a
+document, no build, draw or HTTP request underway -- it is told to `stop`, and its port is taken once
+it has gone (`daemon.RETIRE_SECONDS` at most), whether the port was named, the default or the
+remembered one. One still in use is never stopped: the installation rolls from it as from any other
+holder.
+
+A named port another process holds is refused in one line naming the holder (`daemon.PortHeld`).
 `cadgen server` binds at its start, so the command fails at once with that line on stderr and exits
 1, no engine left. An engine a client starts binds on the first request that serves (that request
 may name its own port: `cadgen viewer --port`), which fails with the line; the engine leaves its
 note (`daemon.failure_path`) and exits 1:
 
-- another program: `port 3245 is held by <name> (pid N): stop it, or start cadgen with
-  CADGEN_ENGINE_PORT=<n>`, its name and pid as the system says them (`daemon.port_holder`: `lsof` on
-  macOS, `/proc` on Linux, `netstat` on Windows), or `another process` where it does not say; a cadgen
-  this one cannot reach is `another cadgen (<name>, pid N), which this one cannot ask to stop`;
-- another installation's engine (an older version, after an upgrade), found by its door in the same
-  engine folder and asked its `status`: when nothing uses it -- no hold, no page watching a document,
-  no build, draw or HTTP request underway -- it is told to `stop`, and its port is taken once it has
-  gone (`daemon.RETIRE_SECONDS` at most). Else `port 3245 is held by cadgen <version>'s engine (pid
-  N), still in use by 1 app server: quit that app or run `cadgen stop` with that version` (or `N open
+- another program: `port 3245 is held by <name> (pid N): stop it, or start cadgen with another
+  CADGEN_ENGINE_PORT` (`…or pass another --port` for a port `--port` named);
+- another installation's engine in use: `port 3245 is held by cadgen <version>'s engine (pid N),
+  still in use by 1 app server: quit that app or run `cadgen stop` with that version` (or `N open
   pages`, `N requests`); an engine whose `status` does not say what uses it cannot be asked, and is
   refused by name the same way.
 
 The token is made at the installation's first start and every start serves with it, in the
-installation's record, `engines/<installation>.json` in the state folder (`token` alone; this
-user's alone, 0600; `registry.Registry.engine`, its own `registry.ENGINE_SCHEMA`). So a page link
+installation's record, `engines/<installation>.json` in the state folder (`token`, and `port`
+while the installation serves on a port it rolled to; this user's alone, 0600;
+`registry.Registry.engine`, its own `registry.ENGINE_SCHEMA`). So a page link
 -- the `cadgen viewer` output, a model's `view:` line, the CAD app's card -- works across `cadgen
 stop`, a crash and a reboot, and a page that lost its engine keeps asking the same address and
 reloads itself when the engine answers again. A stable token means a
 shared link keeps working on this machine until it is rotated: whoever holds it reaches the user's
 folders whenever the engine runs. `cadgen server --rotate-token` replaces it, with no engine running
 (it refuses while one runs), and every link shared before stops working. `cadgen status` says the
-port and where it came from: the default, `--port` or `CADGEN_ENGINE_PORT`.
+port and where it came from: the default, `--port`, `CADGEN_ENGINE_PORT`, or `rolled from 3245
+because <name> (pid N) holds it`.
 
 The injected application also serves `/mcp`, the Streamable HTTP MCP transport
 (2025-11-25 and the previously supported protocol revisions). Initialization returns
@@ -794,8 +810,8 @@ the client that started it says that reason at once, never after a timeout.
 **A hold.** `cadgen mcp`, the stdio peer an agent host starts, connects to the engine as it starts
 (starting it when none runs) and holds it (`client.hold`, `{"op": "hold"}`: a connection the
 daemon answers and keeps until its client goes) for as long as the host runs it. While any hold
-is open, another installation that needs the engine's port refuses to start rather than retire it
-(**A link outlives its engine**). So a sandboxed shell an agent host runs finds an engine whenever
+is open, another installation that wants the engine's port never retires it: it rolls to the next
+free port, or refuses where that port was named (**A link outlives its engine**). So a sandboxed shell an agent host runs finds an engine whenever
 the host runs. An engine that goes while
 held (`cadgen stop`, a crash) is held again at the host's next request, never at once: a stop is
 obeyed. `cadgen status` says how many hold it (`holders`).

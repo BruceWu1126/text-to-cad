@@ -148,7 +148,7 @@ in `$XDG_RUNTIME_DIR`, else in the per-user temporary folder (on macOS the syste
 test, a benchmark or an experiment a daemon to itself. `cadgen status` lists its
 workers, one per model script, each with its memo, and what each is building;
 `cadgen stop` stops it (`cadgen server` runs one in the foreground); a running `cadgen mcp` holds it,
-so another installation needing its port refuses rather than retire it. A running daemon keeps the engine code it started with:
+so another installation wanting its port rolls past it (or refuses a port it was named) rather than retire it. A running daemon keeps the engine code it started with:
 after editing `packages/cadgen/src/cadgen`, stop the daemon you started so the next
 build runs the new code. Never stop one you did not start.
 
@@ -158,7 +158,7 @@ engine's README, **The engine server and its workers** and **Body retention**):
 retires a worker), `CADGEN_ENGINE_MEMORY_MB` (the daemon's one memory budget,
 **Document lifetime**), `CADGEN_ENGINE_CACHE_GB` (the document cache's size, `0` for none;
 `CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, the tests' seam), `CADGEN_ENGINE_PORT` (its HTTP port,
-`0` for any free one; 3245 by default, refused when held), `CADGEN_ENGINE_MEMO=0` (no memo
+`0` for any free one, refused when held; unset, 3245, else the next free port, kept per installation), `CADGEN_ENGINE_MEMO=0` (no memo
 hits), `CADGEN_ENGINE_BODIES=0` (no body replay), `CADGEN_ENGINE_MESH=processes|inline`
 `CADGEN_ENGINE_THREE` (the three.js folder `cadgen serve` pages load) and
 `CADGEN_VIEWER_WARM=0` (no engine warm-up at `cadgen viewer`'s launch). What the
