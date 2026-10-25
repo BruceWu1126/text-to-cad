@@ -775,6 +775,29 @@ def _no_closure(path: Path) -> str:
             f"document by its id for its closure, or name a ref in the file (cadgen inspect {path.name} REF)")
 
 
+def couplings_of(kinematics: dict[str, Any]) -> list[dict[str, Any]]:
+    """The mechanism's couplings as ``inspect`` lists them: each by its name, its kind -- a
+    ``screw_pair`` couples one cylindrical joint, a ``rack_and_pinion_pair`` revolute and prismatic
+    joints, a ``gear_pair`` revolute ones -- its joints with each one's ratio (degrees or
+    millimetres per unit of the coupling's value), and, of two joints, the second's to the first's
+    (``ratio``). Its joints move only through it: the coupling's name is what poses them."""
+    types = {pair.get("label"): pair.get("type") for pair in kinematics.get("pairs") or []}
+    found = []
+    for name, coupling in (kinematics.get("couplings") or {}).items():
+        joints: dict[str, list[float]] = {}
+        for label, _index, ratio in coupling.get("terms") or []:
+            joints.setdefault(label, []).append(ratio)
+        kinds = {types.get(label) for label in joints}
+        kind = ("screw_pair" if kinds == {"cylindrical"} else
+                "rack_and_pinion_pair" if {"revolute", "prismatic"} <= kinds else "gear_pair")
+        rows = [{"name": label, "ratio": ratios[0] if len(ratios) == 1 else ratios} for label, ratios in joints.items()]
+        first, *rest = [row["ratio"] for row in rows]
+        ratio = rest[0] / first if len(rest) == 1 and isinstance(first, float) and isinstance(rest[0], float) and first \
+            else None
+        found.append({"name": name, "kind": kind, "joints": rows, "ratio": ratio, "range": coupling.get("range")})
+    return found
+
+
 def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], Any], ident: str) -> dict[str, Any]:
     """What a served document holds, at a glance (``cadgen inspect DOC``): its name and id; its
     state -- a model's (``live``, ``held``, ...: ``ModelDocuments.state``), where the engine holds
@@ -835,6 +858,7 @@ def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], A
         "materials": list(materials.values()), "mass": sum(weighed) if weighed else None,
         "unweighed": unweighed if materials else [],
         "joints": joints,
+        "couplings": couplings_of(kinematics),
         "states": [{"name": name, "values": values} for name, values in (kinematics.get("configurations") or {}).items()],
         "sequences": [{"name": name, "duration": motion.get("duration")}
                       for name, motion in (kinematics.get("motions") or {}).items()],

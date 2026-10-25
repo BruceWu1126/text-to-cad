@@ -80,7 +80,7 @@ def _inspect_arguments(parser: argparse.ArgumentParser) -> None:
                                                "An element answers what the kernel measures of it, placed where its "
                                                "occurrence stands, and what made it; a part or an assembly its volume, "
                                                "mass and world bounds, a part its placement. Without it: what the document holds (its state, parts, "
-                                               "bounds, volume, materials, joints, states, sequences, animations and "
+                                               "bounds, volume, materials, joints, couplings, states, sequences, animations and "
                                                "declared files), then its build closure")
 
 
@@ -538,6 +538,15 @@ def summary_text(summary: dict[str, Any]) -> str:
         return f"{row['name']}  {row['type']}  {'; '.join(ranges) or 'no range'}{as_built}"
 
     listed("joints", [joint(row) for row in summary["joints"]])
+
+    def coupling(row: dict[str, Any]) -> str:
+        joints = ", ".join(f"{joint['name']} {_number(joint['ratio'])}" if isinstance(joint["ratio"], (int, float))
+                           else f"{joint['name']} {' '.join(_number(value) for value in joint['ratio'])}"
+                           for joint in row["joints"])
+        ratio = f", ratio {_number(row['ratio'])}" if row.get("ratio") is not None else ""
+        return f"{row['name']}  {row['kind']}  {joints}{ratio}"
+
+    listed("couplings", [coupling(row) for row in summary.get("couplings") or []])
     listed("states", [f"{row['name']}  " + ", ".join(f"{name} {_number(value) if isinstance(value, (int, float)) else value}"
                                                        for name, value in row["values"].items())
                       for row in summary["states"]])
