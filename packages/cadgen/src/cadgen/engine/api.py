@@ -386,7 +386,8 @@ def _built(script: Path, functions: list[str] | None, *, verify: bool = False, p
             waiting = bar.around(told) if bar is not None else told
 
             def relay(message: dict[str, Any]) -> None:
-                if message.get("stream") == "waiting":  # behind a build of this script: said whoever logs
+                if message.get("stream") in ("waiting", "notice"):  # said whoever logs: behind a build of
+                    # this script, or the worker's first load of the kernel (``worker.kernel``)
                     waiting(message["log"])
                     return
                 shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")

@@ -272,6 +272,42 @@ class WorkerLoopTest(unittest.TestCase):
         return ident
 
 
+class KernelNoticeTest(unittest.TestCase):
+    """A build on a worker whose kernel is not loaded loads it first, and a load that outlasts
+    ``KERNEL_PATIENCE`` is said to the caller once while it goes on; a warm worker says nothing."""
+
+    def test_a_slow_first_load_is_said_while_it_goes_on_and_a_loaded_kernel_says_nothing(self) -> None:
+        import threading
+
+        from cadgen.engine import worker
+
+        said: list[str] = []
+        told = threading.Event()
+
+        def say(text: str) -> None:
+            said.append(text)
+            told.set()
+
+        def slow() -> None:  # the first import macOS checks: still going when the notice comes
+            self.assertTrue(told.wait(30), "the notice comes while the load goes on")
+            worker._KERNEL_LOADED = True
+
+        with mock.patch.object(worker, "_KERNEL_LOADED", False), mock.patch.object(worker, "KERNEL_PATIENCE", 0.01), \
+                mock.patch.object(worker, "load_kernel", side_effect=slow) as load:
+            worker.kernel(say)
+            self.assertEqual(said, ["loading the CAD kernel for the first time in this environment, up to a minute"])
+            worker.kernel(say)  # a warm worker: nothing loads, nothing is said
+            self.assertEqual((load.call_count, len(said)), (1, 1))
+
+        def quick() -> None:
+            worker._KERNEL_LOADED = True
+
+        with mock.patch.object(worker, "_KERNEL_LOADED", False), mock.patch.object(worker, "KERNEL_PATIENCE", 30.0), \
+                mock.patch.object(worker, "load_kernel", side_effect=quick):
+            worker.kernel(say)
+        self.assertEqual(len(said), 1, "a load done within the patience is not said")
+
+
 class AdoptTest(unittest.TestCase):
     def test_a_run_adopts_its_caller_s_environment_but_what_started_the_worker(self) -> None:
         from cadgen.engine.worker import adopt

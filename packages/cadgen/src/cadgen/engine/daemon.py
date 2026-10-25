@@ -515,6 +515,8 @@ builds no script until a build takes it (``adopt``)."""
                 payload = _read_exactly(stream, size) if size else b""
                 if "log" in message:
                     self._tell({"log": message["log"]})
+                elif "notice" in message:  # said to the caller at once (``worker.kernel``)
+                    self._tell({"log": message["notice"], "stream": "notice"})
                 elif "progress" in message:
                     frame = self.progress = message["progress"]
                     self.touched.update(frame.get("outputs") or ())
@@ -692,6 +694,7 @@ class _Ticket:
     start: bool = False
     victim: Any = None
     standby: Any = None
+    awaits: bool = False  # it waits for the standby being started (``Pool._grant``)
 
     @property
     def granted(self) -> bool:
@@ -752,15 +755,35 @@ class Pool:
         self.follow: dict[str, str] | None = None
         self.stopped = False
 
-    def lease(self, script: str, environment: dict[str, str], cwd: str | None = None) -> Any:
+    def lease(self, script: str, environment: dict[str, str], cwd: str | None = None,
+              loading: Callable[[str], None] | None = None) -> Any:
         """The worker of ``script`` for one request, waiting its turn (see the class); started
-        when it has none, or the standby taken for it. ``release`` it after."""
+        when it has none, or the standby taken for it. ``release`` it after. A request still waiting
+        for the standby being started after ``worker.KERNEL_PATIENCE`` -- its kernel's first load on a
+        fresh installation -- is said to ``loading``, once, while it waits (``worker.KERNEL_NOTICE``)."""
         ticket = _Ticket(os.path.normcase(script), environment, cwd)
+        told = None
         with self.lock:
             self.queue.append(ticket)
             self._grant()
-            while not ticket.granted:
-                self.lock.wait()
+            if not ticket.granted and loading is not None:
+                from cadgen.engine.worker import KERNEL_NOTICE, KERNEL_PATIENCE
+
+                def tell() -> None:
+                    with self.lock:
+                        waits = not ticket.granted and ticket.awaits and self.readying is not None
+                    if waits:
+                        loading(KERNEL_NOTICE)
+
+                told = threading.Timer(KERNEL_PATIENCE, tell)
+                told.daemon = True
+                told.start()
+            try:
+                while not ticket.granted:
+                    self.lock.wait()
+            finally:
+                if told is not None:
+                    told.cancel()
         if ticket.worker is not None:
             return ticket.worker
         if ticket.victim is not None:
@@ -1010,7 +1033,7 @@ class Pool:
                 granted = True
                 continue
             if self.readying is not None and not awaited and interpreter(self.readying) == same:
-                awaited = True
+                awaited = ticket.awaits = True
                 continue  # the standby being started is this request's once it is ready
             occupied = len(self.live) + len(self.starting) + (self.standby is not None) + (self.readying is not None)
             if occupied < self.cap:
@@ -1749,11 +1772,12 @@ class Daemon:
         frame = worker.progress if worker is not None else None
         return f"{error}, at {frame.get('model')}: {describe(frame)}" if frame else str(error)
 
-    def lease(self, script: str, environment: dict[str, str], cwd: str | None = None) -> Worker:
+    def lease(self, script: str, environment: dict[str, str], cwd: str | None = None,
+              loading: Callable[[str], None] | None = None) -> Worker:
         """The warm worker of a script (by its path) or of the documents no worker built
         (``documents``), for one request: waiting its turn in the
-        pool, started when none is alive (``Pool``). ``release`` it after."""
-        return self.pool.lease(script, environment, cwd)
+        pool, started when none is alive (``Pool``); ``loading`` as there. ``release`` it after."""
+        return self.pool.lease(script, environment, cwd, loading)
 
     def release(self, worker: Worker) -> None:
         self.pool.release(worker)
@@ -2139,7 +2163,8 @@ class Daemon:
                     waited = time.monotonic()
                     try:
                         try:
-                            worker = self.lease(key, request.get("env") or {}, cwd)
+                            worker = self.lease(key, request.get("env") or {}, cwd,
+                                                lambda text: send({"log": text, "stream": "notice"}))
                         finally:
                             if ahead is not None and send in ahead[0].followers:
                                 ahead[0].followers.remove(send)

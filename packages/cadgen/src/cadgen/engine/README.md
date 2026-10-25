@@ -580,7 +580,10 @@ none cached and 2.4-2.9 s cached. A folder no daemon started in 30 days goes
 (`PYCACHE_UNUSED_DAYS`). With no cache folder that is this user's alone, nothing is written.
 The daemon's standby (**The engine server and its workers**) loads the kernel at the daemon's
 start: the first load of a fresh installation on macOS also waits on the system's first look at
-each native library, 43 s measured, which the standby pays while nobody waits.
+each native library, 43 s measured, which the standby pays while nobody waits. A build that waits
+on such a load -- one arriving before the standby is ready, or the first of a worker whose kernel is
+not loaded -- says so once, on stderr, when it has waited `worker.KERNEL_PATIENCE` (5 s): `loading
+the CAD kernel for the first time in this environment, up to a minute`. A warm worker says nothing.
 A warm build does not make the document again: the worker holds the XCAF
 document it last wrote and patches it (`document.Kept`). A prototype whose label
 holds what a cold build would make of it keeps that label untouched; one that

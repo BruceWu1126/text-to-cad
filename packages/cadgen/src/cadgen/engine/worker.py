@@ -102,6 +102,13 @@ from cadgen.engine.ids import canonical, file_id
 PATCH_WAIT = 30.0
 # How long the worker waits for a next request, once it has answered, before it collects.
 COLLECT_IDLE = 0.5
+# A build on a worker whose kernel is not loaded (a fresh worker, or one that came before the
+# standby was ready) loads it first (``kernel``); a load still going after this many seconds is said
+# to the caller, once (a ``{"id", "notice"}`` frame): the operating system's first look at a fresh
+# installation's native libraries (macOS checks each once) takes up to about 50 s, where a load
+# it has already looked at takes 2 to 3.
+KERNEL_PATIENCE = 5.0
+KERNEL_NOTICE = "loading the CAD kernel for the first time in this environment, up to a minute"
 # The daemon's word that it holds the patch of a path (``{"op": "patched", "path"}``).
 _PATCHED: dict[str, threading.Event] = {}
 
@@ -324,6 +331,26 @@ def load_kernel() -> None:
     from cadgen.engine.kernel import determinism, history, memo, trace  # noqa: F401
 
     build123d.Box(1, 1, 1)
+    global _KERNEL_LOADED
+    _KERNEL_LOADED = True
+
+
+_KERNEL_LOADED = False
+
+
+def kernel(say: Callable[[str], None]) -> None:
+    """The kernel loaded before a build of this worker, unless it is (``load_kernel``): a load that
+    takes longer than ``KERNEL_PATIENCE`` is said once, while it goes on (``KERNEL_NOTICE``), and
+    a warm worker says nothing."""
+    if _KERNEL_LOADED:
+        return
+    told = threading.Timer(KERNEL_PATIENCE, say, (KERNEL_NOTICE,))
+    told.daemon = True
+    told.start()
+    try:
+        load_kernel()
+    finally:
+        told.cancel()
 
 
 def kept() -> dict[str, str]:
@@ -692,6 +719,7 @@ def main() -> int:
             said = progress(ident, script=script, cwd=cwd)
             with building(said):
                 said.load()
+                kernel(lambda text: send({"id": ident, "notice": text}))
                 reports = build(script, request.get("functions") or None,
                                 log=lambda text: send({"id": ident, "log": text}), cwd=Path(cwd) if cwd else None,
                                 verify=bool(request.get("verify")), profile=bool(request.get("profile")),
