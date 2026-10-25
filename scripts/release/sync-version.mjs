@@ -208,7 +208,7 @@ function syncTomlTarget(relativePath, version) {
 
 // A skill runs its version by the `cadgen` command (`cadgen +0.8.0`), and says it in the
 // command's refusal ("it says 0.8.0 is not installed").
-export const launcherPattern = /(cadgen \+|it says )(\d[^\s`"'\\)]*)/g;
+export const skillVersionPattern = /(cadgen \+|it says )(\d[^\s`"'\\)]*)/g;
 
 function syncPinTarget(relativePath, version, text = readRequiredText(relativePath)) {
   const pin = /(cadgen(?:\[[a-z0-9_,.-]+\])?==)([^"\s]+)/g;
@@ -216,12 +216,12 @@ function syncPinTarget(relativePath, version, text = readRequiredText(relativePa
   if (matches.length === 0) {
     throw new Error(`${relativePath} must pin cadgen==<version>`);
   }
-  const launchers = [...text.matchAll(launcherPattern)];
+  const named = [...text.matchAll(skillVersionPattern)];
   const labels = [];
   if (!matches.every((match) => match[2] === version)) {
     labels.push("cadgen pin");
   }
-  if (!launchers.every((match) => match[2] === version)) {
+  if (!named.every((match) => match[2] === version)) {
     labels.push("cadgen +<version>");
   }
   if (labels.length === 0) {
@@ -232,7 +232,7 @@ function syncPinTarget(relativePath, version, text = readRequiredText(relativePa
     labels,
     text: text
       .replace(pin, (_, prefix) => `${prefix}${version}`)
-      .replace(launcherPattern, (_, prefix) => `${prefix}${version}`),
+      .replace(skillVersionPattern, (_, prefix) => `${prefix}${version}`),
   };
 }
 
