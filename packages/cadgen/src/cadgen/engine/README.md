@@ -1406,10 +1406,14 @@ changed or new one fails in one line naming the folder and its mode.
   and materials' names and densities are the xbf's. OCCT's writer drops the look (metallic,
   roughness, emissive and the rest: a material reads back matte), every physical field but the
   density, a face's material (the face keeps its colour), the mechanism and its configurations,
-  and the model's key and provenance. The writer's two run-dependent choices are settled
-  before it writes: the header's time stamp is `step.WRITTEN_STAMP` (the xbf's date), and the
-  colour presentations, which it keeps in a map keyed by shape, are put in the order of the
-  shapes they style, so the same document is the same STEP in any process on any day.
+  and the model's key and provenance. The writer's run-dependent choices are settled: the
+  header's time stamp is `step.WRITTEN_STAMP` (the xbf's date); the colour presentations, which
+  it keeps in a map keyed by shape, are put in the order of the shapes they style; the assembly
+  occurrences, which it numbers on from every STEP the process wrote, are numbered from 1; and
+  each record so renumbered is put on one line, as the writer broke it where its old numbers
+  fell. A build's document is written as its xbf reads back (written and read once, in memory),
+  since a read moves placements by a last bit. So the same document is the same STEP in any
+  process on any day, a build's or a cold read's of its xbf.
 - **GLB**: one mesh per prototype (indexed in 16 bits up to 65,535 vertices, in 32 past them), a
   node per placement named by its path, a PBR material per
   look (a paint is a primitive of its own) with an extension for each part of the look past

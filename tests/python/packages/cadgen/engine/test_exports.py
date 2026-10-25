@@ -136,6 +136,38 @@ def hinges_open():
     return posed(hinges().shape, "open")
 """
 
+# Twelve rows of nine links, each turned its own way and named at a length of its own, and a
+# plate whose name is longer than a line: 121 assembly occurrences, numbered past 100 by a process
+# that wrote a STEP before, in records the writer breaks where their text puts the breaks (the
+# plate's inside its name); placements a document's read moves by a last bit. ``{noop}`` changes
+# the body and not what it makes.
+ROWS = """
+import build123d as bd
+from cadgen.engine import step, xbf
+
+
+@xbf("XBF/rows.xbf")
+@step("rows.step")
+def rows():
+    noop = {noop}  # noqa: F841
+    rows = []
+    for at in range(12):
+        links = []
+        for index in range(9):
+            link = bd.Box(4, 4, 2 + index % 3).moved(bd.Location((index * 7, 0, 0), (17 * index, 31 + at, 7 * index)))
+            link.color = bd.Color(0.1 + index / 10, 0.5, 0.9 - at / 15)
+            link.label = "link-" + "x" * (index * 4 + at % 4)
+            links.append(link)
+        rows.append(bd.Compound(children=links, label="row" + str(at)).moved(bd.Location((0, at * 9, 0))))
+    plate = bd.Pos(0, -10, 0) * bd.Box(60, 4, 1)
+    plate.color = bd.Color(0.8, 0.8, 0.2)
+    plate.label = PLATE
+    return bd.Compound(children=[*rows, plate], label="rows")
+
+
+PLATE = "a plate whose name runs past the end of a line,   " * 3 + "end"
+"""
+
 
 def _glb_json(path: Path) -> dict:
     data = path.read_bytes()
@@ -558,31 +590,6 @@ class StepTest(unittest.TestCase):
         self.assertEqual(sorted(looks), [*(f"part{i}" for i in range(6)), "peg0"])
         self.assertEqual(looks, built)
 
-    def test_a_step_written_again_in_one_process_is_a_fresh_process_s_bytes(self) -> None:
-        # The kernel numbers assembly occurrences on from every STEP the process wrote before: a
-        # warm worker's export is numbered as a fresh process's all the same.
-        import re
-        import subprocess
-        import sys
-
-        (self.folder / "kit.py").write_text(textwrap.dedent(KIT), encoding="utf-8")
-        (report,) = engine_build.build(self.folder / "kit.py", ["kit"], cwd=self.folder)
-        self.assertTrue(report["ok"], report)
-        xbf = self.folder / "XBF/kit.xbf"
-        here = []
-        for at in range(2):
-            out = self.folder / f"here-{at}.step"
-            translate(xbf, None, out)
-            here.append(out.read_bytes())
-        fresh = self.folder / "fresh.step"
-        done = subprocess.run([sys.executable, "-c", EXPORT, str(xbf), str(fresh)], capture_output=True, text=True)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(here[0], here[1])
-        self.assertEqual(here[0], fresh.read_bytes())
-        ids = re.findall(rb"NEXT_ASSEMBLY_USAGE_OCCURRENCE\('(\d+)'", here[1])
-        self.assertEqual(ids, [b"%d" % number for number in range(1, len(ids) + 1)])
-        self.assertGreater(len(ids), 3)
-
     def test_the_presentations_are_settled_in_the_file_whatever_order_the_writer_left(self) -> None:
         # Two writes of one document whose presentations came out in either order, numbered
         # either way: the file's tail is renumbered where it stands, and what is quoted is text.
@@ -615,7 +622,8 @@ class StepTest(unittest.TestCase):
         self.assertEqual(text[:len(head)], head)
         # Red styles #2, which the shapes number first: its presentation comes first, its colour
         # follows it, and the quoted '#1' is the colour's name still.
-        self.assertIn("#5 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(\n    #6),#4);", text)
+        # Each record renumbered is on one line: the writer broke it where its old numbers fell.
+        self.assertIn("#5 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(#6),#4);\n", text)
         self.assertIn("#6 = STYLED_ITEM('color',(#7),#2);", text)
         self.assertIn("#8 = COLOUR_RGB('red #1',1.,0.,0.);", text)
         self.assertIn("#10 = STYLED_ITEM('color',(#11),#3);", text)
@@ -650,6 +658,93 @@ class StepTest(unittest.TestCase):
         self.assertEqual(len(found), 3)
         for at, matrix in zip(lids, found):
             np.testing.assert_allclose(matrix, posed[at], atol=1e-6)
+
+
+class StepBytesTest(unittest.TestCase):
+    """A STEP is a function of its document: a build's, a warm worker's and a fresh process's
+    from the xbf read cold are the same bytes, and a model run again to the same document keeps
+    its file. Each record the file's settling renumbers is on one line, and reads as written."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.folder = Path(tempfile.mkdtemp(prefix="engine-step-bytes-")).resolve()
+        cls.script = cls.folder / "rows.py"
+        cls.write(1)
+        (report,) = engine_build.build(cls.script, ["rows"], cwd=cls.folder)
+        assert report["ok"], report
+        cls.step, cls.xbf = cls.folder / "rows.step", cls.folder / "XBF/rows.xbf"
+        cls.built = cls.step.read_bytes()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    @classmethod
+    def write(cls, noop: int) -> None:
+        cls.script.write_text(textwrap.dedent(ROWS.replace("{noop}", str(noop))), encoding="utf-8")
+        os.utime(cls.script, ns=(time.time_ns(), time.time_ns()))
+
+    def fresh(self, name: str) -> bytes:
+        import subprocess
+        import sys
+
+        out = self.folder / name
+        done = subprocess.run([sys.executable, "-c", EXPORT, str(self.xbf), str(out)], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return out.read_bytes()
+
+    def test_a_warm_worker_s_step_and_a_fresh_process_s_are_the_same_bytes(self) -> None:
+        import re
+
+        here = []
+        for at in range(3):
+            translate(self.xbf, None, self.folder / f"here-{at}.step")
+            here.append((self.folder / f"here-{at}.step").read_bytes())
+        self.assertEqual(here[0], here[1])
+        self.assertEqual(here[0], here[2])
+        self.assertEqual(here[0], self.fresh("fresh.step"))
+        records = re.findall(rb"NEXT_ASSEMBLY_USAGE_OCCURRENCE\('(\d+)'[^;]*;\n", here[0])
+        self.assertEqual(records, [b"%d" % number for number in range(1, 122)])
+        self.assertEqual(here[0].count(b"NEXT_ASSEMBLY_USAGE_OCCURRENCE"), 121, "every occurrence on one line")
+
+    def test_a_build_s_step_is_its_xbf_s_read_cold_in_another_process(self) -> None:
+        self.assertEqual(self.fresh("cold.step"), self.built)
+        # So exporting the xbf over the build's STEP keeps the file (``cadgen export``: unchanged).
+        stamp = self.step.stat().st_mtime_ns
+        translate(self.xbf, None, self.step)
+        self.assertEqual(self.step.stat().st_mtime_ns, stamp)
+
+    def test_a_model_run_again_to_the_same_document_keeps_its_step(self) -> None:
+        stamp = self.step.stat().st_mtime_ns
+        try:
+            self.write(2)
+            (report,) = engine_build.build(self.script, ["rows"], cwd=self.folder)
+        finally:
+            self.write(1)
+        self.assertTrue(report["ok"], report)
+        self.assertEqual(report["memo"]["bodies_run"], 1, "the body ran: its document was made again")
+        self.assertFalse(report["files"][str(self.step)]["written"], report["files"])
+        self.assertEqual(self.step.read_bytes(), self.built)
+        self.assertEqual(self.step.stat().st_mtime_ns, stamp)
+
+    def test_records_on_one_line_read_back_with_their_solids_names_and_colours(self) -> None:
+        import build123d as bd
+
+        read, built = document.Loaded(self.step), document.Loaded(self.xbf)
+        self.assertEqual([(p.name, p.color) for p in read.prototypes], [(p.name, p.color) for p in built.prototypes])
+        self.assertEqual([i.path for i in read.instances], [i.path for i in built.instances])
+        for mine, theirs in zip(read.instances, built.instances):
+            np.testing.assert_allclose(mine.matrix, theirs.matrix, atol=1e-9)
+        plate = "a plate whose name runs past the end of a line,   " * 3 + "end"
+        self.assertEqual(read.instances[-1].path[-1], plate, "a name broken inside its string reads whole")
+        shape = bd.import_step(self.step)
+        self.assertEqual(len(shape.solids()), 109)
+        labels = {leaf.label for leaf in shape.leaves}
+        self.assertIn(plate.replace(" ", "_"), labels, "build123d reads the name whole (a space its underscore)")
+        (leaf,) = [leaf for leaf in shape.leaves if leaf.label == plate.replace(" ", "_")]
+        for got, want in zip(tuple(leaf.color), (0.8, 0.8, 0.2, 1.0)):
+            self.assertAlmostEqual(got, want, delta=1e-6)
+        self.assertIn("link-" + "x" * 35, labels)
 
 
 if __name__ == "__main__":
