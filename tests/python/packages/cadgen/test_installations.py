@@ -246,6 +246,13 @@ class ResolutionTests(Fixture):
         os.unlink(self.new["python"])
         self.assertEqual(self.choose(["status"])[0], "0.9.0-dev.20261024", "an installation that is gone is passed over")
 
+    def test_a_shell_whose_folder_was_removed_still_resolves(self) -> None:
+        self.assertEqual(proxy.named(["+0.8.0", "status"], {}, None), ("0.8.0", ["status"]))
+        self.assertEqual(proxy.named(["status"], {}, None), (None, ["status"]))
+        with mock.patch("os.getcwd", side_effect=FileNotFoundError(2, "No such file or directory")), \
+                mock.patch("cadgen._internal.installations.records", return_value=[]):
+            self.assertEqual(proxy.main(["+0.8.0", "status"]), 1, "refused in its line, never a traceback")
+
     def test_a_version_not_registered_or_gone_fails_in_one_line(self) -> None:
         with self.assertRaises(proxy.Refused) as refused:
             self.choose(["+1.0.0", "status"])
