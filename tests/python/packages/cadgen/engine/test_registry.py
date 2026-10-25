@@ -61,6 +61,17 @@ class RegistryTest(unittest.TestCase):
         self.assertTrue(self.registry.delete(self.ident))
         self.assertEqual((self.registry.get(self.ident), self.registry.list()), (None, []))
 
+    def test_the_rebuild_command_pastes_into_the_platform_s_shell(self) -> None:
+        # Printed for a person to paste: quoted for a POSIX shell there; on Windows as cmd.exe and
+        # PowerShell both read it, where a single quote would be part of the path.
+        cases = ((False, "/m/caller.py", "python /m/caller.py"),
+                 (False, "/my models/caller.py", "python '/my models/caller.py'"),
+                 (True, "C:\\m\\caller.py", "python C:\\m\\caller.py"),
+                 (True, "C:\\my models\\caller.py", 'python "C:\\my models\\caller.py"'))
+        for windows, program, pasted in cases:
+            with self.subTest(program=program), mock.patch.object(registry, "WINDOWS", windows):
+                self.assertEqual(registry.rerun(program), pasted)
+
     def test_a_record_is_relocated_by_its_root_alone_and_a_shape_s_is_never_detached(self) -> None:
         moved = self.state / "elsewhere"
         self.registry.put(_record(self.ident, moved))

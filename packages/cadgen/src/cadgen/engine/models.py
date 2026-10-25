@@ -36,7 +36,6 @@ import base64
 import os
 import platform
 import secrets
-import shlex
 import threading
 import time
 from pathlib import Path
@@ -364,7 +363,9 @@ class Models:
             return known["rebuild"] if known is not None else None
         if found.get("store") == "shape":
             return None  # handed over by a program the engine did not run: nothing builds it again
-        return f"python {shlex.quote(str(found.get('program') or found['source']['script']))}"
+        from cadgen.engine.registry import rerun
+
+        return rerun(found.get('program') or found['source']['script'])
 
     def recorded(self, ident: str) -> dict[str, Any] | None:
         """What the registry knows of a model document this process never built (one built before a
