@@ -301,7 +301,7 @@ class CacheTest(unittest.TestCase):
         exported = self.cli("export", ident, str(out))
         self.assertEqual(exported.returncode, 2, exported.stderr)
         self.assertIn(f"the engine's cache of {ident} does not read", exported.stderr)
-        self.assertIn(f"run `python {self.project / 'cube.py'}` to build it again", exported.stderr)
+        self.assertIn(f"run `cadgen run {self.project / 'cube.py'}` to build it again", exported.stderr)
         self.assertFalse(out.exists())
         self.assertNotIn("cache", self.record(ident))
         self.assertFalse(self.file(ident).exists())
