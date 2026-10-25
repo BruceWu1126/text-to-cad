@@ -54,6 +54,7 @@ pages waiting on a served document the frame's build writes (``serve.Server.buil
 from __future__ import annotations
 
 import collections
+import functools
 import hashlib
 import itertools
 import json
@@ -1094,13 +1095,56 @@ class PortHeld(ValueError):
 
 
 def installation() -> str:
-    """The version this installation runs as: ``CADGEN_INSTALLATION_VERSION`` when it names one (a
-    development install, which reports its release's version), else the release declared beside
-    this code (``previous.version``)."""
+    """The version this installation runs as -- the one name its client, its daemon and its workers
+    all go by (``_tag``, ``status``): ``CADGEN_INSTALLATION_VERSION`` when it names one (the
+    ``cadgen`` command sets it for a development install, which reports its release's version), else
+    the version this environment is registered as (``registered``: a dev environment's
+    ``python model.py`` run directly), else the release declared beside this code
+    (``previous.version``)."""
     from cadgen.engine.previous import version
 
     named = os.environ.get(INSTALLATION_ENV, "")
-    return named if re.fullmatch(r"[0-9][0-9A-Za-z.+_-]*", named) else version()
+    if re.fullmatch(r"[0-9][0-9A-Za-z.+_-]*", named):
+        return named
+    return registered() or version()
+
+
+def registered() -> str | None:
+    """The version this environment (``sys.prefix``) is registered as in the user's state folder
+    (``installations/<version>.json``, the distribution's records: ``cadgen._internal.installations``),
+    when one names its release: the one registered last. None with no state folder, or no such record
+    -- and for a record of another release, left from before an upgrade into this environment
+    (``pip install -U``), which is not what runs here now. Read once per process and state folder."""
+    from cadgen.engine import registry
+    from cadgen.engine.previous import version
+
+    held = registry.current()
+    if held is None:
+        return None
+    return _registered(str(held.state.root), os.path.normcase(os.path.realpath(sys.prefix)), version())
+
+
+@functools.cache
+def _registered(state: str, prefix: str, release: str) -> str | None:
+    folder = Path(state) / "installations"
+    ours = rank(release)
+    found: list[tuple[float, str]] = []
+    try:
+        names = [entry for entry in os.scandir(folder) if entry.name.endswith(".json")]
+    except OSError:
+        return None
+    for entry in names:
+        try:
+            record = json.loads(Path(entry.path).read_text(encoding="utf-8"))
+            given = record["version"]
+            if (isinstance(given, str) and given == entry.name[:-5] and isinstance(record.get("prefix"), str)
+                    and os.path.normcase(os.path.realpath(record["prefix"])) == prefix):
+                theirs = rank(given)
+                if ours is not None and theirs is not None and theirs[:2] == ours[:2]:
+                    found.append((entry.stat().st_mtime, given))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return max(found)[1] if found else None
 
 
 # A version as PEP 440 spells it, with the spellings it normalizes (``0.8.0-dev.20261024`` is

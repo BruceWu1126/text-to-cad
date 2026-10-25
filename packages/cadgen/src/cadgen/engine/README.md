@@ -326,8 +326,10 @@ retain the application's Host and cross-site mutation checks. Explicit host/port
 requests must match an existing listener. A second installed version has a different
 installation identity and therefore a different engine -- in another environment, and in the same
 one too: the door, lock and port file are named for the environment, the interpreter, the engine's
-folder, the protocol and the version the installation runs as (`daemon._tag`: `CADGEN_INSTALLATION_VERSION`,
-else its release). So an upgrade into one environment (`pip install -U`, `uv tool upgrade`, a
+folder, the protocol and the version the installation runs as (`daemon._tag`, `daemon.installation`:
+`CADGEN_INSTALLATION_VERSION`, else the version its environment is registered as when that record is
+of this release -- so `python model.py` run directly in a registered development environment dials
+the same engine as its CAD app's server --, else its release). So an upgrade into one environment (`pip install -U`, `uv tool upgrade`, a
 development install made again) starts its own engine, never dials the old one still running there,
 and retires that one when nothing uses it (**An upgrade converges**). What outlives an upgrade in an
 environment -- the port it rolled to -- is keyed by the environment alone.
@@ -355,7 +357,7 @@ engine in the engine folder (each door) its `status`, and tells every one to `st
 than itself, wherever it serves, waiting until each has gone (`daemon.RETIRE_SECONDS` at most;
 `daemon.retire_older`). Older is by the installations' version ranking (`daemon.rank`, the order
 `packaging.version` gives and the `cadgen` command picks by): an installation's version is its
-`installation` in `status` (`CADGEN_INSTALLATION_VERSION`, a development install's
+`installation` in `status` (`daemon.installation`, above: a development install's
 `<version>-dev.<time>`, else its release), a release ranks above its own `-dev.*` builds, and a
 version that does not parse is older only when that engine's release (`version`) is lower. An
 engine whose `status` has no `installation` was built before engines said it, and is older than any

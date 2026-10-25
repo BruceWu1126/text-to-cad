@@ -80,10 +80,35 @@ class RegistryTests(Fixture):
 
     def test_a_source_tree_registers_nothing_unless_named(self) -> None:
         # These tests import cadgen from the checkout: the release's version is not theirs to register.
-        with mock.patch.dict("os.environ", {installations.NAME_ENV: ""}):
+        with mock.patch.dict("os.environ", {installations.NAME_ENV: "", "CADGEN_STATE_DIR": str(self.root / "state")}):
             self.assertIsNone(installations.own_version())
         with mock.patch.dict("os.environ", {installations.NAME_ENV: "1.2.3-dev.4"}):
             self.assertEqual(installations.own_version(), "1.2.3-dev.4")
+
+    def test_an_environment_runs_as_the_version_it_is_registered_as(self) -> None:
+        """``python model.py`` run directly in a registered development environment, no variable set:
+        its client, engine and workers go by the record's version (one door with the dev MCP server's
+        engine), never the bare release that would outrank it. Unregistered: the release. The variable
+        still wins, and a record of another release (an upgrade in place since) is not this code's."""
+        import sys
+
+        from cadgen.engine import daemon, previous
+
+        release = previous.version()
+        dev = f"{release}-dev.20261025032333"
+        here = (str(self.root / "c"), str(self.root / "p"), sys.prefix)
+        with mock.patch.dict("os.environ", {"CADGEN_STATE_DIR": str(self.root / "state")}):
+            os.environ.pop(installations.NAME_ENV, None)
+            self.assertEqual(daemon.installation(), release, "unregistered: the release")
+            installations.register("0.0.1-dev.1", here)  # another release's record of this environment
+            self.assertEqual(daemon.installation(), release)
+            installations.register(dev, here)
+            self.assertEqual((daemon.installation(), installations.own_version()), (dev, dev))
+            door = daemon._tag()
+            os.environ[installations.NAME_ENV] = dev
+            self.assertEqual(daemon._tag(), door, "the same door as the engine the variable names")
+            os.environ[installations.NAME_ENV] = "9.9.9"
+            self.assertEqual((daemon.installation(), installations.own_version()), ("9.9.9", "9.9.9"))
 
     def test_only_the_cad_apps_server_and_doctor_write(self) -> None:
         from cadgen import cli

@@ -109,10 +109,18 @@ def editable() -> bool:
 
 def own_version() -> str | None:
     """The version this installation registers as: a development install's own name, else the
-    installed version -- or ``None`` for a source tree, which registers nothing by itself."""
+    version its environment is registered as (``cadgen.engine.daemon.installation``, the name its
+    client, engine and workers go by), else the installed version -- or ``None`` for a source tree
+    never registered, which registers nothing by itself."""
     named = os.environ.get(NAME_ENV)
     if named:
         return named if VERSION.fullmatch(named) else None
+    from cadgen.engine import daemon
+    from cadgen.engine.previous import version
+
+    found = daemon._registered(str(state().root), os.path.normcase(os.path.realpath(sys.prefix)), version())
+    if found:
+        return found
     if editable():
         return None
     from cadgen import __version__
@@ -160,7 +168,16 @@ def register(version: str, found: tuple[str, str, str] | None = None, folder=Non
     for other in records(folder):
         if other["version"] != version and _same_place(other["prefix"], prefix):
             folder.remove(_inside(other["version"]))
+    _forget_read()
     return path, REGISTERED
+
+
+def _forget_read() -> None:
+    """The records changed in this process: the version its environment is registered as
+    (``cadgen.engine.daemon.registered``, read once per process) is read again."""
+    from cadgen.engine import daemon
+
+    daemon._registered.cache_clear()
 
 
 def _same_place(one: str, other: str) -> bool:
@@ -198,6 +215,7 @@ def prune(folder=None) -> list[str]:
         if not alive(record):
             folder.remove(_inside(record["version"]))
             removed.append(record["path"])
+    _forget_read()
     return removed
 
 
@@ -283,6 +301,7 @@ def prune_legacy(where: str | None = None, windows: bool = WINDOWS) -> list[str]
 def forget(version: str, folder=None) -> None:
     """Remove the record of ``version`` (a development install's, as it is taken out)."""
     (folder or state()).remove(_inside(version))
+    _forget_read()
 
 
 # --- the proxy --------------------------------------------------------------------------------
