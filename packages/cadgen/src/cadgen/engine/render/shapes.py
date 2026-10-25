@@ -3,7 +3,7 @@ per node, per triangle or per edge: the triangulations and polylines are written
 straight into the kernel's binary shape format (``BinTools``, format 4) -- triangulation-only
 faces and ``Poly_Polygon3D`` edges in one compound -- and read back in one kernel call.
 
-So OCCT draws the very triangles and polylines the engine meshed (FreeCAD's deflection, the
+So OCCT draws the very triangles and polylines the engine meshed (the engine's deflection, the
 viewer's buffer), and never meshes anything itself: a face with a triangulation and no surface
 is drawn as it is, an edge with a 3D polygon likewise.
 

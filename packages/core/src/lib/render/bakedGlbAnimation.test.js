@@ -40,8 +40,10 @@ test("the viewer's mixer plays a baked animation's STEP and LINEAR channels as t
   const at = (t) => { setGlbAnimationTime(runtime, t); document.scene.updateMatrixWorld(true); };
 
   at(0.5);
-  // LINEAR: the latch halfway out (20 mm at 1 s), a quarter into its one turn over 2 s.
-  assert.ok(Math.abs(node("latch").position.x - 52) < 1e-3, node("latch").position.x);
+  // LINEAR: the latch halfway out (20 mm at 1 s), a quarter into its one turn over 2 s. Its node
+  // stands at its mesh's box centre, off its axis by up to the mesh's deflection (8 x 8 x 8 mm:
+  // 24 / 300 * 0.25 = 0.02 mm).
+  assert.ok(Math.abs(node("latch").position.x - 52) < 0.02, String(node("latch").position.x));
   assert.ok(Math.abs(new THREE.Euler().setFromQuaternion(node("latch").quaternion).z - Math.PI / 2) < 1e-3);
   // STEP: the knob holds its first key until 1 s; LINEAR scale: the first foot at 0.875.
   assert.ok(node("knob").quaternion.angleTo(new THREE.Quaternion()) < 1e-6);

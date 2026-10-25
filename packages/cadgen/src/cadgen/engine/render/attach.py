@@ -1,5 +1,5 @@
 """The alternative to ``shapes.py``, measured against it: a pool process meshes a part exactly
-as ``mesh.mesh_shape`` does (the same bytes, FreeCAD's deflection, the same knob) but hands back
+as ``mesh.mesh_shape`` does (the same bytes, the same deflection, the same knob) but hands back
 the meshed B-rep itself (``BinTools`` with its triangulations), and the renderer attaches each
 face's triangulation and each edge's polygon to the document's own faces and edges
 (``BRep_Builder.UpdateFace`` / ``UpdateEdge``), matched by ``TopExp.MapShapes`` ordinal. The

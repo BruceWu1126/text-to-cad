@@ -1,13 +1,22 @@
 """Tessellation: one part as one buffer a renderer reads without parsing.
 
-**The tolerance is FreeCAD's default, and nothing else.** A part is meshed with
+**The tolerance is a quarter per cent of the part, and nothing else.** A part is meshed with
 ``BRepMesh_IncrementalMesh`` at an absolute linear deflection of ``(Lx + Ly + Lz) / 300 *
-DEVIATION`` of its own bounding box (``DEVIATION`` 0.5: FreeCAD's Deviation of 0.5 %) and an
-angular deflection of ``ANGULAR`` (28.5 degrees), with the kernel's face parallelism on. The
-constant pair is configurable nowhere. The call goes through ``IMeshTools_Parameters`` with
-one knob set besides: ``EnableControlSurfaceDeflectionAllSurfaces``, which holds analytic
-faces (torus, sphere, cone) to the deflection -- measured across nine large documents,
-from 1.5-2x the deflection to under 1x, for 2-13 % more triangles on those parts. Every
+DEVIATION`` of its own bounding box (``DEVIATION`` 0.25: 0.25 % of the box's summed sides, half
+FreeCAD's default Deviation of 0.5 %) and an angular deflection of ``ANGULAR`` (28.5 degrees,
+FreeCAD's), with the kernel's face parallelism on. The deviation is FreeCAD's halved because a
+large arc is drawn as a polygon whose outline no surface normal smooths: a 165 mm flange's rim
+is 38 segments at 0.5 %, 0.28 mm short of the circle and corners in a still, and 53 at 0.25 %,
+0.15 mm short. The angle sets the segment count of small radii, already finer than a
+whole-model picture shows. Measured on 2026-10-25 against 0.5 %: 7 % more triangles on tom and
+about half again on juno, mesh time 2 % less on tom and 19 % more on juno. ``TESSELLATION``
+names the pair (the three are kept in the kernel-free ``mesh_format``, which the server reads
+without the kernel), and a served part's URL carries it, so a browser holding a part's buffer made
+at another pair never draws it. The constant pair is configurable nowhere. The call goes
+through ``IMeshTools_Parameters`` with one knob set besides:
+``EnableControlSurfaceDeflectionAllSurfaces``, which holds analytic faces (torus, sphere,
+cone) to the deflection -- measured across nine large documents, from 1.5-2x the deflection to
+under 1x, for 2-13 % more triangles on those parts. Every
 other knob was measured to change nothing useful and stays at its default.
 
 **BRepMesh as it is.** No check, no second pass, no finer retry, no other tessellator: the
@@ -71,25 +80,21 @@ from OCP.TopoDS import TopoDS
 from OCP.TopTools import TopTools_ListOfShape
 
 __all__ = ["ANGULAR", "BOUNDARY", "DEVIATION", "FEATURE", "HEADER", "MAGIC", "Mesh", "NONMANIFOLD", "SEAM",
-           "TANGENT", "Topology", "check", "deflection", "mesh_shape"]
+           "TANGENT", "TESSELLATION", "Topology", "check", "deflection", "mesh_shape"]
 
-# FreeCAD's default tessellation: Deviation 0.5 (per cent of the box's summed sides, /300 as
-# FreeCAD writes it) and an angular deflection of 28.5 degrees.
-DEVIATION = 0.5
-ANGULAR = math.radians(28.5)
 
 
 _G1 = int(GeomAbs_G1)
 # BRepMesh_Status bits, as the mesher's GetStatusFlags reports them.
 _MESH_FLAGS = ((1, "Failure"), (2, "ReMesh"), (4, "SelfIntersectingWire"), (8, "UserBreak"))
 
-from cadgen.engine.mesh_format import (BOUNDARY, CLASS_NAMES, FEATURE, HEADER, MAGIC,  # noqa: F401
-                                        NONMANIFOLD, SEAM, TANGENT, VERSION, Mesh)
+from cadgen.engine.mesh_format import (ANGULAR, BOUNDARY, CLASS_NAMES, DEVIATION, FEATURE,  # noqa: F401
+                                        HEADER, MAGIC, NONMANIFOLD, SEAM, TANGENT, TESSELLATION, VERSION, Mesh)
 
 
 def deflection(shape: Any) -> float:
-    """The linear deflection of ``shape``: FreeCAD's, ``(Lx + Ly + Lz) / 300 * DEVIATION`` of
-    its bounding box, with a floor for a box that is void or a point."""
+    """The linear deflection of ``shape``: ``(Lx + Ly + Lz) / 300 * DEVIATION`` of its
+    bounding box, with a floor for a box that is void or a point."""
     from OCP.Bnd import Bnd_Box
     from OCP.BRepBndLib import BRepBndLib
 

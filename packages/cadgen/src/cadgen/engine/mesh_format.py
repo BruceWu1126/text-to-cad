@@ -5,10 +5,19 @@ names. Producers, the HTTP server and the mesh files' readers share it; the kern
 
 from __future__ import annotations
 
+import math
 import struct
 from dataclasses import dataclass, field
 
 import numpy as np
+
+# The tessellation (``mesh.py`` says why): a deviation of 0.25 (per cent of the box's summed
+# sides, /300 as FreeCAD writes its own default of 0.5) and FreeCAD's angular deflection of
+# 28.5 degrees.
+DEVIATION = 0.25
+ANGULAR = math.radians(28.5)
+# The pair, by name: what a served part's URL carries (the structure's ``tessellation``).
+TESSELLATION = f"{DEVIATION:g}-{math.degrees(ANGULAR):g}"
 
 MAGIC = b"XBM2"
 VERSION = 2

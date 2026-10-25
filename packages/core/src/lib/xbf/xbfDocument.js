@@ -135,9 +135,14 @@ export async function loadXbfDocument(source, { previous = null, fetch: fetchImp
   const fetched = [];
   const kept = [];
   const wanted = [...new Set(structure.prototypes.map(prototype => String(prototype.key)))];
+  // A part's buffer is the engine's tessellation of its geometry: one made at another
+  // tessellation (an engine of another release) is neither kept nor read from the HTTP cache.
+  const tessellation = structure.tessellation == null ? "" : String(structure.tessellation);
+  const query = tessellation ? `?tessellation=${encodeURIComponent(tessellation)}` : "";
+  const same = String(previous?.structure?.tessellation ?? "") === tessellation;
   const missing = [];
   for (const key of wanted) {
-    const held = previous?.parts?.get(key);
+    const held = same ? previous?.parts?.get(key) : undefined;
     if (held) { parts.set(key, held.retain()); kept.push(key); } else missing.push(key);
   }
   let done = kept.length;
@@ -146,7 +151,7 @@ export async function loadXbfDocument(source, { previous = null, fetch: fetchImp
   const partsStarted = performance.now();
   try {
     await inBatches(missing, PART_CONCURRENCY, async (key) => {
-      const response = await fetchImpl(`${where.url}/part/${encodeURIComponent(key)}`, { signal });
+      const response = await fetchImpl(`${where.url}/part/${encodeURIComponent(key)}${query}`, { signal });
       if (!response.ok) throw await failure(response, `part ${key}`);
       const buffer = await response.arrayBuffer();
       parts.set(key, createPart(key, buffer).retain());
