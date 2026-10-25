@@ -79,6 +79,8 @@ class Models:
             return
         program = answer.get("program")
         for root in reports:
+            if not root.get("ok") and root.get("id") and self.held(root["id"]) is not None:
+                root["previous"] = True  # the failed run's line says its previous good build is served
             for report in [root, *(root.get("child_models") or {}).values()]:
                 ident, source = report.get("id"), report.get("source")
                 if not report.get("ok") or not ident or not source:
@@ -355,9 +357,9 @@ class Models:
                 "state": "evicted", "rebuild": command}
 
     def command(self, ident: str) -> str | None:
-        """The command that builds model document ``ident`` again: ``cadgen run`` and the program that
-        built it (else its script), from this process's book or the registry's record. None for an id
-        the engine never built."""
+        """The command that builds model document ``ident`` again: ``cadgen run`` and the script that
+        defines its model -- never a program that imported it and called it -- from this process's
+        book or the registry's record. None for an id the engine never built."""
         with self.lock:
             found = self.records.get(ident) or self.expired.get(ident)
         if found is None:
@@ -367,7 +369,7 @@ class Models:
             return None  # handed over by a program the engine did not run: nothing builds it again
         from cadgen.engine.registry import rerun
 
-        return rerun(found.get("program") or found["source"]["script"])
+        return rerun(found["source"]["script"])
 
     def recorded(self, ident: str) -> dict[str, Any] | None:
         """What the registry knows of a model document this process never built (one built before a

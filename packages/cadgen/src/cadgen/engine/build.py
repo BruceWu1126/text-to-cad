@@ -505,8 +505,8 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
             try:
                 result = context.root(model)
             except Exception as error:  # noqa: BLE001 - the model's own error, reported
-                reports.append({"ok": False, "model": f"{shown}::{model.name}", "error": _model_traceback(error),
-                                **_refused(error)})
+                reports.append({"ok": False, "model": f"{shown}::{model.name}", "id": model.id,
+                                "error": _model_traceback(error), **_refused(error)})
                 # A child that ran before the error writes its files all the same.
                 results.append((model, None, 0.0, ran(model, before)))
                 continue

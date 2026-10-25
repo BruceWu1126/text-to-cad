@@ -36,6 +36,24 @@ class PoseRefusalTest(unittest.TestCase):
                          "the document has no mechanism state 'slide'; its states: parked; its sequences: spin; "
                          "it is a joint: pose it by value, --pose '{\"slide\": 20}'")
 
+    def test_a_coupled_joint_is_never_the_example_its_coupling_is(self) -> None:
+        # ja and jb are a gear pair's: posed alone they are refused, so the example names the coupling.
+        geared = {"pairs": [{"label": "ja", "type": "revolute", "links": ["frame", "a"], "limits": [[-360, 360]]},
+                            {"label": "jb", "type": "revolute", "links": ["frame", "b"], "limits": [[-360, 360]]}],
+                  "asBuilt": {"ja": 0, "jb": 0}, "configurations": {}, "motions": {},
+                  "couplings": {"drive": {"range": [-180.0, 180.0], "terms": [["ja", 0, 1.0], ["jb", 0, -2.0]]}}}
+        refused = []
+        for pose in ("spin", "jb"):
+            with self.assertRaises(mechanism.KinematicsError) as caught:
+                mechanism.resolve(geared, pose)
+            refused.append(str(caught.exception))
+        self.assertEqual(refused, [
+            "the document has no mechanism state 'spin'; its states: none; its sequences: none; its joints: ja, jb; "
+            "ja, jb moved by their coupling 'drive': pose a coupling by value, --pose '{\"drive\": 90}'",
+            "the document has no mechanism state 'jb'; its states: none; its sequences: none; it is a joint its "
+            "coupling 'drive' moves: pose the coupling by value, --pose '{\"drive\": 90}'"])
+        self.assertEqual(mechanism.resolve(geared, {"drive": 90})[0]["jb"], (-180.0,), "the example poses")
+
     def test_a_state_still_poses(self) -> None:
         self.assertEqual(mechanism.resolve(KINEMATICS, "parked")[1], "parked")
 

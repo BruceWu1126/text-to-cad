@@ -270,9 +270,9 @@ before starting. An agent's explicit host path is a different destination contra
 `cadgen inspect`, `cadgen.inspect()` and `cad_inspect` read existing files or the
 documents the engine holds by id. They never execute source to obtain a missing model or write
 its declared outputs. An unbuilt, evicted or expired model requires an explicit build: one
-the engine built before names the command (`cadgen run` and the program that built it). With no reference,
+the engine built before names the command (`cadgen run` and the script that defines it). With no reference,
 `cadgen inspect` prints what the document holds -- its state, parts, bounds, volume, materials,
-joints, states, sequences, animations and declared files -- then its build closure (`--json`:
+joints, couplings (name, kind, ratio, joints), states, sequences, animations and declared files -- then its build closure (`--json`:
 both as data; `--query closure`, and `cadgen.inspect()` with no reference, the closure alone);
 with a reference it returns geometry facts.
 `query="build"` (`--query build`) returns saved-file metadata and closure or live

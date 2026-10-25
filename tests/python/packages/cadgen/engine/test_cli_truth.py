@@ -117,8 +117,26 @@ class VerbsTest(unittest.TestCase):
         self.assertEqual(self.failed.returncode, 1)
         lines = self.failed.stderr.splitlines()
         self.assertEqual(lines[0], "Traceback (the model's frames):")
-        self.assertEqual(lines[-2:], ["AssertionError: blade count must be positive", "failed parts.py::bad"])
+        # Its previous good build is still served, and the program stopped there: the line after says so.
+        self.assertEqual(lines[-3:], ["AssertionError: blade count must be positive",
+                                      "failed parts.py::bad; serving its previous good build",
+                                      "the run stopped at bad: a model it calls after this one is not built"])
         self.assertEqual(self.failed.stderr.count("Traceback"), 1, self.failed.stderr)
+
+    def test_a_refused_pose_leaves_the_document_as_it_was(self) -> None:
+        """A snapshot refused before it draws -- a pose the document cannot take -- is the
+        request's refusal, never its document's build failure: status, export and inspect say
+        what they said before, and nothing says the last run failed."""
+        before = self.status_line(self.box)
+        self.assertNotIn("failed", before)
+        refused = self.cli("snapshot", self.box, str(self.folder / "posed.png"), "--pose", '{"ja": 45}')
+        self.assertEqual(refused.returncode, 2, refused.stderr)
+        self.assertIn("no joints to pose", refused.stderr)
+        self.assertEqual(self.status_line(self.box), before)
+        for verb, args in (("export", [str(self.folder / "after.stl")]), ("inspect", [])):
+            done = self.cli(verb, self.box, *args)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertNotIn("failed", done.stderr)
 
     def test_a_wrote_line_names_each_path_as_it_was_given(self) -> None:
         """An absolute path outside the working folder stays absolute, unresolved (macOS's /var is
@@ -136,6 +154,8 @@ class VerbsTest(unittest.TestCase):
             done = self.cli(verb, self.box, out, *extra)
             self.assertEqual(done.returncode, 0, done.stderr)
             self.assertTrue(done.stdout.startswith(f"wrote {out} ("), f"{verb} {out}: {done.stdout}")
+            if verb == "export":  # a small file's size in KB (or bytes), never "0.0 MB"
+                self.assertRegex(done.stdout, r"\((\d+ B|\d+\.\d KB)\) in ", done.stdout)
 
     def test_a_step_cadgen_exported_holds_no_closure_because_the_format_carries_none(self) -> None:
         self.assertEqual(self.cli("export", self.box, str(self.folder / "box.step")).returncode, 0)

@@ -174,5 +174,16 @@ class DeltaTest(unittest.TestCase):
                          "  parts 5 | bounds 90 x 10 x 10 mm | joints 0 | sequences 0 | materials changed")
 
 
+class RunLineTest(unittest.TestCase):
+    def test_one_miss_and_one_hit_are_singular(self) -> None:
+        from cadgen.engine import cli
+
+        report = {"ok": True, "model": "m.py::m", "memo": {"misses": 1, "hits": 1}, "bodies": {"m": "run"},
+                  "timings": {}}
+        self.assertEqual(cli._describe(report, 0.1, None), "built m.py::m in 0.10s: bodies 1 run; 1 miss, 1 hit")
+        report["memo"] = {"misses": 2, "hits": 0}
+        self.assertEqual(cli._describe(report, 0.1, None), "built m.py::m in 0.10s: bodies 1 run; 2 misses, 0 hits")
+
+
 if __name__ == "__main__":
     unittest.main()

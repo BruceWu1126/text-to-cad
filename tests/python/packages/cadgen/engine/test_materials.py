@@ -193,6 +193,30 @@ class MaterialValueTest(unittest.TestCase):
         self.assertIs(module.Material, Material)
 
 
+class ColourAndMaterialTest(unittest.TestCase):
+    """An explicit colour always wins, whichever is assigned first; a material's look colours only
+    a part with no colour of its own."""
+
+    def colour(self, *steps: str):
+        import build123d as bd
+
+        box = bd.Box(10, 10, 10)
+        box.label = "box"
+        for step in steps:
+            if step == "color":
+                box.color = bd.Color("red")
+            else:
+                box.material = materials.brass
+        return document.collect(bd.Compound(children=[box], label="kit"), "kit").parts[0].color
+
+    def test_an_explicit_colour_wins_in_either_order_and_a_bare_part_wears_its_material(self) -> None:
+        red = self.colour("color")
+        self.assertNotEqual(red, materials.brass.color)
+        self.assertEqual(self.colour("color", "material"), red, "colour, then material: the colour")
+        self.assertEqual(self.colour("material", "color"), red, "material, then colour: the colour")
+        self.assertEqual(self.colour("material"), materials.brass.color, "no colour of its own: the material's")
+
+
 class MaterialDocumentTest(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-materials-")).resolve()

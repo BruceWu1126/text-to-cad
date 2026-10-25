@@ -87,8 +87,8 @@ class Part:
     colour of its first instance, the face colours painted on it by ordinal, its
     material and its faces' by ordinal, and, once named, its element names
     (``faces``/``edges`` lists by ordinal). A part's colour is its base colour: its own
-    material's colour, else its own colour, else the material it inherits' colour,
-    else the colour it inherits; a part with a material and no colour at all is drawn
+    colour, which always wins, else its own material's colour, else the material it
+    inherits' colour, else the colour it inherits; a part with a material and no colour at all is drawn
     in ``DEFAULT_COLOR``. A face given a material is coloured as the material, or as
     the part where the material has no colour."""
 
@@ -294,10 +294,10 @@ def collect(result: Any, name: str, harvested: Callable[[tuple], "Harvest | None
                 prototypes[signature] = found
                 order.append(found)
             return found, signature, color
-        if own_material is not None and own_material.color is not None:
-            color = own_material.color
-        elif own_color is None and material is not None and material.color is not None:
-            color = material.color
+        # An explicit colour always wins; a material's look colours only a part with none of its own.
+        if own_color is None and material is not None and material.color is not None:
+            color = (own_material if own_material is not None and own_material.color is not None
+                     else material).color
         if material is not None and color is None:
             color = DEFAULT_COLOR
         face_materials = {int(ordinal): given for ordinal, given in (state.get(FACE_MATERIALS) or {}).items()}

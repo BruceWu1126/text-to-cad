@@ -1651,12 +1651,16 @@ class Daemon:
             if outputs:
                 server.building({**frame, "outputs": outputs})
 
-    def _built(self, worker: Worker, answer: dict[str, Any]) -> None:
+    def _built(self, worker: Worker, answer: dict[str, Any], *, verb: bool = False) -> None:
         """A request of ``worker`` answered: each served document its build wrote is built no
-        longer, and one whose model failed says what failed, and where (``serve.Server.built``)."""
+        longer, and one whose model failed says what failed, and where (``serve.Server.built``).
+        ``verb``: an export, a snapshot or a result asked of a document, whose failure -- a pose
+        refused, a draw that failed, the worker gone -- is the request's, never its document's
+        build: no document is marked failed by it (the worker's progress frame is its last
+        build's, not this request's)."""
         self.models.register(worker, answer)
         server = self.server
-        if server is None:
+        if server is None or (verb and "failed" in answer):
             return
         outcomes: dict[str, Any] = {path: None for path in worker.touched}
         done = answer.get("done")
@@ -1919,14 +1923,14 @@ class Daemon:
                             if path.endswith(".xbf"):
                                 self.builders[file_id(path)] = worker
                     if not request.get("expected"):
-                        self._built(worker, answer)
+                        self._built(worker, answer, verb=True)
                     send(answer)
                     return
                 except WorkerGone as error:
                     if attempt == 2 or "during the build" in str(error):
                         failed = {"failed": self._where(error, worker)}
                         if worker is not None and not request.get("expected"):
-                            self._built(worker, failed)
+                            self._built(worker, failed, verb=True)
                         send(failed)
                         return
                 finally:

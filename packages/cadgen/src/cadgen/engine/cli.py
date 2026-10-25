@@ -80,7 +80,7 @@ def _inspect_arguments(parser: argparse.ArgumentParser) -> None:
                                                "An element answers what the kernel measures of it, placed where its "
                                                "occurrence stands, and what made it; a part or an assembly its volume, "
                                                "mass and world bounds, a part its placement. Without it: what the document holds (its state, parts, "
-                                               "bounds, volume, materials, joints, states, sequences, animations and "
+                                               "bounds, volume, materials, joints, couplings, states, sequences, animations and "
                                                "declared files), then its build closure")
 
 
@@ -189,7 +189,7 @@ def _files(report: dict[str, Any]) -> list[str]:
     found = []
     for path, row in (report.get("files") or {}).items():
         state = "written" if row.get("written") else "kept"
-        found.append(f"{_shown(path)} ({state}, {row.get('bytes', 0) / 1e6:.1f} MB)")
+        found.append(f"{_shown(path)} ({state}, {_bytes(row.get('bytes'))})")
     return found
 
 
@@ -200,7 +200,8 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
                        for name, row in (report.get("child_models") or {}).items())
     if not report.get("ok"):
         refused = report.get("failedAt")  # an OCCT exception: the call the kernel refused
-        return f"failed {report.get('model')}" + (f" at {refused}: the kernel refused it" if refused else "") + children
+        return (f"failed {report.get('model')}" + (f" at {refused}: the kernel refused it" if refused else "")
+                + ("; serving its previous good build" if report.get("previous") else "") + children)
     timings = report.get("timings", {})
     memo = report.get("memo", {})
     bodies = list((report.get("bodies") or {}).values())
@@ -218,8 +219,9 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
         stages = ", ".join(f"{name} {timings[name]:.2f}s" for name in ("body", "names", "document", "xbf", "step",
                                                                         "glb", "stl", "threemf", "dxf")
                            if timings.get(name))
-        line = (f"built {report['model']}{worker} in {wall:.2f}s: bodies {shown}; {memo.get('misses', 0)} misses, "
-                f"{memo.get('hits', 0)} hits" + (f"; {stages}" if stages else ""))
+        misses, hits = memo.get("misses", 0), memo.get("hits", 0)
+        line = (f"built {report['model']}{worker} in {wall:.2f}s: bodies {shown}; {misses} miss{'' if misses == 1 else 'es'}, "
+                f"{hits} hit{'' if hits == 1 else 's'}" + (f"; {stages}" if stages else ""))
         waited = report.get("waited")
         if waited:
             line += (f"; {'replayed' if counted.get('replayed') and not counted.get('run') else 'ran after'} "
@@ -340,7 +342,7 @@ def state_notice(model: dict[str, Any], doing: str) -> str | None:
 
     name = (model.get("source") or {}).get("name") or model.get("id")
     if model.get("state") == "failed":
-        program = model.get("program") or (model.get("source") or {}).get("script")
+        program = (model.get("source") or {}).get("script")  # the script that defines it, never a caller
         fix = f"; fix it and run `{rerun(program)}` to update it" if program else ""
         return f"the last run of {name} failed; {doing} its previous good build{fix}"
     stale = model.get("stale")
@@ -377,7 +379,7 @@ def _export(args: argparse.Namespace, prog: str) -> int:
                                     for row in written]}))
         return 0
     for row in written:
-        print(f"wrote {_given(row.path, args.destinations)} ({row.bytes / 1e6:.1f} MB) in {row.seconds:.2f}s")
+        print(f"wrote {_given(row.path, args.destinations)} ({_bytes(row.bytes)}) in {row.seconds:.2f}s")
     return 0
 
 
@@ -537,6 +539,15 @@ def summary_text(summary: dict[str, Any]) -> str:
         return f"{row['name']}  {row['type']}  {'; '.join(ranges) or 'no range'}{as_built}"
 
     listed("joints", [joint(row) for row in summary["joints"]])
+
+    def coupling(row: dict[str, Any]) -> str:
+        joints = ", ".join(f"{joint['name']} {_number(joint['ratio'])}" if isinstance(joint["ratio"], (int, float))
+                           else f"{joint['name']} {' '.join(_number(value) for value in joint['ratio'])}"
+                           for joint in row["joints"])
+        ratio = f", ratio {_number(row['ratio'])}" if row.get("ratio") is not None else ""
+        return f"{row['name']}  {row['kind']}  {joints}{ratio}"
+
+    listed("couplings", [coupling(row) for row in summary.get("couplings") or []])
     listed("states", [f"{row['name']}  " + ", ".join(f"{name} {_number(value) if isinstance(value, (int, float)) else value}"
                                                        for name, value in row["values"].items())
                       for row in summary["states"]])
@@ -684,7 +695,9 @@ def status_text(answer: dict[str, Any]) -> str:
     resident = answer.get("rssMb")
     memory = (f"RSS {_gb(resident)} of {_gb(cap)}" if resident is not None else f"RSS cap {_gb(cap)}") if cap \
         else "no RSS cap"
-    lines = [" · ".join([f"engine server {answer.get('pid')}, up {_span(answer.get('up'))}", workers_text(answer),
+    version = answer.get("installation") or answer.get("version")  # the installation's: two are told apart
+    lines = [" · ".join([f"engine server {answer.get('pid')}" + (f" (cadgen {version})" if version else "")
+                         + f", up {_span(answer.get('up'))}", workers_text(answer),
                          *([f"held by {answer['holders']} app server{'' if answer['holders'] == 1 else 's'}"]
                            if answer.get("holders") else []),
                          memory])]

@@ -75,7 +75,7 @@ class SummaryTest(unittest.TestCase):
         lines = shown.stdout.splitlines()
         self.assertEqual(lines[0], f"hinge  {ident}")
         self.assertTrue(lines[1].startswith("state       live, "), lines[1])
-        self.assertEqual(lines[2:17], [
+        self.assertEqual(lines[2:18], [
             "parts       2 in hinge",
             "bounds      210 x 60 x 30 mm, from (-50, -30, 0)",
             "volume      144,000 mm^3",
@@ -84,6 +84,7 @@ class SummaryTest(unittest.TestCase):
             "  no material: hinge/arm",
             "joints",
             "  elbow  revolute  -10 to 120 deg, as built 0",
+            "couplings   none",
             "states",
             "  open  elbow 90",
             "sequences",
@@ -92,7 +93,7 @@ class SummaryTest(unittest.TestCase):
             "declared files none",
             "closure",
         ])
-        self.assertEqual(json.loads("\n".join(lines[17:]))["source"]["function"], "hinge")
+        self.assertEqual(json.loads("\n".join(lines[18:]))["source"]["function"], "hinge")
 
         data = self.run_("-m", "cadgen.engine", "inspect", ident, "--json")
         self.assertEqual(data.returncode, 0, data.stderr)
@@ -106,6 +107,36 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual((summary["parts"], summary["volume"], summary["mass"]),
                          ({"occurrences": 2, "distinct": 2, "root": "hinge"}, 144000.0, 0.324))
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
+
+
+class CouplingsTest(unittest.TestCase):
+    """A gear pair, a rack and pinion and a screw, as ``inspect`` lists them beside the joints."""
+
+    KINEMATICS = {
+        "pairs": [{"label": "ja", "type": "revolute"}, {"label": "jb", "type": "revolute"},
+                  {"label": "slide", "type": "prismatic"}, {"label": "lead", "type": "cylindrical"}],
+        "couplings": {"drive": {"range": [-90.0, 90.0], "terms": [["ja", 0, 1.0], ["jb", 0, -2.0]]},
+                      "rack": {"range": [None, None], "terms": [["ja", 0, 1.0], ["slide", 0, 0.5]]},
+                      "screw": {"range": [None, None], "terms": [["lead", 0, 1.0], ["lead", 1, 0.004]]}}}
+
+    def test_each_coupling_is_its_name_kind_joints_and_ratio_in_data_and_text(self) -> None:
+        from cadgen.engine.api import couplings_of
+        from cadgen.engine.cli import summary_text
+
+        found = couplings_of(self.KINEMATICS)
+        self.assertEqual(found[0], {"name": "drive", "kind": "gear_pair", "range": [-90.0, 90.0], "ratio": -2.0,
+                                    "joints": [{"name": "ja", "ratio": 1.0}, {"name": "jb", "ratio": -2.0}]})
+        self.assertEqual([(row["kind"], row["ratio"]) for row in found[1:]],
+                         [("rack_and_pinion_pair", 0.5), ("screw_pair", None)])
+        summary = {"name": "train", "id": "x", "state": {"state": "file", "path": "/m/a.xbf"},
+                   "parts": {"occurrences": 1, "distinct": 1, "root": "train"}, "bounds": None, "volume": 0.0,
+                   "materials": [], "unweighed": [], "joints": [], "couplings": found,
+                   "states": [], "sequences": [], "animations": [], "files": []}
+        lines = summary_text(summary).splitlines()
+        at = lines.index("couplings")
+        self.assertEqual(lines[at + 1:at + 4], ["  drive  gear_pair  ja 1, jb -2, ratio -2",
+                                                "  rack  rack_and_pinion_pair  ja 1, slide 0.5, ratio 0.5",
+                                                "  screw  screw_pair  lead 1 0.004"])
 
 
 class SummaryTextTest(unittest.TestCase):
