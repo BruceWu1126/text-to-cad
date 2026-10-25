@@ -1525,8 +1525,9 @@ class Daemon:
         self.pool = Pool(cap or worker_cap(), self._start, self.connected, lambda worker: self.models.drain(worker),
                          rss_cap_mb)
         # The system's memory-pressure signal, the server's too once it runs (``serve``): under it the
-        # pool sheds its standby and its least recently used workers (``Pool.shed``).
-        self.pressure = Pressure()
+        # pool sheds its standby and its least recently used workers (``Pool.shed``); as
+        # ``CADGEN_ENGINE_PRESSURE`` says, where it is set (``Pressure.from_environment``).
+        self.pressure = Pressure.from_environment()
         self.pool.pressed = self.pressure.under
         self.workers_lock = threading.Lock()  # each worker's ``held``
         self.born = time.time()
@@ -2394,6 +2395,13 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
     ``foreground`` (``cadgen server``): its HTTP server bound before anything else, so a port
     another process holds fails the command at once (``bind``). An engine a client starts binds
     on the first request that serves, which may name its own port (``cadgen viewer --port``)."""
+    from cadgen.engine.serve import Pressure
+
+    try:
+        Pressure.override(os.environ)
+    except ValueError as error:  # refused at the start, in its one line, before anything is held
+        _note(str(error))
+        return 1
     bytecode(os.environ)  # its own (``client._start`` set it), or made here: a daemon run in the foreground
     sys.pycache_prefix = os.environ.get("PYTHONPYCACHEPREFIX") or None
     sys.dont_write_bytecode = sys.pycache_prefix is None

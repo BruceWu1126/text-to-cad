@@ -290,6 +290,28 @@ class StandbyTest(unittest.TestCase):
         pool.release(pool.lease("b.py", {}))
         self.standing(pool)
 
+    def test_the_pressure_switch_answers_for_the_host_and_anything_else_is_refused(self) -> None:
+        # CADGEN_ENGINE_PRESSURE is Pressure.simulate for a daemon in another process.
+        from cadgen.engine import daemon as engine
+
+        for value, simulated in (("0", False), ("1", True), ("", None), (None, None)):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {"CADGEN_ENGINE_PRESSURE": value or ""}):
+                if value is None:
+                    os.environ.pop("CADGEN_ENGINE_PRESSURE")
+                made = Daemon(cap=1)
+                self.addCleanup(made.shutdown)
+                self.assertEqual(made.pressure.simulated, simulated, "unset: the system's signal, measured")
+                if simulated is not None:
+                    self.assertEqual((made.pressure.under(), made.pool.pressed()), (simulated, simulated))
+        folder = Path(tempfile.mkdtemp(prefix="eng-"))
+        self.addCleanup(shutil.rmtree, folder, True)
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_PRESSURE": "yes", "CADGEN_ENGINE_DIR": str(folder)}):
+            with self.assertRaisesRegex(ValueError, "CADGEN_ENGINE_PRESSURE is 'yes': 0 .*, 1 .*, or unset"):
+                Daemon(cap=1)
+            with mock.patch("sys.stderr"):
+                self.assertEqual(engine.main([]), 1, "refused at the start")
+            self.assertIn("CADGEN_ENGINE_PRESSURE is 'yes'", json.loads(engine.failure_path().read_text())["reason"])
+
     def test_status_shows_the_standby_with_its_memory_and_never_as_a_script_s_worker(self) -> None:
         from cadgen.engine.cli import status_text
 
@@ -522,7 +544,9 @@ class DaemonPoolTest(unittest.TestCase):
         self.assertTrue(self.build("a").startswith("took a.py::a cold"))
 
     def test_a_new_script_s_first_build_takes_the_standby_and_another_stands_by(self) -> None:
-        env = {**self.env, "CADGEN_ENGINE_WORKERS": "", "CADGEN_ENGINE_STANDBY": "1"}  # the runners' is 0
+        # The runners' standby is off; and the host's memory pressure, which keeps a standby from
+        # starting, is no part of this test (``CADGEN_ENGINE_PRESSURE``).
+        env = {**self.env, "CADGEN_ENGINE_WORKERS": "", "CADGEN_ENGINE_STANDBY": "1", "CADGEN_ENGINE_PRESSURE": "0"}
 
         def standby(besides: int | None = None) -> dict:
             found: dict = {}

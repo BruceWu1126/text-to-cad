@@ -264,9 +264,12 @@ class Pressure:
     ``QueryMemoryResourceNotification``), Linux's pressure stall information (the cgroup's
     ``memory.pressure``, else ``/proc/pressure/memory``: ``some avg10`` past ``PSI_SOME``). None of
     them anywhere else, or unreadable: never under pressure, and the budget alone applies.
-    ``simulate`` is the test hook: it answers in place of the system's signal and wakes the poller."""
+    ``simulate`` is the test hook: it answers in place of the system's signal and wakes the poller.
+    ``CADGEN_ENGINE_PRESSURE`` is its form for a daemon in another process (``from_environment``):
+    ``0`` never under pressure, ``1`` always, unset measured; any other value is refused."""
 
     PSI_SOME = 10.0
+    ENVIRONMENT = "CADGEN_ENGINE_PRESSURE"
 
     def __init__(self) -> None:
         self.simulated: bool | None = None
@@ -276,6 +279,23 @@ class Pressure:
     def simulate(self, under: bool | None) -> None:
         self.simulated = under
         self.wake.set()
+
+    @classmethod
+    def from_environment(cls, environ: Any = None) -> "Pressure":
+        """A daemon's signal: ``simulate``d as ``CADGEN_ENGINE_PRESSURE`` says (``override``)."""
+        found = cls()
+        found.simulate(cls.override(os.environ if environ is None else environ))
+        return found
+
+    @classmethod
+    def override(cls, environ: Any) -> bool | None:
+        """``CADGEN_ENGINE_PRESSURE``'s answer: False for ``0``, True for ``1``, None (measured) unset
+        or empty. ``ValueError``, in one line, for anything else."""
+        text = (environ.get(cls.ENVIRONMENT) or "").strip()
+        if text in ("", "0", "1"):
+            return None if not text else text == "1"
+        raise ValueError(f"{cls.ENVIRONMENT} is {text!r}: 0 (never under memory pressure), 1 (always), or unset "
+                         "(measured)")
 
     def under(self) -> bool:
         if self.simulated is not None:
