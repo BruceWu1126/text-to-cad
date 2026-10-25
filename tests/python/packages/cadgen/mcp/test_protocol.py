@@ -128,7 +128,7 @@ class EndTest(unittest.TestCase):
             "import sys, threading\n"
             "from cadgen.mcp.protocol import Connection\n"
             "def handler(method, params, context):\n"
-            "    sys.stderr.write('entered\\n'); sys.stderr.flush()\n"
+            "    sys.stderr.buffer.write(b'entered\\n'); sys.stderr.flush()\n"
             "    threading.Event().wait()\n"
             "Connection(sys.stdin.buffer, sys.stdout.buffer, handler).serve()\n"
         )

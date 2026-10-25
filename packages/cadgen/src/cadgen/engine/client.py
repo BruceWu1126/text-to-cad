@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from cadgen.engine import daemon as _daemon
+from cadgen.engine.atomic_replace import RETRY_DELAYS_SECONDS
 from cadgen.engine.door import Connection, answering, dial
 
 __all__ = ["hold", "request", "sweep"]
@@ -37,7 +38,7 @@ def _connect(address: Path | None = None) -> Connection | None:
     this process the engine's folder (a sandbox that forbids writing there)."""
     try:
         if _daemon.WINDOWS:
-            port, _token = (address or _daemon.port_path()).read_text(encoding="utf-8").split()
+            port, _token = _port_text(address or _daemon.port_path()).split()
             connection = socket.create_connection(("127.0.0.1", int(port)), timeout=5)
             connection.settimeout(None)
             stream = connection.makefile("rwb")
@@ -50,6 +51,19 @@ def _connect(address: Path | None = None) -> Connection | None:
         raise _denied(f"opening a pipe in the engine's folder {_daemon.state_dir()}: {error.strerror or error}") from None
     except (OSError, ValueError):
         return None
+
+
+def _port_text(path: Path) -> str:
+    """A Windows engine's port file. Windows refuses a reader (EACCES) while the file is renamed
+    into place or removed -- an engine starting, which ``connect`` polls, or stopping -- so that
+    refusal waits out the ladder the writer's rename does (``atomic_replace``) before it is said to be
+    the system's."""
+    for delay in RETRY_DELAYS_SECONDS:
+        try:
+            return path.read_text(encoding="utf-8")
+        except PermissionError:
+            time.sleep(delay)
+    return path.read_text(encoding="utf-8")
 
 
 def _answering(address: Path) -> bool:

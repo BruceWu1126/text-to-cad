@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -109,8 +110,23 @@ class IdsTest(unittest.TestCase):
         keyed = load("left", "from cadgen.engine import model, xbf\n\n@model(key='arm')\ndef left():\n    return None\n"
                              "\n@xbf('XBF/r.xbf', key='rail')\ndef rail():\n    return None\n")
         self.assertEqual((keyed.left.id, keyed.rail.id), (key_id("arm"), key_id("rail")))
-        with self.assertRaisesRegex(ValueError, f"key 'arm' is claimed by two declarations, {canonical(self.folder / 'left.py')}::left"):
+        claimed = re.escape(f"key 'arm' is claimed by two declarations, {canonical(self.folder / 'left.py')}::left")
+        with self.assertRaisesRegex(ValueError, claimed):  # a Windows path's backslashes are no pattern
             load("right", "from cadgen.engine import model\n\n@model(key='arm')\ndef right():\n    return None\n")
+
+    def test_a_windows_link_to_a_missing_target_is_spelled_once(self) -> None:
+        # Windows' realpath gives such a link's target as the link names it, its folders unresolved;
+        # the canonical spelling asks again, so a canonical path is its own spelling.
+        from unittest import mock
+
+        from cadgen.engine import ids
+
+        answers = {"C:/models/alias.xbf": "C:/USERS~1/models/part.xbf",
+                   "C:/USERS~1/models/part.xbf": "C:/Users/models/part.xbf"}
+        with mock.patch.object(ids, "WINDOWS", True), \
+                mock.patch("os.path.realpath", lambda path: answers.get(path, path)):
+            self.assertEqual(canonical("C:/models/alias.xbf"), "C:/Users/models/part.xbf")
+            self.assertEqual(canonical("C:/Users/models/part.xbf"), "C:/Users/models/part.xbf")
 
     def test_two_scripts_with_one_function_name_are_two_models(self) -> None:
         other = self.folder / "other.py"
@@ -187,6 +203,7 @@ class ServedByIdTest(unittest.TestCase):
         ident = self.server.put(path, {"version": "one", "prototypes": []}, {})
         self.assertEqual(self.server.put(link, {"version": "two", "prototypes": []}, {}), ident)
         self.assertEqual([row["id"] for row in self.server.listing()], [ident])
+        self.assertEqual(canonical(canonical(link)), canonical(link), "a canonical path is its own spelling")
         held = self.server.hold([str(link)])
         self.assertEqual(held, [ident], "a build writing the link holds the one document")
         self.server.release(held)

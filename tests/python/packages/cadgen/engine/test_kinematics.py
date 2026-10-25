@@ -861,6 +861,23 @@ def _cut_record(data: bytes) -> tuple[bytes, int, bytes]:
     return data[:at], length, data[at + length:].lstrip(b"\x00")
 
 
+_NEGATIVE_ZERO = b"\x00" * 7 + b"\x80"  # -0.0, an IEEE double little-endian
+
+
+def _signless(data: bytes) -> bytes:
+    """``data`` with each -0.0 double written as 0.0. The golden was written on macOS arm64, whose
+    OCCT writes some of the placements' matrix zeros as -0.0 where Linux's and Windows' write 0.0:
+    one transform either way, and no part of what a name changes."""
+    return data.replace(_NEGATIVE_ZERO, bytes(8))
+
+
+def _differences(new: bytes, old: bytes) -> str:
+    """Where two bodies of one length differ, by the 8-byte word each difference is in."""
+    words = sorted({at // 8 for at, (a, b) in enumerate(zip(new, old)) if a != b})
+    return ", ".join(f"{8 * word}: {new[8 * word:8 * word + 8].hex()} != {old[8 * word:8 * word + 8].hex()}"
+                     for word in words[:12]) + (f" ... {len(words)} words" if len(words) > 12 else "")
+
+
 class AuthoringNamesTest(_Folder):
     def test_the_document_is_the_one_the_old_names_wrote_but_for_its_provenance(self) -> None:
         # The functions' names are no part of the document: renamed, every byte but the
@@ -873,7 +890,9 @@ class AuthoringNamesTest(_Folder):
         from cadgen.engine.previous import FORMAT
 
         old_head = old_head.replace(b"cadgen.engine xbf/5 ", f"cadgen.engine {FORMAT} ".encode())
-        self.assertEqual(new_body, old_body)
+        self.assertEqual(len(new_body), len(old_body))
+        self.assertEqual(_signless(new_body), _signless(old_body),
+                         _differences(_signless(new_body), _signless(old_body)))
         self.assertEqual(len(new_head), len(old_head))
         # The header's words end where the record starts (its length is the last of them).
         moved = sorted({len(new_head) - 4 * -(-(len(new_head) - at) // 4)

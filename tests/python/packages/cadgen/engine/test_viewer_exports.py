@@ -70,9 +70,22 @@ class ViewerExportHttpTest(unittest.TestCase):
         self.addCleanup(self.stop_engine)
 
     def stop_engine(self):
+        import os
+        import time
+
         from cadgen.engine.client import request, wait_gone
+        from tests.python.support.engine_daemon import _alive
+
+        answer = request({"op": "pid"}, start=False)
         request({"op": "stop"}, start=False)
         self.assertTrue(wait_gone(30), "test engine must release its Windows working directories")
+        # Its lock goes before its process does, and on Windows the process stands in this test's
+        # folder (``client._working_folder``), which cannot be removed until that process has exited.
+        # (On POSIX the folder it stands in is the engine's own, and a folder in use can go.)
+        deadline = time.monotonic() + 30
+        while os.name == "nt" and answer and _alive(answer["pid"]):
+            self.assertLess(time.monotonic(), deadline, "the stopped engine's process exits")
+            time.sleep(0.05)
 
     def test_live_model_export_through_authenticated_session_and_worker(self):
         import contextlib

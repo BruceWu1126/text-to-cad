@@ -17,7 +17,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from tests.python.support import engine_daemon
+from tests.python.support import engine_daemon, opengl
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 
@@ -92,9 +92,12 @@ class VerbsTest(unittest.TestCase):
     def said(self, ident: str, ref: str, words: str) -> None:
         """Every verb reading ``ident`` succeeds and says ``words`` (its verb's -ing form in place of
         ``{doing}``) once on stderr."""
-        for verb, args in (("export", [str(self.folder / f"{ident}.glb")]),
-                           ("snapshot", [str(self.folder / f"{ident}.png"), "--width", "64", "--height", "48"]),
-                           ("inspect", []), ("inspect", [ref])):
+        from cadgen.engine.render import context
+
+        verbs = [("export", [str(self.folder / f"{ident}.glb")]), ("inspect", []), ("inspect", [ref])]
+        if opengl.draws(context.available(), "the snapshot verb is drawn by OCCT"):
+            verbs.append(("snapshot", [str(self.folder / f"{ident}.png"), "--width", "64", "--height", "48"]))
+        for verb, args in verbs:
             done = self.cli(verb, ident, *args)
             self.assertEqual(done.returncode, 0, done.stderr)
             doing = {"export": "exporting", "snapshot": "drawing"}.get(verb, "inspecting")

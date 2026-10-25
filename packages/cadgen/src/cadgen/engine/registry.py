@@ -45,6 +45,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -76,6 +77,7 @@ _TOKEN = re.compile(r"[A-Za-z0-9_-]{32,256}")
 
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_LOCK = threading.Lock()
+WINDOWS = os.name == "nt"
 
 
 def current() -> "Registry | None":
@@ -309,9 +311,18 @@ def program(registry: Registry, record: dict[str, Any]) -> Path | None:
 
 def command(registry: Registry, record: dict[str, Any]) -> str | None:
     """The command that builds a model's document again, as a person types it: ``python`` and the
-    program, absolute. The engine never runs it."""
+    program, absolute (``rerun``). The engine never runs it."""
     found = program(registry, record)
-    return None if found is None else f"python {shlex.quote(str(found))}"
+    return None if found is None else rerun(found)
+
+
+def rerun(program: str | os.PathLike) -> str:
+    """``python`` and ``program`` as a person pastes them into this platform's shell: quoted for a
+    POSIX shell (``shlex.quote``); on Windows in the double quotes cmd.exe and PowerShell both read,
+    and only where a space or a quote needs them (``subprocess.list2cmdline``) -- to cmd.exe a
+    single quote is part of the path."""
+    text = os.fspath(program)
+    return f"python {subprocess.list2cmdline([text]) if WINDOWS else shlex.quote(text)}"
 
 
 def detached(registry: Registry, record: dict[str, Any]) -> bool:

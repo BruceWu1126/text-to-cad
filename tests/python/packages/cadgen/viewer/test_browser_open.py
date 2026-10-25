@@ -11,7 +11,8 @@ import time
 import unittest
 from pathlib import Path
 from unittest import mock
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
 from cadgen.viewer import browser_open, main as viewer_main
 
@@ -41,7 +42,7 @@ class BrowserOpenTest(unittest.TestCase):
             path = browser_open.open_page(URL, opener=lambda target: given.append(target) or True)
             self.assertEqual(len(given), 1)
             self.assertNotIn('secret-token', given[0])
-            self.assertEqual(Path(unquote(urlsplit(given[0]).path)), path)
+            self.assertEqual(Path(url2pathname(urlsplit(given[0]).path)), path)  # /C:/... on Windows
             self.assertEqual(path.parent, self.engine)
             if os.name != 'nt':
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)

@@ -21,7 +21,7 @@ import urllib.request
 from pathlib import Path
 from unittest import mock
 
-from tests.python.support import engine_daemon
+from tests.python.support import engine_daemon, opengl
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 if str(SRC) not in sys.path:
@@ -212,9 +212,12 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(exported.returncode, 0, exported.stderr)
         for kind in cold:
             self.assertEqual(cold[kind].read_bytes(), live[kind].read_bytes(), f"the {kind} is the live export's")
-        snapped = self.cli("snapshot", ident, str(self.folder / "cold.png"))
-        self.assertEqual(snapped.returncode, 0, snapped.stderr)
-        self.assertGreater((self.folder / "cold.png").stat().st_size, 0)
+        from cadgen.engine.render import context
+
+        if opengl.draws(context.available(), "the cold snapshot is drawn by OCCT"):
+            snapped = self.cli("snapshot", ident, str(self.folder / "cold.png"))
+            self.assertEqual(snapped.returncode, 0, snapped.stderr)
+            self.assertGreater((self.folder / "cold.png").stat().st_size, 0)
         status, structure = self.page(ident)
         self.assertEqual((status, structure.get("stale")), (200, None))
         self.assertEqual(structure["closure"]["source"]["function"], "cube")

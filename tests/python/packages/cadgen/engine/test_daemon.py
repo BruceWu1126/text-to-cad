@@ -555,7 +555,8 @@ class WindowsTokenFirstTest(unittest.TestCase):
         from cadgen.engine import daemon
 
         handled = []
-        engine = types.SimpleNamespace(token="ab" * 16, handle=lambda request, send: handled.append(request) or send({"ok": True}))
+        engine = types.SimpleNamespace(token="ab" * 16, refusal=None,
+                                       handle=lambda request, send: handled.append(request) or send({"ok": True}))
         server_side, client_side = socket.socketpair()
         self.addCleanup(client_side.close)
         with mock.patch.object(daemon, "WINDOWS", True):
@@ -572,6 +573,23 @@ class WindowsTokenFirstTest(unittest.TestCase):
     def test_a_connection_without_the_token_first_is_refused_before_its_line_is_read(self) -> None:
         handled, _token = self.serve(b'{"token": "' + b"0" * 32 + b'", "op": "status", "pad": "' + b"x" * 200_000)
         self.assertEqual(handled, [])
+
+    def test_a_port_file_being_renamed_into_place_is_read_once_it_is_there(self) -> None:
+        # Windows refuses a reader while the starting engine renames its port file into place; a
+        # client polling for it then is not refused by the system, and one refused throughout is.
+        from unittest import mock
+
+        from cadgen.engine import client
+
+        port_file = Path(tempfile.mkdtemp(prefix="eng-port-")) / "x.port"
+        self.addCleanup(shutil.rmtree, port_file.parent, True)
+        refused = PermissionError(13, "Permission denied")
+        with mock.patch.object(client.time, "sleep"), \
+                mock.patch.object(Path, "read_text", side_effect=[refused, refused, "1234 ab\n"]):
+            self.assertEqual(client._port_text(port_file), "1234 ab\n")
+        with mock.patch.object(client.time, "sleep"), mock.patch.object(Path, "read_text", side_effect=refused), \
+                mock.patch.object(client._daemon, "WINDOWS", True), self.assertRaisesRegex(ConnectionError, "denies"):
+            client._connect(port_file)
 
     def test_the_client_puts_its_token_first_and_is_served(self) -> None:
         import socket
@@ -738,7 +756,8 @@ class DaemonEnvironmentTest(unittest.TestCase):
         for process in ("daemon", "worker"):
             self.assertEqual(found[process].get("PYTHONPYCACHEPREFIX"), ours, process)
             self.assertNotIn("PYTHONDONTWRITEBYTECODE", found[process], f"a caller's switch is not the {process}'s")
-        self.assertEqual(stat.S_IMODE(os.stat(ours).st_mode) & 0o077, 0, "this user's alone")
+        if os.name != "nt":  # a folder's mode bits are POSIX's; Windows' per-user temporary folder is the user's
+            self.assertEqual(stat.S_IMODE(os.stat(ours).st_mode) & 0o077, 0, "this user's alone")
         given = started({"CADGEN_CACHE_DIR": str(cache), "PYTHONPYCACHEPREFIX": str(cache / "theirs")})
         self.assertEqual(given["daemon"]["PYTHONPYCACHEPREFIX"], str(cache / "theirs"), "a prefix given is honoured")
         with mock.patch.object(registry, "FACTORY", None):  # no distribution names a cache folder: nothing written
@@ -883,7 +902,11 @@ class InstallationTest(unittest.TestCase):
             folder = os.path.realpath(folder)
             relative = os.path.relpath(sys.executable, folder) if os.path.splitdrive(sys.executable)[0].lower() \
                 == os.path.splitdrive(folder)[0].lower() else sys.executable
+            # A shell finds a relative command from its own folder; Windows' CreateProcess would look
+            # from this process's, so there the test finds it as cmd.exe does (a full path).
             found = {subprocess.run([command, "-c", probe], cwd=folder, env=env, capture_output=True, text=True,
+                                    executable=os.path.normpath(os.path.join(folder, command)) if os.name == "nt"
+                                    else None,
                                     timeout=60).stdout.strip() for command in (relative, sys.executable)}
         self.assertEqual(len(found), 1, found)
 
