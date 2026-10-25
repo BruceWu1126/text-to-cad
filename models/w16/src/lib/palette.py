@@ -144,15 +144,17 @@ def _color_key(color):
     return tuple(round(float(channel), 5) for channel in bd.Color(color))
 
 
-_FINISH_BY_COLOR = {_color_key(color): FINISHES[name] for name, color in FINISH_COLORS.items()}
+def _finish_by_color():
+    return {_color_key(color): FINISHES[name] for name, color in FINISH_COLORS.items()}
 
 
 def apply_finishes(assembly):
     """Every leaf below ``assembly`` takes the finish of its colour; a leaf of no
     palette colour is an error, by its label. Returns the assembly."""
     leaves = [assembly] if not assembly.children else [n for n in assembly.descendants if not n.children]
+    by_color = _finish_by_color()
     for part in leaves:
-        finish = _FINISH_BY_COLOR.get(_color_key(part.color))
+        finish = by_color.get(_color_key(part.color))
         if finish is None:
             raise ValueError(f"{part.label} has no W16 finish for color {part.color}")
         part.material = finish

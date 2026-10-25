@@ -110,7 +110,7 @@ def _rides(label: str, carrier, rider) -> None:
     bd.RigidJoint(label, rider, here)
 
 
-def _held(base, joint) -> bd.Location:
+def _held(base, joint) -> "bd.Location":
     """Where the rigid half of ``joint`` (on ``base``) stands at value 0, as the engine reads a
     pair: a revolute's or cylindrical's frame is its axis's; a linear joint slides a frame that
     keeps the part's axes, at the axis's origin."""

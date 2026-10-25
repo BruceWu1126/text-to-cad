@@ -28,3 +28,4 @@ def basic_shape_mating_test_fixture_import():
 
 if __name__ == "__main__":
     electronics_enclosure_base_import()
+    basic_shape_mating_test_fixture_import()
