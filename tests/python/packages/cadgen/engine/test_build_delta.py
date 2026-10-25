@@ -2,7 +2,9 @@
 configuration sequences against its build before (``delta``). A first build has nothing to compare;
 an edit that adds parts says how many and the bounds they were; an edit that keeps the bounds says
 how many parts' geometry changed, or that only their materials did; a failed build says none; and
-the report a build returns carries it as data."""
+the report a build returns carries it as data. The bounds are each part's exact box placed where it
+stands, as ``cadgen inspect`` measures it, where the kernel's quick box is wrong: a free-form
+face bulging past its edges, a spline edge's poles, a torus's octagons."""
 
 from __future__ import annotations
 
@@ -51,6 +53,77 @@ if __name__ == "__main__":
     else:
         row()
 """
+
+
+class BoundsTest(unittest.TestCase):
+    """The facts walk in this process, on trees ``document.collect`` makes of build123d results."""
+
+    def bounds(self, result) -> list:
+        from cadgen.engine import delta, document
+
+        tree = document.collect(result, "model")
+        for part in tree.parts:
+            part.key = document.geometry_key(part.shape)
+        return delta._walked(tree)["bounds"]
+
+    @staticmethod
+    def exact(*placed) -> list:
+        """The world box's size from each (shape, location) pair's exact box (``AddOptimal``) in the
+        shape's own frame placed at the location, as ``cadgen inspect`` measures it, to the run line's
+        figures."""
+        from OCP.Bnd import Bnd_Box
+        from OCP.BRepBndLib import BRepBndLib
+        from OCP.gp import gp_Pnt
+
+        from cadgen.engine.delta import _shown
+
+        low, high = [float("inf")] * 3, [float("-inf")] * 3
+        for shape, location in placed:
+            box = Bnd_Box()
+            BRepBndLib.AddOptimal_s(shape.wrapped, box, False, False)
+            x0, y0, z0, x1, y1, z1 = box.Get()
+            for x in (x0, x1):
+                for y in (y0, y1):
+                    for z in (z0, z1):
+                        point = gp_Pnt(x, y, z)
+                        if location:
+                            point = point.Transformed(location.wrapped.Transformation())
+                        for axis, value in enumerate((point.X(), point.Y(), point.Z())):
+                            low[axis], high[axis] = min(low[axis], value), max(high[axis], value)
+        return [_shown(b - a) for a, b in zip(low, high)]
+
+    def test_a_free_form_part_is_measured_where_it_bulges_and_its_shape_is_left_as_it_was(self) -> None:
+        import build123d as bd
+
+        loft = bd.loft([bd.Plane.XY.offset(z) * bd.Circle(r) for z, r in ((0, 10), (20, 30), (40, 10))])
+        side = next(face for face in loft.faces() if face.geom_type == bd.GeomType.BSPLINE)
+        from OCP.BRep import BRep_Tool
+
+        surface = BRep_Tool.Surface_s(side.wrapped)
+        poles = [(surface.Pole(i, j).X(), surface.Pole(i, j).Z()) for i in range(1, surface.NbUPoles() + 1)
+                 for j in range(1, surface.NbVPoles() + 1)]
+        self.assertEqual(self.bounds(loft), [60.0, 60.0, 40.0], "not its edges' 47.88 x 20.75 x 40")
+        self.assertEqual(poles, [(surface.Pole(i, j).X(), surface.Pole(i, j).Z())
+                                 for i in range(1, surface.NbUPoles() + 1) for j in range(1, surface.NbVPoles() + 1)],
+                         "the face's own surface is not cut")
+        # A torus's quick box is the octagon about its circles: 43.3 mm across a 40 mm cylinder.
+        self.assertEqual(self.bounds(bd.fillet(bd.Cylinder(20, 30).edges(), 3)), [40.0, 40.0, 30.0])
+
+    def test_sweeps_and_spline_edges_are_their_exact_boxes_placed_where_they_stand(self) -> None:
+        import build123d as bd
+
+        path = bd.Spline((0, 0, 0), (30, 20, 10), (60, -10, 40), (90, 0, 0))
+        sweep = bd.sweep(bd.Plane(path @ 0, z_dir=path % 0) * bd.Circle(3), path)
+        outline = bd.Spline((0, 0), (20, 25), (45, -5), (60, 10))
+        blob = bd.extrude(bd.make_face(bd.Wire([outline, bd.Line((60, 10), (60, -20)), bd.Line((60, -20), (0, -20)),
+                                                bd.Line((0, -20), (0, 0))])), 10)
+        self.assertEqual(self.bounds(sweep), self.exact((sweep, None)))
+        self.assertEqual(self.bounds(blob), [60.0, 47.49, 10.0], "not its spline's poles' 50.11")
+        turned = bd.Rot(20, 0, 35) * bd.Pos(80, 0, 0) * sweep
+        turned.label = "turned"
+        blob.label = "blob"
+        self.assertEqual(self.bounds(bd.Compound(children=[turned, blob], label="pair")),
+                         self.exact((sweep, turned.location), (blob, None)))
 
 
 class DeltaTest(unittest.TestCase):

@@ -629,6 +629,14 @@ builds no script until a build takes it (``adopt``)."""
             self.process.kill()
 
 
+# The requests that serve (``Daemon.serve``: the HTTP server bound on the first), each counted busy
+# while it is underway (``Daemon.handle``).
+SERVING = frozenset({"serve", "viewer", "http", "read", "warm"})
+# The type a worker answers bytes of a held document that do not read with (``build.Unreadable``),
+# as ``worker.refusal`` names it.
+UNREADABLE = "cadgen.engine.build:Unreadable"
+
+
 def refused(error: Exception) -> dict[str, Any]:
     """A refusal as the daemon answers it: its words, its type (``worker.refusal``), and for a
     document the engine does not hold (``serve.NotHeld``) its state and the command that builds it
@@ -1188,7 +1196,8 @@ def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tup
     installation's port: 3245 (``DEFAULT_PORT``) when it is free, else the port it remembers, else
     the one it rolls to (``_installation_port``). Either way another installation's engine on it that
     nothing uses and that is not newer is retired for it (``_listen``); a newer one never is. The page
-    token is the user's (``registry.TOKEN``), one for every installation, made by the first engine to start.
+    token is the user's (``registry.TOKEN``), one for every installation, made by the first engine to
+    start (``_new_token``); one there that cannot be read is refused by name, and nothing is served.
 
     ``where``: ``source`` (``--port``, ``CADGEN_ENGINE_PORT``, ``default`` or ``rolled``), for a
     rolled port ``because`` (who holds 3245), and ``notice``, the lines this start says once: each
@@ -1219,16 +1228,23 @@ def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tup
 
 
 def _new_token(held: Any) -> str:
-    """A new page token, kept as the user's (``registry.TOKEN``) when there is a state folder: the one
-    on disk after the write, so two engines starting at once serve with one."""
+    """A new page token, made the user's (``registry.TOKEN``) when there is a state folder: made only
+    where there is none (``Registry.make_token``), so of two engines starting at once one makes it and
+    the other serves the one it reads. One that is there but cannot be read is refused by name
+    (``Registry.token``), never replaced."""
     token = secrets.token_urlsafe(32)
     if held is None:
         return token
-    try:
-        held.put_token(token)
-    except OSError:
-        return token  # a state folder it cannot write: this start's links work, the next start's are new
-    return held.token() or token
+    for _attempt in range(3):
+        try:
+            if held.make_token(token):
+                return token
+        except OSError:
+            return token  # a state folder it cannot write: this start's links work, the next start's are new
+        found = held.token()  # another engine's, made first
+        if found is not None:
+            return found
+    return token  # made and removed again, each time it was read: this start's links work
 
 
 def _installation_port(host: str, remembered: int | None, token: str,
@@ -1887,6 +1903,10 @@ class Daemon:
                             send({"failed": "The source changed. Open Export again to use the displayed revision."})
                             return
                     answer = worker.build(ordered, send, payload)
+                    held = (request.get("source") or {}).get("document")
+                    if held and answer.get("kind") == UNREADABLE:
+                        # The bytes a held document was read from (its cache file's) do not read.
+                        answer = refused(self.models.unreadable(str(held), str(answer.get("failed"))))
                     returned = answer.pop("payload", b"")
                     if returned:
                         import base64
@@ -1918,6 +1938,22 @@ class Daemon:
             self.touch()
 
     def handle(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
+        """One request, answered through ``send``. One that serves -- binding the HTTP server, a
+        launch, a page's read -- counts in ``status``'s ``busy`` until it is answered, as builds and
+        draws do: another installation's engine starting meanwhile never retires this one under it
+        (``_holder``, ``retire_older``: both read ``busy`` through ``_uses``)."""
+        if request.get("op") not in SERVING:
+            return self._handle(request, send)
+        with self.busy_lock:
+            self.busy += 1
+        try:
+            self._handle(request, send)
+        finally:
+            with self.busy_lock:
+                self.busy -= 1
+            self.touch()
+
+    def _handle(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
         self.touch()
         op = request.get("op")
         if op == "models":

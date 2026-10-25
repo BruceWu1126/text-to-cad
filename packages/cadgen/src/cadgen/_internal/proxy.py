@@ -131,10 +131,18 @@ def choose(version: str | None, records: list[dict], engines, host: str | None) 
                       for status in running)]
     if host is not None:
         for record in serving:
-            if any(_same(status["prefix"], record["prefix"]) and (status.get("hosts") or {}).get(host)
+            if any(_same(status["prefix"], record["prefix"]) and _hosted(status.get("hosts"), host)
                    for status in running if isinstance(status.get("prefix"), str)):
                 return record
     return serving[0] if serving else live[0]
+
+
+def _hosted(hosts: object, host: str) -> bool:
+    """Whether an engine's ``hosts`` names ``host``: its holds per agent host, a count each, or a list
+    of the hosts; anything else names none."""
+    if isinstance(hosts, dict):
+        return bool(hosts.get(host))
+    return isinstance(hosts, list) and host in hosts
 
 
 def engines() -> list[dict]:

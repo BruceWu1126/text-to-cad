@@ -187,17 +187,25 @@ class ProxyFileTests(Fixture):
         self.assertEqual(ran.stdout, "1.0.0 -P -m cadgen._internal.proxy +2.0.0 a b\n")
 
 
-    def test_the_windows_proxy_reads_the_python_a_record_names(self) -> None:
-        # No Windows runner executes the cmd: its for /f is checked against the record's own line.
+    def test_the_windows_proxy_reads_the_python_and_the_cadgen_a_record_names(self) -> None:
+        # No Windows runner executes the cmd: each for /f is checked against the record's own line.
         # With delims set to a quote alone, cmd skips empty pieces and keeps the indent as one.
         import re
 
         record = self.registered("1.0.0")
-        (line,) = [row for row in Path(record["path"]).read_text(encoding="utf-8").splitlines()
-                   if '"python":' in row]
-        (taken,) = re.findall(r"tokens\^=(\d+)\^ delims\^=\^\" %%p", installations.script(True))
-        pieces = [piece for piece in line.split('"') if piece]
-        self.assertEqual(pieces[int(taken) - 1].replace("\\\\", "\\"), record["python"])
+        lines = Path(record["path"]).read_text(encoding="utf-8").splitlines()
+        text = installations.script(True)
+        reads = re.findall(r'tokens\^=(\d+)\^ delims\^=\^" %%(\w) in \(`findstr /c:"\\"(\w+)\\":" '
+                           r'"!state!\\installations\\%%n"`\) do set "(\w+)=%%\2"', text)
+        self.assertEqual(sorted((key, name) for _taken, _letter, key, name in reads),
+                         [("cadgen", "console"), ("python", "python")])
+        for taken, _letter, key, _name in reads:
+            (line,) = [row for row in lines if f'"{key}":' in row]
+            pieces = [piece for piece in line.split('"') if piece]
+            self.assertEqual(pieces[int(taken) - 1].replace("\\\\", "\\"), record[key])
+        # Alive as alive() says it, as the sh does: an uninstalled cadgen leaves its python.
+        self.assertIn('if exist "!python!" if exist "!console!" goto run', text)
+        self.assertEqual(text.count("goto run"), 1)
 
     @POSIX
     def test_the_sh_passes_over_an_installation_whose_cadgen_is_gone(self) -> None:
@@ -260,6 +268,11 @@ class ResolutionTests(Fixture):
         engines = [self.engine(self.new, claude_code=1), self.engine(self.old, codex=2)]
         self.assertEqual(self.choose(["status"], engines=engines, shell="codex")[0], "0.8.0")
         self.assertEqual(self.choose(["status"], engines=engines, shell="claude code")[0], "0.9.0")
+        # An engine that says its hosts as a list (no counts) is read so too; anything else names none.
+        listed = [{**self.engine(self.new), "hosts": ["claude code"]}, {**self.engine(self.old), "hosts": ["codex"]}]
+        self.assertEqual(self.choose(["status"], engines=listed, shell="codex")[0], "0.8.0")
+        odd = [{**self.engine(self.new), "hosts": "codex"}, {**self.engine(self.old), "hosts": None}]
+        self.assertEqual(self.choose(["status"], engines=odd, shell="codex")[0], "0.9.0", "(e): the newest running")
 
     def test_e_then_any_running_engine_newest_first(self) -> None:
         engines = [self.engine(self.old), self.engine(self.dev, codex=1)]
@@ -366,6 +379,8 @@ class ResolutionTests(Fixture):
 
 class TokenTests(unittest.TestCase):
     def test_the_page_token_is_one_file_the_users_alone(self) -> None:
+        import re
+
         with TemporaryDirectory() as scratch:
             held = Registry(scratch)
             self.assertIsNone(held.token())
@@ -375,17 +390,60 @@ class TokenTests(unittest.TestCase):
             if os.name != "nt":
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             path.write_text("short\n", encoding="utf-8")
-            self.assertIsNone(held.token(), "a token too short to guard anything is none")
+            with self.assertRaisesRegex(ValueError, rf"^the page token {re.escape(str(path))} holds no token "
+                                                    r"\(6 bytes\): remove it to make a new one"):
+                held.token()  # a token too short to guard anything is refused, never taken for none
             path.write_text("t" * 40 + "\r\nSet-Cookie: x=y\n", encoding="utf-8")
-            self.assertIsNone(held.token(), "only a token's characters: it goes into a cookie")
+            with self.assertRaisesRegex(ValueError, rf"^the page token {re.escape(str(path))} holds no token"):
+                held.token()  # only a token's characters: it goes into a cookie
             held.put_token("u" * 43)
             if os.name != "nt":
                 os.chmod(path, 0o644)  # readable by others, as in a state folder others share
-                self.assertIsNone(held.token(), "a token others can read guards nothing: a new one is made")
+                with self.assertRaisesRegex(ValueError, rf"^the page token {re.escape(str(path))} is not this "
+                                                        r"user's alone \(mode 0644\)"):
+                    held.token()  # a token others can read guards nothing, and is never served
                 os.chmod(path, 0o600)
                 with mock.patch("os.getuid", return_value=os.getuid() + 1):
-                    self.assertIsNone(held.token(), "another user's token file is not this user's token")
+                    with self.assertRaisesRegex(ValueError, r"is not this user's alone \(mode 0600, owned by uid"):
+                        held.token()  # another user's token file is not this user's token
             self.assertEqual(held.token(), "u" * 43)
+            self.assertEqual(path.read_text(encoding="utf-8"), "u" * 43 + "\n", "refused, never replaced")
+
+    def test_the_first_engine_makes_the_token_and_another_starting_with_it_serves_that_one(self) -> None:
+        from cadgen.engine import daemon
+
+        with TemporaryDirectory() as scratch:
+            held = Registry(scratch)
+            self.assertTrue(held.make_token("a" * 43))
+            self.assertFalse(held.make_token("b" * 43), "never made over one that is there")
+            self.assertEqual(held.token(), "a" * 43)
+            if os.name != "nt":
+                self.assertEqual((Path(scratch) / "engines" / "token").stat().st_mode & 0o777, 0o600)
+            # An engine that found none, then lost the making to this one: it serves this one's.
+            self.assertEqual(daemon._new_token(held), "a" * 43)
+            self.assertEqual(held.token(), "a" * 43)
+            self.assertEqual(os.listdir(Path(scratch) / "engines"), ["token"], "nothing of its own left beside it")
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "a file's mode is POSIX's, and refuses no one running as root")
+    def test_a_token_that_cannot_be_read_is_refused_by_name_and_never_replaced(self) -> None:
+        import re
+
+        from cadgen.engine import daemon
+
+        with TemporaryDirectory() as scratch:
+            held = Registry(scratch)
+            held.put_token("a" * 43)
+            path = Path(scratch) / "engines" / "token"
+            path.chmod(0)
+            try:
+                for call in (held.token, lambda: daemon._new_token(held)):
+                    with self.assertRaisesRegex(ValueError, rf"^the page token {re.escape(str(path))} cannot be read "
+                                                            r"\(Permission denied, mode 0000\): make it this user's"):
+                        call()
+            finally:
+                path.chmod(0o600)
+            self.assertEqual(path.read_text(encoding="utf-8"), "a" * 43 + "\n", "left as it was: every link still works")
 
 
 if __name__ == "__main__":

@@ -438,7 +438,7 @@ only, and a file's id is derived again from its path after a restart.
 | `colors.py` | a colour as the author gives it (sRGB hex, 0-255 integers, a build123d `Color`) held linear, and the way back (**Materials**) |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`gear_pair`, `rack_and_pinion_pair`, `screw_pair`), mechanism states (`mechanism_state`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground; `posed`, an assembly copied at a state), and configuration sequences (`configuration_sequence`, a function's samples, `Timeline`: a sequence's pair values over time) |
 | `build.py` | one build: load the script afresh (as Python imports it: a package's module by its dotted name), one memo run, document, element names, files: every model's that ran |
-| `delta.py` | the line under the run line: a built tree's facts (`facts`: its occurrences, its world bounds from each part's quick box, kept by its geometry key, its parts' geometry keys and looks, and its joints, configuration sequences and warnings), worked out in the worker, and the daemon's delta of them against the build before (`delta`), kept beside each record and in the registry's |
+| `delta.py` | the line under the run line: a built tree's facts (`facts`: its occurrences, its world bounds -- each part's box, kept by its geometry key, measured where it decides the model's -- its parts' geometry keys and looks, and its joints, configuration sequences and warnings), worked out in the worker, and the daemon's delta of them against the build before (`delta`), kept beside each record and in the registry's |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
@@ -518,9 +518,12 @@ many parts have a geometry the build before had none of (by the geometry keys th
 has, so an edit that keeps the bounds -- a hole, a thickness, a fillet -- is still seen) or
 `materials changed` when only colours or materials did, nothing to compare on a first
 build and no line for a failed one, and the report carries it as data (`delta`). Its bounds are
-the kernel's quick boxes, a free-form face's from its edges (31 ms cold on juno's 246 parts, within
-0.1 mm of `inspect`'s exact boxes, which took 8.6-12 s), and a tree whose signature is its last
-build's is not walked again, so a warm no-op pays nothing measurable for it. A failed build
+`inspect`'s, each part's box placed where it stands, to within each part's mesh tolerance: every
+part starts from the kernel's quick box, and only the parts that could hold the model's extremes
+are measured, their outermost faces exactly (a cold walk of tom lists 5 of its 221 parts and
+measures no face exactly; juno's, 41 of 246 and 12 faces; measuring every part took 5.5 s and
+8.2 s), and a tree whose signature is its last build's is not walked again, so a warm no-op pays
+nothing measurable for it. A failed build
 raises; a successful call resumes the script. A body that fails in a kernel call with an OCCT exception (often bare: `Standard_Failure`,
 `Standard_DomainError`, by OCCT build) has that call named on its failure line, as the memo saw it --
 `failed plate.py::plate at Solid.make_box(0, 60, 5): the kernel refused it` -- and in its report

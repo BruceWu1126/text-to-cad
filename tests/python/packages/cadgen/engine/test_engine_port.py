@@ -305,6 +305,21 @@ class EnginePortTest(unittest.TestCase):
         self.assertIsNone(self.remembered())
         self.assertEqual(server.token, "t" * 43)
 
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "a file's mode is POSIX's, and refuses no one running as root")
+    def test_a_page_token_that_cannot_be_read_serves_nothing_and_is_left_as_it_is(self) -> None:
+        from cadgen.engine import registry
+
+        registry.Registry(self.root / "state").put_token("t" * 43)
+        token = self.root / "state" / "engines" / "token"
+        token.chmod(0)
+        self.addCleanup(token.chmod, 0o600)
+        with self.assertRaisesRegex(ValueError, r"^the page token \S+/engines/token cannot be read \(Permission denied, "
+                                                r"mode 0000\): make it this user's to read \(mode 0600\) or remove it"):
+            self.bound(free_port())
+        token.chmod(0o600)
+        self.assertEqual(self.token(), "t" * 43, "never replaced: the links made with it still work")
+
     def test_an_unused_engine_of_another_installation_is_retired_and_its_port_taken(self) -> None:
         _python, theirs, _door = self.other()
         ours = self.launch(CADGEN_ENGINE_PORT=str(theirs["port"]))
