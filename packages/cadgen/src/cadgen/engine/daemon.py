@@ -54,6 +54,7 @@ pages waiting on a served document the frame's build writes (``serve.Server.buil
 from __future__ import annotations
 
 import collections
+import functools
 import hashlib
 import itertools
 import json
@@ -256,14 +257,19 @@ def _users_own(folder: str) -> bool:
     return stat.S_ISDIR(found.st_mode) and found.st_uid == os.getuid() and not found.st_mode & 0o022
 
 
-def _tag(protocol: int | None = None) -> str:
+def _tag(protocol: int | None = None, *, versioned: bool = True) -> str:
     """One daemon per installation: its environment, its interpreter's version and the engine it
     runs -- never the name the interpreter was started by (``python``, ``python3``, ``python3.12``
-    of one environment are one installation) -- and the protocol it speaks (``PROTOCOL``, else
-    ``protocol``: an older one's daemon, which ``stop`` still finds)."""
+    of one environment are one installation) -- the protocol it speaks (``PROTOCOL``, else
+    ``protocol``: an older one's daemon, which ``stop`` still finds), and the version it runs as
+    (``installation``). So an upgrade into the same environment (``pip install -U``, ``uv tool
+    upgrade``, a development install made again) has a door, lock and port file of its own: its
+    clients start its engine, never dial the old one still running there, and that start retires
+    the old one when nothing uses it (``retire_older``). ``versioned=False``: the environment alone,
+    which keys what outlives an upgrade in it -- its engine record, the port it rolled to (``bind``)."""
     prefix = os.path.normcase(os.path.realpath(sys.prefix))
     material = (f"{prefix}|{sys.implementation.cache_tag}|{Path(__file__).resolve().parent}|"
-                f"{PROTOCOL if protocol is None else protocol}")
+                f"{PROTOCOL if protocol is None else protocol}" + (f"|{installation()}" if versioned else ""))
     return hashlib.sha256(material.encode()).hexdigest()[:12]
 
 
@@ -1089,13 +1095,56 @@ class PortHeld(ValueError):
 
 
 def installation() -> str:
-    """The version this installation runs as: ``CADGEN_INSTALLATION_VERSION`` when it names one (a
-    development install, which reports its release's version), else the release declared beside
-    this code (``previous.version``)."""
+    """The version this installation runs as -- the one name its client, its daemon and its workers
+    all go by (``_tag``, ``status``): ``CADGEN_INSTALLATION_VERSION`` when it names one (the
+    ``cadgen`` command sets it for a development install, which reports its release's version), else
+    the version this environment is registered as (``registered``: a dev environment's
+    ``python model.py`` run directly), else the release declared beside this code
+    (``previous.version``)."""
     from cadgen.engine.previous import version
 
     named = os.environ.get(INSTALLATION_ENV, "")
-    return named if re.fullmatch(r"[0-9][0-9A-Za-z.+_-]*", named) else version()
+    if re.fullmatch(r"[0-9][0-9A-Za-z.+_-]*", named):
+        return named
+    return registered() or version()
+
+
+def registered() -> str | None:
+    """The version this environment (``sys.prefix``) is registered as in the user's state folder
+    (``installations/<version>.json``, the distribution's records: ``cadgen._internal.installations``),
+    when one names its release: the one registered last. None with no state folder, or no such record
+    -- and for a record of another release, left from before an upgrade into this environment
+    (``pip install -U``), which is not what runs here now. Read once per process and state folder."""
+    from cadgen.engine import registry
+    from cadgen.engine.previous import version
+
+    held = registry.current()
+    if held is None:
+        return None
+    return _registered(str(held.state.root), os.path.normcase(os.path.realpath(sys.prefix)), version())
+
+
+@functools.cache
+def _registered(state: str, prefix: str, release: str) -> str | None:
+    folder = Path(state) / "installations"
+    ours = rank(release)
+    found: list[tuple[float, str]] = []
+    try:
+        names = [entry for entry in os.scandir(folder) if entry.name.endswith(".json")]
+    except OSError:
+        return None
+    for entry in names:
+        try:
+            record = json.loads(Path(entry.path).read_text(encoding="utf-8"))
+            given = record["version"]
+            if (isinstance(given, str) and given == entry.name[:-5] and isinstance(record.get("prefix"), str)
+                    and os.path.normcase(os.path.realpath(record["prefix"])) == prefix):
+                theirs = rank(given)
+                if ours is not None and theirs is not None and theirs[:2] == ours[:2]:
+                    found.append((entry.stat().st_mtime, given))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return max(found)[1] if found else None
 
 
 # A version as PEP 440 spells it, with the spellings it normalizes (``0.8.0-dev.20261024`` is
@@ -1132,10 +1181,15 @@ def rank(version: Any) -> tuple | None:
 
 def _standing(status: dict[str, Any]) -> int | None:
     """How another installation's engine, by its ``status``, ranks against this one: -1 older, 0 the
-    same version, 1 newer; None when it cannot be said. Its installation's version first (``rank``);
-    one either side cannot parse is older only when its release (``version``) is lower than this one's."""
+    same version, 1 newer; None when it cannot be said. An engine whose ``status`` has no
+    ``installation`` was built before engines said it: older than any that does, whatever its
+    release (a ``0.8.0`` that would outrank every ``0.8.0-dev.*`` build). Else its installation's
+    version (``rank``); one either side cannot parse is older only when its release (``version``)
+    is lower than this one's."""
     from cadgen.engine.previous import version
 
+    if "installation" not in status:
+        return -1
     ours, theirs = rank(installation()), rank(status.get("installation") or status.get("version"))
     if ours is None or theirs is None:
         ours, theirs = rank(version()), rank(status.get("version"))
@@ -1206,8 +1260,8 @@ def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tup
 
     retired = retire_older(host)
     held = registry.current()
-    installation = _tag()
-    record = held.engine(installation) if held is not None else {}
+    environment = _tag(versioned=False)  # the environment's record: its links outlive an upgrade in it
+    record = held.engine(environment) if held is not None else {}
     token = (held.token() if held is not None else None) or _new_token(held)
     remembered = record.get("port")
     if asked is not None:
@@ -1220,7 +1274,7 @@ def bind(host: str, asked: int | None, listen: Callable[[int, str], Any]) -> tup
     kept = {"port": remembered} if remembered else {}
     if held is not None and kept != record:
         try:
-            held.put_engine(installation, kept)
+            held.put_engine(environment, kept)
         except OSError:
             pass  # a state folder it cannot write: this start's links work, the next start's are new
     said = "\n".join([*retired, *([where["notice"]] if where.get("notice") else [])])

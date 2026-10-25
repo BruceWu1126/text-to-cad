@@ -58,8 +58,11 @@ _COMMANDS: dict[str, tuple[str, str]] = {
 }
 
 # A skill's pin is the version its SKILL.md's install command names
-# (`uvx ... --from cadgen==1.2.3 cadgen doctor`), stamped by the release with its `cadgen +1.2.3`.
+# (`uvx ... --from cadgen==1.2.3 cadgen doctor`), stamped by the release with its `cadgen +1.2.3`;
+# else the version its commands run by (`cadgen +1.2.3`, a development install's
+# `cadgen +1.2.3-dev.<time>`).
 _PIN_RE = re.compile(r"--from\s+cadgen==(?P<pin>[^\s`'\"]+)")
+_RUN_PIN_RE = re.compile(r"(?<![\w.-])cadgen\s+\+(?P<pin>[0-9][0-9A-Za-z.+_-]*[0-9A-Za-z])")
 
 
 def read_skill_pin(skill_path) -> str | None:
@@ -75,7 +78,7 @@ def read_skill_pin(skill_path) -> str | None:
             text = handle.read()
     except OSError:
         return None
-    match = _PIN_RE.search(text)
+    match = _PIN_RE.search(text) or _RUN_PIN_RE.search(text)
     return match.group("pin") if match else None
 
 
