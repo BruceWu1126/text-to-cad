@@ -330,6 +330,9 @@ class Models:
         command = self.command(ident)
         name = found["source"]["name"]
         if found.get("store") == "shape":
+            known = self.recorded(ident) if found.get("program") is None else None
+            if known is not None:
+                return known  # taken up after a restart (``adopt``): its record's words name the program
             return {"error": f"{name} ({ident}) is no longer held: it is {self.shown(found.get('program'))}; run "
                              "that program again to hand it over again", "state": "evicted", "rebuild": None}
         if gone is None and not Path(found["source"]["script"]).is_file():

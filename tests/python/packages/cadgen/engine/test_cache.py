@@ -530,6 +530,29 @@ class BoundTest(unittest.TestCase):
         self.assertEqual((found["state"], found["rebuild"]), ("evicted", None))
         self.assertIn("run that program again to hand it over again", found["error"])
 
+    def test_a_shape_taken_up_after_a_restart_and_evicted_names_the_program_that_handed_it_over(self) -> None:
+        from cadgen.engine import registry as registering
+        from cadgen.engine.models import Models as Book
+
+        folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="engine-shape-")))
+        self.addCleanup(shutil.rmtree, folder, True)
+        held = Registry(folder / "state", folder / "cache")
+        ident = model_id(folder / "hand.py", "crate")
+        words = Book.shown(str(folder / "hand.py"))
+        held.put({"id": ident, "kind": "model", "store": "shape", "root": str(folder), "home": "hand.py",
+                  "entry": "crate", "run": [], "shown": words, "revision": "h1", "built": 1.0})
+        held.cache.write(f"documents/{ident}/document.xbf", b"x" * 10)
+        held.update(ident, lambda found: {**found, "cache": {"revision": "h1", "bytes": 10, "read": []}})
+        daemon = mock.Mock(server=None)
+        with mock.patch.object(registering, "FACTORY", lambda: held):
+            book = Book(daemon)
+            book.adopt(ident)  # a restart: taken up from its record, its cache file at its revision
+            self.assertEqual(book.state(ident), "held")
+            book.cache.remove(ident)  # the bound took its file
+            found = book.rebuild(ident)
+        self.assertEqual((found["state"], found["rebuild"]), ("evicted", None))
+        self.assertIn(words, found["error"], "the words its record keeps, not a Python session's")
+
 
 if __name__ == "__main__":
     unittest.main()
