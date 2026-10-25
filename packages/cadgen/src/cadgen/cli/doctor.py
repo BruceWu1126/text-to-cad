@@ -281,6 +281,13 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     if pin == installed:
         sys.stdout.write(f"  pin      OK — cadgen=={pin} ({skill})\n")
         return status
+    from cadgen._internal.installations import VERSION
+
+    if not VERSION.fullmatch(pin):
+        # A SKILL.md in a downloaded project is anyone's: a "pin" that is no version (a shell
+        # command, a uv option) is said as data, never built into the command printed below.
+        sys.stderr.write(f"  pin      MISMATCH — {skill} pins no cadgen version: {ascii(pin[:64])}\n")
+        return 3
     sys.stderr.write(
         f"  pin      MISMATCH — {skill} pins cadgen=={pin}, "
         f"but cadgen {installed} is installed.\n"
