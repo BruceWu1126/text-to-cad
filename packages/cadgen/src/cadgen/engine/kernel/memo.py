@@ -793,6 +793,8 @@ _QUERY_TARGETS: tuple[tuple[str, str], ...] = (
     # Clearances (``BRepExtrema_DistShapeShape``'s minimum distance alone, no points): to a
     # shape or a point.
     ("Shape", "distance"), ("Shape", "distance_to"),
+    # Point tests (``BRepClass3d_SolidClassifier``): whether a point is inside a solid or on a face.
+    ("Mixin3D", "is_inside"), ("Face", "is_inside"),
 )
 # The answers one shape's record keeps, the oldest dropped past them: a model asking one
 # shape about many points keeps the last of them.

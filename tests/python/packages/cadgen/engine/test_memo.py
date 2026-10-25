@@ -535,6 +535,27 @@ class QueryTest(MemoCase):
                 _run(lambda: loose_a.distance_to(loose_b))
         self.assertEqual(len(runs), 4, "a distance of shapes made past the memo is measured every time")
 
+    def test_a_point_test_is_answered_per_point_and_tolerance(self) -> None:
+        from build123d.topology import three_d
+
+        def model(points, tolerance=1e-6):
+            part = self._part(3.0)
+            return [part.is_inside(point, tolerance) for point in points], part
+
+        points = [(4, 4, 0), (0, 0, 0), (4, 4, 5), (20, 0, 0)]
+        counted, runs = _counted(three_d.BRepClass3d_SolidClassifier, "Perform")
+        with counted:
+            (cold, part), _, _ = _run(model, points)
+            (warm, _), _, run = _run(model, points)
+            self.assertEqual((len(runs), run.tally["queries_answered"]), (4, 4))
+            _run(model, points[:1], 0.1)
+            self.assertEqual(len(runs), 5, "another tolerance is another key")
+            _run(model, [(4, 4, 1)])
+            self.assertEqual(len(runs), 6, "another point is another key")
+        self.assertEqual(warm, cold)
+        self.assertEqual(cold, [True, False, True, False])
+        self.assertEqual(warm, [part.is_inside(point) for point in points], "a fresh test of the same solid")
+
 
 class VertexTest(MemoCase):
     def test_a_point_placed_by_a_model_is_keyed(self) -> None:
