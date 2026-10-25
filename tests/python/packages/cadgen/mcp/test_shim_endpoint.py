@@ -1,6 +1,8 @@
 """The stdio shim speaks only to the endpoint the engine's door names. A loopback port the
-engine has let go is anyone's: once the engine moves, the shim reads its endpoint from the door
-again and never sends the host's initialize to a port held from an earlier call."""
+engine has let go is anyone's, and the page token every call carries outlives the engine: once
+the engine that named the endpoint is gone (its door no longer answers, or is another's), the
+shim reads its endpoint from the door again before it sends anything, so a listener on the
+freed port is sent neither a request nor the token."""
 
 from __future__ import annotations
 
@@ -80,6 +82,11 @@ class ShimEndpointTest(unittest.TestCase):
         patch = mock.patch.object(engine_client, "request", side_effect=read)
         patch.start()
         self.addCleanup(patch.stop)
+        # The door's identity (``engine_client._door``): one per engine run, None with none.
+        self.door: object = object()
+        doors = mock.patch.object(engine_client, "_door", side_effect=lambda _address=None: self.door)
+        doors.start()
+        self.addCleanup(doors.stop)
         self.proxy = Proxy(engine_client.EngineClient())
         self.proxy.handle("initialize", {"clientInfo": {"name": "test"}}, RequestContext(1, {}))
         self.proxy.notify("notifications/initialized", {})
@@ -90,7 +97,7 @@ class ShimEndpointTest(unittest.TestCase):
         self.first.close()
         second = Listener("second")
         self.addCleanup(second.close)
-        self.names = second.endpoint()
+        self.names, self.door = second.endpoint(), object()
         return second, old
 
     def ask(self, request_id: int) -> dict:
@@ -114,13 +121,23 @@ class ShimEndpointTest(unittest.TestCase):
         self.addCleanup(squatter.close)
         second = Listener("second")
         self.addCleanup(second.close)
-        self.names = second.endpoint()
+        self.names, self.door = second.endpoint(), object()
         self.assertEqual(self.ask(2), {"from": "second"})
         self.assertEqual(self.ask(3), {"from": "second"})
-        self.assertEqual([method for method, _token in squatter.seen], ["tools/list"],
-                         "one request it refused, and no initialize")
-        self.assertNotIn("Bearer second", [token for _method, token in squatter.seen])
-        self.assertEqual([method for method, _token in second.seen][:2], ["initialize", "notifications/initialized"])
+        self.assertEqual(squatter.seen, [], "no request, and so no token, reached the freed port")
+        self.assertEqual([method for method, _token in second.seen][:2], ["tools/list", "initialize"])
+
+    def test_an_engine_gone_with_its_port_squatted_is_sent_nothing(self) -> None:
+        # `cadgen stop`, or a crash: the door answers no more and another process binds the port.
+        # The token it would carry is the user's, valid at the engine's next start.
+        old = self.first.port
+        self.first.close()
+        squatter = Listener(None, port=old)
+        self.addCleanup(squatter.close)
+        self.names, self.door = None, None
+        with self.assertRaises(Exception):
+            self.ask(2)
+        self.assertEqual(squatter.seen, [])
 
     def test_a_host_closing_after_the_engine_stopped_starts_none(self) -> None:
         self.first.close()  # `cadgen stop`: nothing listens, and the socket names no engine
