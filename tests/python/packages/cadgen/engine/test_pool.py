@@ -310,7 +310,7 @@ class StandbyTest(unittest.TestCase):
                 Daemon(cap=1)
             with mock.patch("sys.stderr"):
                 self.assertEqual(engine.main([]), 1, "refused at the start")
-            self.assertIn("CADGEN_ENGINE_PRESSURE is 'yes'", json.loads(engine.failure_path().read_text())["reason"])
+            self.assertIn("CADGEN_ENGINE_PRESSURE is 'yes'", json.loads(engine.failure_path().read_text(encoding="utf-8"))["reason"])
 
     def test_status_shows_the_standby_with_its_memory_and_never_as_a_script_s_worker(self) -> None:
         from cadgen.engine.cli import status_text
