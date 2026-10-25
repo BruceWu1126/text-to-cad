@@ -72,9 +72,14 @@ def pair(folder: Path, ident: str) -> tuple[Path, Path]:
 
 
 def _private(folder: Path) -> bool:
-    """Whether ``folder`` (made when missing) is a real folder, this user's, closed to everyone else."""
+    """Whether ``folder`` (made when missing) is a real folder, this user's, closed to everyone else.
+    A folder of this user's opened to others is closed again: it is in the engine's folder, which
+    is this user's alone (``daemon.folder_refusal``), so only this user made it so."""
     folder.mkdir(mode=0o700, exist_ok=True)
     found = os.lstat(folder)
+    if stat.S_ISDIR(found.st_mode) and found.st_uid == os.getuid() and found.st_mode & 0o077:
+        os.chmod(folder, 0o700)  # a real folder (lstat): no link followed
+        found = os.lstat(folder)
     return stat.S_ISDIR(found.st_mode) and found.st_uid == os.getuid() and not found.st_mode & 0o077
 
 
@@ -218,6 +223,8 @@ def _greeted(fd: int, door: Path, timeout: float) -> bool:
                     return False
             except OSError:
                 return False
+            if not answering(door):
+                return False  # its daemon died after reading the hello: nobody reads the door now
     return got == GREETING
 
 
@@ -316,6 +323,8 @@ class Door:
                 if ident is None or self.closed.is_set():
                     continue
                 with self.lock:
+                    if ident in self.holding:
+                        continue  # one answer a pair: a second would greet twice and split its stream
                     self.holding.add(ident)
                 threading.Thread(target=self._answer, args=(ident,), daemon=True).start()
 

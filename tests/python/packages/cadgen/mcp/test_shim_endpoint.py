@@ -1,6 +1,8 @@
 """The stdio shim speaks only to the endpoint the engine's door names. A loopback port the
-engine has let go is anyone's: once the engine moves, the shim reads its endpoint from the door
-again and never sends the host's initialize to a port held from an earlier call."""
+engine has let go is anyone's, and the page token every call carries outlives the engine: once
+the engine that named the endpoint is gone (its door no longer answers, or is another's), the
+shim reads its endpoint from the door again before it sends anything, so a listener on the
+freed port is sent neither a request nor the token."""
 
 from __future__ import annotations
 
@@ -80,6 +82,11 @@ class ShimEndpointTest(unittest.TestCase):
         patch = mock.patch.object(engine_client, "request", side_effect=read)
         patch.start()
         self.addCleanup(patch.stop)
+        # The door's identity (``engine_client._door``): one per engine run, None with none.
+        self.door: object = object()
+        doors = mock.patch.object(engine_client, "_door", side_effect=lambda _address=None: self.door)
+        doors.start()
+        self.addCleanup(doors.stop)
         self.proxy = Proxy(engine_client.EngineClient())
         self.proxy.handle("initialize", {"clientInfo": {"name": "test"}}, RequestContext(1, {}))
         self.proxy.notify("notifications/initialized", {})
@@ -90,7 +97,7 @@ class ShimEndpointTest(unittest.TestCase):
         self.first.close()
         second = Listener("second")
         self.addCleanup(second.close)
-        self.names = second.endpoint()
+        self.names, self.door = second.endpoint(), object()
         return second, old
 
     def ask(self, request_id: int) -> dict:
@@ -114,13 +121,23 @@ class ShimEndpointTest(unittest.TestCase):
         self.addCleanup(squatter.close)
         second = Listener("second")
         self.addCleanup(second.close)
-        self.names = second.endpoint()
+        self.names, self.door = second.endpoint(), object()
         self.assertEqual(self.ask(2), {"from": "second"})
         self.assertEqual(self.ask(3), {"from": "second"})
-        self.assertEqual([method for method, _token in squatter.seen], ["tools/list"],
-                         "one request it refused, and no initialize")
-        self.assertNotIn("Bearer second", [token for _method, token in squatter.seen])
-        self.assertEqual([method for method, _token in second.seen][:2], ["initialize", "notifications/initialized"])
+        self.assertEqual(squatter.seen, [], "no request, and so no token, reached the freed port")
+        self.assertEqual([method for method, _token in second.seen][:2], ["tools/list", "initialize"])
+
+    def test_an_engine_gone_with_its_port_squatted_is_sent_nothing(self) -> None:
+        # `cadgen stop`, or a crash: the door answers no more and another process binds the port.
+        # The token it would carry is the user's, valid at the engine's next start.
+        old = self.first.port
+        self.first.close()
+        squatter = Listener(None, port=old)
+        self.addCleanup(squatter.close)
+        self.names, self.door = None, None
+        with self.assertRaises(Exception):
+            self.ask(2)
+        self.assertEqual(squatter.seen, [])
 
     def test_a_host_closing_after_the_engine_stopped_starts_none(self) -> None:
         self.first.close()  # `cadgen stop`: nothing listens, and the socket names no engine
@@ -136,3 +153,65 @@ class ShimEndpointTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HolderTest(unittest.TestCase):
+    """The server's hold on the engine (``shim.Holder``): taken at its start, and after the engine
+    goes held again only at the host's next request -- a stop is obeyed."""
+
+    def test_a_request_while_the_hold_is_taken_never_holds_again_after_a_stop(self) -> None:
+        from cadgen.mcp.shim import Holder
+
+        gone, taking, calls = threading.Event(), threading.Event(), []
+
+        class Held:
+            def __init__(self) -> None:
+                self.reader = self
+
+            def read(self, _size):
+                gone.wait(10)
+                return b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return None
+
+        def hold(host=None):
+            calls.append(host)
+            taking.wait(10)  # the engine starting: the host's initialize arrives meanwhile
+            return Held()
+
+        holder = Holder()
+        with mock.patch("cadgen.engine.client.hold", hold):
+            holder.start()
+            holder.want()  # Proxy._send, while the first hold starts the engine
+            taking.set()
+            self.assertTrue(holder.tried.wait(10))
+            # The request was served by the hold it waited for: none is left wanting another, which
+            # the engine's going (cadgen stop) would take as a request and start an engine for.
+            self.assertFalse(holder.wanted.is_set())
+            gone.set()
+        self.assertEqual(len(calls), 1)
+
+    def test_a_hold_that_fails_unexpectedly_is_tried_again_at_the_next_request(self) -> None:
+        calls = []
+
+        def hold(host=None):
+            calls.append(host)
+            raise RuntimeError("an answer of no shape")
+
+        from cadgen.mcp.shim import Holder
+
+        holder = Holder()
+        with mock.patch("cadgen.engine.client.hold", hold):
+            holder.start()
+            self.assertTrue(holder.tried.wait(10), "the server's exit never waits a minute on it")
+            holder.want()
+            for _ in range(500):
+                if len(calls) == 2:
+                    break
+                threading.Event().wait(0.01)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(holder.thread.is_alive())

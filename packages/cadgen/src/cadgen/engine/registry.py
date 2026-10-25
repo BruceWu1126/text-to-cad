@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -70,6 +71,9 @@ TOKEN = f"{ENGINES}/token"
 OBSERVERS: list[Callable[[dict[str, Any]], None]] = []
 # The distribution's: makes the registry of the user's state folder (``cadgen._internal.engine_host``).
 FACTORY: Callable[[], "Registry"] | None = None
+
+# A page token as ``secrets.token_urlsafe`` makes one, long enough to guard anything.
+_TOKEN = re.compile(r"[A-Za-z0-9_-]{32,256}")
 
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_LOCK = threading.Lock()
@@ -228,10 +232,20 @@ class Registry:
     # --- the installation's engine -------------------------------------------------------------
 
     def token(self) -> str | None:
-        """The user's page token (``TOKEN``), or None before the first engine has made one."""
+        """The user's page token (``TOKEN``), or None before the first engine has made one -- or
+        when the file is not one this user alone could have written and can read (on POSIX: another
+        user's, or open to others, as in a state folder others share), or holds anything but a
+        token's characters (it goes into a cookie and a URL): the next engine makes a new one."""
+        if os.name != "nt":
+            try:
+                found = os.stat(self.state.path(TOKEN))
+            except OSError:
+                return None
+            if found.st_uid != os.getuid() or found.st_mode & 0o077:
+                return None
         data = self.state.read(TOKEN)
         token = data.decode("ascii", "replace").strip() if data is not None else ""
-        return token if len(token) >= 32 and token.isascii() and " " not in token else None
+        return token if _TOKEN.fullmatch(token) else None
 
     def put_token(self, token: str) -> None:
         """Write the user's page token, this user's alone."""
@@ -248,7 +262,7 @@ class Registry:
         if not isinstance(record, dict) or record.get("schema") != ENGINE_SCHEMA:
             return {}
         found: dict[str, Any] = {}
-        if isinstance(record.get("port"), int) and 0 < record["port"] < 65536:
+        if type(record.get("port")) is int and 0 < record["port"] < 65536:  # a JSON true is no port
             found["port"] = record["port"]
         return found
 
@@ -295,20 +309,21 @@ def program(registry: Registry, record: dict[str, Any]) -> Path | None:
     return Path(os.path.normpath(registry.root(record) / run[-1])) if run else None
 
 
-def command(registry: Registry, record: dict[str, Any]) -> str | None:
-    """The command that builds a model's document again, as a person types it: ``python`` and the
-    program, absolute (``rerun``). The engine never runs it."""
-    found = program(registry, record)
-    return None if found is None else rerun(found)
-
-
 def rerun(program: str | os.PathLike) -> str:
-    """``python`` and ``program`` as a person pastes them into this platform's shell: quoted for a
+    """The command that runs ``program`` again, as a person pastes it into this platform's shell:
+    ``cadgen run`` and the program, absolute. The engine that says it is the one ``cadgen run``
+    reaches, and its python has the kernel a bare ``python`` may not. The program is quoted for a
     POSIX shell (``shlex.quote``); on Windows in the double quotes cmd.exe and PowerShell both read,
     and only where a space or a quote needs them (``subprocess.list2cmdline``) -- to cmd.exe a
     single quote is part of the path."""
     text = os.fspath(program)
-    return f"python {subprocess.list2cmdline([text]) if WINDOWS else shlex.quote(text)}"
+    return f"cadgen run {subprocess.list2cmdline([text]) if WINDOWS else shlex.quote(text)}"
+
+
+def command(registry: Registry, record: dict[str, Any]) -> str | None:
+    """The command that builds a model's document again (``rerun``). The engine never runs it."""
+    found = program(registry, record)
+    return None if found is None else rerun(found)
 
 
 def detached(registry: Registry, record: dict[str, Any]) -> bool:

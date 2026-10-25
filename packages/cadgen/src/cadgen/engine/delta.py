@@ -11,10 +11,17 @@ juno's 246 parts, measured cold, that took 31 ms, and its bounds were ``cadgen i
 the model's extreme is under-measured. The daemon keeps each document's facts beside its record, and in the registry's, and
 says the build's against the last (``delta``): each fact now, and what it was when it changed;
 a first build has nothing to compare. The CLI prints it under the run line (``cli._describe``).
-Volume is not among them: measured, it costs a kernel pass per part.
+An edit that keeps every one of those -- a hole's size, a thickness, a fillet -- is still said: the
+facts keep each part's geometry key (``shapes``: the digest the build keyed the part by, shortened,
+and how many occurrences have it) and, per key, a digest of its parts' colours and materials
+(``looks``), so the delta counts the parts whose geometry
+no part of the build before had (``changed``), and says when only the look changed. Both come from
+what the tree already holds: nothing is measured for them. Volume is not among them: measured, it
+costs a kernel pass per part.
 """
 from __future__ import annotations
 
+import hashlib
 from collections import OrderedDict
 from typing import Any
 
@@ -22,6 +29,7 @@ from typing import Any
 _BOXES: "OrderedDict[str, tuple[float, ...] | None]" = OrderedDict()
 _BOXES_HELD = 1 << 16
 FACTS = ("parts", "bounds", "joints", "sequences", "warnings")
+_KEY = 12  # the hex digits of a part's geometry key the facts keep: enough to tell two builds' parts apart
 
 
 def _shown(value: float) -> float:
@@ -93,14 +101,21 @@ def _walked(tree: Any) -> dict[str, Any]:
 
     low, high = [float("inf")] * 3, [float("-inf")] * 3
     count = 0
+    shapes: dict[str, int] = {}
+    looks: dict[str, set[str]] = {}  # per geometry key, its parts' looks: a rename or another copy changes none
 
-    def visit(prototype: Any, placed: Any) -> None:
+    def visit(prototype: Any, placed: Any, painted: Any = None) -> None:
         nonlocal count
         if isinstance(prototype, Assembly):
             for component in prototype.components:
-                visit(component.prototype, placed.Multiplied(component.location.Transformation()))
+                visit(component.prototype, placed.Multiplied(component.location.Transformation()),
+                      component.color if component.color is not None else painted)
             return
         count += 1
+        key = prototype.key[:_KEY]
+        shapes[key] = shapes.get(key, 0) + 1
+        looks.setdefault(key, set()).add(repr((painted, prototype.color, sorted(prototype.face_colors.items()), prototype.material,
+                        sorted(prototype.face_materials.items(), key=lambda item: item[0]))))
         box = _box(prototype)
         if box is None:
             return
@@ -117,16 +132,26 @@ def _walked(tree: Any) -> dict[str, Any]:
             "bounds": None if low[0] == float("inf") else [_shown(b - a) for a, b in zip(low, high)],
             "joints": len(mechanism.pairs) if mechanism is not None else 0,
             "sequences": len(mechanism.motions) if mechanism is not None else 0,
-            "warnings": len(mechanism.warnings) if mechanism is not None else 0}
+            "warnings": len(mechanism.warnings) if mechanism is not None else 0,
+            "shapes": dict(sorted(shapes.items())),
+            "looks": {key: hashlib.blake2b("\0".join(sorted(found)).encode(), digest_size=4).hexdigest()
+                      for key, found in sorted(looks.items())}}
 
 
 def delta(now: dict[str, Any], before: dict[str, Any] | None) -> dict[str, Any]:
     """Each fact ``now`` holds, ``{"now": value}``, with ``"was"`` where ``before`` held another;
-    ``first`` when there was no build before to compare."""
+    ``first`` when there was no build before to compare. Against a build before whose facts kept
+    its parts' geometry keys, ``changed``: ``parts``, how many of this build's part occurrences
+    have a geometry no part of the build before had, and ``looks``, whether a colour or a material
+    changed on a geometry both builds have."""
     found: dict[str, Any] = {"first": before is None}
     for name in FACTS:
         row: dict[str, Any] = {"now": now.get(name)}
         if before is not None and before.get(name) != row["now"]:
             row["was"] = before.get(name)
         found[name] = row
+    if before is not None and before.get("shapes") is not None and now.get("shapes") is not None:
+        was, looked, looks = before["shapes"], before.get("looks") or {}, now.get("looks") or {}
+        found["changed"] = {"parts": sum(count for key, count in now["shapes"].items() if key not in was),
+                            "looks": any(looked[key] != look for key, look in looks.items() if key in looked)}
     return found

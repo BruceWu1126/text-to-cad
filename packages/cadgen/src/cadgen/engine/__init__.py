@@ -83,3 +83,10 @@ def __getattr__(name: str) -> Any:
         declarations = importlib.import_module("cadgen.engine.model")
         return declarations if name == "model" else getattr(declarations, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    """Its public names (``__all__``) and the submodules imported so far: what ``dir()`` and
+    completion offer, without loading any of them, nor the kernel."""
+    return sorted({*__all__, *(name for name, value in globals().items() if name.startswith("__")
+                               or getattr(value, "__name__", "").startswith(__name__ + "."))})

@@ -1,7 +1,8 @@
 """The line under the run line, in an engine of the test's own: a model's parts, bounds, joints and
 configuration sequences against its build before (``delta``). A first build has nothing to compare;
-an edit that adds parts says how many and the bounds they were; a failed build says none; and the
-report a build returns carries it as data."""
+an edit that adds parts says how many and the bounds they were; an edit that keeps the bounds says
+how many parts' geometry changed, or that only their materials did; a failed build says none; and
+the report a build returns carries it as data."""
 
 from __future__ import annotations
 
@@ -18,7 +19,8 @@ from tests.python.support import engine_daemon
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 
-# A row of ``COUNT`` 10 mm cubes, 20 mm apart; ``FAIL`` makes the body raise. cadgen is imported
+# A row of ``COUNT`` 10 mm cubes, 20 mm apart, each with a hole of radius ``HOLE`` (none at 0) and
+# coloured ``COLOR`` (none when None); ``FAIL`` makes the body raise. cadgen is imported
 # first, so its lazy kernel binds ``build123d``.
 SCRIPT = """
 import json
@@ -28,15 +30,18 @@ from cadgen import model
 
 import build123d as bd
 
-COUNT, FAIL = {count}, {fail}
+COUNT, FAIL, HOLE, COLOR = {count}, {fail}, {hole}, {color!r}
 
 
 @model
 def row():
     assert not FAIL, "the row needs a cube"
-    cubes = [bd.Pos(20 * at, 0, 0) * bd.Box(10, 10, 10) for at in range(COUNT)]
+    cube = bd.Box(10, 10, 10) - bd.Cylinder(HOLE, 10) if HOLE else bd.Box(10, 10, 10)
+    cubes = [bd.Pos(20 * at, 0, 0) * cube for at in range(COUNT)]
     for at, cube in enumerate(cubes):
         cube.label = f"cube{{at}}"
+        if COLOR:
+            cube.color = bd.Color(COLOR)
     return bd.Compound(children=cubes, label="row")
 
 
@@ -66,8 +71,9 @@ class DeltaTest(unittest.TestCase):
     def run_(cls, *args: str):
         return engine_daemon.run([sys.executable, *args], cwd=cls.folder, env=cls.env)
 
-    def built(self, count: int, *args: str, fail: bool = False):
-        (self.folder / "row.py").write_text(textwrap.dedent(SCRIPT.format(count=count, fail=fail)), encoding="utf-8")
+    def built(self, count: int, *args: str, fail: bool = False, hole: float = 0, color: str | None = None):
+        (self.folder / "row.py").write_text(textwrap.dedent(SCRIPT.format(count=count, fail=fail, hole=hole, color=color)),
+                                            encoding="utf-8")
         return self.run_("row.py", *args)
 
     def delta(self, done) -> str:
@@ -86,7 +92,13 @@ class DeltaTest(unittest.TestCase):
         self.assertEqual(json.loads(self.built(5, "--report").stdout.splitlines()[-1]),
                          {"first": False, "parts": {"now": 5, "was": 4}, "bounds": {"now": [90.0, 10.0, 10.0],
                                                                                      "was": [70.0, 10.0, 10.0]},
-                          "joints": {"now": 0}, "sequences": {"now": 0}, "warnings": {"now": 0}})
+                          "joints": {"now": 0}, "sequences": {"now": 0}, "warnings": {"now": 0},
+                          "changed": {"parts": 0, "looks": False}})
+        # Edits that keep the bounds: a hole in every cube, then only a colour.
+        self.assertEqual(self.delta(self.built(5, hole=2)),
+                         "  parts 5 | bounds 90 x 10 x 10 mm | joints 0 | sequences 0 | changed 5")
+        self.assertEqual(self.delta(self.built(5, hole=2, color="red")),
+                         "  parts 5 | bounds 90 x 10 x 10 mm | joints 0 | sequences 0 | materials changed")
 
 
 if __name__ == "__main__":

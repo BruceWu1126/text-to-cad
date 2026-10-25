@@ -77,10 +77,29 @@ def _server(start: bool = True) -> str:
     except Exception as error:  # noqa: BLE001 - a report line, never a reason for the report to fail
         return f"unknown ({type(error).__name__}: {error})"
     if not isinstance(answer, dict):
-        return f"not running ({where}); the first build starts it"
-    workers = len(answer.get("workers") or [])
-    return (f"{'started' if started else 'running'}, pid {answer.get('pid')}, "
-            f"{workers} worker{'' if workers == 1 else 's'} ({where})")
+        return f"not running ({where}); a build starts it outside a sandbox; inside one, run `cadgen server` outside first"
+    from cadgen.engine.cli import workers_text
+
+    # The workers as `cadgen status` counts them: the standby with them.
+    return f"{'started' if started else 'running'}, pid {answer.get('pid')}, {workers_text(answer)} ({where})"
+
+
+def _on_path(folder: str) -> bool:
+    """Whether ``folder`` is on this shell's ``PATH``, however either spells it."""
+    import os
+
+    def same(entry: str) -> bool:
+        return os.path.normcase(os.path.realpath(os.path.expanduser(entry))) == os.path.normcase(os.path.realpath(folder))
+
+    return any(same(entry) for entry in os.environ.get("PATH", "").split(os.pathsep) if entry)
+
+
+def _home(path: str) -> str:
+    """``path`` with the home folder spelled ``~``, as a person types it."""
+    import os
+
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if home not in ("", "~") and (path == home or path.startswith(home + os.sep)) else path
 
 
 def _sharing() -> str | None:
@@ -178,10 +197,17 @@ def _setup() -> list[str]:
         said = {setup.OK: "OK", setup.NEWER: "OK (a later cadgen's)",
                 setup.FOREIGN: "is not cadgen's (left alone): remove it to run cadgen +<version> by it",
                 setup.MISSING: "missing", setup.STALE: "stale"}[status]
+        import os
+
+        folder = os.path.dirname(path)
+        # The folder off PATH: the command is there, but the shell does not find it by its name.
+        unfound = "" if _on_path(folder) else f"; run it as `{path}` until `{_home(folder)}` is on your PATH"
         if error:
             lines.append(f"command  {path} {said}; cannot write it here ({error}): run this outside any sandbox")
         elif status in (setup.MISSING, setup.STALE) and version:
-            lines.append(f"command  {path} written (was {said})")
+            lines.append(f"command  {path} written (was {said}){unfound}")
+        elif status in (setup.OK, setup.NEWER):
+            lines.append(f"command  {path} {said}{unfound}")
         else:
             lines.append(f"command  {path} {said}")
         for record in setup.records():
@@ -231,12 +257,14 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
         return 0
 
     import cadgen
+    from cadgen._internal.installations import own_version
     from cadgen._internal.launch import launch_command
     from cadgen.cli import read_skill_pin
 
     installed = getattr(cadgen, "__version__", "unknown")
     location = Path(cadgen.__file__).resolve().parent
-    sys.stdout.write(f"cadgen {installed}\n")
+    # The version this installation runs as: a development install's own name, else its release.
+    sys.stdout.write(f"cadgen {own_version() or installed}\n")
     sys.stdout.write(f"  python   {sys.version.split()[0]} ({sys.executable})\n")
     sys.stdout.write(f"  install  {location}\n")
     # Its record and the command the skills run it by (`cadgen._internal.installations`).
@@ -281,6 +309,13 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     if pin == installed:
         sys.stdout.write(f"  pin      OK — cadgen=={pin} ({skill})\n")
         return status
+    from cadgen._internal.installations import VERSION
+
+    if not VERSION.fullmatch(pin):
+        # A SKILL.md in a downloaded project is anyone's: a "pin" that is no version (a shell
+        # command, a uv option) is said as data, never built into the command printed below.
+        sys.stderr.write(f"  pin      MISMATCH — {skill} pins no cadgen version: {ascii(pin[:64])}\n")
+        return 3
     sys.stderr.write(
         f"  pin      MISMATCH — {skill} pins cadgen=={pin}, "
         f"but cadgen {installed} is installed.\n"

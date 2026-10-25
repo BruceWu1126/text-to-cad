@@ -2,33 +2,57 @@
 from __future__ import annotations
 
 import http.client
+import os
 import threading
 from urllib.parse import urlsplit
 
-from cadgen.engine.client import request
+from cadgen.engine import daemon
+from cadgen.engine.client import _answering, request
+
+
+def _door(address=None):
+    """Which engine the door at ``address`` (by default this installation's) names now: the identity
+    of the door a daemon reads (on Windows, of its port file, made anew at each start), or None when
+    no engine answers there. A stat and an open of the door that writes nothing: some 15 us."""
+    address = address or daemon.address()
+    try:
+        found = os.stat(address)
+    except OSError:
+        return None
+    if daemon.WINDOWS:
+        return found.st_ino, found.st_mtime_ns, found.st_size
+    return (found.st_dev, found.st_ino) if _answering(address) else None
 
 
 class EngineClient:
     """The engine's loopback endpoint as its door last named it. Only the engine can own that
     door (``daemon.folder_refusal``), while a loopback port is anyone's once the engine has let it
-    go, so the endpoint is read from the door again whenever the one held may be stale: after any
-    answer that is not a success, after a connection error, and for every call that asks for a
-    ``fresh`` endpoint (an MCP ``initialize``)."""
+    go, and every call carries the user's page token, which outlives the engine. So the endpoint
+    held is used only while the door that named it still answers (``_door``), and it is read from
+    the door again whenever it may be stale: an engine gone or replaced, after any answer that is
+    not a success, after a connection error, and for every call that asks for a ``fresh``
+    endpoint (an MCP ``initialize``)."""
 
     def __init__(self):
         self.lock = threading.Lock()
         self.endpoint = None
+        self.door = None  # the identity of the door that named ``endpoint`` (``_door``)
+        self.address = None  # where that door is
 
     def connect(self, *, fresh=False, start=True):
-        """The endpoint held, or -- when there is none, or ``fresh`` -- the one the engine's door
-        names now: an engine started when none answers, unless ``start`` is false (``ConnectionError``)."""
+        """The endpoint held, or -- when there is none, the engine that named it is gone, or
+        ``fresh`` -- the one the engine's door names now: an engine started when none answers,
+        unless ``start`` is false (``ConnectionError``)."""
         with self.lock:
+            if self.endpoint is not None and not fresh and (self.door is None or _door(self.address) != self.door):
+                self.endpoint = None  # its engine is gone: its port, and the token sent there, anyone's
             if self.endpoint is None or fresh:
                 self.endpoint = None
                 answer = request({'op': 'http'}, start=start)
                 if not answer or 'failed' in answer:
                     raise ConnectionError((answer or {}).get('failed', 'engine did not answer'))
-                self.endpoint = answer
+                self.address = daemon.address()
+                self.endpoint, self.door = answer, _door(self.address)
             return self.endpoint
 
     def forget(self):

@@ -333,7 +333,8 @@ is taken or refused. Else the installation's own port: 3245 (`daemon.DEFAULT_POR
 can, as Vite, Jupyter and Next.js take theirs; when another program holds it, the next free port
 (`daemon.PORTS_TRIED` above it, then any), which the installation remembers in its record and takes
 at every later start, so its links stay what they were. The start that rolls says so once, on the
-stderr of the client whose request bound the port (or `cadgen server`'s) and in `cadgen status`:
+stderr of the client whose request bound the port (a build's, when its page bound it; or `cadgen
+server`'s) and in `cadgen status`:
 `3245 is held by <name> (pid N); this installation serves on 3246 and keeps it`. A remembered port
 that is free is used, and one held is rolled from the same way. When 3245 is free again at a start,
 the engine takes it back and forgets the port it rolled to: `back on the default port 3245: links
@@ -342,25 +343,38 @@ system says it (`daemon.port_holder`: `lsof` on macOS, `/proc` on Linux, `netsta
 `another process` where it does not say; a cadgen this one cannot reach is `another cadgen (<name>,
 pid N)`.
 
-Another installation's engine (an older version, after an upgrade) on the port is found by its door
-in the same engine folder and asked its `status`: when nothing uses it -- no hold, no page watching a
-document, no build, draw or HTTP request underway -- it is told to `stop`, and its port is taken once
-it has gone (`daemon.RETIRE_SECONDS` at most), whether the port was named, the default or the
-remembered one. One still in use is never stopped: the installation rolls from it as from any other
-holder.
+**An upgrade converges.** As an engine binds its port, it first asks every other installation's
+engine in the engine folder (each door) its `status`, and tells every one to `stop` that nothing uses
+-- no hold, no page watching a document, no build, draw or HTTP request underway -- and that is older
+than itself, wherever it serves, waiting until each has gone (`daemon.RETIRE_SECONDS` at most;
+`daemon.retire_older`). Older is by the installations' version ranking (`daemon.rank`, the order
+`packaging.version` gives and the `cadgen` command picks by): an installation's version is its
+`installation` in `status` (`CADGEN_INSTALLATION_VERSION`, a development install's
+`<version>-dev.<time>`, else its release), a release ranks above its own `-dev.*` builds, and a
+version that does not parse is older only when that engine's release (`version`) is lower. It says
+each, once, as it says a roll: `retired cadgen 0.8.0's idle engine (pid N) for this newer
+installation`. Then it binds as above. Another installation's engine still on the port is retired
+the same way when nothing uses it and it is not newer, and its port taken once it has gone, whether
+the port was named, the default or the remembered one. An older installation never retires a newer
+one's engine, nor one still in use: it rolls from it as from any other holder.
 
 A named port another process holds is refused in one line naming the holder (`daemon.PortHeld`).
 `cadgen server` binds at its start, so the command fails at once with that line on stderr and exits
-1, no engine left. An engine a client starts binds on the first request that serves (that request
-may name its own port: `cadgen viewer --port`), which fails with the line; the engine leaves its
-note (`daemon.failure_path`) and exits 1:
+1, no engine left. An engine a client starts binds on the first request that serves. A port that
+request names (`cadgen viewer --port`) refuses that request alone, with the line: the engine runs
+on, unbound, for its other clients' builds and the next request that serves. Its own port held
+(`CADGEN_ENGINE_PORT` in the environment it started in) fails that request with the line, and the
+engine, which can never serve, leaves its note (`daemon.failure_path`) and exits 1:
 
 - another program: `port 3245 is held by <name> (pid N): stop it, or start cadgen with another
   CADGEN_ENGINE_PORT` (`…or pass another --port` for a port `--port` named);
 - another installation's engine in use: `port 3245 is held by cadgen <version>'s engine (pid N),
   still in use by 1 app server: quit that app or run `cadgen stop` with that version` (or `N open
   pages`, `N requests`); an engine whose `status` does not say what uses it cannot be asked, and is
-  refused by name the same way.
+  refused by name the same way;
+- a newer installation's engine: `port 3245 is held by cadgen <version>'s engine (pid N), a newer
+  installation's, which this one never retires: use that version, or start cadgen with another
+  CADGEN_ENGINE_PORT`.
 
 The token is made at the installation's first start and every start serves with it, in the
 installation's record, `engines/<installation>.json` in the state folder (`port` while the
@@ -424,7 +438,7 @@ only, and a file's id is derived again from its path after a restart.
 | `colors.py` | a colour as the author gives it (sRGB hex, 0-255 integers, a build123d `Color`) held linear, and the way back (**Materials**) |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`gear_pair`, `rack_and_pinion_pair`, `screw_pair`), mechanism states (`mechanism_state`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground; `posed`, an assembly copied at a state), and configuration sequences (`configuration_sequence`, a function's samples, `Timeline`: a sequence's pair values over time) |
 | `build.py` | one build: load the script afresh (as Python imports it: a package's module by its dotted name), one memo run, document, element names, files: every model's that ran |
-| `delta.py` | the line under the run line: a built tree's facts (`facts`: its occurrences, its world bounds from each part's quick box, kept by its geometry key, and its joints, configuration sequences and warnings), worked out in the worker, and the daemon's delta of them against the build before (`delta`), kept beside each record and in the registry's |
+| `delta.py` | the line under the run line: a built tree's facts (`facts`: its occurrences, its world bounds from each part's quick box, kept by its geometry key, its parts' geometry keys and looks, and its joints, configuration sequences and warnings), worked out in the worker, and the daemon's delta of them against the build before (`delta`), kept beside each record and in the registry's |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
@@ -471,7 +485,7 @@ cadgen status [--json] | stop [--json] | server [--port N] [--rotate-token]
 Every `SRC` and `DOC` is an on-disk CAD file's path or a document's id (`ids`): a model's id is
 what `python SCRIPT.py` prints for it (`id:`, beside its page, `view: <engine>/<id>`). A document
 id is read as the engine holds it, never built: one it does not hold is refused with the command
-that builds it again, `python <the program that built it>`. A script is never a source: `x.py`
+that builds it again, `cadgen run <the program that built it>`. A script is never a source: `x.py`
 and `x.py::fn` are refused as any other file that is no document is.
 
 Every build and every verb goes through the engine: no command runs one in its own process. A
@@ -499,12 +513,18 @@ build that model and the children its body calls, prints its report -- its `id:`
 or `took …` for a model taken from its key) is followed by the model's delta against its build
 before, which the daemon says from the facts the worker's tree held (`delta`): `parts 21 (+2) ·
 bounds 461.4 × 152 × 709.3 mm (was 504.9 × 152 × 709.3) · joints 1 · sequences 1`, with `warnings
-N` where there are or were some, what a changed value was beside it, nothing to compare on a first
+N` where there are or were some, what a changed value was beside it, then `changed 2` when that
+many parts have a geometry the build before had none of (by the geometry keys the build already
+has, so an edit that keeps the bounds -- a hole, a thickness, a fillet -- is still seen) or
+`materials changed` when only colours or materials did, nothing to compare on a first
 build and no line for a failed one, and the report carries it as data (`delta`). Its bounds are
 the kernel's quick boxes, a free-form face's from its edges (31 ms cold on juno's 246 parts, within
 0.1 mm of `inspect`'s exact boxes, which took 8.6-12 s), and a tree whose signature is its last
 build's is not walked again, so a warm no-op pays nothing measurable for it. A failed build
-raises; a successful call resumes the script. Put executable model calls under
+raises; a successful call resumes the script. A body that fails in a kernel call whose OCCT exception carries no words
+(`Standard_Failure`, bare) has that call named on its failure line, as the memo saw it --
+`failed plate.py::plate at Solid.make_box(0, 60, 5): the kernel refused it` -- and in its report
+(`failedAt`; `memo.refused_call`). Put executable model calls under
 `if __name__ == "__main__":` so other models can import their definitions.
 `Model.build(verify=, profile=, daemon=)`, the debug seam, explicitly requests a build and returns its report.
 No watcher selects, suppresses or introduces calls in a Python script.
@@ -553,7 +573,10 @@ If a body raises, the error is reported with the model's frames and the
 previous files stay: the program's own call prints those frames once on stderr, then `failed
 <script>::<model>`, and nothing else; the call still raises (`EngineError`), so a caller may catch
 it, and left uncaught it ends the program with status 1 without its traceback again
-(`model._told`). Builds run in the daemon's warm workers, at most one per core alive
+(`model._told`). A call the engine never served -- none runs and this shell's sandbox cannot
+start one, a folder refused, its port held -- raises its `ConnectionError` or `EngineError` the
+same way: left uncaught, its one line on stderr (`cadgen: <why>`, as a `cadgen` verb says it) and
+status 1, no traceback; caught, nothing said. Builds run in the daemon's warm workers, at most one per core alive
 (**The engine server and its workers**). `CADGEN_ENGINE_DIR` moves its door and lock; the client and the server resolve it alike (`daemon.state_dir`: a `..`, a symlink or a trailing slash names the same folder). On POSIX the folder must be the user's own and closed to writing by anyone else (`daemon.folder_refusal`): whoever owns or can write the folder could take the door's place, so a client refuses to connect or start there and the daemon refuses to lock there, saying why.
 `CADGEN_ENGINE_MEMORY_MB` sets the server's memory budget, and `CADGEN_ENGINE_CACHE_GB` the
 document cache's size (`0`: no cache; `CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, is the tests'
@@ -625,8 +648,8 @@ which also avoids pybind11's unmatched profile events on Python 3.12 and later.
 One engine server per installation (`daemon.py`: a daemon, which `cadgen server` runs in the
 foreground), started on demand by the first command that needs it. **No timer stops it**: a
 person may be using a page or the CAD app for hours without a build. It stops in four ways: on
-`cadgen stop` (or a terminate); when another installation that needs its port retires it while
-nothing uses it (**A link outlives its engine**); when its door is gone -- its folder removed, a
+`cadgen stop` (or a terminate); when a newer installation's engine starts, or another that needs its
+port, and retires it while nothing uses it (**A link outlives its engine**); when its door is gone -- its folder removed, a
 temporary folder cleaned up, or another file put in the door's place -- so that no one can reach it
 (`Daemon.tend` sees it within a round, and it stops as `stop` does, saving what it holds to the
 cache); and with the machine. **No timer retires a worker either**: memory alone does. Idle
@@ -670,8 +693,8 @@ tessellations, is under one memory budget: **Document lifetime**.)
   it idle processes are retired, least recently used first within each rank: the standby, render
   processes, the workers no page watches, then the watched ones, only when no other is left; a
   worker is drained to the held tier first. Under the system's memory pressure (the server's
-  `serve.Pressure`, polled every two seconds), the standby goes at once and the rest down to half
-  the cap. A busy process is never retired, and an idle worker under the cap lives as long as the
+  `serve.Pressure`, polled every two seconds), the standby goes at once, none starts while it lasts, and
+  the rest go down to half the cap. A busy process is never retired, and an idle worker under the cap lives as long as the
   engine. A worker alone over the cap after a build is retired at once: the report says so
   (`retired`), and once it has answered the daemon drains it and closes its stdin.
 - **Collected when idle.** A worker builds with Python's cyclic collector off and collects once
@@ -740,7 +763,7 @@ documents:
   live      tom      8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12
   held      bracket  3e9b7c21-55aa-5f0e-8d11-6c2a9b4e7d30  memory and disk
   held      lid      0a6f2d94-7c1e-5b38-9e40-1d5c7a2b8f63  disk
-  evicted   arm      71d0c4e8-9b2a-5c13-a6f4-0e8d2b5c9a17  run `python /work/assemble.py`
+  evicted   arm      71d0c4e8-9b2a-5c13-a6f4-0e8d2b5c9a17  run `cadgen run /work/assemble.py`
 ```
 
 A worker's memory is as it measured it after its last build; a busy one's build is where its
@@ -756,7 +779,7 @@ lifetime**), and a held one where it is held: in memory, on disk (the cache), or
 `cache` line is the cache folder, the documents and bytes in it against its cap, the files evicted
 for room and the last save that failed. `--json` lists the documents as `models`, the cache as
 `cache`, and `serving.documents` the files served, each `held` or `evicted`, with the bytes it holds. It
-also says its `version` and what uses it -- `holders`, `watched` (the documents pages watch), `busy`
+also says its `version` (its release), its `installation` (the version it runs as) and what uses it -- `holders`, `watched` (the documents pages watch), `busy`
 (builds and draws running) and `active` (HTTP work underway) -- which another installation's engine
 asks before it retires this one (**A link outlives its engine**).
 
@@ -940,9 +963,9 @@ current model; changed, it shows the last built state, with a badge -- "The code
 was built" and the rebuild command -- and `inspect` answers `stale`. Nothing reruns. Every verb
 that reads a document by its id (`export`, `snapshot`, `inspect`, with a ref or without) says once
 on stderr what it reads when that is not what the code makes now (`cli.told_state`, from
-`model_info`): "exporting the build of turbine from before turbine.py changed; run `python
+`model_info`): "exporting the build of turbine from before turbine.py changed; run `cadgen run
 …/turbine.py` to update it", or, for a document whose last run failed, "the last run of turbine
-failed; exporting its previous good build; fix it and run `python …/turbine.py` to update it". It
+failed; exporting its previous good build; fix it and run `cadgen run …/turbine.py` to update it". It
 goes on: a notice, never a refusal. `cadgen status` ends such a document's line with the word: stale
 and the command, or "serving its previous good build". A font is named by a family, not checked.
 
@@ -1002,9 +1025,13 @@ mark, half the budget:
 Where none can be read, the budget alone applies. `Pressure.simulate` is the tests' hook.
 
 **The rebuild command.** A document that is not held -- `evicted`, `expired` -- names the exact
-command that builds it again: `python` and the program whose call built it (its `__main__`
-file, else the model's script), from the daemon's record of it, or after a
-restart the registry's. A shape handed over has none: its words say that a program the engine did
+command that builds it again: `cadgen run` and the program whose call built it (its `__main__`
+file, else the model's script) -- the engine that says it is the one `cadgen run` reaches, and its
+python has the kernel a bare `python` may lack -- from the daemon's record of it, or after a
+restart the registry's. The program is quoted for the shell a person pastes it into (`registry.rerun`):
+`shlex.quote` on POSIX; on Windows the double quotes cmd.exe and PowerShell both read, only where a
+space or a quote needs them (`subprocess.list2cmdline`), since to cmd.exe a single quote is part of
+the path. A shape handed over has none: its words say that a program the engine did
 not run showed it, and that only running that program again hands it over again. A child model's is its parent's program, whose run builds it. The page
 reads it from its document's 404 (`GET /api/doc/<id>`: `{"error", "state", "rebuild"}`),
 `cadgen inspect` and `cad_show` of its id refuse with it, and `cadgen status` lists it. A `memory`
@@ -2492,7 +2519,7 @@ inspect ID 'face 1'` take the id; `cadgen inspect 'ID#face 1'` uses the same ref
 Each reads the document the engine holds, as it is: editing the script changes nothing until
 Python runs it again, and no verb imports, runs or builds a script. An id the engine no longer
 holds (evicted, expired) is refused with its state and the command that builds it again
-(`python <the program that built it>`; **Document lifetime**).
+(`cadgen run <the program that built it>`; **Document lifetime**).
 `--query build` returns saved-file metadata/closure or live-build metadata; `--query closure` and
 `--query geometry` select the other queries explicitly. In the CAD Viewer a model's page is
 `/<id>`; it has no file of its own, so no Select File and no file menu.

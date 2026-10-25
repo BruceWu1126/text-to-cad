@@ -152,10 +152,10 @@ class NotHeldRefusalTest(unittest.TestCase):
         answers: list[dict] = []
         engine.handle({"op": "document", "id": ident}, answers.append)
         (answer,) = answers
-        self.assertEqual((answer["state"], answer["rebuild"]), ("expired", "python /nowhere/caller.py"))
+        self.assertEqual((answer["state"], answer["rebuild"]), ("expired", "cadgen run /nowhere/caller.py"))
         error = api._failed(answer)
         self.assertIsInstance(error, NotHeld, "raised as its type: the CLI exits 2 for a ValueError")
-        self.assertEqual((error.state, error.rebuild, str(error)), ("expired", "python /nowhere/caller.py", answer["failed"]))
+        self.assertEqual((error.state, error.rebuild, str(error)), ("expired", "cadgen run /nowhere/caller.py", answer["failed"]))
         answers.clear()
         engine.handle({"op": "document", "id": model_id(Path("/nowhere/other.py"), "other")}, answers.append)
         self.assertIsInstance(api._failed(answers[0]), NotHeld, "an id it never built is refused the same")
@@ -439,7 +439,7 @@ class LifetimeDaemonTest(unittest.TestCase):
         tiny = {**self.env, "CADGEN_ENGINE_MEMORY_MB": "0.001", "CADGEN_ENGINE_CACHE_GB": "0"}
         evicted = self.built("arm", env=tiny)
         expired = self.built("cell", store='(store="memory")', env=tiny)
-        command = f"python {self.folder / 'caller_arm.py'}"
+        command = f"cadgen run {self.folder / 'caller_arm.py'}"
         row = self.row(evicted, "evicted")
         self.assertEqual(row["rebuild"], command, "the program that built it, not its script")
         status, body = self.page(evicted)
@@ -449,7 +449,7 @@ class LifetimeDaemonTest(unittest.TestCase):
         self.assertEqual(inspected.returncode, 2, "a document not held is a refusal, not a failure")
         self.assertIn(f"run `{command}`", inspected.stderr)
         row = self.row(expired, "expired")
-        self.assertEqual(row["rebuild"], f"python {self.folder / 'caller_cell.py'}")
+        self.assertEqual(row["rebuild"], f"cadgen run {self.folder / 'caller_cell.py'}")
         status, body = self.page(expired)
         self.assertEqual((status, body["state"]), (404, "expired"))
         self.assertIn("it is kept in memory only", body["error"])

@@ -334,6 +334,15 @@ def _model_traceback(error: BaseException) -> str:
     return "".join(lines).rstrip()
 
 
+def _refused(error: BaseException) -> dict[str, str]:
+    """``failedAt``: the kernel call an OCCT exception with no words of its own was raised in
+    (``memo.refused_call``), which the failure line names; nothing for any other error."""
+    from cadgen.engine.kernel.memo import refused_call
+
+    found = refused_call(error)
+    return {"failedAt": found} if found else {}
+
+
 def build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
           cwd: Path | None = None, verify: bool = False, profile: bool = False,
           run: str | None = None, cache: str | None = None) -> list[dict[str, Any]]:
@@ -419,7 +428,7 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
             except BuildError:
                 raise
             except Exception as error:  # noqa: BLE001 - the model's own error, reported
-                return [{"ok": False, "model": f"{shown}", "error": _model_traceback(error)}]
+                return [{"ok": False, "model": f"{shown}", "error": _model_traceback(error), **_refused(error)}]
             finally:
                 _HEARD[0] = None
             context.loaded = set(_first_party_modules())
@@ -490,7 +499,8 @@ def _build(script: Path, functions: list[str] | None = None, *, log: Callable[[s
             try:
                 result = context.root(model)
             except Exception as error:  # noqa: BLE001 - the model's own error, reported
-                reports.append({"ok": False, "model": f"{shown}::{model.name}", "error": _model_traceback(error)})
+                reports.append({"ok": False, "model": f"{shown}::{model.name}", "error": _model_traceback(error),
+                                **_refused(error)})
                 # A child that ran before the error writes its files all the same.
                 results.append((model, None, 0.0, ran(model, before)))
                 continue

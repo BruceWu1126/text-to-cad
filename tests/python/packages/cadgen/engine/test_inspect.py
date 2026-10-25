@@ -108,5 +108,22 @@ class SummaryTest(unittest.TestCase):
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
 
 
+class SummaryTextTest(unittest.TestCase):
+    def test_names_a_file_carries_are_printed_without_their_control_characters(self) -> None:
+        # A third-party STEP's product names reach the terminal: OCCT keeps an ESC in them.
+        from cadgen.engine.cli import summary_text
+
+        evil = "asm\x1b[2J\x1b]52;c;cHduZWQ=\x07\x9b"
+        summary = {"name": evil, "id": "x", "state": {"state": "file", "path": "/m/a.step"},
+                   "parts": {"occurrences": 1, "distinct": 1, "root": evil}, "bounds": None, "volume": 0.0,
+                   "materials": [{"name": evil, "mass": None, "parts": [evil]}], "unweighed": [evil],
+                   "joints": [{"name": evil, "type": "revolute", "range": [], "units": [], "asBuilt": None}],
+                   "states": [], "sequences": [], "animations": [], "files": [evil]}
+        text = summary_text(summary)
+        self.assertFalse([character for character in text if ord(character) < 0x20 and character != "\n"
+                          or 0x7f <= ord(character) < 0xa0], text)
+        self.assertIn("asm\\x1b[2J", text, "each shown as its escape")
+
+
 if __name__ == "__main__":
     unittest.main()

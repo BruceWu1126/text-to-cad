@@ -280,7 +280,7 @@ class HingeTest(_Folder):
         path = self.folder / "XBF/hinge.xbf"
         out = self.folder / "stale.png"
         for pose, words in (({"elbw": 1}, "names no joint 'elbw'"), ({"elbow": 150}, "'elbow' at 150 deg is outside"),
-                            ("folded", "no configuration 'folded'")):
+                            ("folded", "no mechanism state 'folded'")):
             out.write_bytes(b"before")
             with self.assertRaisesRegex(SnapshotRefused, words):
                 snapshot(path, out, pose=pose, size=(160, 120), daemon=False)

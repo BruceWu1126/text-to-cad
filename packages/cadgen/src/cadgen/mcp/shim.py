@@ -70,11 +70,12 @@ class Holder:
             self.wanted.clear()
             try:
                 connection = hold(host=self.host)
-            except (ConnectionError, OSError, ValueError) as error:
+            except Exception as error:  # noqa: BLE001 - held again at the next request; the thread lives
                 LOG.info('could not hold the engine: %s', error)
                 self.tried.set()
                 continue
             self.holding = True
+            self.wanted.clear()  # the requests made while it was taken are served by this hold
             self.tried.set()
             try:
                 with connection:

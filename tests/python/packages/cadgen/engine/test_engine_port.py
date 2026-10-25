@@ -2,7 +2,7 @@
 ``CADGEN_ENGINE_PORT``, else 3245 or the port it rolled to when 3245 was another's, remembered) and
 the user's one page token, every installation's, the same at every start until ``cadgen server
 --rotate-token``. A named port another process holds is refused by name; another installation's
-engine that nothing uses is retired."""
+engine that nothing uses is retired: an older one's wherever it serves, and never a newer one's."""
 
 from __future__ import annotations
 
@@ -119,12 +119,13 @@ class EnginePortTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": self.env["CADGEN_ENGINE_DIR"]}):
             return daemon.address()
 
-    def other(self) -> tuple[str, dict, Path]:
+    def other(self, **extra: str) -> tuple[str, dict, Path]:
         """A second installation's engine on a port of this test's, its page launched: its
-        interpreter, the launch (``pid``, ``port``) and its door, stopped at the end."""
+        interpreter, the launch (``pid``, ``port``) and its door, stopped at the end. ``extra``: its
+        environment (``CADGEN_INSTALLATION_VERSION``, the version it runs as)."""
         python = other_installation(self.root)
         self.addCleanup(self.stop, python)
-        launched = self.launch(python, CADGEN_ENGINE_PORT=str(free_port()))
+        launched = self.launch(python, CADGEN_ENGINE_PORT=str(free_port()), **extra)
         (door,) = (self.root / "engine").glob("*.port" if os.name == "nt" else "*.door")
         self.assertNotEqual(door, self.ours(), "another installation's engine")
         return python, launched, door
@@ -161,13 +162,26 @@ class EnginePortTest(unittest.TestCase):
             self.assertEqual(found.stat().st_mode & 0o777, 0o600)
         return found.read_text(encoding="utf-8").strip()
 
-    def bound(self, default: int) -> tuple[Listener, dict]:
+    def held(self, door: Path) -> None:
+        """An app server's hold on the engine at ``door``, as ``client.hold`` asks one, kept to the end."""
+        from cadgen.engine import client
+
+        held = client._connect(door)
+        self.addCleanup(held.close)
+        message = {"op": "hold", "host": "codex"}
+        if os.name == "nt":
+            message = {"token": door.read_text(encoding="utf-8").split()[1], **message}
+        held.writer.write((json.dumps(message) + "\n").encode())
+        held.writer.flush()
+        self.assertEqual(json.loads(held.reader.readline()), {"ok": True})
+
+    def bound(self, default: int, **extra: str) -> tuple[Listener, dict]:
         """``daemon.bind`` in this process, nothing named, its default ``default``: its listener
-        (closed at the end) and where its port came from."""
+        (closed at the end) and where its port came from. ``extra``: this process's environment."""
         from cadgen.engine import daemon, registry
 
         environment = {key: value for key, value in os.environ.items() if key != "CADGEN_ENGINE_PORT"}
-        with mock.patch.dict(os.environ, {**environment, "CADGEN_ENGINE_DIR": self.env["CADGEN_ENGINE_DIR"]},
+        with mock.patch.dict(os.environ, {**environment, "CADGEN_ENGINE_DIR": self.env["CADGEN_ENGINE_DIR"], **extra},
                              clear=True), mock.patch.object(daemon, "DEFAULT_PORT", default), \
                 mock.patch.object(registry, "FACTORY", lambda: registry.Registry(self.root / "state")):
             server, where = daemon.bind("127.0.0.1", None, Listener)
@@ -199,6 +213,25 @@ class EnginePortTest(unittest.TestCase):
             self.assertIn(f" (pid {os.getpid()}): ", said)
         self.answering()
 
+    def test_a_request_s_own_held_port_is_refused_and_the_running_engine_goes_on(self) -> None:
+        # An engine already running for other clients (no page yet): one viewer's --port, held by
+        # another program, refuses that viewer and never stops the engine under the others.
+        own = free_port()
+        before = engine_daemon.run([sys.executable, "-c", "from cadgen.engine import client; "
+                                    "print(client.request({'op': 'pid'})['pid'])"],
+                                   env={**self.env, "CADGEN_ENGINE_PORT": str(own)})
+        self.assertEqual(before.returncode, 0, before.stderr)
+        port = held_port(self)
+        done = engine_daemon.run([sys.executable, "-m", "cadgen.viewer", "--api-only", "--json", "--port", str(port)],
+                                 env=self.env, cwd=self.root)
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertRegex(done.stderr.strip().splitlines()[-1],
+                         rf"^CAD Viewer: port {port} is held by .+: stop it, or pass another --port$")
+        after = engine_daemon.run([sys.executable, "-c", "from cadgen.engine import client; "
+                                   "print((client.request({'op': 'pid'}, start=False) or {}).get('pid'))"], env=self.env)
+        self.assertEqual(after.stdout.strip(), before.stdout.strip(), "the same engine answers")
+        self.assertEqual(self.launch()["port"], own, "and serves the next page on its own port")
+
     def test_cadgen_server_on_a_held_port_fails_at_once_and_leaves_no_engine(self) -> None:
         port = held_port(self)
         done = self.cli("server", "--port", str(port))  # no request is ever sent: it binds at its start
@@ -206,6 +239,21 @@ class EnginePortTest(unittest.TestCase):
         self.assertRegex(done.stderr.strip().splitlines()[-1],
                          rf"^cadgen: port {port} is held by .+: stop it, or pass another --port$")
         self.answering()
+
+    def test_cadgen_server_beside_a_running_engine_says_so_and_a_port_it_cannot_take_fails(self) -> None:
+        running = self.launch(CADGEN_ENGINE_PORT=str(free_port()))
+        asked = free_port()
+        done = self.cli("server", "--port", str(asked))
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("this installation's engine server is already running", done.stderr)
+        self.assertFalse(listening(asked), "nothing serves the port it named")
+        plain = self.cli("server")
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        self.assertIn("already running", plain.stderr)
+        self.assertEqual(self.launch()["pid"], running["pid"])
+        bad = self.cli("server", "--port", "70000")
+        self.assertEqual(bad.returncode, 2)
+        self.assertRegex(bad.stderr.strip(), r"^[^:]*server: --port must be between 0 and 65535$", "its name said once")
 
     def test_a_held_default_rolls_to_the_next_free_port_says_so_once_and_keeps_it(self) -> None:
         mine = not listening(3245)
@@ -300,6 +348,66 @@ class EnginePortTest(unittest.TestCase):
         self.assertEqual(refused.returncode, 1)
         self.assertIn("another installation's engine server is running", refused.stderr)
 
+    def test_a_newer_installation_retires_an_idle_older_engine_on_any_port_and_says_so_once(self) -> None:
+        _python, theirs, door = self.other(CADGEN_INSTALLATION_VERSION="0.8.0")
+        self.assertNotIn(theirs["port"], (3245,))
+        done = self.started(CADGEN_INSTALLATION_VERSION="0.9.0", CADGEN_ENGINE_PORT=str(free_port()))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        said = f"retired cadgen 0.8.0's idle engine (pid {theirs['pid']}) for this newer installation"
+        self.assertEqual([line for line in done.stderr.splitlines() if "retired" in line], [f"cadgen: {said}"])
+        self.answering(self.ours())
+        self.assertIn(f"  {said}", self.cli("status").stdout.splitlines())
+        again = self.started(CADGEN_INSTALLATION_VERSION="0.9.0")  # its engine reused: nothing said again
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn("retired", again.stderr)
+
+    def test_an_older_installation_never_retires_a_newer_engine_it_rolls_from_it(self) -> None:
+        _python, theirs, door = self.other(CADGEN_INSTALLATION_VERSION="0.9.0-dev.20261025")
+        server, where = self.bound(theirs["port"], CADGEN_INSTALLATION_VERSION="0.8.0-dev.20261024")
+        self.assertGreater(server.port, theirs["port"])
+        self.assertEqual(where["notice"], f"{theirs['port']} is held by cadgen 0.9.0-dev.20261025's engine (pid "
+                                          f"{theirs['pid']}); this installation serves on {server.port} and keeps it")
+        server.socket.close()
+        done = self.started(CADGEN_INSTALLATION_VERSION="0.8.0", CADGEN_ENGINE_PORT=str(theirs["port"]))
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertEqual(done.stderr.strip().splitlines()[-1],
+                         f"CAD Viewer: port {theirs['port']} is held by cadgen 0.9.0-dev.20261025's engine (pid "
+                         f"{theirs['pid']}), a newer installation's, which this one never retires: use that version, "
+                         "or start cadgen with another CADGEN_ENGINE_PORT")
+        self.answering(door)
+
+    def test_an_older_engine_in_use_is_left_and_the_newer_rolls_from_it_with_its_notice(self) -> None:
+        _python, theirs, door = self.other(CADGEN_INSTALLATION_VERSION="0.8.0")
+        self.held(door)
+        server, where = self.bound(theirs["port"], CADGEN_INSTALLATION_VERSION="0.9.0")
+        self.assertGreater(server.port, theirs["port"])
+        self.assertEqual(where["notice"], f"{theirs['port']} is held by cadgen 0.8.0's engine (pid {theirs['pid']}); "
+                                          f"this installation serves on {server.port} and keeps it")
+        self.answering(door)
+
+    def test_installations_rank_as_packaging_orders_versions(self) -> None:
+        from cadgen.engine import daemon, previous
+
+        ordered = ["0.7.26", "0.8.0-dev.20261024", "0.8.0-dev.20261025", "0.8.0a1", "0.8.0rc1", "0.8.0",
+                   "0.8.0+local.1", "0.8.0.post1", "0.8.1-dev.1", "0.9.0", "0.10.0"]
+        self.assertEqual(sorted(reversed(ordered), key=daemon.rank), ordered)
+        self.assertEqual(daemon.rank("0.8"), daemon.rank("0.8.0"))
+        self.assertIsNone(daemon.rank("0.8.0-dev.x"))
+        try:
+            from packaging.version import Version
+        except ImportError:
+            pass
+        else:
+            self.assertEqual(sorted(reversed(ordered), key=Version), ordered)
+        with mock.patch.dict(os.environ, {"CADGEN_INSTALLATION_VERSION": "0.9.0"}):
+            self.assertEqual(daemon._standing({"installation": "0.9.0-dev.1"}), -1, "a release above its builds")
+            self.assertEqual(daemon._standing({"version": "0.9.0"}), 0)
+            self.assertEqual(daemon._standing({"installation": "1.0.0-dev.1"}), 1)
+        with mock.patch.dict(os.environ, {"CADGEN_INSTALLATION_VERSION": "mine"}):
+            # A version it cannot parse: older only when its door answers with a lower release.
+            self.assertEqual(daemon._standing({"installation": "theirs", "version": "0.0.1"}), -1)
+            self.assertIsNone(daemon._standing({"installation": "theirs", "version": previous.version()}))
+
     def test_a_named_port_wins_and_rotate_token_replaces_the_token(self) -> None:
         named = free_port()
         first = self.launch(CADGEN_ENGINE_PORT=str(named))
@@ -320,6 +428,35 @@ class EnginePortTest(unittest.TestCase):
         self.assertEqual(refused.returncode, 1)
         self.assertIn("run cadgen stop first", refused.stderr)
         self.assertEqual(self.token(), rotated["token"])
+
+
+class BuildBoundNoticeTest(unittest.TestCase):
+    def test_a_roll_a_builds_page_made_is_said_by_the_next_build_once_and_by_no_status(self) -> None:
+        """A build's page binds the port with no client's request (``models.register_page``): the
+        next build's answer says the roll, once; a status asked meanwhile does not take it."""
+        import io
+
+        from cadgen.engine import daemon
+
+        said = "3245 is held by another process; this installation serves on 3246 and keeps it"
+
+        class Engine:
+            refusal, token, unsaid = None, "", said
+
+            def handle(self, request: dict, send) -> None:
+                send({"log": "building"})
+                send({"ok": True})
+
+        engine = Engine()
+
+        def asked(op: str) -> list[dict]:
+            out = io.BytesIO()
+            daemon._serve(engine, io.BytesIO((json.dumps({"op": op}) + "\n").encode()), out)
+            return [json.loads(line) for line in out.getvalue().splitlines()]
+
+        self.assertEqual(asked("status"), [{"log": "building"}, {"ok": True}])
+        self.assertEqual(asked("build"), [{"log": "building"}, {"ok": True, "notice": said}])
+        self.assertEqual(asked("build"), [{"log": "building"}, {"ok": True}])
 
 
 if __name__ == "__main__":

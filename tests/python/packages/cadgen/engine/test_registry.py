@@ -45,6 +45,14 @@ class RegistryTest(unittest.TestCase):
         self.registry = Registry(self.state)
         self.ident = model_id(self.state / "parts.py", "cube")
 
+    def test_an_engine_record_reads_only_a_port_number(self) -> None:
+        engines = self.state / registry.ENGINES
+        engines.mkdir(parents=True, exist_ok=True)
+        for port, read in ((3246, {"port": 3246}), (True, {}), ("3246", {}), (70000, {}), (3246.0, {})):
+            (engines / "abc123.json").write_text(json.dumps({"schema": registry.ENGINE_SCHEMA, "port": port}),
+                                                 encoding="utf-8")
+            self.assertEqual(self.registry.engine("abc123"), read, port)
+
     def test_a_record_is_written_once_until_it_changes_and_its_observers_hear_each_write(self) -> None:
         heard: list[dict] = []
         self.enterContext(mock.patch.object(registry, "OBSERVERS", [heard.append]))
@@ -57,17 +65,17 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual([record["revision"] for record in heard], ["a", "b"])
         self.assertEqual([record["id"] for record in self.registry.list()], [self.ident])
         self.assertEqual(registry.command(self.registry, self.registry.get(self.ident)),
-                         f"python {self.state / 'caller.py'}")
+                         f"cadgen run {self.state / 'caller.py'}")
         self.assertTrue(self.registry.delete(self.ident))
         self.assertEqual((self.registry.get(self.ident), self.registry.list()), (None, []))
 
     def test_the_rebuild_command_pastes_into_the_platform_s_shell(self) -> None:
         # Printed for a person to paste: quoted for a POSIX shell there; on Windows as cmd.exe and
         # PowerShell both read it, where a single quote would be part of the path.
-        cases = ((False, "/m/caller.py", "python /m/caller.py"),
-                 (False, "/my models/caller.py", "python '/my models/caller.py'"),
-                 (True, "C:\\m\\caller.py", "python C:\\m\\caller.py"),
-                 (True, "C:\\my models\\caller.py", 'python "C:\\my models\\caller.py"'))
+        cases = ((False, "/m/caller.py", "cadgen run /m/caller.py"),
+                 (False, "/my models/caller.py", "cadgen run '/my models/caller.py'"),
+                 (True, "C:\\m\\caller.py", "cadgen run C:\\m\\caller.py"),
+                 (True, "C:\\my models\\caller.py", 'cadgen run "C:\\my models\\caller.py"'))
         for windows, program, pasted in cases:
             with self.subTest(program=program), mock.patch.object(registry, "WINDOWS", windows):
                 self.assertEqual(registry.rerun(program), pasted)
@@ -219,9 +227,9 @@ class RegistryDaemonTest(unittest.TestCase):
         self.assertEqual(self.cli("stop").returncode, 0)
         inspected = self.cli("inspect", cube)
         self.assertEqual(inspected.returncode, 2, inspected.stderr)
-        self.assertIn(f"run `python {project / 'caller.py'}`", inspected.stderr)
+        self.assertIn(f"run `cadgen run {project / 'caller.py'}`", inspected.stderr)
         answer = self.ask({"op": "state", "id": cube})
-        self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", f"python {project / 'caller.py'}"))
+        self.assertEqual((answer["state"], answer["rebuild"]), ("evicted", f"cadgen run {project / 'caller.py'}"))
         self.assertEqual(self.ask({"op": "state", "id": scratch})["state"], "evicted", "a memory id is unknown")
         from cadgen.viewer.recents import RecentStore
 
