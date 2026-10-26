@@ -198,7 +198,7 @@ class ExportsTest(unittest.TestCase):
         running = self.jobs.create(self.request("two"))
         self.assertTrue(self.entered.wait(10))
         engine = SimpleNamespace(lock=threading.RLock(), _default=SimpleNamespace(_exports=self.jobs), _mcp=None,
-                                 analytics=Mock())
+                                 analytics=Mock(), viewer_analytics=Mock())
         EngineApp.close(engine)
         self.assertEqual(list(Path(self.tmp.name).iterdir()), [])
         self.finish.set()
