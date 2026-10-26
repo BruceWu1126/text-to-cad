@@ -618,7 +618,10 @@ text, and iOS Safari zooming into any field under 16px): type 12, 13, 14 and 15p
 `text-tiny`, `text-xs` and `text-ui`; text entry at the panel's own size (the page's viewport,
 not a 16px font, stops a phone zooming in on a field); menu, select and tree rows 36-40px; the
 navbar, and Preview's bar in its place, a 48px row of 36px controls; the strip and the sub-toolbars 36px tiles (the strip one row,
-**More tools** holding what does not fit; the drawing tools' row the same single row, wrapping where it must).
+**More tools** holding what does not fit; the drawing tools' row the same single row, wrapping where it must — Shapes' does
+at 375px, its style group under its tools, and a row that wrapped draws no rule between its groups, the line
+break parting them, `SubToolbar`'s `data-wrapped`). An SDF's counts are two tiles a row in a phone's panel (three on a desktop), so
+their labels read whole.
 The scale is set once, in `globals.css`, for the whole page while a phone's view is on it, so a
 portalled menu, select or hint is the same size as the chrome it opened from. There is no view
 cube; the file sidebar is one tile at the strip's left, its sections tabs of one panel; and

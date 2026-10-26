@@ -1,5 +1,6 @@
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { useI18n } from "@text-to-cad/ui/i18n";
+import { useViewerMobile } from "../../file-viewer/responsive.js";
 import { FILE_SHEET_FIELD_LABEL_CLASSES, FileSheetFieldGrid, FileSheetSubsection, FileSheetValueField } from "../kit/inspector/FileSheet.js";
 
 function formatSdfNumber(value, fallback = "0") {
@@ -31,9 +32,14 @@ function SdfMetadataList({ title, items, fields }) {
   );
 }
 
-/** What an SDF document says about itself beyond its links and joints: the payload's `sdf` record. */
+/**
+ * What an SDF document says about itself beyond its links and joints: the payload's `sdf` record.
+ * Its counts are three tiles a row; on a phone, whose panel is 288px wide and whose type is a step
+ * larger, two, so "Nested models" and "Unsupported geom." read whole instead of truncating.
+ */
 export default function SdfSection({ info }) {
   const { t } = useI18n();
+  const mobile = useViewerMobile();
   const sdfInfo = info && typeof info === "object" ? info : {};
   const metadata = sdfInfo.staticMetadata && typeof sdfInfo.staticMetadata === "object" ? sdfInfo.staticMetadata : {};
   const list = key => (Array.isArray(metadata[key]) ? metadata[key] : []);
@@ -52,7 +58,7 @@ export default function SdfSection({ info }) {
         </FileSheetFieldGrid>
       </FileSheetSubsection>
       <FileSheetSubsection title={t("sdf.counts")}>
-        <FileSheetFieldGrid columns={3}>
+        <FileSheetFieldGrid columns={mobile ? 2 : 3} data-sdf-counts="">
           <FileSheetValueField label={t("robot.links")} value={String(sdfInfo.linkCount ?? 0)} />
           <FileSheetValueField label={t("sdf.joints")} value={String(sdfInfo.jointCount ?? 0)} />
           <FileSheetValueField label={t("sdf.frames")} value={String(sdfInfo.frameCount ?? 0)} />
