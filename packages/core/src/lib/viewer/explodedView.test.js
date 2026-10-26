@@ -4,9 +4,7 @@ import * as THREE from "three";
 
 import {
   applyExplodedViewProgress,
-  clearExplodedViewRecords,
   computeExplodedViewLayout,
-  easeExplodedViewProgress,
   explodedViewBounds
 } from "./explodedView.js";
 
@@ -135,8 +133,8 @@ test("fully concentric parts telescope out along their long axis", () => {
 });
 
 test("subassemblies separate first, then bloom internally (cascade)", () => {
-  // Two subassemblies of two leaves each, as the assembly tree lists them: the ids are tokens,
-  // and only the tree says which leaves share a parent (occurrencePathsFromAssemblyRoot).
+  // Two subassemblies of two leaves each, as the file's tree lists them: the ids are tokens,
+  // and only the tree says which leaves share a parent.
   const records = [
     record("o1.1.1", box([-10, -1.5, 0], 1)),
     record("o1.1.2", box([-10, 1.5, 0], 1)),
@@ -268,21 +266,4 @@ test("non-occurrence part ids explode as flat leaves", () => {
   const { offsets } = explode(records, bounds);
   assert.ok(offsets.get("part:0")[0] < -1);
   assert.ok(offsets.get("part:1")[0] > 1);
-});
-
-test("clearExplodedViewRecords nulls every matrix", () => {
-  const records = [
-    record("o1.1", box([-5, 0, 0], 1)),
-    record("o1.2", box([5, 0, 0], 1))
-  ];
-  const layout = computeExplodedViewLayout(records, { min: [-6, -1, -1], max: [6, 1, 1] });
-  applyExplodedViewProgress(THREE, layout, 1);
-  clearExplodedViewRecords(records);
-  assert.ok(records.every((r) => r.explodedViewMatrix === null));
-});
-
-test("easeExplodedViewProgress clamps and eases out", () => {
-  assert.equal(easeExplodedViewProgress(-1), 0);
-  assert.equal(easeExplodedViewProgress(2), 1);
-  assert.ok(easeExplodedViewProgress(0.5) > 0.5);
 });

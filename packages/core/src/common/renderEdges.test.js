@@ -1,4 +1,3 @@
-import { CAD_EDGE_COVERAGE_GLSL } from "./cadEdgeCoverage.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -12,17 +11,12 @@ import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import {
   TOPOLOGY_LINE_DEPTH_BIAS,
   applyLineDepthBias,
-  createCadEdgeLineSegments,
-  createDisplayEdgeObject,
   createScreenSpaceLineSegments,
-  lineSegmentPositionsFromGeometry,
   screenSpaceLineDeviceResolution,
   syncLineMaterialOpacity,
-  syncRecordEdgeMaterials,
-  syncScreenSpaceLineMaterialResolution,
   topologyLineDepthBiasForWidth
 } from "./renderEdges.js";
-import { CAD_EDGE_FEATHER_PIXELS } from "./cadEdgeInstances.js";
+import { CAD_EDGE_COVERAGE_GLSL, CAD_EDGE_FEATHER_PIXELS } from "./cadEdgeCoverage.js";
 
 function edgeContext(materials = new Set()) {
   return {
@@ -37,94 +31,15 @@ function edgeContext(materials = new Set()) {
   };
 }
 
-function twoPointGeometry() {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
-    0, 0, 0,
-    1, 0, 0
-  ]), 3));
-  return geometry;
-}
-
-test("line segment extraction uses the geometry position buffer unchanged", () => {
-  const geometry = twoPointGeometry();
-  const positions = geometry.getAttribute("position").array;
-
-  assert.equal(lineSegmentPositionsFromGeometry(geometry), positions);
-});
-
-test("screen-space display edge creation registers material settings", () => {
+test("a screen-space line registers its material with the viewer and the caller's set", () => {
   const materials = new Set();
-  const { edgeMesh, edgeMaterial } = createDisplayEdgeObject(edgeContext(materials), {
-    geometry: twoPointGeometry(),
-    edgeSettings: {
-      color: "#123456",
-      opacity: 0.42,
-      thickness: 2
-    },
-    baseTheme: {
-      edge: "#000000",
-      edgeOpacity: 0.84
-    },
-    partId: "part-a",
-    displayMode: "shaded_edges",
-    thickness: 2
+  const line = createScreenSpaceLineSegments(edgeContext(materials), [0, 0, 0, 1, 0, 0], {
+    color: "#123456", opacity: 0.42, lineWidth: 2, depthTest: false
   }, materials);
-
-  assert.equal(edgeMesh.userData.partId, "part-a");
-  assert.equal(edgeMaterial.opacity, 0.42);
-  assert.equal(edgeMaterial.linewidth, 2);
-  assert.equal(edgeMaterial.polygonOffset, true);
-  assert.equal(edgeMaterial.polygonOffsetFactor, 0);
-  assert.equal(edgeMaterial.polygonOffsetUnits, -5);
-  assert.equal(materials.has(edgeMaterial), true);
-
-  syncScreenSpaceLineMaterialResolution(materials, 640, 480);
-  assert.equal(edgeMaterial.resolution.x, 640);
-  assert.equal(edgeMaterial.resolution.y, 480);
-});
-
-test("screen-space display edges can render through surfaces", () => {
-  const { edgeMaterial } = createDisplayEdgeObject(edgeContext(), {
-    geometry: twoPointGeometry(),
-    edgeSettings: {
-      color: "#123456",
-      opacity: 0.42,
-      thickness: 2,
-      depthTest: false
-    },
-    baseTheme: {
-      edge: "#000000",
-      edgeOpacity: 0.84
-    },
-    partId: "part-a",
-    displayMode: "hidden_edges",
-    thickness: 2
-  });
-
-  assert.equal(edgeMaterial.depthTest, false);
-});
-
-test("wireframe display edges preserve high opacity and basic line material", () => {
-  const { edgeMesh, edgeMaterial } = createDisplayEdgeObject(edgeContext(), {
-    geometry: twoPointGeometry(),
-    edgeSettings: {
-      color: "#123456",
-      opacity: 0.2
-    },
-    baseTheme: {
-      edge: "#000000",
-      edgeOpacity: 0.84
-    },
-    partId: "wire-a",
-    displayMode: "wireframe",
-    wireframeEdgeColor: "#abcdef"
-  });
-
-  assert.equal(edgeMesh.userData.partId, "wire-a");
-  assert.equal(edgeMaterial.isLineBasicMaterial, true);
-  assert.equal(edgeMaterial.opacity, 0.9);
-  assert.equal(edgeMaterial.depthTest, false);
+  assert.equal(line.material.opacity, 0.42);
+  assert.equal(line.material.linewidth, 2);
+  assert.equal(line.material.depthTest, false);
+  assert.equal(materials.has(line.material), true);
 });
 
 test("line depth bias uses fixed-function polygon offset", () => {
@@ -154,59 +69,6 @@ test("line material opacity helper clamps transparency consistently", () => {
   syncLineMaterialOpacity(material, 5);
   assert.equal(material.opacity, 1);
   assert.equal(material.transparent, false);
-});
-
-test("CAD edge line segments wrap a shared vertex-coloured geometry", () => {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0]), 3));
-  geometry.setAttribute("color", new THREE.BufferAttribute(new Uint16Array(8), 4, true));
-  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array([0, 1]), 1));
-  const line = createCadEdgeLineSegments(THREE, geometry, { depthTest: false, depthBias: TOPOLOGY_LINE_DEPTH_BIAS });
-  assert.equal(line.isLineSegments, true);
-  assert.equal(line.geometry, geometry);
-  assert.equal(line.userData.disposeGeometry, false);
-  assert.equal(line.material.vertexColors, true);
-  assert.equal(line.material.transparent, true);
-  assert.equal(line.material.depthTest, false);
-  assert.equal(line.material.polygonOffsetUnits, -5);
-  assert.equal(line.material.userData.cadEdgeVertexColors, true);
-});
-
-test("record edge materials: uniform overrides, scaled restores, per material kind", () => {
-  const plain = new THREE.LineBasicMaterial({ color: "#000000", transparent: true, opacity: 1 });
-  const based = new THREE.LineBasicMaterial({ color: "#000000", transparent: true, opacity: 1 });
-  based.userData.cadEdgeBaseColor = "#111111";
-  based.userData.cadEdgeBaseOpacity = 0.25;
-  const classed = createCadEdgeLineSegments(THREE, new THREE.BufferGeometry()).material;
-  const record = { edgeMaterials: [plain, based, classed] };
-
-  // Scaled pass (no highlight): plain takes the fallback, based its base style,
-  // the vertex-coloured material keeps its classes and scales them.
-  syncRecordEdgeMaterials(record, { opacityScale: 0.5, fallbackColor: "#abcdef", fallbackOpacity: 0.84 });
-  assert.equal(plain.color.getHexString(), "abcdef");
-  assert.equal(plain.opacity, 0.42);
-  assert.equal(based.color.getHexString(), "111111");
-  assert.equal(based.opacity, 0.125);
-  assert.equal(classed.vertexColors, true);
-  assert.equal(classed.color.getHexString(), "ffffff");
-  assert.equal(classed.opacity, 0.5);
-  assert.equal(classed.transparent, true);
-
-  // Uniform pass (highlight): every material takes the colour and opacity.
-  syncRecordEdgeMaterials(record, { color: "#ff0000", opacity: 1, fallbackColor: "#abcdef" });
-  for (const material of record.edgeMaterials) {
-    assert.equal(material.color.getHexString(), "ff0000");
-    assert.equal(material.opacity, 1);
-  }
-  assert.equal(classed.vertexColors, false);
-
-  // An effect edge colour in a scaled pass recolours the classes too.
-  syncRecordEdgeMaterials(record, { color: "#00ff00", opacityScale: 0.5, fallbackColor: "#abcdef", fallbackOpacity: 0.84 });
-  assert.equal(classed.vertexColors, false);
-  assert.equal(classed.color.getHexString(), "00ff00");
-  assert.equal(classed.opacity, 0.5);
-  assert.equal(based.opacity, 0.125);
-  syncRecordEdgeMaterials({ edgeMaterials: null }, { fallbackColor: "#abcdef" });
 });
 
 // --- The screen-space line pass: device-pixel width, and the analytic feather.
@@ -296,7 +158,7 @@ test("a screen-space line draws its configured thickness in DEVICE pixels", () =
 
   // No live viewport (an off-screen pass): keep the synced drawing-buffer size
   // rather than falling back to something in CSS pixels.
-  syncScreenSpaceLineMaterialResolution([line.material], 1280, 960);
+  line.material.resolution.set(1280, 960);
   line.onBeforeRender({});
   assert.equal(line.material.resolution.x, 1280);
   assert.equal(line.material.resolution.y, 960);

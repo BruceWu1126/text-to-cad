@@ -5,7 +5,6 @@ import {
 
 export {
   CAD_EDGE_CLASS_IDS,
-  CAD_EDGE_COLOR,
   CAD_EDGE_HIGHLIGHT_COLOR,
   CAMERA_PROJECTION,
   normalizeCameraProjection

@@ -1,8 +1,4 @@
-import { CAD_EDGE_COVERAGE_GLSL } from "./cadEdgeCoverage.js";
-import {
-  displayModeIsWireframe
-} from "./displaySettings.js";
-import { CAD_EDGE_FEATHER_PIXELS, syncEdgeInstanceStyle } from "./cadEdgeInstances.js";
+import { CAD_EDGE_COVERAGE_GLSL, CAD_EDGE_FEATHER_PIXELS } from "./cadEdgeCoverage.js";
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -17,9 +13,6 @@ const COPLANAR_TOPOLOGY_EDGE_CLASSES = new Set(["tangent", "seam"]);
 const COPLANAR_TOPOLOGY_LINE_DEPTH_BIAS = 0.006;
 const COPLANAR_TOPOLOGY_LINE_DEPTH_BIAS_PER_EXTRA_PIXEL = 0.00025;
 const MAX_COPLANAR_TOPOLOGY_LINE_DEPTH_BIAS = 0.008;
-// The CAD edge classes, in the order every per-class table (theme settings,
-// the instanced edge shader's class index) uses.
-export const CAD_EDGE_CLASS_ORDER = Object.freeze(["feature", "tangent", "seam", "degenerate"]);
 
 export function topologyLineDepthBiasForWidth(lineWidth = 1, { visibilityClass = "" } = {}) {
   const width = Number.isFinite(Number(lineWidth))
@@ -40,15 +33,6 @@ export function topologyLineDepthBiasForWidth(lineWidth = 1, { visibilityClass =
     baseBias,
     maxBias
   );
-}
-
-export function lineSegmentPositionsFromGeometry(geometry) {
-  const positionAttribute = geometry?.getAttribute?.("position");
-  const rawPositions = positionAttribute?.array;
-  if (!positionAttribute?.count || !rawPositions?.length) {
-    return null;
-  }
-  return rawPositions;
 }
 
 export function syncLineMaterialOpacity(material, opacity) {
@@ -74,9 +58,8 @@ export function syncLineMaterialOpacity(material, opacity) {
 // A screen-space line's width is measured in DEVICE pixels, and `resolution` is
 // what decides that.
 //
-// Both line shaders — three's LineMaterial and the repo's instanced edge shader
-// — extrude with `offset *= lineWidth; offset /= resolution.y`, which lands in
-// NDC. NDC y spans the whole DRAWING BUFFER, so the ink a fragment sees is
+// Three's LineMaterial extrudes with `offset *= lineWidth; offset /= resolution.y`,
+// which lands in NDC. NDC y spans the whole DRAWING BUFFER, so the ink a fragment sees is
 // `lineWidth * drawingBufferHeight / resolution.y` device pixels: whatever unit
 // `resolution` is in is the unit the resolved class width is in.
 //
@@ -98,15 +81,6 @@ export function screenSpaceLineDeviceResolution(renderer, width, height) {
     width: Math.max(1, Math.floor((Number(width) || 1) * scale)),
     height: Math.max(1, Math.floor((Number(height) || 1) * scale))
   };
-}
-
-// `width`/`height` are DEVICE pixels (screenSpaceLineDeviceResolution), never CSS.
-export function syncScreenSpaceLineMaterialResolution(materials, width, height) {
-  const nextWidth = Math.max(1, Math.floor(Number(width) || 1));
-  const nextHeight = Math.max(1, Math.floor(Number(height) || 1));
-  for (const material of materials || []) {
-    material?.resolution?.set?.(nextWidth, nextHeight);
-  }
 }
 
 function registerLineMaterial(context = {}, material, materials = null) {
@@ -350,180 +324,3 @@ export function createScreenSpaceLineStrip(context = {}, positions, {
   line.userData.disposeMaterial = true;
   return line;
 }
-
-export function createBasicLineStrip(context = {}, positions, {
-  color,
-  opacity = 1,
-  lineWidth = 1,
-  renderOrder = 3,
-  depthTest = true,
-  depthWrite = false,
-  depthBias = DEFAULT_LINE_DEPTH_BIAS
-} = {}) {
-  const THREE = context.THREE;
-  if (
-    !THREE ||
-    !(Array.isArray(positions) || ArrayBuffer.isView(positions)) ||
-    positions.length < 6
-  ) {
-    return null;
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  const positionArray = positions instanceof Float32Array ? positions : new Float32Array(positions);
-  geometry.setAttribute("position", new THREE.BufferAttribute(positionArray, 3));
-  const material = new THREE.LineBasicMaterial({
-    color,
-    linewidth: Number.isFinite(Number(lineWidth)) ? Number(lineWidth) : 1,
-    transparent: Number(opacity) < 0.999,
-    opacity: clamp(Number(opacity) || 0, 0, 1),
-    depthTest,
-    depthWrite,
-    toneMapped: false
-  });
-  applyLineDepthBias(material, depthBias);
-  const line = new THREE.Line(geometry, material);
-  line.renderOrder = renderOrder;
-  line.frustumCulled = false;
-  line.userData.disposeGeometry = true;
-  line.userData.disposeMaterial = true;
-  return line;
-}
-
-// One GL_LINES object per record over a shared per-component geometry whose
-// `color` attribute carries each edge class's linear RGBA. The material
-// multiplies that by white at
-// unit opacity until a highlight or dim pass overrides it; the geometry
-// belongs to the component cache and is not disposed with the object.
-export function createCadEdgeLineSegments(THREE, geometry, {
-  depthTest = true,
-  renderOrder = 3,
-  depthBias = TOPOLOGY_LINE_DEPTH_BIAS
-} = {}) {
-  const material = new THREE.LineBasicMaterial({
-    color: "#ffffff",
-    vertexColors: true,
-    transparent: true,
-    opacity: 1,
-    depthTest,
-    depthWrite: false,
-    toneMapped: false
-  });
-  material.userData.cadEdgeVertexColors = true;
-  applyLineDepthBias(material, depthBias);
-  const line = new THREE.LineSegments(geometry, material);
-  line.renderOrder = renderOrder;
-  line.frustumCulled = false;
-  line.userData.disposeGeometry = false;
-  line.userData.disposeMaterial = true;
-  return line;
-}
-
-function setLineMaterialVertexColors(material, enabled) {
-  if (material.vertexColors !== enabled) {
-    material.vertexColors = enabled;
-    material.needsUpdate = true;
-  }
-}
-
-// A record's edge materials: the GLB-era derived line and the wireframe carry a
-// plain material (its base colour/opacity in userData.cadEdgeBaseColor /
-// cadEdgeBaseOpacity when set). Deformed CAD edges use one such material per
-// class; externally supplied vertex-coloured lines retain their colour arrays.
-// A uniform `opacity`
-// (highlight, dim) overrides every class with `color`; otherwise
-// `opacityScale` scales the class (or base) opacities and `color`, when given,
-// recolours them (an effect edgeColor).
-export function syncRecordEdgeMaterials(record, {
-  color = null,
-  opacity = null,
-  opacityScale = 1,
-  fallbackColor,
-  fallbackOpacity = 1
-}) {
-  if (record?.edgeInstance) {
-    // An instanced CAD edge slot: the same colour/opacity rules, written per occurrence.
-    syncEdgeInstanceStyle(record.edgeInstance, { color, opacity, opacityScale, fallbackColor });
-  }
-  for (const material of Array.isArray(record?.edgeMaterials) ? record.edgeMaterials : []) {
-    if (!material) {
-      continue;
-    }
-    const vertexColored = material.userData?.cadEdgeVertexColors === true;
-    if (vertexColored && opacity === null && !color) {
-      setLineMaterialVertexColors(material, true);
-      material.color?.set?.("#ffffff");
-      material.opacity = clamp(Number(opacityScale) || 0, 0, 1);
-      material.transparent = true;
-      material.depthWrite = false;
-      continue;
-    }
-    if (vertexColored) {
-      setLineMaterialVertexColors(material, false);
-    }
-    material.color?.set?.(color || material.userData?.cadEdgeBaseColor || fallbackColor);
-    // A recoloured vertex-coloured line has lost its per-class opacities; the
-    // scale alone applies. Plain lines scale their base opacity.
-    const baseOpacity = vertexColored ? 1 : Number(material.userData?.cadEdgeBaseOpacity);
-    syncLineMaterialOpacity(material, opacity !== null
-      ? opacity
-      : (Number.isFinite(baseOpacity) ? baseOpacity : fallbackOpacity) * opacityScale);
-  }
-}
-
-export function createScreenSpaceLineSegmentsFromGeometry(context, geometry, options, materials = null) {
-  const positions = lineSegmentPositionsFromGeometry(geometry);
-  return positions ? createScreenSpaceLineSegments(context, positions, options, materials) : null;
-}
-
-export function createDisplayEdgeObject(context = {}, {
-  geometry,
-  edgeSettings,
-  baseTheme,
-  partId,
-  displayMode,
-  thickness,
-  wireframeEdgeColor = ""
-}, materials = null) {
-  const THREE = context.THREE;
-  const wireframeMode = displayModeIsWireframe(displayMode);
-  const depthTest = edgeSettings?.depthTest === false ? false : true;
-  const edgeOpacity = Number.isFinite(Number(edgeSettings?.opacity))
-    ? clamp(Number(edgeSettings.opacity), 0, 1)
-    : (baseTheme?.edgeOpacity ?? 0.84);
-  const color = wireframeMode
-    ? (wireframeEdgeColor || edgeSettings?.color || baseTheme?.edge || "#18181b")
-    : (edgeSettings?.color || baseTheme?.edge || "#18181b");
-  if (wireframeMode && THREE) {
-    const opacity = Math.max(edgeOpacity, 0.9);
-    const material = new THREE.LineBasicMaterial({
-      color,
-      transparent: opacity < 0.999,
-      opacity,
-      depthTest: edgeSettings?.depthTest ?? false,
-      depthWrite: false,
-      toneMapped: false
-    });
-    const line = new THREE.LineSegments(geometry, material);
-    line.renderOrder = 4;
-    line.frustumCulled = false;
-    line.userData.partId = partId;
-    return { edgeMesh: line, edgeMaterial: material };
-  }
-
-  const line = createScreenSpaceLineSegmentsFromGeometry(context, geometry, {
-    color,
-    opacity: edgeOpacity,
-    lineWidth: Number.isFinite(Number(thickness)) ? Number(thickness) : 1,
-    renderOrder: 3,
-    depthTest,
-    depthWrite: false,
-    depthBias: topologyLineDepthBiasForWidth(thickness)
-  }, materials);
-  if (!line) {
-    return { edgeMesh: null, edgeMaterial: null };
-  }
-  line.userData.partId = partId;
-  return { edgeMesh: line, edgeMaterial: line.material };
-}
-

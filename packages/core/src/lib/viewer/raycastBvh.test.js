@@ -53,8 +53,7 @@ test("a component released while its BVH was queued never gets a tree built for 
   scheduleRuntimeRaycastBvh({ displayRecords: [{ mesh: meshOf(kept) }, { mesh: meshOf(released) }] });
   assert.equal(released.userData.__bvhQueued, true, "both are queued before any idle slice runs");
 
-  // The publish that drops every occurrence of a component: cadScene's
-  // releaseUnusedRecordGeometry disposes the geometry and clears the flag. It
+  // A scene that drops every mesh of a geometry disposes it and clears the flag. It
   // cannot reach the already-scheduled queue, so the queue must notice.
   delete released.userData.__bvhQueued;
   released.dispose();
@@ -177,26 +176,6 @@ test("deferred display BVHs reject far rays and share one build after an exact f
   assert.equal(mirrorRay.intersectObject(second, false)[0]?.faceIndex, 2);
 });
 
-test("deferred BVHs honor deformation before bounds and release before the idle build", async () => {
-  const geometry = indexedGeometry();
-  geometry.computeBoundingBox();
-  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
-  mesh.updateMatrixWorld();
-  mesh.userData.cadBeforeRaycast = () => {
-    geometry.translate(10, 0, 0);
-    geometry.computeBoundingBox();
-    delete mesh.userData.cadBeforeRaycast;
-  };
-  scheduleRuntimeRaycastBvh({ displayRecords: [{ mesh }] }, { deferUntilRaycast: true });
-  const ray = new THREE.Raycaster(new THREE.Vector3(10.6, 0.3, 5), new THREE.Vector3(0, 0, -1));
-  assert.equal(ray.intersectObject(mesh, false)[0]?.faceIndex, 0);
-  assert.equal(geometry.userData.__bvhQueued, true);
-  delete geometry.userData.__bvhQueued;
-  geometry.dispose();
-  await tick();
-  assert.equal(geometry.boundsTree, undefined, "released geometry is not built by pending demand");
-});
-
 test("deferred BVH denied admission leaves first and later picks exact", async () => {
   const geometry = indexedGeometry();
   const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
@@ -210,7 +189,4 @@ test("deferred BVH denied admission leaves first and later picks exact", async (
   await tick();
   assert.equal(geometry.boundsTree, undefined);
   assert.equal(ray.intersectObject(mesh, false)[0]?.faceIndex, 0);
-  await tick();
-  mesh.userData.cadBeforeRaycast = () => false;
-  assert.deepEqual(ray.intersectObject(mesh, false), [], "deformation rejection remains authoritative");
 });

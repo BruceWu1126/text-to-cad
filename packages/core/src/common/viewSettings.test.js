@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
-import { buildModel } from "./cadScene.js";
 import { buildStepClipPlane } from "../lib/viewer/clipPlane.js";
 import { resolveCadEdgeSettings } from "./cadInk.js";
-import { applyMaterialSettingsToRecord as applyViewerMaterialSettings } from "../lib/viewer/surfaceMaterials.js";
 import { resolveViewSceneSettings } from "./sceneSettings.js";
-import { renderJobContext, modelOptionsForRenderJob } from "./renderMeshScene.js";
+import { renderJobContext } from "./renderMeshScene.js";
 import { DEFAULT_PART_COLOR_SETTINGS } from "./displaySettings.js";
 import {
   ALL_VIEW_FEATURES, EDGELESS_VIEW_FEATURES, RENDER_FLOOR_PLACEMENT, STEP_PART_VIEW_FEATURES, VIEW_MODE_VALUES, normalizePreviewSettings,
@@ -15,6 +13,9 @@ import {
 } from "./viewSettings.js";
 
 const PREVIEW = { preview: true };
+
+// What a snapshot job is resolved against: the scene's box.
+const mesh = () => ({ bounds: { min: [0, 0, 0], max: [1, 1, 0] } });
 
 test("input stays sparse and refuses what a display does not have", () => {
   assert.deepEqual(normalizeViewSettings(), { mode: "solid" });
@@ -161,52 +162,6 @@ test("default grouped edges preserve the original class palette in both appearan
   for (const appearance of ["light", "dark"]) {
     const scene = resolveViewSceneSettings({ appearance });
     assert.deepEqual(resolveCadEdgeSettings(scene.display.edges).classes, resolveCadEdgeSettings().classes);
-  }
-});
-
-function mesh() {
-  return {
-    vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), indices: new Uint32Array([0, 1, 2]),
-    normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), bounds: { min: [0, 0, 0], max: [1, 1, 0] },
-    parts: [{ id: "part", vertexOffset: 0, vertexCount: 3, triangleOffset: 0, triangleCount: 1, bounds: { min: [0, 0, 0], max: [1, 1, 0] } }]
-  };
-}
-
-test("draw bridge keeps surface opacity, edge visibility and edge color independent", () => {
-  // Edges belong to a CAD model, so the job says it is one.
-  const context = renderJobContext(mesh(), { kind: "step", display: { mode: "xray" } });
-  const model = buildModel(THREE, mesh(), { ...modelOptionsForRenderJob(context), edgeRendering: { mode: "basic" } });
-  try {
-    const record = model.displayRecords[0];
-    assert.equal(record.material.opacity, 0.22);
-    assert.equal(record.edgeMaterials[0].depthTest, false);
-    assert.equal(record.edgeMaterials[0].color.getHexString(), "253443");
-    // A dark Wireframe draws its edges light, with no faces behind them.
-    const next = resolveViewSceneSettings({ display: { mode: "wireframe" }, appearance: "dark" });
-    model.update({ displayMode: next.display.mode, surfaceSettings: next.view.surfaces, edgeSettings: next.display.edges });
-    assert.equal(model.displayRecords[0].edgeMaterials[0].color.getHexString(), "c9d3de");
-    const solid = resolveViewSceneSettings({ display: { mode: "solid" } });
-    applyViewerMaterialSettings(THREE, model.displayRecords[0], model.runtime.materialSettings, {
-      displayMode: solid.display.mode, surfaceSettings: solid.view.surfaces
-    });
-    assert.equal(model.displayRecords[0].material.opacity, 1, "viewer fallback follows the same grouped opacity");
-  } finally { model.dispose(); }
-});
-
-test("hidden-line uses a depth-only surface; wireframe has none; Shaded is Solid's surface without its edges", () => {
-  for (const [display, colorWrite, depthWrite, edges] of [
-    [{ mode: "hidden-line" }, false, true, true],
-    [{ mode: "wireframe" }, false, false, true],
-    [{ mode: "solid" }, true, true, true],
-    [{ mode: "shaded" }, true, true, false]
-  ]) {
-    const context = renderJobContext(mesh(), { kind: "step", display });
-    const model = buildModel(THREE, mesh(), { ...modelOptionsForRenderJob(context), edgeRendering: { mode: "basic" } });
-    try {
-      assert.equal(model.displayRecords[0].material.colorWrite, colorWrite);
-      assert.equal(model.displayRecords[0].material.depthWrite, depthWrite);
-      assert.equal(Boolean(model.displayRecords[0].edges), edges);
-    } finally { model.dispose(); }
   }
 });
 

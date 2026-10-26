@@ -1,7 +1,6 @@
 import {
   DEFAULT_STEP_CLIP_SETTINGS,
-  normalizeStepClipSettings,
-  stepClipSettingsEqual
+  normalizeStepClipSettings
 } from "../lib/viewer/clipPlane.js";
 import {
   CAMERA_PROJECTION,
@@ -24,7 +23,6 @@ export const CAD_DISPLAY_MODE_VALUES = Object.freeze(Object.values(CAD_DISPLAY_M
 
 const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}){1,2}$/;
 
-export const CAD_EDGE_COLOR = "#132232";
 export const CAD_EDGE_HIGHLIGHT_COLOR = "#8dc5ff";
 export const CAD_EDGE_CLASS_IDS = Object.freeze(["feature", "tangent", "seam", "degenerate"]);
 
@@ -402,95 +400,4 @@ export function normalizeDisplaySettings(value = null, { fallback = DEFAULT_DISP
     guides: normalizeDisplayGuideSettings(source.guides, fallback.guides),
     partColor: normalizePartColorSettings(source.partColor, fallback.partColor)
   };
-}
-
-export function displaySettingsEqual(left, right) {
-  const a = normalizeDisplaySettings(left);
-  const b = normalizeDisplaySettings(right);
-  return a.mode === b.mode &&
-    JSON.stringify(a.surfaces) === JSON.stringify(b.surfaces) &&
-    JSON.stringify(a.render) === JSON.stringify(b.render) &&
-    stepClipSettingsEqual(a.clip, b.clip) &&
-    JSON.stringify(a.exploded) === JSON.stringify(b.exploded) &&
-    JSON.stringify(a.edges) === JSON.stringify(b.edges) &&
-    JSON.stringify(a.guides) === JSON.stringify(b.guides) &&
-    JSON.stringify(a.partColor) === JSON.stringify(b.partColor);
-}
-
-export function resolveDisplayMode(displaySettings) {
-  return normalizeDisplaySettings(displaySettings).mode;
-}
-
-export function resolveDisplayEdgeSettings(displaySettings) {
-  return normalizeDisplaySettings(displaySettings).edges;
-}
-
-export function displayModeIsWireframe(value) {
-  return normalizeDisplayMode(value) === CAD_DISPLAY_MODE.WIREFRAME;
-}
-
-export function displayModeForcesEdges(value) {
-  return [
-    CAD_DISPLAY_MODE.SHADED_EDGES,
-    CAD_DISPLAY_MODE.TRANSPARENT,
-    CAD_DISPLAY_MODE.HIDDEN_EDGES,
-    CAD_DISPLAY_MODE.HIDDEN_LINES_REMOVED
-  ].includes(normalizeDisplayMode(value));
-}
-
-export function displayModeAllowsEdges(value) {
-  return ![
-    CAD_DISPLAY_MODE.RENDER,
-    CAD_DISPLAY_MODE.SHADED,
-    CAD_DISPLAY_MODE.UNSHADED
-  ].includes(normalizeDisplayMode(value));
-}
-
-// The MODE decides whether CAD linework is drawn at all, and nothing else does:
-// `shaded_edges` is shaded-with-edges (so is `transparent`, `hidden_edges`,
-// `hidden_lines_removed`), `wireframe` is linework only, and `shaded`/`unshaded`
-// draw none. This took an `edgeSettings` argument it never read, which read as a
-// bug at every call site; `edges` styles the linework the mode has decided to draw.
-export function displayModeShowsEdges(value) {
-  const mode = normalizeDisplayMode(value);
-  return mode === CAD_DISPLAY_MODE.WIREFRAME ||
-    displayModeForcesEdges(mode);
-}
-
-export function displayModeShowsThroughEdges(value) {
-  return [
-    CAD_DISPLAY_MODE.TRANSPARENT,
-    CAD_DISPLAY_MODE.HIDDEN_EDGES
-  ].includes(normalizeDisplayMode(value));
-}
-
-export function displayModeUsesTransparentSurfaces(value) {
-  return [
-    CAD_DISPLAY_MODE.TRANSPARENT,
-    CAD_DISPLAY_MODE.HIDDEN_LINES_REMOVED,
-    CAD_DISPLAY_MODE.WIREFRAME
-  ].includes(normalizeDisplayMode(value));
-}
-
-export function displayModeUsesUnlitSurfaces(value) {
-  return [
-    CAD_DISPLAY_MODE.UNSHADED,
-    CAD_DISPLAY_MODE.HIDDEN_LINES_REMOVED,
-    CAD_DISPLAY_MODE.WIREFRAME
-  ].includes(normalizeDisplayMode(value));
-}
-
-export function displayModeSurfaceOpacity(value, fallback = 1) {
-  const mode = normalizeDisplayMode(value);
-  if (mode === CAD_DISPLAY_MODE.WIREFRAME) {
-    return 0.035;
-  }
-  if (mode === CAD_DISPLAY_MODE.TRANSPARENT) {
-    return 0.22;
-  }
-  if (mode === CAD_DISPLAY_MODE.HIDDEN_LINES_REMOVED) {
-    return 0.045;
-  }
-  const numericFallback = Number(fallback);
-  return Number.isFinite(numericFallback) ? numericFallback : 1;
 }

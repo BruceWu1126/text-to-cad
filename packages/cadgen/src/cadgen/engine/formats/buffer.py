@@ -2,8 +2,7 @@
 an STL, a 3MF, a GLB or a robot's link mesh as they draw a document's part.
 
 ``buffer(positions, triangles)`` is that buffer: the triangles, their normals, one face (or one
-per ``faces`` id), and the viewer's feature edges -- three's ``EdgesGeometry`` at 16 degrees,
-which the viewer draws over every mesh it has no CAD edges for (``cadScene.js``). Its rule, in
+per ``faces`` id), and its feature edges -- three's ``EdgesGeometry`` rule at 16 degrees. In
 numpy: points weld where they round alike (three's ``Math.round(x * 1e4)`` in the mesh's own
 units: ``weld`` is that step in the buffer's millimetres); an edge two triangles share in
 opposite directions is drawn where their normals part by more than ``edge_angle``; any other
@@ -34,7 +33,7 @@ from cadgen.engine.mesh_format import BOUNDARY, FEATURE, NONMANIFOLD, Mesh
 
 __all__ = ["CREASE", "CREASED_MAX", "EDGE_ANGLE", "buffer", "creased_normals", "feature_edges"]
 
-EDGE_ANGLE = 16.0  # degrees: the viewer's CAD_EDGE_THRESHOLD_DEG
+EDGE_ANGLE = 16.0  # degrees: the fold a feature edge needs
 CREASE = 30.0  # degrees: the viewer's MESH_NORMAL_CREASE_ANGLE
 CREASED_MAX = 10_000  # triangles: above, flat normals (CREASED_NORMAL_MAX_TRIANGLES)
 CREASE_PAIRS_MAX = 4_000_000  # corner pairs a crease compares: above, flat normals

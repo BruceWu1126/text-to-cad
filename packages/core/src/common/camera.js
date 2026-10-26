@@ -33,8 +33,6 @@ export const RENDER_CAMERA_PRESETS = Object.freeze({
   iso: Object.freeze({ name: "iso", direction: Object.freeze([1, -1, 0.8]), up: WORLD_UP })
 });
 
-export const RENDER_VIEW_PRESETS = RENDER_CAMERA_PRESETS;
-
 const DEFAULT_CAMERA_PRESET = "iso";
 export const CAMERA_SPEC_KEYS = Object.freeze([
   "preset",

@@ -229,13 +229,12 @@ test("a family scene has no CAD edges, a one-part GLB no Explode, and --mode lis
   const context = renderJobContext({ bounds: { min: [0, 0, 0], max: [1, 1, 1] } }, job("glb", {
     display: { mode: "solid", exploded: { enabled: true, amount: 1 }, clip: { enabled: true } }
   }));
-  assert.deepEqual([context.stepDisplayEnabled, context.edgesVisible,
-    context.displaySettings.exploded.enabled, context.displaySettings.clip.enabled], [false, false, false, true]);
+  assert.deepEqual([context.sceneSettings.view.edges.enabled,
+    context.displaySettings.exploded.enabled, context.displaySettings.clip.enabled], [false, false, true]);
   assert.deepEqual(resolveViewSceneSettings({ display: { mode: "solid" }, features: EDGELESS_VIEW_FEATURES }).view.edges.enabled, false);
 
   const model = headlessSceneModel(THREE, headlessSceneFamily(job("glb")).build(THREE, await buildGlbDocumentFromBuffer(glbBytes())),
     headlessSceneDress(context.sceneSettings));
-  assert.equal(model.runtime, undefined, "no CAD runtime: captureModel skips the exploded view and line widths");
   const listed = await captureModel({ model, context: { ...context, mode: "list" } }, { job: job("glb") });
   assert.deepEqual(listed.parts.map(({ ref, name, triangleCount, vertexCount }) => [ref, name, triangleCount, vertexCount]),
     [["#n0", "pair", 12, 24], ["#n1", "pair", 12, 24]], "a GLB's parts by the nodes a reference names (`model.glb#n0`)");

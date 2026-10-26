@@ -1,19 +1,16 @@
 // The articulation player.
 //
-// cadgen resolves a model's kinematics into ONE artifact (`cadgen.robot_payload`'s): controls
+// cadgen resolves a robot's kinematics into ONE artifact (`cadgen.robot_payload`'s): controls
 // with their limits and rest values, joints in their rest frames with affine rows over the
-// controls, which occurrences each joint carries, what a drag gesture writes, the named
-// poses and the opening pose. This module plays it and decides nothing: control values go
-// to joint values by dot products, joint values to one world delta per joint (its parent's
-// delta, then its own displacement about its rest axis), and the deltas onto the effect
-// records of the occurrences the artifact says each joint carries. A delta IS an effect
-// matrix: for an occurrence at rest placement R, the posed placement is D * R, which is how
-// every effect premultiplies (recordEffects.js), so a clip's keys play on top of a pose
-// unchanged (applySceneState.js).
+// controls, what a drag gesture writes and the opening pose. This module plays it and decides
+// nothing: control values go to joint values by dot products, and joint values to one
+// displacement per joint about its rest axis (`jointMotionMatrix`), which the robot's scene
+// writes as the joint node's own matrix (`lib/urdf/robotScene.js`); `jointDeltas` composes the
+// same chain into one world delta per joint.
 //
-// The same player serves a robot description: its articulation puts a link's visuals under
-// the joint that carries them, a mimic is a row with a leader term and a bias, and a
-// continuous joint has no limits. A row may also carry a `curve` (a four-bar linkage's
+// A robot description's articulation puts a link's visuals under the joint that carries them,
+// a mimic is a row with a leader term and a bias, and a continuous joint has no limits. A row
+// may also carry a `curve` (a four-bar linkage's
 // crank): a sampled function of its driver row's value, played by linear interpolation of
 // the keys cadgen sampled from the closed form, as a glTF LINEAR sampler is played; the
 // page solves nothing of the linkage.
@@ -35,10 +32,6 @@ export function articulationControls(articulation) {
 
 export function articulationHandles(articulation) {
   return Array.isArray(articulation?.handles) ? articulation.handles.filter((handle) => handle?.id) : [];
-}
-
-export function articulationPoses(articulation) {
-  return isObject(articulation?.poses) ? articulation.poses : {};
 }
 
 /** The control a value is for, by id. */
@@ -73,12 +66,6 @@ export function normalizeControlValues(articulation, values) {
   return Object.fromEntries(articulationControls(articulation).map((control) => [
     control.id, Object.hasOwn(given, control.id) ? clampControlValue(control, given[control.id]) : opening[control.id]
   ]));
-}
-
-/** A named pose as a full configuration: what it names, and every other control at rest. */
-export function poseControlValues(articulation, name) {
-  const preset = articulationPoses(articulation)[String(name || "")];
-  return normalizeControlValues(articulation, { ...openingControlValues(articulation), ...(isObject(preset) ? preset : {}) });
 }
 
 /**
@@ -125,13 +112,6 @@ export function jointValues(articulation, values) {
     result[joint.id] = { turn: rowValue(joint.turn, values), travel: rowValue(joint.travel, values) };
   }
   return result;
-}
-
-/** True when no joint moves: the artifact as written (every row at 0). */
-export function articulationAtRest(articulation, values, epsilon = 1e-9) {
-  return Object.values(jointValues(articulation, values)).every(
-    ({ turn, travel }) => Math.abs(turn) <= epsilon && Math.abs(travel) <= epsilon
-  );
 }
 
 const scratch = { axis: null, origin: null, rotation: null, step: null };
@@ -185,31 +165,6 @@ export function jointDeltas(THREE, articulation, values) {
     deltas.set(joint.id, delta);
   }
   return deltas;
-}
-
-/** The occurrences a joint carries, as the artifact lists them. */
-export function jointCarries(articulation, jointId) {
-  const carried = articulation?.carries?.[jointId];
-  return Array.isArray(carried) ? carried : [];
-}
-
-/**
- * Pose the effect records: each joint's delta onto every occurrence it carries (over whatever
- * an effect already holds, though a pose is the first thing a pass writes). Returns how many
- * occurrences moved; at rest nothing is written, which is the "artifact as written is q=0" law.
- */
-export function applyArticulationToEffects(THREE, articulation, values, effectsByPartId) {
-  if (!articulation || !effectsByPartId || articulationAtRest(articulation, values)) return 0;
-  let moved = 0;
-  for (const [jointId, delta] of jointDeltas(THREE, articulation, values)) {
-    for (const partId of jointCarries(articulation, jointId)) {
-      const effect = effectsByPartId.get(partId) || { matrix: null, style: null, visible: null, highlighted: false };
-      effect.matrix = effect.matrix ? effect.matrix.clone().premultiply(delta) : delta.clone();
-      effectsByPartId.set(partId, effect);
-      moved += 1;
-    }
-  }
-  return moved;
 }
 
 /** What a handle shows: its joint row's value at the configuration. */

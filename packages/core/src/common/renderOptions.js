@@ -42,50 +42,6 @@ export const RENDER_SCENE_SCALE = Object.freeze({
 export { TOP_VIEW_UP, WORLD_UP };
 export const RENDER_VIEW_PRESETS = RENDER_CAMERA_PRESETS;
 
-export const SHARED_RENDER_OPTION_KEYS = Object.freeze([
-  "themeSettings",
-  "display",
-  "camera",
-  "framing",
-  "sceneScale",
-  "clip",
-  "selection",
-  "floor",
-  "background",
-  "lighting",
-  "outputSize",
-  "renderScale"
-]);
-
-/**
- * SharedRenderOptions is the policy-free shape consumed by lower-level render
- * helpers after snapshot or viewer code has already chosen defaults.
- *
- * @typedef {Object} SharedRenderOptions
- * @property {Object|null} themeSettings Explicit, normalized theme settings.
- * @property {Object|null} display Explicit display settings.
- * @property {Object|null} camera Explicit camera/view state.
- * @property {Object|null} framing Explicit framing settings.
- * @property {string|null} sceneScale Explicit CAD/URDF scene scale.
- * @property {Object|null} clip Explicit clip settings.
- * @property {Object|null} selection Explicit part/selection settings.
- * @property {Object|null} floor Explicit floor settings.
- * @property {Object|null} background Explicit background settings.
- * @property {Object|null} lighting Explicit lighting settings.
- * @property {Object|null} outputSize Explicit output width/height.
- * @property {number|null} renderScale Explicit render scale.
- */
-
-export function createSharedRenderOptions(explicitOptions = {}) {
-  const result = {};
-  for (const key of SHARED_RENDER_OPTION_KEYS) {
-    result[key] = Object.prototype.hasOwnProperty.call(explicitOptions, key)
-      ? explicitOptions[key]
-      : null;
-  }
-  return result;
-}
-
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
@@ -727,8 +683,7 @@ export function configurePngRenderer(width, height, job, {
     preserveDrawingBuffer: true,
     // Ordinary depth in every preset, as the viewer draws them (`viewerLogarithmicDepthBuffer`):
     // each output fits its camera's depth range to what it frames (`fitCameraDepthToBounds`).
-    // A logarithmic buffer drops the studio's shadows, and the instanced CAD edges, which write
-    // no logarithmic depth, would lose every depth test against a perspective surface.
+    // A logarithmic buffer drops the studio's shadows.
     logarithmicDepthBuffer: false
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;

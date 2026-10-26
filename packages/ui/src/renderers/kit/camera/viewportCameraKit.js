@@ -190,7 +190,7 @@ export function viewportFitScale({
 // A source fallback must also be authored bounds. Live modelBounds are never
 // a safe fallback: before adoption they may still describe another pose.
 export function runtimeFramingBounds(runtime, fallbackBounds = null) {
-  return runtime?.zeroPoseBounds || fallbackBounds || runtime?.cadScene?.restBounds || null;
+  return runtime?.zeroPoseBounds || fallbackBounds || null;
 }
 
 // When the camera fits, and why. A model is framed ONCE per viewing mode, on

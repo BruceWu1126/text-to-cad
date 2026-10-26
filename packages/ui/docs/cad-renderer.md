@@ -1284,12 +1284,9 @@ again after the tab left it starts at the defaults.
 
 No component renders for a playing frame. While a routine plays, the animation clock calls
 the renderer's frame once per tick (`usePlaybackFrames`; the GLB renderer drives its mixer so),
-and the scrubber is the clock's only React subscriber. Because the frame runs inside
-the tick, the clock's adaptive pacing measures a frame's real cost, and only a
-run of frames that all overran slows it (`createAnimationFramePacer` in core's
-`common/animationClock.js`): a frame that misses one vsync publishes on, where
-pacing on it held the routine still for two or three frames and then moved it
-four or five.
+and the scrubber is the clock's only React subscriber. A tick is one animation frame: the
+player advances the time by what the frame took (`advanceAnimationElapsed` in core's
+`common/animationClock.js`) and draws it; nothing paces the frames.
 
 ### Pencil and Shapes
 
