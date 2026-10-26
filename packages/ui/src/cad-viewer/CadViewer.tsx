@@ -167,6 +167,10 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   }, []);
   const homed = Boolean(library);
   const home = useCallback(() => latest.current.onShow(''), []);
+  // The name menu's Recent: the home's library, read through the library the host hands now.
+  const libraryNow = useRef(library);
+  libraryNow.current = library;
+  const recent = useMemo(() => (homed ? { list: () => libraryNow.current?.list() ?? Promise.resolve([]) } : undefined), [homed]);
   const viewerHost = useMemo<ViewerHost>(() => ({ ...host, navigation: homed ? { openFile, home } : {} }), [host, openFile, home, homed]);
 
   // The home's pictures for cards without a current one, drawn out of sight one at a time and kept as
@@ -214,7 +218,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   }), [library, layout, changeLayout, path, picture, host.links, host.fileActions, entry, onError, goHome, t]);
   return <I18nProvider locale={locale}>
     <ExportControls service={client.exports} downloads={host.downloads} file={shown ?? path}>{({ navbar, overlay }) => <FileViewer navbarActions={navbar} overlay={overlay} file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
-      colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} fullSize={fullSize} openInBrowser={openInBrowser} history={history} notice={notice} onError={onError} presentation={presentation} />}</ExportControls>
+      colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} fullSize={fullSize} openInBrowser={openInBrowser} history={history} recent={recent} notice={notice} onError={onError} presentation={presentation} />}</ExportControls>
     {drawing && !path ? <OffscreenPicture key={drawing.source.file} source={drawing.source} host={host} preferences={preferences} onDone={drawn} /> : null}
   </I18nProvider>;
 }

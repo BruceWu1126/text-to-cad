@@ -272,7 +272,8 @@ class Catalog(HttpLayerTestCase):
 
     def test_a_model_by_its_id_is_its_row_at_the_build_held_and_one_not_held_names_its_state(self):
         ident = "6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"
-        answers = {"model_info": {"model": {"source": {"name": "cube"}, "version": "v1"}}}
+        script = os.path.join(self.fixture.root, "parts", "cube.py")
+        answers = {"model_info": {"model": {"source": {"name": "cube", "script": script}, "version": "v1"}}}
         app = self.fixture.app
 
         def catalog():
@@ -285,6 +286,8 @@ class Catalog(HttpLayerTestCase):
             # The row's hash is the build the engine holds: a rebuild is a new revision of the row.
             [row] = catalog()[1]["entries"]
             self.assertEqual((row["id"], row["file"], row["sourcePath"], row["hash"]), (ident, ident, None, "model:v1"))
+            # Its Files tab lists the folder its record registered: the script's, never read.
+            self.assertEqual(row["folder"], os.path.dirname(script).replace(os.sep, "/"))
             answers["model_info"] = {"model": {"source": {"name": "cube"}, "version": "v2"}}
             self.assertEqual(catalog()[1]["entries"][0]["hash"], "model:v2")
             # One it does not hold says why, in the engine's words, and its state.

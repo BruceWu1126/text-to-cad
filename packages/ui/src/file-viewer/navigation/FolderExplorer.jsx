@@ -107,13 +107,14 @@ function Row({ kind, path, detail = "", name, depth = 0, active = false, expande
  * folders as fit whole -- the folder it is in always, cut only once it is alone -- and an ellipsis
  * whose menu holds the ones above them. "Filter files..." searches every CAD file nested under the
  * folder it is in (`source.search`, bounded by the server, which says when it stopped early). A
- * pick is `onOpen`; whoever holds the explorer puts it away.
+ * pick is `onOpen`; whoever holds the explorer puts it away. A document with no file of its own (a
+ * model's) starts in the folder it was registered from (`folder`).
  *
- * @param {{ source: Pick<import("../types").FileSource, "list" | "search">, file: string, onOpen(path: string): void }} props
+ * @param {{ source: Pick<import("../types").FileSource, "list" | "search">, file: string, folder?: string | null, onOpen(path: string): void }} props
  */
-export function FolderExplorer({ source, file, onOpen }) {
+export function FolderExplorer({ source, file, folder: start = null, onOpen }) {
   const { t } = useI18n();
-  const [folder, setFolder] = useState(() => parentFolder(file));
+  const [folder, setFolder] = useState(() => start || parentFolder(file));
   const [listing, setListing] = useState({ folder: "", entries: null, error: null });
   const [query, setQuery] = useState("");
   const [found, setFound] = useState(null);

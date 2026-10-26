@@ -51,11 +51,12 @@ export function createCadFileSource(client: Pick<CadWorkspaceService, 'resolveEn
       const entry = await client.resolveEntry(path, { signal });
       signal.throwIfAborted();
       // A document known by its id alone (a model's) keeps its id for a path, is named by its
-      // function, and has no file to browse from or act on (`navigationPath: null`).
+      // function, and has no file to browse from or act on (`navigationPath: null`); its Files tab
+      // starts in the folder its record registered (`folder`).
       const byId = entry.sourcePath === null;
       const file = byId ? entry.file : normalizePath(entry.file);
       const name = entry.name || baseName(file);
-      return { path: file, name, ...(byId ? { navigationPath: null } : {}), kind: 'file', size: Number(entry.bytes || 0),
+      return { path: file, name, ...(byId ? { navigationPath: null, ...(entry.folder ? { folder: normalizePath(entry.folder) } : {}) } : {}), kind: 'file', size: Number(entry.bytes || 0),
         extension: byId ? 'xbf' : name.split('.').pop()?.toLowerCase() || '', mediaType: byId ? 'cad-document' : 'cad',
         revision: contentRevision(entry) };
     },

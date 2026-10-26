@@ -89,6 +89,10 @@ export default {
   "explorer.noMatches": "没有匹配的文件",
   "explorer.noMatchesYet": "暂无匹配文件。继续输入可缩小搜索范围。",
   "explorer.stoppedEarly": "搜索提前停止。继续输入可缩小范围。",
+  "explorer.recent": "最近",
+  "explorer.files": "文件",
+  "explorer.noRecent": "尚未打开任何内容",
+  "explorer.recentFailed": "无法读取最近的文件",
 
   "home.byline": "构建万物。",
   "home.bylineOpenSource": "100% 开源免费。",

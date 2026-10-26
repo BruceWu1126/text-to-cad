@@ -88,6 +88,10 @@ export default {
   "explorer.noMatches": "一致するファイルはありません",
   "explorer.noMatchesYet": "まだ一致するファイルはありません。入力を続けて検索を絞り込んでください。",
   "explorer.stoppedEarly": "検索を途中で止めました。入力を続けて絞り込んでください。",
+  "explorer.recent": "最近",
+  "explorer.files": "ファイル",
+  "explorer.noRecent": "まだ何も開いていません",
+  "explorer.recentFailed": "最近のファイルを読み込めませんでした",
 
   "home.byline": "何でも作ろう。",
   "home.bylineOpenSource": "100% オープンソースで無料。",

@@ -1,6 +1,8 @@
 """The documents the engine holds by id (a model's), as catalog rows, without kernel imports."""
 from __future__ import annotations
 
+import os
+
 from cadgen.engine.client import request
 from cadgen.engine.ids import is_id
 
@@ -19,15 +21,20 @@ def held(ident: str) -> tuple[dict | None, str, str]:
 
 def entry(value: str) -> dict | None:
     """The catalog row of the model document ``value`` (its id) while the engine holds it; None for
-    anything else. The row's ``file`` is the id: a model has no file to browse (``sourcePath``). Its
-    ``hash`` is the build the engine holds (its ``version``), so a page that shows the model hears a
-    rebuild as it hears a file written again: its picture is taken again."""
+    anything else. The row's ``file`` is the id: a model has no file to browse (``sourcePath``), and
+    ``folder`` is where its record says it was registered from (its script's folder, a shape's home
+    folder), which its name menu's Files lists; nothing reads the script. Its ``hash`` is the build
+    the engine holds (its ``version``), so a page that shows the model hears a rebuild as it hears a
+    file written again: its picture is taken again."""
     if not is_id(value):
         return None
     model, _why, _state = held(value)
     if model is None:
         return None
     built = model.get("version") or model.get("builtAt")
+    home = str(model["source"].get("script") or "")
+    folder = home if home and os.path.isdir(home) else os.path.dirname(home)
     return {"id": value, "file": value, "name": model["source"]["name"], "sourcePath": None,
+            "folder": folder.replace(os.sep, "/") if folder else None,
             "kind": "xbf", "sourceFormat": "model", "url": "",
             "hash": f"model:{built}" if built is not None else "model", "bytes": 0}

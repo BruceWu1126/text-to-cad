@@ -28,8 +28,10 @@ export function revealLabel(platform: Platform, t?: (key: string) => string): st
  */
 export const FolderExplorer: ComponentType<{
   source: Pick<FileSource, "list" | "search">;
-  /** The open file, by its absolute path. */
+  /** The open file, by its absolute path (a document with no file of its own: its id). */
   file: string;
+  /** Where it starts: the open file's folder unless given (a model's registered folder). */
+  folder?: string | null;
   onOpen: (path: string) => void;
 }>;
 /** The folders from the top of `path`'s filesystem down to it, `/`-separated. */
@@ -56,7 +58,7 @@ export function fuzzyMatch(
 /**
  * The one navbar, over a file and over a host's home (with no file, history or Back to files). Left: the logo, which opens the app's menu
  * (`AppMenu`), Back and Forward where the host keeps the view's history (`history`), the open file's
- * name (the explorer's door, where the host's files can be browsed) and its ⋯. Right: `update`, `trailing` (the file's actions), `fullSize`, the renderer's view controls (`controlsRef`), then `openInBrowser`.
+ * name, after its kind's glyph (the door to the name menu: Recent and Files, where the host has them) and its ⋯. Right: `update`, `trailing` (the file's actions), `fullSize`, the renderer's view controls (`controlsRef`), then `openInBrowser`.
  */
 export const ViewerNavbar: ComponentType<{
   /** The host's home, where it has one: the app menu's Back to files. */
@@ -69,7 +71,12 @@ export const ViewerNavbar: ComponentType<{
   file?: string | null;
   /** The document's name where its path does not give it (a model's). */
   name?: string;
-  explorer?: { source: Pick<FileSource, "list" | "search">; onOpen: (path: string) => void } | null;
+  /** What the open document is: a model (built from code) or a file. Its glyph before the name, and the name menu's first tab. */
+  kind?: "model" | "file";
+  /** The name menu's Files: the explorer, rooted at `folder` where given (a model's registered folder). */
+  explorer?: { source: Pick<FileSource, "list" | "search">; folder?: string | null; onOpen: (path: string) => void } | null;
+  /** The name menu's Recent: the host's library, in the explorer's style, a row opening its document. */
+  recent?: { list(): Promise<readonly import("../types.js").RecentDocument[]>; onOpen: (path: string) => void } | null;
   fileMenu?: { platform: Platform; capabilities: ReadonlySet<EntryAction>; onAction: (action: EntryAction, path: string) => void } | null;
   trailing?: ReactNode;
   /** The host's update button, first among the controls, while its install is behind. */
