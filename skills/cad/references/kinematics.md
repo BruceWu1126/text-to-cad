@@ -289,10 +289,10 @@ cadgen snapshot "$ID" tmp/open.png --pose open
 cadgen snapshot "$ID" tmp/elbow_45.png --pose '{"elbow": 45}'
 ```
 
-`--pose` takes a mechanism state's name, or joint and coupling values as JSON (the rest
-as built): it says how the picture is drawn. An unknown state, joint or coupling, a
-value out of range and a coupling's joint set alone are refused by name before anything
-renders.
+`--pose` takes a mechanism state's name, or joint and coupling values as JSON (a turn
+in degrees, a slide in millimetres; the rest as built): it says how the picture is
+drawn. An unknown state, joint or coupling, a value out of range and a coupling's joint
+set alone are refused by name before anything renders.
 
 On the model's page, Position poses the document live: a slider per coupling and per
 joint no coupling moves, and the mechanism states as presets. The sidebar's Motion section

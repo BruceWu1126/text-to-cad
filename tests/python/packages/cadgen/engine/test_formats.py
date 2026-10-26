@@ -73,6 +73,14 @@ KINEMATICS = """<?xml version="1.0"?>
 </robot>
 """
 
+# A 0.26 m two-link arm standing on z = 0: a 0.2 x 0.2 x 0.04 m base and a 0.03 x 0.03 x 0.22 m arm on a
+# shoulder at 0.04 m. The viewer draws it in its metres (``ROBOT_SCENE_UNITS``); the stills in millimetres.
+ARM = ('<robot name="arm"><link name="base"><visual><origin xyz="0 0 0.02"/><geometry><box size="0.2 0.2 0.04"/>'
+       '</geometry></visual></link><link name="arm"><visual><origin xyz="0 0 0.11"/><geometry>'
+       '<box size="0.03 0.03 0.22"/></geometry></visual></link><joint name="shoulder" type="revolute">'
+       '<parent link="base"/><child link="arm"/><origin xyz="0 0 0.04"/><axis xyz="0 1 0"/>'
+       '<limit lower="-1" upper="1" effort="1" velocity="1"/></joint></robot>')
+
 SRDF = """<?xml version="1.0"?>
 <robot name="kinematics">
   <group name="arm"><joint name="spin"/><joint name="lift"/><joint name="reach"/></group>
@@ -614,6 +622,28 @@ class GlbTest(FixtureTest):
         np.testing.assert_allclose(np.ptp(positions, 0).max(), 40 * math.sqrt(2), atol=1e-3)
         np.testing.assert_allclose(positions.mean(0), (0, -25, 0), atol=1e-3)
 
+    def test_a_packet_s_camera_for_a_glb_is_in_the_millimetres_the_viewer_draws(self) -> None:
+        """The viewer draws glTF's metres as millimetres, so a Quick Edit packet's camera for a GLB is in
+        millimetres already (``millimetresPerSceneUnit`` 1, though ``clip.at`` is in the file's metres): the
+        viewer's front view of the rig, its half height the preset's, replayed through ``--job`` is the
+        preset ``front``'s picture."""
+        from cadgen.engine.snapshot import draw_pictures, job_pictures
+
+        gl()
+        path = write_glb(self.folder / "rig.glb")
+        # From the front the rig is the plate's 120 x 80 mm footprint turned 45 degrees -- 100 sqrt(2) mm across
+        # and tall, about the origin -- with the box inside it, which the preset frames over 92 % of the height.
+        half = 100 * math.sqrt(2) / (2 * 0.92)
+        camera = {"position": [0, -500, 0], "target": [0, 0, 0], "up": [0, 0, 1], "orthographicHalfHeight": half}
+        pictures = {}
+        for name, view in (("front", {"camera": "front", "output": {"transparent": True}}),
+                           ("viewer", {"camera": camera, "output": {"transparent": True, "padding": 0, "tightFrame": False}})):
+            out = self.folder / f"glb_{name}.png"
+            draw_pictures(job_pictures({"input": str(path), "jobs": [
+                {**view, "outputs": [{"path": str(out), "width": 240, "height": 180}]}]}), daemon=False)
+            pictures[name] = pixels(out.read_bytes())
+        self.assertLessEqual(mismatch(pictures["viewer"], pictures["front"]), 0.002, "a GLB's camera in millimetres, as the viewer's")
+
 
 # --- robots ----------------------------------------------------------------------------------------
 
@@ -696,12 +726,8 @@ class RobotTest(FixtureTest):
         from cadgen.engine.snapshot import draw_pictures, job_pictures
 
         gl()
-        base = '<link name="base"><visual><origin xyz="0 0 0.02"/><geometry><box size="0.2 0.2 0.04"/></geometry></visual></link>'
-        arm = ('<link name="arm"><visual><origin xyz="0 0 0.11"/><geometry><box size="0.03 0.03 0.22"/></geometry></visual>'
-               '</link><joint name="shoulder" type="revolute"><parent link="base"/><child link="arm"/><origin xyz="0 0 0.04"/>'
-               '<axis xyz="0 1 0"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint>')
-        path = self.folder / "arm.urdf"  # 0.26 m tall, standing on z = 0
-        path.write_text(f'<robot name="arm">{base}{arm}</robot>', encoding="utf-8")
+        path = self.folder / "arm.urdf"
+        path.write_text(ARM, encoding="utf-8")
         clip = {"enabled": True, "axis": "z", "at": 0.13}  # the viewer's number: metres, mid-height
 
         def rows(picture: Path) -> tuple[int, int]:
@@ -728,6 +754,50 @@ class RobotTest(FixtureTest):
         snapshot(path, direct, display={"clip": clip}, camera="front", size=(240, 180), daemon=False)
         replayed = job("replayed", {"clip": clip}, False)
         self.assertLessEqual(mismatch(pixels(direct.read_bytes()), pixels(replayed.read_bytes())), 0.001)
+
+    def test_a_packet_s_camera_and_measurement_in_metres_draw_the_viewer_s_front_view(self) -> None:
+        """A Quick Edit packet's camera and Measure's points are in the viewer's scene coordinates -- a
+        robot's metres -- though the stills draw the robot in millimetres: the viewer's front view of the
+        0.26 m arm, its half height the preset's, replayed through ``--job`` is the preset ``front``'s
+        picture; the same numbers in millimetres are read as metres and leave a speck; and a dimension from
+        the shoulder to the arm's top is drawn between those two heights, beside the arm."""
+        from PIL import Image
+
+        from cadgen.engine.snapshot import draw_pictures, job_pictures
+
+        gl()
+        path = self.folder / "arm.urdf"
+        path.write_text(ARM, encoding="utf-8")
+        half = 0.13 / 0.92  # the preset's frame: the 0.26 m arm over 92 % of the height (PADDING 0.04 a side)
+        camera = {"position": [0, -1, 0.13], "target": [0, 0, 0.13], "up": [0, 0, 1], "orthographicHalfHeight": half}
+        dimension = [{"start": [0, 0, 0.04], "end": [0, 0, 0.26], "label": "0.22 m", "color": "#ff2d55"}]
+
+        def job(name: str, camera, exact: bool, **fields) -> np.ndarray:
+            out = self.folder / f"camera_{name}.png"
+            output = {"transparent": True, **({"padding": 0, "tightFrame": False} if exact else {})}
+            view = {"camera": camera, "output": output, "outputs": [{"path": str(out), "width": 480, "height": 360}], **fields}
+            draw_pictures(job_pictures({"input": str(path), "jobs": [view]}), daemon=False)
+            with Image.open(out) as image:
+                return np.asarray(image.convert("RGBA")).astype(np.int16)
+
+        def rows(picture: np.ndarray) -> tuple[int, int]:
+            hit = np.flatnonzero((picture[..., 3] > 0).any(1))
+            return (int(hit[0]), int(hit[-1])) if hit.size else (0, 0)
+
+        front, viewer = job("front", "front", False), job("viewer", camera, True)
+        self.assertLessEqual(mismatch(viewer[..., :3], front[..., :3]), 0.002, "the viewer's camera, in metres, is the front view")
+        speck = job("millimetres", {**camera, "position": [0, -1000, 130], "target": [0, 0, 130],
+                                    "orthographicHalfHeight": half * 1000}, True)
+        self.assertLess(rows(speck)[1] - rows(speck)[0], 4, "the same numbers in millimetres are read as metres")
+        self.assertGreater(mismatch(speck[..., :3], front[..., :3]), 0.05)
+        measured = job("measured", camera, True, measurements=dimension)
+        ink = (np.abs(measured[..., :3] - viewer[..., :3]).max(-1) > 16) | (np.abs(measured[..., 3] - viewer[..., 3]) > 16)
+        ink_rows, ink_cols = np.flatnonzero(ink.any(1)), np.flatnonzero(ink.any(0))
+        per_mm = 360 / (2 * half * 1000)
+        top, shoulder = 180 - (260 - 130) * per_mm, 180 + (130 - 40) * per_mm  # the ends' rows
+        self.assertTrue(abs(ink_rows[0] - top) < 5 and abs(ink_rows[-1] - shoulder) < 5,
+                        f"the dimension spans rows {ink_rows[0]}-{ink_rows[-1]}, not {top:.0f}-{shoulder:.0f}")
+        self.assertTrue(234 <= ink_cols[0] and ink_cols[-1] <= 270, f"beside the arm, columns {ink_cols[0]}-{ink_cols[-1]}")
 
     def test_a_package_mesh_is_found_in_the_package_the_description_is_in(self) -> None:
         """``package://NAME/...`` (#611): the package's folder is the nearest above the description named
@@ -813,16 +883,31 @@ class DxfTest(FixtureTest):
 
 class UnitTest(FixtureTest):
     """A length asked of a file -- where ``display.clip.at`` stands -- is in the file's unit, as the
-    viewer reads one (``sceneUnits.js``); each reader says what one of them is in the millimetres drawn."""
+    viewer reads one (``sceneUnits.js``); a packet's camera, Measure's points and the ink are in the viewer's
+    scene coordinates, the file's unit but a GLB's millimetre. Each reader says what one of each is in the
+    millimetres drawn, and the stills read those lengths through it."""
 
     def test_each_reader_says_what_one_of_the_file_s_units_is_in_millimetres(self) -> None:
         write_stl(self.folder / "part.stl", box_soup((20, 10, 4)))
         write_3mf(self.folder / "kit.3mf")  # its model unit is the centimetre
         write_glb(self.folder / "rig.glb")
         (self.folder / "kinematics.urdf").write_text(KINEMATICS, encoding="utf-8")
-        found = {name: formats.read(self.folder / name).structure["millimetresPerUnit"]
-                 for name in ("part.stl", "kit.3mf", "rig.glb", "kinematics.urdf")}
-        self.assertEqual(found, {"part.stl": 1.0, "kit.3mf": 10.0, "rig.glb": 1000.0, "kinematics.urdf": 1000.0})
+        found = {name: (structure["millimetresPerUnit"], structure["millimetresPerSceneUnit"])
+                 for name in ("part.stl", "kit.3mf", "rig.glb", "kinematics.urdf")
+                 for structure in [formats.read(self.folder / name).structure]}
+        self.assertEqual(found, {"part.stl": (1.0, 1.0), "kit.3mf": (10.0, 10.0), "rig.glb": (1000.0, 1.0),
+                                 "kinematics.urdf": (1000.0, 1000.0)})
+
+    def test_a_camera_s_lengths_are_read_in_the_viewer_s_scene_coordinates(self) -> None:
+        from cadgen.engine.render.occt import camera_in_millimetres
+
+        camera = {"position": [0, -1, 0.13], "target": [0, 0, 0.13], "up": [0, 0, 1], "orthographicHalfHeight": 0.16,
+                  "zoom": 1.5, "name": "view 1"}
+        self.assertEqual(camera_in_millimetres(camera, 1000.0), {**camera, "position": [0.0, -1000.0, 130.0],
+                                                                 "target": [0.0, 0.0, 130.0], "orthographicHalfHeight": 160.0})
+        self.assertIs(camera_in_millimetres(camera, 1.0), camera, "a document's and a GLB's millimetres are the scene's")
+        self.assertEqual(camera_in_millimetres({"preset": "front", "direction": [0, -1, 0]}, 1000.0),
+                         {"preset": "front", "direction": [0, -1, 0]}, "a direction carries no length")
 
     def test_the_clip_s_plane_stands_at_its_at_in_the_file_s_unit(self) -> None:
         from types import SimpleNamespace

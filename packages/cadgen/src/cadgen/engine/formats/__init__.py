@@ -9,7 +9,12 @@ The structure's numbers are millimetres whatever the file's unit, and each reade
 the file's units is in them (``millimetresPerUnit``: a robot's and a GLB's metre 1000, a 3MF's
 declared unit, an STL's bare numbers 1), because a length a person reads or writes of the file --
 where ``display.clip.at`` stands -- is in the FILE's unit, in the viewer (core's
-``lib/viewer/sceneUnits.js``) and in a still alike (``render/clip.py``).
+``lib/viewer/sceneUnits.js``) and in a still alike (``render/clip.py``). Each says too what one of the
+viewer's scene coordinates is in them (``millimetresPerSceneUnit``): the file's unit, but a GLB's
+millimetre, the viewer drawing glTF's metres as millimetres (core's ``lib/render/glbScene.js``). A Quick
+Edit packet's camera, Measure's points and the ink are in those coordinates, as the viewer had them,
+and a still reads them through it (``render/occt.py`` ``camera_in_millimetres``, ``annotate``,
+``measure``).
 
 | suffix | reader | what it is |
 | --- | --- | --- |
@@ -124,12 +129,15 @@ def _column_major(matrix: np.ndarray) -> list[float]:
 
 def assemble(kind: str, path: Path, name: str, parts: list[Part], placed: list[Placed], tree: dict[str, Any],
              files: dict[str, tuple[int, int]], *, pose: Callable | None = None,
-             warnings: list[str] | None = None, unit: float = 1.0) -> Foreign:
+             warnings: list[str] | None = None, unit: float = 1.0, scene_unit: float | None = None) -> Foreign:
     """The file as a renderer holds it: the structure ``Loaded.structure()`` would give a document
     of these parts, instances and tree, each part's buffer by a key of its bytes, and the shapes of
     the parts a buffer does not carry whole (texture coordinates and textures). ``unit`` is the
     millimetres one of the file's units is (the structure's ``millimetresPerUnit``), the unit
-    ``display.clip.at`` is read in: 1 where the file's numbers are the millimetres drawn."""
+    ``display.clip.at`` is read in: 1 where the file's numbers are the millimetres drawn. ``scene_unit``
+    is the millimetres one of the viewer's scene coordinates is (``millimetresPerSceneUnit``), what a
+    packet's camera, Measure's points and the ink are in: the file's unit unless given (a GLB's 1, the
+    viewer drawing glTF's metres as millimetres)."""
     from cadgen.engine.render.shapes import part_shapes
 
     buffers: dict[str, bytes] = {}
@@ -158,6 +166,7 @@ def assemble(kind: str, path: Path, name: str, parts: list[Part], placed: list[P
                   **({} if item.object is None else {"object": item.object})} for item in placed]
     version = hashlib.blake2b(repr(sorted(files.items())).encode(), digest_size=8).hexdigest()
     structure = {"name": name, "path": str(path), "version": version, "units": "mm", "millimetresPerUnit": float(unit),
+                 "millimetresPerSceneUnit": float(unit if scene_unit is None else scene_unit),
                  "kind": kind, "prototypes": prototypes, "instances": instances, "tree": tree}
     return Foreign(kind, Path(path), structure, buffers, shapes, files, pose, list(warnings or []))
 

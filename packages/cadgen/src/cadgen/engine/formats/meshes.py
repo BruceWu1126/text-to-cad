@@ -92,7 +92,7 @@ def threemf_file(path: Path) -> Foreign:
     if not any(part.mesh.triangles for part in parts):
         raise FormatError(f"{path.name} holds no triangles to draw")
     placed, tree = build_of(path, model)
-    # A length of the file is in its declared unit, which the viewer draws unscaled.
+    # A length of the file is in its declared unit, which the viewer draws unscaled: its scene is that unit too.
     return assemble("3mf", path, path.stem, parts, placed, tree, files_of([path]), unit=model.unit)
 
 

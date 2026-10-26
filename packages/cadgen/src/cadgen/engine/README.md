@@ -1291,7 +1291,12 @@ render process opening it). `parts` and `exploded` for a document that places on
 part are refused by name before anything renders. `--annotation FILE` draws the viewer's annotation over the
 model -- each mark on the part it was drawn on, wherever the picture places that part -- from an
 annotation file or the Quick Edit packet that carries one (the `.snapshot.json` the viewer writes),
-and `--measurements FILE` Measure's dimensions (`[{start, end, label, color}]`). A mark names the
+and `--measurements FILE` Measure's dimensions (`[{start, end, label, color}]`). A camera object's
+lengths (`position`, `target`, `orthographicHalfHeight`), a measurement's points and the ink are in
+the viewer's scene coordinates, as a Quick Edit packet carries them -- a document's and a GLB's
+millimetres, a robot's metres, a 3MF's declared unit (the structure's `millimetresPerSceneUnit`;
+`clip.at` alone is in the file's unit, a GLB's metres) -- and a still draws them in its millimetres
+(`render/occt.py` `camera_in_millimetres`, `measure`, `annotate`). A mark names the
 view it was drawn in by label alone (`"view": "view 1"`); the view itself -- its camera
 (`position`, `target`, `up`, `orthographicHalfHeight`, the snapshot's own camera object), size and
 projection -- is a job of the packet. `--camera authored` draws the picture from the view of the

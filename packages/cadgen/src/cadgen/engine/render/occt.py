@@ -143,6 +143,23 @@ def direction_of(camera: str) -> tuple[np.ndarray, np.ndarray]:
     return d / np.linalg.norm(d), np.array(up, float)
 
 
+def camera_in_millimetres(camera: dict[str, Any], factor: float) -> dict[str, Any]:
+    """A camera object's lengths -- ``position``, ``target`` and ``orthographicHalfHeight`` -- in the
+    scene's millimetres, from the viewer's scene coordinates (``factor`` millimetres each:
+    ``Scene.millimetres_per_scene_unit``), which a Quick Edit packet's view carries and ``--camera``
+    takes: a document's and a GLB's millimetres, a robot's metres, a 3MF's declared unit. ``up``,
+    ``direction``, ``zoom``, ``preset`` and ``name`` carry no length. The camera itself at 1."""
+    if factor == 1.0:
+        return camera
+    scaled = dict(camera)
+    for key in ("position", "target"):
+        if camera.get(key) is not None:
+            scaled[key] = [float(value) * factor for value in camera[key]]
+    if camera.get("orthographicHalfHeight") is not None:
+        scaled["orthographicHalfHeight"] = float(camera["orthographicHalfHeight"]) * factor
+    return scaled
+
+
 def prototype_shapes(prototype: dict[str, Any], mesh: Mesh) -> Any:
     """A prototype's faces by its paints and its edges by class (``shapes.part_shapes``)."""
     groups = {int(k): tuple(v) for k, v in (prototype.get("faceColors") or {}).items()}
@@ -173,6 +190,10 @@ class Scene:
         # (1), a robot's and a GLB's metre 1000. A length asked of the file -- where ``display.clip.at``
         # stands -- is in that unit, as the viewer reads one (``sceneUnits.js``).
         self.millimetres_per_unit = float(structure.get("millimetresPerUnit") or 1.0)
+        # And one of the viewer's scene coordinates: the file's unit, but a GLB's millimetre (the viewer
+        # draws glTF's metres as millimetres). A Quick Edit packet's camera, Measure's points and the ink
+        # are in those coordinates (``camera_in_millimetres``, ``measure``, ``annotate``).
+        self.millimetres_per_scene_unit = float(structure.get("millimetresPerSceneUnit") or self.millimetres_per_unit)
         self.timings["read"] = time.perf_counter() - clock
         clock = time.perf_counter()
         self.canvas = Canvas(*size)
@@ -422,11 +443,13 @@ class Scene:
 
     def _pinned(self, camera: dict[str, Any], projection: str, focal_length: float) -> dict[str, Any]:
         """A camera as a prompt's view holds it (``{position, target, up, orthographicHalfHeight}``,
-        ``annotation/views.js``), placed as it is, the way the snapshot page places one
-        (``fitOrthographicCamera``: the half-height the vertical half-extent, no fit, no padding)."""
+        ``annotation/views.js``, its lengths in the viewer's scene coordinates: ``camera_in_millimetres``),
+        placed as it is, the way the snapshot page places one (``fitOrthographicCamera``: the
+        half-height the vertical half-extent, no fit, no padding)."""
         from OCP.gp import gp_Dir, gp_Pnt
         from OCP.Graphic3d import Graphic3d_Camera
 
+        camera = camera_in_millimetres(camera, self.millimetres_per_scene_unit)
         eye, target = np.array(camera["position"], float), np.array(camera["target"], float)
         up = np.array(camera.get("up") or (0.0, 0.0, 1.0), float)
         d = (eye - target) / (np.linalg.norm(eye - target) or 1.0)
@@ -706,17 +729,21 @@ class Scene:
     def annotate(self, annotation: dict[str, Any]) -> list[np.ndarray]:
         """The viewer's annotation data drawn: each mark's points in its part's frame (``part``:
         ``i<instance>``, placed where the scene now has the instance; else its recorded placement),
-        a stroke a polyline of its width, a text mark its words on its quad (``_text_quad``).
-        Returns each mark's world points, for checking where they land."""
+        a stroke a polyline of its width, a text mark its words on its quad (``_text_quad``). The
+        points and the recorded placements are in the viewer's scene coordinates, as it wrote them
+        (``millimetres_per_scene_unit`` of the scene's millimetres each). Returns each mark's world
+        points, for checking where they land."""
         scale = self.canvas.height / REFERENCE_HEIGHT
+        factor = self.millimetres_per_scene_unit
         placed_marks = []
         for mark in annotation.get("marks", []):
-            points = np.array(mark["points"], float).reshape(-1, 3)
+            points = np.array(mark["points"], float).reshape(-1, 3) * factor
             part = mark.get("part")
             if part and part.startswith("i") and part[1:].isdigit() and int(part[1:]) < len(self.matrices):
                 matrix = self.placement(int(part[1:]))
             elif part and part in annotation.get("parts", {}):
                 matrix = _matrix(annotation["parts"][part]["placement"])
+                matrix[:3, 3] *= factor  # the viewer's placement: its translation in its coordinates
             else:
                 matrix = np.eye(4)
             world = points @ matrix[:3, :3].T + matrix[:3, 3]
@@ -731,11 +758,15 @@ class Scene:
 
     def measure(self, marks: list[dict[str, Any]]) -> None:
         """The snapshot job's ``measurements``, painted over the finished frame as the snapshot
-        page paints them on its 2D canvas (``overlay.py``): in screen space, over everything."""
+        page paints them on its 2D canvas (``overlay.py``): in screen space, over everything. Their
+        ``start`` and ``end`` are in the viewer's scene coordinates, as Measure took them
+        (``millimetres_per_scene_unit`` of the scene's millimetres each)."""
         from cadgen.engine.render.overlay import LABEL_FACE
         from cadgen.engine.render.text import face
 
-        self.screen_marks = list(marks)
+        factor = self.millimetres_per_scene_unit
+        self.screen_marks = [{**mark, "start": [float(value) * factor for value in mark["start"]],
+                              "end": [float(value) * factor for value in mark["end"]]} for mark in marks]
         if any(str(mark.get("label") or "").strip() for mark in marks):
             self.fonts.add(face(*LABEL_FACE).name)
 

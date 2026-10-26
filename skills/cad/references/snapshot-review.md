@@ -82,8 +82,10 @@ document of one part. Unknown keys and out-of-range values are refused.
 
 `--camera` is a preset (`iso`, `front`, `back`, `left`, `right`, `top`, `bottom`),
 an `azimuth:elevation` pair in degrees, a camera object (`position`, `target`, `up`,
-`direction`, `zoom`, `orthographicHalfHeight`), or `authored` (below). Projection and
-focal length belong in `display.camera`.
+`direction`, `zoom`, `orthographicHalfHeight`), or `authored` (below). A camera
+object's lengths are in the viewer's scene coordinates, as a Quick Edit packet carries
+them: a document's and a GLB's millimetres, a robot's metres, a 3MF's declared unit.
+Projection and focal length belong in `display.camera`.
 
 `--size-profile` is one of exactly these names; anything else is refused with this
 list:
@@ -101,7 +103,8 @@ list:
 `--width` and `--height` set the size in pixels instead, up to 8192.
 
 `--pose` draws a document's mechanism posed: a mechanism state's name, or joint and
-coupling values as JSON ([reviewing motion](kinematics.md#reviewing-motion)). It is how
+coupling values as JSON, a turn in degrees, a slide in millimetres
+([reviewing motion](kinematics.md#reviewing-motion)). It is how
 the picture is drawn; a file of the pose is a posed model
 ([exports](exports.md#posed-files-and-parts-on-their-own)).
 
@@ -113,7 +116,8 @@ and a failure as `{"ok": false, "error": ...}` on stdout, with exit status 1.
 Clip reveals internal geometry: a shell, a bore, a cavity, a blind hole, a wall's
 relation to a floor. `display.clip` takes `enabled`, `axis` (`x`, `y` or `z`), `at`
 (the plane's coordinate on that axis, in the file's own unit: a document's
-millimetres) and `invert`; the cut is capped. Look straight at the cut:
+millimetres, a robot's or a GLB's metres, a 3MF's declared unit) and `invert`; the
+cut is capped. Look straight at the cut:
 
 ```bash
 cadgen snapshot "$ID" tmp/cut.png --camera back --display '{"clip": {"enabled": true, "axis": "y", "at": 12.5}}'
@@ -147,6 +151,10 @@ absolute path of a `.snapshot.json`. Save inline JSON to a temporary
 - `hidden` and `isolated`: with ink, the parts the view it was last drawn in hid
   and isolated, which `--annotation` leaves out of the picture;
 - `measurements`: Measure's dimensions, when they took any.
+
+The views' cameras, the ink and the measurements are in the viewer's scene coordinates
+-- a document's and a GLB's millimetres, a robot's metres, a 3MF's declared unit -- and
+`cadgen snapshot` reads them so; `clip.at` alone is in the file's unit, a GLB's metres.
 
 Draw the view a person drew their ink in, with the ink on the model:
 
