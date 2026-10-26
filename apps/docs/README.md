@@ -45,19 +45,19 @@ The hero is one GLB, `public/hero/planetary.glb`: the planetary gear model
 `cadgen export`, its parts, colours and its `meshCycle` motion, which the export bakes
 into a clip. It is committed as a PLAIN file (never LFS: Vercel serves it statically
 with no backend). The page frames it, draws each part's folds and outline in the
-hero's edge colour, and plays the clip slowed to a display pace. Refresh it after
-changing the model:
+hero's edge colour, and plays the clip slowed to a display pace. The site and its
+checks read only that committed file; nothing in the docs app's build or
+`npm run check` reads the sample corpus. Refresh it by hand after changing the model:
 
 ```
 node apps/docs/scripts/sync-hero-glb.mjs
 ```
 
-The sync script builds the model with this checkout's cadgen (`PYTHON_BIN`, default the
-repository's `.venv`), exports the document the model wrote, and runs the check. The check
-script (`scripts/check-hero-glb.mjs`, part of `npm run check`) holds the GLB to the
-model's source (the motion's name, duration and loop) and to the page (the clip it
-plays), then reads it and plays the clip through @text-to-cad/core's GLB path, so an
-export or format change cannot silently break the hero.
+That hand step reads `models/` on purpose. It builds the model with this checkout's
+cadgen (`PYTHON_BIN`, default the repository's `.venv`), exports the document the model
+wrote, and checks the new file against the model's source (the motion's name and
+duration) and the page (the clip it plays), then reads it and plays the clip through
+@text-to-cad/core's GLB path. Commit the GLB it writes.
 
 ## The shape of the app
 
@@ -66,7 +66,7 @@ src/app/         # routes
 src/components/  # site components incl. the CAD hero renderers
 src/lib/         # site utilities
 public/hero/     # the hero's GLB, a plain file (never LFS)
-scripts/         # asset checks
+scripts/         # the hero's hand sync (sync-hero-glb.mjs) and the icon's
 ```
 
 ## Brand and loading icon

@@ -41,7 +41,7 @@ project delivers them and because something outside the model reads them:
 
 | Project | Files | How | Why |
 | --- | --- | --- | --- |
-| `assemblies` (`planetary_gear_assembly`) | `apps/docs/public/hero/planetary.glb` | `apps/docs/scripts/sync-hero-glb.mjs`, which calls `cadgen.export(model, path)` | the docs site's hero plays its `meshCycle` clip; `check-hero-glb.mjs` gates it in CI |
+| `assemblies` (`planetary_gear_assembly`) | `apps/docs/public/hero/planetary.glb` | `apps/docs/scripts/sync-hero-glb.mjs`, which calls `cadgen.export(model, path)` | the docs site's hero plays its `meshCycle` clip; a hand step, which checks what it writes (no CI job reads the model) |
 | `examples` (`mounting_plate`, `spur_gear_blank`) | `STL/`, `3MF/`, `GLB/<name>.*` | `@stl`, `@threemf`, `@glb` on the model | the example of declared files: a print part whose files every run writes |
 | `branding` (the three logos) | `STEP/logo_*.step` | `src/exports.py` | the STEP deliverable, kept current by an `exports.py` |
 | `drawings` (all eight) | `DXF/<name>.dxf` | `src/exports.py` | the DXF deliverables, flat patterns among them; a drawing exists for its DXF |
