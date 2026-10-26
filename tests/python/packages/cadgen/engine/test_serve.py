@@ -16,11 +16,12 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
 from cadgen.engine import build as engine_build
-from cadgen.engine import mesh, serve
+from cadgen.engine import mesh
 from cadgen.engine.serve import Server
 
 MODEL = """
@@ -94,10 +95,10 @@ class ServeTest(unittest.TestCase):
             with self.subTest(wait=wait), self.assertRaises(urllib.error.HTTPError) as refused:
                 self.get(f"/api/doc/{self.ident}/version?after={version}&wait={wait}")
             self.assertEqual(refused.exception.code, 400)
-        started = time.monotonic()
-        answer = json.loads(self.get(f"/api/doc/{self.ident}/version?after={version}&wait=-5"))
+        with mock.patch.object(self.server, "wait", wraps=self.server.wait) as waited:
+            answer = json.loads(self.get(f"/api/doc/{self.ident}/version?after={version}&wait=-5"))
         self.assertEqual(answer["version"], version)
-        self.assertLess(time.monotonic() - started, serve.WAIT_LIMIT)
+        self.assertEqual(waited.call_args.args[2], 0.0, "a negative wait waits not at all")
 
     def test_inline_and_processes_mesh_the_same_buffers(self) -> None:
         keys = [p["key"] for p in self.structure()["prototypes"]]
@@ -198,6 +199,10 @@ class DeclaredFileTest(unittest.TestCase):
                 mock.patch.object(document, "saved", side_effect=consulted):
             waiting = threading.Thread(target=lambda: answers.append(server.wait(ident, before.version, 60)))
             waiting.start()  # a page waits on the file's version while the model runs again
+            parked = time.monotonic() + 60
+            while ident not in server.watchers:  # it watches before the model runs
+                self.assertLess(time.monotonic(), parked, "the page's wait began")
+                time.sleep(0.01)
             self.build(6)
             waiting.join(60)
             self.assertFalse(waiting.is_alive(), "the page's wait was answered")

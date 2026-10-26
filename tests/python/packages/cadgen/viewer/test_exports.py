@@ -161,12 +161,18 @@ class ExportsTest(unittest.TestCase):
         self.finish.set()
         ident = self.jobs.create(self.request())["id"]
         ready = self.settled(ident)
-        answered = []
-        waiter = threading.Thread(target=lambda: answered.append(self.jobs.get(ident, ready["sequence"], 25)))
-        waiter.start()
-        with self.jobs.changed:  # the waiter is parked on the job's sequence before the fetch ends
-            self.assertTrue(self.jobs.changed.wait_for(lambda: waiter.is_alive(), 10))
-        self.download(ident)
+        answered, parked = [], threading.Event()
+        real = self.jobs.changed.wait_for
+
+        def wait_for(predicate, timeout):
+            parked.set()
+            return real(predicate, timeout)
+
+        with patch.object(self.jobs.changed, "wait_for", side_effect=wait_for):
+            waiter = threading.Thread(target=lambda: answered.append(self.jobs.get(ident, ready["sequence"], 25)))
+            waiter.start()
+            self.assertTrue(parked.wait(10), "the waiter is parked on the job's sequence before the fetch ends")
+            self.download(ident)
         waiter.join(10)
         self.assertEqual(answered[0]["state"], "expired")
 

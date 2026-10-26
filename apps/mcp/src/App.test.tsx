@@ -179,7 +179,7 @@ it("a capture the agent asks with its show is of the model it showed, once that 
   expect(viewer.props!.file).toBe('/work/b.step');
   a.unbind();
   const b = bound('/work/b.step', true);
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+  await act(async () => {});  // how long it waits while the view loads is captureSettled's (host/capture.test.ts)
   expect(server.reply).not.toHaveBeenCalled();
   b.loaded();
   await vi.waitFor(() => expect(server.reply).toHaveBeenCalledWith('c1', { png: btoa('/work/b.step') }));

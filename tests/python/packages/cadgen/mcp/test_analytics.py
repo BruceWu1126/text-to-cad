@@ -848,23 +848,31 @@ class NeverInTheWayTest(_Tmp):
     def test_no_tool_call_waits_on_the_network(self) -> None:
         server, sent = self.serve("claude-directory")
         self.consent(server, True)
-        release = threading.Event()
-        with mock.patch("cadgen.analytics.request_deletion", side_effect=lambda id: release.wait(10)):
-            began = time.monotonic()
+        release, asked, finished = threading.Event(), threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+
+        def deletion(_id) -> None:  # the network, hanging until the test lets it go
+            asked.set()
+            release.wait(30)
+            finished.set()
+
+        with mock.patch("cadgen.analytics.request_deletion", side_effect=deletion):
             self.consent(server, False)  # its deletion hangs in the background
-            self.assertLess(time.monotonic() - began, 1)
+            self.assertTrue(asked.wait(30), "the deletion was asked")
+            self.assertFalse(finished.is_set(), "the call answered while the deletion still hung")
             release.set()
+            self.assertTrue(finished.wait(30))
 
     def test_an_exiting_process_waits_on_nothing_and_the_next_one_sends_its_last_batch(self) -> None:
         hang = threading.Event()
         self.addCleanup(hang.set)
         choose(True, by="cli", path=self.path)
-        exiting = Recorder(path=self.path, send=lambda payload: hang.wait(30))
+        asked: list[dict] = []
+        exiting = Recorder(path=self.path, send=lambda payload: asked.append(payload) or hang.wait(30))
         exiting.started(client={"name": "codex-mcp-client"}, presentation="tabs")
         exiting.called("cad_show", True)
-        began = time.monotonic()
         exiting.close()  # the network hangs: an exit never asks it
-        self.assertLess(time.monotonic() - began, 1)
+        self.assertEqual(asked, [], "an exit sends nothing")
         self.assertTrue((self.tmp / KEPT).exists())
         sent: list[dict] = []
         answers = [False, True]  # offline first: kept again, then taken

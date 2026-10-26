@@ -3,12 +3,18 @@ import { cleanup, render, screen, waitFor, within, act } from '@testing-library/
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
-import { ExportRequestError } from '@text-to-cad/core/client';
+import { ExportRequestError, exportPause } from '@text-to-cad/core/client';
 import { ExportControls } from '../../dist/export/ExportControls.js';
 import { useExportView } from '../../dist/export/context.js';
 import { I18nProvider } from '../../dist/i18n/index.js';
 import { ViewerMobileContext } from '../../dist/file-viewer/responsive.js';
 import { ViewerElementContext, ViewerHostContext } from '../../dist/host/context.js';
+
+// A retry's pause is the test's to end: a dropped connection is asked again when it says so.
+vi.mock('@text-to-cad/core/client', async original => ({
+  ...await original<typeof import('@text-to-cad/core/client')>(),
+  exportPause: vi.fn(),
+}));
 
 Object.assign(globalThis, { React });
 // jsdom has no pointer capture, which a press on a Sonner toast takes.
@@ -168,10 +174,15 @@ it('a dropped connection keeps the toast spinning until the poll resumes, then t
   await exportOnce(user);
   await waitFor(() => expect(service.status).toHaveBeenCalledTimes(1));
   const [id] = [...jobs.keys()];
+  let resume = () => {};
+  vi.mocked(exportPause).mockImplementationOnce(() => new Promise<void>(resolve => { resume = resolve; }));
   await act(async () => waiting.get(id)!.reject(new TypeError('Failed to fetch')));
+  await waitFor(() => expect(exportPause).toHaveBeenCalledWith(1000, expect.any(AbortSignal)));
   await shown('loading', 'Preparing part.step…');
+  expect(service.status).toHaveBeenCalledTimes(1);
   // Asked again after its pause, it answers ready.
-  await waitFor(() => expect(service.status).toHaveBeenCalledTimes(2), { timeout: 3000 });
+  await act(async () => resume());
+  await waitFor(() => expect(service.status).toHaveBeenCalledTimes(2));
   await shown('loading', 'Preparing part.step…');
   await finish(id);
   await waitFor(() => expect(toasts()).toEqual([]));
