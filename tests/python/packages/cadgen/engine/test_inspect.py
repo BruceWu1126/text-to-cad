@@ -155,6 +155,25 @@ class SummaryTextTest(unittest.TestCase):
                           or 0x7f <= ord(character) < 0xa0], text)
         self.assertIn("asm\\x1b[2J", text, "each shown as its escape")
 
+    def test_joint_values_read_as_the_viewer_shows_them_and_round_off_as_zero(self) -> None:
+        # A joint placed through a turned sub-assembly measures -2.1e-31 as built: the kernel's zero.
+        from cadgen.engine.cli import summary_text
+
+        joints = [{"name": "roll", "type": "revolute", "range": [[-90.0, 90.0]], "units": ["deg"], "asBuilt": -2.148e-31},
+                  {"name": "pitch", "type": "revolute", "range": [[-90.0, 90.0]], "units": ["deg"], "asBuilt": 29.99999999},
+                  {"name": "lead", "type": "cylindrical", "range": [[], []], "units": ["deg", "mm"],
+                   "asBuilt": [1e-30, 12.345]}]
+        summary = {"name": "arm", "id": "x", "state": {"state": "file", "path": "/m/a.xbf"},
+                   "parts": {"occurrences": 1, "distinct": 1, "root": "arm"}, "bounds": None, "volume": 0.0,
+                   "materials": [], "unweighed": [], "joints": joints,
+                   "states": [{"name": "rest", "values": {"roll": 3e-17, "pitch": 0.5, "lead": [180.25, 0.0]}}],
+                   "sequences": [], "animations": [], "files": []}
+        lines = summary_text(summary).splitlines()
+        self.assertEqual(lines[lines.index("joints") + 1:lines.index("joints") + 4],
+                         ["  roll  revolute  -90 to 90 deg, as built 0", "  pitch  revolute  -90 to 90 deg, as built 30",
+                          "  lead  cylindrical  free; free, as built 0 12.3"])
+        self.assertEqual(lines[lines.index("states") + 1], "  rest  roll 0, pitch 0.5, lead 180 0")
+
 
 if __name__ == "__main__":
     unittest.main()

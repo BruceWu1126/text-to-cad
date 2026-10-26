@@ -505,6 +505,27 @@ def summary_text(summary: dict[str, Any]) -> str:
     import time
 
     lines = [f"{summary['name']}  {summary['id']}"]
+# Precision::Confusion: a joint value below it is the kernel's zero, and reads as one.
+_KERNEL_ZERO = 1e-7
+
+
+def _joint_value(value: Any) -> str:
+    """A joint's value to the viewer's Position's precision -- whole from a hundred up, one decimal
+    from ten, two below -- with no trailing zeros; ``0`` below the kernel's tolerance (a placement's
+    round-off, ``-2.1e-31``), and a several-valued joint's values one after another."""
+    if isinstance(value, dict):
+        return ", ".join(f"{name} {_joint_value(item)}" for name, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return " ".join(_joint_value(item) for item in value)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return str(value)
+    if abs(value) < _KERNEL_ZERO:
+        return "0"
+    text = f"{value:.{0 if abs(value) >= 100 else 1 if abs(value) >= 10 else 2}f}"
+    text = text.rstrip("0").rstrip(".") if "." in text else text
+    return "0" if text in ("-0", "") else text
+
+
     state = summary["state"]
     if state["state"] == "file":
         said = f"file {state.get('path')}"
@@ -552,7 +573,7 @@ def summary_text(summary: dict[str, Any]) -> str:
             unit = units[at] if at < len(units) else ""
             ranges.append("free" if not limits else f"{_number(limits[0])} to {_number(limits[1])} {unit}".rstrip())
         built = row.get("asBuilt")
-        as_built = "" if built is None else f", as built {built if isinstance(built, (list, dict)) else _number(built)}"
+        as_built = "" if built is None else f", as built {_joint_value(built)}"
         return f"{row['name']}  {row['type']}  {'; '.join(ranges) or 'no range'}{as_built}"
 
     listed("joints", [joint(row) for row in summary["joints"]])
@@ -565,8 +586,7 @@ def summary_text(summary: dict[str, Any]) -> str:
         return f"{row['name']}  {row['kind']}  {joints}{ratio}"
 
     listed("couplings", [coupling(row) for row in summary.get("couplings") or []])
-    listed("states", [f"{row['name']}  " + ", ".join(f"{name} {_number(value) if isinstance(value, (int, float)) else value}"
-                                                       for name, value in row["values"].items())
+    listed("states", [f"{row['name']}  " + ", ".join(f"{name} {_joint_value(value)}" for name, value in row["values"].items())
                       for row in summary["states"]])
     listed("sequences", [f"{row['name']}  {_number(row['duration'])} s" for row in summary["sequences"]])
     listed("animations", [f"{row['name']}  {_number(row['duration'])} s" for row in summary["animations"]])
