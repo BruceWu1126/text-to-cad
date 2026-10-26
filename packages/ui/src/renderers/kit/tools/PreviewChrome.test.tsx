@@ -1,7 +1,7 @@
 import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
-import PreviewChrome from '../../../../dist/renderers/kit/tools/PreviewChrome.js';
+import PreviewChrome, { createPreviewIdle } from '../../../../dist/renderers/kit/tools/PreviewChrome.js';
 
 afterEach(cleanup);
 it('keeps editor controls hidden throughout Preview and restores them on exit', () => {
@@ -26,4 +26,37 @@ it("puts Preview's own bar over the view's top edge, the name at its left and it
   view.rerender(<PreviewChrome active={false} name="arm.step" controls={<button>Exit preview</button>} panel={<div data-testid="settings" />} />);
   expect(view.container.querySelector('[data-preview-bar]')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Exit preview' })).toBeNull();
+});
+
+it("names the file in Preview's bar muted, as its controls are", () => {
+  const view = render(<PreviewChrome active name="arm.step" />);
+  const name = view.container.querySelector<HTMLElement>('[data-preview-name]')!;
+  expect([name.classList.contains('text-muted-foreground'), name.classList.contains('text-foreground')]).toEqual([true, false]);
+});
+
+it('hides the bar at once when the pointer leaves the view or the window, unless its settings hold it, and brings it back on a move', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  try {
+    const idle = createPreviewIdle();
+    idle.setActive(true, root);
+    // Waits for the one move's events: the pointer may be passing onto a menu of the bar's.
+    const settle = () => new Promise(resolve => setTimeout(resolve));
+    expect(idle.shown()).toBe(true);
+    fireEvent.pointerLeave(root);
+    await settle();
+    expect(idle.shown()).toBe(false);
+    fireEvent.pointerMove(root);
+    expect(idle.shown()).toBe(true);
+    fireEvent(window, new Event('blur'));
+    await settle();
+    expect(idle.shown()).toBe(false);
+    fireEvent.pointerMove(root);
+    // Held by its open settings, it stays.
+    idle.setHeld(true);
+    fireEvent.mouseLeave(root);
+    await settle();
+    expect(idle.shown()).toBe(true);
+    idle.setActive(false, null);
+  } finally { root.remove(); }
 });

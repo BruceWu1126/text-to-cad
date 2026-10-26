@@ -949,12 +949,13 @@ inert); leaving Preview gives the host's chrome back as it was.
 
 In the navbar's place, over the view's top edge, is **Preview's bar**: the navbar's row (36px, a
 phone's 48px) on no surface, the model showing through, with the file's or model's name at its
-left as plain words (no logo, menu, dropdown or glyph) and at its right **Preview settings** (a
+left as plain words, muted as its controls are (no logo, menu, dropdown or glyph), and at its right **Preview settings** (a
 sliders icon, pressed while its panel is open, a second press closing it) and the way out, an X
 (**Exit preview**), their hints below them; nothing else, in every host (no Full size, no update,
 no Quick Edit). It and the playbar, where the file has routines, come and go together, as a
 video player's controls do (`usePreviewIdle`): up as Preview opens, gone after two seconds with no
-pointer movement over the view, back on the next movement or a tap, and on keyboard focus of
+pointer movement over the view, and at once when the pointer leaves the view or the window
+(`pointerleave`/`mouseleave` on the view, `blur` of the window), back on the next movement or a tap, and on keyboard focus of
 anything in either; they stay while the pointer is on either, while something in one has the
 focus (a menu of theirs open among them) and while the settings are open. Gone, they let presses
 through to the model, and hiding never touches the routine. Under the bar's right end, docked at
