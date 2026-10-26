@@ -26,6 +26,7 @@ import {
   zoomRuntimeToBounds
 } from "../camera/runtimeCamera.js";
 import { useViewportCamera } from "../camera/useViewportCamera.js";
+import { CAMERA_TOUCH, cameraUntouched, fitCamera, rebuildRefits, touchCamera } from "../camera/cameraTouch.js";
 import {
   DEFAULT_VIEW_DIRECTION, DEFAULT_VIEW_PLANE_ORIENTATION, KEYBOARD_ORBIT_NUDGE_RAD, VIEWING_MODE, VIEW_PLANE_FACES,
   WHEEL_PINCH_DELTA_BOOST, WORLD_UP, applyOrbitDelta, clearKeyboardOrbitState, createViewPlaneOrientationStore,
@@ -369,6 +370,9 @@ const ShellViewport = forwardRef(function ShellViewport({
     cameraMovedRef.current?.();
   }, []);
 
+  // The cube's Fit: the fit F makes (`resetZoom`), animated.
+  const fitFromViewCube = useCallback(() => resetZoomAndPan({ animate: true }), [resetZoomAndPan]);
+
   const hasViewportContent = Boolean(scene);
   const annotationOverlayActive = annotationEnabled && hasViewportContent;
   // The annotation's ink in the model (`tools/annotate/annotation3d.js`), from every angle, Annotate up or not: each
@@ -409,7 +413,7 @@ const ShellViewport = forwardRef(function ShellViewport({
       moved = transitionCameraToPerspectiveSnapshot(runtime, { ...now, target: look.point,
         position: look.point.map((c, i) => c + basis.direction[i] * distance), up: basis.up }, { orthographicHalfHeight: now?.orthographicHalfHeight });
     }
-    if (moved) runtime.userMovedCamera = true;
+    if (moved) touchCamera(runtime, CAMERA_TOUCH.LOOK_AT);
     return moved;
   };
   useImperativeHandle(ref, () => ({
@@ -502,7 +506,7 @@ const ShellViewport = forwardRef(function ShellViewport({
       const applied = options?.animate
         ? transitionCameraToPerspectiveSnapshot(runtime, nextPerspective, options)
         : applyPerspectiveSnapshot(runtime, nextPerspective);
-      if (applied) runtime.userMovedCamera = true;
+      if (applied) touchCamera(runtime, CAMERA_TOUCH.SET_CAMERA);
       if (applied && !options?.animate && options?.resetZoomBaseline) resetRuntimeZoomBaseline(runtime);
       return applied;
     },
@@ -555,7 +559,7 @@ const ShellViewport = forwardRef(function ShellViewport({
         runtime.openFitPending = false;
         const moved = transitionCameraToPerspectiveSnapshot(runtime, { ...readPerspectiveSnapshot(runtime),
           position: drawn.position, target: drawn.target, up: drawn.up || [0, 0, 1] }, { orthographicHalfHeight: drawn.orthographicHalfHeight });
-        if (moved) runtime.userMovedCamera = true;
+        if (moved) touchCamera(runtime, CAMERA_TOUCH.LOOK_AT);
         return moved;
       }
       return lookAtSubject({ kind: "free", points });
@@ -566,7 +570,7 @@ const ShellViewport = forwardRef(function ShellViewport({
       const runtime = runtimeRef.current;
       if (!bounds || !runtime) return false;
       const zoomed = zoomRuntimeToBounds(runtime, bounds, sceneScaleModeRef.current, { animate, modelOffset: modelTransformRef.current.offset });
-      if (zoomed) runtime.userMovedCamera = true;
+      if (zoomed) touchCamera(runtime, CAMERA_TOUCH.ZOOM_TO);
       return zoomed;
     }
   }), [activateViewPlaneFace, modelKey, normalizedSceneScaleMode, resetZoomAndPan, scene]);
@@ -589,6 +593,9 @@ const ShellViewport = forwardRef(function ShellViewport({
         // scene that grew in place has a new one, and only a commit re-reads it.
         near: Number(camera.near), far: Number(camera.far),
         originalBounds: active.zeroPoseBounds,
+        // The camera is still the fit, nobody's yet: a rebuild whose box changed fits it again
+        // (`camera/cameraTouch.js`).
+        untouched: cameraUntouched(active),
         // The camera is still moving by itself: a gesture, a transition, a held key, Preview's
         // orbit, or the controls' damping (their last update moved it).
         settling: Boolean(active.interactionState?.active || active.cameraTransition || active.previewOrbitEnabled
@@ -1028,9 +1035,14 @@ const ShellViewport = forwardRef(function ShellViewport({
     if (!frame) { setError(""); runtime.requestRender(); return; }
     const viewingMode = renderMode ? VIEWING_MODE.RENDER : VIEWING_MODE.INSPECT;
     // A scene whose rest box may still grow (`complete: false`) is framed on the box as it stands
-    // and once more when it can grow no more; every other scene is framed once. Nothing else
-    // re-frames: a rebuild of the same file keeps the camera exactly.
+    // and once more when it can grow no more; every other scene is framed once. A rebuild of the
+    // same file keeps the camera exactly, unless the camera is still the fit and the rebuild
+    // changed the box (below).
     const sceneComplete = scene.complete !== false;
+    // The rest box the last whole scene was adopted at: a rebuild that changed it, under a camera
+    // that is still the fit, is fitted again (`camera/cameraTouch.js`).
+    const previousRestBounds = runtime.autoFitBounds;
+    if (sceneComplete) runtime.autoFitBounds = framingBounds;
     const reframe = reframeReason({
       modelKey, framedModelKey: framedModelKeyRef.current, framedCompleteModelKey: framedCompleteModelKeyRef.current,
       mode: viewingMode, framedMode: framedViewingModeRef.current, modelComplete: sceneComplete,
@@ -1038,7 +1050,7 @@ const ShellViewport = forwardRef(function ShellViewport({
     });
     if (sceneComplete) framedCompleteModelKeyRef.current = modelKey || "";
     if (reframe) {
-      if (reframe === "model") runtime.userMovedCamera = false;
+      if (reframe === "model") fitCamera(runtime);
       const nextPerspective = resolvePerspectiveSnapshot(perspectiveRef ? perspectiveRef.current : undefined, perspective);
       const storedMatches = perspectiveSnapshotMatchesScene(nextPerspective, {
         modelKey, sceneScaleMode: normalizedSceneScaleMode, coordinateSystem: STORED_CAMERA_COORDINATES,
@@ -1059,6 +1071,8 @@ const ShellViewport = forwardRef(function ShellViewport({
         const restored = restorable && storedMatches
           && applyPerspectiveSnapshot(runtime, nextPerspective, { scheduleIdle: false });
         restoredCameraModelKeyRef.current = restored ? (modelKey || "") : "";
+        // A view a reload put back is the person's: a rebuild keeps it until they fit.
+        if (restored) touchCamera(runtime, CAMERA_TOUCH.RESTORE);
         // Only a camera the viewer chose is the viewer's to re-fit when the viewport changes.
         if (restored) runtime.openFitPending = false; else armOpenFit(runtime);
         if (restored) {
@@ -1085,6 +1099,12 @@ const ShellViewport = forwardRef(function ShellViewport({
       framedModelKeyRef.current = modelKey || "";
       framedViewingModeRef.current = viewingMode;
       lastEmittedPerspectiveRef.current = readScopedPerspectiveSnapshot(runtime, { modelKey, sceneScaleMode: normalizedSceneScaleMode });
+    } else if (sceneComplete && !preview && rebuildRefits(runtime, previousRestBounds, framingBounds)) {
+      // A rebuild of the open file whose box changed, under a camera nobody has touched since the
+      // page opened or the last fit: it is framed again, the fit F makes, animated as F's is (along
+      // the direction it looks now, which untouched is the opening one). Preview keeps no camera
+      // and draws a model opened afresh; it re-fits nothing.
+      resetZoomAndPan({ animate: true });
     }
     // A replaced runtime (context recovery) restores framing independently of what drew last.
     if (runtime.previousViewState) {
@@ -1216,6 +1236,7 @@ const ShellViewport = forwardRef(function ShellViewport({
         viewerTheme={viewerTheme}
         activateViewPlaneFace={activateViewPlaneFace}
         orbitViewCube={orbitFromViewCube}
+        fitView={fitFromViewCube}
       />
       </div>}
       <ViewportError message={error} />

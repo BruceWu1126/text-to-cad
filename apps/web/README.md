@@ -297,7 +297,9 @@ in Preview (on entry only with Autoplay on); the host passes no Preview props.
 The file on screen keeps its view in the tab — its camera, Display settings
 (explode and clip included) and pose — so a refresh restores it; leaving the file for
 another or for the home drops it, and opening it again frames it anew (see
-[storage](docs/storage.md)).
+[storage](docs/storage.md)). A rebuild of the file on screen keeps the camera once the person
+has moved it, and fits it again to a changed model while they have not
+([the camera rule](../../packages/ui/docs/settings-ui.md#camera-animation-and-preview)).
 
 Authored material information lives in the selection's reference details; editing
 it requires changing the source model or annotations. The viewer has no Materials

@@ -196,10 +196,12 @@ export function runtimeFramingBounds(runtime, fallbackBounds = null) {
 //   its first publish and is never framed twice.
 //
 // An UPDATE is none of these. A rebuild of the open file -- a saved revision,
-// another publish of the same geometry -- keeps the camera exactly,
-// its pose and its zoom, even when the model grew or shrank: only the person's
-// Zoom to fit frames it again. Neither is a joint, a group state, a mate or an
-// animation frame, which never move the zero pose at all.
+// another publish of the same geometry -- is not a reframe: a camera the person
+// took keeps exactly its pose and its zoom, even when the model grew or shrank,
+// until their own fit. The one rebuild that fits again is decided apart from
+// this (`cameraTouch.js`'s `rebuildRefits`): a camera still untouched since the
+// last fit, and a box that changed. Neither is a joint, a group state, a mate or
+// an animation frame, which never move the zero pose at all.
 //
 // "complete" stands down once the user has taken the view: their camera is a
 // deliberate choice about this model, and an automatic fit would throw it away. A

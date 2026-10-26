@@ -929,6 +929,20 @@ Zoom to Fit recenters and frames the whole original model at the current angle;
 Zoom to Selection frames the selection and is unavailable without one. Both are
 STEP context-menu items; the live `resetCamera` command takes the same fit path.
 
+**A rebuild follows the camera's owner** (`kit/camera/cameraTouch.js`). A page opens on the
+viewer's fit, and the camera is **untouched** until the person takes it: an orbit, a pan or a
+zoom (a drag, the wheel, a pinch, the arrow keys), a view cube face, edge or corner, a drag
+across the cube, a double-click's Look at, Zoom to selection, or a camera handed to the view
+(the live `setCamera`). While it is untouched, a rebuild of the file on screen whose rest box
+changed fits the camera again, the fit F makes, animated as F's is, along the direction the
+view looks; a rebuild with the same box changes nothing. The first touch makes the camera the
+person's for the page's life, and a rebuild then keeps it exactly, its pose and its zoom, as
+desktop CAD does. A fit hands it back: **F**, the cube's Fit, Zoom to Fit or the live
+`resetCamera` leaves the camera untouched again. A resize keeps its own rule (opening's refit
+while it settles, the model's apparent size after). The state is the page's: a reload restores
+the saved view, and a camera restored is the person's, so it is touched until they fit; a file
+opened afresh starts untouched. Preview's view, which keeps no camera, re-fits nothing.
+
 **Preview** (`previewing` in code) is available for every 3D file, animated
 or not, and for nothing else: a renderer declares it (`useRendererShell`'s `previewable`: STEP,
 GLB, STL/3MF, URDF/SRDF/SDF), and a view whose renderer does not (a DXF, 2D) has no Preview
