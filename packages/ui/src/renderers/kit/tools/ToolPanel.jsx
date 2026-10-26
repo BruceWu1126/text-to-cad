@@ -209,7 +209,7 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
     "data-tool-panel-fold-row": "",
   } : null;
 
-  const closeButton = onClose ? <button type="button" aria-label={closeLabel || `Close ${label.toLowerCase()}`}
+  const closeButton = onClose ? <button type="button" aria-label={closeLabel || t("panel.close", { name: label.toLowerCase() })}
     className={cn(TOOL_PANEL_BUTTON_CLASS, REVEAL_CLASS)} onClick={onClose}><X className="size-3" aria-hidden="true" /></button> : null;
   const heading = title ? <div {...foldRow} className={cn("flex min-h-7 shrink-0 items-center justify-end gap-0.5 pl-2 pr-1", foldRow?.className)} data-tool-panel-heading="">
     <h3 className={cn("min-w-0 truncate", TOOL_PANEL_HEADING_TEXT_CLASS)}>{title}</h3>

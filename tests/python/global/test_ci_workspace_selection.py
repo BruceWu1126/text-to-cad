@@ -68,7 +68,7 @@ class EveryTestRunsInCI(unittest.TestCase):
             r"^apps/mcp/src/.*\.test\.tsx?$",                          # apps/mcp vitest.config.mjs
             r"^apps/api/src/[^/]*\.test\.mjs$",                   # test-api.sh (node --test)
             r"^scripts/brand/[^/]*\.test\.mjs$",                          # test-docs.sh
-            r"^scripts/test/check-(dependencies|kit-boundaries)\.test\.mjs$",  # test-js.sh
+            r"^scripts/test/check-(dependencies|kit-boundaries|ui-strings)\.test\.mjs$",  # test-js.sh
             r"^tests/python/packages/cadgen/(.*/)?test_[^/]*\.py$",      # test-python.sh cadgen
             r"^tests/python/skills/[^/]+/(.*/)?test_[^/]*\.py$",         # test-python.sh skills
             r"^tests/python/global/test_[^/]*\.py$",                     # test-global.sh

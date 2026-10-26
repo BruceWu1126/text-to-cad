@@ -24,30 +24,31 @@ import { useI18n } from '@text-to-cad/ui/i18n';
  */
 
 /** @typedef {import('./tools.js').AnnotationTool} AnnotationTool */
-/** @typedef {{ id: AnnotationTool, label: string, Icon: typeof Pencil }} AnnotationToolEntry */
-// What Pencil draws with, the pen first, then the highlighter and the eraser.
+/** @typedef {{ id: AnnotationTool, key: string, label: string, Icon: typeof Pencil }} AnnotationToolEntry */
+// What Pencil draws with, the pen first, then the highlighter and the eraser. Each says its `key` in the
+// view's language (`drawingToolLabel`); `label` is its English name.
 /** @type {readonly AnnotationToolEntry[]} */
 export const PENCIL_TOOL_ENTRIES = [
-  { id: 'freedraw', label: 'Pen', Icon: Pencil },
-  { id: 'highlighter', label: 'Highlighter', Icon: Highlighter },
-  { id: 'eraser', label: 'Eraser', Icon: Eraser },
+  { id: 'freedraw', key: 'annotate.tool.freedraw', label: 'Pen', Icon: Pencil },
+  { id: 'highlighter', key: 'annotate.tool.highlighter', label: 'Highlighter', Icon: Highlighter },
+  { id: 'eraser', key: 'annotate.tool.eraser', label: 'Eraser', Icon: Eraser },
 ];
 // What Shapes draws with, the line first; text with them, a mark put down in place.
 /** @type {readonly AnnotationToolEntry[]} */
 export const SHAPE_TOOL_ENTRIES = [
-  { id: 'rectangle', label: 'Rectangle', Icon: Square },
-  { id: 'line', label: 'Line', Icon: Slash },
-  { id: 'arrow', label: 'Arrow', Icon: MoveUpRight },
-  { id: 'ellipse', label: 'Ellipse', Icon: Circle },
-  { id: 'text', label: 'Text', Icon: Type },
+  { id: 'rectangle', key: 'annotate.tool.rectangle', label: 'Rectangle', Icon: Square },
+  { id: 'line', key: 'annotate.tool.line', label: 'Line', Icon: Slash },
+  { id: 'arrow', key: 'annotate.tool.arrow', label: 'Arrow', Icon: MoveUpRight },
+  { id: 'ellipse', key: 'annotate.tool.ellipse', label: 'Ellipse', Icon: Circle },
+  { id: 'text', key: 'annotate.tool.text', label: 'Text', Icon: Type },
 ];
 /**
  * The two strip tools that draw: their ids are the tool modes', their variants what each draws with.
- * @type {readonly { id: import('./tools.js').AnnotationFamily, label: string, entries: readonly AnnotationToolEntry[] }[]}
+ * @type {readonly { id: import('./tools.js').AnnotationFamily, key: string, label: string, entries: readonly AnnotationToolEntry[] }[]}
  */
 export const DRAWING_TOOLS = [
-  { id: 'pencil', label: 'Pencil', entries: PENCIL_TOOL_ENTRIES },
-  { id: 'shapes', label: 'Shapes', entries: SHAPE_TOOL_ENTRIES },
+  { id: 'pencil', key: 'annotate.tool.pencil', label: 'Pencil', entries: PENCIL_TOOL_ENTRIES },
+  { id: 'shapes', key: 'annotate.tool.shapes', label: 'Shapes', entries: SHAPE_TOOL_ENTRIES },
 ];
 /** A drawing tool's name in `t`'s language: a strip tool's (`pencil`, `shapes`) or what one draws with (`freedraw`, `line`, …). */
 export const drawingToolLabel = (id, t) => t(`annotate.tool.${id}`);

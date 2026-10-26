@@ -752,7 +752,10 @@ the person comes back to the page.
 
 Every string of the chrome reads through `@text-to-cad/ui/i18n` (`useI18n().t`), English
 first: `en.js` holds every key, each other locale the same keys (a parity test), and a key a
-locale misses reads English. What a file or cadgen says (an alert's own title and message,
+locale misses reads English. No view spells a word itself: `scripts/test/check-ui-strings.mjs`
+refuses English in JSX text, the attributes a person reads and a table's labels across
+`packages/ui/src`, `apps/web/src` and `apps/mcp/src` (a table entry says its `key` beside its
+English `label`), with an allow-list for what is no language. What a file or cadgen says (an alert's own title and message,
 a part's name) stays as it was written. The loading and view-update lines are a closed
 vocabulary (`kit/status/loadingState.js`), English in the code and said in the view's language
 on screen (`kit/status/statusLabels.js`).
