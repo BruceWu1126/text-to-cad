@@ -1023,7 +1023,8 @@ plain file to every surface. A verb given its path reads the file, in the docume
 the document of the model whose build wrote it (`Daemon._routed`), and the engine lists a model that
 declares files like any other. A page given its path serves it as it serves any file: its version
 is the file's, it is read again when the file's bytes change (**The page's route**), and it names no
-model -- no `made_by`, no worker kept warm, and nothing of a run sent to it.
+model -- no `made_by`, no worker kept warm, and nothing of a run sent to it, its progress and its
+failure among them.
 
 **The last run.** A document is what its model's last run made, and that is all the engine knows
 of the code: it never compares a script, a module or an input file on disk with what a build read,
@@ -1172,7 +1173,9 @@ the daemon:
   phase finished a line with its time, the one in flight repainted in place -- and nothing when
   it is not (`progress.Bar`; `api.build_script(progress=)` takes the frames instead, `False` none);
 - keeps a busy worker's last, which `cadgen status` shows (**The engine server and its workers**);
-- wakes the pages waiting on a served document among the frame's `outputs` (below);
+- wakes the pages waiting on the model document it builds (below); a file among the frame's
+  `outputs`, a declared xbf among them, is no document of the build's: its page hears nothing of
+  the run and follows the file's bytes;
 - sends it on to a build request queued behind it, one of the same script (`Daemon.behind`): a
   rerun after its client was killed (a shell's time limit) waits for the build that client left
   running, nothing cancelled. Its client says so on stderr at once ("waiting for the build of
@@ -1187,14 +1190,15 @@ says where it was; a worker that dies during a build fails it with where it was 
 **The page's route.** `GET /api/doc/<id>/version?after=V&progress=N&wait=S` answers
 `{"version", "building", "failed", "progress"}` once the version is not `V`, or the
 count `progress` is not `N`, or after `S` seconds (60 at most); without `progress=` it waits on
-the version alone. `building` is the last frame of the build writing the document now, null when
+the version alone. `building` is the last frame of the build of the model's document now, null when
 none is; `failed` is the last build of it that failed, `{"model", "error", "progress"}` -- its
 error, and its last frame -- null once another begins or one succeeds; `progress` is a count that
 moves whenever either does. A page sends back the last answer's `progress`, so each frame and the
-build's end wake it, and nothing polls. A file's version is its modification time and size: the
-server looks at them each time the file is asked for and at least twice a second while a page waits on it,
-and reads the file again when they changed -- whatever program wrote it, a model's run writing the
-xbf it declares among them: no run sends a file's page anything (**Document lifetime**).
+build's end wake it, and nothing polls. A file's `building` and `failed` are null and its `progress`
+stays: a file names no model. A file's version is its modification time and size: the server
+looks at them each time the file is asked for and at least twice a second while a page waits on
+it, and reads the file again when they changed -- whatever program wrote it, a model's run writing
+the xbf it declares among them: no run sends a file's page anything (**Document lifetime**).
 
 ## The viewer and the snapshot
 

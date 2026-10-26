@@ -9,9 +9,10 @@ for each part already meshed the faces its mesher left without triangles
 ``GET /api/doc/<id>/version?after=V&progress=N&wait=S`` answers ``{"version",
 "building", "failed", "progress"}`` once the version is not ``V``, or the count ``progress`` is
 not ``N`` (without ``progress=``, the version alone is waited on), or after ``S`` seconds:
-``building`` is the last progress frame of the build writing the document now (``progress.py``;
-null when none is), ``failed`` the last build of it that failed (``{"model", "error",
-"progress"}``: its error and where it was; null once one succeeds or another begins), and
+``building`` is the last progress frame of the build of a model's document now (``progress.py``;
+null when none is, and always for a file, which names no model), ``failed`` the last build of it
+that failed (``{"model", "error", "progress"}``: its error and where it was; null once one
+succeeds or another begins), and
 ``progress`` a count that moves whenever either does (``building``, ``built``), which the page
 sends back to wait for the next; ``GET /api/doc/<id>/part/<key>`` is one part's tessellation
 (``mesh.Mesh.to_bytes``), held in memory by the part's geometry key, so a part that two
@@ -1171,11 +1172,12 @@ class Server:
             prototypes.append(prototype)
         return found
 
-    def building(self, frame: dict[str, Any]) -> None:
-        """A build's progress frame (``progress.py``): each served document among its
-        ``outputs`` is being built, as the frame says, and its pages are woken."""
+    def building(self, frame: dict[str, Any], documents: list[str]) -> None:
+        """A build's progress frame (``progress.py``): each served model document among
+        ``documents`` (the ones the build is building) is being built, as the frame says, and its
+        pages are woken. A file the frame's ``outputs`` name is no document of the build's."""
         with self.load_lock:
-            hit = self._ids(frame.get("outputs") or [])
+            hit = self._ids(documents)
             for ident in hit:
                 state = self.builds.setdefault(ident, {"building": None, "failed": None, "progress": 0})
                 state.update(building=frame, failed=None, progress=state["progress"] + 1)
@@ -1183,8 +1185,8 @@ class Server:
             self._changed()
 
     def built(self, outcomes: dict[str, dict[str, Any] | None]) -> None:
-        """Builds that answered: per document they wrote (a path, or a model's id), None when its
-        model built, else what failed (``{"model", "error", "progress"}``). Those served are built
+        """Builds that answered: per model document they built (its id), None when its model built,
+        else what failed (``{"model", "error", "progress"}``). Those served are built
         no longer; their pages are woken."""
         hit = False
         with self.load_lock:

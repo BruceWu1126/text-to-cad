@@ -437,13 +437,12 @@ builds no script until a build takes it (``adopt``)."""
         self.on_progress = on_progress
         self.on_saved = on_saved
         self.saves = itertools.count(1)
-        # The running request's last progress frame, and every file its frames named.
+        # The running request's last progress frame.
         self.progress: dict[str, Any] | None = None
         # When the running build began (``time.time()``), None while no build runs; and the requests
         # queued behind it, each sent its progress frames as its own build would be (``Daemon.behind``).
         self.building: float | None = None
         self.followers: list[Callable[[dict[str, Any]], None]] = []
-        self.touched: set[str] = set()
         self.document_read = False
         self.answers: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
         self.started = time.time()
@@ -510,7 +509,6 @@ builds no script until a build takes it (``adopt``)."""
                     self._tell({"log": message["notice"], "stream": "notice"})
                 elif "progress" in message:
                     frame = self.progress = message["progress"]
-                    self.touched.update(frame.get("outputs") or ())
                     self._tell({"progress": frame})
                     for follow in list(self.followers):
                         try:
@@ -582,7 +580,7 @@ builds no script until a build takes it (``adopt``)."""
         with self.lock:
             self.sink = send
             self.document_read = bool(request.get("expected"))
-            self.progress, self.touched = None, set()
+            self.progress = None
             self.building = time.time() if request.get("op") == "build" else None
             try:
                 self._write(request, payload)
@@ -1703,17 +1701,19 @@ class Daemon:
                       on_saved=self.models.cache.saved)
 
     def progressed(self, _worker: Worker, frame: dict[str, Any]) -> None:
-        """A build's progress frame: the pages waiting on a served document it writes are woken
-        with it (``serve.Server.building``)."""
+        """A build's progress frame: the pages waiting on the model document it builds are woken
+        with it (``serve.Server.building``). A file it writes is no document of the build's: a page
+        serving it follows its bytes, and hears nothing of the run."""
         server = self.server
         if server is not None and not _worker.document_read:
-            outputs = [*(frame.get("outputs") or []), *self.models.paths(_worker, frame.get("model"))]
-            if outputs:
-                server.building({**frame, "outputs": outputs})
+            documents = self.models.paths(_worker, frame.get("model"))
+            if documents:
+                server.building(frame, documents)
 
     def _built(self, worker: Worker, answer: dict[str, Any], *, verb: bool = False) -> None:
-        """A request of ``worker`` answered: each served document its build wrote is built no
-        longer, and one whose model failed says what failed, and where (``serve.Server.built``).
+        """A request of ``worker`` answered: each model document it built is built no longer, and
+        one whose model failed says what failed, and where (``serve.Server.built``); a file it wrote
+        is told nothing.
         ``verb``: an export, a snapshot or a result asked of a document, whose failure -- a pose
         refused, a draw that failed, the worker gone -- is the request's, never its document's
         build: no document is marked failed by it (the worker's progress frame is its last
@@ -1722,16 +1722,15 @@ class Daemon:
         server = self.server
         if server is None or (verb and "failed" in answer):
             return
-        outcomes: dict[str, Any] = {path: None for path in worker.touched}
+        outcomes: dict[str, Any] = {}
         done = answer.get("done")
         reports = done.get("reports") if isinstance(done, dict) else done
         for report in reports if isinstance(reports, list) else []:
             frame = report.get("progress") or {}
             failed = None if report.get("ok") else {"model": report.get("model"), "error": report.get("error"),
                                                     "progress": frame}
-            for path in [*(frame.get("outputs") or ()), *(report.get("files") or {}),
-                         *self.models.paths(worker, report.get("model"))]:
-                outcomes[path] = failed
+            for ident in self.models.paths(worker, report.get("model")):
+                outcomes[ident] = failed
             # Each child model the run built is a document of its own, built as its own row says: its
             # body's progress marked it building, and only this marks it built (or failed).
             for identity, child in (report.get("child_models") or {}).items():

@@ -70,7 +70,8 @@ if __name__ == "__main__":
   nothing included. Keep numbers (tuples) at module level and make kernel objects inside
   bodies. Write build123d attribute-style.
 - **A body that raises fails its model**: the run prints the model's frames, exits 1,
-  and the page says the run failed.
+  and the model's page says the run failed (a page of a file it declares follows the file
+  alone).
 - **Called from a plain script** (a check, a drawing), a model is built in the engine
   and its call's `.shape` is the result as a build123d tree: every assembly a `Compound`,
   every part placed, named, coloured and given its material (its joints stay in the

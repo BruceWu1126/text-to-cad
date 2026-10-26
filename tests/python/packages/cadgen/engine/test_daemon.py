@@ -291,7 +291,7 @@ class ClientGoneTest(unittest.TestCase):
 
         worker = object.__new__(Worker)  # its pipes stood in for: no process
         worker.process = SimpleNamespace(stdout=io.BytesIO(stdout), stderr=io.BytesIO(stderr))
-        worker.answers, worker.asked, worker.progress, worker.touched = queue.Queue(), {}, None, set()
+        worker.answers, worker.asked, worker.progress = queue.Queue(), {}, None
         worker.followers = []
         worker.on_progress = lambda *_args: None
 
