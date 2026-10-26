@@ -7,6 +7,7 @@ converted for use in a model. 2D DXF belongs to `$dxf`.
 ## Contents
 
 - [A file is an action](#a-file-is-an-action)
+- [Model page or file page](#model-page-or-file-page)
 - [Standing deliverables: `exports.py`](#standing-deliverables-exportspy)
 - [Posed files and parts on their own](#posed-files-and-parts-on-their-own)
 - [The xbf is Save As](#the-xbf-is-save-as)
@@ -50,6 +51,18 @@ decorator (`@step`, `@glb`, ...) wrote it: nothing ties it to the model, nothing
 it, and a viewer page of it follows the file's bytes on disk, never the model. It
 changes only when it is written again. Give the person its path; open it only when they
 ask to see it ([Show the model](../SKILL.md#show-the-model)).
+
+## Model page or file page
+
+The model's page is the default; a file's page is for a project that revolves around its
+files ([projects built around exported files](../SKILL.md#projects-built-around-exported-files)):
+
+| | Model page | File page |
+| --- | --- | --- |
+| When | The default. | The person asks to iterate on the exported file, or the project revolves around its files: an `exports.py`, a consumer reading them (a robot description, a slicer, a drawing pipeline), a 0.7-era layout. |
+| Each run | The page updates; nothing is written. | The file is written too (a file decorator, `exports.py` or `cadgen export`) and the page re-reads it, a STEP parsed again. |
+| A picked ref | `made_by` names the function, file and line. | `made_by` is null, a file names no model: a Quick Edit has no way back into the code. |
+| A failed run | The page says so. | The file keeps its last write and the page says nothing. |
 
 ## Standing deliverables: `exports.py`
 

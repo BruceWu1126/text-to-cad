@@ -10,10 +10,10 @@ Provenance: maintained in [earthtojake/text-to-cad](https://github.com/earthtoja
 Use the installed local skill files for the current interface.
 
 The viewer page is the open document, the script is its feature tree, and running the
-script is the rebuild. Export is the download button at the navbar's right: pick a
-format, the engine prepares the file, the browser saves it. A model is a Python function; running
-its script rebuilds it in cadgen's warm engine, and the page the person has open updates.
-Nothing is written to disk until someone asks for a file.
+script is the rebuild: a model is a Python function, a run rebuilds it in cadgen's warm engine,
+and the page the person has open updates. Export is the download button at the navbar's right:
+pick a format, the engine prepares the file, the browser saves it. Nothing is written to disk
+until someone asks for a file.
 
 ## Start with the task
 
@@ -29,6 +29,7 @@ Nothing is written to disk until someone asks for a file.
 | **Articulate a mechanism** | build123d joints in the body, then `cadgen.ap242`. | [Kinematics](references/kinematics.md) |
 | **Explode, reveal or showcase a model** | `cadgen.gltf`'s `animation()` in the body. | [Animation](references/animation.md) |
 | **Open an existing XBF, STEP/STP, STL, 3MF or GLB** | Show it to the user. | [Show the model](#show-the-model) |
+
 A project built with cadgen 0.7 may need migrating: see [migrations](references/migrations.md).
 
 For 2D DXF drawings use `$dxf`; this skill owns any 3D part the drawing projects.
@@ -75,9 +76,10 @@ them on `__file__` in code that must run from any folder.
 
 A part or an assembly is a function with no parameters, decorated `@model` (or with its
 file decorators, never both), that returns a build123d shape. Its dimensions are the
-arguments of a plain helper function, and each configuration is a `@model` of its own. A
-call builds it and returns its document: a handle with `.id`, `.url`, `.shape` (the built
-shape) and `.export(...)`. For example, `src/bracket.py`:
+arguments of a plain helper function, and each configuration is a `@model` of its own, with
+its own id and page; constants several models share live in a module they import. A call
+builds it and returns its document: a handle with `.id`, `.url`, `.shape` (the built shape)
+and `.export(...)`. For example, `src/bracket.py`:
 
 ```python
 import build123d as bd
@@ -135,9 +137,6 @@ run, and the open page follows every run.
   the script replays every operation an edit did not reach, so a comment re-runs nothing
   and a dimension edit re-runs what reads it. Decoration only declares: keep the calls
   under `if __name__ == "__main__":` so other scripts can import the models.
-- **A model takes no parameters.** Values live on plain helper functions; a variant is
-  another named `@model` that calls them with other values: a configuration, with its own
-  id and page. Constants several models share live in a module they import.
 - **`@memo` marks stages, never parts.** The engine already replays every kernel call, so
   mark only a function holding seconds of kernel work that an edit elsewhere leaves
   alone, such as a whole sub-assembly stage; never a part, never a helper called many
@@ -190,10 +189,26 @@ and nothing else: a posed file is a model that returns the posed assembly
 
 The xbf, cadgen's own document, is Save As: export one only to share a model without its
 code, or to compose it in another project with `read_xbf`. A restart needs none: the
-engine's own cache reopens every document it built, as last built (nothing reruns; after an
-edit, run the script). A vendor STEP is converted to an xbf once
+engine's own cache reopens every document it built, as last built. A vendor STEP is
+converted to an xbf once
 (`cadgen export vendor/motor.step vendor/motor.xbf`) and read with `read_xbf`, many
 times faster than parsing the STEP.
+
+## Projects built around exported files
+
+A project can instead revolve around its exported files, but only when the person asks to
+iterate on the exported file itself or the project already does: an `exports.py`, a consumer
+that reads the files (a robot description, a slicer, a drawing pipeline), or a 0.7-era
+layout, whose runs wrote files. The loop is three steps. The script writes the file on each
+run, by a file decorator in place of `@model` (`@step("../STEP/bracket.step")`, relative to
+the script), or `exports.py` or `cadgen export` follows the run. Show the file's page, not
+the model's: it follows the file on disk, updating when a run rewrites the file.
+Verification reads the file: `cadgen snapshot` or `cadgen inspect` with its path, or
+`read_step` in a check. The costs keep the default the default: each iteration pays the
+file's translation and the page's re-read, a STEP parsed again; a file names no model, so a
+ref picked on its page has no `made_by` and a Quick Edit from it no way back into the code;
+and the model's page stays the better place to look while editing.
+[Exports](references/exports.md#model-page-or-file-page) tables the triggers and costs.
 
 ## Pictures
 
@@ -210,8 +225,7 @@ several angles by habit. After a Quick Edit, the picture to take is the person's
 replayed (`--camera authored` with the packet), not a fresh angle. For a large assembly,
 isolate the parts the edit touched or hide what covers them and frame them, instead of
 drawing the whole model. Resolve a reference with `cadgen inspect` only when a prompt names
-one. Never screenshot the card to confirm your own work, never check a number nobody asked
-for, never show a model again after a rebuild.
+one.
 
 ```bash
 cadgen snapshot "$ID" tmp/review.png
@@ -297,8 +311,6 @@ print(closest_points(plate, post).distance)   # 0: the standoff sits on the plat
 - `cadgen inspect "$ID" <assembly label>` weighs an assembly (the label it was given, which
   is also the root name `inspect "$ID"` prints): each part's volume times its material's
   density, and the parts that have no material.
-- A snapshot shows arrangement, not dimensions: a number the person asked for is
-  measured, never read off a picture.
 - A check that fails or cannot decide has shown nothing about the design.
 - A retry that leaves out or shrinks a specified feature (a fillet skipped, a radius
   reduced) builds a different design from the one asked for.
