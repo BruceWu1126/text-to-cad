@@ -162,6 +162,45 @@ test('the home pictures a card out of sight, in a viewer of its own, and never s
   expect(viewer.hidden).toBeNull();
 });
 
+test('the home pictures a model document the engine holds, by its id, and leaves one it does not hold (unsaved, detached) to its placeholder', async () => {
+  const held = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab', unsaved = '0a1b2c3d-4e5f-5a6b-8c7d-0123456789ab';
+  const client = { ...cadClient(), engineHolds: vi.fn(async (file: string) => file === held) };
+  render(<CadViewer client={client as never} host={ports(client)} tabStore={createTabStore(memoryTabRecord())} live={createLiveRegistry()} file=""
+    library={library} onThumbnail={async () => {}} onShow={() => {}} />);
+  const picture = (props().presentation!.home as { props: { picture(model: { path: string }): Promise<boolean> } }).props.picture;
+  // The engine is asked, and nothing is built or drawn.
+  await expect(picture({ path: unsaved })).resolves.toBe(false);
+  expect(client.engineHolds).toHaveBeenCalledWith(unsaved);
+  expect(viewer.hidden).toBeNull();
+  // One it holds is drawn out of sight, by its id, in a view of its own.
+  let drawn!: Promise<boolean>;
+  await act(async () => { drawn = picture({ path: held }); });
+  expect(viewer.hidden!.file).toBe(held);
+  expect(viewer.hidden!.renderers).not.toBe(props().renderers);
+  act(() => viewer.hidden!.onError!(new Error('unreadable')));
+  await expect(drawn).resolves.toBe(false);
+});
+
+test('a model document on screen is pictured by its id once it settles, once per build the engine holds', async () => {
+  const id = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab';
+  const client = cadClient();
+  const live = createLiveRegistry();
+  const kept: [string, string][] = [];
+  render(<CadViewer client={client as never} host={ports(client)} tabStore={createTabStore(memoryTabRecord())} live={live} file={id}
+    library={library} onThumbnail={async (png, file) => { kept.push([await png.text(), file]); }} onShow={() => {}} />);
+  await act(async () => client.publish([{ id, file: id, sourcePath: null, hash: 'model:1' }]));
+  let pictures = 0;
+  const shot = vi.fn(async () => new Blob([`build ${++pictures}`]));
+  await act(async () => { live.binding.bind({ readState: () => ({ active: true, loading: false, resource: { kind: 'cad-model', path: id } }),
+    capture: async () => new Blob(), thumbnail: shot }); });
+  await vi.waitFor(() => expect(kept).toEqual([['build 1', id]]));
+  // The catalog read again with the same build changes nothing; a rebuild is pictured again.
+  await act(async () => client.publish([{ id, file: id, sourcePath: null, hash: 'model:1', name: 'cube' }]));
+  expect(shot).toHaveBeenCalledTimes(1);
+  await act(async () => client.publish([{ id, file: id, sourcePath: null, hash: 'model:2' }]));
+  await vi.waitFor(() => expect(kept).toEqual([['build 1', id], ['build 2', id]]));
+});
+
 test("the person's settings go to the app menu over every file; the home shows the host's links", async () => {
   const client = cadClient();
   const appSettings = [{ id: 'analytics', label: 'Share anonymous usage data', checked: false, onCheckedChange: () => {} }];

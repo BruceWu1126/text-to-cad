@@ -344,16 +344,18 @@ changes (`kit/viewport/thumbnail.js`; a DXF paints its fitted drawing on a canva
 of its own). A view that goes before it settles rejects it. `useModelThumbnail`
 keeps one per revision of a file per mounted view (a model rebuilt while it is
 open is pictured again once its new revision is drawn), and only for the file the
-view still shows.
+view still shows. A model's document is pictured as a file is, by its id: its catalog
+row's revision is the build the engine holds, so a rebuild is a new revision.
 On the home, a card on screen with no picture, or one taken before its file last
 changed (`pictured` against `modified`), is pictured out of sight wherever the host
 keeps pictures (`onThumbnail`): `CadViewer` mounts a viewer of its own for it, over
 its own client — its own renderers and live binding, compact, behind the page at the
-picture's size — one model at a time, each once per visit, and a STEP only once the
-cadgen engine holds it (`client.engineHolds`), and keeps the picture through
-`onThumbnail` as it keeps the file on screen's. The home never starts the engine's
-read of a STEP (a large one's is long): one it does not hold keeps its placeholder
-until a view shows it.
+picture's size — one model at a time, each once per visit, and a STEP or a model's
+document (by its id) only once the cadgen engine holds it (`client.engineHolds`), and
+keeps the picture through `onThumbnail` as it keeps the file on screen's. The home never
+starts the engine's read of a STEP (a large one's is long) nor a model's build: one it
+does not hold — a model that is `unsaved` or `detached` among them — keeps its
+placeholder until a view shows it.
 `readState().display` and `setDisplaySettings(patch)` use the same sparse display
 schema as snapshots: `mode` selects `solid`, `shaded`, `parts`, `xray`, `hidden-line`,
 or `wireframe` (each a look at its own defaults), `grid` switches the measuring grid,

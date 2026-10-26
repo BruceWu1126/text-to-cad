@@ -455,7 +455,9 @@ composer has no camera action: its note to the agent is Quick Edit.
 A model's page is `/<id>`, its document's id, which `python SCRIPT.py` prints (`view:`). The
 page reads the document the engine holds, by id (`GET /__cad/catalog?id=`); it never builds or
 imports a script, and no folder lists one. A model has no file of its own: no Select File, no
-file menu, and it never enters saved recents or thumbnail storage. Once its worker retires or
+file menu. It is in the library by its id (the engine's record), and its picture is taken by
+its id as a file's is: on screen once it settles, once per build, and on the home only while
+the engine holds it. Once its worker retires or
 the engine restarts, its page shows it from the engine's cache, as last built; only once the cache
 holds no file of it (deleted by hand, or never saved: the engine's state `unsaved`) does its page
 say it is no longer held and name the command that builds it again. Rebuilding the model updates the same view through the document version stream.

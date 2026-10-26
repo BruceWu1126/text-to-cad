@@ -21,7 +21,8 @@ import { isDocumentId } from '@text-to-cad/core/lib/cadRefs.js';
 import { LaunchFolder } from './LaunchFolder.js';
 import { MissingCadFile } from './MissingCadFile.js';
 
-// A STEP: read by the cadgen engine, at a length its size decides (the home's pictures ask first).
+// A STEP: read by the cadgen engine, at a length its size decides (the home's pictures ask first, as
+// they do for a model's document, by its id).
 const STEP_FILE = /\.(?:step|stp)$/i;
 
 export interface CadViewerProps<Model extends LibraryModel = LibraryModel> {
@@ -153,9 +154,10 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
     };
   }, [client]);
 
-  // What is on screen joins the library with a picture, once it has settled.
-  // A document known by its id alone (a model's) is not in the library: it has no file.
-  useModelThumbnail(live, shown && !isDocumentId(shown) ? shown : null, String(entry?.documentHash || entry?.hash || ''),
+  // What is on screen joins the library with a picture, once it has settled: a file by its path, a
+  // model's document by its id, each at its revision (a model's row's is the build the engine holds),
+  // so a model rebuilt while it is open is pictured again as a file written again is.
+  useModelThumbnail(live, shown, String(entry?.documentHash || entry?.hash || ''),
     (png, pictured) => latest.current.onThumbnail?.(png, pictured) ?? Promise.resolve());
 
   // A file the viewer asks for — a pick in the explorer, a renderer's link — is shown by the host.
@@ -169,14 +171,15 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   const viewerHost = useMemo<ViewerHost>(() => ({ ...host, navigation: homed ? { openFile, home } : {} }), [host, openFile, home, homed]);
 
   // The home's pictures for cards without a current one, drawn out of sight one at a time and kept as
-  // the file on screen's are. A STEP the cadgen engine does not hold is left to its placeholder: the
-  // home never starts the engine's read of one (a large STEP's is long), it only asks.
+  // the file on screen's are. A STEP or a model's document the cadgen engine does not hold is left to
+  // its placeholder: the home never starts the engine's read of a STEP (a large one's is long) nor a
+  // model's build, it only asks; a model that is `unsaved` or `detached` is held by none.
   const [drawing, setDrawing] = useState<{ source: ModelPictureSource; done(kept: boolean): void } | null>(null);
   const drawable = Boolean(library && onThumbnail);
   const picture = useMemo(() => (drawable ? async (model: Model) => {
     const file = normalizePath(model.path);
-    if (latest.current.path || isDocumentId(file)) return false;
-    if (STEP_FILE.test(file) && !(await client.engineHolds?.(file).catch(() => false))) return false;
+    if (latest.current.path) return false;
+    if ((STEP_FILE.test(file) || isDocumentId(file)) && !(await client.engineHolds?.(file).catch(() => false))) return false;
     if (latest.current.path) return false;
     const keep = (png: Blob) => latest.current.onThumbnail?.(png, model.path) ?? Promise.resolve();
     return new Promise<boolean>(done => setDrawing({ source: { client, file, keep }, done }));

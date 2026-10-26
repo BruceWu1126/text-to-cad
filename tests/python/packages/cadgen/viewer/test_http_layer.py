@@ -272,6 +272,23 @@ class Catalog(HttpLayerTestCase):
             with self.subTest(file=missing):
                 self.assertEqual(self.catalog(missing)[1]["entries"], [])
 
+    def test_a_model_by_its_id_is_its_row_at_the_build_held(self):
+        ident = "6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"
+        answers = {"model_info": {"model": {"source": {"name": "cube"}, "version": "v1"}}}
+        app = self.fixture.app
+
+        def catalog():
+            status, _, body = self.fixture.request("GET", f"/__cad/catalog?id={ident}")
+            return status, json.loads(body)
+
+        with mock.patch("cadgen.viewer.model_catalog.request", side_effect=lambda ask, start: answers[ask["op"]]), \
+                mock.patch.object(app, "_file_of", return_value=None):
+            # The row's hash is the build the engine holds: a rebuild is a new revision of the row.
+            [row] = catalog()[1]["entries"]
+            self.assertEqual((row["id"], row["file"], row["sourcePath"], row["hash"]), (ident, ident, None, "model:v1"))
+            answers["model_info"] = {"model": {"source": {"name": "cube"}, "version": "v2"}}
+            self.assertEqual(catalog()[1]["entries"][0]["hash"], "model:v2")
+
     def test_a_file_that_is_not_named_by_its_absolute_path_is_a_400(self):
         status, body = self.catalog("part.stl")
         self.assertEqual(status, 400)
