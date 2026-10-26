@@ -2,7 +2,7 @@
 // Preview"). A document page opens on the viewer's own fit and is UNTOUCHED; while it stays so, a
 // rebuild whose box changed is fitted again, as the open fitted it. The first touch makes the
 // camera the person's for the page's life, and a rebuild then keeps it exactly, as desktop CAD
-// does. A fit (F, the view cube's Fit, Zoom to fit, the live `resetCamera`) hands the camera back:
+// does. A fit (F, Zoom to fit, the live `resetCamera`) hands the camera back:
 // a fit is untouched again. A resize is neither: it keeps its own refit rule (`ShellViewport`).
 //
 // The state lives on the runtime, beside `userMovedCamera`, the flag a progressive model's

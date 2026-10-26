@@ -177,7 +177,6 @@ export default {
   "projection.orthographic": "正交",
   "projection.perspective": "透视",
 
-  "viewCube.fit": "适合",
 
   "preview.label": "预览",
   "preview.settings": "预览设置",

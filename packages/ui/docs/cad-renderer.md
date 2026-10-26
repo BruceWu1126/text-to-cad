@@ -1640,6 +1640,6 @@ for clipping, lighting and picking. Nothing displays that percentage; it is read
 through the `window.__cadCamera()` test seam (`zoomPercent`). The acts that frame the
 model are an engine document's context menu (Zoom to fit, Zoom to selection) and the live
 `resetCamera`; the view cube (bottom-right, absent in Preview) turns
-the camera and keeps its zoom and pan, Fit in its corner (F) frames the model, and opening a
+the camera and keeps its zoom and pan, F frames the model (the cube has no Fit button), and opening a
 file fits the model afresh (a
 reload of the page restores the camera the file on screen was left at).

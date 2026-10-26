@@ -176,7 +176,6 @@ export default {
   "projection.orthographic": "직교 투영",
   "projection.perspective": "원근 투영",
 
-  "viewCube.fit": "맞춤",
 
   "preview.label": "미리 보기",
   "preview.settings": "미리 보기 설정",

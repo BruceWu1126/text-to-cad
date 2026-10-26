@@ -176,7 +176,6 @@ export default {
   "projection.orthographic": "平行投影",
   "projection.perspective": "透視投影",
 
-  "viewCube.fit": "フィット",
 
   "preview.label": "プレビュー",
   "preview.settings": "プレビューの設定",
