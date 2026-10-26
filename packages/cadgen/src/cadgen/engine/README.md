@@ -2488,17 +2488,18 @@ no git. It names what the document was built from and what built it, the toolcha
 
 ```
 schema    "cadgen.engine closure/2"
-engine    {"release": "cadgen 0.8.0", "format": "xbf/8", "digest": ...}   the release and the format (keyed);
+engine    {"release": "cadgen 0.8.0", "format": "xbf/8", "digest": ...}   the format (keyed); the release and
                                                                      the engine's code digest (information only)
 libs      {"build123d": "0.11.1", "OCP": "7.9.3.1.1"}                 what decides the geometry (keyed): OCP's
                                                                      version leads with the OCCT it wraps
-platform  {"python": "3.12.10", "system": "Darwin", "arch": "arm64"}  the Python and the machine (keyed):
+platform  {"python": "3.12.10", "system": "Darwin", "arch": "arm64"}  the system and architecture (keyed),
+                                                                     Python (information only):
                                                                      platform.python_version(), .system(), .machine()
 source    {"kind": "script", "path": "../src/tom.py", "function": "tom"}
 modules   [["../src/lib/arm_parts.py", "9f3c..."], ...]
 inputs    [["file", "../STEP/gripper.step", "c0de..."], ["read", "../src/lib/ids.json", "77ab..."], ...]
 bodies    how many bodies the model is
-key       one digest over the toolchain (the release, the format, libs and platform) and the code (source,
+key       one digest over the format, libs, system and architecture, and the code (source,
           modules and inputs); null where the closure cannot say all the model is made of
 ```
 
@@ -2518,16 +2519,15 @@ a motion's function's reads too, **Configuration sequences**), or a text's font 
 null (**Body retention**). `cadgen inspect DOC` prints the closure, `cadgen.inspect(doc)` and
 `document.Loaded.closure` read it.
 
-**When the toolchain or the format moves.** The key takes the toolchain that built the
-document -- the release, the format (`previous.FORMAT`), build123d and OCP, the Python and the
-machine -- because they decide its bytes: an arm64 kernel and an x86-64 one write other bytes of
-one model. So a document is only ever taken by the toolchain that would write it, and is never
-trusted by another machine's, another release's or another Python's; each of those builds the
-model once, saying what moved (`rebuilt: cadgen 0.8.0 became cadgen 0.8.1`, `Python 3.12.10
-became 3.13.5`, `arm64 became x86_64`). A cadgen upgrade therefore builds every model once. Not
-a digest of the engine's code: an engine edit within a release that leaves the written document
-alone keeps every xbf current. `FORMAT` is bumped by hand (`xbf/7` to `xbf/8`) when what
-an engine writes changes -- the document's structure, the attributes on its labels, the
+**When the toolchain or the format moves.** The key covers the document format
+(`previous.FORMAT`), the kernel and library versions (`libs`: build123d and OCP), the operating
+system and the architecture, along with the model's code and inputs. An arm64 kernel and an
+x86-64 one write other bytes of one model; a system, architecture or library change rebuilds it,
+saying what moved (`rebuilt: arm64 became x86_64`). The cadgen release (`engine.release`) and
+Python version (`platform.python`) are recorded in the closure but not keyed: a change to either
+alone does not rebuild. The engine's code digest is information only too; an engine edit that
+leaves the written document alone keeps every xbf current. `FORMAT` is bumped by hand (`xbf/7` to
+`xbf/8`) when what an engine writes changes -- the document's structure, the attributes on its labels, the
 closure's fields, or what the key covers -- and then every xbf builds once, cleanly: a
 document of another format is "written by" another engine (`cache.reason`). The bumps so far:
 `xbf/2`, the key left the release, the engine digest and numpy, and the closure its commit;
@@ -2536,8 +2536,9 @@ motion's samples are made for linear interpolation (**Configuration sequences**)
 functions join the closure (**Configuration sequences**); `xbf/6`, the closure counted the build's
 animations, and a document with any was not taken; `xbf/7`, the compiled animations are a build
 record on the main label, the closure counts none, and an animated document is taken like any
-(**Animations**); `xbf/8`, the closure names its toolchain (`closure/2`: the platform, and the
-release keyed), the one bump that builds nothing: its documents are moved in place (below).
+(**Animations**); `xbf/8`, the closure names its toolchain (`closure/2`: system and architecture
+join the key; release and Python are recorded), the one bump that builds nothing: its documents
+are moved in place (below).
 
 **The move from `closure/1`.** The engine moves every cached document of the closure before
 (`closure/1`, written as `xbf/7`: no platform, the release not keyed) at its start, before it can be
@@ -2579,8 +2580,8 @@ again from the document, and every file `written: false` where each holds its by
 Anything else builds as before, and `cache.reason` says why: the cache holds none of it, written
 by another engine or program, a cache file that does not read, no key in it, or what changed, by
 name (`cache.changed`, each change; the CLI prints `rebuilt: ../src/lib/arm_parts.py changed`): a
-module changed, is new or is no longer imported, an input changed or is missing, the format, the
-release, a library, the Python, the system, the architecture or the source moved.
+module changed, is new or is no longer imported, an input changed or is missing, the format, a
+library, the system, the architecture or the source moved.
 `CADGEN_ENGINE_MEMO=0` and `CADGEN_ENGINE_BODIES=0` turn it off with the rest of retention.
 
 The document is taken whole or not at all, never one body's part of it. OCCT's BinXCAF

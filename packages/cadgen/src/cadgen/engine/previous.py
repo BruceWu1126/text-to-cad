@@ -4,13 +4,14 @@ digests, and the key a restart compares.
 When a build writes a model's xbf, the document's main label carries its closure
 (``manifest``, schema ``cadgen.engine closure/2``):
 
-- ``engine``: the release that wrote it (``cadgen <VERSION>``, the version declared beside this
-  very code: ``version``) and the xbf format (``FORMAT``), and, as information only, a digest of
+- ``engine``: the keyed xbf format (``FORMAT``); as information only, the release that wrote it
+  (``cadgen <VERSION>``, the version declared beside this very code: ``version``) and a digest of
   the engine's own code;
 - ``libs``: the versions of build123d and OCP (the kernel: OCCT's release leads its version),
   which decide the geometry;
-- ``platform``: the Python the build ran on and the machine (``platform.system()``,
-  ``platform.machine()``): an arm64 kernel and an x86-64 one write other bytes of one model;
+- ``platform``: the keyed system and architecture (``platform.system()``, ``platform.machine()``):
+  an arm64 kernel and an x86-64 one write other bytes of one model; the Python version is recorded
+  as information only;
 - ``source``: ``{"kind": "script", "path", "function"}`` -- the script relative to the
   document's folder and the model's function;
 - ``modules``: ``[path, digest]`` per first-party module the script's load imported or the
@@ -25,13 +26,13 @@ When a build writes a model's xbf, the document's main label carries its closure
   relative to the document's folder (``null`` digest: a file it found missing), and a text's
   font (``font``);
 - ``bodies``: how many bodies the model is;
-- ``key``: one digest over the toolchain -- the release, the format, the libraries and the
-  platform -- and the code: the source, the modules and the inputs; ``null`` where the closure
+- ``key``: one digest over the format, the libraries, the system and the architecture, and the
+  code: the source, the modules and the inputs; ``null`` where the closure
   cannot say all the model is made of (a body read a pipe, or reaches what cannot be keyed).
   Not the engine's code digest: an engine edit that leaves the document alone keeps every xbf
   current. ``FORMAT`` is what moves when the written document, or what the key covers, changes
-  (``xbf/1`` to ``xbf/2``), and every xbf then builds once, cleanly; a cadgen release moves the
-  key too, so a document is only ever taken by the toolchain that would write its bytes.
+  (``xbf/1`` to ``xbf/2``), and every xbf then builds once, cleanly. A cadgen release or Python
+  version change alone leaves the key current.
 
 No source text, no line, no input's contents (**the file is the document**, **names are the
 durable tie to code**).
@@ -41,7 +42,7 @@ made again now -- the script loaded, its modules digested, each input hashed aga
 the one the document holds. The same key, in a document this engine wrote that reads whole, and
 the body is not run: the document on disk is what it would make, and it is not written.
 Otherwise the build runs, and its report names what changed (``changes``): ``../src/lib/arm.py
-changed``, ``../STEP/gripper.step is missing``, ``Python 3.12.10 became 3.13.5``.
+changed``, ``../STEP/gripper.step is missing``, ``arm64 became x86_64``.
 
 Only the whole document is taken, never a part of it. OCCT's BinXCAF reader does not
 give back the doubles it was given: it builds each direction and placement anew, and a
@@ -84,7 +85,7 @@ SCHEMA = "cadgen.engine closure/2"
 # xbf/5: files read by motion functions join the closure.
 # xbf/6: the closure counts the build's animations, and a document with any is not taken.
 # xbf/7: the build's animations are a record on the main label (``animations.record``); the closure counts none.
-# xbf/8: the closure names the toolchain that built it (closure/2): the release and the platform join the key.
+# xbf/8: the closure names the toolchain that built it (closure/2): the system and architecture join the key.
 FORMAT = "xbf/8"
 # The closure and the format before the toolchain was keyed: a cached document of them is moved
 # to this closure in place, once (``migrated``), never built again for it.
@@ -92,8 +93,8 @@ EARLIER_SCHEMA = "cadgen.engine closure/1"
 EARLIER_FORMAT = "xbf/7"
 # The libraries a key covers: what decides the geometry.
 KEYED_LIBRARIES = ("build123d", "OCP")
-# What the closure says of the platform a build ran on, all keyed: the Python, the system, the machine.
-PLATFORM = ("python", "system", "arch")
+# The keyed platform fields; the closure also records Python as information only.
+KEYED_PLATFORM = ("system", "arch")
 # The start of a closure's text: the schema first, so a head scan finds it; and an earlier one's.
 _PREFIX = f'{{"schema":"{SCHEMA}",'.encode()
 _EARLIER_PREFIX = f'{{"schema":"{EARLIER_SCHEMA}",'.encode()
@@ -259,14 +260,12 @@ def _named(symbols: dict[str, dict[str, str]], folder: Path) -> dict[str, dict[s
 
 
 def key(record: dict[str, Any]) -> str:
-    """The digest a restart compares: the toolchain -- the release, the format, the libraries and
-    the platform -- and the code: the source, the modules and the inputs. The same closure on the
-    same toolchain is the same key in every process; a field of the toolchain that differs, an
-    architecture alone, is another key. Not the engine's code digest: the format moves when what
-    an engine writes does."""
+    """The digest a restart compares: the format, the libraries, the system and the architecture,
+    and the code: the source, the modules and the inputs. The release, Python version and engine's
+    code digest are recorded but not keyed; the format moves when what an engine writes does."""
     libs = {name: record["libs"].get(name) for name in KEYED_LIBRARIES}
-    platform = {name: record["platform"].get(name) for name in PLATFORM}
-    return _digest([SCHEMA, record["engine"]["release"], record["engine"]["format"], libs, platform,
+    platform = {name: record["platform"].get(name) for name in KEYED_PLATFORM}
+    return _digest([SCHEMA, record["engine"]["format"], libs, platform,
                     record["source"], record["modules"], record["inputs"]])
 
 
@@ -289,16 +288,13 @@ def again(record: dict[str, Any], model: Any, folder: Path, modules: dict[str, s
     changes: list[str] = []
     if now["engine"]["format"] != record["engine"].get("format"):
         changes.append(f"the xbf format changed ({record['engine'].get('format')} to {now['engine']['format']})")
-    if now["engine"]["release"] != record["engine"].get("release"):
-        changes.append(f"{record['engine'].get('release')} became {now['engine']['release']}")
     for name in sorted(set(now["libs"]) | set(record["libs"])):
         if now["libs"].get(name) != record["libs"].get(name):
             changes.append(f"{name} {record['libs'].get(name)} became {now['libs'].get(name)}")
     held_platform = record.get("platform") or {}
-    for name in PLATFORM:
+    for name in KEYED_PLATFORM:
         if now["platform"][name] != held_platform.get(name):
-            shown = "Python " if name == "python" else ""
-            changes.append(f"{shown}{held_platform.get(name)} became {now['platform'][name]}")
+            changes.append(f"{held_platform.get(name)} became {now['platform'][name]}")
     if now["source"] != record["source"]:
         source = now["source"]
         changes.append(f"the model is now {source['path']}::{source['function']}")

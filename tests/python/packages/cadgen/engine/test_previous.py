@@ -321,8 +321,8 @@ class PreviousTest(unittest.TestCase):
         self.cold()
         writer = document._writer().encode()
         release = previous.version().encode()
-        # Another cadgen release in the writer's words: information (the closure's release is the
-        # one keyed), the file is taken.
+        # Another cadgen release in the writer's words: information, as in the closure; the file
+        # is taken.
         other_release = writer.replace(b"(cadgen " + release, b"(cadgen " + b"9" * len(release))
         self.restart()
         self.cached.write_bytes(self.cached.read_bytes().replace(writer, other_release))
@@ -555,7 +555,7 @@ class ClosureTest(unittest.TestCase):
         self.assertFalse(report["files"][str(self.xbf)]["written"])
         self.assertEqual((self.xbf.read_bytes(), self.xbf.stat().st_mtime_ns), written)
 
-    def test_the_key_is_the_toolchain_and_the_code_not_the_engine_digest_or_numpy(self) -> None:
+    def test_the_key_covers_format_libs_system_arch_and_code_but_not_release_or_python(self) -> None:
         self.plate()
         record = previous.of(self.xbf)
 
@@ -570,9 +570,10 @@ class ClosureTest(unittest.TestCase):
         # Two closures that differ in the architecture alone: an x86-64 kernel writes other bytes.
         arm, intel = copy(platform={"arch": "arm64"}), copy(platform={"arch": "x86_64"})
         self.assertNotEqual(previous.key(arm), previous.key(intel))
-        # Every other field of the toolchain is keyed too.
-        for name, values in (("engine", {"release": "cadgen 99.0.0"}), ("engine", {"format": "xbf/1"}),
-                             ("libs", {"OCP": "7.0.0"}), ("platform", {"python": "3.99.0"}),
+        for name, values in (("engine", {"release": "cadgen 99.0.0"}), ("platform", {"python": "3.99.0"})):
+            self.assertEqual(previous.key(copy(**{name: values})), record["key"], f"{name} {values} is recorded only")
+        for name, values in (("engine", {"format": "xbf/1"}), ("libs", {"build123d": "0.0.1"}),
+                             ("libs", {"OCP": "7.0.0"}),
                              ("platform", {"system": "Plan 9"})):
             self.assertNotEqual(previous.key(copy(**{name: values})), record["key"], f"{name} {values} is keyed")
         # The same closure on the same toolchain is the same key, made again anywhere: the key a move
@@ -580,15 +581,34 @@ class ClosureTest(unittest.TestCase):
         self.assertEqual(previous.key(json.loads(previous.text(record))), record["key"])
         self.assertEqual(previous.key(copy(platform=previous._platform(), engine=previous._engine())), record["key"])
 
-    def test_another_python_or_architecture_builds_and_says_so(self) -> None:
+    def test_another_release_or_python_takes_the_document_without_a_rebuild_reason(self) -> None:
+        from types import SimpleNamespace
+        from unittest import mock
+
+        self.plate()
+        record = previous.of(self.xbf)
+        for field, value in (("engine", {**previous._engine(), "release": "cadgen 99.0.0"}),
+                             ("platform", {**previous._platform(), "python": "3.99.0"})):
+            with self.subTest(field=field), mock.patch.object(previous, f"_{field}", lambda: value):
+                report = self.plate()
+                key, changes = previous.again(record, SimpleNamespace(script=self.script, name="plate"),
+                                              self.xbf.parent, {previous.absolute(path, self.xbf.parent): digest
+                                                                for path, digest in record["modules"]})
+            self.assertEqual((report["cache"], report["memo"]["bodies_run"]),
+                             ({"used": True, "from": "cache"}, 0))
+            self.assertEqual((key, changes), (record["key"], []))
+            self.assertEqual(previous.of(self.xbf), record, "the taken document keeps its recorded toolchain")
+
+    def test_another_system_or_architecture_builds_and_says_so(self) -> None:
         from unittest import mock
 
         self.plate()
         here = previous._platform()
-        there = {**here, "python": "3.99.0", "arch": "x86_64" if here["arch"] != "x86_64" else "arm64"}
+        there = {**here, "python": "3.99.0", "system": "Plan 9",
+                 "arch": "x86_64" if here["arch"] != "x86_64" else "arm64"}
         with mock.patch.object(previous, "_platform", lambda: there):
             report = self.plate()
-        self.assertEqual(report["cache"]["changed"], [f"Python {here['python']} became 3.99.0",
+        self.assertEqual(report["cache"]["changed"], [f"{here['system']} became Plan 9",
                                                       f"{here['arch']} became {there['arch']}"])
         self.assertEqual(previous.of(self.xbf)["platform"], there, "the closure names what it was built with")
 

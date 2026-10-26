@@ -31,10 +31,12 @@ Once per revision: the record gains ``cache: {revision, bytes}``, and a document
 whose revision is the cache's is never written again.
 
 Moved, once: at its start, before it can be reached, the daemon moves each cache file of the closure
-before its own (``closure/1``, before the toolchain was keyed) to its closure in place, and the record's
-revision and ``cache`` with it (``Cache.migrate``): the bytes a cold build here writes of a model nothing
-changed in, so its next run takes it with nothing run. Finding them reads each record and the first
-64 KiB of each cache file; a start that finds none writes nothing.
+before its own (``closure/1``, before the system and architecture were keyed) to its closure in place,
+and the record's revision and ``cache`` with it (``Cache.migrate``): the bytes a cold build here writes
+of a model nothing changed in, so its next run takes it with nothing run. Finding them reads each
+record and the first 64 KiB of each cache file; a start that finds none writes nothing.
+The key covers the format, library versions, system and architecture along with the model's code
+and inputs; the closure records the cadgen release and Python version without keying them.
 
 Read: at start the daemon indexes which records have a cache file (``Cache.ensure_index``: a listing
 and a stat each, no record and no byte read). A document with one answers every verb by loading its
