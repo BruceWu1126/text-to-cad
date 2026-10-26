@@ -327,7 +327,16 @@ async function formatGate() {
 async function selectViewingMode(page, current, next) {
   const [press, arrive] = next === "Render" ? ["Preview", "Exit preview"] : ["Exit preview", "Preview"];
   if (!(await page.getByRole("button", { name: press, exact: true }).count())) fail(`viewing mode: expected ${current} before switching to ${next}`);
-  await page.getByRole("button", { name: press, exact: true }).click();
+  const button = page.getByRole("button", { name: press, exact: true });
+  if (next !== "Render") {
+    // Preview's bar hides two seconds after the pointer last moved over the view, and a person's pointer, moving to
+    // Exit preview, brings it back: this pointer does the same (Playwright checks what is under the point first).
+    const box = await page.locator("[data-preview-view]").first().boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForFunction(() => !document.querySelector("[data-preview-bar]")?.hasAttribute("data-hidden"));
+    await button.hover();  // resting on the bar holds it
+  }
+  await button.click();
   await page.getByRole("button", { name: arrive, exact: true }).waitFor();
   await page.waitForFunction(() => !document.querySelector("[data-preview-cover]"));
 }

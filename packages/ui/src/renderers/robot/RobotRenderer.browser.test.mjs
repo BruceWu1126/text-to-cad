@@ -128,8 +128,17 @@ async function open(t, file, { panel = true } = {}) {
       await pane.locator(`[data-file-sidebar-tools] button[aria-pressed="true"][aria-label="${name}"]`).waitFor();
     },
     // In and out of Preview, by Preview at the strip's end and Exit preview in Preview's bar, once its cover has lifted.
+    // The bar hides two seconds after the pointer last moved over the view, and a person's pointer, moving to Exit
+    // preview, brings it back: the test's pointer does the same (Playwright checks what is under the point first).
     async preview(enter) {
-      await pane.getByRole('button', { name: enter ? 'Preview' : 'Exit preview', exact: true }).click();
+      const press = pane.getByRole('button', { name: enter ? 'Preview' : 'Exit preview', exact: true });
+      if (!enter) {
+        const box = await pane.locator('[data-preview-view]').boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-bar]')?.hasAttribute('data-hidden'));
+        await press.hover();  // resting on the bar holds it
+      }
+      await press.click();
       await pane.getByRole('button', { name: enter ? 'Exit preview' : 'Preview', exact: true }).waitFor();
       await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-cover]'));
     },
