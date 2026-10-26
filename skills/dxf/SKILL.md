@@ -311,9 +311,10 @@ own work; review with `cadgen snapshot`.
   every later run of its model and every rewrite of its file, so share it once.
   Return that link to the user. If it fails to launch, say so.
 
-The viewer renders DXF files as read-only 2D drawings; it never runs drawing
-scripts. A `.dxf` you export is a download like any other file: give its path, and
-open it in the viewer when the person asks to see it. Drag to pan, wheel/pinch to zoom, double-click to fit. Its
+A drawing script's model has a page, but it shows a flat face in the 3D viewer, with no
+pens, layers or entity refs. The drawing a person wants is the exported `.dxf`, which the
+viewer opens as a read-only 2D drawing with its layers (it never runs drawing scripts):
+show the `.dxf` when they ask to see the drawing, and give its path otherwise. Drag to pan, wheel/pinch to zoom, double-click to fit. Its
 Select, Pencil, Shapes and Measure feed Quick Edit, whose prompt names what the person
 picked as references into the drawing by entity HANDLE: `panel.dxf#h2F` is the
 modelspace entity whose handle is `2F` (`doc.entitydb["2F"]` in ezdxf); anything a
@@ -360,7 +361,8 @@ Report only checks that actually ran.
 
 ## Handoff
 
-Show every drawing you created or changed ([Show the model](#show-the-model)).
+Give the path of every `.dxf` you created or changed, and show it when the person asks to
+see the drawing ([Show the model](#show-the-model)).
 Report any failure explicitly.
 
 Final responses should include generated files, returned viewer links, validation
