@@ -5,6 +5,12 @@ the renderer -- a structure (prototypes, instances, a tree) and a part buffer pe
 Explode, Preview, the annotation and the size are theirs. A DXF is a drawing, read here and
 drawn by ``render/drawing.py``.
 
+The structure's numbers are millimetres whatever the file's unit, and each reader says what one of
+the file's units is in them (``millimetresPerUnit``: a robot's and a GLB's metre 1000, a 3MF's
+declared unit, an STL's bare numbers 1), because a length a person reads or writes of the file --
+where ``display.clip.at`` stands -- is in the FILE's unit, in the viewer (core's
+``lib/viewer/sceneUnits.js``) and in a still alike (``render/clip.py``).
+
 | suffix | reader | what it is |
 | --- | --- | --- |
 | ``.stl`` | ``stl.py`` (numpy) | one part, its numbers as millimetres |
@@ -118,10 +124,12 @@ def _column_major(matrix: np.ndarray) -> list[float]:
 
 def assemble(kind: str, path: Path, name: str, parts: list[Part], placed: list[Placed], tree: dict[str, Any],
              files: dict[str, tuple[int, int]], *, pose: Callable | None = None,
-             warnings: list[str] | None = None) -> Foreign:
+             warnings: list[str] | None = None, unit: float = 1.0) -> Foreign:
     """The file as a renderer holds it: the structure ``Loaded.structure()`` would give a document
     of these parts, instances and tree, each part's buffer by a key of its bytes, and the shapes of
-    the parts a buffer does not carry whole (texture coordinates and textures)."""
+    the parts a buffer does not carry whole (texture coordinates and textures). ``unit`` is the
+    millimetres one of the file's units is (the structure's ``millimetresPerUnit``), the unit
+    ``display.clip.at`` is read in: 1 where the file's numbers are the millimetres drawn."""
     from cadgen.engine.render.shapes import part_shapes
 
     buffers: dict[str, bytes] = {}
@@ -149,8 +157,8 @@ def assemble(kind: str, path: Path, name: str, parts: list[Part], placed: list[P
                   **({} if item.visual is None else {"visual": item.visual}),
                   **({} if item.object is None else {"object": item.object})} for item in placed]
     version = hashlib.blake2b(repr(sorted(files.items())).encode(), digest_size=8).hexdigest()
-    structure = {"name": name, "path": str(path), "version": version, "units": "mm", "kind": kind,
-                 "prototypes": prototypes, "instances": instances, "tree": tree}
+    structure = {"name": name, "path": str(path), "version": version, "units": "mm", "millimetresPerUnit": float(unit),
+                 "kind": kind, "prototypes": prototypes, "instances": instances, "tree": tree}
     return Foreign(kind, Path(path), structure, buffers, shapes, files, pose, list(warnings or []))
 
 

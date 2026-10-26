@@ -1,7 +1,9 @@
 """The viewer's Clip, drawn by OCCT (``occt.py``'s ``Scene._clip``): one plane cutting the model
 and its cut capped, as core's ``lib/viewer/sectionCaps.js`` caps it.
 
-**The viewer.** ``display.clip`` is one plane along an axis, at ``at`` (else the middle of the
+**The viewer.** ``display.clip`` is one plane along an axis, at ``at`` (in the file's unit, the one
+a person reads a length of the model in -- a document's millimetres, a robot's or a GLB's metres, a
+3MF's declared unit: core's ``lib/viewer/sceneUnits.js``, ``clipInWorld``; else the middle of the
 model at rest), keeping the lower side (``invert`` the upper). Each mesh is capped where it is cut
 by a stencil pass and an unlit plane (``MeshBasicMaterial``) in the mesh's own colour, or in
 #e9a451 when ``partColors`` is false: a flat fill, hiding whatever is behind the cut, lit by
@@ -45,12 +47,17 @@ CAP = "#e9a451"  # the viewer's cap when it is not in the part's colour
 
 def plane(scene: Any, clip: dict[str, Any]) -> Any:
     """The clip's plane (``gp_Pln``), its normal pointing into the half the cut keeps (OCCT keeps
-    the half-space the normal points into)."""
+    the half-space the normal points into). ``at`` is in the file's unit, as the viewer reads it
+    (``clipInWorld``): ``scene.millimetres_per_unit`` of the scene's millimetres each; without it
+    the plane goes through the middle of the model at rest."""
     from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
 
     axis = "xyz".index(clip.get("axis", "x"))
-    low, high = scene.rest_bounds()
-    at = float(clip.get("at", (low[axis] + high[axis]) / 2))
+    if clip.get("at") is not None:
+        at = float(clip["at"]) * scene.millimetres_per_unit
+    else:
+        low, high = scene.rest_bounds()
+        at = (low[axis] + high[axis]) / 2
     normal, point = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
     normal[axis] = 1.0 if clip.get("invert") else -1.0
     point[axis] = at

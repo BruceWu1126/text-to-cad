@@ -19,7 +19,9 @@ the look the viewer's viewport resolves for the same display settings. The answe
 which this writes to OUT.
 
 The request is the snapshot contract's where it applies (``--display`` mode or JSON, ``--grid``,
-``--camera``, ``--preview``, ``clip``, the sizes, ``--json``), and what a kind does not offer is
+``--camera``, ``--preview``, ``clip`` -- its ``at`` in the file's unit, as the viewer reads it: a
+document's millimetres, a robot's or a GLB's metres, a 3MF's declared unit (``render/clip.py``) --
+the sizes, ``--json``), and what a kind does not offer is
 refused by name before anything renders: ``parts`` and ``exploded`` for a file that places a single
 part, ``--pose`` for a mesh, and everything but ``appearance`` for a drawing. ``--display
 exploded=0.6`` (or ``display.exploded``) moves the parts apart as the viewer's Explode does, by its
@@ -32,8 +34,9 @@ projection -- is a job of the packet (``authored``). Nothing is written but OUT.
 
 ``--pose`` draws a document's mechanism at a configuration (its name) or at joint and coupling
 values (a JSON object, the rest as built): each link placed by its pairs from the ground; a robot's
-at a group state of its SRDF or at joint values (degrees, metres) over where the viewer opens it. An
-unknown configuration, joint or coupling, a value out of range and a mechanism that is not a tree are
+at a group state of its SRDF or at joint values over where the viewer opens it. A turn is degrees;
+a slide is in the file's unit, a document's millimetres or a robot's metres. An unknown
+configuration, joint or coupling, a value out of range and a mechanism that is not a tree are
 refused by name before anything renders.
 
 ``--job PACKET`` replays a Quick Edit packet (the ``.snapshot.json`` the viewer writes) or a job
@@ -1043,8 +1046,9 @@ def _arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument("--height", type=int)
     parser.add_argument("--size-profile", choices=sorted(SIZE_PROFILES))
     parser.add_argument("--pose", help="a configuration's name (a robot's SRDF group state), or joint and coupling "
-                                       "values as JSON ('{\"elbow\": 45}', '{\"curl\": 0.6}'; degrees, metres): the "
-                                       "mechanism posed there; as built without it (a robot where the viewer opens it)")
+                                       "values as JSON ('{\"elbow\": 45}', '{\"curl\": 0.6}'; degrees, and a slide in "
+                                       "the file's unit: a document's mm, a robot's m): the mechanism posed there; as "
+                                       "built without it (a robot where the viewer opens it)")
     parser.add_argument("--annotation", metavar="FILE", help="the viewer's annotation file, or the Quick Edit packet "
                                                               "(.snapshot.json) that carries it: its ink drawn over the "
                                                               "model, on the parts it was drawn on")

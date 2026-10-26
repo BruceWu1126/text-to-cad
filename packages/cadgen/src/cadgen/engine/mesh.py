@@ -2,7 +2,7 @@
 
 **The tolerance is a quarter per cent of the part, and nothing else.** A part is meshed with
 ``BRepMesh_IncrementalMesh`` at an absolute linear deflection of ``(Lx + Ly + Lz) / 300 *
-DEVIATION`` of its own bounding box (``DEVIATION`` 0.25: 0.25 % of the box's summed sides, half
+DEVIATION`` of its own bounding box (``DEVIATION`` 0.25: 0.25 % of the box's mean side, half
 FreeCAD's default Deviation of 0.5 %) and an angular deflection of ``ANGULAR`` (28.5 degrees,
 FreeCAD's), with the kernel's face parallelism on. The deviation is FreeCAD's halved because a
 large arc is drawn as a polygon whose outline no surface normal smooths: a 165 mm flange's rim

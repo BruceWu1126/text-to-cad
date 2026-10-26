@@ -1267,7 +1267,9 @@ daemon's meshes, or with `daemon=False` a server of this process), and OCCT draw
 a mode (`solid`, `shaded`, `parts`, `xray`, `hidden-line`, `wireframe`), `exploded=A` (the parts
 moved apart as the viewer's Explode moves them, by an amount from 0 to 1; with a mode,
 `hidden-line,exploded=0.6`), `light` or `dark` (the appearance, all a drawing takes), or the display
-object (`mode`, `grid`, `appearance`, `camera`, `clip`, `exploded`: `{"enabled", "amount"}`, 0.5
+object (`mode`, `grid`, `appearance`, `camera`, `clip`: `{"enabled", "axis", "at", "invert", "partColors"}`,
+its `at` in the file's unit as the viewer reads it -- a document's millimetres, a robot's or a GLB's
+metres, a 3MF's declared unit (`render/clip.py`); `exploded`: `{"enabled", "amount"}`, 0.5
 unless given; `hidden` and `isolated`: lists of part refs, an occurrence's path in the refs
 grammar, which every look -- Preview, X-ray, Explode, Clip -- leaves out or alone draws, as the
 viewer's hide and isolate do, and which a Quick Edit packet given to `--annotation` carries; a
@@ -1751,8 +1753,8 @@ range null where nothing bounds it. **STEP carries none of it**: OCCT reads AP24
 kinematics but cannot write them, so every STEP, posed or not, is placements only.
 
 `--pose` on `cadgen snapshot` poses the mechanism at a
-mechanism state (its name, among the structure's `configurations`) or at joint and coupling values (`'{"elbow": 45}'`, `'{"curl": 0.6}'`,
-the rest as built): the engine places each link by composing its pairs from the ground down,
+mechanism state (its name, among the structure's `configurations`) or at joint and coupling values (`'{"elbow": 45}'`, `'{"curl": 0.6}'`:
+a turn in degrees, a slide in millimetres, the rest as built): the engine places each link by composing its pairs from the ground down,
 exact forward kinematics, and draws that. No flag is as built. An unknown configuration, joint or
 coupling, a value out of range (a joint's, a coupling's, or a joint's a coupling puts it at), a
 coupling's joint set alone, a coupling set with one of its joints and a pair of a loop are

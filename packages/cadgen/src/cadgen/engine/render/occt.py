@@ -169,6 +169,10 @@ class Scene:
 
             structure = posed_structure(structure, pose)
         self.structure = structure
+        # The millimetres one of the file's units is (``formats.assemble``): a document's are millimetres
+        # (1), a robot's and a GLB's metre 1000. A length asked of the file -- where ``display.clip.at``
+        # stands -- is in that unit, as the viewer reads one (``sceneUnits.js``).
+        self.millimetres_per_unit = float(structure.get("millimetresPerUnit") or 1.0)
         self.timings["read"] = time.perf_counter() - clock
         clock = time.perf_counter()
         self.canvas = Canvas(*size)

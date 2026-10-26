@@ -26,11 +26,12 @@ its limits are refused by name.
 **Meshes**: a link mesh is an STL or a 3MF (its numbers as they are, which the description's
 mesh scale makes metres) or a GLB (metres), each drawn as the stills draw that file; a box,
 cylinder, sphere or capsule is made by the kernel and meshed as a part is (``mesh.py``). The
-robot is drawn in millimetres. A ``package://NAME/REST`` mesh is REST in the ROS package the
-description is in: the nearest folder at or above it named NAME, or holding a ``package.xml``
-that names it (``package_file``, which the viewer's robot payload resolves by too). A description
-naming a mesh in any other format (OBJ, DAE), a package no folder above it is, or a file that is
-not there, is refused by name.
+robot is drawn in millimetres, and a length of it -- where ``display.clip.at`` stands -- is read in
+its metres, as the viewer reads one (``millimetresPerUnit`` 1000). A ``package://NAME/REST`` mesh is
+REST in the ROS package the description is in: the nearest folder at or above it named NAME, or
+holding a ``package.xml`` that names it (``package_file``, which the viewer's robot payload resolves
+by too). A description naming a mesh in any other format (OBJ, DAE), a package no folder above it
+is, or a file that is not there, is refused by name.
 """
 
 from __future__ import annotations
@@ -964,4 +965,5 @@ def robot_file(path: Path) -> Foreign:
                                         "configuration": named}}
         return found
 
-    return assemble(robot.kind, path, robot.name, parts, placed, tree, files_of(robot.files), pose=posed)
+    return assemble(robot.kind, path, robot.name, parts, placed, tree, files_of(robot.files), pose=posed,
+                    unit=1000.0)  # the robot's metres
