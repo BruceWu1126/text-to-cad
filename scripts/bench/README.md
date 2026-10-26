@@ -16,7 +16,7 @@ warm, and times every step:
 ```sh
 .venv/bin/python scripts/bench/corpus_bench.py --dry-run         # the config and the interpreter, checked
 .venv/bin/python scripts/bench/corpus_bench.py --max-load 16     # every model; each step waits for load <= 16 and no other busy cadgen build
-.venv/bin/python scripts/bench/corpus_bench.py --model tom       # one; repeat --model for more
+.venv/bin/python scripts/bench/corpus_bench.py --model l_bracket # one; repeat --model for more
 ```
 
 A model in `corpus.json` is its project folder (`root`, from the repository), the
@@ -24,12 +24,14 @@ folder its builds run from (`cwd`), the folders put on `PYTHONPATH` beside
 cadgen's (`pythonpath`), its `targets` (`script.py`, as `python script.py` builds
 it, or `script.py::model`), its document (`xbf`: where the batch saves the model its stem names), one `edit` (`{file, from, to}`,
 `from` found exactly once in `file`), the inputs a build reads that are never
-committed (`needs`: tom's vendor STEP) and a `note`. The models, smallest first:
+committed (`needs`: tom's pinned STEP) and a `note`. The models, smallest first:
 `l_bracket`, `planetary_gear`, `qdd`, `motorbike`, `case`, `juno`, `movement`,
-`tom`, `hypercar` and `f1`, all from `models/`. `--dry-run` checks every key,
-that each file is there and each edit's `from` occurs once, and that the
-interpreter imports this checkout's cadgen (`--cadgen-src`; not the venv's
-editable install), and runs nothing.
+`tom`, `hypercar` and `f1`, all from `models/` but `tom`, which lives in its own
+repository: its `root` is the checkout beside this one, `../tom-cad` (a worktree has no
+such sibling: give `--config` a copy of `corpus.json` whose `tom` root spells the way
+up). `--dry-run` checks every key, that each file is there and each edit's `from`
+occurs once, and that the interpreter imports this checkout's cadgen (`--cadgen-src`;
+not the venv's editable install), and runs nothing.
 
 Each model is copied into the batch's folder without its `XBF/` (an APFS clone on
 macOS), so the checkout is never written. In the copy, the model its `xbf` stem names

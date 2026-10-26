@@ -53,12 +53,15 @@ class ConfigTest(unittest.TestCase):
             (root / "proj" / "src" / "part.py").write_text(SCRIPT, encoding="utf-8")
             (root / "proj" / "src" / "loose.py").write_text("WIDTH = 8.0\n", encoding="utf-8")
             self.assertEqual(corpus_bench.problems({"models": [model()]}, root), [])
+            # A project kept in a repository of its own sits beside this one: only a root may climb.
+            self.assertEqual(corpus_bench.problems({"models": [model(root="../beside")]}), [])
             cases = {
                 "part: a second model of this name": [model(), model()],
                 "part: unknown key `target`": [model(target="part.py")],
                 "part: `targets` is a list of `script.py` or `script.py::model`": [model(targets=["part"])],
                 "part: `xbf` names an .xbf": [model(xbf="XBF/part.step")],
-                "part: `root` is a relative path inside the repository": [model(root="/proj")],
+                "part: `root` is a relative path from the repository": [model(root="/proj")],
+                "part: `cwd` is a relative path inside the project": [model(cwd="../src")],
                 "part: the edit's `to` is its `from`": [model(edit={"file": "src/part.py", "from": "A", "to": "A"})],
                 "part: no script gone.py in proj/src": [model(targets=["gone.py"])],
                 "part: no STEP/imported: an input the build reads": [model(needs=["STEP/imported"])],

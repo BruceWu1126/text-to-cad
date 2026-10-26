@@ -79,8 +79,6 @@ models/**/*.mkv
 # the files written on request (STEP/ STL/ GLB/ 3MF/ DXF/, and the PDF/ of an @eng_drawing).
 # An xbf saved by hand lands where it was asked to.
 models/**/XBF/
-# tom's vendor STEP inputs (536 MB, tom-cad's read-only data): a local copy, never committed.
-models/tom/STEP/
 # The unported models' frozen inputs and generated validation output (tendon_hand's
 # palm and native hand, 8.5 MB and 250 MB), wherever someone restores them.
 models/*/unported/STEP/
