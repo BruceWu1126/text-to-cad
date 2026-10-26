@@ -4,7 +4,7 @@ import { compactSuffix, hasPickGlyph, pickGlyphNode } from "../../inspector/pick
 
 // Quick Edit's note is plain text with references inline: an editable field whose text is the
 // person's and whose chips are references pasted into it, each one atomic (a Backspace takes it
-// whole) and read back as the reference it stands for (`/models/base.step#o1.f2`), in its place.
+// whole) and read back as the reference it stands for (`/models/base.step#f:base.make_box1.2`), in its place.
 
 // A chip's own size and look (`ReferenceChips.jsx`): 20px tall, its background, its glyph first,
 // then its words. It is the note's 20px line, top to bottom, so it sits in the text's rows without
@@ -39,7 +39,7 @@ function notePill(document, { token, kind = "", color = null, text, suffix = "" 
  * A reference as the note shows it: a pill carrying its token, named as the view names it — a
  * reference into the file on screen by what the renderer calls it (`name`: a part "cam", or a pick
  * by its part, kind and number, `{ name: "cam", kind: "face", number: "3" }`), into any other by its
- * file and what in it ("hinge.step · o1.e4").
+ * file and what in it ("hinge.step · e:hinge.make_box1.4").
  */
 export function noteChip(reference, document = globalThis.document, name = "") {
   const token = referenceToken(reference);

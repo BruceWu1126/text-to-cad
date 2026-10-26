@@ -537,8 +537,8 @@ test("two points on one face measure the distance between them, not zero", () =>
   // its normal is exactly 0. Reporting that reads as "0.00 mm" and collapses the
   // dimension line to zero length, so the tool looks broken.
   const face = { pickData: { selectorType: "face", surfaceType: "plane", normal: [0, 0, 1] } };
-  const a = { snapKind: "face", point: [0, 0, 10], referenceId: "o1.1.f8", reference: face };
-  const b = { snapKind: "face", point: [30, 40, 10], referenceId: "o1.1.f8", reference: face };
+  const a = { snapKind: "face", point: [0, 0, 10], referenceId: "f:plate.make_box1.8", reference: face };
+  const b = { snapKind: "face", point: [30, 40, 10], referenceId: "f:plate.make_box1.8", reference: face };
 
   const result = measurementFromPicks(a, b);
   assert.equal(result.perpendicular, null);

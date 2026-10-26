@@ -14,7 +14,7 @@ const fixture = name => prepareDrawing(JSON.parse(fs.readFileSync(new URL(`./__f
 test("a reference names an entity by its handle, and reads back as the prompt grammar's", () => {
   assert.equal(drawingReferenceId("2f"), "h2F");
   assert.equal(drawingHandleOf("h2F"), "2F");
-  assert.equal(drawingHandleOf("o1.f2"), "");
+  assert.equal(drawingHandleOf("f:plate.make_box1.2"), "");
   const reference = parsePromptReference("/models/panel.dxf#h2F");
   assert.deepEqual(reference.target, { kind: "cad-selector", selectors: ["h2F"] });
 });

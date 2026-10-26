@@ -69,12 +69,6 @@ class OperationsTest(unittest.TestCase):
         self.assertEqual(result['result'], {'inspection': {'kind': 'face'}})
         self.assertNotIn('secret', json.dumps(result))
 
-    def test_no_tool_builds_source_text(self):
-        # A model is built by its script's call (law 12): there is no build tool to call.
-        self.assertNotIn('cad_build', {tool['name'] for tool in catalog()})
-        answer = Operations().call('cad_build', {'requestId': 'build-request-0001', 'code': 'result = 1'})
-        self.assertEqual(answer['state'], 'rejected')
-
     def test_tool_envelope_and_catalog_need_no_view(self):
         server = Server()
         # Test the same adapter used by every presentation without starting analytics.

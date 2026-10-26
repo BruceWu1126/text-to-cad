@@ -263,7 +263,7 @@ test('a static GLB opens on its native scene in Select: its tools, its display m
   // A GLB's own answers to the host: its state, and a command's pick refused (a person picks its nodes).
   const state = await page.evaluate(() => window.cadHarness.a.controller.readState());
   assert.deepEqual([state.resource.path, state.revision, state.loading, state.selection], ['/models/static.glb', 'one-static.glb', false, []]);
-  const declined = await page.evaluate(() => window.cadHarness.a.controller.select({ selectors: ['o1.f1'] }).then(() => '', error => error.message));
+  const declined = await page.evaluate(() => window.cadHarness.a.controller.select({ selectors: ['f:pair.make_box1.1'] }).then(() => '', error => error.message));
   assert.match(declined, /A GLB's nodes are picked by a person in the viewport under Select/);
   assert.equal(await page.evaluate(() => window.cadHarness.a.controller.clearSelection().then(() => '', error => error.message)), '', 'its node selection clears');
 

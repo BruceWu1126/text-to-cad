@@ -283,7 +283,7 @@ it('a drawing with layers and blocks has a Layers section: a layer hidden is not
 
 it('a select-reference request is consumed without a notification', async () => {
   const { pane, commands, request, dispose } = await openDrawing();
-  await request({ selectReference: { selector: 'o1.f1', key: 7 } });
+  await request({ selectReference: { selector: 'f:plate.make_box1.1', key: 7 } });
   await waitFor(() => expect(commands.getSnapshot().selectReference ?? null).toBeNull());
   expect(commands.acknowledge).toHaveBeenCalledWith('selectReference', 7);
   // Declined silently: no alert, no status, and the drawing is still the drawing.

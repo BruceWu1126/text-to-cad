@@ -130,7 +130,7 @@ class _Session(unittest.TestCase):
     def poll_as(self, view: str, surface: str, answers: int, model: str | None = None, png: str = "iVBORw0KGgo=") -> threading.Thread:
         """A view syncing as the page does (every few milliseconds here): its first sync registers it
         and says what it shows; it answers ``answers`` captures with ``png``."""
-        state = {"model": model, "selection": [f"{model}#o1.f1"]}
+        state = {"model": model, "selection": [f"{model}#f:bracket.make_box1.1"]}
         first = self.call("cad_sync", {"view": view, "surface": surface, "model": model, "state": state})["structuredContent"]["events"]
 
         def page() -> None:
@@ -360,7 +360,7 @@ class TabServerTest(_Session):
     def test_the_agent_reads_and_captures_what_the_open_view_shows(self) -> None:
         self.assertTrue(self.call("cad_screenshot")["isError"])
         model = self.bracket
-        state = {"model": model, "selection": [f"{model}#o1.f1"]}
+        state = {"model": model, "selection": [f"{model}#f:bracket.make_box1.1"]}
         viewer = self.poll_as("v1", "tab", 1, model)
         # What the view said it shows on its sync, answered at once: nothing asks the view.
         self.assertEqual(self.call("cad_view")["structuredContent"], {"views": [{"view": "v1", "surface": "tab", **state}]})
@@ -501,7 +501,7 @@ class SidebarAcrossThreadsTest(_Session):
         return self.on_sidebar("cad_sync", {"view": "s1", "surface": "sidebar", "model": self.model, **extra})
 
     def test_an_agent_with_no_tab_opens_one_and_reads_and_captures_the_sidebar(self) -> None:
-        self.sync_sidebar(state={"model": self.model, "selection": [f"{self.model}#o1.f1"]}, focused=True)
+        self.sync_sidebar(state={"model": self.model, "selection": [f"{self.model}#f:bracket.make_box1.1"]}, focused=True)
         # No tab in this thread: the agent is told to open one, and the sidebar is sent nothing.
         shown = self.call("cad_show", {"source": self.loose})
         self.assertEqual(shown["structuredContent"], {"delivered": 0})
@@ -509,7 +509,7 @@ class SidebarAcrossThreadsTest(_Session):
         self.assertEqual(self.sync_sidebar()["events"], [])
         # What the sidebar reported, read at once.
         (view,) = self.call("cad_view")["structuredContent"]["views"]
-        self.assertEqual((view["view"], view["surface"], view["selection"]), ("s1", "sidebar", [f"{self.model}#o1.f1"]))
+        self.assertEqual((view["view"], view["surface"], view["selection"]), ("s1", "sidebar", [f"{self.model}#f:bracket.make_box1.1"]))
         # Named, the sidebar takes another model on its next sync.
         self.assertEqual(self.call("cad_show", {"source": self.loose, "view": "s1"})["structuredContent"],
                          {"delivered": 1, "view": "s1", "sidebar": True})
@@ -734,7 +734,7 @@ class InlineServerTest(_Session):
         # Another chat's view, served by the same process and touched since, is never the one read.
         self.call("cad_sync", {"view": "cad-other", "surface": "inline", "model": model, "focused": True})
         described = self.call("cad_view", {"view": view})["structuredContent"]["views"]
-        self.assertEqual(described, [{"view": view, "surface": "inline", "model": model, "selection": [f"{model}#o1.f1"]}])
+        self.assertEqual(described, [{"view": view, "surface": "inline", "model": model, "selection": [f"{model}#f:bracket.make_box1.1"]}])
         self.assertEqual(self.call("cad_screenshot", {"view": view})["content"][0]["data"], "iVBORw0KGgo=")
         viewer.join(10)
         # A view a newer one replaced closes itself, and is no longer there to read.

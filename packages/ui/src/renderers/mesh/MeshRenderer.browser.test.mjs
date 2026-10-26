@@ -303,11 +303,11 @@ test('an STL opens as one mesh in Select, which picks nothing: display settings,
   assert.deepEqual(camera.position.map(Math.round), [90, -70, 60]);
   const state = await page.evaluate(() => window.cadHarness.a.controller.readState());
   assert.deepEqual([state.resource.path, state.revision, state.loading, state.selection], ['/models/part.stl', 'one-part.stl', false, []]);
-  const declined = await page.evaluate(() => window.cadHarness.a.controller.select({ selectors: ['o1.f1'] }).then(() => '', error => error.message));
+  const declined = await page.evaluate(() => window.cadHarness.a.controller.select({ selectors: ['f:part.make_box1.1'] }).then(() => '', error => error.message));
   assert.match(declined, /A mesh file has no references a command can select/);
   assert.equal(await page.evaluate(() => window.cadHarness.a.controller.clearSelection().then(() => '', error => error.message)), '', 'a selection clears, an STL\'s empty one too');
   // A host's request to select a reference is consumed without a notification.
-  await page.evaluate(() => window.cadHarness.selectReference('o1.f1'));
+  await page.evaluate(() => window.cadHarness.selectReference('f:part.make_box1.1'));
   await page.waitForFunction(() => !window.cadHarness.a.commands.getSnapshot().selectReference);
   assert.equal(await page.evaluate(() => window.cadHarness.a.commands.getSnapshot().selectReference ?? null), null, 'the declined request is acknowledged');
 

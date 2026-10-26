@@ -20,7 +20,7 @@ import { PickGlyph, compactSuffix, hasPickGlyph } from "../../inspector/pickGlyp
  * @property {import("../../inspector/pickGlyph.jsx").CompactName} [compact]  What it shows, short:
  *   its part, then its kind's glyph and its number or count ("base ◧3", "base ◧×6"); with no part name
  *   (a document of one part, which the page already names), its `words` after the glyph ("◧face 1").
- * @property {string} [id]  Its id in its file, as its card shows it: "o1.2.f3", "upper_arm".
+ * @property {string} [id]  Its id in its file, as its card shows it: "f:base.make_box1.3", "upper_arm".
  * @property {string | (() => string)} [copy]  What a click on it copies: its reference, the file's path and its
  *   id; or a reference resolved at the click. Annotation and measurement chips omit this.
  * @property {import("react").ReactNode} [card]  What it is, for its card: its key measurements.
