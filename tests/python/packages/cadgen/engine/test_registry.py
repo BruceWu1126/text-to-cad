@@ -214,7 +214,8 @@ class RegistryDaemonTest(unittest.TestCase):
         self.assertEqual((record["kind"], record["home"], Path(record["root"])), ("model", "parts.py", project))
         # What a restart needs and no more: no closure (the document's own), no versions, no stamps,
         # no command (always `cadgen run` of its home), no record of the files it declared.
-        self.assertEqual(set(record), {"schema", "id", "kind", "root", "home", "entry", "revision", "built", "created", "facts"})
+        self.assertEqual(set(record), {"schema", "id", "kind", "root", "home", "entry", "revision", "built", "created", "facts", "namespace", "name"})
+        self.assertEqual((record["namespace"], record["name"]), (str(project), "cube"))
         self.assertEqual(record["created"], record["built"], "a first build is when the model was created")
         self.assertEqual(sorted(os.listdir(self.state / "documents" / cube)), ["document.json"], "it points: no geometry")
         self.assertEqual(listed(), before, "nothing beside the script")
@@ -249,6 +250,11 @@ class RegistryDaemonTest(unittest.TestCase):
 
         record = self.records()[derived_id(project, "arm")]
         self.assertEqual((record["line"], record["entry"]), (6, "left"))
+        self.assertEqual((record["namespace"], record["name"]), (str(project), "arm"))
+        from cadgen.viewer.recents import RecentStore
+
+        recent = next(row.public() for row in RecentStore(self.state).list() if row.path == record["id"])
+        self.assertEqual((recent["namespace"], recent["name"]), (str(project), "arm"))
         second = self.run_python("right.py", cwd=project)
         self.assertNotEqual(second.returncode, 0)
         self.assertIn(f"{project / 'left.py'}:6", second.stderr)

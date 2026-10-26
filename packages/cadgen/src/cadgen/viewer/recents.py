@@ -112,6 +112,7 @@ class Recent:
     kind: str = "file"
     # A model's (and a shape's): its name, its script, and the command that builds it again.
     name: str | None = None
+    namespace: str | None = None
     script: str | None = None
     rebuild: str | None = None
     # A shape handed over: its home is the script or the folder it was handed over from, nothing
@@ -140,6 +141,7 @@ class Recent:
             "name": self.name or os.path.basename(self.path),
             # Where it is, as the person reads it: a file's folder, a model's script's.
             "folder": folder,
+            "namespace": self.namespace or folder,
             "opened": self.opened,
             "updated": self.updated,
             "created": self.created,
@@ -192,7 +194,8 @@ class RecentStore:
 
         def change(record):
             record = dict(record or {"id": file_id(found), "kind": "file", "created": now})
-            record.update(root=os.path.dirname(found), home=os.path.basename(found), opened=now)
+            record.update(root=os.path.dirname(found), home=os.path.basename(found), opened=now,
+                          namespace=os.path.dirname(found), name=os.path.basename(found))
             return record
 
         return self.registry.update(file_id(found), change)
@@ -244,7 +247,8 @@ class RecentStore:
                 entries.append(Recent(path=path, opened=float(record["opened"]), updated=_mtime(path), **common))
             elif record.get("kind") in ("model", "shape"):
                 program = registering.program(self.registry, record)
-                entries.append(Recent(path=record["id"], kind=record["kind"], name=record.get("entry"),
+                entries.append(Recent(path=record["id"], kind=record["kind"], name=record.get("name") or record.get("entry"),
+                                      namespace=record.get("namespace") or record.get("root"),
                                       script=str(registering.home(self.registry, record)),
                                       rebuild=registering.command(self.registry, record),
                                       shown=Models.shown(str(program) if program else None)

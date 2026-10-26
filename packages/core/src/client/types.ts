@@ -35,6 +35,8 @@ export interface CadServerInfo {
 /** A model in the library every CAD view shares (`GET /__cad/recents`): times in seconds. */
 export interface CadRecent {
   path: string; name: string; folder: string;
+  /** Identity namespace: the script folder in 0.8; a file’s folder for an opened file. */
+  namespace?: string;
   /** When a page last opened it; null for a model no page has opened. */
   opened: number | null;
   /** When it last changed: a file's time on disk (null once it is gone), a model's run. */

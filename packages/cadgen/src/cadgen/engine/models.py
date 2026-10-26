@@ -193,7 +193,8 @@ class Models:
         # its document's own (``previous``); which files it declared is no one's: they are exports.
         found: dict[str, Any] = {
             "id": ident, "kind": "model", "root": root, "home": registering.relative(script, root),
-            "entry": source["name"], "revision": recorded,
+            "entry": source["name"], "namespace": root, "name": source.get("explicit_name") or source["name"],
+            "revision": recorded,
             "built": old["built"] if old.get("revision") == recorded and old.get("built") else time.time()}
         if not old:
             found["created"] = found["built"]
@@ -257,7 +258,8 @@ class Models:
             previous = held.get(ident) or {}
             found: dict[str, Any] = {
                 "id": ident, "kind": "shape", "root": root,
-                "home": registering.relative(scope, root), "entry": name, "revision": recorded,
+                "home": registering.relative(scope, root), "entry": name, "namespace": root, "name": name,
+                "revision": recorded,
                 "built": previous["built"] if previous.get("revision") == recorded and previous.get("built")
                 else time.time()}
             if not previous:  # first handed over now; an older record keeps what it has (``record``)
