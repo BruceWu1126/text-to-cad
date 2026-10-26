@@ -423,15 +423,15 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   out before it.
 - **Every document has a record** in cadgen's state folder, beside your settings
   (`documents/<uuid>/document.json`: the script and function that build it, never
-  geometry), and the home's Recents lists them, most recent first. 0.7's Recents are not
-  read: they start empty after the upgrade.
+  geometry), and the home lists them, models and files alike, pinned first, then by last
+  activity. 0.7's Recents are not read: the home starts empty after the upgrade.
 - **Documents reopen after a restart** from the engine's cache, as last built; the code
   stays the source. A document is what its last run made: the engine does not watch your
   script for edits or say that it changed, and nothing reruns it -- run it again when you want
   the document to follow your code. The cache
   (`documents/<uuid>/document.xbf` in the cache folder, `~/.cache/cadgen` by 0.7's rule)
   keeps every document until you delete it: it has no size cap, and nothing evicts from it.
-  `cadgen delete <id>` (or a model's script, or a file's path), or Delete on a model's row of
+  `cadgen delete <id>` (or a model's script, or a file's path), or Delete in a card's menu on
   the home, deletes a document: its record and its cached document. Your script and its files
   stay.
 - **A model lives in a `.py` file.** Its record points at the script, and every model's
@@ -443,10 +443,16 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   passed as `animations=[...]`. Its id comes from the notebook's working folder and the
   name, or from `key=`. Nothing builds it again: run the cell again.
 - **No page sessions.** `/s/<session>/...`, `?file=` and `?doc=` links open the home.
-  The home shows Recents and the folder of the most recent `cadgen viewer` launch.
+  The home is the library alone: a card for each model and file opened, with Open, Copy
+  path, Reveal, Pin and Delete in its menu, in a grid or a table.
+- **Exports are downloads.** The viewer's Export is a browser download: pick a format,
+  the engine prepares the file and the browser saves it. An exported file, from the
+  viewer, `cadgen export` or a file decorator, is a detached copy: its page follows the
+  file on disk, never the model, and nothing reruns it.
 - **The CAD app** shows a model by its id or a file by its path (`cad_show`), as the
-  viewer alone: its cards and tabs have no navbar (no app menu, explorer, file menu or Open
-  in browser), Full size and the update notice at the view's top-right. Every CAD tool names
+  viewer alone: its cards and tabs have no navbar (no app menu, explorer, file menu, Export
+  or Open in browser), Full size and the update notice at the view's top-right; an agent
+  writes files with `cad_export`. Every CAD tool names
   the model in `source` (`cad_show` and `cad_open` took `path` in 0.7).
 
 | 0.7 | 0.8 |
@@ -556,9 +562,10 @@ too, for `cadgen inspect` and build123d's selectors in the body, and
 
 ## Telemetry
 
-Unchanged. Your answer carries over in the same settings, `cadgen telemetry
-status|on|off` works as before, and `DO_NOT_TRACK=1` or `CADGEN_TELEMETRY=0` turns it
-off for a process. The CAD app's `cad_telemetry` tool is gone: an agent reads the status
+Your answer carries over in the same settings, `cadgen telemetry status|on|off` works as
+before, and `DO_NOT_TRACK=1` or `CADGEN_TELEMETRY=0` turns it off for a process. New in
+0.8: the viewer also counts which of its tools and settings are used (a control's name
+and how often, never a value, a file's name or a part's). The CAD app's `cad_telemetry` tool is gone: an agent reads the status
 through `cad_http` (`GET /__cad/analytics`) and can opt you out when you ask; only you can
 opt in.
 
