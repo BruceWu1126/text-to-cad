@@ -198,7 +198,7 @@ export interface FileViewerProps {
   /**
    * The chrome around the view: `"page"` (the default) draws the navbar over every file and over the
    * home; `"bare"` draws none, the view alone, for a host whose own frame is the navigation (the CAD
-   * app's cards and tabs). The renderer's own controls over the viewport are the same either way.
+   * app's file handler). The renderer's own controls over the viewport are the same either way.
    */
   chrome?: "page" | "bare";
   onError?: (error: Error) => void;

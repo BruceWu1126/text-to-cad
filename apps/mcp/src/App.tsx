@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
-import { Maximize2 } from 'lucide-react';
+import { ExternalLink, Maximize2 } from 'lucide-react';
 import { useAnalyticsConsent } from '@text-to-cad/ui/consent';
 import { useI18n, useLanguage } from '@text-to-cad/ui/i18n';
-import { useUpdateNotice } from '@text-to-cad/ui/update';
+import { UpdateButton, useUpdateNotice } from '@text-to-cad/ui/update';
 import { viewerLinks } from '@text-to-cad/ui/links';
 import { Button } from '@text-to-cad/ui/primitives/button';
 import { TooltipHint } from '@text-to-cad/ui/primitives/tooltip';
@@ -10,6 +10,7 @@ import { createTabStore, memoryTabRecord } from '@text-to-cad/ui/tab-store';
 import { normalizePath } from '@text-to-cad/ui/cad-viewer';
 import { version } from '../package.json';
 import type { Bridge, HostContext } from './host/bridge';
+import { declaresOpenLinks } from './host/channel';
 import { captureSettled, fitCapture } from './host/capture';
 import { frameClipboard } from './host/clipboard';
 import { createLiveRegistry, describeView } from './host/live';
@@ -17,7 +18,7 @@ import { watchSupersession, type Presentation } from './host/presentation';
 import { chatReach } from './host/prompt';
 import type { Launch, Server } from './host/server';
 import { createViewSync } from './host/sync';
-import { createTunnelClient, createTunnelFetch } from './host/tunnel';
+import { createTunnelClient, createTunnelFetch, TUNNEL_ORIGIN } from './host/tunnel';
 import ModelView, { type ViewReporter } from './ModelView';
 import { UpdateNotice } from './CardCorner';
 import { Banner } from './Notice';
@@ -83,8 +84,9 @@ function Frame({ bridge, context, insets, inline = false, floatingComposer = fal
 }
 
 /**
- * Inline, the card's way to full size, where the host can show it so: at the top-right corner of the
- * view (`CardCorner`), over a file and on the home. Two diagonal arrows.
+ * Inline, the card's way to full size, where the host can show it so: in the navbar, before the
+ * host's other actions, over a file and on the home; in the file handler's corner (`CardCorner`),
+ * which has no navbar. Two diagonal arrows.
  */
 function FullSizeButton({ bridge }: { bridge: Bridge }) {
   const { t } = useI18n();
@@ -93,6 +95,67 @@ function FullSizeButton({ bridge }: { bridge: Bridge }) {
   return <TooltipHint content={label}>
     <Button variant="ghost" size="icon-xs" className="size-6 text-muted-foreground hover:text-foreground" aria-label={label} onClick={expand}>
       <Maximize2 className="size-3.5" aria-hidden="true" />
+    </Button>
+  </TooltipHint>;
+}
+
+/**
+ * The CAD Viewer's page of each document a launch named, from its `browser` (`cadgen/mcp/server.py`'s
+ * `_reach`, the link a text client's `cad_show` gives): by absolute path, the home's under ''.
+ */
+type Pages = ReadonlyMap<string, string>;
+function withPage(pages: Pages, launch: Launch): Pages {
+  if (typeof launch.browser !== 'string') return pages;
+  return new Map(pages).set(launch.model ? normalizePath(launch.model) : '', launch.browser);
+}
+
+/**
+ * The page of what the view shows: the one its launch named, else (a file the person opened from the
+ * home, which no launch named) the web viewer's home with the same day link, where that file leads
+ * the library. Null where no launch carried a page.
+ */
+export function pageOf(pages: Pages, model: string | null): string | null {
+  const known = pages.get(model ?? '');
+  if (known) return known;
+  const any = pages.values().next().value;
+  if (!any) return null;
+  try {
+    const page = new URL(any);
+    const token = page.searchParams.get('token');
+    return `${page.origin}/${token ? `?${new URLSearchParams({ token })}` : ''}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Open the web viewer's page of `model` (the home's with none) in the person's browser. The server
+ * opens it itself, from this computer (`POST /__cad/browser/open`, the app's alone, naming the
+ * document and never a URL), as a host may not follow a link to a loopback page (Codex does not);
+ * where it cannot (no display, a remote shell) or is not reached that way (`direct`), the launch's
+ * page goes through the host's open-link request where it offers one, else as a plain link.
+ */
+async function openBrowserPage({ tunnel, direct, bridge, model, page }: {
+  tunnel: typeof fetch; direct: boolean; bridge: Bridge; model: string | null; page: string;
+}) {
+  if (!direct) {
+    const response = await tunnel(`${TUNNEL_ORIGIN}/__cad/browser/open`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }),
+    }).catch(() => null);
+    if (response?.ok) return;
+  }
+  const plain = () => { window.open(page, '_blank', 'noopener,noreferrer'); };
+  if (declaresOpenLinks(bridge.hostCapabilities)) await bridge.request('ui/open-link', { url: page }).catch(plain);
+  else plain();
+}
+
+/** The view's page in the person's browser (`openBrowserPage`): the navbar's last control, over every file and on the home. */
+function OpenInBrowserButton({ open }: { open: () => void }) {
+  const { t } = useI18n();
+  const label = t('navbar.openInBrowser');
+  return <TooltipHint content={label}>
+    <Button variant="ghost" size="icon-xs" className="size-6 text-muted-foreground hover:text-foreground" aria-label={label} onClick={open}>
+      <ExternalLink className="size-3.5" aria-hidden="true" />
     </Button>
   </TooltipHint>;
 }
@@ -148,6 +211,10 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   // The server stopped answering (its process has gone): the view keeps its model, and says so.
   const [lost, setLost] = useState(false);
   const shown = useRef<string | null>(null);
+  // What the view shows, for its page in the browser: the launch's until the view says.
+  const [showingModel, setShowingModel] = useState<string | null>(() => initial.model ? normalizePath(initial.model) : null);
+  // The pages the launches carried: the first one's, then each the agent's shows bring.
+  const [pages, setPages] = useState<Pages>(() => withPage(new Map(), initial));
   // The model the agent last showed here, until the view shows it (or anything after it): a capture
   // asked with the show, or right after it, is of that model, not of the one it is leaving.
   const asked = useRef<string | null>(null);
@@ -157,6 +224,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
     show: launch => {
       if (alone) return;
       asked.current = launch.model ? normalizePath(launch.model) : '';
+      setPages(current => withPage(current, launch));
       setShowing(previous => ({ launch, sequence: previous.sequence + 1 }));
     },
     capture: async () => fitCapture(await captureSettled(live, () => asked.current ?? shown.current)),
@@ -167,6 +235,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
     showing(model) {
       shown.current = model;
       asked.current = null;
+      setShowingModel(model);
       sync.focus();
     },
   }), [sync]);
@@ -216,9 +285,10 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   const { locale, language } = useLanguage(client.language, { preferred: [context.locale, ...(navigator.languages ?? [navigator.language])] });
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   const { appSettings } = useAnalyticsConsent(client.consent, locale);
-  // A newer text-to-cad (`cadgen/updates.py`): a notice at the view's top-right while this install is
-  // behind, from the launch's notice at once, until the person closes it for this view. Its prompt goes
-  // to the chat where the host takes messages, so the agent updates CAD; elsewhere it is copied.
+  // A newer text-to-cad (`cadgen/updates.py`), from the launch's notice at once, while this install is
+  // behind: the navbar's blue update button, first among its controls; in the file handler, which has
+  // no navbar, a notice at the view's top-right until the person closes it for this view. Its prompt
+  // goes to the chat where the host takes messages, so the agent updates CAD; elsewhere it is copied.
   const updateNotice = useUpdateNotice(client.version, initial.notice ?? null);
   const [updateClosed, setUpdateClosed] = useState(false);
   const sendPrompt = chat.send
@@ -229,6 +299,10 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   // host (a frame cannot open one itself).
   const links = useMemo(() => viewerLinks({ version, build: BUILD, open: url => bridge.request('ui/open-link', { url }).then(() => {}) }),
     [bridge]);
+  // The view's page in the browser, last in the navbar, where a launch carried one; never in the file
+  // handler, which shows its file alone.
+  const page = alone ? null : pageOf(pages, showingModel);
+  const openInBrowser = page ? () => void openBrowserPage({ tunnel, direct: Boolean(direct), bridge, model: showingModel, page }) : null;
   const { launch } = showing;
   if (superseded) {
     return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer}><Superseded still={still} /></Frame>;
@@ -237,9 +311,11 @@ export default function App({ bridge, server, launch: initial, presentation = 't
     overlay={lost ? <Banner message={LOST[presentation]} /> : null}>
     <ModelView launch={launch} sequence={showing.sequence} alone={alone} bridge={bridge} client={client} tunnel={tunnel}
       tabStore={tabStore} live={live} links={links} appSettings={appSettings}
-      update={updateNotice && !updateClosed ? <UpdateNotice notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)}
-        onLink={openLink} onClose={() => setUpdateClosed(true)} /> : null}
+      update={!updateNotice ? null : !alone ? <UpdateButton notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)} onLink={openLink} />
+        : updateClosed ? null : <UpdateNotice notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)}
+          onLink={openLink} onClose={() => setUpdateClosed(true)} />}
       fullSize={inline && context.availableDisplayModes?.includes('fullscreen') !== false ? <FullSizeButton bridge={bridge} /> : null}
+      openInBrowser={openInBrowser ? <OpenInBrowserButton open={openInBrowser} /> : null}
       colorScheme={colorScheme} theme={theme} locale={locale} language={language} platform={initial.platform || 'darwin'} reporter={reporter} sync={sync} chat={chat} />
   </Frame>;
 }

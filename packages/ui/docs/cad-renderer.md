@@ -1392,7 +1392,7 @@ version), Back and Forward where the host keeps the view's history, the file's n
 opens the explorer) and its ⋯ menu at the left; at the
 right only what a host or a file adds: the update, the renderer's actions and, last, the
 host's actions (the web viewer's Export). A host that shows the view alone (`chrome: "bare"`,
-the CAD app) has no navbar; in Preview no host has one. The CAD renderers publish one navbar action, and only while a person has put away an
+the CAD app's file handler) has no navbar; in Preview no host has one. The CAD renderers publish one navbar action, and only while a person has put away an
 alert card the model survives: the card's own icon, which brings it back (see
 [Inspect, Render and live revisions](#inspect-render-and-live-revisions)). What a person
 tells the agent is Quick Edit's. The view's own controls (Display, a popover from its tile,

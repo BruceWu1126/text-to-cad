@@ -36,8 +36,8 @@ Hosts pass no Preview or notification props; there are none. A host's one say ov
 is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
 
 - **Navbar.** One row, the same wherever it is drawn, over every file and over the home: in a page's
-  chrome (`chrome: "page"`, the web viewer's), never in a host that shows the view alone
-  (`chrome: "bare"`, the CAD app's cards and tabs: below), and never in Preview, which draws its
+  chrome (`chrome: "page"`: the web viewer's, and the CAD app's sidebar, tabs and cards), never in a
+  host that shows the view alone (`chrome: "bare"`, the CAD app's file handler: below), and never in Preview, which draws its
   own bar in its place, in every host (see [Preview](#camera-animation-and-preview)). Left: the text-to-cad logo,
   named Menu, with no chevron: over the home the TEXTTOCAD
   wordmark, 20px tall (about 117px wide), and over a document the "C", 16px in the row's 24px
@@ -65,7 +65,10 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   is new. Then, while a person has put an alert card away: the card's own icon (a circle
   with an exclamation mark, red for an error and amber for a warning, named and hinted by
   the alert's title), which brings the card back and goes with it — the renderer's one
-  navbar action. Then the host's own actions (the web viewer's **Export**). A CAD file publishes no
+  navbar action. Then the host's own actions: inline, where the host can show the view full size,
+  **Full size** (the CAD app's: two diagonal arrows, a ghost icon button); the web viewer's
+  **Export**; last, **Open in browser** (the CAD app's: an arrow out of a box, a ghost icon button,
+  where a launch carried the web viewer's page of what it shows). A CAD file publishes no
   navbar action but that icon. The person's own settings, the theme among them, are never here: they are the app
   menu's.
 
@@ -113,15 +116,14 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   drawn as a picture (`compact`, the home's thumbnails) has no navbar either, and draws the
   model alone: no tools, view actions, cube or Quick Edit.
 
-  A host that shows the view alone (`chrome: "bare"`: the CAD app, in Codex's tabs and Claude
-  Desktop's cards) draws no navbar over a file, over its home or over a page that will not open:
-  no logo or app menu, no Back and Forward, no name or name menu, no ⋯, no Export and no Open in
-  browser. What it still adds is its corner at the viewport's top-right, first in the column of
-  the host's notice and Quick Edit (`ViewportTopRight`): inline, where the host can show the view
-  full size, **Full size**, two diagonal arrows, a ghost icon button; then, while its install is
-  behind, the update as a notice — the update card itself, Send to agent or Copy prompt, closable
-  for the view — rather than the blue button. Over its home, which has no viewport, the same
-  corner stands at the page's top-right. In Preview it is gone with the rest of the column.
+  A host that shows the view alone (`chrome: "bare"`: the CAD app's file handler, Codex's *Open
+  with CAD*, one file whose host's file tree is its navigation) draws no navbar over the file or
+  over a page that will not open: no logo or app menu, no Back and Forward, no name or name menu,
+  no ⋯, no Export and no Open in browser. What it still adds is its corner at the viewport's
+  top-right, first in the column of the host's notice and Quick Edit (`ViewportTopRight`): where
+  the host can show the view full size, **Full size**; then, while its install is behind, the
+  update as a notice — the update card itself, Send to agent or Copy prompt, closable for the
+  view — rather than the blue button. In Preview it is gone with the rest of the column.
 - **Name menu** is a popover under the file's name, aligned to the name's left edge, 18rem wide
   and never resized: two stock shadcn Tabs on top, **Recent** and **Files**, sized to the
   explorer's type (`text-xs`, a 28px list), and under them the explorer's own style. It opens on
@@ -188,7 +190,7 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
 - **Quick Edit** at top-right, 8px in, a STEP's or a robot's: the box of the note a
   person writes to their agent, there only while something is picked, drawn or measured
   (see [Quick Edit](#quick-edit)), under the host's notice where there is one (the CAD app's
-  corner: Full size and its update). The rest of the right side of the view is clear.
+  file handler's corner: Full size and its update). The rest of the right side of the view is clear.
 - **View cube** at bottom-right, 2px from the right and 8px off the bottom so the axes
   drawn in its lower corner never touch the edge (`VIEWPORT_CUBE_BOTTOM`), in a 6rem area:
   enlarged face/edge/corner hit areas and neutral hover and XYZ guides. A host whose own
@@ -1044,7 +1046,7 @@ delay. No native `title` anywhere in chrome. Prefer one or two words; show a
 full technical name only when it is truncated (`overflowOnly`). Quick Edit's buttons, the
 strip's buttons (Display and Preview among them; a tool with a key shows it after its name,
 muted), the drawing row's tools (each with its key), the navbar's right-hand controls (the
-update, an alert's icon, the host's actions), the CAD app's Full size, Preview's bar (Preview
+update, an alert's icon, the host's actions: the CAD app's Full size and Open in browser among them), Preview's bar (Preview
 settings, Exit preview) and the
 Animation section's Reset are hinted by name — the strip's hints above their
 buttons, the others' below; there is no hint on the navbar's left (the logo,

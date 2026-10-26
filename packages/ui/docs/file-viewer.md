@@ -81,7 +81,7 @@ host keeps the view's history, and the host's update and actions, where they sta
 a file — never for a `compact` view (a
 picture: the home's thumbnails), never where the host asks for the view alone
 (`chrome: "bare"`, `FileViewerProps.chrome`; the default is `"page"`: the CAD app hands
-`"bare"`, its card and tab frames being their navigation), and not while a renderer says its
+`"bare"` to its file handler alone, whose host's file tree is its navigation), and not while a renderer says its
 Preview is up (`RendererViewProps.onPreviewChange`): the CAD viewer's Preview draws its own
 bar in its place and gives it back as it closes. Over a file, left to right:
 

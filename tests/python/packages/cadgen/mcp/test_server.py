@@ -295,6 +295,31 @@ class TabServerTest(_Session):
         (event,) = self.call("cad_sync", {"view": "v1", "surface": "tab"})["structuredContent"]["events"]
         self.assertEqual((event["type"], event["launch"]["model"]), ("show", self.bracket))
 
+    def test_a_tabs_launches_and_shows_carry_their_page_for_open_in_browser_and_the_file_handlers_none(self) -> None:
+        asked = []
+
+        def page(model=None) -> str:
+            asked.append(model)
+            return f"http://127.0.0.1:3245/{'doc' if model else ''}?token=t"
+
+        self.server._viewer_url = page
+        # The sidebar's home, the thread's tab and the agent's: each the page of what it shows, and no
+        # engine origin (a tab's card always has its channel).
+        for name, arguments, url in (("cad_home", {}, "http://127.0.0.1:3245/?token=t"),
+                                     ("cad_open", {"source": self.bracket}, "http://127.0.0.1:3245/doc?token=t"),
+                                     ("cad_tab", {}, "http://127.0.0.1:3245/doc?token=t")):
+            launch = self.launch(name, arguments)
+            self.assertEqual((launch.get("browser"), "engine" in launch), (url, False), name)
+        # A show the sync carries to a tab carries its page too.
+        self.call("cad_sync", {"view": "v1", "surface": "tab"})
+        self.call("cad_show", {"source": self.loose, "view": "v1"})
+        (event,) = self.call("cad_sync", {"view": "v1", "surface": "tab"})["structuredContent"]["events"]
+        self.assertEqual((event["launch"]["model"], event["launch"]["browser"]), (self.loose, "http://127.0.0.1:3245/doc?token=t"))
+        # The file handler shows its file alone, with no Open in browser: no page is asked for it.
+        before = len(asked)
+        launch = self.launch("cad_file", {"file": {"name": "bracket.stl", "resourceUri": "x"}}, {"openai/resource": {"path": self.bracket}})
+        self.assertEqual((launch["surface"], "browser" in launch, "engine" in launch, len(asked)), ("file", False, False, before))
+
     def test_the_hosts_file_view_shows_the_file_it_opened_and_nothing_the_agent_shows(self) -> None:
         self.call("cad_sync", {"view": "f1", "surface": "file", "model": self.bracket})
         # The agent reads it by its id...
@@ -577,13 +602,58 @@ class InlineServerTest(_Session):
         launch = self.launch("cad_show", {"source": self.bracket})
         self.assertNotIn("browser", launch)
         self.assertNotIn("engine", launch)
-        # A tab host's launches are what they were: its card always has its channel.
+        # A tab host's launches carry the page alone, for Open in browser: its card always has its channel.
         tabs = Server(page=self.server.page, recents=self.server.recents, viewer_url=page)
         tabs.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": DECLARES_TABS,
                                                      "clientInfo": OTHER_HOST}), None)
         home = tabs.handle("tools/call", {"name": "cad_home", "arguments": as_page(tabs, "cad_home", {})},
                            RequestContext(1, {"threadId": "t"}))["structuredContent"]["launch"]
-        self.assertEqual((home["page"], "browser" in home, "engine" in home), ("home", False, False))
+        self.assertEqual((home["page"], "browser" in home, "engine" in home), ("home", True, False))
+
+    def test_the_cards_open_in_browser_opens_the_page_from_this_process_through_a_redirect_file(self) -> None:
+        from cadgen.mcp.browser import ViewerUnavailable
+        from cadgen.viewer import browser_open
+
+        engine = self.tmp / "engine"
+        engine.mkdir(mode=0o700)
+        opened: list[tuple[str, str]] = []
+
+        def opener(target: str) -> bool:
+            path = Path(local_path(target))
+            opened.append((target, path.read_text(encoding="utf-8")))
+            if os.name != "nt":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            return True
+
+        self.server._viewer_url = lambda model=None: "http://127.0.0.1:3245/" + ("doc" if model else "") + "?token=t"
+        self.server._browser_opener = opener
+        route = "http://cad.invalid/__cad/browser/open"
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(engine)}), \
+                mock.patch.object(browser_open, "display_refusal", return_value=None):
+            self.assertEqual(self.http("POST", route, {"model": self.bracket}), (200, {"opened": True}))
+            self.assertEqual(self.http("POST", route, {"model": None}), (200, {"opened": True}))
+            self.assertEqual(len(opened), 2)
+            for (target, page), url in zip(opened, ("http://127.0.0.1:3245/doc?token=t", "http://127.0.0.1:3245/?token=t")):
+                self.assertTrue(target.startswith("file:") and "token" not in target, target)
+                self.assertIn(f"url={url}", page)
+            # A read is refused, the body names a document and never a URL, and an agent never reaches it.
+            self.assertEqual(self.http("GET", route)[0], 405)
+            self.assertEqual(self.http("POST", route, {"model": 7})[0], 400)
+            agent = self.call("cad_http", {"method": "POST", "url": route, "body": base64.b64encode(b"{}").decode()})
+            self.assertEqual(agent["structuredContent"]["status"], 403)
+            self.assertEqual(len(opened), 2)
+            # No browser here, or no page: 503 in words, when the card opens its launch's page through its host.
+            self.server._browser_opener = lambda _target: False
+            status, answer = self.http("POST", route, {})
+            self.assertEqual((status, "no browser" in answer["error"]), (503, True))
+
+            def refuse(_model=None) -> str:
+                raise ViewerUnavailable("CAD Viewer client is not built")
+
+            self.server._viewer_url = refuse
+            self.assertEqual(self.http("POST", route, {}), (503, {"error": "CAD Viewer client is not built"}))
+        with mock.patch.object(browser_open, "display_refusal", return_value="there is no display to open a browser on"):
+            self.assertEqual(self.http("POST", route, {}), (503, {"error": "there is no display to open a browser on"}))
 
     def test_an_inline_cards_sandbox_may_fetch_the_engine_s_origin_and_a_tab_s_is_served_as_it_was(self) -> None:
         # An inline host is asked to let the card fetch the engine; a server given no engine adds nothing.

@@ -18,7 +18,9 @@ terminal UI show none and are served as text clients.
 
 - **Tabs (the Codex app, and hosts that declare those entrypoints).** **CAD** in the
   sidebar (the home: the models opened before, and Open), a **CAD** tab beside
-  each thread, and *Open with CAD* for a model file. The agent opens a tab once
+  each thread, and *Open with CAD* for a model file. The sidebar and every tab are the
+  whole viewer under its navbar, as a card is (below); *Open with CAD* alone shows its file
+  bare, with no navbar. The agent opens a tab once
   (`cad_open`) and drives it (`cad_show`). These remain separate because the host mounts
   the UI from static tool metadata: adding that metadata to `cad_show` would mount a new
   view on updates too. A conditional server result cannot promise host-side tab reuse. A host that declares tabs does what
@@ -26,13 +28,12 @@ terminal UI show none and are served as text clients.
   engine session, so an unnamed view belongs to that thread.
 - **Inline (Claude Desktop, and every other MCP Apps host).** Each `cad_show`
   mounts a viewer card in the chat, and the host keeps the old cards. A card is
-  the viewer alone at card size, as a tab is: no navbar (`chrome: "bare"`), so no logo or
-  app menu, no Back or Forward, no file name or name menu, no ⋯, no Export and no Open in
-  browser; the tool strip ending in Projection, Display and Preview, the file sidebar, the
-  view cube, Quick Edit, and at the viewport's top-right the card's corner (`CardCorner.tsx`):
-  Full size, two diagonal arrows, where the host can show a view full size, then the update
-  notice while this install is behind. In Preview the corner goes with the rest of the chrome,
-  Preview's own bar (the file's name, its settings, its exit) in the navbar's place. A
+  the whole viewer at card size, as a tab is: its navbar (`chrome: "page"`: the logo, which
+  opens the app menu, first; Back and Forward; the file name that opens the name menu; the ⋯;
+  then, at the right, the update button, Full size where the host can show a view full size,
+  and last Open in browser — no Export, as this host has no downloads), the tool strip ending
+  in Projection, Display and Preview, the file sidebar, the view cube, and Quick Edit. In
+  Preview its own bar (the file's name, its settings, its exit) takes the navbar's place. A
   newer card retires the older ones. The Claude app's Code tab draws the card too, but carries none of its calls
   back: there the card tries the engine directly, else links the CAD Viewer (**A card says
   why it cannot work**, below).
@@ -83,26 +84,33 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   the host restored after an update, a past chat's card) says so: the page
   reads only its own protocol's.
 - **Every view but a file handler's has a home**: the library (the documents opened or built
-  before, in any view or the web viewer). The sidebar (`cad_home`) and a tab with nothing to show open on it; a
-  model opened from it is shown in place. With no navbar there is no way back to it from a
-  file but a show of the home; it has no navbar either, the card's corner (Full size, the
-  update) at its top-right; it starts with its control row, its links the app menu's.
-- **A view browses nothing of its own.** The name menu (Recent and Files, the explorer) is the
-  navbar's, under the file's name, and a tab or a card has no navbar: the agent's shows and the home's library are
-  how another file reaches it.
+  before, in any view or the web viewer). Back to files, first in the menu the navbar's logo
+  opens, goes to it. The sidebar (`cad_home`) and a tab with nothing to show open on it; a
+  model opened from it is shown in place. The home has the same navbar (the logo's menu, Back
+  and Forward, the update button, Full size and Open in browser); it starts with its control
+  row, its links the app menu's.
+- **A view browses from its file's folder.** The file name in the navbar opens the name menu:
+  Recent, and Files, the explorer, starting at the file's folder. A pick shows the file in
+  place. Nothing says where a view may browse: a tab, a card and the web viewer browse the
+  same way.
 - **A view keeps its own history.** As a browser keeps a tab's: every file a
   view showed, and the home, in order, the agent's shows and the person's own
-  moves alike (`ModelView.tsx`), handed to the viewer as `history`. With no navbar
-  nothing draws Back or Forward over it in a tab or a card. A move after a Back drops
-  what was ahead, and a show of what is already on screen adds nothing.
+  moves alike (`ModelView.tsx`), handed to the viewer as `history`. The navbar's Back
+  and Forward, after its logo, over a file and on the home, walk it, each disabled where it
+  has nowhere to go. A move after a Back drops what was ahead, and a show of what is already
+  on screen adds nothing.
   It is the view's, in memory: another tab or card has its own, and a view opened
   again starts with one step. A file handler's view, which shows its file alone,
   keeps none.
 - ***Open with CAD* is the file alone.** `cad_file` (`surface: file`) shows the
   file the host handed over, and nothing else, for as long as it is open: no home
   and no explorer (the host's own file tree is its navigation), no Back or Forward,
-  and a renderer's link to another file (a robot's mesh) is plain text. It has no
-  navbar, as every view of this app has none. The agent reads it
+  and a renderer's link to another file (a robot's mesh) is plain text. It is the one
+  view with no navbar (`chrome: "bare"`): no logo or app menu, no name or name menu, no ⋯
+  and no Open in browser; what the navbar would carry that it still has is its corner at
+  the viewport's top-right (`CardCorner.tsx`, the viewer's `notice`, Quick Edit under it):
+  Full size where the host offers it, then the update notice. Preview's bar hides the
+  corner as it hides a navbar. Its launch carries no page (`browser`). The agent reads it
   (`cad_view` lists it) but shows nothing in it: `cad_show` refuses its view, and
   the page ignores a show that reaches it anyway.
 - **An agent reads the sidebar too, and shows beside its thread.** Each MCP session
@@ -115,12 +123,12 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   Both go to `api.texttocad.dev` (`apps/api`). Once a day at most, cadgen
   reads the version feed (`cadgen/updates.py`): one anonymous GET, with no id and
   nothing about the person (`CADGEN_UPDATE_CHECK=0` turns it off; never in CI or from
-  a source tree). While this install is behind, a view shows the update card itself
-  as a notice (`UpdateNotice` over the shared `UpdateCard`, `@text-to-cad/ui/update`) in its
-  corner at the viewport's top-right, under Full size, over a file and over the home, until
-  the person closes it or sends its prompt; the web viewer's navbar keeps the blue
-  `UpdateButton`, which opens the same card. A launch carries the
-  notice the server last read, so the notice draws with the page; the page reads it
+  a source tree). While this install is behind, the navbar shows the shared blue
+  `UpdateButton` (`@text-to-cad/ui/update`), first among its controls, over a file and over
+  the home; it opens the update card. The file handler, which has no navbar, shows the card
+  itself as a notice in its corner (`UpdateNotice` over the shared `UpdateCard`), under Full
+  size, until the person closes it or sends its prompt. A launch carries the
+  notice the server last read, so the button draws with the page; the page reads it
   again (`/__cad/version`) when the person comes back to it. The card says: "A new version of text-to-cad
   is available. Send a message to your agent asking it to update to the latest
   version:", and a prompt worded like the install message, "Update text-to-cad to
@@ -198,7 +206,9 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   and an `.xbf`'s reads too, dispatched directly to the engine's document router
   that serves them (`/__cad/api/...`) -- the
   library and its pictures, Reveal, the person's analytics
-  answer and language, the update check. Only the clipboard stays the host's: a
+  answer and language, the update check. One route is the server's own, not the
+  viewer's: `/__cad/browser/open`, which opens the web viewer's page of what the view shows
+  in the person's browser, for Open in browser. Only the clipboard stays the host's: a
   view copies through its frame. `cad_sync` and `cad_capture_reply` remain app-only
   and are absent in text-only hosts. `cad_http` is shared with agents: without
   an app capability, only telemetry status and opt-out are authorized. Every
@@ -268,7 +278,8 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   where the engine gives a page, `browser` (the CAD Viewer's page of what it shows, the same
   day link a text client's `cad_show` gives, loopback only) and `engine`
   (its origin), so the card needs no call to read them (`cadgen/mcp/server.py`, `_reach`); a
-  tab host's launches carry neither, its card always having its channel.
+  tab host's launches, and the shows its sync carries, carry `browser` alone (for Open in
+  browser), its card always having its channel; the file handler's carry neither.
   With no channel, the card reads `GET <engine>/__cad/server` with the link's token as a
   Bearer credential (`host/direct.ts`, at most five seconds). If it answers, the whole card
   runs over direct HTTP: the tunnel's fetch is swapped for one that sends the same paths to
@@ -342,12 +353,22 @@ its view — camera, Display settings, pose — through updates of it, and leavi
 another model or the home drops it, as in the web Viewer. A view the
 host creates again (its frame re-created) starts afresh: nothing names a view across its
 frames, so there is nothing to keep its record under. `App.tsx` frames it (full page, or
-an inline card whose height the host is told) and draws the view alone (`chrome: "bare"`):
-there is no navbar and no Open in browser, in any presentation. Inline, where the host offers
+an inline card whose height the host is told) under the navbar (`chrome: "page"`) in every
+presentation but the file handler's (`chrome: "bare"`, above). Inline, where the host offers
 `fullscreen` among its display modes, the card's **Full size** (lucide `Maximize2`, a small ghost
-icon button) asks it for `ui/request-display-mode` fullscreen; it stands first in the card's
-corner, which is the viewer's `notice` at the viewport's top-right over a file (Quick Edit under
-it) and the same corner at the page's top-right over the home. In a tab, Codex's composer floats over the page, and the
+icon button) asks it for `ui/request-display-mode` fullscreen; it is the first of the host's
+actions at the navbar's right, over a file and on the home (the corner's first in the file
+handler). Last in the navbar, Open in browser (lucide `ExternalLink`) opens the web viewer's
+page of what the view shows: the page each launch carries (`browser`: the document's, `/<id>`
+with the day link, or the home's), and for a file the person opened that no launch named, the
+web viewer's home with the same link, where that file leads the library. The server opens it
+itself, on this computer: a press posts the document the view shows (its path or id, never a
+URL) to `POST /__cad/browser/open`, a `cad_http` route of the app's alone, and the server opens
+the browser on an owner-only redirect file, so the token is on no command line (a host need
+not follow a link to a loopback page, and Codex does not). Only where the server can open no
+browser (503: no display, a remote shell), or the card reaches the engine directly, does the
+card open the launch's page through `ui/open-link` where the host offers it, else as a plain
+link. A view whose launches carried no page (the engine gave none) has no button. In a tab, Codex's composer floats over the page, and the
 home's list scrolls clear of it (`--cad-host-bottom-inset`). The cube sits at bottom-left
 in this tab presentation, across sidebar, thread and file views, so the composer and
 sidebar chat button can occupy bottom-right. `App.tsx` supplies

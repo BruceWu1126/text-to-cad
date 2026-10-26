@@ -31,6 +31,7 @@ export default {
   "navbar.forward": "下一頁",
   "navbar.fileActions": "檔案動作",
   "navbar.fullSize": "全尺寸",
+  "navbar.openInBrowser": "在瀏覽器中開啟",
 
   "file.copyPath": "複製路徑",
   "file.revealFinder": "在 Finder 中顯示",

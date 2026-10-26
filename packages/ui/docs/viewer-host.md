@@ -28,10 +28,9 @@ the keyboard `platform` (`darwin` shows ⌘, anything else Ctrl), the app's own
 `compact`: a view drawn as a picture (the home draws its thumbnails this way, out
 of sight), where a CAD renderer draws the model alone — no tools, view actions,
 view cube or Quick Edit — and FileViewer draws no navbar. A view shown small in a
-conversation is not compact: it is the whole viewer, with no navbar (the CAD app's
-`chrome: "bare"`), and its host draws its own way to full size in its corner at the
-viewport's top-right, as its notice (the CAD app's Full size, over the home at the page's
-top-right). CAD is a separate registration supplied with a
+conversation is not compact: it is the whole viewer under its navbar, and its host hands
+its own way to full size as a navbar action (the CAD app's Full size, `CadViewerProps.fullSize`).
+CAD is a separate registration supplied with a
 `CadWorkspaceService`; the generic FileViewer does not import CAD. The HTTP CAD
 adapter can serve both apps, while desktop owns native runtime startup/recovery.
 See [workspace resources](../../core/docs/workspace-resources.md) for resource
@@ -469,12 +468,13 @@ keyboard `platform` (`environment.platform`) for its undo and redo keys.
 
 FileViewer draws one navbar, the same wherever it is drawn, over every file and over a host's
 home, in a page's chrome (`FileViewerProps.chrome` / `CadViewerProps.chrome`: `"page"`, the
-default, the web viewer's). A host whose frame is its navigation hands `"bare"` (the CAD app,
-in Codex's tabs and Claude Desktop's cards): no navbar at all, over a file, its home or a page
-that will not open — no logo or app menu, no Back and Forward, no name or name menu, no ⋯, no
-Export and no Open in browser — and what it still adds is its own, as its notice at the
-viewport's top-right (`notice`, the column Quick Edit hangs under: the CAD app's Full size and
-its update notice; over its home, the same corner at the page's top-right). In Preview, in
+default, the web viewer's, and the CAD app's sidebar, tabs and cards). A host whose own frame
+is the view's navigation hands `"bare"` (the CAD app's file handler, Codex's *Open with CAD*,
+which shows one file alone): no navbar at all, over a file or a page that will not open — no
+logo or app menu, no Back and Forward, no name or name menu, no ⋯, no Export and no Open in
+browser — and what it still adds is its own, as its notice at the viewport's top-right
+(`notice`, the column Quick Edit hangs under: the CAD app's Full size and its update notice).
+In Preview, in
 every host, the navbar steps aside for Preview's own bar. Over the home the navbar has only
 the logo and its menu (no Back to files), Back and Forward where the host hands a `history`,
 and the host's update and actions, each where it stands over a file; the home's type filter, search and
@@ -492,8 +492,9 @@ plain text where there is neither; the ⋯ offers Copy path and Reveal in Finder
 manager, each where `fileActions` can do it, and is absent where it can do none (no
 right-click on the name). Right, only what a host or a file adds: the host's update button
 first (`update`, while its install is behind), the renderer's navigation actions, and last
-the host's actions (`navbarActions`: the web viewer's Export). The navbar holds no settings
-and none of the view's controls.
+the host's actions (`navbarActions`: the web viewer's Export; `CadViewer` puts the host's
+`fullSize` before it and `openInBrowser` after it, the CAD app's Full size and Open in
+browser). The navbar holds no settings and none of the view's controls.
 
 The app menu is FileViewer's, built from the host's `navigation.home`, `links` and
 `environment.platform` and the person's `FileViewerProps.appSettings` (which `CadViewer`
