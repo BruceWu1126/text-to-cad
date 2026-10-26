@@ -24,6 +24,8 @@ import { MissingCadFile } from './MissingCadFile.js';
 // A STEP: read by the cadgen engine, at a length its size decides (the home's pictures ask first, as
 // they do for a model's document, by its id).
 const STEP_FILE = /\.(?:step|stp)$/i;
+// The title of a model's document the engine does not hold, by the state it names (any other: not held).
+const NOT_HELD_TITLES: Record<string, string> = { unsaved: "file.notSaved", detached: "file.detached" };
 
 export interface CadViewerProps<Model extends LibraryModel = LibraryModel> {
   /** The CAD client: the catalog of the files on screen, and every document's resources. */
@@ -206,10 +208,12 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
       after={start && host.files.list ? <LaunchFolder source={host.files} folder={start} onOpen={openFile} /> : null} /> : undefined,
     loading: <div className="relative h-full"><ViewerLoadingOverlay viewerLoading /></div>,
     // A document named by its id that the engine does not hold says why, and the command that
-    // builds it again (the engine's words); a file that is not there, its path.
-    error: ({ message, missing, reload }: { message: string; missing: boolean; reload?: () => void }) => missing
+    // builds it again (the engine's words), under a title of the state the engine names; a file
+    // that is not there, its path.
+    error: ({ message, missing, error, reload }: { message: string; missing: boolean; error?: unknown; reload?: () => void }) => missing
       ? <MissingCadFile file={path} entry={entry} reload={reload} action={goHome}
-        title={isDocumentId(path) ? t("file.notHeld") : t("file.missing")} description={isDocumentId(path) ? message : undefined} />
+        title={isDocumentId(path) ? t(NOT_HELD_TITLES[String((error as { state?: unknown } | null)?.state)] ?? "file.notHeld") : t("file.missing")}
+        description={isDocumentId(path) ? message : undefined} />
       : <EmptyState icon={FileWarning} title={t("file.openFailed")} description={message} tone="warn" action={goHome} />,
   }), [library, layout, changeLayout, path, picture, host.links, host.files, openFile, entry, onError, goHome, t, start]);
   return <I18nProvider locale={locale}>

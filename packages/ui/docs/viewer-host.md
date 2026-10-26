@@ -43,8 +43,8 @@ mounted renderers own scenes, document controllers and temporary resource leases
 Unmounting one view releases its work without disposing another view's services
 or admitted cache writes. Hosts dispose a service when its workspace closes.
 
-`FileViewer`'s optional `presentation.error` receives `message`, `missing`, and
-`reload`, which rereads only the file that produced the error; a callback from a
+`FileViewer`'s optional `presentation.error` receives `message`, `missing`, `error`
+(what the source raised, for a host to read its own fields on), and `reload`, which rereads only the file that produced the error; a callback from a
 departed file cannot reload its replacement.
 
 ## Interface map and implementations
@@ -532,8 +532,11 @@ never resizes it.
 
 A file that will not open leaves the navbar over a page of the host's
 (`presentation.error`). `CadViewer`'s says "File does not exist" and the file's path
-when it is missing (`isMissingFileError`) -- for a document named by its id, "This model is no
-longer held" and the engine's words, which name the command that builds it again -- and "Could
+when it is missing (`isMissingFileError`) -- for a document named by its id, the engine's words,
+which name the command that builds it again, under a title of the state the engine names
+(the client's error's `state`, from the catalog's `missingState`): "This model is not saved"
+(`unsaved`), "This model’s script is gone" (`detached`), else "This model is no longer held" --
+and "Could
 not open that file" and the reason otherwise, each with a Go home button where the host has a home.
 
 The viewport's edges and corners are the shell's, never the host's: the tool strip at the

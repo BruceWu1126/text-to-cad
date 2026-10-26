@@ -5,15 +5,16 @@ from cadgen.engine.client import request
 from cadgen.engine.ids import is_id
 
 
-def held(ident: str) -> tuple[dict | None, str]:
-    """The model the engine holds of id ``ident``, and why it holds none (``""`` when it does):
-    the engine's own words, naming the command that builds it again. Nothing is built."""
+def held(ident: str) -> tuple[dict | None, str, str]:
+    """The model the engine holds of id ``ident``, why it holds none (``""`` when it does) -- the
+    engine's own words, naming the command that builds it again -- and the state the engine names
+    for one it does not hold (``unsaved``, ``detached``; ``""`` when it names none). Nothing is built."""
     answer = request({"op": "model_info", "id": ident}, start=False)
     if not answer:
-        return None, f"no document {ident} is held: no engine is running"
+        return None, f"no document {ident} is held: no engine is running", ""
     if "failed" in answer:
-        return None, str(answer["failed"])
-    return answer["model"], ""
+        return None, str(answer["failed"]), str(answer.get("state") or "")
+    return answer["model"], "", ""
 
 
 def entry(value: str) -> dict | None:
@@ -23,7 +24,7 @@ def entry(value: str) -> dict | None:
     rebuild as it hears a file written again: its picture is taken again."""
     if not is_id(value):
         return None
-    model, _why = held(value)
+    model, _why, _state = held(value)
     if model is None:
         return None
     built = model.get("version") or model.get("builtAt")

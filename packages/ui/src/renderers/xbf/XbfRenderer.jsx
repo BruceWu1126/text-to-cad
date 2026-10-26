@@ -11,8 +11,7 @@ import RendererShell from "../kit/shell/RendererShell.jsx";
 import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell.js";
 import { usePreviewScene } from "../kit/shell/usePreviewScene.js";
 import { useViewportLoadStatus } from "../kit/shell/useViewportLoadStatus.js";
-import { buildFailedAlert, noGeometryAlert, staleBuildAlert } from "../kit/status/loadAlerts.js";
-import { useI18n } from "@text-to-cad/ui/i18n";
+import { buildFailedAlert, noGeometryAlert } from "../kit/status/loadAlerts.js";
 import { useModelTools } from "../kit/tools/model-effects/ModelTools.jsx";
 import { useMotionExclusion } from "../kit/tools/model-effects/motionExclusion.js";
 import { useMeasureSession } from "../kit/tools/measure/useMeasureSession.js";
@@ -92,17 +91,14 @@ function XbfSurface({ view, data }) {
   const source = loaded.document?.source?.url || "";
   // What every later read of the document's engine is made with: the fetch it was read with.
   const engineFetch = loaded.document?.fetch;
-  const { t } = useI18n();
   // A failed build of the file is said over the version on screen, the last that built; the view
-  // updates by itself when one succeeds. A model shown from its last build though its code changed
-  // since (the engine's `stale`) says so, with the command that builds it again.
-  const stale = loaded.document?.structure?.stale || null;
+  // updates by itself when one succeeds. The view shows the engine's last build and says nothing of
+  // the code it came from: a script edited since is the engine's business, not the page's.
   const loadAlert = useMemo(() => workspaceLoadAlert({
     catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene)
   }) || (loaded.failed ? buildFailedAlert(document.modelKey, loaded.failed, Boolean(scene)) : null)
-    || (stale && scene ? staleBuildAlert(stale, t) : null)
     || (loaded.empty ? noGeometryAlert(document.modelKey) : null),
-  [document.catalogError, loaded.error, loaded.failed, loaded.empty, document.modelKey, scene, stale, t]);
+  [document.catalogError, loaded.error, loaded.failed, loaded.empty, document.modelKey, scene]);
   const tree = useMemo(() => presentXbfTree(scene?.structure || null), [scene?.structure]);
   // The model's two readiness moments, as a STEP's are published (`window.__cadViewerLoad`): its
   // first scene, and the whole of it -- one moment here, every part is in the first scene.

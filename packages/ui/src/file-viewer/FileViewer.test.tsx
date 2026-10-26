@@ -247,8 +247,9 @@ it('says why a file will not open, and that it does not exist when it is missing
   cleanup();
   open({ host: failing(new Error('The disk is gone')), presentation });
   await screen.findByText('failed');
-  expect(failures.at(0)).toEqual({ message: 'File does not exist: /models/gone.step', missing: true, reload: expect.any(Function) });
-  expect(failures.at(-1)).toEqual({ message: 'The disk is gone', missing: false, reload: expect.any(Function) });
+  // What the source raised comes with it, for a host to read its own fields on.
+  expect(failures.at(0)).toEqual({ message: 'File does not exist: /models/gone.step', missing: true, error: missing, reload: expect.any(Function) });
+  expect(failures.at(-1)).toEqual({ message: 'The disk is gone', missing: false, error: expect.any(Error), reload: expect.any(Function) });
   cleanup();
   // A host with no page of its own for it gets the viewer's.
   open({ host: failing(new Error('The disk is gone')) });

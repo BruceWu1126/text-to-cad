@@ -40,6 +40,8 @@ export default {
   "file.opening": "Opening…",
   "file.missing": "File does not exist",
   "file.notHeld": "This model is no longer held",
+  "file.notSaved": "This model is not saved",
+  "file.detached": "This model’s script is gone",
   "file.openFailed": "Could not open that file",
   "file.displayFailed": "Could not display that file",
   "file.goHome": "Go home",
@@ -156,8 +158,6 @@ export default {
   "alert.copyFailed": "The details could not be copied. Select them above and copy them.",
   "alert.retry": "Retry",
   "alert.reportIssue": "Report Issue",
-  "alert.stale.title": "The code changed since this was built",
-  "alert.stale.message": "You’re viewing the last build: nothing reran. To build it again, run:",
 
   // The loading indicator under the loading mark.
   "loading.lastStep": "Last step: {label}",

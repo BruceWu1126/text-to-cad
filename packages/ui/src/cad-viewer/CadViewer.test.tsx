@@ -227,6 +227,16 @@ test('a document named by its id is its row, joined by id: the host hears its fi
   const missing = render(<>{props().presentation!.error!({ message: `no document ${id} is held: bracket is no longer in memory; run \`python /m/parts.py\` to build it again`, missing: true })}</>);
   expect(missing.getByText('This model is no longer held')).toBeTruthy();
   expect(missing.getByText(/run `python \/m\/parts.py` to build it again/)).toBeTruthy();
+  missing.unmount();
+  // The engine's state names the page: a model not saved, and one whose script is gone, each over the engine's words.
+  const failure = (state: string, message: string) => render(<>{props().presentation!.error!({ message, missing: true,
+    error: Object.assign(new Error(message), { code: 'cad-file-missing', state }) })}</>);
+  const unsaved = failure('unsaved', `bracket (${id}) is not saved: the engine's cache holds no file of its last build; run \`python /m/parts.py\` to build it again`);
+  expect([unsaved.getByText('This model is not saved'), unsaved.getByText(/is not saved: the engine's cache/)].every(Boolean)).toBe(true);
+  expect(unsaved.queryByText('This model is no longer held')).toBeNull();
+  unsaved.unmount();
+  const detached = failure('detached', `bracket (${id}) is detached: /m/parts.py is gone, and nothing builds it again; delete it from the home`);
+  expect(detached.getByText('This model’s script is gone')).toBeTruthy();
 });
 
 test('the home shows the folder of the most recent launch, and a file in it opens', async () => {

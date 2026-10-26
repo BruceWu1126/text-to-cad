@@ -68,8 +68,8 @@ its absolute path, in this view (a robot's mesh), absent where the view shows it
 own to show: a CAD renderer shows them in its viewport. Host-specific pages are supplied through `presentation`,
 without duplicating the view's placement: `home` is a host's own page for a view with
 no file (every CAD host's model library), under the navbar; `loading`; and
-`error({ message, missing })` for a file that will not open, `missing` when it does
-not exist. Per-file renderer state is also accepted during a departing renderer's
+`error({ message, missing, error })` for a file that will not open, `missing` when it does
+not exist, `error` what the source raised (a host reads its own fields on it). Per-file renderer state is also accepted during a departing renderer's
 cleanup, while it still belongs to the same source.
 
 ## The navbar and the explorer

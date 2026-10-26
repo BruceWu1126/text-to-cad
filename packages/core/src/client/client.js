@@ -78,7 +78,8 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
   const activeFiles = new Map();
   // Each path a view asked for, and the id of the document the server answered it with.
   const aliases = new Map();
-  // Why the server has no row for an id it was asked for (the engine's words), by that id.
+  // Why the server has no row for an id it was asked for (the engine's words) and the state it
+  // names for it (`unsaved`, `detached`, or ''), by that id.
   const missing = new Map();
   let preferredFile = '';
   /** The key of the row `file` names: its document's id once the server said it. */
@@ -127,8 +128,9 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     // The document the path asked for is the row the server answered: its id joins every spelling.
     if (asked && incoming.length === 1 && incoming[0].id && !isDocumentId(asked)) aliases.set(asked, incoming[0].id);
     if (isDocumentId(asked)) {
-      if (typeof catalog?.missing === 'string' && !incoming.length) missing.set(asked, catalog.missing);
-      else missing.delete(asked);
+      if (typeof catalog?.missing === 'string' && !incoming.length) {
+        missing.set(asked, { text: catalog.missing, state: typeof catalog.missingState === 'string' ? catalog.missingState : '' });
+      } else missing.delete(asked);
     }
     const answered = new Set(incoming.map(entryKey));
     // The catalog is the files on screen: an answer brings one, and keeps the others shown.
@@ -221,8 +223,10 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
       }
       if (signal?.aborted || disposed) throw abortError();
       if (!entry) {
-        // An id the engine does not hold says why, and names the command that builds it again.
-        throw Object.assign(new Error(missing.get(path) || `File does not exist: ${path}`), { code: 'cad-file-missing' });
+        // An id the engine does not hold says why, and names the command that builds it again, and
+        // its state, the engine's (`unsaved`, `detached`), where it names one.
+        const why = missing.get(path);
+        throw Object.assign(new Error(why?.text || `File does not exist: ${path}`), { code: 'cad-file-missing', ...(why?.state ? { state: why.state } : {}) });
       }
       return entry;
     },

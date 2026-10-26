@@ -36,6 +36,8 @@ export default {
   "file.opening": "正在打开…",
   "file.missing": "文件不存在",
   "file.notHeld": "此模型已不再保留",
+  "file.notSaved": "此模型未保存",
+  "file.detached": "此模型的脚本已不存在",
   "file.openFailed": "无法打开该文件",
   "file.displayFailed": "无法显示该文件",
   "file.goHome": "返回主页",
@@ -142,8 +144,6 @@ export default {
   "alert.copyFailed": "无法复制详情。请选中上方内容并手动复制。",
   "alert.retry": "重试",
   "alert.reportIssue": "报告问题",
-  "alert.stale.title": "自上次构建以来代码已更改",
-  "alert.stale.message": "你正在查看上次的构建结果，没有重新运行。要重新构建，请运行：",
 
   "loading.lastStep": "上一步：{label}",
   "loading.openingModel": "正在打开模型",
