@@ -215,6 +215,62 @@ it('names a script\'s card for the model named as its script is, else the one bu
   expect(cards.map(card => [card.item.name, card.folded.map(item => item.name)])).toEqual([['b', ['a']], ['x.step', []]]);
 });
 
+it('asks before Delete, in words that say what stays on disk, and the card leaves at once', async () => {
+  const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
+  const bracket = model('bracket', { path: id, kind: 'model', script: '/work/parts/bracket.py' });
+  let settle!: () => void;
+  const source = library([bracket, model('bracket.step')], {
+    change: vi.fn(() => new Promise<readonly LibraryModel[]>(resolve => { settle = () => resolve([model('bracket.step')]); })),
+  });
+  render(<ModelLibrary library={source} />);
+  await screen.findByRole('button', { name: 'Open bracket' });
+  await act(async () => { fireEvent.click(within(await menu('bracket')).getByRole('menuitem', { name: 'Delete' })); });
+  const dialog = await screen.findByRole('alertdialog');
+  expect(within(dialog).getByRole('heading').textContent).toBe('Delete bracket?');
+  expect(within(dialog).getByText("Removes the engine's record and its saved build. The script and any exported files stay on disk. Run the script to build it again.")).toBeTruthy();
+  expect(within(dialog).getAllByRole('button').map(button => button.textContent)).toEqual(['Cancel', 'Delete']);
+  // Cancel deletes nothing.
+  await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })); });
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(source.change).not.toHaveBeenCalled();
+  cleanup();
+  render(<ModelLibrary library={source} />);
+  await screen.findByRole('button', { name: 'Open bracket' });
+  await act(async () => { fireEvent.click(within(await menu('bracket')).getByRole('menuitem', { name: 'Delete' })); });
+  await act(async () => { fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' })); });
+  // Deleted through the client, and gone from the list before it answers.
+  expect(source.change).toHaveBeenCalledWith('delete', expect.objectContaining({ path: id }));
+  expect(screen.queryByRole('button', { name: 'Open bracket' })).toBeNull();
+  await act(async () => { settle(); });
+  expect(screen.queryByRole('button', { name: 'Open bracket' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Open bracket.step' })).toBeTruthy();
+});
+
+it('asks to delete a file from the viewer alone, and a script\'s card with all its models', async () => {
+  const file = library([model('bracket.step')]);
+  render(<ModelLibrary library={file} />);
+  await screen.findByRole('button', { name: 'Open bracket.step' });
+  await act(async () => { fireEvent.click(within(await menu('bracket.step')).getByRole('menuitem', { name: 'Delete' })); });
+  let dialog = await screen.findByRole('alertdialog');
+  expect(within(dialog).getByRole('heading').textContent).toBe('Delete bracket.step from the viewer?');
+  expect(within(dialog).getByText("Removes the engine's record of this file. The file itself stays on disk.")).toBeTruthy();
+  await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' })); });
+  expect(file.change).toHaveBeenCalledWith('remove', expect.objectContaining({ name: 'bracket.step' }));
+  cleanup();
+  const script = '/work/juno/juno.py';
+  const ids = ['0', '1', '2'].map(digit => `8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f1${digit}`);
+  const juno = library([model('juno', { path: ids[0], kind: 'model', script }), model('wheel', { path: ids[1], kind: 'model', script }),
+    model('axle', { path: ids[2], kind: 'model', script })], { change: vi.fn(async () => []) });
+  render(<ModelLibrary library={juno} />);
+  await screen.findByRole('button', { name: 'Open juno' });
+  await act(async () => { fireEvent.click(within(await menu('juno')).getByRole('menuitem', { name: 'Delete' })); });
+  dialog = await screen.findByRole('alertdialog');
+  expect(within(dialog).getByRole('heading').textContent).toBe('Delete juno and its 3 models?');
+  await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' })); });
+  await waitFor(() => expect(juno.change).toHaveBeenCalledTimes(3));
+  expect((juno.change as ReturnType<typeof vi.fn>).mock.calls.map(([action, item]) => [action, item.name])).toEqual([['delete', 'juno'], ['delete', 'wheel'], ['delete', 'axle']]);
+});
+
 it('says how long ago with no verb, in the largest unit that is at least one, then the short date', () => {
   const ago = (seconds: number) => ageLabel(NOW / 1000 - seconds, NOW);
   expect([ago(20), ago(5 * 60), ago(2 * 3600), ago(3 * 86400)]).toEqual(['now', '5m ago', '2h ago', '3d ago']);

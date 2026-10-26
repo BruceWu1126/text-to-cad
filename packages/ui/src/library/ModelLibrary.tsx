@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Box, ChevronRight, Ellipsis, LayoutGrid, List, Pin, Search } from "lucide-react";
 import { Button } from "../primitives/button.jsx";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../primitives/alert-dialog.jsx";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../primitives/dropdown-menu.jsx";
 import { Input } from "../primitives/input.jsx";
 import { Spinner } from "../primitives/spinner.jsx";
@@ -190,7 +191,8 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
  * the kind's glyph, the name and how long ago it was last opened or updated, with no verb) or as
  * rows. A script that declares several models is one card, named for its main model, the others
  * folded under it ("and 27 more"), opened in place. Each card has one ⋯ menu: Open, Copy path and
- * Reveal where the host can, Pin or Unpin, then Delete; a pinned card shows its pin. It is the
+ * Reveal where the host can, Pin or Unpin, then Delete, which asks first (an AlertDialog saying what
+ * goes and what stays on disk) and takes the card off the list at once; a pinned card shows its pin. It is the
  * library alone: nothing opens a file from here but its cards. It is drawn on the navbar's colour.
  *
  * Nothing waits unseen. While the list is read, placeholder cards (or rows) stand where the models
@@ -273,10 +275,18 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
     setOpening(item.path);
     void current.current.open(item).catch(fail).finally(() => setOpening(null));
   };
-  const change = (action: "pin" | "unpin" | "remove" | "delete", item: Model) => { void current.current.change(action, item).then(setItems, fail); };
-  // Delete: a model's (or a shape's) document and its record; a file's record alone, the file kept.
-  const remove = (item: Model) => change(deletes(item) ? "delete" : "remove", item);
-  const all = items ?? [];
+  const change = (action: "pin" | "unpin" | "remove" | "delete", item: Model) => current.current.change(action, item).then(setItems, fail);
+  // Delete, once the person says so: a model's (or a shape's) document and its record, every model
+  // of a script's card; a file's record alone, the file kept. The card leaves the list at once.
+  const [confirming, setConfirming] = useState<LibraryCard<Model> | null>(null);
+  const [gone, setGone] = useState<ReadonlySet<string>>(() => new Set());
+  const remove = (card: LibraryCard<Model>) => {
+    const doomed = [card.item, ...card.folded];
+    setGone(previous => new Set([...previous, ...doomed.map(item => item.path)]));
+    void doomed.reduce<Promise<unknown>>((before, item) => before.then(() => change(deletes(item) ? "delete" : "remove", item)), Promise.resolve())
+      .finally(() => setGone(previous => { const next = new Set(previous); for (const item of doomed) next.delete(item.path); return next; }));
+  };
+  const all = (items ?? []).filter(item => !gone.has(item.path));
   const [kind, setKind] = useState<LibraryKind>("all");
   // The scripts whose folded models are shown, by script: collapsed until a press opens one.
   const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
@@ -300,7 +310,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
   };
   // A card's one menu: Open, what the host can do with it on disk, Pin or Unpin, then Delete. A
   // pinned card shows its pin beside the menu, whatever the pointer does.
-  const actions = (item: Model) => <div className="cad-library-actions" data-pinned={item.pinned || undefined}>
+  const actions = (card: LibraryCard<Model>) => { const item = card.item; return <div className="cad-library-actions" data-pinned={item.pinned || undefined}>
     {item.pinned ? <Pin className="cad-library-pinned" role="img" aria-label={t("home.pinned")} fill="currentColor" /> : null}
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
@@ -311,10 +321,30 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
         {(deletes(item) ? item.script : item.path) ? fileItems.map(entry => <DropdownMenuItem key={entry.action} onSelect={() => perform(entry.action, item)}>{entry.label}</DropdownMenuItem>) : null}
         <DropdownMenuItem onSelect={() => change(item.pinned ? "unpin" : "pin", item)}>{t(item.pinned ? "home.unpin" : "home.pin")}</DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onSelect={() => remove(item)}>{t("home.delete")}</DropdownMenuItem>
+        <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(card)}>{t("home.delete")}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  </div>;
+  </div>; };
+  // What Delete asks first: what goes, and what stays on disk; its words stay while the dialog leaves.
+  const lastAsked = useRef<LibraryCard<Model> | null>(null);
+  if (confirming) lastAsked.current = confirming;
+  const asking = lastAsked.current;
+  const question = asking ? deletes(asking.item) ? {
+    title: asking.folded.length ? t("home.deleteScriptTitle", { name: asking.item.name, n: asking.folded.length + 1 }) : t("home.deleteModelTitle", { name: asking.item.name }),
+    body: t("home.deleteModelBody"),
+  } : { title: t("home.deleteFileTitle", { name: asking.item.name }), body: t("home.deleteFileBody") } : null;
+  const confirm = <AlertDialog open={Boolean(confirming)} onOpenChange={next => { if (!next) setConfirming(null); }}>
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{question?.title}</AlertDialogTitle>
+        <AlertDialogDescription>{question?.body}</AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel>{t("home.cancel")}</AlertDialogCancel>
+        <AlertDialogAction variant="destructive" onClick={() => { if (confirming) remove(confirming); }}>{t("home.delete")}</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>;
   const status = (item: Model) => item.missing ? t("home.fileUnavailable") : ageLabel(lastActivity(item), now, t, locale);
   const name = (item: Model) => <span className="cad-library-name">
     <DocumentGlyph model={deletes(item)} path={item.path} className="cad-library-glyph" />
@@ -346,7 +376,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
           {name(item)}
           <span className="cad-library-status">{status(item)}</span>
         </button>
-        {actions(item)}
+        {actions(card)}
       </div>
       {folded(card)}
     </li>; })}</ul>
@@ -359,7 +389,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
             <span className="cad-library-status">{status(item)}</span>
           </span>
         </button>
-        {actions(item)}
+        {actions(card)}
       </div>
       {folded(card)}
     </li>; })}</ul>;
@@ -394,6 +424,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
         : (query || kind !== "all") && all.length && !shown.length ? <p className="cad-library-empty" role="status">{t("home.noMatchingModels")}</p>
           : !all.length ? <p className="cad-library-empty">{t("home.empty")}</p>
             : models}
+      {confirm}
     </main>
   </div>;
 }
