@@ -1028,7 +1028,9 @@ nothing is prepared ahead: Preview prepares as it is entered, under its cover.
 ## Keyboard
 
 Escape and Copy belong to one viewer: the one with focus, or the one last
-pressed in while focus is on the page. Editable targets keep their own keys.
+pressed in while focus is on the page. Editable targets keep their own keys. A file
+shown takes the keyboard where nothing has it, in a page of its own (never a card in a
+chat's frame), so its tool keys work with no press in it first (`file-viewer/takeKeyboard.js`).
 
 - **Escape**, innermost first: an open popup in this viewer (a menu, the app menu
   included, a Select, a color picker, Display, the explorer) closes itself; then Preview closes;
