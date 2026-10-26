@@ -206,6 +206,20 @@ class RunLineTest(unittest.TestCase):
             cli._reported([report], 0.1, None, False)
         self.assertTrue(pipe.flushed.endswith("  view: http://127.0.0.1:1/an-id\n"), pipe.flushed)
 
+    def test_a_stopped_run_names_unbuilt_models_only_where_its_code_calls_one_after(self) -> None:
+        from types import SimpleNamespace
+
+        from cadgen.engine import model as engine_model
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-after-"))
+        self.addCleanup(shutil.rmtree, folder, True)
+        script = folder / "parts.py"
+        script.write_text("first()\nsecond()\nprint('done')\n", encoding="utf-8")
+        models = {"first": engine_model.Model(lambda: None), "second": engine_model.Model(lambda: None), "print": print}
+        frame = lambda line: SimpleNamespace(f_code=SimpleNamespace(co_filename=str(script)), f_lineno=line, f_globals=models)  # noqa: E731
+        self.assertTrue(engine_model._calls_after(frame(1)), "second() comes after first()")
+        self.assertFalse(engine_model._calls_after(frame(2)), "only a print after the last model")
+
     def test_one_miss_and_one_hit_are_singular(self) -> None:
         from cadgen.engine import cli
 

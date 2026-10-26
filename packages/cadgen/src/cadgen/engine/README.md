@@ -560,8 +560,9 @@ measures no face exactly; juno's, 41 of 246 and 12 faces; measuring every part t
 nothing measurable for it. A failed build
 raises; a successful call resumes the script. A failed run's line says when the model's previous
 good build is still served (`failed parts.py::bad; serving its previous good build`), and, the
-error left uncaught, that the program stopped there: `the run stopped at bad: a model it calls
-after this one is not built`. Nothing builds those models for it: Python decides which calls run
+error left uncaught, that the program stopped there: `the run stopped at bad`, and, where its code
+calls a model after that line, `: a model it calls after this one is not built` (`model._calls_after`,
+read from the program's source). Nothing builds those models for it: Python decides which calls run
 (law 11), so each keeps the document of its last run until the program runs again. A body that fails in a kernel call with an OCCT exception (often bare: `Standard_Failure`,
 `Standard_DomainError`, by OCCT build) has that call named on its failure line, as the memo saw it --
 `failed plate.py::plate at Solid.make_box(0, 60, 5): the kernel refused it` -- and in its report
