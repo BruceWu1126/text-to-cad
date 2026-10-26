@@ -25,7 +25,8 @@ import { createContext, createElement, useContext, useEffect, useRef, useState }
  * `CONTROLS`), which refuse any other.
  */
 export const CONTROLS = Object.freeze(/** @type {const} */ ([
-  // The tools on the strip, each one a mode that stays on (its seconds counted), and Preview.
+  // The tools on the strip, each one a mode that stays on (its seconds counted), and Preview; Explode
+  // and Clip are popovers from their tiles, no mode, counted as used each time one opens (no seconds).
   'select', 'pencil', 'shapes', 'measure', 'explode', 'clip', 'preview',
   // Select's and Measure's filters.
   'select_filter_all', 'select_filter_parts', 'select_filter_faces', 'select_filter_edges', 'select_filter_position',
@@ -225,9 +226,6 @@ export function ControlUsageProvider({ report, children }) {
   return createElement(ControlUsageContext.Provider, { value: report ? usage : NOTHING }, children);
 }
 
-// A tool's mode id as a control's name, where the two differ.
-const TOOL_MODES = Object.freeze({ exploded: 'explode' });
-
 /**
  * The tool in hand, by its mode id (null: none, as in Preview), on while it is: a use each time a person
  * takes up another, and its seconds while it is up. The tool a view opens with is not the person's choice,
@@ -236,7 +234,7 @@ const TOOL_MODES = Object.freeze({ exploded: 'explode' });
  * @param {string | null} mode
  */
 export function useToolControl(mode) {
-  const name = mode ? TOOL_MODES[mode] ?? mode : null;
+  const name = mode || null;
   const usage = useControlUsage();
   /** @type {import('react').MutableRefObject<string | null>} */
   const last = useRef(null);

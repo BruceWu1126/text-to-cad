@@ -766,12 +766,15 @@ it("what a person uses is counted for the host by name: a tool taken up and how 
   await openDisplay(user);
   await user.click(within(displayMenu()!).getByRole('menuitemcheckbox', { name: 'Grid' }));
   await enterPreview(user);
+  // Preview's bar: its settings opened (a use, no seconds), then its way out.
+  await user.click(within(previewBar()!).getByRole('button', { name: 'Preview settings', exact: true }));
   now += 3_000;
   await user.click(screen.getByRole('button', { name: 'Exit preview' }));
   expect(reports).toEqual([]); // said at most every minute, or as the view goes
   view.unmount();
   const said = Object.fromEntries(reports.flat().map(({ control, ...counts }) => [control, counts]));
   expect(said).toEqual({ pencil: { count: 1, seconds: 5 }, display_grid: { count: 1, seconds: 0 }, preview: { count: 1, seconds: 3 },
+    preview_settings: { count: 1, seconds: 0 },
     // Select is counted once: the person took it up again; the file opened in it, and Preview gave it back.
     select: { count: 1, seconds: 0 } });
   vi.restoreAllMocks();

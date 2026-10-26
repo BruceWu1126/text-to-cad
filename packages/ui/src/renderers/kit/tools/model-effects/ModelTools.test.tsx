@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@te
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useModelTools } from '../../../../../dist/renderers/kit/tools/model-effects/ModelTools.js';
+import { ControlUsageProvider } from '../../../../../dist/usage/controls.js';
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -64,6 +65,23 @@ it('what an effect sets stays on the model once its popover closes, its dot on t
   expect(screen.getByRole('toolbar', { name: 'Explode controls' }).querySelector('[data-model-tool-amount]')!.textContent).toBe(`${Math.round(amount * 100)}%`);
   await user.click(screen.getByRole('button', { name: 'Reset explode' }));
   expect([store.getSnapshot().scene.view.exploded.enabled, explode().hasAttribute('data-changed'), screen.queryByRole('toolbar', { name: 'Explode controls' }) !== null]).toEqual([false, false, true]);
+});
+
+it('each popover opened is one use of its effect, with no seconds (it is no tool in hand), and its Reset one of its reset', async () => {
+  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const store = createViewSettingsStore();
+  const reports: { control: string; count: number; seconds: number }[][] = [];
+  const view = render(<ControlUsageProvider report={counts => reports.push(counts)}><Strip store={store} /></ControlUsageProvider>);
+  await user.click(screen.getByRole('button', { name: 'Explode', exact: true }));
+  fireEvent.keyDown(screen.getByRole('slider', { name: 'Explode amount' }), { key: 'PageUp' });
+  await user.click(screen.getByRole('button', { name: 'Reset explode' }));
+  await user.keyboard('{Escape}');
+  await user.click(screen.getByRole('button', { name: 'Explode', exact: true }));
+  await user.keyboard('{Escape}');
+  await user.click(screen.getByRole('button', { name: 'Clip', exact: true }));
+  view.unmount();
+  const said = Object.fromEntries(reports.flat().map(({ control, ...counts }) => [control, counts]));
+  expect([said.explode, said.clip, said.explode_reset]).toEqual([{ count: 2, seconds: 0 }, { count: 1, seconds: 0 }, { count: 1, seconds: 0 }]);
 });
 
 it('offers Explode and Clip on every STEP, a single part too, and idles them while the model loads', () => {
