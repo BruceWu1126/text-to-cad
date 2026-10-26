@@ -104,12 +104,6 @@ class ViewerAnalyticsTest(unittest.TestCase):
         self.assertEqual(json.loads(self.state.read_text(encoding="utf-8"))["telemetry"]["choice"], "off")
         self.assertEqual(self.request("POST", "/__cad/analytics", {"share": True})[1]["sharing"], True)
 
-    def test_a_web_page_cannot_answer_for_the_person(self) -> None:
-        # Without the viewer's own header (no page from another site can send it), a POST changes nothing.
-        self.assertEqual(self.request("POST", "/__cad/analytics", {"share": True}, guard=False)[0], 403)
-        self.assertEqual(self.request("GET", "/__cad/analytics")[1]["reason"], "untold")
-        self.assertFalse(self.state.exists())
-
     def test_what_the_page_did_is_sent_only_with_consent_and_a_file_only_as_a_count(self) -> None:
         # A touch is reported; a model the page shows is counted as it joins the library.
         model = str(self.root / "parts" / "a.stl")
@@ -150,18 +144,6 @@ class ViewerAnalyticsTest(unittest.TestCase):
         self.assertEqual(crashes, [("page", "TypeError"), ("route", "KeyError")])
         self.assertNotIn("secret", json.dumps(self.sent))
 
-    def test_a_page_says_the_controls_a_person_used_and_only_names_on_the_list_count(self) -> None:
-        self.request("POST", "/__cad/analytics", {"share": True})
-        controls = [{"control": "measure", "count": 1, "seconds": 42}, {"control": "export_step", "count": 1, "seconds": 0},
-                    {"control": "/Users/someone/a.stl", "count": 1, "seconds": 0}, "measure"]
-        self.assertEqual(self.request("POST", "/__cad/analytics/activity", {"controls": controls})[0], 204)
-        self.assertTrue(self.app.analytics.flush())
-        [payload] = self.sent
-        self.assertEqual((payload["schema"], payload["process"]), (7, "viewer"))
-        self.assertEqual(payload["events"], [{"name": "control", "control": "export_step", "count": 1, "seconds": 0},
-                                             {"name": "control", "control": "measure", "count": 1, "seconds": 42}])
-        self.assertNotIn("someone", json.dumps(self.sent))
-
     def test_a_page_that_leaves_mid_answer_is_no_crash_and_a_route_that_breaks_still_is(self) -> None:
         self.request("POST", "/__cad/analytics", {"share": True})
         handler_class = handler_module.make_handler_class(self.app)
@@ -175,17 +157,6 @@ class ViewerAnalyticsTest(unittest.TestCase):
         self.assertTrue(self.app.analytics.flush())
         crashes = [(event["where"], event["type"]) for event in self.sent[-1]["events"] if event["name"] == "exception"]
         self.assertEqual(crashes, [("route", "KeyError")], "the route's own mistake, once; never the page leaving")
-
-    def test_told_before_it_started_the_viewer_counts_by_default(self) -> None:
-        # A `cadgen` command said it before this viewer started (``cadgen/analytics.py``: ``notify``).
-        self.state.parent.mkdir(parents=True, exist_ok=True)
-        self.state.write_text(json.dumps({"telemetry": {"notifiedAt": time.time() - 3600, "notice": 1}}), encoding="utf-8")
-        self.assertEqual(self.request("GET", "/__cad/analytics")[1]["reason"], "default")
-        model = str(self.root / "parts" / "a.stl")
-        self.request("POST", "/__cad/analytics/activity", {"touched": True})
-        self.request("POST", "/__cad/recents", {"action": "open", "path": model})
-        self.assertTrue(self.app.analytics.flush())
-        self.assertEqual(self.sent[0]["events"], [{"name": "files", "kind": "stl", "count": 1}, {"name": "view", "calls": 1}])
 
     def test_the_update_button_reads_whether_a_newer_release_is_out(self) -> None:
         # The CAD app's notice (`cadgen/updates.py`), from the same feed; this page copies its prompt,

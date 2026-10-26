@@ -19,7 +19,8 @@ import {
   themeSettingsSupportsSystemColorMode,
   SNAPSHOT_THEME_ID,
   normalizeThemePresetId,
-  getThemePresetById
+  getThemePresetById,
+  RENDER_ONLY_THEME_PRESETS
 } from "./themeSettings.js";
 
 const WORKBENCH_FILL_COLORS = Object.freeze([
@@ -68,6 +69,18 @@ test("workbench ships as split light and dark presets", () => {
   assert.equal(normalizeThemePresetId("workbench"), "");
   assert.equal(normalizeThemePresetId("light"), "");
   assert.equal(normalizeThemePresetId("dark"), "");
+});
+
+// Floor placement is a floor-dependent theme trait: `followModel` acts only while the theme's stage
+// floor is on, so with it off (the workbench canvases, the snapshot scene) the model stands on the
+// true z=0 plane, and no hidden setting moves the stage under it.
+test("followModel is inert while the floor is off, in every preset and in any settings", () => {
+  for (const preset of [...THEME_PRESETS, ...RENDER_ONLY_THEME_PRESETS]) {
+    const floor = normalizeThemeSettings(preset.settings).floor;
+    if (floor.enabled !== true) assert.equal(floor.followModel, false, `${preset.id}: followModel inert while the floor is off`);
+  }
+  assert.equal(normalizeThemeSettings({ floor: { enabled: false, followModel: true } }).floor.followModel, false);
+  assert.equal(normalizeThemeSettings({ floor: { enabled: true, followModel: true } }).floor.followModel, true);
 });
 
 test("workbench-light preset uses neutral material treatment while preserving source colors", () => {

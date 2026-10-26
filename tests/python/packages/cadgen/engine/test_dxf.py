@@ -302,12 +302,6 @@ class DrawingChecksTest(unittest.TestCase):
     def codes(self, document: ezdxf.document.Drawing, **options: bool) -> set[str]:
         return {finding.code for finding in engine_dxf.validate_drawing_document(document, **options)}
 
-    def test_layer_intent_is_read_from_whole_tokens(self) -> None:
-        for name, intent in (("BEND", "bend"), ("bend-lines", "bend"), ("ENGRAVE_TEXT", "engrave"),
-                             ("REF_GEOMETRY", "reference"), ("DIMENSIONS", "reference"), ("CUT_SECTION", "cut"),
-                             ("PREFORM", "cut"), ("KEYNOTES", "cut")):
-            self.assertEqual(engine_dxf.layer_intent(name), intent, name)
-
     def test_a_cut_chain_closes_through_ends_a_rounding_apart_and_fails_open(self) -> None:
         document = self.document()
         modelspace = document.modelspace()

@@ -60,12 +60,10 @@ class RevealTests(unittest.TestCase):
                 reveal_path(str(self.target.with_name('missing.step')))
             run.assert_not_called()
 
-    def test_route_requires_browser_guard_and_valid_payload(self):
+    def test_route_takes_a_valid_payload(self):  # the header gate is test_http_layer.PostGuard's
         headers = {'x-cadgen-viewer': '1', 'Content-Type': 'application/json'}
         body = json.dumps({'path': str(self.target)}).encode()
         with mock.patch('cadgen.viewer.reveal.reveal_path') as reveal:
-            self.assertEqual(self.server.request('POST', '/__cad/reveal', body=body)[0], 403)
-            reveal.assert_not_called()
             self.assertEqual(self.server.request('POST', '/__cad/reveal', headers=headers, body=body)[0], 204)
             reveal.assert_called_once_with(str(self.target))
             reveal.reset_mock()

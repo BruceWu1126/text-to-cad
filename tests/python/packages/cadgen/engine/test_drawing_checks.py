@@ -96,6 +96,11 @@ class LayerIntentTokenTest(unittest.TestCase):
             with self.subTest(layer=name):
                 self.assertEqual("cut", layer_intent(name))
 
+    def test_bend_and_engrave_layers_are_named_by_a_token_in_any_case(self) -> None:
+        for name, intent in (("BEND", "bend"), ("bend-lines", "bend"), ("ENGRAVE_TEXT", "engrave")):
+            with self.subTest(layer=name):
+                self.assertEqual(intent, layer_intent(name))
+
 
 def _cut_layout_with_an_open_profile():
     document = ezdxf.new("R2010", setup=True)

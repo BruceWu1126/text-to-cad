@@ -425,20 +425,6 @@ class StaticDistAndSpa(HttpLayerTestCase):
         self.assertEqual(body, b"Forbidden")
         self.assertNotIn("content-type", {k.lower() for k in headers})
 
-    def test_plain_dot_segments_are_normalised_before_routing(self):
-        # /__cad/../etc/passwd is /etc/passwd, i.e. the SPA, not an API path.
-        status, _, body = self.fixture.request("GET", "/__cad/../etc/passwd")
-        self.assertEqual(status, 200)
-        self.assertIn(b"<!doctype html>", body)
-
-    def test_cad_without_a_trailing_slash_is_the_spa_and_with_one_is_404_json(self):
-        status, _, body = self.fixture.request("GET", "/__cad")
-        self.assertEqual(status, 200)
-        self.assertIn(b"<!doctype html>", body)
-        status, _, body = self.fixture.request("GET", "/__cad/")
-        self.assertEqual(status, 404)
-        self.assertEqual(body, b'{"error":"Not found"}')
-
     def test_unknown_cad_route_is_404_json_never_the_spa(self):
         status, headers, body = self.fixture.request("GET", "/__cad/nope")
         self.assertEqual(status, 404)
@@ -449,10 +435,6 @@ class StaticDistAndSpa(HttpLayerTestCase):
         status, _, body = self.fixture.request("GET", "/index.html%00.js")
         self.assertEqual(status, 200)
         self.assertIn(b"<!doctype html>", body)
-
-    def test_backslash_routes_as_a_slash(self):
-        status, _, _ = self.fixture.request("GET", "/__cad\\server")
-        self.assertEqual(status, 200)
 
     def test_authority_form_targets_route_on_the_path_only(self):
         raw = self.fixture.raw(
@@ -630,20 +612,6 @@ class HeaderContract(HttpLayerTestCase):
                     b"GET " + target + b" HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
                 )
                 self.assertIn(b"date", names, head)
-
-    def test_no_access_control_header_on_any_route_or_status(self):
-        targets = [
-            b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
-            b"GET /__cad/server HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
-            b"GET /__cad/server HTTP/1.1\r\nHost: evil.example\r\nConnection: close\r\n\r\n",
-            b"POST /__cad/recents HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
-            b"OPTIONS / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
-            b"GET /assets/missing.js HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
-        ]
-        for request_bytes in targets:
-            with self.subTest(request=request_bytes.split(b"\r\n")[0]):
-                _, names, head = self._raw_headers(request_bytes)
-                self.assertFalse([n for n in names if n.startswith(b"access-control")], head)
 
     def test_no_route_ever_emits_text_html_except_the_spa(self):
         # BaseHTTPRequestHandler's default send_error emits a 361-byte

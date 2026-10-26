@@ -92,8 +92,8 @@ class AttackFixture:
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         try:
             conn.putrequest(method, target, skip_host=True, skip_accept_encoding=True)
-            conn.putheader("Host", f"127.0.0.1:{self.port}")
-            for name, value in (headers or {}).items():
+            headers = {"Host": f"127.0.0.1:{self.port}", **(headers or {})}
+            for name, value in headers.items():
                 conn.putheader(name, value)
             conn.endheaders(body)
             response = conn.getresponse()
@@ -259,11 +259,6 @@ class MalformedPercentEncoding(SecurityTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body, b"public step\n")
 
-    def test_an_authority_form_target_routes_on_the_path(self):
-        status, _, body = self.fixture.request("GET", "//evil.example/__cad/server")
-        self.assertEqual(status, 200)
-        self.assertIn(b'"app":"cad-viewer"', body)
-
 
 class TheTwoGatesCoverTheDataRoutes(SecurityTestCase):
     def targets(self):
@@ -289,14 +284,17 @@ class TheTwoGatesCoverTheDataRoutes(SecurityTestCase):
                 self.assertEqual(response.status, 403)
                 self.assertIn(b"DNS-rebinding", body)
 
-    def test_no_access_control_header_on_any_route_or_status(self):
-        # Their absence is what keeps another site from reading any of it.
-        for target in ["/", "/assets/app.js", "/assets/missing.js", "/__cad/server", "/__cad/nope",
-                       "/__cad/asset?file=/etc/passwd", "/__cad/asset?file=relative.step", *self.targets()]:
-            with self.subTest(target=target):
-                _, headers, _ = self.fixture.request("GET", target)
-                offenders = [k for k in headers if k.lower().startswith("access-control-")]
-                self.assertEqual(offenders, [])
+    def test_no_access_control_header_on_any_route_method_or_status(self):
+        # Their absence is what keeps another site from reading any of it: a refused host, a guarded
+        # POST and a preflight included.
+        asked = [("GET", target, {}) for target in ["/", "/assets/app.js", "/assets/missing.js", "/__cad/server", "/__cad/nope",
+                                                     "/__cad/asset?file=/etc/passwd", "/__cad/asset?file=relative.step",
+                                                     *self.targets()]]
+        asked += [("GET", "/__cad/server", {"Host": "evil.example"}), ("POST", "/__cad/recents", {}), ("OPTIONS", "/", {})]
+        for method, target, headers in asked:
+            with self.subTest(method=method, target=target, headers=headers):
+                _, answered, _ = self.fixture.request(method, target, headers=headers)
+                self.assertEqual([k for k in answered if k.lower().startswith("access-control-")], [])
 
 
 def setUpModule() -> None:
