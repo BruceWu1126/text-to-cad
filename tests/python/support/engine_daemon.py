@@ -214,6 +214,25 @@ def await_exit(pid: int | None, within: float = 30.0) -> bool:
     return True
 
 
+def survivors(env: dict[str, str], within: float = 60.0) -> list[tuple[str, int]]:
+    """Every process the journal of ``env`` names -- the engine daemon, its workers, readers and
+    render processes, the commands -- awaited gone for up to ``within`` s once the engine was asked
+    to stop; those still alive then are killed, so a failing test leaves none behind. The ones it
+    found alive, as ``(role, pid)``: a test asserts there are none."""
+    import signal
+
+    deadline = time.monotonic() + within
+    while (alive := [(role, pid) for role, pid in sorted(_processes(env)) if _alive(pid)]) \
+            and time.monotonic() < deadline:
+        time.sleep(0.05)
+    for _role, pid in alive:
+        try:
+            os.kill(pid, signal.SIGKILL if hasattr(signal, "SIGKILL") else signal.SIGTERM)
+        except OSError:
+            pass
+    return alive
+
+
 def engine_pid(env: dict[str, str]) -> int | None:
     """The pid of the engine ``env`` names, or None when none answers."""
     from unittest import mock
