@@ -1206,6 +1206,119 @@ def _fix_date(path: Path) -> None:
             handle.write(WRITTEN_DATE)
 
 
+# The BinOcaf file a document is saved as, as far as ``relabel`` reads it: its magic and the byte
+# order mark after it, the header's integers (where its info and comment sections end), the one
+# table of contents entry of a file that writes its shapes inline in their attributes (``:``, three
+# placeholders), and the markers that end a label's attributes and the label.
+_MAGIC = b"BINFILE"
+_ORDER = 0x04030201
+_TOC_END = b"\x04\x00\x00\x00:\x00\x00\x00" + bytes(24)
+_END_ATTRIBUTES, _END_LABEL = -1, -2
+_STRING_TYPE = "TDataStd_AsciiString"
+
+
+def relabel(data: bytes, texts: dict[str, str]) -> bytes:
+    """An xbf's bytes with each ASCII string of its main label named here by GUID holding the text
+    given: those attributes' bytes made again where they are, the sizes of the two labels that
+    hold them (the root's and the main label's) moved by what they grew, every other byte as it
+    was. The document is never read and saved again for it, which would make each direction and
+    placement anew (``previous``'s note): these are the bytes a save of the document holding
+    these texts writes. ``ValueError``, and nothing made, for bytes of another layout than the
+    documents this engine writes -- one whose table of contents names sections (its shapes in a
+    section of their own), labels other than the root's main label first, sizes that do not span
+    the file, or no such string of a GUID asked for."""
+    import struct
+    import uuid
+
+    def integer(at: int) -> int:
+        if at + 4 > len(data):
+            raise ValueError("not a document this engine wrote: it ends inside its labels")
+        return struct.unpack_from("<i", data, at)[0]
+
+    def refused(why: str) -> ValueError:
+        return ValueError(f"not a document this engine wrote: {why}")
+
+    if data[:len(_MAGIC)] != _MAGIC or integer(len(_MAGIC)) != _ORDER:
+        raise refused("no BinOcaf header")
+    info, info_end, comments_end = integer(11), integer(15), integer(23)
+    types = _attribute_types(data, info, info_end)
+    if data[comments_end:comments_end + len(_TOC_END)] != _TOC_END:
+        raise refused("its table of contents names sections")
+    root = comments_end + len(_TOC_END)
+    if integer(root) != 0:
+        raise refused("no root label")
+
+    def attributes(at: int) -> tuple[list[tuple[int, int, int]], int]:
+        """The attributes of the label whose first one is at ``at``: (start, its type, its data's
+        size) each, and where the label's attributes end."""
+        found = []
+        while integer(at) != _END_ATTRIBUTES:
+            kind, size = integer(at), integer(at + 8)
+            if kind not in types:
+                raise refused(f"an attribute of type {kind}, which its info section does not list")
+            if size < 0:
+                raise refused("an attribute written as a stream on its root or main label")
+            found.append((at, kind, size))
+            at += 12 + size
+        return found, at + 4
+
+    _root_attributes, main = attributes(root + 12)
+    if integer(main) != 1:
+        raise refused("no main label after the root's attributes")
+    spans = {root + 4: len(data), main + 4: len(data) - 4}  # each label's size, from where it is to its end
+    if integer(len(data) - 4) != _END_LABEL or any(struct.unpack_from("<Q", data, at)[0] != end - at
+                                                    for at, end in spans.items()):
+        raise refused("its labels' sizes do not span the file")
+    wanted = {uuid.UUID(guid).bytes_le: (guid, text) for guid, text in texts.items()}
+    edits = []
+    main_attributes, _end = attributes(main + 12)
+    for at, kind, size in main_attributes:
+        guid = data[at + 12 + size - 16:at + 12 + size]
+        if types[kind] != _STRING_TYPE or guid not in wanted or size < 20:
+            continue
+        old = data[at + 12:at + 12 + size - 16]
+        ends = old.find(b"\x00")
+        if ends < 0 or old[ends:].strip(b"\x00") or len(old) % 4 or len(old) - ends > 4:
+            raise refused(f"the string {wanted[guid][0]} is not written as an ASCII string")
+        text = wanted.pop(guid)[1].encode("ascii")
+        if b"\x00" in text:
+            raise ValueError("a label's text holds no NUL")
+        string = text + b"\x00" * (4 - len(text) % 4)  # its NUL, then to a whole word, as OCCT aligns it
+        edits.append((at + 8, at + 12 + size, struct.pack("<i", len(string) + 16) + string + guid))
+    if wanted:
+        raise refused(f"its main label holds no string {', '.join(guid for guid, _text in wanted.values())}")
+    grown = sum(len(made) - (end - start) for start, end, made in edits)
+    out, last = bytearray(), 0
+    for start, end, made in edits:  # in the file's order: the main label's attributes, as found
+        out += data[last:start] + made
+        last = end
+    out += data[last:]
+    for at in spans:  # both labels are before every edit: their sizes are where they were
+        struct.pack_into("<Q", out, at, struct.unpack_from("<Q", data, at)[0] + grown)
+    return bytes(out)
+
+
+def _attribute_types(data: bytes, start: int, end: int) -> dict[int, str]:
+    """The attribute types a BinOcaf file's info section lists, by the number its attributes name
+    them with: from ``START_TYPES`` to ``END_TYPES``, each a counted string, the first number 1."""
+    import struct
+
+    marker = b"\x0b\x00\x00\x00START_TYPES"
+    at = data.find(marker, start, end)
+    if at < 0:
+        raise ValueError("not a document this engine wrote: no attribute types in its info section")
+    at += len(marker)
+    found: dict[int, str] = {}
+    while at + 4 <= end:
+        size = struct.unpack_from("<i", data, at)[0]
+        name = data[at + 4:at + 4 + size].decode("ascii", "replace")
+        at += 4 + max(size, 0)
+        if name == "END_TYPES":
+            return found
+        found[len(found) + 1] = name
+    raise ValueError("not a document this engine wrote: its attribute types do not end")
+
+
 def _free_shapes(doc: Any) -> list[Any]:
     from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
@@ -1653,7 +1766,7 @@ def _writer() -> str:
 
 
 def written_format(writer: str | None) -> str | None:
-    """The xbf format a document's writer names (``xbf/7``), or None for another program's."""
+    """The xbf format a document's writer names (``xbf/8``), or None for another program's."""
     import re
 
     found = re.match(r"cadgen\.engine (xbf/[0-9]+) \(cadgen ", writer or "")

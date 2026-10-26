@@ -2674,6 +2674,9 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
     # The files of engines that died without removing theirs, swept while this one starts.
     threading.Thread(target=sweep_dead, daemon=True).start()
     daemon = Daemon(port=port)
+    # Before it can be reached: a cached document of the closure before this engine's is moved to
+    # it in place, once, so no build meets one (``cache.Cache.migrate``).
+    daemon.models.cache.migrate()
     daemon.stand()
     if foreground:
         try:

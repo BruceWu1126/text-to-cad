@@ -343,8 +343,8 @@ only, and a file's id is derived again from its path after a restart.
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`gear_pair`, `rack_and_pinion_pair`, `screw_pair`), mechanism states (`mechanism_state`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground; `posed`, an assembly copied at a state), and configuration sequences (`configuration_sequence`, a function's samples, `Timeline`: a sequence's pair values over time) |
 | `build.py` | one build: load the script afresh (as Python imports it: a package's module by its dotted name), one memo run, document, element names, files: every model's that ran |
 | `delta.py` | the line under the run line: a built tree's facts (`facts`: its occurrences, its world bounds -- each part's box, kept by its geometry key, measured where it decides the model's -- its parts' geometry keys and looks, and its joints, configuration sequences and warnings), worked out in the worker, and the daemon's delta of them against the build before (`delta`), kept beside each record and in the registry's |
-| `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
-| `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
+| `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code and the platform, the closure made again before the body runs (`again`), and a `closure/1` document's bytes moved to this closure (`migrated`) |
+| `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP, and a saved document's main-label strings rewritten in its bytes (`relabel`) |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
 | `refs.py` | references to geometry: the ref grammar, occurrence paths, resolution by name in the latest build, for `inspect` and the viewer (**References**) |
 | `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); a mesh file read as a document of triangles, no kernel (`mesh_file`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a planar document's drawing through build123d's DXF exporter, with the drawing checks (`dxf`); a motion baked into a glTF clip (`motion`); a view made a document again, for a STEP of a document held without its XCAF document and an xbf written from a STEP (`tree`) |
@@ -357,7 +357,7 @@ only, and a file's id is derived again from its path after a restart.
 | `door.py` | how a client reaches the daemon on POSIX: the door, a named pipe, and a pair of pipes per connection (**The door**) |
 | `progress.py` | where a build is: the engine's stages heard where they begin, each body a model's body runs by name, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
-| `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads; kept until a person deletes it, with no cap (`Cache`) |
+| `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads; kept until a person deletes it, with no cap (`Cache`); at the engine's start, a `closure/1` document moved to this closure in place (`migrate`) |
 | `registry.py` | the registry of documents in the user's state folder (`Registry`: `get`, `put`, `list`, `delete`), the user's page token (`token`, `put_token`), each installation's engine record (`engine`, `put_engine`: its rolled port), and the one owner of every write under that folder (`Folder`); where the folder is, the distribution's (`FACTORY`) |
 | `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `delete`, `server` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
@@ -2459,7 +2459,7 @@ the same geometry and the same names written in another order.
 Why that holds, checked:
 
 - **Nothing keys on a document's bytes.** The restart key is digests of the model's code
-  and inputs and the format (**Build closure**); a derived file is translated from the
+  and inputs and the toolchain (**Build closure**); a derived file is translated from the
   document, and the write compares bytes only to leave an identical file untouched. The one
   place a document's bytes count is a document *read as an input* (`read_xbf`, `read_step`
   of another model's file), which is keyed by its bytes like any input: an order-only rewrite
@@ -2481,22 +2481,25 @@ The snapshot's part listing (0.7's `--mode list`) is gone by decision: `read_xbf
 A model's document is its own cache, as a FreeCAD document is: opened, it is what was last
 computed, and only what changed is computed again. It is kept in the engine's cache (**The
 cache**), and written as the model's xbf where one is declared, the same bytes. Its main label names what
-wrote it (`cadgen.engine xbf/7 (cadgen <release>)`, `document.Loaded.writer`) and holds the model's build
+wrote it (`cadgen.engine xbf/8 (cadgen <release>)`, `document.Loaded.writer`) and holds the model's build
 closure (`previous.py`, a `TDataStd_AsciiString` beside the writer's, schema `cadgen.engine
-closure/1`), pointers and digests only (law 1), and nothing of a version control's -- the engine calls
-no git:
+closure/2`), pointers and digests only (law 1), and nothing of a version control's -- the engine calls
+no git. It names what the document was built from and what built it, the toolchain:
 
 ```
-schema   "cadgen.engine closure/1"
-engine   {"release": "cadgen 0.8.0", "format": "xbf/7", "digest": ...}   the format (keyed); the release and
-                                                                    the engine's code digest (information only)
-libs     {"build123d": ..., "OCP": ...}                             what decides the geometry
-source   {"kind": "script", "path": "../src/tom.py", "function": "tom"}
-modules  [["../src/lib/arm_parts.py", "9f3c..."], ...]
-inputs   [["file", "../STEP/gripper.step", "c0de..."], ["read", "../src/lib/ids.json", "77ab..."], ...]
-bodies   how many bodies the model is
-key      one digest over the format, libs, source, modules and inputs; null where the
-         closure cannot say all the model is made of
+schema    "cadgen.engine closure/2"
+engine    {"release": "cadgen 0.8.0", "format": "xbf/8", "digest": ...}   the release and the format (keyed);
+                                                                     the engine's code digest (information only)
+libs      {"build123d": "0.11.1", "OCP": "7.9.3.1.1"}                 what decides the geometry (keyed): OCP's
+                                                                     version leads with the OCCT it wraps
+platform  {"python": "3.12.10", "system": "Darwin", "arch": "arm64"}  the Python and the machine (keyed):
+                                                                     platform.python_version(), .system(), .machine()
+source    {"kind": "script", "path": "../src/tom.py", "function": "tom"}
+modules   [["../src/lib/arm_parts.py", "9f3c..."], ...]
+inputs    [["file", "../STEP/gripper.step", "c0de..."], ["read", "../src/lib/ids.json", "77ab..."], ...]
+bodies    how many bodies the model is
+key       one digest over the toolchain (the release, the format, libs and platform) and the code (source,
+          modules and inputs); null where the closure cannot say all the model is made of
 ```
 
 Beside it on the main label, a document whose build made an `animation()` holds the compiled
@@ -2515,10 +2518,15 @@ a motion's function's reads too, **Configuration sequences**), or a text's font 
 null (**Body retention**). `cadgen inspect DOC` prints the closure, `cadgen.inspect(doc)` and
 `document.Loaded.closure` read it.
 
-**When the format moves.** The key takes the engine's `format` alone (`previous.FORMAT`),
-not the release that wrote a document nor a digest of the engine's code: a cadgen release,
-or an engine edit, that leaves the written document alone keeps every xbf current. `FORMAT`
-is bumped by hand (`xbf/6` to `xbf/7`) when what
+**When the toolchain or the format moves.** The key takes the toolchain that built the
+document -- the release, the format (`previous.FORMAT`), build123d and OCP, the Python and the
+machine -- because they decide its bytes: an arm64 kernel and an x86-64 one write other bytes of
+one model. So a document is only ever taken by the toolchain that would write it, and is never
+trusted by another machine's, another release's or another Python's; each of those builds the
+model once, saying what moved (`rebuilt: cadgen 0.8.0 became cadgen 0.8.1`, `Python 3.12.10
+became 3.13.5`, `arm64 became x86_64`). A cadgen upgrade therefore builds every model once. Not
+a digest of the engine's code: an engine edit within a release that leaves the written document
+alone keeps every xbf current. `FORMAT` is bumped by hand (`xbf/7` to `xbf/8`) when what
 an engine writes changes -- the document's structure, the attributes on its labels, the
 closure's fields, or what the key covers -- and then every xbf builds once, cleanly: a
 document of another format is "written by" another engine (`cache.reason`). The bumps so far:
@@ -2528,7 +2536,30 @@ motion's samples are made for linear interpolation (**Configuration sequences**)
 functions join the closure (**Configuration sequences**); `xbf/6`, the closure counted the build's
 animations, and a document with any was not taken; `xbf/7`, the compiled animations are a build
 record on the main label, the closure counts none, and an animated document is taken like any
-(**Animations**).
+(**Animations**); `xbf/8`, the closure names its toolchain (`closure/2`: the platform, and the
+release keyed), the one bump that builds nothing: its documents are moved in place (below).
+
+**The move from `closure/1`.** The engine moves every cached document of the closure before
+(`closure/1`, written as `xbf/7`: no platform, the release not keyed) at its start, before it can be
+reached (`cache.Cache.migrate`), rather than build each model once. Its closure becomes the one this
+toolchain makes of it (`previous.restamped`): the release, the format and the platform this
+engine's, which `closure/1` did not key; its libraries, source, modules, symbols, inputs and bodies
+as it held them; the key made again over them, null where it was. That text and this engine's
+writer go into the cache file's main label where the old ones were, the label sizes that span
+them moved by what they grew, every other byte as it was (`document.relabel`, the BinXCAF bytes
+edited, never a document read and saved again); then its record's `revision` and its `cache`
+take the new key and size, so its facts and its build time stay with it. Those are the bytes a
+cold build on this toolchain writes of the model when nothing it is made of changed, to the byte,
+and every such model is taken with nothing run, its declared files written again from the moved
+document as its exports; one whose library moved since builds,
+saying so (`build123d 0.10.0 became 0.11.1`). Once: a moved document holds `closure/2`, and the
+next start moves none (a 64 KiB look at each cache file finds that). One whose bytes do not read
+as a document this engine wrote, or whose file is not the size its record says, is left as it
+was, and builds once. The start says what it moved in its log, one line, and `cadgen status`
+says it in its `cache` line (`5 moved to this engine's closure at its start`). An engine of the
+closure before that shares the registry meanwhile finds the moved documents written by another
+engine, and builds each once. `closure/1` is read for this move alone; with the move removed, a
+`closure/1` document left anywhere builds once, as one of another format does.
 
 Before a body runs or is replayed, the build makes the closure again -- the script loaded,
 its modules digested, each input hashed again -- and compares its key with the one the model's
@@ -2548,8 +2579,8 @@ again from the document, and every file `written: false` where each holds its by
 Anything else builds as before, and `cache.reason` says why: the cache holds none of it, written
 by another engine or program, a cache file that does not read, no key in it, or what changed, by
 name (`cache.changed`, each change; the CLI prints `rebuilt: ../src/lib/arm_parts.py changed`): a
-module changed, is new or is no longer imported, an input changed or is missing, the format, a
-library or the source moved.
+module changed, is new or is no longer imported, an input changed or is missing, the format, the
+release, a library, the Python, the system, the architecture or the source moved.
 `CADGEN_ENGINE_MEMO=0` and `CADGEN_ENGINE_BODIES=0` turn it off with the rest of retention.
 
 The document is taken whole or not at all, never one body's part of it. OCCT's BinXCAF

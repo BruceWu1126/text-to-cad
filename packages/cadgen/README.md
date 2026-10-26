@@ -59,9 +59,9 @@ These are LAWS, not conventions: a change that violates them is wrong even when 
 Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
 
 1. **An xbf carries its build closure as pointers and digests** -- script and function,
-   modules, data inputs, versions and the key; never source, never lines on elements, never
-   input contents, nothing of git's; names remain the per-element tie to code (the engine's
-   **Build closure**).
+   modules, data inputs, the toolchain (versions, the Python and the machine) and the key; never
+   source, never lines on elements, never input contents, nothing of git's; names remain the
+   per-element tie to code (the engine's **Build closure**).
 2. **Only requested files to disk.** The engine writes the files a model declares -- the xbf and the exports
    its decorators name, nothing beside them -- and the operating system's coordination for its
    warm process: a door (a named pipe; on Windows a port file), a lock and its connections' pipes, in
