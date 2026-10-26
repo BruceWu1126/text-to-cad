@@ -33,9 +33,11 @@
   [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="select-item"], [data-slot="context-menu-item"], [data-menu-theme], [data-clip-axis-row], [data-menu-language]) {
   min-height: 40px;
 }
-/* The navbar a 48px row of 36px controls; a section's heading in the file sidebar 36px, its buttons 32px. */
-[data-viewer-layout="mobile"] [data-viewer-navbar] { height: 48px; }
-[data-viewer-layout="mobile"] [data-viewer-navbar] :is(button, a) { min-height: 36px; min-width: 36px; }
+/* The navbar, and Preview's bar in its place, a 48px row of 36px controls (Preview's settings docked
+   under it); a section's heading in the file sidebar 36px, its buttons 32px. */
+[data-viewer-layout="mobile"] :is([data-viewer-navbar], [data-preview-bar]) { height: 48px; }
+[data-viewer-layout="mobile"] :is([data-viewer-navbar], [data-preview-bar]) :is(button, a) { min-height: 36px; min-width: 36px; }
+[data-viewer-layout="mobile"] [data-preview-panel] { top: 48px; }
 [data-viewer-layout="mobile"] [data-sidebar-head] [data-tool-panel-heading] { height: 36px; }
 [data-viewer-layout="mobile"] [data-sidebar-head] button { min-height: 32px; min-width: 32px; }
 [data-viewer-layout="mobile"] [data-select-trigger], [data-viewer-layout="mobile"] [data-slot="select-trigger"] { min-height: 36px; }

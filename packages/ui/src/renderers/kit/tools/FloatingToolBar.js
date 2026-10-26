@@ -26,7 +26,11 @@ export { STRIP_BUTTON_CLASS, StripTouchProvider, TOUCH_STRIP_BUTTON_CLASS, useSt
  * @property {import("react").ReactNode} icon
  * @property {boolean} [active]
  * @property {boolean} [disabled]
- * @property {() => void} onSelect  Every press of the button.
+ * @property {() => void} [onSelect]  Every press of the button (a tool with a `tile` has none).
+ * @property {import("react").ReactNode} [tile]  Drawn in place of the button: a model effect's, which opens
+ *   its row in a popover from its own tile (`model-effects/ModelTools.jsx`) and is never in hand.
+ * @property {(props: { anchor: import("react").RefObject<HTMLElement>, open: boolean, onOpenChange(open: boolean): void }) => import("react").ReactNode} [popover]
+ *   With a `tile`: that popover, opened from the touch strip's More button when the tile has no room.
  * @property {string} [description]  `aria-description`.
  * @property {import("react").ReactNode} [menu]  Its modes: the chevron after its button, and the menu it opens.
  * @property {boolean} [changed]  What it sets is off its default (an effect on the model): a dot in its tile's corner.
@@ -63,6 +67,7 @@ const SPLIT_BUTTON_CLASS = "rounded-r-none hover:bg-transparent data-[variant=se
 
 // A plain function, not a component: the strip's own output is the buttons.
 function toolButton(tool, className = STRIP_BUTTON_CLASS, touch = false) {
+  if (tool.tile) return tool.tile;
   const active = tool.active === true;
   const button = <ToolbarButton tooltipSide="top" label={tool.label} tooltip={tool.tooltip ?? true} shortcut={tool.shortcut} active={active} disabled={tool.disabled}
     className={cn(className, tool.changed && "relative", tool.menu && SPLIT_BUTTON_CLASS)} aria-pressed={active} aria-description={tool.description} onClick={() => tool.onSelect()}
@@ -168,8 +173,9 @@ function TouchStrip({ tools, views }) {
   const count = touchStripFit(toolEntries, room, { more: viewEntries.length > 0 });
   const shown = toolEntries.slice(0, count), hidden = [...toolEntries.slice(count), ...viewEntries];
   const shownTools = shown.filter(entry => !entry.view), shownViews = shown.filter(entry => entry.view);
-  const overflowViews = hidden.filter(entry => entry.view).map(entry => entry.control);
-  const popoverView = overflowViews.find(view => view.id === openView && view.popover);
+  // What opens a popover from More: a view control's, or a model effect's (a tool with a `tile`).
+  const overflowPopovers = hidden.map(entry => entry.view ? entry.control : entry.tool).filter(item => item.popover);
+  const popoverView = overflowPopovers.find(item => item.id === openView);
   // A tool in hand that lives in More: More's button is drawn selected while it is (its row checked).
   const heldInMore = hidden.some(entry => !entry.view && entry.tool.active === true);
   return <StripTouchProvider value={true}>
@@ -214,6 +220,10 @@ function TouchStrip({ tools, views }) {
                 onSelect={() => { if (entry.control.popover) pending.current = entry.control.id; else entry.control.onSelect?.(); }}>
                 <span className={MORE_ICON_CLASS} aria-hidden="true">{entry.control.icon}</span>{entry.control.label}
               </DropdownMenuItem>
+              : entry.tool.popover
+                ? <DropdownMenuItem key={entry.tool.id} disabled={entry.tool.disabled} onSelect={() => { pending.current = entry.tool.id; }}>
+                  <span className={MORE_ICON_CLASS} aria-hidden="true">{entry.tool.icon}</span>{entry.tool.label}
+                </DropdownMenuItem>
               : <DropdownMenuCheckboxItem key={entry.tool.id} checked={entry.tool.active === true} disabled={entry.tool.disabled}
                 onSelect={() => entry.tool.onSelect()}>
                 <span className={MORE_ICON_CLASS} aria-hidden="true">{entry.tool.icon}</span>{entry.tool.label}

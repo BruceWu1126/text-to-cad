@@ -125,11 +125,10 @@ export interface RendererViewProps {
   file: FileMetadata;
   source: FileSource;
   /**
-   * The navbar's box for the renderer's own view controls, last at its right end (the CAD
-   * viewer's Display and Preview, for a 3D view); null where no navbar is drawn (a compact view),
-   * when the renderer draws them over its view instead.
+   * The renderer's Preview is up (`true`) or has closed (`false`): FileViewer hides its navbar while
+   * it is, Preview drawing its own bar in its place.
    */
-  navbarSlot?: HTMLElement | null;
+  onPreviewChange?: (previewing: boolean) => void;
   onReady: (ready: boolean) => void;
   /**
    * Show another file, by its absolute path, in this view (a robot's mesh). Absent where the view
@@ -187,16 +186,6 @@ export interface FileViewerProps {
    * controls, while the host's install is behind; nothing otherwise.
    */
   update?: ReactNode;
-  /**
-   * The host's Full size button, where the host shows the view small (inline in a conversation):
-   * at the navbar's right end, before the renderer's view controls.
-   */
-  fullSize?: ReactNode;
-  /**
-   * The host's way to open what is shown in a page of its own outside the host (the CAD app's Open
-   * in browser), where it has one: last at the navbar's right end, over every file and on the home.
-   */
-  openInBrowser?: ReactNode;
   /** The view's own history, where the host keeps one: Back and Forward after the navbar's logo, over a file and on the home. */
   history?: ViewerHistory;
   /**
@@ -206,9 +195,15 @@ export interface FileViewerProps {
   recent?: { list(): Promise<readonly RecentDocument[]> };
   /** The host's notice, shown at the viewport's top-right once the file is on screen (`RendererViewProps.notice`). */
   notice?: ReactNode;
+  /**
+   * The chrome around the view: `"page"` (the default) draws the navbar over every file and over the
+   * home; `"bare"` draws none, the view alone, for a host whose own frame is the navigation (the CAD
+   * app's cards and tabs). The renderer's own controls over the viewport are the same either way.
+   */
+  chrome?: "page" | "bare";
   onError?: (error: Error) => void;
   presentation?: {
-    /** The host's home, shown with no file: a page of its own under the navbar, which has only its logo's menu, Back and Forward, update, Full size and Open in browser there. */
+    /** The host's home, shown with no file: a page of its own under the navbar, which has only its logo's menu, Back and Forward, the update and the host's actions there. */
     home?: ReactNode;
     loading?: ReactNode;
     /**

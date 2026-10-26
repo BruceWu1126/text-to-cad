@@ -16,8 +16,8 @@ vi.mock('@text-to-cad/ui/cad-viewer', async original => {
   const { useEffect } = await import('react');
   return {
     ...await original<object>(),
-    // The host's notice, if it had one, drawn as the real viewer would once a model is on screen.
-    CadViewer: (props: CadViewerProps) => { viewer.props = props; useEffect(() => { viewer.mounts += 1; }, []); return <>{props.update ?? null}{props.fullSize ?? null}{props.openInBrowser ?? null}{props.notice ?? null}</>; },
+    // The host's notice, drawn as the real viewer would once a model is on screen (the card's corner).
+    CadViewer: (props: CadViewerProps) => { viewer.props = props; useEffect(() => { viewer.mounts += 1; }, []); return <>{props.notice ?? null}</>; },
   };
 });
 
@@ -110,7 +110,7 @@ it.each(['inline', 'fullscreen'] as const)('an inline host in %s mode keeps the 
   expect(frame.style.getPropertyValue('--cad-viewport-corner-right')).toBe('');
 });
 
-it('a model opened from the home is shown in place, joins the library with its picture, and leads back home; the navbar\'s links and file menu go through the host', async () => {
+it('a model opened from the home is shown in place, joins the library with its picture, and leads back home; the host\'s links and file actions go through the host', async () => {
   const { bridge, server } = host({ displayMode: 'fullscreen' });
   render(<App bridge={bridge as any} server={server as any} launch={home} />);
   await act(async () => viewer.props!.library!.open({ path: '/work/parts/a.step', name: 'a.step', folder: 'work/parts', pinned: false, thumbnail: null, opened: 1 } as any));
@@ -120,7 +120,7 @@ it('a model opened from the home is shown in place, joins the library with its p
   await act(async () => { await viewer.props!.onThumbnail!(new Blob([new Uint8Array([0x89, 0x50])], { type: 'image/png' }), '/work/parts/a.step'); });
   expect(server.asked('/__cad/recents')).toEqual([{ action: 'open', path: '/work/parts/a.step' },
     { action: 'thumbnail', path: '/work/parts/a.step', png: 'iVA=' }]);
-  // Home again, from the navbar's logo.
+  // Home again (the view's history goes there, as a show of the home does).
   act(() => viewer.props!.onShow(''));
   expect(viewer.props!.file).toBe('');
   await act(async () => viewer.props!.host.links!.open!('https://github.com/earthtojake/text-to-cad'));
@@ -185,22 +185,44 @@ it("a capture the agent asks with its show is of the model it showed, once that 
   await vi.waitFor(() => expect(server.reply).toHaveBeenCalledWith('c1', { png: btoa('/work/b.step') }));
 });
 
-it('an inline host gets the whole viewer in a card of a height it is told, with Full size in its navbar, which goes full size in place', () => {
+it('an inline host gets the whole viewer in a card of a height it is told, with Full size, two diagonal arrows, at its top-right corner, which goes full size in place', () => {
   const { bridge, server } = host({ displayMode: 'inline', availableDisplayModes: ['inline', 'fullscreen'] });
   const { container } = render(<App bridge={bridge as any} server={server as any} presentation="inline"
     launch={{ ...home, surface: 'inline', view: 'cad-1-a', order: { createdAt: 1, seq: 1 } }} />);
-  // Not a picture: the card has the navbar (and its update button), the tools, the cube and Quick Edit.
+  // Not a picture: the card has the tools, the cube and Quick Edit.
   expect(viewer.props!.host.environment.compact).toBeUndefined();
   expect(sized(bridge.notify)).toEqual([['ui/notifications/size-changed', { height: expect.any(Number) }]]);
-  act(() => (container.querySelector('[aria-label="Full size"]') as HTMLButtonElement).click());
+  // On the home, which has no viewport, the corner stands over the page's top-right.
+  const fullSize = () => container.querySelector<HTMLButtonElement>('[aria-label="Full size"]');
+  expect(fullSize()!.closest('[data-home-corner]')).not.toBeNull();
+  expect(fullSize()!.querySelector('svg.lucide-maximize-2')).not.toBeNull();
+  act(() => fullSize()!.click());
   expect(bridge.request).toHaveBeenCalledWith('ui/request-display-mode', { mode: 'fullscreen' });
   act(() => bridge.change({ displayMode: 'fullscreen', safeAreaInsets: { bottom: 72 } }));
-  expect(container.querySelector('[aria-label="Full size"]')).toBeNull();
+  expect(fullSize()).toBeNull();
   // Full size, the host's composer lies across the bottom: the view keeps clear of it.
   expect((container.firstElementChild as HTMLElement).style.paddingBottom).toBe('72px');
   expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--cad-host-bottom-inset')).toBe('');
   // Full size keeps what was on the card: the same view, not a new one.
   expect(viewer.mounts).toBe(1);
+});
+
+it('the card is the viewer alone, with no navbar: no logo or menu, no Back or Forward, no name, no file menu, no Export and no Open in browser; over a file its corner is the viewport\'s top-right, the host\'s notice', () => {
+  const { bridge, server } = host({ displayMode: 'inline', availableDisplayModes: ['inline', 'fullscreen'] });
+  const { container } = render(<App bridge={bridge as any} server={server as any} presentation="inline"
+    launch={{ protocol: 9, page: 'viewer', model: '/work/part.step', surface: 'inline', view: 'cad-1-c', order: { createdAt: 1, seq: 1 } }} />);
+  expect(viewer.props!.chrome).toBe('bare');
+  // Nothing the navbar carried is handed over: the corner is the viewer's notice, Full size in it.
+  expect([viewer.props!.update, viewer.props!.fullSize, viewer.props!.openInBrowser]).toEqual([undefined, undefined, undefined]);
+  expect(container.querySelector('[data-card-corner] [aria-label="Full size"]')).not.toBeNull();
+  expect(container.querySelector('[data-home-corner]')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Open in browser' })).toBeNull();
+  expect(server.asked('/__cad/browser')).toEqual([]);
+  for (const surface of ['tab', 'file'] as const) {
+    cleanup();
+    render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 9, page: 'viewer', model: '/work/part.step', surface }} />);
+    expect([viewer.props!.chrome, screen.queryByRole('button', { name: 'Full size' }), document.querySelector('[data-card-corner]')]).toEqual(['bare', null, null]);
+  }
 });
 
 it("a view keeps its own history of files, as a browser's tab does: the agent's shows and the person's moves, Back and Forward over them, a move after a Back dropping what was ahead, the home a step like a file", async () => {
@@ -259,62 +281,12 @@ it("a view keeps its own history of files, as a browser's tab does: the agent's 
   expect(viewer.props!.history).toBeUndefined();
 });
 
-it("Open in browser has the server open the page of what the view shows from this computer, and asks the host only where the server can open no browser", async () => {
-  const { bridge, server } = host({ displayMode: 'fullscreen' });
-  server.answers['/__cad/browser'] = (_body, url) => ({ url: `http://127.0.0.1:3245/${url.searchParams.get('model') ? 'id-a' : ''}?token=t` });
-  let display = true;
-  server.answers['/__cad/browser/open'] = () => display ? { opened: true } : new Status(503, { error: 'there is no display to open a browser on' });
-  render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 9, page: 'viewer', model: '/work/a b.step' }} />);
-  const button = await screen.findByRole('button', { name: 'Open in browser' });
-  act(() => button.click());
-  await waitFor(() => expect(server.asked('/__cad/browser/open')).toEqual([{ model: '/work/a b.step' }]));
-  // The request names the document, never a URL; the server opened it, so the host is asked nothing.
-  display = false;
-  act(() => button.click());
-  await waitFor(() => expect(bridge.request).toHaveBeenCalledWith('ui/open-link', { url: 'http://127.0.0.1:3245/id-a?token=t' }));
-  expect(server.asked('/__cad/browser/open')).toHaveLength(2);
-  expect(bridge.request.mock.calls.filter(([method]) => method === 'ui/open-link')).toHaveLength(1);
-});
-
-it("Open in browser, the navbar's last control, opens the web viewer's page of what the view shows now through the host, and is absent where the engine gives none", async () => {
-  const { bridge, server } = host({ displayMode: 'fullscreen' });
-  const replies: ((reply: { events: unknown[] }) => void)[] = [];
-  server.sync = vi.fn(() => new Promise(resolve => { replies.push(resolve); }));
-  const agentShows = (model: string, seq: number) => act(async () => {
-    replies.shift()!({ events: [{ seq, type: 'show', launch: { protocol: 9, page: 'viewer', model } }] });
-  });
-  // The engine's page of each document (`/<id>`, its viewer token in the URL) and its home; none for one it cannot give.
-  const ids: Record<string, string> = { '/work/a b.step': 'id-a', '/work/b.step': 'id-b' };
-  // A computer whose server can open no browser: every press is the host's to open.
-  server.answers['/__cad/browser/open'] = () => new Status(503, { error: 'there is no display to open a browser on' });
-  server.answers['/__cad/browser'] = (_body, url) => {
-    const model = url.searchParams.get('model');
-    if (model && !ids[model]) return new Status(503, { error: 'CAD Viewer client is not built' });
-    return { url: `http://127.0.0.1:3245/${model ? ids[model] : ''}?token=t` };
-  };
-  const opened = async (url: string) => {
-    act(() => screen.getByRole('button', { name: 'Open in browser' }).click());
-    await waitFor(() => expect(bridge.request).toHaveBeenCalledWith('ui/open-link', { url }));
-  };
-  render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 9, page: 'viewer', model: '/work/a b.step' }} />);
-  await screen.findByRole('button', { name: 'Open in browser' });
-  await opened('http://127.0.0.1:3245/id-a?token=t');
-  // The home the person goes to, and the model the agent shows next: each its own page.
-  act(() => viewer.props!.onShow(''));
-  await opened('http://127.0.0.1:3245/?token=t');
-  await agentShows('/work/b.step', 1);
-  await opened('http://127.0.0.1:3245/id-b?token=t');
-  await agentShows('/work/gone.step', 2);
-  await waitFor(() => expect(screen.queryByRole('button', { name: 'Open in browser' })).toBeNull());
-  expect(viewer.props!.openInBrowser).toBeNull();
-});
-
 it('an inline host that cannot show a view full size gets no Full size, and still the whole viewer', () => {
   const { bridge, server } = host({ displayMode: 'inline', availableDisplayModes: ['inline'] });
   const { container } = render(<App bridge={bridge as any} server={server as any} presentation="inline"
     launch={{ protocol: 7, page: 'viewer', model: '/work/part.stl', surface: 'inline', view: 'cad-1-b', order: { createdAt: 1, seq: 1 } }} />);
   expect(container.querySelector('[aria-label="Full size"]')).toBeNull();
-  expect(viewer.props!.fullSize).toBeNull();
+  expect(container.querySelector('[data-card-corner]')).toBeNull();
   expect(viewer.props!.host.environment.compact).toBeUndefined();
 });
 
@@ -393,34 +365,36 @@ it('an answer is never undone by a read sent just before it, and a choice the en
   expect(viewer.props!.appSettings![0]).toEqual(expect.objectContaining({ disabled: true, label: 'Telemetry (set by your environment)' }));
 });
 
-it('a newer release is the blue update button: its card sends the prompt to the chat where the host takes messages, copies it elsewhere, the full instructions a link away', async () => {
+it('a newer release is a notice at the card\'s top-right: it sends the prompt to the chat where the host takes messages, copies it elsewhere, the full instructions a link away, and closes for the view', async () => {
   const notice = { latest: '0.9.0', version: '0.8.1', text: 'A new version v0.9.0 of text-to-cad is available (currently on v0.8.1)',
     prompt: 'Update text-to-cad to 0.9.0 from https://github.com/earthtojake/text-to-cad', instructions: 'https://www.texttocad.dev/install' };
   {
-    // The launch carries the notice as the server last read it: the button draws with the page.
+    // The launch carries the notice as the server last read it: it draws with the page, over the home too.
     const { bridge, server } = host({ displayMode: 'fullscreen' }, { message: {} });
     const { findByRole, getByRole, queryByRole } = render(<App bridge={bridge as any} server={server as any} launch={{ ...home, notice }} />);
-    const update = await findByRole('button', { name: 'Update to 0.9.0' });
-    await act(async () => update.click());
-    await findByRole('dialog', { name: 'Update available' });
+    const card = await findByRole('region', { name: 'Update available' });
+    expect(card.closest('[data-home-corner] [data-card-corner]')).not.toBeNull();
+    expect(queryByRole('button', { name: 'Update to 0.9.0' })).toBeNull();
     await act(async () => getByRole('link', { name: 'Manual installation' }).click());
     expect(bridge.request).toHaveBeenCalledWith('ui/open-link', { url: notice.instructions });
     await act(async () => getByRole('button', { name: 'Send to agent' }).click());
     expect(bridge.request).toHaveBeenCalledWith('ui/message', { role: 'user', content: [{ type: 'text', text: notice.prompt }] }, { timeoutMs: 30_000 });
-    expect(queryByRole('dialog', { name: 'Update available' })).toBeNull();
-    expect(getByRole('button', { name: 'Update to 0.9.0' })).toBeTruthy();
+    expect(queryByRole('region', { name: 'Update available' })).toBeNull();
     expect(server.asked('/__cad/version')).toEqual([]); // nothing to read, and nothing kept
     cleanup();
   }
   const writeText = vi.fn(async () => {});
   Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
   const { bridge, server } = host({ displayMode: 'fullscreen' });
-  const { findByRole } = render(<App bridge={bridge as any} server={server as any} launch={{ ...home, notice }} />);
-  // Looked up outside act: act holds React's updates until it returns, and the lookup waits on them.
-  const update = await findByRole('button', { name: 'Update to 0.9.0' });
-  await act(async () => update.click());
+  // Over a file: the viewer's notice, at its viewport's top-right.
+  const { findByRole, getByRole, queryByRole } = render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 9, page: 'viewer', model: '/work/a.step', notice }} />);
+  const card = await findByRole('region', { name: 'Update available' });
+  expect(card.closest('[data-card-corner]')).not.toBeNull();
   const copy = await findByRole('button', { name: 'Copy prompt' });
   await act(async () => copy.click());
   expect(writeText).toHaveBeenCalledWith(notice.prompt);
   expect(bridge.request).not.toHaveBeenCalledWith('ui/message', expect.anything(), expect.anything());
+  // Its X closes it for this view.
+  await act(async () => getByRole('button', { name: 'Close' }).click());
+  expect(queryByRole('region', { name: 'Update available' })).toBeNull();
 });

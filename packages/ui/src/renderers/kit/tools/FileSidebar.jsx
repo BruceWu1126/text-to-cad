@@ -17,6 +17,10 @@ const KEY_NUDGE_PX = 16;
 // A phone's panel: a joint's name and its slider side by side, within the view's inset.
 const PHONE_PANEL_WIDTH = 288;
 
+// How the sidebar's panel slides in and out from its edge (and Preview's settings from theirs):
+// its translate and opacity, 200ms, easing out; at once where motion is reduced.
+export const SIDEBAR_SLIDE_CLASS = "transition-[translate,opacity] duration-200 ease-out motion-reduce:transition-none";
+
 /**
  * The file's sidebar: what there is to read of the file, its hierarchy, properties and controls,
  * whatever tool is in hand. The toolbar is for using tools; this is for the file. It is a toolbar
@@ -268,7 +272,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   };
 
   const aside = <aside ref={bar} aria-label="File" data-cad-file-sidebar="" data-open={open ? "" : undefined} inert={!open}
-    className={cn("relative flex max-w-full flex-col overflow-hidden text-tiny transition-[translate,opacity] duration-200 ease-out motion-reduce:transition-none",
+    className={cn("relative flex max-w-full flex-col overflow-hidden text-tiny", SIDEBAR_SLIDE_CLASS,
       "rounded-md", FILE_SIDEBAR_SURFACE_CLASS,
       open ? "pointer-events-auto" : "pointer-events-none -translate-x-[calc(100%+1rem)] opacity-0")}
     // Never wider than the room left of the tool strip (`--cad-file-sidebar-max-width`, the shell's

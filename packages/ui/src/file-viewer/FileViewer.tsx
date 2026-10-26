@@ -24,7 +24,7 @@ class RenderBoundary extends Component<{ children: ReactNode; title: string; onE
  * The complete file view: one file, by its absolute path, under the one navbar. Its only knowledge
  * of formats comes from registrations. With no file it shows the host's home.
  */
-export function FileViewer({ file, host, renderers, state, onStateChange, colorScheme, language, appSettings, update, fullSize, openInBrowser, history, recent, notice, navbarActions, overlay, onError, presentation }: FileViewerProps) {
+export function FileViewer({ file, host, renderers, state, onStateChange, colorScheme, language, appSettings, update, history, recent, notice, navbarActions, overlay, onError, presentation, chrome = "page" }: FileViewerProps) {
   // The language the host names (`environment.locale`): this frame's own strings, and everything
   // drawn under it (`I18nProvider`), the nodes the host hands it included.
   const locale = host.environment.locale;
@@ -49,8 +49,9 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
   const [rootRef, mobile] = useViewerMobileMeasure();
   const viewerElement = useRef<HTMLDivElement | null>(null);
   const bindElement = useCallback((element: HTMLDivElement | null) => { viewerElement.current = element; rootRef(element); }, [rootRef]);
-  // The navbar's box the renderer draws its view controls into (`navbarSlot`).
-  const [navbarSlot, setNavbarSlot] = useState<HTMLDivElement | null>(null);
+  // The file whose renderer says its Preview is up, while it is: the navbar steps aside for Preview's own bar.
+  const [previewing, setPreviewing] = useState<typeof key | null>(null);
+  const onPreviewChange = useCallback((on: boolean) => { if (currentKey.current === key) setPreviewing(on ? key : null); }, [key]);
   const [readiness, setReadiness] = useState<{ key: string; ready: boolean } | null>(null);
   const [navActions, setNavActions] = useState<{ key: string; actions: readonly FileNavigationAction[] } | null>(null);
   const onNavigationActionsChange = useCallback((actions: readonly FileNavigationAction[]) => { if (currentKey.current === key) setNavActions({ key, actions }); }, [key]);
@@ -75,10 +76,10 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
     if (!shown) return null;
     const Renderer = shown.prepared.Component;
     return <RenderBoundary key={key} title={t("file.displayFailed")} onError={onError}><Renderer notice={notice} key={key} file={shown.file} source={source}
-      navbarSlot={navbarSlot} onReady={onReady} onNavigationActionsChange={onNavigationActionsChange}
+      onPreviewChange={onPreviewChange} onReady={onReady} onNavigationActionsChange={onNavigationActionsChange}
       onOpenFile={onOpenFile} appearance={appearance}
       state={rendererState} onStateChange={setRendererState} reload={reload} /></RenderBoundary>;
-  }, [shown, key, onError, notice, source, navbarSlot, onReady,
+  }, [shown, key, onError, notice, source, onPreviewChange, onReady,
     onNavigationActionsChange, onOpenFile, appearance, rendererState, setRendererState, reload, t]);
 
   let body: ReactNode;
@@ -117,15 +118,16 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
   const menu = useMemo(() => host.links || appSettings?.length || colorScheme || language ? { links: host.links, appSettings, colorScheme, language, platform: appearance.platform } : null,
     [host.links, appSettings, colorScheme, language, appearance.platform]);
   // The navbar is drawn over every file and over the host's home — there only the logo's menu (no
-  // Back to files), Back and Forward where the host keeps the view's history, and the host's update,
-  // Full size and Open in browser, each where it is over a file — never over a view drawn small with no chrome
-  // (`compact`: an offscreen picture).
+  // Back to files), Back and Forward where the host keeps the view's history, and the host's update
+  // and actions, each where it is over a file — never over a view drawn small with no chrome
+  // (`compact`: an offscreen picture), never where the host asks for the view alone (`chrome: "bare"`),
+  // and not while the renderer's Preview is up, which draws its own bar in its place.
   const home = loaded.status === "empty" && Boolean(presentation?.home);
-  const navbar = (Boolean(path) || home) && !appearance.compact;
+  const navbar = (Boolean(path) || home) && !appearance.compact && chrome !== "bare" && previewing !== key;
   return <I18nProvider locale={locale}><ViewerMobileContext.Provider value={mobile}><ViewerHostContext.Provider value={host}><ViewerElementContext.Provider value={viewerElement}><div className="text-to-cad-file-viewer text-ui font-normal flex h-full min-h-0 min-w-0 flex-col overflow-hidden" ref={bindElement} data-viewer-layout={mobile ? "mobile" : "desktop"} tabIndex={-1}>
     {navbar ? (path
-      ? <ViewerNavbar onHome={host.navigation.home} menu={menu} history={history} file={navigationPath ?? path} name={shown?.file.name} kind={model ? "model" : "file"} explorer={explorer} recent={recentMenu} fileMenu={fileMenu} trailing={trailing} actions={navbarActions} update={update} fullSize={fullSize} openInBrowser={openInBrowser} controlsRef={setNavbarSlot} />
-      : <ViewerNavbar menu={menu} history={history} actions={navbarActions} update={update} fullSize={fullSize} openInBrowser={openInBrowser} />) : null}
+      ? <ViewerNavbar onHome={host.navigation.home} menu={menu} history={history} file={navigationPath ?? path} name={shown?.file.name} kind={model ? "model" : "file"} explorer={explorer} recent={recentMenu} fileMenu={fileMenu} trailing={trailing} actions={navbarActions} update={update} />
+      : <ViewerNavbar menu={menu} history={history} actions={navbarActions} update={update} />) : null}
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <div className="min-w-0 flex-1 overflow-hidden">{body}</div>
       {overlay}

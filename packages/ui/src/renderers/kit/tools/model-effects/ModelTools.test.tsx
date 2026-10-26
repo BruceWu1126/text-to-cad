@@ -5,53 +5,89 @@ import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@te
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useModelTools } from '../../../../../dist/renderers/kit/tools/model-effects/ModelTools.js';
+import { ControlUsageProvider } from '../../../../../dist/usage/controls.js';
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const neutral = () => resolveViewSettings({});
 
-it('only the tool in hand has its row under the strip, an applied effect leaving none behind; taken up again it is as it was, unset it starts neutral; only the tool in hand is lit', () => {
-  const props = { view: neutral(), features: { settings: ['exploded', 'clip'] }, store: { patch: vi.fn() },
-    mesh: null, disabled: false, selectedTool: 'references', onSelect: vi.fn() };
-  const { result, rerender } = renderHook(options => useModelTools(options), { initialProps: props });
-  const active = () => result.current.tools.filter(tool => tool.active).map(tool => tool.id);
-  // The tool's row on screen, by its name.
-  const shown = () => { const view = render(<>{result.current.subToolbar}</>); const names = [...view.container.querySelectorAll('[role=toolbar][data-cad-sub-toolbar]')]
-    .map(row => row.getAttribute('aria-label')); view.unmount(); return names; };
-  act(() => result.current.tools.find(tool => tool.id === 'exploded').onSelect());
-  expect(props.onSelect).toHaveBeenCalledWith('exploded');
-  expect(props.store.patch).toHaveBeenLastCalledWith({ exploded: { enabled: false, amount: 0 } });
-  rerender({ ...props, selectedTool: 'exploded' });
-  expect([active(), shown()]).toEqual([['exploded'], ['Explode controls']]);
-  // A second press on the tool in hand does nothing.
-  act(() => result.current.tools.find(tool => tool.id === 'exploded').onSelect());
-  expect(props.onSelect).toHaveBeenCalledOnce();
-  // Applied, then put down: the effect stays on the model, and nothing of it on screen.
-  const applied = { ...props, view: { ...neutral(), exploded: { enabled: true, amount: .4 } } };
-  rerender({ ...applied, selectedTool: 'references' });
-  expect([active(), shown()]).toEqual([[], []]);
-  // Taken up again it is as it was: nothing is patched.
-  props.store.patch.mockClear();
-  act(() => result.current.tools.find(tool => tool.id === 'exploded').onSelect());
-  expect(props.store.patch).not.toHaveBeenCalled();
+// The strip's tiles, as FloatingToolBar draws a tool with a `tile`, and a click-away target.
+function Strip({ store, settings = ['exploded', 'clip'] }: { store: ReturnType<typeof createViewSettingsStore>; settings?: string[] }) {
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const tools = useModelTools({ view: snapshot.scene.view, features: { settings }, store,
+    mesh: { bounds: { min: [0, 0, 0], max: [10, 10, 10] } }, disabled: false });
+  return <><div data-testid="model">model</div>{tools.tools.map(tool => <React.Fragment key={tool.id}>{tool.tile}</React.Fragment>)}</>;
+}
+
+it('Explode and Clip are popovers from their tiles: a press opens the row under its button, a press away or Escape closes it, and the button is never pressed', async () => {
+  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const store = createViewSettingsStore();
+  render(<Strip store={store} />);
+  const explode = screen.getByRole('button', { name: 'Explode', exact: true });
+  const row = () => screen.queryByRole('toolbar', { name: 'Explode controls' });
+  const pressed = (button: HTMLElement) => [button.getAttribute('aria-pressed'), button.hasAttribute('data-active'), button.getAttribute('data-variant')];
+  expect([row(), pressed(explode)]).toEqual([null, [null, false, 'ghost']]);
+  await user.click(explode);
+  // Its row as it was under the strip: its name, the slider, the amount, Reset; the button not pressed.
+  expect([...row()!.querySelectorAll('[data-model-tool-amount], button[aria-label], [role=slider]')].map(node => node.getAttribute('aria-label') || node.textContent))
+    .toEqual(['Explode amount', '0%', 'Reset explode']);
+  expect(row()!.closest('[data-radix-popper-content-wrapper]')).not.toBeNull();
+  expect(pressed(explode)).toEqual([null, false, 'ghost']);
+  // A press away (on the model) closes it; so does Escape; so does its button again.
+  await user.click(screen.getByTestId('model'));
+  expect(row()).toBeNull();
+  await user.click(explode);
+  await user.keyboard('{Escape}');
+  expect(row()).toBeNull();
+  await user.click(explode);
+  await user.click(explode);
+  expect(row()).toBeNull();
+  // Clip's is its own, one open at a time as any popover.
+  await user.click(screen.getByRole('button', { name: 'Clip', exact: true }));
+  expect([row(), screen.getByRole('toolbar', { name: 'Clip controls' }) !== null]).toEqual([null, true]);
 });
 
-it('a clip at zero keeps its row while in hand, and no tool leaves one behind', () => {
-  const props = { view: { ...neutral(), clip: { ...neutral().clip, enabled: true, at: 5 } },
-    features: { settings: ['clip'] }, store: { patch: vi.fn() }, mesh: null, disabled: false, selectedTool: 'clip', onSelect: vi.fn() };
-  const { result, rerender } = renderHook(options => useModelTools(options), { initialProps: props });
-  const kept = () => { const view = render(<>{result.current.subToolbar}</>); const count = view.container.querySelectorAll('[role=toolbar][data-cad-sub-toolbar]').length; view.unmount(); return count; };
-  expect(kept()).toBe(1);
-  rerender({ ...props, view: neutral() });
-  expect(kept()).toBe(1);
-  rerender({ ...props, view: neutral(), selectedTool: 'display' });
-  expect(kept()).toBe(0);
+it('what an effect sets stays on the model once its popover closes, its dot on the tile, until its Reset', async () => {
+  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const store = createViewSettingsStore();
+  render(<Strip store={store} />);
+  const explode = () => screen.getByRole('button', { name: 'Explode', exact: true });
+  await user.click(explode());
+  fireEvent.keyDown(screen.getByRole('slider', { name: 'Explode amount' }), { key: 'PageUp' });
+  const amount = store.getSnapshot().scene.view.exploded.amount;
+  expect([store.getSnapshot().scene.view.exploded.enabled, amount > 0]).toEqual([true, true]);
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('toolbar', { name: 'Explode controls' })).toBeNull();
+  // Closed: still exploded, the tile's dot saying so, the button still not pressed.
+  expect([store.getSnapshot().scene.view.exploded.amount, explode().hasAttribute('data-changed'), explode().getAttribute('aria-pressed')]).toEqual([amount, true, null]);
+  // Opened again, as it was; Reset takes it away, and the popover stays up.
+  await user.click(explode());
+  expect(screen.getByRole('toolbar', { name: 'Explode controls' }).querySelector('[data-model-tool-amount]')!.textContent).toBe(`${Math.round(amount * 100)}%`);
+  await user.click(screen.getByRole('button', { name: 'Reset explode' }));
+  expect([store.getSnapshot().scene.view.exploded.enabled, explode().hasAttribute('data-changed'), screen.queryByRole('toolbar', { name: 'Explode controls' }) !== null]).toEqual([false, false, true]);
+});
+
+it('each popover opened is one use of its effect, with no seconds (it is no tool in hand), and its Reset one of its reset', async () => {
+  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const store = createViewSettingsStore();
+  const reports: { control: string; count: number; seconds: number }[][] = [];
+  const view = render(<ControlUsageProvider report={counts => reports.push(counts)}><Strip store={store} /></ControlUsageProvider>);
+  await user.click(screen.getByRole('button', { name: 'Explode', exact: true }));
+  fireEvent.keyDown(screen.getByRole('slider', { name: 'Explode amount' }), { key: 'PageUp' });
+  await user.click(screen.getByRole('button', { name: 'Reset explode' }));
+  await user.keyboard('{Escape}');
+  await user.click(screen.getByRole('button', { name: 'Explode', exact: true }));
+  await user.keyboard('{Escape}');
+  await user.click(screen.getByRole('button', { name: 'Clip', exact: true }));
+  view.unmount();
+  const said = Object.fromEntries(reports.flat().map(({ control, ...counts }) => [control, counts]));
+  expect([said.explode, said.clip, said.explode_reset]).toEqual([{ count: 2, seconds: 0 }, { count: 1, seconds: 0 }, { count: 1, seconds: 0 }]);
 });
 
 it('offers Explode and Clip on every STEP, a single part too, and idles them while the model loads', () => {
   const part = (id: string) => ({ id, bounds: { min: [0, 0, 0], max: [1, 1, 1] } });
   const props = { view: neutral(), features: { settings: ['exploded', 'clip'] }, store: { patch: vi.fn() },
-    mesh: null as null | object, disabled: true, selectedTool: 'references', onSelect: vi.fn() };
+    mesh: null as null | object, disabled: true };
   const { result, rerender } = renderHook(options => useModelTools(options), { initialProps: props });
   const offered = () => result.current.tools.map(tool => `${tool.id}:${tool.disabled}`);
   // Loading, idle; then every STEP has both, a single part too (its Explode separates nothing).
@@ -62,20 +98,20 @@ it('offers Explode and Clip on every STEP, a single part too, and idles them whi
   expect(offered()).toEqual(['exploded:false', 'clip:false']);
 });
 
-it('Clip\'s axis dropdown holds its settings: the axes as one row of radio items, a rule, then Part colors and Reverse; all kept across tools and by Reset, which only takes the cut away; both persist in the display', async () => {
+it('Clip\'s axis dropdown holds its settings: the axes as one row of radio items, a rule, then Part colors and Reverse; all kept as its popover closes and by Reset, which only takes the cut away; both persist in the display', async () => {
   const user = userEvent.setup({ pointerEventsCheck: 0 });
   const store = createViewSettingsStore();
   function Harness() {
     const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
-    const [selectedTool, onSelect] = useState('references');
     const tools = useModelTools({ view: snapshot.scene.view, features: { settings: ['clip'] }, store,
-      mesh: { bounds: { min: [0, 0, 0], max: [10, 10, 10] } }, disabled: false, selectedTool, onSelect });
-    return <><button onClick={() => onSelect('references')}>Select</button>
-      {tools.tools.map(tool => <button key={tool.id} onClick={tool.onSelect}>{tool.label}</button>)}{tools.subToolbar}</>;
+      mesh: { bounds: { min: [0, 0, 0], max: [10, 10, 10] } }, disabled: false });
+    return <>{tools.tools.map(tool => <React.Fragment key={tool.id}>{tool.tile}</React.Fragment>)}</>;
   }
   render(<Harness />);
   const clip = () => store.getSnapshot().scene.view.clip;
   const takeUp = (name: string) => user.click(screen.getByRole('button', { name, exact: true }));
+  // Closing Clip's popover: Escape, once its menu (if open) has closed.
+  const putDown = () => user.keyboard('{Escape}');
   const axisButton = () => screen.getByRole('toolbar', { name: 'Clip controls' }).querySelector<HTMLElement>('[data-clip-axis]')!;
   // The menu is named by its trigger, as every dropdown here is.
   const menu = () => screen.getByRole('menu', { name: /^Clip axis: [XYZ]$/ });
@@ -108,7 +144,8 @@ it('Clip\'s axis dropdown holds its settings: the axes as one row of radio items
     ['menuitemradio:X:false', 'menuitemradio:Y:true', 'menuitemradio:Z:false', 'menuitemcheckbox:Part colors:false', 'menuitemcheckbox:Reverse:true'],
     'Y', false, 'y', false, true]);
   await user.keyboard('{Escape}');
-  expect(screen.queryByRole('menu')).toBeNull();
+  // Escape closed the menu alone: the popover it opened in is still up, as every choice in it kept it.
+  expect([screen.queryByRole('menu'), screen.queryByRole('toolbar', { name: 'Clip controls' }) !== null]).toEqual([null, true]);
   // A cut: Reverse turns it round keeping its share.
   fireEvent.keyDown(screen.getByRole('slider', { name: 'Clip amount' }), { key: 'PageUp' });
   const cut = share();
@@ -118,14 +155,15 @@ it('Clip\'s axis dropdown holds its settings: the axes as one row of radio items
   expect([clip().invert, share(), clip().enabled]).toEqual([false, cut, true]);
   await user.click(item('Reverse'));
   await user.keyboard('{Escape}');
-  // Put down and taken up again, all as it was.
-  await takeUp('Select');
+  // Closed and opened again, all as it was.
+  await putDown();
+  expect(screen.queryByRole('toolbar', { name: 'Clip controls' })).toBeNull();
   await takeUp('Clip');
   expect([clip().enabled, clip().axis, clip().partColors, clip().invert, share()]).toEqual([true, 'y', false, true, cut]);
   // Reset: the amount back at zero, nothing else; an unset Clip taken up again changes nothing either.
   await user.click(screen.getByRole('button', { name: 'Reset clip' }));
   expect([clip().enabled, clip().axis, clip().partColors, clip().invert, share()]).toEqual([false, 'y', false, true, '0%']);
-  await takeUp('Select');
+  await putDown();
   await takeUp('Clip');
   expect([clip().axis, clip().partColors, clip().invert]).toEqual(['y', false, true]);
   await user.click(axisButton());

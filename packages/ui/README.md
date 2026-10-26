@@ -259,10 +259,11 @@ the file sidebar, mobile layout, section density, keyboard scope, tooltips
 and Preview. RendererShell owns the strip and its sub-toolbar at the top centre, the file
 sidebar, Quick Edit at the top-right and the cube at the bottom-right. Preview (preview
 mode) is the shell's own, the one place Render is drawn — whatever the file's display mode,
-which has no Render — and takes the whole page, the navbar and the strip with it; its own
-controls stand in the view's top-right corner — Preview settings (Orbit, off at every entry,
-and its speed, then Render's settings) and Exit preview — and the file sidebar offers its
-Position and Animation alone at the top-left; nothing sits under the model. Routines play from
+which has no Render — and takes the whole page, the navbar and the strip with it, in every
+host; in the navbar's place its own bar, on no surface, names the file and holds Preview settings
+(Orbit, off at every entry, and its speed, then Render's settings, sliding in from the right
+edge) and Exit preview, fading with the playbar while the pointer rests; nothing sits under the
+model. Routines play from
 the sidebar's Animation section, in either view. Preview and the tools view are two views,
 each with its own viewport, scene, camera, pose and routine over the page's one GPU device:
 Preview starts from the model as authored and leaves the tools view's state untouched, and
@@ -289,11 +290,13 @@ gray, the version and who made it. Where the host keeps the view's own history (
 app's views), Back and Forward follow, disabled where they have nowhere to go. It names the
 file after its kind's glyph — the name opens Recent and Files — and offers its ⋯ menu (Copy path, Reveal). They share one look: transparent until the
 pointer is on them or their menu is open, with no tooltip. At the right is only what a host
-or a file adds: the host's update button, a dismissed alert's icon, the host's Full size
-and, last, the view's own controls (a 3D view's Display and Preview). With no file a view
-shows the host's home, the model library, under the same navbar (its logo and menu, without
-Back to files, Back and Forward where the host keeps the view's history, and the host's
-update and Full size): its wordmark, byline and GitHub,
+or a file adds: the host's update button, a dismissed alert's icon and, last, the host's
+actions (the web viewer's Export); the view's own controls (a 3D view's Projection, Display and
+Preview) end its tool strip, never the navbar. A host whose own frame is its navigation shows
+the view alone (`chrome: "bare"`, the CAD app's cards and tabs), with no navbar at all. With no
+file a view shows the host's home, the model library, under the same navbar (its logo and menu,
+without Back to files, Back and Forward where the host keeps the view's history, and the host's
+update and actions): its wordmark, byline and GitHub,
 Discord and X, then the library alone: the documents opened or built before, pinned first,
 with their pictures, each card's ⋯ menu ending in Delete, which asks first. A file that
 does not exist shows "File does not exist" and its path, and any other failure to open

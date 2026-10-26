@@ -1,4 +1,3 @@
-import { createPortal } from 'react-dom';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -28,7 +27,7 @@ const navbar = () => document.querySelector('[data-viewer-navbar]');
 const fileName = () => document.querySelector<HTMLElement>('[data-file-name]')!;
 const labels = (selector = '[data-viewer-navbar]') => [...document.querySelectorAll(`${selector} a, ${selector} button`)].map(node => node.getAttribute('aria-label'));
 
-it('draws the navbar over every file, named by its name, and over the home with only its menu, update, Full size and the host\'s last control; never over a view shown small', async () => {
+it('draws the navbar over every file, named by its name, and over the home with only its menu, Back and Forward, the update and the host\'s actions; never over a view shown small', async () => {
   open({});
   await screen.findByText('shown');
   // The name, as words where nothing can be browsed; no logo with no home, no ⋯ where the host can do nothing.
@@ -40,16 +39,15 @@ it('draws the navbar over every file, named by its name, and over the home with 
   expect(navbar()).toBeNull();
   cleanup();
   // The home has the same navbar: the logo's menu, Back and Forward where the host keeps the view's
-  // history, and the host's update, Full size and Open in browser, as over a file; no file, no box for view controls.
+  // history, and the host's update and actions, as over a file; no file, no box for view controls.
   const back = vi.fn();
   open({ host: { ...host, links: viewerLinks({ version: '0.7.4' }), navigation: { openFile() {}, home() {} } }, file: null,
     history: { canGoBack: true, canGoForward: false, back, forward() {} },
-    update: <button type="button" aria-label="Update to 0.7.5" />, fullSize: <button type="button" aria-label="Full size" />,
-    openInBrowser: <button type="button" aria-label="Open in browser" />,
+    update: <button type="button" aria-label="Update to 0.7.5" />, navbarActions: <button type="button" aria-label="Export" />,
     presentation: { home: <p>home</p> } } as any);
   await screen.findByText('home');
   expect([labels(), document.querySelector('[data-file-name]'), document.querySelector('[data-view-controls]')])
-    .toEqual([['Menu', 'Back', 'Forward', 'Update to 0.7.5', 'Full size', 'Open in browser'], null, null]);
+    .toEqual([['Menu', 'Back', 'Forward', 'Update to 0.7.5', 'Export'], null, null]);
   expect((screen.getByRole('button', { name: 'Forward' }) as HTMLButtonElement).disabled).toBe(true);
   await userEvent.setup().click(screen.getByRole('button', { name: 'Back' }));
   expect(back).toHaveBeenCalledOnce();
@@ -57,30 +55,44 @@ it('draws the navbar over every file, named by its name, and over the home with 
   expect(screen.queryByRole('menuitem', { name: 'Back to files' })).toBeNull();
 });
 
-it('keeps the right of the navbar for the host\'s update button and Full size, then hands the renderer a box for its own view controls, then the host\'s Open in browser, last; a view shown small has no navbar and no box', async () => {
-  // A renderer that draws its view controls into the box it is handed (the CAD viewer's Display
-  // and Preview), and over its view where it is handed none.
-  const handed: (HTMLElement | null)[] = [];
-  const slotted = defineFileRenderer({
-    id: 'slotted', priority: 2, matches: () => true, prepare: async () => ({ data: null }),
+it('draws no navbar where the host asks for the view alone (`chrome: "bare"`): over a file or the home, whatever it hands the navbar', async () => {
+  const homed = { ...host, links: viewerLinks({ version: '0.7.4' }), navigation: { openFile() {}, home() {} } };
+  const everything = { host: homed, chrome: 'bare', history: { canGoBack: true, canGoForward: false, back() {}, forward() {} },
+    update: <button type="button" aria-label="Update to 0.7.5" />,
+    navbarActions: <button type="button" aria-label="Export" />, presentation: { home: <p>home</p> } };
+  open(everything);
+  await screen.findByText('shown');
+  expect([navbar(), document.querySelector('[data-file-name]'), screen.queryAllByRole('button').map(button => button.getAttribute('aria-label'))]).toEqual([null, null, []]);
+  cleanup();
+  open({ ...everything, file: null });
+  await screen.findByText('home');
+  expect([navbar(), screen.queryAllByRole('button')]).toEqual([null, []]);
+  cleanup();
+  // The default is the page's chrome: the same props draw the navbar.
+  open({ ...everything, chrome: undefined });
+  await screen.findByText('shown');
+  expect(labels()).toEqual(['Menu', 'Back', 'Forward', 'Update to 0.7.5', 'Export']);
+});
+
+it('keeps the right of the navbar for the host\'s update button and its actions, and hides the navbar while the renderer says its Preview is up', async () => {
+  // A renderer whose Preview a test opens and closes, as the CAD shell reports it.
+  let report: ((previewing: boolean) => void) | undefined;
+  const previewed = defineFileRenderer({
+    id: 'previewed', priority: 2, matches: () => true, prepare: async () => ({ data: null }),
     load: async () => ({ default: (props: any) => {
-      handed.push(props.navbarSlot ?? null);
-      expect('onFullscreenChange' in props).toBe(false);
-      const control = <button type="button" aria-label="Preview" />;
-      return props.navbarSlot ? createPortal(control, props.navbarSlot) : control;
+      report = props.onPreviewChange;
+      expect(['navbarSlot' in props, 'onFullscreenChange' in props]).toEqual([false, false]);
+      return <p>shown</p>;
     } }),
   });
-  const view = (extra: object = {}) => render(<FileViewer file={FILE} host={{ ...host, ...extra } as any} renderers={[slotted]} state={{}} onStateChange={() => {}}
-    update={<button type="button" aria-label="Update to 0.7.5" />} fullSize={<button type="button" aria-label="Full size" />}
-    openInBrowser={<button type="button" aria-label="Open in browser" />} />);
-  view();
-  await screen.findByRole('button', { name: 'Preview' });
-  expect([labels(), screen.getByRole('button', { name: 'Preview' }).parentElement!.hasAttribute('data-view-controls')]).toEqual([['Update to 0.7.5', 'Full size', 'Preview', 'Open in browser'], true]);
-  cleanup();
-  handed.length = 0;
-  view({ environment: { colorScheme: 'light', compact: true } });
-  await screen.findByRole('button', { name: 'Preview' });
-  expect([navbar(), handed.at(-1)]).toEqual([null, null]);
+  render(<FileViewer file={FILE} host={host as any} renderers={[previewed]} state={{}} onStateChange={() => {}}
+    update={<button type="button" aria-label="Update to 0.7.5" />} navbarActions={<button type="button" aria-label="Export" />} />);
+  await screen.findByText('shown');
+  expect([labels(), document.querySelector('[data-view-controls]')]).toEqual([['Update to 0.7.5', 'Export'], null]);
+  act(() => report!(true));
+  expect([navbar(), screen.getByText('shown')]).toEqual([null, expect.anything()]);
+  act(() => report!(false));
+  expect(navbar()).not.toBeNull();
 });
 
 it('draws Back and Forward between the logo and the file\'s name where the host keeps the view\'s own history, each disabled where it has nowhere to go', async () => {

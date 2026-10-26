@@ -26,7 +26,8 @@ const PAYLOADS = Object.fromEntries(DESCRIPTIONS.filter(name => existsSync(paylo
 const REFUSALS = JSON.parse(readFileSync(new URL('refusals.json', FIXTURES), 'utf8'));
 // A chain long enough that a per-pose cost proportional to the robot would show.
 // The strip with Select in hand: a robot's four tools (`robot/tools.js`).
-const SELECT_IN_HAND = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false', 'Clip:false'];
+// The tools that can be in hand; Clip, a popover from its tile, is never one.
+const SELECT_IN_HAND = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false'];
 const CHAIN_LINKS = 30;
 // The harness renders its panes at a fixed CSS size; the spec draws them smaller, so a software
 // GL (CI's SwiftShader) has fewer pixels to fill and a capture fewer to read.
@@ -131,7 +132,7 @@ async function open(t, file, { panel = true } = {}) {
       if (await tile.getAttribute('aria-pressed') !== 'true') await tile.click();
       await pane.locator(`[data-file-sidebar-tools] button[aria-pressed="true"][aria-label="${name}"]`).waitFor();
     },
-    // In and out of Preview, by Preview at the strip's end and Exit preview in the navbar, once its cover has lifted.
+    // In and out of Preview, by Preview at the strip's end and Exit preview in Preview's bar, once its cover has lifted.
     async preview(enter) {
       await pane.getByRole('button', { name: enter ? 'Preview' : 'Exit preview', exact: true }).click();
       await pane.getByRole('button', { name: enter ? 'Exit preview' : 'Preview', exact: true }).waitFor();
@@ -468,8 +469,10 @@ test('Select picks a visual at once; a selection outlives Select; Links shows wh
   await card.getByText('shoulder', { exact: true }).first().waitFor();
   assert.match(await card.innerText(), /arm/, 'the SRDF planning group of the link');
   assert.match(await card.innerText(), /^upper_arm\s+ID\s+upper_arm\s/, 'headed by the link\'s name, its id the name too');
-  // A link's facts are in the card's one face and size, never monospace, in compact rows.
-  const faces = await card.locator('[data-info-row] *').evaluateAll(nodes => [...new Set(nodes
+  // A link's facts are in the card's one face and size, never monospace, in compact rows; its ID, one
+  // monospace line, is the reference, not a fact.
+  assert.match(await card.locator('[data-chip-id]').evaluate(node => getComputedStyle(node).fontFamily), /mono/i, 'the ID in monospace');
+  const faces = await card.locator('[data-info-row]:not(:has([data-chip-id])) *').evaluateAll(nodes => [...new Set(nodes
     .filter(node => !node.childElementCount && node.textContent.trim())
     .map(node => `${getComputedStyle(node).fontFamily} | ${getComputedStyle(node).fontSize}`))]);
   assert.equal(faces.length, 1, `one face and size: ${faces.join(' / ')}`);
@@ -686,11 +689,12 @@ test('Preview draws the robot as it opens, and leaving it finds the tools view a
   await enterPreview();
   assert.deepEqual(await robot.links(), opening, 'Preview poses the robot as it opens');
   assert.ok((await robot.capture()).data.equals(authored), 'Preview draws the robot as it opens');
-  // Preview has no file sidebar (a robot has no routine, so no playbar either), and the navbar holds
-  // only its settings and the way out.
+  // Preview has no file sidebar (a robot has no routine, so no playbar either), and no navbar: its own
+  // bar holds only the file's name, its settings and the way out.
   assert.equal(await pane.locator('[data-file-sidebar-room]').isHidden(), true, 'no file sidebar in Preview');
   assert.equal(await pane.locator('[data-preview-playbar]').count(), 0, 'no playbar for a file with no routine');
-  assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+  assert.equal(await pane.locator('[data-viewer-navbar]').count(), 0, 'no navbar in Preview');
+  assert.deepEqual(await pane.locator('[data-preview-bar] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
     ['Preview settings', 'Exit preview']);
 
   // Leaving finds the tools view's work as it was left.

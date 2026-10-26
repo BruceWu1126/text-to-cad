@@ -276,7 +276,7 @@ it('a drawing with layers and blocks has a Layers section: a layer hidden is not
   const inserts = [...list.querySelectorAll('[data-insert-row]')];
   expect(inserts.map(row => row.getAttribute('data-insert-row'))).toEqual(['99', '9B']);
   fireEvent.click(inserts[0]);
-  await waitFor(() => expect(within(pane.querySelector('[data-quick-edit-box]') as HTMLElement).getByText('Block M5_NUT on HARDWARE')).toBeTruthy());
+  await waitFor(() => expect(within(pane.querySelector('[data-quick-edit-box]') as HTMLElement).getByRole('button', { name: 'Block M5_NUT on HARDWARE' })).toBeTruthy());
   dispose();
 });
 

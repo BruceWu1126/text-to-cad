@@ -323,7 +323,7 @@ async function formatGate() {
 }
 
 // Inspect is the tools view, in the file's mode (Solid); Render is Preview's alone, in by
-// Preview and out by Exit preview, both in the navbar, each once the cover over the crossing has lifted.
+// Preview at the strip's end and out by Exit preview in Preview's bar, each once the cover over the crossing has lifted.
 async function selectViewingMode(page, current, next) {
   const [press, arrive] = next === "Render" ? ["Preview", "Exit preview"] : ["Exit preview", "Preview"];
   if (!(await page.getByRole("button", { name: press, exact: true }).count())) fail(`viewing mode: expected ${current} before switching to ${next}`);

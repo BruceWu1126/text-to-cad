@@ -282,7 +282,7 @@ and an SDF's metadata are the file sidebar's, a tile each at the top-left, whate
 file's name in the navbar opens its name menu: Recent and Files (the explorer).
 STEP and robot files have tools on a strip at the top centre; GLB, STL and 3MF have none,
 a GLB's clips or not.
-Every 3D file's strip ends in Display (its settings, a popover that opens down) and
+Every 3D file's strip ends in Projection, Display (its settings, a popover that opens down) and
 Preview, with the view cube at the bottom-right and Quick Edit at the top-right. DXF is a
 2D canvas with pan, zoom, snapshot and Quick Edit, without a 3D toolbar or file sidebar.
 
@@ -294,9 +294,10 @@ time, with "Filter files..." to find a file anywhere under it. It opens on Recen
 and on Files over a file. Below 600px of
 FileViewer width (a phone) the chrome is touch-sized and the file sidebar's tiles lead the tool strip. Preview is the shared shell's button after Display on the strip: it takes the whole page,
 hiding the navbar, the tool strip and Quick Edit, opens still (Orbit, in its settings, is
-off at every entry), draws the model in Render — the one place it is drawn — and keeps its
-own controls in the view's top-right corner: Preview settings (Orbit, then Render's settings)
-and Exit preview, with the file sidebar's Position and Animation at its top-left. Routines play
+off at every entry), draws the model in Render — the one place it is drawn — and draws its
+own bar in the navbar's place, over the view's top edge on no surface: the file's name at
+its left, Preview settings (Orbit, then Render's settings, a panel sliding in from the right
+edge) and Exit preview at its right, fading with the playbar while the pointer rests. Routines play
 from the sidebar's Animation section, in either view (in Preview, on entry only with
 Autoplay on); the host passes no Preview props.
 The file on screen keeps its view in the tab — its camera, Display settings
@@ -439,7 +440,8 @@ which opens the name menu (Recent and Files), with its ⋯; at the right only th
 is out. The app menu holds Back to files (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
 GitHub, Discord and, in gray, the version (a link to its release notes) and "Made by @…"
 (X), as in the CAD app, over a file and on the home alike.
-Display and Preview are the view's, at the navbar's right end. This host
+Projection, Display and Preview are the view's, at the tool strip's end, never the navbar's;
+in Preview the navbar gives way to Preview's own bar. This host
 supplies the links (`src/host/viewerLinks.js`): its version (with its build's id,
 `v0.7.15-dev.b80844940`, for any build but the release's own), the GitHub (where new
 issues open) and Discord its build names (`VIEWER_GITHUB_URL`, `VIEWER_DISCORD_URL`);

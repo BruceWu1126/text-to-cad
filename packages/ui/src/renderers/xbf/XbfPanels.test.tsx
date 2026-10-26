@@ -387,11 +387,13 @@ it("a face picked on a STEP's page opens Quick Edit with its reference, named or
   const box = () => screen.queryByRole('region', { name: 'Quick Edit' });
   const { rerender } = render(<StepQuickEdit ids={[]} />);
   expect(box()).toBeNull();
-  // A named face, a face by its number, the part: each is a reference, which opens the box with its chip.
-  for (const id of ['i0/face/7', 'i0/face/3', 'i0']) {
+  // A named face, a face by its number, the part: each is a reference, which opens the box with its chip,
+  // named by the part (the one part: a face's chip shows its kind and number, its name the part's).
+  for (const [id, shown] of [['i0/face/7', 'face 7'], ['i0/face/3', 'face 3'], ['i0', BRACKET.slice(0, 15).trimEnd()]]) {
     rerender(<StepQuickEdit ids={[id]} />);
     expect(box(), id).not.toBeNull();
-    expect(box()!.textContent, id).toContain(BRACKET);
+    const chip = box()!.querySelector('[data-quick-edit-ref] button')!;
+    expect([chip.getAttribute('aria-label')!.startsWith(BRACKET), chip.textContent!.startsWith(shown)], id).toEqual([true, true]);
   }
 });
 

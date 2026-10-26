@@ -84,7 +84,8 @@ const FEATURES = new Set(['assembly', 'declared_mesh', 'kinematics', 'animation'
 // What a person used in a CAD view (`cadgen/analytics.py`: `CONTROLS`, the page's own in `@text-to-cad/ui`'s
 // `usage/controls.js`): a closed list of names the page chose, never a value typed or a file's.
 export const CONTROLS = new Set([
-  // The tools on the strip, each one a mode that stays on (its seconds counted), and Preview.
+  // The tools on the strip, each one a mode that stays on (its seconds counted), and Preview; Explode
+  // and Clip are popovers from their tiles, no mode, counted as used each time one opens (no seconds).
   'select', 'pencil', 'shapes', 'measure', 'explode', 'clip', 'preview',
   // Select's and Measure's filters.
   'select_filter_all', 'select_filter_parts', 'select_filter_faces', 'select_filter_edges', 'select_filter_position',

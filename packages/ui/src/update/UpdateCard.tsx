@@ -54,7 +54,7 @@ export function UpdateCard({ id, notice, send, copy, onLink, onClose }: {
     </div>
     <p id={`${id}-text`} className="text-xs text-muted-foreground">{t("update.description")}</p>
     <div className="relative rounded-sm bg-muted" data-update-prompt="">
-      <p className="select-text py-1 pl-2 pr-8 font-mono text-xs text-foreground">{notice.prompt}</p>
+      <p className="select-text py-1 pl-2 pr-8 font-mono text-xs text-foreground [overflow-wrap:anywhere]">{notice.prompt}</p>
       <TooltipHint content={state.copied ? t("update.copied") : t("update.copy")} side="bottom">
         <Button variant="ghost" size="icon-xs" className="absolute right-1 top-1 size-6 text-muted-foreground hover:bg-background hover:text-foreground"
           aria-label={state.copied ? t("update.copied") : t("update.copy")} disabled={state.busy || state.copied} onClick={() => void copyPrompt()}>

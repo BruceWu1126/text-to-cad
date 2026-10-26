@@ -30,7 +30,6 @@ export default {
   "navbar.forward": "進む",
   "navbar.fileActions": "ファイルの操作",
   "navbar.fullSize": "フルサイズ",
-  "navbar.openInBrowser": "ブラウザで開く",
 
   "file.copyPath": "パスをコピー",
   "file.revealFinder": "Finder で表示",

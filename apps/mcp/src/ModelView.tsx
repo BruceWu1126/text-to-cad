@@ -11,6 +11,7 @@ import { frameClipboard } from './host/clipboard';
 import type { LiveRegistry } from './host/live';
 import { createChatPromptContext, type ChatReach } from './host/prompt';
 import type { Launch } from './host/server';
+import { CardCorner } from './CardCorner';
 import type { ViewSync } from './host/sync';
 import { TUNNEL_ORIGIN } from './host/tunnel';
 
@@ -23,14 +24,16 @@ export interface ViewReporter {
 }
 
 /**
- * One view: the shared CAD viewer over this host — the model a launch names, by its absolute path,
+ * One view: the shared CAD viewer over this host, alone (`chrome: "bare"`): no navbar, the host's
+ * frame being the navigation. What the navbar would carry that this host still has, Full size and
+ * the update, is its corner (`CardCorner`) at the view's top-right — the model a launch names, by its absolute path,
  * or with none, the home (the library, and Open). A view browses from its model's folder, shows
  * what is opened in place, and adds what it shows to the library. Everything differs by data —
  * what a Quick Edit can do in the chat, whether the view has a home — never by where the view is.
  * Codex's file handler (`surface: file`, `alone`) shows its file alone: the host's own file tree is
  * its navigation.
  */
-export default function ModelView({ launch, sequence, alone = false, bridge, client, tunnel, tabStore, live, links, colorScheme, theme, locale, language, platform, reporter, sync, chat, appSettings, update, fullSize, openInBrowser }: {
+export default function ModelView({ launch, sequence, alone = false, bridge, client, tunnel, tabStore, live, links, colorScheme, theme, locale, language, platform, reporter, sync, chat, appSettings, update, fullSize }: {
   launch: Launch; sequence: number; bridge: Bridge; tabStore: TabStore; live: LiveRegistry; links: ViewerLinks;
   /**
    * The view shows the one file its host opened, and nothing else (Codex's file handler): no home,
@@ -54,12 +57,10 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
   chat: ChatReach;
   /** This app's on/off settings, in the app menu: analytics. */
   appSettings?: readonly AppSetting[];
-  /** The update button, first in the navbar and on the home, while this install is behind. */
+  /** The update notice, in the corner under Full size, over a file and on the home, while this install is behind. */
   update?: ReactNode;
-  /** Inline, the card's way to full size, where the host can show it so: in the navbar, before the view's controls and Open in browser, over a file and on the home. */
+  /** Inline, the card's way to full size, where the host can show it so: first in the corner, over a file and on the home. */
   fullSize?: ReactNode;
-  /** The view's page in the person's browser, where the engine gives one: last in the navbar, over every file and on the home. */
-  openInBrowser?: ReactNode;
 }) {
   // Codex's file handler shows its file alone: the host's own file tree is its navigation, so it
   // has neither the home nor the explorer (a source that cannot list or search offers none).
@@ -129,9 +130,15 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
     environment: { colorScheme, locale, platform },
   }), [client, source, fileActions, promptContext, promptFiles, links, colorScheme, locale, platform]);
 
+  // The corner: over a file, the host's notice at the viewport's top-right (Quick Edit under it); over
+  // the home, which has no viewport, the same place over the page.
+  const corner = <CardCorner fullSize={fullSize} update={update} />;
   // The file on screen joins the library every CAD view shares, with its picture.
-  return <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={navigate}
-    onShown={path => { if (path) void client.changeRecents({ action: 'open', path }).catch(() => {}); }}
-    library={library} appSettings={appSettings} colorScheme={theme} language={language} update={update} fullSize={fullSize} openInBrowser={openInBrowser} history={viewerHistory}
-    onThumbnail={(png, pictured) => client.keepThumbnail(png, pictured)} />;
+  return <>
+    <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={navigate} chrome="bare"
+      onShown={path => { if (path) void client.changeRecents({ action: 'open', path }).catch(() => {}); }}
+      library={library} appSettings={appSettings} colorScheme={theme} language={language} notice={file ? corner : null} history={viewerHistory}
+      onThumbnail={(png, pictured) => client.keepThumbnail(png, pictured)} />
+    {file || !(fullSize || update) ? null : <div className="pointer-events-none absolute right-2 top-2 z-30 w-[min(20rem,calc(100%-1rem))]" data-home-corner="">{corner}</div>}
+  </>;
 }

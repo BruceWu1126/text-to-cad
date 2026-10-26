@@ -158,6 +158,8 @@ function xbfSelectionChips({ scene, tree, resource, selectedIds, facts, onRemove
     if (!scene || !selectedIds.length) return { references: EMPTY, chips: EMPTY };
     const { referenceOf, nodeSelector, elementSelector, copyOf, nodeCopy } = referencing({ tree, resource });
     const partName = id => tree.nodes.get(id)?.label || scene.describePart(id)?.name || id;
+    // A document of one part names it already: its element chips say their kind and number alone.
+    const onePart = new Set(tree.roots.flatMap(root => root.leafPartIds || [])).size === 1;
     const chips = [];
     const references = [];
     const runs = new Map();
@@ -203,11 +205,13 @@ function xbfSelectionChips({ scene, tree, resource, selectedIds, facts, onRemove
         if (chip.members.length === 1) {
           const [{ element }] = chip.members;
           return { ...shared, label: `${name} · ${chip.kind} ${element.ordinal}`,
-            compact: { name, kind: chip.kind, number: String(element.ordinal) },
+            compact: onePart ? { kind: chip.kind, number: String(element.ordinal), words: `${chip.kind} ${element.ordinal}` }
+              : { name, kind: chip.kind, number: String(element.ordinal) },
             card: <MeasurementRows rows={xbfMeasurementRows(chip.kind, facts.get(element.id))} /> };
         }
         return { ...shared, label: `${name} · ${chip.members.length} ${PLURAL[chip.kind]}`,
-          compact: { name, kind: chip.kind, count: chip.members.length },
+          compact: onePart ? { kind: chip.kind, count: chip.members.length, words: `${chip.members.length} ${PLURAL[chip.kind]}` }
+            : { name, kind: chip.kind, count: chip.members.length },
           card: chip.members.map(({ element }) => {
             const [, value, unit] = xbfMeasurementRows(chip.kind, facts.get(element.id))[0] || [];
             return <InfoRow key={element.id} label={`${chip.kind} ${element.ordinal}`}><MonoValue>{value === undefined ? "—" : `${formatNumber(value)} ${unit}`}</MonoValue></InfoRow>;
