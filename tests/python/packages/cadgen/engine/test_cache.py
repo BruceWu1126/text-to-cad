@@ -352,6 +352,36 @@ class CacheTest(unittest.TestCase):
         self.assertIn("the engine's cache holds the model's key, 1 body loaded, nothing ran", done.stdout)
         self.assertNotIn("the body ran", done.stderr)
 
+    def generation(self, stdout: str, after: str | None = None) -> str:
+        """The generation a page reads of the document a run printed (its `view:` page's version); with
+        ``after``, what a page waiting a moment on that generation is answered."""
+        import urllib.parse
+        import urllib.request
+
+        view = urllib.parse.urlsplit(next(line.split()[1] for line in stdout.splitlines() if line.strip().startswith("view:")))
+        link = urllib.parse.parse_qs(view.query)["token"][0]
+        wait = f"?after={after}&wait=1" if after else ""
+        request = urllib.request.Request(f"{view.scheme}://{view.netloc}/__cad/api/doc{view.path}/version{wait}",
+                                         headers={"Authorization": f"Bearer {link}"})
+        with urllib.request.urlopen(request, timeout=30) as answer:
+            return json.loads(answer.read())["version"]
+
+    def test_two_unchanged_runs_leave_one_generation_and_the_page_idle(self) -> None:
+        # A document is what its last run made: nothing ran, nothing changed, so a page has nothing to fetch.
+        self.said()
+        self.assertIn("the body ran", self.run_script("cube").stderr)
+        first = self.run_script("cube")
+        self.assertIn("nothing ran", first.stdout)
+        version = self.generation(first.stdout)
+        second = self.run_script("cube")
+        self.assertIn("nothing ran", second.stdout)
+        self.assertEqual(self.generation(second.stdout), version)
+        self.assertEqual(self.generation(second.stdout, after=version), version, "a waiting page is not woken")
+        self.said(width=5.0)
+        edited = self.run_script("cube")
+        self.assertIn("the body ran", edited.stderr)
+        self.assertNotEqual(self.generation(edited.stdout), version, "an edit is a new generation")
+
     def corrupt(self, ident: str) -> None:
         """The document's cache file broken where its bytes are read, its size and its head (the writer
         and the closure a build compares) as they were: what an earlier test of this left behind."""

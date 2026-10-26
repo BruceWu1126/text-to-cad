@@ -138,14 +138,25 @@ class ViewerExportHttpTest(unittest.TestCase):
             self.assertIn('attachment;', headers['content-disposition'])
             self.assertEqual(http(f"/__cad/exports/{job['id']}/release", {})[0], 200)
             self.assertEqual(http(f"/__cad/exports/{job['id']}/file")[0], 410)
-            # Even a rebuild with identical geometry is a different displayed generation.
-            api.build_script(script, ['export_http'])
-            payload['requestId'] = 'http-export-request-0002'
-            _, _, data = http('/__cad/exports', payload)
-            job = json.loads(data)
-            while job['state'] in ('queued', 'running'):
-                _, _, data = http(f"/__cad/exports/{job['id']}?after={job['sequence']}&wait=25")
+            def export(request_id):
+                payload['requestId'] = request_id
+                _, _, data = http('/__cad/exports', payload)
                 job = json.loads(data)
+                while job['state'] in ('queued', 'running'):
+                    _, _, data = http(f"/__cad/exports/{job['id']}?after={job['sequence']}&wait=25")
+                    job = json.loads(data)
+                return job
+
+            # A document is what its last run made: a run of the unchanged script ran nothing, so its
+            # generation stands and an export of the displayed revision is still that document.
+            api.build_script(script, ['export_http'])
+            self.assertEqual(json.loads(http('/api/doc/' + doc + '/version')[2])['version'], source['revision'])
+            job = export('http-export-request-0002')
+            self.assertEqual(job['state'], 'ready', job)
+            # An edit is a new generation: the revision the page showed is refused.
+            script.write_text(script.read_text(encoding='utf-8').replace('Box(2, 3, 4)', 'Box(2, 3, 5)'), encoding='utf-8')
+            api.build_script(script, ['export_http'])
+            job = export('http-export-request-0003')
             self.assertEqual(job['state'], 'failed', job)
             self.assertIn('source changed', job['error'])
             _, _, data = http('/api/doc/' + doc + '/version')

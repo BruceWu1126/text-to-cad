@@ -19,7 +19,8 @@ for one declaration: another declaration's build or hand-over
 of that key is refused, naming the one that holds it (``claimed``). A served
 document's generation (``version``, what a page shows and the viewer's export compares) is a token
 of its build's own, never a counter that starts again, so an id and a generation never name two
-documents across a restart; its record's ``revision`` is its build closure's key (``revision``), the
+documents across a restart; a run of the same closure in the worker holding the last build keeps it
+(nothing ran, nothing changed: no page fetches it again); its record's ``revision`` is its build closure's key (``revision``), the
 same for the same code, so a build that changed nothing rewrites no record.
 
 What a restart opens at once is the cache's (``cache``): each ``model`` and ``shape`` document's
@@ -105,7 +106,6 @@ class Models:
                 ident, source = report.get("id"), report.get("source")
                 if not report.get("ok") or not ident or not source:
                     continue
-                version = secrets.token_hex(8)  # this build's generation: a rebuild is a new one
                 recorded = revision(report)
                 facts, before = self.facts(ident, report, recorded)
                 try:
@@ -118,6 +118,14 @@ class Models:
                     continue
                 with self.lock:
                     old = self.records.get(ident)
+                    # This build's generation. A document is what its last run made: a run of the same
+                    # code and inputs (its closure's key) in the worker that holds the last build made
+                    # that document again -- nothing ran, or it ran to the same bytes -- so its generation
+                    # stands, no page fetches it again and an export of it is still the one displayed.
+                    # Anything else is a new generation.
+                    same = (old is not None and old.get("worker") is worker and old.get("revision") == recorded
+                            and not recorded.startswith("t"))
+                    version = old["version"] if same else secrets.token_hex(8)
                     self.records[ident] = {"id": ident, "source": source, "worker": worker,
                                            "program": program or (old or {}).get("program") or source["script"],
                                            "kind": "model",
