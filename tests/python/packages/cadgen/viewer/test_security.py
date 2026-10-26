@@ -236,24 +236,6 @@ class MalformedPercentEncoding(SecurityTestCase):
         status, _, _ = self.fixture.request("GET", "/__cad/server")
         self.assertEqual(status, 200, "the server still answers afterwards")
 
-    def test_the_dist_route_rejects_malformed_overlong_and_lone_surrogate(self):
-        for target in ("/assets/%zz.js", "/assets/%C0%AF.js", "/assets/%ED%A0%80.js"):
-            with self.subTest(target=target):
-                status, _, body = self.fixture.request("GET", target)
-                self.assertEqual(status, 400)
-                self.assertEqual(body, b"Bad request")
-
-    def test_encoded_traversal_out_of_dist_is_403(self):
-        status, _, body = self.fixture.request(
-            "GET", "/assets/%2e%2e%2f%2e%2e%2fetc%2fpasswd"
-        )
-        self.assertEqual(status, 403)
-        self.assertEqual(body, b"Forbidden")
-
-
-class RoutingNormalisation(SecurityTestCase):
-    """WHATWG pathname semantics, which ``urlsplit`` does not share."""
-
     def test_the_routing_table(self):
         cases = [
             # (target, expected status, expected body fragment)

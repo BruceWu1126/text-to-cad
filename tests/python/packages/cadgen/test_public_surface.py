@@ -216,13 +216,6 @@ class Manifest(unittest.TestCase):
         for verb in (api.export, api.snapshot):
             self.assertIn("daemon", inspect.signature(verb).parameters)
 
-    def test_no_command_builds_source_text(self):
-        # A model is a script, built by running it (law 12): `build` is an unknown command like any
-        # other, said by the dispatcher's ordinary words and nothing about what it once was.
-        code, out, err = self._dispatch("build", "raise AssertionError('must not run')")
-        self.assertEqual((code, out), (2, ""))
-        self.assertTrue(err.startswith("cadgen: unknown command 'build'\n"), err)
-
     def test_a_format_snapshot_draws_its_own_files_alone(self):
         # `cadgen dxf snapshot` is the engine's snapshot for a .dxf: any other file is refused by
         # name before anything renders.

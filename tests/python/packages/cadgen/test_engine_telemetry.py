@@ -213,20 +213,26 @@ class ThroughTheDaemonTest(unittest.TestCase):
     daemon: who asked, the worker started for the first build, and the one that died under a build."""
 
     def setUp(self) -> None:
-        self.folder = Path(tempfile.mkdtemp(prefix="engine-telemetry-models-")).resolve()
-        self.engine = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
-        self.state = self.folder / "state"
+        # One folder of the test's own holds the models, the engine's door, its state and its cache.
+        self.root = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.folder, self.state = self.root / "models", self.root / "state"
+        self.folder.mkdir()
         self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_STATE_DIR": str(self.state),
-                                          "CADGEN_ENGINE_DIR": str(self.engine),
+                                          "CADGEN_ENGINE_DIR": str(self.root / "engine"),
+                                          "CADGEN_CACHE_DIR": str(self.root / "cache"),
                                           "CADGEN_ENGINE_MESH": "inline", "DO_NOT_TRACK": "", "CADGEN_TELEMETRY": ""},
                                          self.addCleanup)
         self.addCleanup(self._stop)
         analytics.choose(True, by="cli", path=self.state / "settings.json")
 
     def _stop(self) -> None:
-        self.run_in("-m", "cadgen.engine", "stop")
-        shutil.rmtree(self.folder, ignore_errors=True)
-        shutil.rmtree(self.engine, ignore_errors=True)
+        """The test's engine stopped, and every process it started -- the daemon, its workers, its
+        render processes -- gone before its folder is removed; one left is killed and fails the test."""
+        stopped = self.run_in("-m", "cadgen.engine", "stop")
+        left = engine_daemon.survivors(self.env)
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertEqual(left, [], "no engine process of this test's survives it")
 
     def run_in(self, *args: str) -> subprocess.CompletedProcess:
         return engine_daemon.run([sys.executable, *args], cwd=self.folder, env=self.env)

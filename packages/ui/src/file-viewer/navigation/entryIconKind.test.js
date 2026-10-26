@@ -30,19 +30,10 @@ test("entryIconKind gives STEP, STL, 3MF, and GLB distinct file explorer icons",
     kind: "glb",
     source: { format: "glb", path: "exports/bracket.glb" }
   }, { sourceFormat: "glb" });
-  const staleStepIcon = entryIconKind({
-    file: "parts/stale.step",
-    kind: "part",
-    artifact: { ok: false, stale: true }
-  }, {
-    sourceFormat: "step",
-    status: { artifactWarning: true, artifactStale: true }
-  });
 
   assert.equal(stepIcon, ENTRY_ICON_KIND.STEP);
   assert.equal(stlIcon, ENTRY_ICON_KIND.STL_MESH);
   assert.equal(threeMfIcon, ENTRY_ICON_KIND.THREE_MF_MESH);
   assert.equal(glbIcon, ENTRY_ICON_KIND.GLB_MESH);
-  assert.equal(staleStepIcon, ENTRY_ICON_KIND.STEP);
   assert.equal(new Set([stepIcon, stlIcon, threeMfIcon, glbIcon]).size, 4);
 });

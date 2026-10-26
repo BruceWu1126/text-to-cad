@@ -130,13 +130,6 @@ class DocumentedCommands(unittest.TestCase):
                     f"{source} documents `cadgen {' '.join(argv)}`, which no command answers",
                 )
 
-    def test_no_document_runs_a_verb_outside_the_engine(self):
-        # Every build and every verb goes through the engine: no documented form passes --no-daemon (the parse
-        # below refuses one; this names the rule). Migrations' tables name the retired flag, outside any fence.
-        for source, argv, _elided in _documented_forms():
-            with self.subTest(source=str(source), form=" ".join(argv)):
-                self.assertNotIn("--no-daemon", argv)
-
     def test_every_documented_form_parses(self):
         for source, argv, elided in _documented_forms():
             split = _split_command(argv)

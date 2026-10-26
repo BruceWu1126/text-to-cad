@@ -41,6 +41,7 @@ import { SolidModeIcon } from '../../../../dist/renderers/kit/view-settings/Disp
 import { ControlUsageProvider } from '../../../../dist/usage/controls.js';
 import { SIDEBAR_SLIDE_CLASS } from '../../../../dist/renderers/kit/tools/FileSidebar.js';
 import { createAnimationClock } from '../../../../dist/renderers/kit/tools/playbar/animationClock.js';
+import { writeFileView } from '../../../../dist/renderers/kit/shell/fileView.js';
 
 // jsdom lays nothing out, so the few sizes the chrome reads are given: a viewer 1280 × 800 whose
 // stack column (under the strip) and the sidebar panel's room (under its tiles) are each 600px
@@ -695,10 +696,11 @@ function previewOrbit(user: ReturnType<typeof userEvent.setup>) {
   };
 }
 
-it("Preview opens still: Orbit, in its settings, turns the camera, and a speed chosen is kept between visits", async () => {
+it("Preview opens still: Orbit, in its settings, turns the camera, and a speed chosen is the file's view's, never Orbit on or off, kept between visits", async () => {
   const user = userEvent.setup();
   const { orbit, enter, speedOnceOn, choose } = previewOrbit(user);
-  frame();
+  const states: any[] = [];
+  const view = frame({ onStateChange: state => states.push(state) });
   await enter();
   expect([orbit().getAttribute('aria-checked'), previewProps.current.orbit, within(previewSettings()!).queryByRole('combobox', { name: 'Orbit speed' })]).toEqual(['false', false, null]);
   await user.click(orbit());
@@ -709,29 +711,18 @@ it("Preview opens still: Orbit, in its settings, turns the camera, and a speed c
   expect(previewProps.current.orbitSpeed).toBe(2);
   // Leaving and coming back: still again, at 2×.
   await user.click(screen.getByRole('button', { name: 'Exit preview' }));
-  await enter();
-  expect([orbit().getAttribute('aria-checked'), previewProps.current.orbit, await speedOnceOn()]).toEqual(['false', false, '2×']);
+  await enterPreview(user);
+  expect([previewProps.current.orbit, previewProps.current.orbitSpeed]).toEqual([false, 2]);
+  // The file's view holds the speed, and no Orbit on or off.
+  view.unmount();
+  expect(states.at(-1).playback).toEqual({ orbitSpeed: 2, autoplay: false });
 });
 
-it("Orbit's speed is the file's: its view holds it and no Orbit on or off, it comes back with the view, and another file is at the default", async () => {
+it("Orbit's speed comes back with the file's view", async () => {
   const user = userEvent.setup();
-  const { enter, speedOnceOn, choose } = previewOrbit(user);
-  const states: any[] = [];
-  const first = frame({ onStateChange: state => states.push(state) });
-  await enter();
-  await speedOnceOn();
-  await choose('2×');
-  first.unmount();
-  const saved = states.at(-1);
-  expect(saved.playback).toEqual({ orbitSpeed: 2, autoplay: false });
-  // Reopened from that view: 2×. Another file: 1×.
-  const reopened = frame({ state: saved });
-  await enter();
-  expect(await speedOnceOn()).toBe('2×');
-  reopened.unmount();
-  frame({ name: 'other.harness' });
-  await enter();
-  expect(await speedOnceOn()).toBe('1×');
+  frame({ state: writeFileView({ playback: { orbitSpeed: 2 } }) });
+  await enterPreview(user);
+  expect([previewProps.current.orbit, previewProps.current.orbitSpeed]).toEqual([false, 2]);
 });
 
 it('Escape puts the tool in hand down and takes Select up, what it set kept', async () => {

@@ -160,11 +160,9 @@ async function newPage() {
             url: location.href,
             text: document.body.innerText.slice(0, 24000),
             buttons: [...document.querySelectorAll('button')].filter(node => node.getBoundingClientRect().height).map(node => ({ label: node.getAttribute('aria-label'), text: node.innerText.slice(0, 120), disabled: node.disabled })).slice(0, 120),
-            placement: window.__cadModelPlacement,
             canvases: [...document.querySelectorAll('canvas')].map(canvas => canvas.getBoundingClientRect().toJSON()),
             camera: window.__cadCamera?.(),
             load: window.__cadViewerLoad,
-            badge: document.querySelector('[data-file-status]')?.dataset.fileStatus,
           })),
           new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('diagnostic state timed out')), 3000); }),
         ]);
@@ -222,11 +220,9 @@ async function openFile(page, file) {
   return canvas;
 }
 
-/** The staged model's bounds, from whichever seam its renderer publishes. */
+/** The staged model's bounds, from the stage its renderer publishes (`__cadStage`). */
 const MODEL_BOUNDS_SCRIPT = () => {
   window.__cadModelBounds = () => {
-    const placement = window.__cadModelPlacement;
-    if (Array.isArray(placement?.boundsMin)) return { min: placement.boundsMin, max: placement.boundsMax };
     const stage = window.__cadStage?.();
     return stage?.bounds ? { min: stage.bounds.min, max: stage.bounds.max } : null;
   };
@@ -419,10 +415,17 @@ async function settledCameraFrame(page, { projection = null, stage, timeout = 60
   // must be loaded, and the camera at rest by the controller's own account
   // (`settling`: no gesture, transition, held key or damping still moves it),
   // for every framing assertion. The frame the poll runs in was drawn at rest.
+  // And the camera is framed for the box the canvas has on screen: leaving Preview brings the
+  // navbar back a commit after the tools view returns, and the viewport answers that resize (its
+  // refit of the orthographic half-height) in its ResizeObserver, which runs after this frame's
+  // animation callbacks -- so a poll can see the new box with the camera still framed for Preview's
+  // taller one. Its projection's aspect is the viewport's once the resize is handled.
   const ready = await page.waitForFunction(({ want }) => {
     const canvas = document.querySelector("canvas");
     const camera = window.__cadCamera?.();
+    const box = canvas ? canvas.clientWidth / canvas.clientHeight : NaN;
     if (!canvas || !camera || camera.settling !== false || (want && camera.projection !== want)
+      || !(Math.abs(Number(camera.aspect) - box) <= 1e-6 * box)
       || canvas.closest("[aria-busy]")?.getAttribute("aria-busy") !== "false"
       || getComputedStyle(canvas).visibility !== "visible"
       || document.querySelector("[data-viewer-transition]")

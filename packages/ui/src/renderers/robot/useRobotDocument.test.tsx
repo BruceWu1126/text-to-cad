@@ -91,5 +91,6 @@ it('a mesh that cannot be fetched fails the robot, and an SRDF cadgen could not 
   expect(lonely.result.current.error.alert.title).toBe('No URDF beside this SRDF');
   expect(lonely.result.current.error.alert.message).toContain('in “/models” for exactly one .urdf file with the same <robot name>');
   expect(lonely.result.current.error.alert.message).toContain("no .urdf in /models declares <robot name='nobody'>");
+  expect(lonely.result.current.error.alert.recovery).toMatch(/^Put the robot's URDF next to this SRDF/);
   expect(lonely.result.current.error.message).toContain('/models/lonely.srdf');
 });

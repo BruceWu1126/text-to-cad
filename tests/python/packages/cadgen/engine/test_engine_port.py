@@ -6,7 +6,6 @@ engine that nothing uses is retired: an older one's wherever it serves, and neve
 
 from __future__ import annotations
 
-import errno
 import json
 import os
 import shutil
@@ -79,7 +78,10 @@ class EnginePortTest(unittest.TestCase):
         self.root = Path(tempfile.mkdtemp(prefix="eport-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.addCleanup(shutil.rmtree, self.root, True)
         environment = {key: value for key, value in os.environ.items() if key != "CADGEN_ENGINE_PORT"}
+        # The test's own default port (``daemon.default_port``): nothing here touches the machine's 3245.
+        self.default = free_port()
         self.env = engine_daemon.watched({**environment, "PYTHONPATH": str(SRC),
+                                          "CADGEN_ENGINE_DEFAULT_PORT": str(self.default),
                                           "CADGEN_ENGINE_DIR": str(self.root / "engine"),
                                           "CADGEN_STATE_DIR": str(self.root / "state"),
                                           "CADGEN_CACHE_DIR": str(self.root / "cache")},
@@ -209,8 +211,9 @@ class EnginePortTest(unittest.TestCase):
         from cadgen.engine import daemon, registry
 
         environment = {key: value for key, value in os.environ.items() if key != "CADGEN_ENGINE_PORT"}
-        with mock.patch.dict(os.environ, {**environment, "CADGEN_ENGINE_DIR": self.env["CADGEN_ENGINE_DIR"], **extra},
-                             clear=True), mock.patch.object(daemon, "DEFAULT_PORT", default), \
+        with mock.patch.dict(os.environ, {**environment, "CADGEN_ENGINE_DIR": self.env["CADGEN_ENGINE_DIR"],
+                                          "CADGEN_ENGINE_DEFAULT_PORT": str(default), **extra},
+                             clear=True), \
                 mock.patch.object(registry, "FACTORY", lambda: registry.Registry(self.root / "state")):
             server, where = daemon.bind("127.0.0.1", None, Listener)
         self.addCleanup(server.socket.close)
@@ -221,14 +224,14 @@ class EnginePortTest(unittest.TestCase):
 
         return registry.Registry(self.root / "state").engine(daemon._tag(versioned=False)).get("port")
 
-    def test_the_default_port_is_3245(self) -> None:
-        from cadgen.engine.daemon import DEFAULT_PORT
+    def test_the_default_port_is_3245_and_taken_when_free(self) -> None:
+        from cadgen.engine import daemon
 
-        self.assertEqual(DEFAULT_PORT, 3245)
-        if listening(DEFAULT_PORT):
-            self.skipTest("3245 is another engine's on this machine")
-        self.assertEqual(self.launch()["port"], 3245)
-        self.assertIn("serving http://127.0.0.1:3245 (the default port)", self.cli("status").stdout)
+        self.assertEqual(daemon.DEFAULT_PORT, 3245)
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DEFAULT_PORT": ""}):
+            self.assertEqual(daemon.default_port(), 3245)
+        self.assertEqual(self.launch()["port"], self.default)  # the test's stand-in for 3245, free
+        self.assertIn(f"serving http://127.0.0.1:{self.default} (the default port)", self.cli("status").stdout)
 
     def test_a_port_another_program_holds_is_refused_by_name_and_leaves_no_engine(self) -> None:
         port = held_port(self)
@@ -284,34 +287,24 @@ class EnginePortTest(unittest.TestCase):
         self.assertRegex(bad.stderr.strip(), r"^[^:]*server: --port must be between 0 and 65535$", "its name said once")
 
     def test_a_held_default_rolls_to_the_next_free_port_says_so_once_and_keeps_it(self) -> None:
-        mine = not listening(3245)
-        if mine:  # else another program's already: the same roll
-            holder = socket.socket()
-            self.addCleanup(holder.close)
-            try:
-                holder.bind(("127.0.0.1", 3245))
-            except OSError as error:  # another engine or suite took the machine's default port first
-                if error.errno != errno.EADDRINUSE:
-                    raise
-                mine = False
-            else:
-                holder.listen(1)
-        done = self.started()
+        default = held_port(self)  # the test's default, held by this process: another program's
+        extra = {"CADGEN_ENGINE_DEFAULT_PORT": str(default)}
+        done = self.started(**extra)
         self.assertEqual(done.returncode, 0, done.stderr)
         port = json.loads(done.stdout)["port"]
-        self.assertTrue(3245 < port <= 3245 + 64, port)
-        pid = str(os.getpid()) if mine and os.name != "nt" else r"\d+"  # the system names the holder
-        said = rf"3245 is held by (.+pid {pid}\)|another process); this installation serves on {port} and keeps it"
+        self.assertTrue(default < port <= default + 64, port)
+        pid = str(os.getpid()) if os.name != "nt" else r"\d+"  # the system names the holder
+        said = rf"{default} is held by (.+pid {pid}\)|another process); this installation serves on {port} and keeps it"
         self.assertRegex(done.stderr, rf"(?m)^cadgen: {said}$")
         self.assertEqual(self.record()["port"], port)
-        status = self.cli("status").stdout
-        self.assertRegex(status, rf"serving http://127\.0\.0\.1:{port} \(rolled from 3245 because .+ holds it\)")
+        status = self.cli("status", **extra).stdout
+        self.assertRegex(status, rf"serving http://127\.0\.0\.1:{port} \(rolled from {default} because .+ holds it\)")
         self.assertRegex(status, rf"(?m)^  {said}$")
         self.stop()
-        again = self.started()  # the remembered port: the same links, nothing said
+        again = self.started(**extra)  # the remembered port: the same links, nothing said
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertEqual(json.loads(again.stdout)["port"], port)
-        self.assertNotIn("3245 is held", again.stderr + self.cli("status").stdout)
+        self.assertNotIn(f"{default} is held", again.stderr + self.cli("status", **extra).stdout)
 
     def test_the_installation_port_returns_to_a_free_default_and_rolls_from_a_held_remembered_one(self) -> None:
         from cadgen.engine import daemon, registry

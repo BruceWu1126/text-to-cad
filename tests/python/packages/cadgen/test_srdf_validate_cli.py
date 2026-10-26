@@ -6,9 +6,6 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("skills/srdf/scripts")
 
 from cadgen.cli import srdf_validate as cli
 

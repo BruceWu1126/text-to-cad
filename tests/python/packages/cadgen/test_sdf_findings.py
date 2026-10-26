@@ -11,9 +11,6 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("skills/sdf/scripts")
 
 from cadgen.sdf_validation import validate_sdf_xml
 

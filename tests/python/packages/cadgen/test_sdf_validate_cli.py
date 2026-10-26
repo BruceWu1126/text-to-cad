@@ -8,9 +8,6 @@ import tempfile
 import unittest
 from unittest import mock
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("skills/sdf/scripts")
 
 from cadgen.cli import sdf_validate as cli
 

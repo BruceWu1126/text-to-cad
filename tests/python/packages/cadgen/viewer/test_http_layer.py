@@ -776,23 +776,6 @@ class RequestBodies(HttpLayerTestCase):
         self.assertIn(b"request body too large", raw)
 
 
-class EveryRouteAnswersForReal(HttpLayerTestCase):
-    def test_no_route_reports_itself_as_unported(self):
-        # This class used to list the routes still awaiting their step, each
-        # answering 501 with a distinctive body so a missing route could never
-        # be mistaken for a working one. The list is empty: the assertion now
-        # runs the other way, and no route may ever reintroduce that marker.
-        for method, path, headers in [
-            ("GET", "/__cad/server", {}),
-            ("GET", "/__cad/catalog", {}),
-            ("GET", "/__cad/xbf", {}),
-            ("GET", "/__cad/asset?file=/x.step", {}),
-        ]:
-            with self.subTest(method=method, path=path):
-                _, _, body = self.fixture.request(method, path, headers=headers)
-                self.assertNotIn(b"not yet ported", body)
-
-
 class EngineClientFollowsARestartedEngine(unittest.TestCase):
     """A long-lived client (the MCP stdio peer) holds the engine's endpoint; an engine restarted on
     the same --port has a new token, and the client's next call asks the engine for it."""

@@ -192,10 +192,6 @@ test("measure ruler entry-change gate stays null without state", () => {
   assert.equal(measureRulerStateForChange(null), null);
 });
 
-test("measure ruler reset returns null", () => {
-  const draft = applyMeasureRulerPick(null, FIRST_PICK);
-});
-
 test("cancelMeasureRulerDraft drops the in-flight measurement and nothing else", () => {
   // Escape while measuring cancels the pending pick; committed measurements and
   // the tool itself are untouched.

@@ -94,6 +94,8 @@ STANDBY = "standby"
 # request's own), then ``CADGEN_ENGINE_PORT``, then the installation's remembered port, then this
 # (``bind``). Held by another program, the engine rolls to the next free port and remembers it.
 DEFAULT_PORT = 3245
+# A test suite's own "default" (``default_port``), so no test binds or rolls from the machine's 3245.
+DEFAULT_PORT_ENV = "CADGEN_ENGINE_DEFAULT_PORT"
 # How many ports past a held default (or remembered) one the engine tries before any free one.
 PORTS_TRIED = 64
 # How long the engine waits for another installation's engine it asked to stop to let its port go.
@@ -1058,6 +1060,13 @@ def environment_port() -> int | None:
     return port
 
 
+def default_port() -> int:
+    """``DEFAULT_PORT``, or the port ``CADGEN_ENGINE_DEFAULT_PORT`` names (1-65535): a test's seam,
+    the default it holds or frees without touching the machine's 3245."""
+    given = os.environ.get(DEFAULT_PORT_ENV, "").strip()
+    return int(given) if given.isdigit() and 0 < int(given) <= 65535 else DEFAULT_PORT
+
+
 def _held(error: OSError) -> bool:
     """Whether a bind failed because the port is someone else's (in use, or reserved on Windows)."""
     import errno
@@ -1300,22 +1309,23 @@ def _installation_port(host: str, remembered: int | None, token: str,
     free (a remembered other port forgotten: the one time a link changes), else the remembered port,
     else -- that one held by anything but another installation's engine nothing uses -- the next
     free port, ``PORTS_TRIED`` above it and then any (``_roll``), remembered from then on."""
-    first = remembered or DEFAULT_PORT
-    if first != DEFAULT_PORT:
-        server = _free(host, DEFAULT_PORT, token, listen)
+    default = default_port()
+    first = remembered or default
+    if first != default:
+        server = _free(host, default, token, listen)
         if server is not None:
             return server, {"source": "default",
-                            "notice": f"back on the default port {DEFAULT_PORT}: links made on {first} no longer work"}
+                            "notice": f"back on the default port {default}: links made on {first} no longer work"}
     try:
         server = _listen(host, first, "default", token, listen)
     except PortHeld as refusal:
         server = _roll(host, first, token, listen)
-        return server, {"source": "rolled", "because": refusal.who if first == DEFAULT_PORT else _who(DEFAULT_PORT),
+        return server, {"source": "rolled", "because": refusal.who if first == default else _who(default),
                         "notice": f"{first} is held by {refusal.who}; this installation serves on {server.port} "
                                   "and keeps it"}
-    if first == DEFAULT_PORT:
+    if first == default:
         return server, {"source": "default"}
-    return server, {"source": "rolled", "because": _who(DEFAULT_PORT)}
+    return server, {"source": "rolled", "because": _who(default)}
 
 
 def _free(host: str, port: int, token: str, listen: Callable[[int, str], Any]) -> Any:
@@ -2275,7 +2285,7 @@ class Daemon:
                                                              "portSource": self.port_source,
                                                              "portBecause": self.port_because,
                                                              "portNotice": self.port_notice,
-                                                             "defaultPort": DEFAULT_PORT,
+                                                             "defaultPort": default_port(),
                                                              "documents": self.server.listing(every=True),
                                                              "memory": self.server.memory()},
                 "models": self.models.listing(),
