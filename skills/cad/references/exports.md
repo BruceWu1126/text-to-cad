@@ -15,8 +15,9 @@ converted for use in a model. 2D DXF belongs to `$dxf`.
 
 ## A file is an action
 
-A model's document lives in the engine; a file is written from it when asked, as File →
-Export writes one in a desktop CAD program. No code changes, nothing rebuilds, and every
+A model's document lives in the engine; a file is written from it when asked. In the
+viewer, Export is the download button at the navbar's right: pick a format, the engine
+prepares the file, the browser saves it. No code changes, nothing rebuilds, and every
 destination is written from the document the engine holds, by its suffix:
 
 ```bash
@@ -48,9 +49,7 @@ A written file is a detached copy, whether `cadgen export`, `exports.py` or a fi
 decorator (`@step`, `@glb`, ...) wrote it: nothing ties it to the model, nothing reruns
 it, and a viewer page of it follows the file's bytes on disk, never the model. It
 changes only when it is written again. Give the person its path; open it only when they
-ask to see it ([Show the model](../SKILL.md#show-the-model)). In the viewer an export is
-a browser download: the person picks a format under Export, the engine prepares the file
-and the browser saves it.
+ask to see it ([Show the model](../SKILL.md#show-the-model)).
 
 ## Standing deliverables: `exports.py`
 

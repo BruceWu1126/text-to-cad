@@ -9,8 +9,9 @@ license: MIT
 Provenance: maintained in [earthtojake/text-to-cad](https://github.com/earthtojake/text-to-cad).
 Use the installed local skill files for the current interface.
 
-The viewer page is the open document, the script is its feature tree, running the
-script is the rebuild, and export is File → Export. A model is a Python function; running
+The viewer page is the open document, the script is its feature tree, and running the
+script is the rebuild. Export is the download button at the navbar's right: pick a
+format, the engine prepares the file, the browser saves it. A model is a Python function; running
 its script rebuilds it in cadgen's warm engine, and the page the person has open updates.
 Nothing is written to disk until someone asks for a file.
 

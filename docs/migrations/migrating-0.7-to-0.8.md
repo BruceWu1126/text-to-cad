@@ -24,8 +24,9 @@ what you did. Read it as a spec.
 Python function, but it is decorated `@model` and a run writes nothing: `python
 model.py` rebuilds the model in a warm engine, prints its document's id and a link to
 its page, and every page open on it updates. Think of the page as the open document, the
-script as its feature tree, running the script as the rebuild, and export as File →
-Export: `cadgen export <id> part.step` writes a file when you want one. Mates, couplings,
+script as its feature tree, and running the script as the rebuild. Export is the
+download button at the navbar's right: pick a format, the engine prepares the file, the
+browser saves it; `cadgen export <id> part.step` writes one from the command line. Mates, couplings,
 poses and JavaScript clips become build123d joints and STEP AP242's mechanism
 vocabulary in the model's body (`cadgen.ap242`), and showcase animations become a GLB's
 own channels (`cadgen.gltf`). Colours are sRGB hex. `import build123d as bd` is free
