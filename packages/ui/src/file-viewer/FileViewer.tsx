@@ -24,7 +24,7 @@ class RenderBoundary extends Component<{ children: ReactNode; title: string; onE
  * The complete file view: one file, by its absolute path, under the one navbar. Its only knowledge
  * of formats comes from registrations. With no file it shows the host's home.
  */
-export function FileViewer({ file, host, renderers, state, onStateChange, colorScheme, language, appSettings, update, fullSize, openInBrowser, history, recent, notice, navbarActions, overlay, onError, presentation }: FileViewerProps) {
+export function FileViewer({ file, host, renderers, state, onStateChange, colorScheme, language, appSettings, update, fullSize, openInBrowser, history, recent, notice, navbarActions, overlay, onError, presentation, chrome = "page" }: FileViewerProps) {
   // The language the host names (`environment.locale`): this frame's own strings, and everything
   // drawn under it (`I18nProvider`), the nodes the host hands it included.
   const locale = host.environment.locale;
@@ -119,9 +119,9 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
   // The navbar is drawn over every file and over the host's home — there only the logo's menu (no
   // Back to files), Back and Forward where the host keeps the view's history, and the host's update,
   // Full size and Open in browser, each where it is over a file — never over a view drawn small with no chrome
-  // (`compact`: an offscreen picture).
+  // (`compact`: an offscreen picture), and never where the host asks for the view alone (`chrome: "bare"`).
   const home = loaded.status === "empty" && Boolean(presentation?.home);
-  const navbar = (Boolean(path) || home) && !appearance.compact;
+  const navbar = (Boolean(path) || home) && !appearance.compact && chrome !== "bare";
   return <I18nProvider locale={locale}><ViewerMobileContext.Provider value={mobile}><ViewerHostContext.Provider value={host}><ViewerElementContext.Provider value={viewerElement}><div className="text-to-cad-file-viewer text-ui font-normal flex h-full min-h-0 min-w-0 flex-col overflow-hidden" ref={bindElement} data-viewer-layout={mobile ? "mobile" : "desktop"} tabIndex={-1}>
     {navbar ? (path
       ? <ViewerNavbar onHome={host.navigation.home} menu={menu} history={history} file={navigationPath ?? path} name={shown?.file.name} kind={model ? "model" : "file"} explorer={explorer} recent={recentMenu} fileMenu={fileMenu} trailing={trailing} actions={navbarActions} update={update} fullSize={fullSize} openInBrowser={openInBrowser} controlsRef={setNavbarSlot} />

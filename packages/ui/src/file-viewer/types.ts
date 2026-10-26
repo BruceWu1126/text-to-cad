@@ -206,6 +206,12 @@ export interface FileViewerProps {
   recent?: { list(): Promise<readonly RecentDocument[]> };
   /** The host's notice, shown at the viewport's top-right once the file is on screen (`RendererViewProps.notice`). */
   notice?: ReactNode;
+  /**
+   * The chrome around the view: `"page"` (the default) draws the navbar over every file and over the
+   * home; `"bare"` draws none, the view alone, for a host whose own frame is the navigation (the CAD
+   * app's cards and tabs). The renderer's own controls over the viewport are the same either way.
+   */
+  chrome?: "page" | "bare";
   onError?: (error: Error) => void;
   presentation?: {
     /** The host's home, shown with no file: a page of its own under the navbar, which has only its logo's menu, Back and Forward, update, Full size and Open in browser there. */

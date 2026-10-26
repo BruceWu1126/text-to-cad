@@ -57,6 +57,25 @@ it('draws the navbar over every file, named by its name, and over the home with 
   expect(screen.queryByRole('menuitem', { name: 'Back to files' })).toBeNull();
 });
 
+it('draws no navbar where the host asks for the view alone (`chrome: "bare"`): over a file or the home, whatever it hands the navbar', async () => {
+  const homed = { ...host, links: viewerLinks({ version: '0.7.4' }), navigation: { openFile() {}, home() {} } };
+  const everything = { host: homed, chrome: 'bare', history: { canGoBack: true, canGoForward: false, back() {}, forward() {} },
+    update: <button type="button" aria-label="Update to 0.7.5" />, fullSize: <button type="button" aria-label="Full size" />,
+    navbarActions: <button type="button" aria-label="Export" />, presentation: { home: <p>home</p> } };
+  open(everything);
+  await screen.findByText('shown');
+  expect([navbar(), document.querySelector('[data-file-name]'), screen.queryAllByRole('button').map(button => button.getAttribute('aria-label'))]).toEqual([null, null, []]);
+  cleanup();
+  open({ ...everything, file: null });
+  await screen.findByText('home');
+  expect([navbar(), screen.queryAllByRole('button')]).toEqual([null, []]);
+  cleanup();
+  // The default is the page's chrome: the same props draw the navbar.
+  open({ ...everything, chrome: undefined });
+  await screen.findByText('shown');
+  expect(labels()).toEqual(['Menu', 'Back', 'Forward', 'Update to 0.7.5', 'Full size', 'Export']);
+});
+
 it('keeps the right of the navbar for the host\'s update button and Full size, then hands the renderer a box for its own view controls, then the host\'s Open in browser, last; a view shown small has no navbar and no box', async () => {
   // A renderer that draws its view controls into the box it is handed (the CAD viewer's Display
   // and Preview), and over its view where it is handed none.
