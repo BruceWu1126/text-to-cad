@@ -123,11 +123,10 @@ export default {
   "home.deleteAria": "Delete {name}",
   "home.fileUnavailable": "File unavailable",
   "home.openingAria": "Opening {name}",
-  "home.editedJustNow": "Edited just now",
-  "home.editedMinutesAgo": "Edited {n}m ago",
-  "home.editedHoursAgo": "Edited {n}h ago",
-  "home.editedDaysAgo": "Edited {n}d ago",
-  "home.editedOn": "Edited {date}",
+  "home.ageNow": "now",
+  "home.ageMinutes": "{n}m ago",
+  "home.ageHours": "{n}h ago",
+  "home.ageDays": "{n}d ago",
 
   // The update button and its card.
   "update.label": "Update",

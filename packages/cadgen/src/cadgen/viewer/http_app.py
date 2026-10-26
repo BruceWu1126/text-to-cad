@@ -608,8 +608,9 @@ class CadApp:
         """A change to the library -- ``{action, path, png?}``, a file by its absolute path, a model by
         its id (its entry's ``path``) -- answered with the library as it now is. A file opened is
         also counted for analytics; a model's entry is the engine's, written when it builds, so only
-        pinning, its picture and its deletion (``delete``: the document, ``delete_document``) change
-        it. A file's entry is removed (``remove``), its file untouched."""
+        when a page opened it (``open``), pinning, its picture and its deletion (``delete``: the
+        document, ``delete_document``) change it. A file's entry is removed (``remove``), its file
+        untouched."""
         from .recents import thumbnail_png
 
         if type(payload) is not dict:
@@ -623,7 +624,9 @@ class CadApp:
                 self.delete_document(ident)
             elif action == "thumbnail":
                 self.recents.thumbnail(ident, thumbnail_png(payload.get("png")))
-            elif action != "open":
+            elif action == "open":
+                self.recents.opened(ident)
+            else:
                 raise ValueError(f"unknown recents action {action!r}")
             return self._recents_payload()
         path = absolute_path(payload.get("path"))

@@ -3,11 +3,12 @@ import { Box, LayoutGrid, List, Pin, Search, Trash2, X } from "lucide-react";
 import { Button } from "../primitives/button.jsx";
 import { Input } from "../primitives/input.jsx";
 import { Spinner } from "../primitives/spinner.jsx";
-import { english, useI18n } from "../i18n/index.js";
+import { useI18n } from "../i18n/index.js";
 import type { LibraryLayout } from "../tab-store/tabRecord.js";
 import wordmark from "../assets/logo-texttocad.svg";
 import { HomeLinks } from "../file-viewer/navigation/NavbarLinks.jsx";
 import type { ViewerLinks } from "../host/types.js";
+import { ageLabel, lastActivity } from "../lib/age.js";
 
 /** A model someone opened: kept by the host, which also says where it is shown from. */
 export interface LibraryModel {
@@ -16,16 +17,16 @@ export interface LibraryModel {
   name: string;
   /** Where it is, as the person reads it. */
   folder: string;
-  /** When it was last opened, in seconds. */
-  opened: number;
-  /** When the file was last changed on disk, in seconds; null when it is gone. */
-  modified: number | null;
+  /** When a page last opened it, in seconds; null for a model no page has opened. */
+  opened: number | null;
+  /** When it last changed, in seconds: a file's time on disk (null once it is gone), a model's run. */
+  updated: number | null;
   pinned: boolean;
   /** Gone from where it was: listed, but not openable. */
   missing: boolean;
   /** A picture's name, for `thumbnail()`. */
   thumbnail: string | null;
-  /** When the picture was taken, in seconds; null without one. A file changed since has an old one. */
+  /** When the picture was taken, in seconds; null without one. A document updated since has an old one. */
   pictured: number | null;
   /**
    * What it is: a document built from code, a model's or a shape's (`model`, `shape`), which a row
@@ -40,7 +41,7 @@ export const deletes = (model: LibraryModel) => model.kind === "model" || model.
 
 /** A host's library of models: read, changed and opened through the host. */
 export interface ModelLibrarySource<Model extends LibraryModel = LibraryModel> {
-  /** Pinned first, then most recently opened. */
+  /** Pinned first, then by last activity (`lastActivity`), newest first. */
   list(): Promise<readonly Model[]>;
   /** `delete` for a model's row (`deletes`), `remove` for a file's. */
   change(action: "pin" | "unpin" | "remove" | "delete", model: Model): Promise<readonly Model[]>;
@@ -49,31 +50,13 @@ export interface ModelLibrarySource<Model extends LibraryModel = LibraryModel> {
   open(model: Model): Promise<void>;
 }
 
-/** A card wants a picture: it has none, or its file changed since it was taken. */
+/** A card wants a picture: it has none, or it was updated (a file written, a model run) since it was taken. */
 export const wantsPicture = (model: LibraryModel) => !model.missing && (!model.thumbnail
-  || (model.modified !== null && model.pictured !== null && model.modified > model.pictured));
+  || (model.updated !== null && model.pictured !== null && model.updated > model.pictured));
 
 export function filterModels<Model extends LibraryModel>(items: readonly Model[], query: string): Model[] {
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   return items.filter(item => words.every(word => item.path.toLowerCase().includes(word)));
-}
-
-const MONTHS = { month: "short", day: "numeric" } as const;
-/**
- * "Edited 16h ago": how long since the file changed, in the largest unit that is at least one, in
- * the language of `t` (the view's; English by default), an older date written as `locale` writes it.
- */
-export function editedLabel(modified: number | null, now = Date.now(),
-  t: (key: string, params?: Record<string, unknown>) => string = english, locale?: string): string {
-  if (modified === null || !Number.isFinite(modified)) return "";
-  const seconds = Math.max(0, (now - modified * 1000) / 1000);
-  if (seconds < 60) return t("home.editedJustNow");
-  if (seconds < 3600) return t("home.editedMinutesAgo", { n: Math.floor(seconds / 60) });
-  if (seconds < 86400) return t("home.editedHoursAgo", { n: Math.floor(seconds / 3600) });
-  if (seconds < 7 * 86400) return t("home.editedDaysAgo", { n: Math.floor(seconds / 86400) });
-  const date = new Date(modified * 1000);
-  const sameYear = date.getFullYear() === new Date(now).getFullYear();
-  return t("home.editedOn", { date: date.toLocaleDateString(locale, sameYear ? MONTHS : { ...MONTHS, year: "numeric" }) });
 }
 
 const message = (failure: unknown) => failure instanceof Error ? failure.message : String(failure);
@@ -106,7 +89,7 @@ function Thumbnail<Model extends LibraryModel>({ item, load, seen, opening = fal
     });
     observer.observe(element.current);
     return () => { active = false; observer.disconnect(); };
-  }, [item.path, item.thumbnail, item.missing, item.modified, load]);
+  }, [item.path, item.thumbnail, item.missing, item.updated, load]);
   return <span className="cad-library-thumbnail" ref={element}>
     {image ? <img src={image} alt="" /> : <Box strokeWidth={1} aria-hidden="true" />}
     {opening ? <span className="cad-library-opening"><Spinner aria-label={t("home.openingAria", { name: item.name })} /></span> : null}
@@ -135,7 +118,7 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
  * wordmark is centred at its top over its byline, then the host's links — GitHub, Discord and X,
  * as icon links, which the app menu also holds — then "Recent" with its search and its grid/list
  * switch, both there with no models yet too; then the models, pinned first, as solid cards (a
- * picture over the name and when the file was edited) or as rows. A card can be pinned (its pin
+ * picture over the name and how long ago it was last opened or updated) or as rows. A card can be pinned (its pin
  * filled); a row can also be removed. It is the library alone: nothing opens a file from here but
  * its cards. It is drawn on the navbar's colour.
  *
@@ -168,7 +151,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
   const refresh = useCallback(() => current.current.list().then(next =>
     setItems(previous => previous && JSON.stringify(previous) === JSON.stringify(next) ? previous : next)), []);
   // Read on mount, again every couple of seconds while the home is up (a model rebuilt meanwhile
-  // is edited later than its picture, and is pictured again), and when the page is shown.
+  // is updated later than its picture, and is pictured again), and when the page is shown.
   useEffect(() => {
     void refresh().catch(failure => { setItems([]); setError(message(failure)); });
     const again = () => { void refresh().catch(() => {}); };
@@ -181,9 +164,9 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
   draw.current = picture;
   const asked = useRef(new Set<string>());
   const [queue, setQueue] = useState<readonly Model[]>([]);
-  // Once per card and edit: a file edited again wants its picture again.
+  // Once per card and update: a file written or a model run again wants its picture again.
   const seen = useCallback((item: Model) => {
-    const key = JSON.stringify([item.path, item.modified]);
+    const key = JSON.stringify([item.path, item.updated]);
     if (!draw.current || asked.current.has(key) || !wantsPicture(item)) return;
     asked.current.add(key);
     setQueue(waiting => [...waiting, item]);
@@ -230,7 +213,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
       ? <Button variant="ghost" size="icon-xs" aria-label={t("home.deleteAria", { name: item.name })} onClick={() => change("delete", item)}><Trash2 aria-hidden="true" /></Button>
       : <Button variant="ghost" size="icon-xs" aria-label={t("home.removeAria", { name: item.name })} onClick={() => change("remove", item)}><X aria-hidden="true" /></Button> : null}
   </div>;
-  const status = (item: Model) => item.missing ? t("home.fileUnavailable") : editedLabel(item.modified, now, t, locale);
+  const status = (item: Model) => item.missing ? t("home.fileUnavailable") : ageLabel(lastActivity(item), now, t, locale);
   const models = layout === "list"
     ? <ul className="cad-library-list" aria-label={t("home.filesAria")}>{shown.map(item => <li key={item.path} className="cad-library-row" data-missing={item.missing || undefined} data-opening={opening === item.path || undefined}>
       <button type="button" className="cad-library-open" disabled={item.missing} aria-label={t("home.openAria", { name: item.name })} aria-busy={opening === item.path || undefined} onClick={() => open(item)}>

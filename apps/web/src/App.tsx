@@ -94,12 +94,13 @@ export default function App({ client, server, tabStore, notice = null, language:
     window.addEventListener('popstate', sync);
     return () => window.removeEventListener('popstate', sync);
   }, []);
-  // Once the catalog has the document: the page is named after it, and a file joins the library every
-  // CAD view shares (counted, as a code, for analytics). A model, known by its id alone, does not.
+  // Once the catalog has the document: the page is named after it, and the library every CAD view
+  // shares says it was opened now: a file joins it (counted, as a code, for analytics), and a model,
+  // known by its id alone and in it since its run, has its opened time.
   const shown = useCallback((path: string | null) => {
     const entry = path ? client.entryOf?.(path) : null;
     document.title = path ? `CAD | ${entry?.name || path.split('/').pop()}` : 'CAD';
-    if (path && !DOCUMENT_ID.test(path)) void client.changeRecents({ action: 'open', path }).catch(() => {});
+    if (path) void client.changeRecents({ action: 'open', path }).catch(() => {});
   }, [client]);
   // The home: the library every CAD view shares. A card's picture is the server's, by name.
   const library = useMemo<ModelLibrarySource>(() => ({

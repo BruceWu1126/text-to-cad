@@ -28,14 +28,18 @@ export interface CadServerInfo {
 }
 /** A model in the library every CAD view shares (`GET /__cad/recents`): times in seconds. */
 export interface CadRecent {
-  path: string; name: string; folder: string; opened: number;
-  /** When the file last changed; null once it is gone. */
-  modified: number | null;
+  path: string; name: string; folder: string;
+  /** When a page last opened it; null for a model no page has opened. */
+  opened: number | null;
+  /** When it last changed: a file's time on disk (null once it is gone), a model's run. */
+  updated: number | null;
   pinned: boolean; missing: boolean;
   /** The picture's name, for `thumbnail()`, and when it was taken. */
   thumbnail: string | null; pictured: number | null;
   /** A CAD file on disk, or a document built from code: a model's, or a shape a program handed over. */
   kind: 'file' | 'model' | 'shape';
+  /** A model's or a shape's: the script it was built from (a shape's home). */
+  script?: string;
 }
 /** Whether the person's usage stats are sent (`/__cad/analytics`; nothing asks): `reason` says who decided. */
 export interface CadConsent { sharing: boolean; reason: 'default' | 'untold' | 'choice' | 'environment' | 'unavailable'; policy: string; saved?: boolean }

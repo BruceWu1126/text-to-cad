@@ -1,14 +1,15 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 // The built module: its Settings is the renderer kit's, whose JSX lives in .js files this runner does not compile.
-import { ModelLibrary, editedLabel } from '../../dist/library/ModelLibrary.js';
+import { ModelLibrary } from '../../dist/library/ModelLibrary.js';
+import { ageLabel, lastActivity } from '../../dist/lib/age.js';
 import type { LibraryModel, ModelLibrarySource } from './ModelLibrary.js';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const NOW = Date.UTC(2026, 8, 30, 12);
 const model = (name: string, extra: Partial<LibraryModel> = {}): LibraryModel =>
-  ({ path: `/work/parts/${name}`, name, folder: '/work/parts', opened: 1, modified: Date.now() / 1000 - 16 * 3600, pinned: false, missing: false, thumbnail: null, pictured: null, ...extra });
+  ({ path: `/work/parts/${name}`, name, folder: '/work/parts', opened: 1, updated: Date.now() / 1000 - 16 * 3600, pinned: false, missing: false, thumbnail: null, pictured: null, ...extra });
 
 function library(models: LibraryModel[], extra: Partial<ModelLibrarySource> = {}): ModelLibrarySource {
   return {
@@ -93,11 +94,11 @@ it('stands placeholders where the models will be while the list is read, and ope
   expect(source.open).toHaveBeenCalledTimes(2);
 });
 
-it('names a card by its file and when it was edited, and switches between a grid and a list', async () => {
+it('names a card by its file and how long ago it was last active, and switches between a grid and a list', async () => {
   const layouts: string[] = [];
   const { rerender } = render(<ModelLibrary library={library([model('bracket.step')])} layout="grid" onLayoutChange={layout => layouts.push(layout)} />);
   const card = await screen.findByRole('button', { name: 'Open bracket.step' });
-  expect(card.textContent).toMatch(/^bracket\.stepEdited \d+h ago$/);
+  expect(card.textContent).toMatch(/^bracket\.step16h ago$/);
   expect(card.textContent).not.toContain('/work');
   expect(screen.getByRole('button', { name: 'Grid' }).getAttribute('aria-pressed')).toBe('true');
   fireEvent.click(screen.getByRole('button', { name: 'List' }));
@@ -123,11 +124,29 @@ it('deletes a model from its row, in the word Delete, and removes a file from th
   expect(screen.queryByRole('button', { name: 'Delete bracket.step' })).toBeNull();
 });
 
-it('says how long ago a file changed in the largest unit that is at least one', () => {
-  const ago = (seconds: number) => editedLabel(NOW / 1000 - seconds, NOW);
-  expect([ago(20), ago(5 * 60), ago(16 * 3600), ago(3 * 86400)]).toEqual(['Edited just now', 'Edited 5m ago', 'Edited 16h ago', 'Edited 3d ago']);
-  expect(ago(40 * 86400)).toMatch(/^Edited \S/);
-  expect(editedLabel(null, NOW)).toBe('');
+it('says how long ago with no verb, in the largest unit that is at least one, then the short date', () => {
+  const ago = (seconds: number) => ageLabel(NOW / 1000 - seconds, NOW);
+  expect([ago(20), ago(5 * 60), ago(2 * 3600), ago(3 * 86400)]).toEqual(['now', '5m ago', '2h ago', '3d ago']);
+  expect(ago(40 * 86400)).toBe(new Date(NOW - 40 * 86400_000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+  expect(ageLabel(null, NOW)).toBe('');
+});
+
+it('dates a row by its last activity, the later of when it was opened and updated', () => {
+  expect(lastActivity({ opened: 10, updated: 20 })).toBe(20);
+  expect(lastActivity({ opened: 30, updated: 20 })).toBe(30);
+  expect(lastActivity({ opened: null, updated: 20 })).toBe(20);
+  expect(lastActivity({ opened: null, updated: null })).toBeNull();
+});
+
+it('shows a model by its run and a file by its opening, whichever came last', async () => {
+  const hour = 3600, now = Date.now() / 1000;
+  const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
+  render(<ModelLibrary library={library([
+    model('arm', { path: id, kind: 'model', opened: null, updated: now - 2 * hour }),
+    model('plate.step', { opened: now - 5 * hour, updated: now - 30 * hour }),
+  ])} />);
+  expect((await screen.findByRole('button', { name: 'Open arm' })).textContent).toBe('arm2h ago');
+  expect(screen.getByRole('button', { name: 'Open plate.step' }).textContent).toBe('plate.step5h ago');
 });
 
 it('shows why an open failed where the library shows it', async () => {
@@ -142,8 +161,8 @@ it('asks for a picture of each card on screen that has none or an old one, one a
   const edited = Date.now() / 1000 - 60;
   let models = [
     model('new.step'),
-    model('current.step', { thumbnail: 'current.png', pictured: edited + 30, modified: edited }),
-    model('old.step', { thumbnail: 'old.png', pictured: edited - 3600, modified: edited }),
+    model('current.step', { thumbnail: 'current.png', pictured: edited + 30, updated: edited }),
+    model('old.step', { thumbnail: 'old.png', pictured: edited - 3600, updated: edited }),
     model('gone.step', { missing: true }),
   ];
   const list = vi.fn(async () => models);
@@ -164,17 +183,17 @@ it('asks for a picture of each card on screen that has none or an old one, one a
 });
 
 // The home stays up while an agent rebuilds a model it lists: the card is pictured again.
-it('pictures a card again when its file is edited while the home is up', async () => {
+it('pictures a card again when it is updated while the home is up', async () => {
   const edited = Date.now() / 1000 - 60;
-  let models = [model('plate.step', { thumbnail: 'plate.png', pictured: edited + 30, modified: edited })];
+  let models = [model('plate.step', { thumbnail: 'plate.png', pictured: edited + 30, updated: edited })];
   const list = vi.fn(async () => models);
   const picture = vi.fn(async () => true);
   render(<ModelLibrary library={library(models, { list })} picture={picture} />);
   await screen.findByRole('button', { name: 'Open plate.step' });
   expect(picture).not.toHaveBeenCalled();
-  models = [{ ...models[0], modified: edited + 60 }];
+  models = [{ ...models[0], updated: edited + 60 }];
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
-  await waitFor(() => expect(picture.mock.calls.map(([item]) => item.modified)).toEqual([edited + 60]));
+  await waitFor(() => expect(picture.mock.calls.map(([item]) => item.updated)).toEqual([edited + 60]));
 });
 
 it('reads its list again every couple of seconds while the home is up, keeping the cards when nothing changed', async () => {

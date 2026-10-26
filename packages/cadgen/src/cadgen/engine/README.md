@@ -971,7 +971,8 @@ restart too), or a token of the build's own where the closure has none. A served
 generation (its structure's `version`, which a page waits on and the viewer's export compares)
 is a token of its build's own: a rebuild is a new generation, and no generation is a counter that
 a restart starts again. Recents is the registry's view (`cadgen.viewer.recents`): pinned
-first, then the most recently opened or built.
+first, then by last activity, the later of a row's `opened` (a page opened it) and `updated` (a
+file's time on disk, a model's run), each row carrying both; a model's script is never read for it.
 
 **The cache.** For every model and shape document -- never a file's, which is its own
 file -- the engine keeps `documents/<id>/document.xbf` in the cache folder its host names

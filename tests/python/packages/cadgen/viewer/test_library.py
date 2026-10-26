@@ -108,6 +108,10 @@ class LibraryTest(unittest.TestCase):
         [entry] = json.loads(body)["recents"]
         self.assertEqual((status, entry["path"], entry["kind"], entry["name"]), (200, ident, "model", "cube"),
                          "the home opens it by its id: /<id>")
+        self.assertEqual((entry["updated"], entry["opened"]), (1.0, None), "updated is its run's; no page opened it yet")
+        [entry] = self.change("open", ident)[1]["recents"]
+        self.assertEqual(entry["updated"], 1.0)
+        self.assertGreater(entry["opened"], 1.0, "a page's open of its id says when")
         self.assertTrue(self.change("pin", ident)[1]["recents"][0]["pinned"])
         cached = self.tmp / "cache" / "documents" / ident / "document.xbf"
         cached.parent.mkdir(parents=True)
