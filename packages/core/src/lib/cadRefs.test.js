@@ -5,139 +5,71 @@ import test from "node:test";
 
 import {
   buildCadRefToken,
-  elementRef,
   engineSelectorText,
-  isElementName,
   isEngineRefFile,
   isEngineSelector,
-  isNativeCadSelector,
+  isLabelSelector,
   isOccurrenceToken,
-  normalizeCadRefSelectors,
-  parseCadRefSelector,
   parseCadRefToken,
   parseEngineRef,
-  sortCadRefSelectors,
-  spellEngineRefs,
-  splitElementRef
+  spellEngineRefs
 } from "./cadRefs.js";
 
 // The same fixture the Python suites read. It is the only thing keeping the engine grammar's two
 // parsers -- this module and cadgen/engine/refs.py -- from drifting, which the grammars had
-// already done four copies deep before it existed; a STEP's cases pin this module alone.
+// already done four copies deep before it existed.
 const FIXTURE = JSON.parse(
   readFileSync(fileURLToPath(new URL("./cadRefs.parity.json", import.meta.url)), "utf8")
 );
 
-const O1 = "o:4b1f9e2a7c03";
-const O2 = "o:0a9e8d7c6b5f";
-const F = "f:9d2e8c1b5a70";
-const E = "e:12ab34cd56ef";
-const V = "v:fedcba987654";
-// Names by lineage: the feature that made the element, its number there, and a split piece's.
-const NAMED = ["f:dial.extrude1.3", "e:dial.make_box1.6;Gf:dial.cut1+f:dial.make_cylinder2.1", "v:dial.cut1~5d1e0c2f9a3b;U2:dial.fillet1"];
-
-test("every selector case parses as the shared fixture says", () => {
-  for (const testCase of FIXTURE.selectorCases) {
-    const parsed = parseCadRefSelector(testCase.selector);
-    assert.ok(parsed, `${testCase.selector} should parse`);
-    assert.equal(parsed.selectorType, testCase.selectorType, testCase.selector);
-    assert.equal(parsed.occurrenceId, testCase.occurrenceId, testCase.selector);
-    assert.equal(parsed.element ?? "", testCase.element, testCase.selector);
-    assert.equal(parsed.canonical, testCase.canonical, testCase.selector);
-    assert.equal(parsed.label ?? "", testCase.label ?? "", testCase.selector);
+test("an element name is what the engine's naming says it is, and anything else is an owner's segment", () => {
+  const { names, notNames } = FIXTURE.elementNameCases;
+  assert.ok(names.length && notNames.length);
+  for (const name of names) assert.deepEqual(parseEngineRef(`#part/${name}`).selectors[0].element, name, name);
+  for (const text of notNames) {
+    const [selector] = parseEngineRef(`#part/${text}`).selectors;
+    assert.equal(selector.element, null, text);
+    assert.equal(selector.owner.at(-1).text, text, text);
   }
 });
 
-test("comma lists inherit as the shared fixture says", () => {
-  for (const testCase of FIXTURE.inheritanceCases) {
-    assert.deepEqual(
-      normalizeCadRefSelectors(testCase.input),
-      testCase.expected,
-      `${testCase.input}: ${testCase.why || ""}`
-    );
+test("every document the engine draws is named in its grammar: an .xbf, a STEP, a document by its id", () => {
+  for (const path of ["/w/kit.xbf", "/w/KIT.XBF", "/w/kit.step", "/w/Kit.STEP", "/w/kit.stp", "6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"]) {
+    assert.ok(isEngineRefFile(path), path);
+  }
+  for (const path of ["/w/kit.xbf.py", "/w/kit.step.py", "/w/arm.urdf", "/w/plate.stl", "/w/plate.dxf", "", "6F1C2A4E-1B2C-5D3E-8F4A-0123456789AB"]) {
+    assert.ok(!isEngineRefFile(path), path);
   }
 });
 
-// The parse ordering: token and name forms are tried before the label form, so neither is a label.
-test("token and name selectors never take the label branch", () => {
-  for (const selector of [O1, `${O1}/${F}`, `${O1}/${E}`, `${O1}/${V}`, F, E, V, ...NAMED, ...NAMED.map(name => `${O2}/${name}`), "m1", "m17"]) {
-    const parsed = parseCadRefSelector(selector);
-    assert.equal(parsed.label ?? "", "", `${selector} must not be read as a label`);
+test("any other file names a pick by a label, its token a comma list that stops at a blank", () => {
+  for (const selector of ["upper_arm", "h2F", "glb:3", "_base", "cast_rim:5spoke_2", "m1"]) assert.ok(isLabelSelector(selector), selector);
+  for (const selector of ["", " upper_arm", "5spoke", "eye#shank", "not a label", "a/b", "a,b", "arm-link", null]) assert.ok(!isLabelSelector(selector), String(selector));
+  const cases = [
+    ["/robots/arm.urdf#upper_arm", "/robots/arm.urdf", ["upper_arm"]],
+    ["/robots/arm.urdf#base_link,upper_arm,base_link note", "/robots/arm.urdf", ["base_link", "upper_arm"]],
+    ["   bracket.dxf#h2F", "bracket.dxf", ["h2F"]],
+    ["plate.stl#", "plate.stl", []],
+    ["#glb:3", "", ["glb:3"]],
+    ["\"/robots/my arm (2).urdf\"#base_link", "/robots/my arm (2).urdf", ["base_link"]]
+  ];
+  for (const [text, cadPath, selectors] of cases) {
+    const parsed = parseCadRefToken(text);
+    assert.equal(parsed.cadPath, cadPath, text);
+    assert.deepEqual(parsed.selectors, selectors, text);
   }
-});
-
-test("mates stay opaque even though they match the label shape", () => {
-  for (const selector of ["m1", "m2", "M3"]) {
-    assert.equal(parseCadRefSelector(selector).selectorType, "opaque", selector);
-  }
-});
-
-test("isNativeCadSelector accepts every token and name form and rejects labels and the retired grammar", () => {
-  for (const selector of [O1, `${O1}/${F}`, `${O1}/${E}`, `${O1}/${V}`, F, E, V, ...NAMED, `${O1}/${NAMED[0]}`, "m1", "M3"]) {
-    assert.ok(isNativeCadSelector(selector), selector);
-  }
-  for (const selector of ["eye_shank", `servo_end_plate/${F}`, `bracket/${NAMED[0]}`, "", "not a selector!", "o1", "o1.2",
-    "o1.2.f7", "f45", "s2", "o:4B1F9E2A7C03", "f:dial.extrude1", "f:dial.extrude1.3.2", "f:dial.make_box1.6;G:dial.cut1"]) {
-    assert.ok(!isNativeCadSelector(selector), selector);
-  }
-  assert.ok(isOccurrenceToken(O1) && !isOccurrenceToken(F) && !isOccurrenceToken("o1.2"));
-  for (const name of [F, E, V, ...NAMED]) assert.ok(isElementName(name), name);
-  for (const value of [O1, "f7", "f:dial.extrude1", "f:9d2e8c1b5a70.3", "x:dial.extrude1.3", "f:dial.cut3~5d1e", "e:a.b.1;Gf:c.d1+f:9d2e8c1b5a70"]) assert.ok(!isElementName(value), value);
-});
-
-test("an element ref is composed and split by one rule", () => {
-  assert.equal(elementRef(O1, F), `${O1}/${F}`);
-  assert.deepEqual(splitElementRef(`${O1}/${F}`), { owner: O1, element: F });
-  assert.deepEqual(splitElementRef(`#base_plate/${E}`), { owner: "base_plate", element: E });
-  assert.deepEqual(splitElementRef(`${O1}/${NAMED[1]}`), { owner: O1, element: NAMED[1] });
-  assert.equal(splitElementRef(O1), null);
-  assert.equal(splitElementRef(`${O1}/s:9d2e8c1b5a70`), null);
-  assert.equal(splitElementRef("o1.2.f7"), null);
-});
-
-test("every token case parses as the shared fixture says", () => {
-  for (const testCase of FIXTURE.tokenCases) {
-    const parsed = parseCadRefToken(testCase.text);
-    if (testCase.selectors === null) {
-      assert.equal(parsed, null, `${testCase.text} should not be a token`);
-      continue;
-    }
-    assert.ok(parsed, `${testCase.text} should parse`);
-    assert.equal(parsed.cadPath, testCase.cadPath, testCase.text);
-    assert.deepEqual(parsed.selectors, testCase.selectors, testCase.text);
-  }
-});
-
-test("a token round-trips through buildCadRefToken", () => {
-  // What the viewer copies is what the grammar parses back, file prefix included.
-  assert.equal(buildCadRefToken({ cadPath: "plate.stl", selector: O1 }), `plate.stl#${O1}`);
-  assert.equal(buildCadRefToken({ selector: O1 }), `#${O1}`);
+  for (const text of ["plate.stl", "\"broken name.urdf#base_link", ""]) assert.equal(parseCadRefToken(text), null, text);
+  // Written as given, once each, in order; a path with a blank or a delimiter quoted.
+  assert.equal(buildCadRefToken({ cadPath: "/robots/arm.urdf", selectors: ["upper_arm", "base_link", "upper_arm"] }), "/robots/arm.urdf#upper_arm,base_link");
   assert.equal(buildCadRefToken({ cadPath: "plate.stl" }), "plate.stl#");
+  assert.equal(buildCadRefToken({ selector: "glb:3" }), "#glb:3");
   assert.equal(buildCadRefToken({}), "#");
-  assert.equal(
-    parseCadRefToken(buildCadRefToken({ cadPath: "a/b.step.py", selectors: [O1, F] })).cadPath,
-    "a/b.step.py"
-  );
-});
-
-test("selectors sort by occurrence, then occurrence before face before edge before vertex", () => {
-  assert.deepEqual(
-    sortCadRefSelectors([`${O1}/${V}`, `${O1}/${E}`, O1, `${O1}/${F}`, `${O2}/${F}`, O2]),
-    [O2, `${O2}/${F}`, O1, `${O1}/${F}`, `${O1}/${E}`, `${O1}/${V}`]
-  );
-});
-
-test("bare tokens carry no file prefix", () => {
-  for (const text of [`#${O1}`, `#${O1}/${F}`, `#${F}`, "#m1", "#", `#${O1},${F}`]) {
-    assert.equal(parseCadRefToken(text).cadPath, "", `${text} must carry no prefix`);
+  for (const cadPath of ["Hex Drive Screw (2).urdf", 'models/caf\u00e9 #1 "arm".urdf']) {
+    const token = buildCadRefToken({ cadPath, selectors: ["upper_arm", "base_link"] });
+    assert.deepEqual(parseCadRefToken(token), { token, cadPath, selectors: ["upper_arm", "base_link"] });
   }
-});
-
-test("imported file tokens quote and round-trip filename delimiters", () => {
-  for (const cadPath of ['Hex Drive Screw (2).STEP', 'models/café #1 "screw".STEP']) {
-    const token = buildCadRefToken({cadPath, selectors:[O2, O1]});
-    assert.deepEqual(parseCadRefToken(token), {token, cadPath, selectors:[O2, O1]});
-  }
+  // An older GLB names the nodes it places by an occurrence token.
+  assert.ok(isOccurrenceToken("o:4b1f9e2a7c03") && !isOccurrenceToken("o:4B1F9E2A7C03") && !isOccurrenceToken("o1.2"));
 });
 
 // A parsed engine selector as the fixture writes it: its owner's segments, a quoted one as
@@ -177,7 +109,7 @@ test("an .xbf's occurrences and elements are spelled as cadgen inspect answers t
   }
 });
 
-test("an .xbf's copied line is the engine's whole ref, round-tripped; a STEP's keeps its own grammar", () => {
+test("an engine document's copied line is the engine's whole ref, round-tripped, a STEP's as an .xbf's", () => {
   const cadPath = "/work/my parts/kit.xbf";
   const selectors = ["kit/hand/finger.2/face 7", "\"M3, M4\"/e:screw.body.2", "palm"];
   const token = buildCadRefToken({ cadPath, selectors });
@@ -188,10 +120,13 @@ test("an .xbf's copied line is the engine's whole ref, round-tripped; a STEP's k
   assert.deepEqual(parseCadRefToken("/w/kit.xbf#kit/v1.5 bracket/face 2").selectors, ["kit/v1.5 bracket/face 2"]);
   assert.deepEqual(parseCadRefToken("/w/kit.xbf#hand/finger.2,face 3").selectors, ["hand/finger.2", "hand/finger.2/face 3"]);
   assert.equal(parseCadRefToken("/w/kit.xbf#kit//face 1"), null);
-  assert.ok(isEngineRefFile("/w/KIT.XBF") && !isEngineRefFile("/w/kit.step") && !isEngineRefFile("/w/kit.xbf.step"));
   assert.ok(isEngineSelector("kit/\"M3, M4\"/face 1") && !isEngineSelector("a,b") && !isEngineSelector(" a") && !isEngineSelector(""));
-  // A STEP's token is unchanged: it stops at a blank, and its selectors sort.
-  assert.deepEqual(parseCadRefToken("/w/kit.step#o:4b1f9e2a7c03/f:dial.extrude1.3 note").selectors, ["o:4b1f9e2a7c03/f:dial.extrude1.3"]);
-  assert.equal(buildCadRefToken({ cadPath: "/w/kit.step", selectors: ["o:4b1f9e2a7c03/f:9d2e8c1b5a70", "o:4b1f9e2a7c03"] }),
-    "/w/kit.step#o:4b1f9e2a7c03,o:4b1f9e2a7c03/f:9d2e8c1b5a70");
+  // A STEP's line is read the same way: a part labelled with spaces, a face by its name or its number.
+  const step = "/w/L bracket.step";
+  const bracket = "L bracket 80 x 60 x 6 mm";
+  const named = `${bracket}/f:bracket_body.body_bcndnk~ba6e1714f88b`;
+  const stepToken = buildCadRefToken({ cadPath: step, selectors: [named, `${bracket}/face 4`] });
+  assert.equal(stepToken, `"${step}"#${named},${bracket}/face 4`);
+  assert.deepEqual(parseCadRefToken(stepToken), { token: stepToken, cadPath: step, selectors: [named, `${bracket}/face 4`] });
+  assert.deepEqual(parseCadRefToken(`/w/kit.STP#${bracket}/edge 2`).selectors, [`${bracket}/edge 2`]);
 });

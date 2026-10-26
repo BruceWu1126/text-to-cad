@@ -472,12 +472,11 @@ class ImportedNamesTest(NamingCase):
 
 class GrammarTest(unittest.TestCase):
     def test_the_engine_reads_element_names_as_the_viewer_s_grammar_does(self) -> None:
-        cases = json.loads(PARITY.read_text(encoding="utf-8"))["selectorCases"]
-        elements = [case["element"] for case in cases if case.get("element")]
-        self.assertTrue(elements)
-        for element in elements:
+        cases = json.loads(PARITY.read_text(encoding="utf-8"))["elementNameCases"]
+        self.assertTrue(cases["names"] and cases["notNames"])
+        for element in cases["names"]:
             self.assertIsNotNone(ELEMENT_NAME.fullmatch(element), element)
-        for text in ("f:a.b.c.1", "f:plate.relief", "x:plate.body.1", "f:plate.body.1;Q:plate.cut"):
+        for text in cases["notNames"]:
             self.assertIsNone(ELEMENT_NAME.fullmatch(text), text)
 
 

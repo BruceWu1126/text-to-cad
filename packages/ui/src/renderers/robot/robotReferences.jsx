@@ -1,11 +1,12 @@
 import { useMemo } from "react";
 import { formatPromptReference } from "@text-to-cad/core/prompt";
+import { isLabelSelector } from "@text-to-cad/core/lib/cadRefs.js";
 import RobotComponentDetails, { RobotLinkDetails } from "./LinkDetails.jsx";
 import { buildRobotTree, robotLinkFacts, robotLinkNodeId } from "./robotTree.js";
 
-// A link named as the CAD reference grammar names a label (`cadRefs.js`): `robot.urdf#upper_arm`.
-// A name outside it (a hyphen, a dot) has no reference to give, and is left out of the prompt.
-const LABEL = /^[A-Za-z_][A-Za-z0-9_:]*$/;
+// A link named by its label, as a file the engine does not draw names a pick (`cadRefs.js`):
+// `robot.urdf#upper_arm`. A name outside it (a hyphen, a dot) has no reference to give, and is left
+// out of the prompt.
 const EMPTY = Object.freeze([]);
 
 /**
@@ -28,8 +29,8 @@ export function useRobotReferences({ robot, components = EMPTY, selection, resou
   return useMemo(() => {
     const hasLinkRow = name => Boolean(tree?.nodesById.has(robotLinkNodeId(name)));
     const objects = components.filter(component => selectedComponentIds.includes(component.id));
-    const names = [...new Set([...selectedLinkNames, ...objects.map(component => component.link)])].filter(name => LABEL.test(String(name || "")));
-    const reference = name => resource?.kind === "workspace-file" && LABEL.test(String(name || ""))
+    const names = [...new Set([...selectedLinkNames, ...objects.map(component => component.link)])].filter(name => isLabelSelector(String(name || "")));
+    const reference = name => resource?.kind === "workspace-file" && isLabelSelector(String(name || ""))
       ? { resource: { ...resource }, target: { kind: "cad-selector", selectors: [name] } } : null;
     const references = names.map(reference).filter(Boolean);
     const copy = name => { const value = reference(name); return value ? { copy: formatPromptReference(value) } : {}; };

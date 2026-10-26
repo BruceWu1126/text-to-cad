@@ -130,7 +130,7 @@ describe('a view\'s one call each second', () => {
       const sync = createViewSync(server, { id: 'v1', surface: 'tab', model: () => '/p/a.step' }, {
         show: next => shown.push(next.model),
         capture: async () => { const png = captures.shift(); if (!png) throw new Error('nothing to capture'); return png; },
-        state: () => ({ model: '/p/a.step', selection: ['/p/a.step#o:3f2a9c1d7e5b/f:bracket.extrude1.3'] }),
+        state: () => ({ model: '/p/a.step', selection: ['/p/a.step#bracket/f:bracket.extrude1.3'] }),
       });
       sync.run(stop.signal);
       await vi.advanceTimersByTimeAsync(0);
@@ -141,7 +141,7 @@ describe('a view\'s one call each second', () => {
       expect(requests).toHaveLength(4);
       // What the view shows goes up once, and again only when it changes.
       expect(requests.map(request => Boolean(request.state))).toEqual([true, false, false, false]);
-      expect(requests[0]).toMatchObject({ view: 'v1', surface: 'tab', model: '/p/a.step', state: { selection: ['/p/a.step#o:3f2a9c1d7e5b/f:bracket.extrude1.3'] } });
+      expect(requests[0]).toMatchObject({ view: 'v1', surface: 'tab', model: '/p/a.step', state: { selection: ['/p/a.step#bracket/f:bracket.extrude1.3'] } });
       expect(shown).toEqual(['/p/b.step']);
       expect(replied).toEqual(expect.arrayContaining([
         { requestId: 'c1', png: encodeBase64(new Uint8Array([1, 2, 3])) },
@@ -352,7 +352,7 @@ function servingInParts(bytes: Uint8Array, {
 
 describe('a Quick Edit in the chat', () => {
   const file = referencePart({ resource: { kind: 'workspace-file', path: '/project/parts/a.step' }, target: { kind: 'whole-resource' } }, 'file');
-  const face = referencePart({ resource: { kind: 'workspace-file', path: '/project/parts/a.step' }, target: { kind: 'cad-selector', selectors: ['o:1a2b3c4d5e6f/f:base.extrude1.2'] } }, 'face');
+  const face = referencePart({ resource: { kind: 'workspace-file', path: '/project/parts/a.step' }, target: { kind: 'cad-selector', selectors: ['base/f:base.extrude1.2'] } }, 'face');
   const annotation = () => ({ id: 'annotation', kind: 'attachment' as const, name: 'a.annotation.json', label: 'Annotation', mimeType: 'application/json', about: ['file'],
     content: { then: () => { throw new Error('JSON bytes must not be read for handoff'); } }, path: Promise.resolve('/tmp/p/a-1.annotation.json') });
   // The snapshot packet: a file, never an image, always named by where it was made.
@@ -379,7 +379,7 @@ describe('a Quick Edit in the chat', () => {
     const [text] = updates[0].params.content;
     expect(updates[0].params.content).toHaveLength(1);
     expect(updates[0].method).toBe('ui/update-model-context');
-    expect(text).toEqual({ type: 'text', text: 'Round it.\n\nFile: /project/parts/a.step\nReferences:\n/project/parts/a.step#o:1a2b3c4d5e6f/f:base.extrude1.2\nAnnotation: /tmp/p/a-1.annotation.json', _meta: { 'openai/title': 'Quick edit · a.step' } });
+    expect(text).toEqual({ type: 'text', text: 'Round it.\n\nFile: /project/parts/a.step\nReferences:\n/project/parts/a.step#base/f:base.extrude1.2\nAnnotation: /tmp/p/a-1.annotation.json', _meta: { 'openai/title': 'Quick edit · a.step' } });
     await port.deliver(edit());
     expect(updates[1].params.content).toHaveLength(2);
     // The host cleared the context (the message went out): the next one starts afresh.
