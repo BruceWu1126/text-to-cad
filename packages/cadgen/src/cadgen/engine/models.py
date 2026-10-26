@@ -212,12 +212,17 @@ class Models:
         # What a restart needs of it and no more: what it is (``id``, ``kind``, ``key``), where its
         # code is (``root``, ``home``, ``entry``: the command that builds it again is ``cadgen run``
         # of its home, always), the revision the cache and the delta compare, when it was built (the
-        # home's order). The closure is its document's own (``previous``); which files it declared
-        # is no one's: they are exports.
+        # home's order) and when it was first built (``created``, the home's Created: kept from the
+        # record it had; a record from before the time was kept stays without one). The closure is
+        # its document's own (``previous``); which files it declared is no one's: they are exports.
         found: dict[str, Any] = {
             "id": ident, "kind": "model", "root": root, "home": registering.relative(script, root),
             "entry": source["name"], "revision": recorded,
             "built": old["built"] if old.get("revision") == recorded and old.get("built") else time.time()}
+        if not old:
+            found["created"] = found["built"]
+        elif "created" in old:
+            found["created"] = old["created"]
         if report.get("key"):
             found["key"] = report["key"]
         if facts is not None:
@@ -280,6 +285,10 @@ class Models:
                 "home": registering.relative(scope, root), "entry": name, "revision": recorded,
                 "built": previous["built"] if previous.get("revision") == recorded and previous.get("built")
                 else time.time()}
+            if not previous:  # first handed over now; an older record keeps what it has (``record``)
+                found["created"] = found["built"]
+            elif "created" in previous:
+                found["created"] = previous["created"]
             if request.get("key"):
                 found["key"] = request["key"]
             if program:

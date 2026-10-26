@@ -375,9 +375,10 @@ switch and, where the server's computer has a file chooser (`pick` in its info),
 which opens the desktop's own chooser (`POST /__cad/pick`, `cadgen._internal.picker`) and shows
 the file picked. The grid's tiles are transparent with a 1px border, at least 280px wide (three across
 the full column): a picture on the muted fill, then, in a compact caption, the kind's glyph (a model's cube, a
-file's plain file outline, whatever its kind) beside its name over its last activity with no verb ("now", "5m ago", "2h
-ago", "3d ago", then the short date). The list is a table: Name, Updated and Opened over 40px
-rows, each a document's glyph and name and its two ages. Every model is a tile and a row of
+file's plain file outline, whatever its kind) beside its name over its last activity with its verb ("Edited now",
+"Viewed 5m ago", "Edited 2h ago", "Viewed 3d ago", then the short date: Edited when it changed after it was last
+opened, Viewed when it was opened after it last changed). The list is a table: Name, Updated and Created over 40px
+rows, each a document's glyph and name and those two ages with no verb. Every model is a tile and a row of
 its own, nothing folded, and none is tied to the script it was built from: a model shows its
 name, its glyph and its age. The pin and the ⋯ appear on hover (at a tile's picture's corner, at a row's end); a
 pinned one keeps its pin. The ⋯ menu holds Open, a file's Copy path and Reveal (a model has
@@ -402,8 +403,10 @@ spelling of one file is one row. A model (a document with no file of its own) ha
 its Files lists the folder the explorer was last in this tab, else the person's home folder
 (`home` in the server's info); a file's its own folder.
 
-The home reads the library over `GET /__cad/recents`, each row with two times, `updated` (a
-file's time on disk, a model's run) and `opened` (when a page last opened it), ordered pinned
+The home reads the library over `GET /__cad/recents`, each row with three times, `updated` (a
+file's time on disk, a model's run), `opened` (when a page last opened it) and `created` (when the
+engine first made its record: a model's first run, a file's first open; null for a record from before
+it was kept), ordered pinned
 first, then by the later of the two; it pins, unpins, removes a file's record (`remove`) and
 deletes a model's document (`delete`) over `POST /__cad/recents`, and draws each card's picture
 from `GET /__cad/thumbnail`. A model's script is never read for any of it. The document on

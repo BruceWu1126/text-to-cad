@@ -41,6 +41,8 @@ export interface CadRecent {
   opened: number | null;
   /** When it last changed: a file's time on disk (null once it is gone), a model's run. */
   updated: number | null;
+  /** When its record was first made: a model's first run, a file's first open; null for a record from before the engine kept it. */
+  created: number | null;
   pinned: boolean; missing: boolean;
   /** The picture's name, for `thumbnail()`, and when it was taken. */
   thumbnail: string | null; pictured: number | null;

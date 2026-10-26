@@ -105,10 +105,11 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   page in both themes, a 1px `border`, a 12px radius and no shadow, the same under the pointer;
   columns at least 280px (three across the full column, two at a narrower window), 24px apart. Its picture sits on the
   `muted` fill at 330:185, contained (its placeholder cube 24px); its caption is compact (8px by 12px): its kind's 16px glyph in a 20px
-  column, 8px before its name (`text-ui`, weight 500) over its last activity with no verb ("2h ago",
-  `text-tiny`, muted). In the list, a **table**, one type in every cell (`text-ui`, 13px): a
-  32px header row of muted labels (Name, Updated, Opened) over 40px rows, each its glyph and
-  name, then its `updated` and `opened` ages, muted, in two 160px columns (Opened dropped under a 560px page), transparent with the
+  column, 8px before its name (`text-ui`, weight 500) over its last activity with its verb
+  ("Edited 2m ago" for a change after the last opening, "Viewed 16m ago" for an opening after the
+  last change; `lib/age.ts`, `text-tiny`, muted). In the list, a **table**, one type in every cell (`text-ui`, 13px): a
+  32px header row of muted labels (Name, Updated, Created) over 40px rows, each its glyph and
+  name, then its `updated` and `created` ages with no verb, muted, in two 160px columns (Created dropped under a 560px page), transparent with the
   hover fill. Each has a **pin** toggle and **one ⋯ menu** (a stock DropdownMenu), shown on hover
   or focus, at a tile's picture's top-right (Figma's star) or a row's end; a pinned one keeps its
   filled pin at rest. The menu holds Open, a file's Copy path and Reveal where the host can, Pin or

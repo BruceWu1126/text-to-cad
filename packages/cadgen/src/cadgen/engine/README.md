@@ -840,7 +840,7 @@ it is refused: a body returns its shape.
 `documents/<id>/document.json` in the user's state folder ([registry.py](registry.py); the
 distribution names the folder, `cadgen.viewer.recents.state_dir`): it points; a document's bytes
 are the cache's, in the cache folder (**The cache**).
-Every record has one shape, `{schema, id, kind, root, home, entry, revision, built, key?, facts?,
+Every record has one shape, `{schema, id, kind, root, home, entry, revision, built, created?, key?, facts?,
 program?, cache?{revision, bytes}, opened?, pinned?, preview?}`, and holds what a restart needs
 and no more. `kind` says what it is: `model` (`home` and `entry`, its script and function; the
 command that builds it again is always `cadgen run` of its home), `shape` (a shape handed over:
@@ -849,6 +849,9 @@ command that builds it again is always `cadgen run` of its home), `shape` (a sha
 model's and a shape's hold their revision and when they were built, their `key=` and a build's facts
 (what the delta says against); any record its Recents picture (`preview`, UI state: the PNG under
 `recents/thumbnails`), and a model's or a shape's `cache` once the cache holds it (**The cache**).
+`created` is when the record was first made -- a model's first run, a shape's first hand-over, a
+file's first open on a page -- kept through every rebuild and reopen (the home's Created column);
+a record from before the engine kept it has none, and every reader takes that as null.
 Its closure is its document's own (**Build closure**): it is not copied here. Nothing records which files a model declared or wrote: a
 declared file is an export, a plain file to every surface. Every path in it is relative to its one `root`, so a record moves by one field. It is written synchronously
 as a build registers, and only when a field differs: an unchanged build rewrites

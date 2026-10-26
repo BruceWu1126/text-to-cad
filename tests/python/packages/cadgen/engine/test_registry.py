@@ -215,7 +215,8 @@ class RegistryDaemonTest(unittest.TestCase):
         self.assertEqual((record["kind"], record["home"], Path(record["root"])), ("model", "parts.py", project))
         # What a restart needs and no more: no closure (the document's own), no versions, no stamps,
         # no command (always `cadgen run` of its home), no record of the files it declared.
-        self.assertEqual(set(record), {"schema", "id", "kind", "root", "home", "entry", "revision", "built", "facts"})
+        self.assertEqual(set(record), {"schema", "id", "kind", "root", "home", "entry", "revision", "built", "created", "facts"})
+        self.assertEqual(record["created"], record["built"], "a first build is when the model was created")
         self.assertEqual(sorted(os.listdir(self.state / "documents" / cube)), ["document.json"], "it points: no geometry")
         self.assertEqual(listed(), before, "nothing beside the script")
         written = (self.state / "documents" / cube / "document.json").stat().st_mtime_ns

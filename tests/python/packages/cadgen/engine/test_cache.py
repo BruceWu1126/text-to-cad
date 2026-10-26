@@ -225,7 +225,7 @@ class CacheTest(unittest.TestCase):
         self.run_script("cube")
         meta = self.cached(ident)
         record = self.record(ident)
-        self.assertEqual(set(record), {"schema", "id", "kind", "root", "home", "entry", "revision", "built", "facts",
+        self.assertEqual(set(record), {"schema", "id", "kind", "root", "home", "entry", "revision", "built", "created", "facts",
                                        "cache"}, "a build's record, once its document is cached")
         self.assertEqual(set(meta), {"revision", "bytes"})
         self.assertEqual((meta["revision"], meta["bytes"]), (record["revision"], self.file(ident).stat().st_size))

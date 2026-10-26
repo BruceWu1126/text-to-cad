@@ -200,7 +200,7 @@
 .cad-library-row .cad-library-actions { right: 8px; top: 50%; transform: translateY(-50%); }
 @container (max-width: 560px) {
   .cad-library-table { --cad-library-columns: minmax(0, 1fr) 96px; }
-  .cad-library-table [data-column=opened] { display: none; }
+  .cad-library-table [data-column=created] { display: none; }
 }
 .cad-library-empty { margin: 48px 0 0; text-align: center; color: var(--muted-foreground); line-height: 1.6; }
 /* While the list is read: the cards' own shapes, pulsing. */

@@ -39,7 +39,7 @@ class RecentStoreTest(unittest.TestCase):
         self.assertIsNone(entries[0].public()["pictured"])
         self.assertEqual(len(Registry(self.tmp).list()), 2, "one record per file; the removed one's folder went")
         self.assertEqual(set(Registry(self.tmp).list()[0]) - {"pinned", "preview"},
-                         {"schema", "id", "kind", "root", "home", "opened"}, "its path, and when it was opened")
+                         {"schema", "id", "kind", "root", "home", "opened", "created"}, "its path, and when it was opened, first and last")
 
     def test_a_picture_no_record_shows_goes_once_no_writer_can_still_name_it(self) -> None:
         # Each rebuilt revision a view pictures adds a PNG; replaced ones must not pile up.
@@ -85,11 +85,31 @@ class RecentStoreTest(unittest.TestCase):
             [entry] = [recent.public() for recent in store.list()]
         self.assertEqual(timed, [], "a model's script's time is never read")
         self.assertEqual((entry["updated"], entry["opened"], entry["missing"]), (built, None, False))
+        self.assertIsNone(entry["created"], "a record from before the engine kept it says no creation time")
         store.opened(ident)  # a page opened it: its record says when, and its run's time stays
         [entry] = [recent.public() for recent in store.list()]
         self.assertEqual(entry["updated"], built)
         self.assertGreater(entry["opened"], built)
         self.assertEqual(Registry(self.tmp).get(ident)["built"], built)
+        self.assertIsNone(entry["created"], "an opening makes no creation time up")
+
+    def test_a_file_is_created_at_its_first_open_and_a_model_at_its_first_run(self) -> None:
+        store = RecentStore(self.tmp)
+        path = str(self.tmp / "part.step")
+        store.opened(path)
+        [first] = [recent.public() for recent in store.list()]
+        self.assertEqual(first["created"], first["opened"], "a file's record is made as a page first opens it")
+        time.sleep(0.01)
+        store.opened(path)
+        [again] = [recent.public() for recent in store.list()]
+        self.assertEqual(again["created"], first["created"], "a second open keeps the first")
+        self.assertGreater(again["opened"], first["opened"])
+        # A model's run writes its record with the time it was first built (``Models.record``).
+        ident = model_id(self.tmp / "parts.py", "plate")
+        Registry(self.tmp).put({"id": ident, "kind": "model", "root": str(self.tmp), "home": "parts.py",
+                                "entry": "plate", "revision": "r2", "built": 1_700_000_100.0, "created": 1_700_000_000.0})
+        by_path = {recent.path: recent.public() for recent in store.list()}
+        self.assertEqual((by_path[ident]["created"], by_path[ident]["updated"]), (1_700_000_000.0, 1_700_000_100.0))
 
     def test_rows_are_ordered_by_last_activity_after_the_pinned(self) -> None:
         store = RecentStore(self.tmp / "state")

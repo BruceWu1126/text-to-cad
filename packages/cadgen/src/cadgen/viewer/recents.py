@@ -5,8 +5,8 @@ home shows all of it (``GET /__cad/recents``, which the MCP app's views reach
 through its tunnel).
 
 Recents is a view of the registry (``cadgen.engine.registry``, ``<state>/documents/<id>/document.json``):
-a CAD file opened on a page is a record of its own (``kind: "file"``: its path, when it was opened,
-whether it is pinned), and every model a script built is one already (``kind: "model"``, which the
+a CAD file opened on a page is a record of its own (``kind: "file"``: its path, when it was first
+opened, ``created``, and last, ``opened``, whether it is pinned), and every model a script built is one already (``kind: "model"``, which the
 engine writes when it registers the build), as is every shape a program handed over (``kind:
 "shape"``). The home's picture of each is UI state on its record (``preview``), the PNG under
 ``recents/thumbnails`` named by its content. Removing a file's entry forgets its record, the file
@@ -101,6 +101,9 @@ class Recent:
     # When it last changed: a file's mtime (the file itself; None once it is gone), a model's or a
     # shape's run (the record's ``built``). A model's script is never read for it.
     updated: float | None = None
+    # When its record was first made (the record's ``created``): a model's first run, a file's first
+    # open, a shape's first hand-over; None for a record from before the engine kept it.
+    created: float | None = None
     pinned: bool = False
     thumbnail: str | None = None
     # When the picture was taken, in seconds: a document updated since has an old one.
@@ -121,7 +124,7 @@ class Recent:
         return max(self.opened or 0, self.updated or 0)
 
     def public(self) -> dict[str, Any]:
-        """The row a home reads: both times (``opened``, ``updated``). Of a model's script only whether
+        """The row a home reads: its times (``opened``, ``updated``, ``created``). Of a model's script only whether
         it is still there is asked (``missing``), never its contents or its times: the engine reads a
         script in a run alone."""
         if self.kind == "file":
@@ -139,6 +142,7 @@ class Recent:
             "folder": folder,
             "opened": self.opened,
             "updated": self.updated,
+            "created": self.created,
             "pinned": self.pinned,
             # A file that is gone, or a model whose script is (``detached``): listed, and removable.
             "missing": not present,
@@ -176,8 +180,9 @@ class RecentStore:
     # -- writes ----------------------------------------------------------------
 
     def opened(self, path: str) -> None:
-        """A CAD file opened on a page: its record, opened now. A model's id: its record (the
-        engine's, written by its run) says when a page opened it, and nothing else of it changes."""
+        """A CAD file opened on a page: its record, opened now, and made now (``created``) when it had
+        none. A model's id: its record (the engine's, written by its run) says when a page opened it,
+        and nothing else of it changes."""
         from cadgen.engine.ids import canonical, file_id, is_id
 
         now = time.time()
@@ -187,7 +192,7 @@ class RecentStore:
         found = canonical(path)
 
         def change(record):
-            record = dict(record or {"id": file_id(found), "kind": "file"})
+            record = dict(record or {"id": file_id(found), "kind": "file", "created": now})
             record.update(root=os.path.dirname(found), home=os.path.basename(found), opened=now)
             return record
 
@@ -234,7 +239,7 @@ class RecentStore:
         for record in self.registry.list():
             preview = record.get("preview") or {}
             common = {"pinned": bool(record.get("pinned")), "thumbnail": preview.get("thumbnail"),
-                      "pictured": preview.get("pictured")}
+                      "pictured": preview.get("pictured"), "created": record.get("created")}
             if record.get("kind") == "file" and record.get("opened"):
                 path = str(registering.home(self.registry, record))
                 entries.append(Recent(path=path, opened=float(record["opened"]), updated=_mtime(path), **common))

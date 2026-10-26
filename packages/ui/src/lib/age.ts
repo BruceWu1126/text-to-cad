@@ -16,6 +16,24 @@ export function lastActivity(item: Dated): number | null {
   return times.length ? Math.max(...times) : null;
 }
 
+const finite = (time: number | null | undefined): time is number => typeof time === "number" && Number.isFinite(time);
+
+/**
+ * A row's last activity with its verb, the Home's tile line: "Edited 2m ago" when it was last
+ * changed (`updated`) after a page last opened it, "Viewed 16m ago" when the opening came after
+ * (an equal time is an edit: the page opened what it had just built). The age is `ageLabel`'s
+ * ("now", "2m ago", the short date), in the language of `t`. Empty with neither time.
+ */
+export function activityLabel(item: Dated, now = Date.now(),
+  t: (key: string, params?: Record<string, unknown>) => string = english, locale?: string): string {
+  const updated = finite(item.updated) ? item.updated : null;
+  const opened = finite(item.opened) ? item.opened : null;
+  if (updated === null && opened === null) return "";
+  const edited = updated !== null && (opened === null || updated >= opened);
+  const age = ageLabel(edited ? updated : opened, now, t, locale);
+  return t(edited ? "home.ageEdited" : "home.ageViewed", { age });
+}
+
 const MONTHS = { month: "short", day: "numeric" } as const;
 
 /**
