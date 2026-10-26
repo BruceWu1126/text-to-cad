@@ -328,6 +328,10 @@ def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as
         if not report.get("ok"):
             failed = True
             print(report.get("error", ""), file=sys.stderr)
+    # The call's answer is read now, its page opened from its `view:` line: a pipe (an agent's shell)
+    # would hold it until the script exits, after whatever the script does next -- a self-check that
+    # loads the CAD kernel here takes seconds.
+    sys.stdout.flush()
     return 1 if failed else 0
 
 

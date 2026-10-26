@@ -185,6 +185,27 @@ class RunLineTest(unittest.TestCase):
         build._outputs([target], {}, heard.append, lambda _path: (True, 21_990), lambda: None)
         self.assertRegex(heard[0], r"^wrote .*sized\.xbf \(21\.5 KB\) in \d+\.\d\ds$")
 
+    def test_a_run_s_report_is_flushed_as_it_is_said(self) -> None:
+        # Through a pipe stdout is block-buffered: the `view:` line would wait for whatever the script
+        # does after the call (a self-check loading the kernel), and the page with it.
+        import io
+        from unittest import mock
+
+        from cadgen.engine import cli
+
+        class Pipe(io.StringIO):
+            flushed = ""
+
+            def flush(self) -> None:
+                self.flushed = self.getvalue()
+
+        pipe = Pipe()
+        report = {"ok": True, "model": "m.py::m", "memo": {"bodies_loaded": 1}, "timings": {}, "bodies": {},
+                  "cache": {"from": "memory"}, "id": "an-id", "url": "http://127.0.0.1:1/an-id"}
+        with mock.patch("sys.stdout", pipe):
+            cli._reported([report], 0.1, None, False)
+        self.assertTrue(pipe.flushed.endswith("  view: http://127.0.0.1:1/an-id\n"), pipe.flushed)
+
     def test_one_miss_and_one_hit_are_singular(self) -> None:
         from cadgen.engine import cli
 

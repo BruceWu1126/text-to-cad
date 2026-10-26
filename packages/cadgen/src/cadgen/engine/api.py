@@ -281,6 +281,7 @@ def hand_over(shape: Any, name: Any, *, key: str | None = None, animations: Any 
         print(f"  id: {ident}")
         if report["url"]:
             print(f"  view: {report['url']}")
+        sys.stdout.flush()  # read now, as a model call's report is (``cli._reported``)
     return Document(name, Path(scope), report, Path.cwd(), shape=shape)
 
 
