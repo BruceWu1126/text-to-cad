@@ -17,10 +17,11 @@ sends back to wait for the next; ``GET /api/doc/<id>/part/<key>`` is one part's 
 (``mesh.Mesh.to_bytes``), held in memory by the part's geometry key, so a part that two
 documents, two versions of one document or ten instances share is meshed once;
 ``GET /api/doc/<id>/part/<key>/face|edge|vertex/<ordinal>`` is what the kernel measures
-of that element, now (``mesh.Topology``), and ``made_by``: the element's name, the feature
-that made it, its operation, and the function, file and line of that feature's call,
-asked of the worker that built the document (``provenance``) -- never read from a file, so
-a document served cold, with no live worker that built it, answers null;
+of that element, now (``mesh.Topology``), and, of a model's document, ``made_by``: the
+element's name, the feature that made it, its operation, and the function, file and line of
+that feature's call, asked of the worker that built the document (``provenance``) -- never read
+from a file, so a document served cold, with no live worker that built it, answers null; a file's
+answers no ``made_by``, since a file names no model, whichever model's run wrote it;
 ``GET /api/doc/<id>/part/<key>/groups`` is how a pick of one face or edge grows (each face's
 tangent group, each edge's chain: ``mesh.Topology.groups``); ``.../volume`` the part's volume
 in cubic millimetres, what its mass is weighed from (``mesh.Topology.volume``); ``POST /api/doc/<id>/mesh`` meshes every part
@@ -1586,13 +1587,14 @@ class Server:
         if kind == "face":
             unmeshed = self.cache.unmeshed(key)
             found["meshed"] = None if unmeshed is None else ordinal not in unmeshed
-        found["made_by"] = self.made_by(doc, key, kind, ordinal)
+        if doc.ident in self.model_loaders:
+            found["made_by"] = self.made_by(doc, key, kind, ordinal)  # a file names no model: none
         self.json(handler, found)
 
     def made_by(self, doc: Served, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
-        """What made the element, from the worker that built the document (``provenance``),
-        when the name it gives is the one the served document holds: None for a document
-        no live worker built, or whose served version that worker's last build is not."""
+        """What made an element of a model's document, from the worker that built it
+        (``provenance``), when the name it gives is the one the served document holds: None for a
+        document no live worker built, or whose served version that worker's last build is not."""
         if self.provenance is None:
             return None
         try:

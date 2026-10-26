@@ -376,8 +376,13 @@ class PreviousTest(unittest.TestCase):
         return re.sub(rb"'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d'", b"'T'", out.read_bytes(), count=1)
 
     def test_a_taken_document_serves_and_exports_as_the_cold_one(self) -> None:
+        from cadgen.engine.ids import model_id
+
         self.cold()
         structure = document.Loaded(self.xbf).structure()
+        built = document.Loaded(self.xbf).prototypes[0].key
+        self.assertIsNotNone(engine_build.made_by(model_id(self.script, "kit"), built, "face", 1),
+                             "the process that built it names what made its elements")
         step = self.export("cold.step")
         self.restart()
         self.assertTrue(self.kit()["cache"]["used"])
@@ -386,7 +391,7 @@ class PreviousTest(unittest.TestCase):
         self.assertEqual(self.export("taken.step"), step)
         # Provenance is the worker's that built it: a taken document has none to give.
         key = again.prototypes[0].key
-        self.assertIsNone(engine_build.made_by(str(self.xbf), key, "face", 1))
+        self.assertIsNone(engine_build.made_by(model_id(self.script, "kit"), key, "face", 1))
 
 
 HELPER = """

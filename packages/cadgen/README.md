@@ -126,8 +126,9 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    engine's **Document lifetime**).
 7. **Provenance is served live, never written.** What made an element -- the feature, its
    operation, the function, file and line of its call -- lives in the trace of the worker that
-   built the document, and is asked of it while it lives (`made_by`, `cadgen inspect`). A document
-   opened with no such worker has none to give, and says so (`made_by: null`).
+   built the document, and is asked of it while it lives (`made_by`, `cadgen inspect`). A model's
+   document opened with no such worker has none to give, and says so (`made_by: null`); a file --
+   a model's declared xbf among them -- names no model and answers none.
 8. **Poses and motion definitions, never frames.** The document carries kinematics -- the
    mechanism, its mechanism states and its configuration sequences -- as poses and definitions,
    never baked frames or clips. A GLB export is the one place a sequence is baked, into a clip of

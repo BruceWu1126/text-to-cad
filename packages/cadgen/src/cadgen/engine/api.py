@@ -628,7 +628,8 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
     """What a ref names in a document (``refs``: ``hand/finger.2/face 7``, ``base/f:...``, a
     copied ``/abs/kit.xbf#...`` line) and what made it. An element answers what the kernel
     measures of it -- its points placed where its occurrence stands, in the document's frame --
-    with its canonical ``ref``, its occurrence's ``path`` and ``made_by``; a part or an assembly
+    with its canonical ``ref``, its occurrence's ``path`` and, of a model's document, ``made_by``
+    (a file names no model); a part or an assembly
     its volume and its mass: each part's volume times its material's density, summed
     (``cli.weighed``), its world bounds and a part's placement (``_placed``). One answer per selector (a list for several). Without ``ref``, the build
     closure the xbf holds (``previous``): its engine, libraries, source, modules, inputs and

@@ -44,7 +44,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from cadgen.engine.addresses import document_id
 from cadgen.engine.ids import canonical, file_id
 
 __all__ = ["BuildError", "build", "load_script"]
@@ -100,9 +99,9 @@ _TOKENS = __import__("itertools").count(1)
 # Per model: the document this process last wrote, kept to be patched by the next build,
 # and each declared file as it left it.
 _WRITTEN: dict[str, _Written] = {}
-# Per document this process last built (its id: each xbf's, and its model's): per part key, what
-# the build made of the part -- what ``made_by`` answers from. In memory only: provenance
-# is served while this process lives, never written.
+# Per model this process last built (its id): per part key, what the build made of the part --
+# what ``made_by`` answers from. A file the build wrote is no key here: a file names no model. In
+# memory only: provenance is served while this process lives, never written.
 _BUILT: dict[str, dict[str, _Named]] = {}
 # Per model, the functions its last run in this process ran or replayed, apart from their
 # arguments: a model calling one a verification found impure is not taken from its file.
@@ -717,9 +716,6 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
 
     report["facts"] = facts(tree, name, signature)
     timings["facts"] = round(time.perf_counter() - clock, 4)
-    for kind, path in targets:
-        if kind == "xbf":
-            _BUILT[file_id(path)] = built
     _BUILT[model.id] = built
     _write(model, plan, tree, signature, report, log)
     timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
@@ -1055,12 +1051,13 @@ _KINDS = {"face": "faces", "edge": "edges", "vertex": "vertices"}
 
 def made_by(document: str, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
     """What made element ``ordinal`` (1-based) of kind ``kind`` (face, edge, vertex) of
-    part ``key`` of ``document`` (its id, or the xbf's path), as this process's last build
-    of it named it: the element's name, the feature that made it (its last step's), that feature's
+    part ``key`` of ``document`` (its model's id), as this process's last build of it named
+    it: the element's name, the feature that made it (its last step's), that feature's
     operation and the function, file and line of its call, and, where the name folds
     part of its derivation, the derivation spelled out. None for a document this process
-    did not build, or an element its build gave no name."""
-    named = _BUILT.get(document_id(document), {}).get(key)
+    did not build -- a file among them, which names no model -- or an element its build gave no
+    name."""
+    named = _BUILT.get(document, {}).get(key)
     if named is None or not named.names:
         return None
     texts = named.names.get(_KINDS[kind]) or []

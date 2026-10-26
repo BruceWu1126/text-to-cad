@@ -1519,15 +1519,15 @@ if __name__ == '__main__':
         self.assertEqual(answer["patch"]["meshes"], 1)
         self.assertEqual(self.built("pair")["meshed"], 0)
 
-    def where(self, ref: str) -> dict:
-        found = engine_daemon.run([sys.executable, "-m", "cadgen.cli", "inspect", "XBF/block.xbf", ref], cwd=self.folder,
+    def where(self, ref: str, doc: str = "XBF/block.xbf") -> dict:
+        found = engine_daemon.run([sys.executable, "-m", "cadgen.cli", "inspect", doc, ref], cwd=self.folder,
                                   env=self.env)
         self.assertEqual(found.returncode, 0, found.stderr)
         return json.loads(found.stdout)
 
     def test_an_element_answers_what_made_it_from_the_worker_that_built_it(self) -> None:
-        self.build(10)
-        face = self.where("block/face 1")
+        ident = self.build(10)["id"]
+        face = self.where("block/face 1", ident)
         made = face["made_by"]
         line = next(n for n, text in enumerate(self.script.read_text(encoding="utf-8").splitlines(), 1)
                     if "bd.fillet" in text)
@@ -1536,14 +1536,20 @@ if __name__ == '__main__':
         self.assertTrue(made["feature"].startswith("block.") and made["operation"])
         self.assertGreater(face["area"], 0)
         # By its element name, the same element.
-        self.assertEqual(self.where(face["name"])["ordinal"], 1)
-        # A daemon started again with no build serves the file cold: no worker holds a
-        # trace of it, so ``made_by`` is null -- and every fact the kernel measures is
+        self.assertEqual(self.where(face["name"], ident)["ordinal"], 1)
+        drop = ("made_by", "meshed")
+        # The xbf the run wrote is a file: it names no model, so its element answers no ``made_by``,
+        # the worker that wrote it live or not -- and every fact the kernel measures is the model's.
+        declared = self.where("block/face 1")
+        self.assertNotIn("made_by", declared)
+        self.assertEqual({k: v for k, v in declared.items() if k not in drop},
+                         {k: v for k, v in face.items() if k not in drop})
+        # A daemon started again with no build serves the model from its cache cold: no worker
+        # holds a trace of it, so ``made_by`` is null -- and every fact the kernel measures is
         # what it was. Nothing of the provenance was written anywhere.
         self._stop_daemon()
-        cold = self.where("block/face 1")
+        cold = self.where("block/face 1", ident)
         self.assertIsNone(cold.pop("made_by"))
-        drop = ("made_by", "meshed")
         self.assertEqual({k: v for k, v in cold.items() if k not in drop}, {k: v for k, v in face.items() if k not in drop})
         self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/block.xbf", "block.py"])

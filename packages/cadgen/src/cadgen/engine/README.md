@@ -210,8 +210,9 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
 7. **Provenance is served live, never written.** What made an element -- the
    feature, its operation, the function, file and line of its call -- lives in
    the trace of the worker that built the document, and is asked of it while it
-   lives (`made_by` on the facts endpoints, `cadgen inspect`). A document
-   opened with no such worker has none to give, and says so (`made_by: null`).
+   lives (`made_by` on the facts endpoints, `cadgen inspect`). A model's document
+   opened with no such worker has none to give, and says so (`made_by: null`); a
+   file -- a model's declared xbf among them -- names no model and answers none.
 8. **Poses and motion definitions, never frames.** The document carries
    kinematics -- the mechanism, its mechanism states (each a pose: where its parts
    stand) and its configuration sequences (each a definition: waypoints and an
@@ -2073,7 +2074,7 @@ type, exact bounding box and `BRepCheck` verdict (and a round face's radii);
 circle's radius and sweep); `.../vertex/<ordinal>` its position;
 `.../groups` how a pick of one face or edge grows, as a STEP's selector table
 says: each face's tangent group (faces joined across tangent edges of one
-solid) and each edge's chain (edges that run on through a shared vertex). Each also answers `made_by`: the element's name, the feature that made
+solid) and each edge's chain (edges that run on through a shared vertex). An element of a model's document also answers `made_by`: the element's name, the feature that made
 it (its name's last step), that feature's operation, the function, file and line
 of its call, and, for a name that folds its derivation, the derivation spelled
 out. It comes from the trace of the worker that built the document, asked over
@@ -2081,9 +2082,11 @@ the worker's pipe (a `where` request, answered by the worker's reading thread,
 during a build too) and never from a file: a document served cold, with no live
 worker that built it (for example, after a daemon restart), answers
 `made_by: null`, and so does an element the served version names otherwise than
-that worker's last build. The line is the call's in the run that named the part.
+that worker's last build. The line is the call's in the run that named the part. A file's
+element -- a model's declared xbf among them -- answers no `made_by`: a file names no model,
+whichever run wrote it.
 `cadgen inspect DOC REF` serves the document on demand and resolves `REF` (**References**):
-an element answers its facts and `made_by`, with its canonical `ref`, its occurrence's `path`
+an element answers its facts and, of a model's document, `made_by`, with its canonical `ref`, its occurrence's `path`
 (`hand/finger.2`), its part, key, kind, ordinal and name, its points (centroid, position,
 endpoints, box) placed where that occurrence stands; a part or an assembly answers what it
 weighs: each part's volume, measured on its solids (`.../part/<key>/volume`), times its material's
@@ -2273,7 +2276,7 @@ fixture both suites assert.
 A ref resolves inside the engine, for `inspect` and the viewer, never in a model:
 `cadgen inspect DOC REF` (`cadgen.inspect(source, ref)`) answers what it names, placed where its
 occurrence stands -- an element's kind, ordinal, name and canonical ref, the kernel's facts of it,
-and `made_by`, the feature and the function, file and line of the call that made it; a part's or
+and, of a model's document, `made_by`, the feature and the function, file and line of the call that made it; a part's or
 an assembly's volume and mass, and its world `bounds` (each part's measured box placed where it
 stands), with a part's `placement`: the origin and the x, y and z axes of its instance's matrix.
 Nothing is built or measured again for them. A model that changes what a person picked reads that answer and
