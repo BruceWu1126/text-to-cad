@@ -30,7 +30,7 @@ outside the sandbox once.
 
 ## Core Rules
 
-1. The `.urdf` file is the source of truth. Author and edit URDF XML directly; do not build a Python generation pipeline for it. There is no `gen_urdf()` contract.
+1. The `.urdf` file is the source of truth. Author and edit URDF XML directly; do not build a Python generation pipeline for it.
 2. Before writing or changing URDF XML, establish the robot's frame, joint, geometry, unit, and assumption ledger and embed it as a comment block at the top of the `.urdf` file. See `references/design-ledger.md`.
 3. Use URDF frame semantics exactly. Joint origins, link frames, joint axes, and visual/collision/inertial origins use different reference frames. See `references/frame-semantics.md`.
 4. Do not infer spatial transforms, mesh units, handedness, axes, or joint signs from vague prose. Use CAD transforms, dimensioned drawings, measured values, existing source data, or explicit documented assumptions.
@@ -123,7 +123,7 @@ linkages followed, and drawn in one colour of the Parts palette.
 
 A visual is a `box`, `cylinder` or `sphere`, which cadgen meshes itself, or a mesh
 file beside the description: an STL or a 3MF (its numbers scaled by the mesh's
-`scale`, which must be even) or a GLB (metres). A `package://NAME/...` mesh is found
+`scale`, the same on all three axes) or a GLB (metres). A `package://NAME/...` mesh is found
 in the ROS package the description is in: the nearest folder above the `.urdf` named
 NAME, or holding a `package.xml` that names it, so keep the description inside its
 package folder. A mesh in another format (`.dae`, `.obj`), a remote URI, a package no
@@ -134,7 +134,8 @@ A normal snapshot uses Solid mode and Light appearance. `--display` takes any of
 viewer's display modes (`parts`, `xray`, `hidden-line`, `wireframe`, ...),
 `exploded=AMOUNT`, or the display object: `appearance` (`light` or `dark`),
 `camera` (projection and focal length) and `clip` (`{"clip": {"axis": "x", "at":
-0.05}}`, `at` in metres). `--grid` draws the measuring grid, `--preview` draws
+0.05}}`, `at` in metres, the file's own unit, as the viewer draws it). `--grid` draws
+the measuring grid, `--preview` draws
 Preview's photographic look, and `--camera`, `--size-profile`, `--width` and
 `--height` frame and size it. A Quick Edit packet from the viewer (inline JSON, saved
 to a temporary `.snapshot.json`, or its path) replays with

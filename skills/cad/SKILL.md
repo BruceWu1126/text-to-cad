@@ -114,16 +114,20 @@ python src/bracket.py
 
 ```text
 built src/bracket.py::bracket cold in 2.61s: bodies 1 run; 6 misses, 0 hits; body 0.01s, names 0.00s, document 0.00s
+  parts 1 · bounds 40 × 20 × 6 mm · joints 0 · sequences 0
   id: 0dc50a92-a21f-5895-a245-ebdeb5352f3b
   view: http://127.0.0.1:54360/0dc50a92-a21f-5895-a245-ebdeb5352f3b?token=...
 built src/bracket.py::bracket_wide warm in 0.01s: bodies 1 run; 6 misses, 0 hits; body 0.01s, names 0.00s, document 0.00s
+  parts 1 · bounds 60 × 20 × 6 mm · joints 0 · sequences 0
   id: 966d03a5-7b43-5bed-b75c-eb67d56c72d2
   view: http://127.0.0.1:54360/966d03a5-7b43-5bed-b75c-eb67d56c72d2?token=...
 ```
 
-Each call the script's `__main__` makes prints its document's `id:` and its page,
-`view:` (the handle's `.id` and `.url`). Give the user the page once ([Show the
-model](#show-the-model)) and use the id for every command after it. The id comes from the
+Each call the script's `__main__` makes prints how its model built, the delta under it
+(parts, bounds, joints and sequences), its document's `id:` and its page, `view:` (the
+handle's `.id` and `.url`). An unchanged rerun prints `took ... nothing ran` instead. Give the
+user the page once ([Show the model](#show-the-model)) and use the id for every command
+after it. The id comes from the
 script's path and the function's name (or `@model(key="...")`), so it is the same run after
 run, and the open page follows every run.
 
