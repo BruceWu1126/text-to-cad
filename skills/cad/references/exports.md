@@ -116,9 +116,9 @@ the model's animations, which only a GLB exported from it reads. Export one only
 
 An engine restart needs none: the engine keeps each model document it built in its own
 cache, so after a restart the document's id opens in the viewer, answers `cadgen inspect`,
-exports and snapshots without a rebuild. It is the last built state: when the code changed
-since, the page and `inspect` say so, with the command that builds it again, and nothing
-reruns.
+exports and snapshots without a rebuild. It is the last built state: the engine never
+checks the code against it and nothing reruns, so after an edit run the script to build it
+again.
 
 A vendor STEP converted once (`cadgen export vendor/motor.step vendor/motor.xbf`) is
 read by `read_xbf` many times faster than `read_step` parses the STEP, with the same

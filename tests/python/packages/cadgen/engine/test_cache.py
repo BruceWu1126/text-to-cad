@@ -1,7 +1,7 @@
 """The engine's document cache: a model document idle a moment is saved once per revision in the
 cache folder (its record, in the state folder, says so), so a restarted engine answers every verb
 of it -- page, export, snapshot, inspect, cad_show -- with nothing run; a document whose code
-changed since says so and reruns nothing; the cache keeps every document until a person deletes it,
+changed since is answered as its last run, and nothing reruns; the cache keeps every document until a person deletes it,
 with no cap and nothing evicted, and touches nothing in its folder but ``documents/``; and an engine
 whose cache folder is read-only, or not writable at all, saves nothing and does everything else as
 ever."""
@@ -192,9 +192,8 @@ class CacheTest(unittest.TestCase):
         record = self.record(ident)
         self.assertEqual(set(record), {"schema", "id", "kind", "root", "home", "entry", "revision", "built", "facts",
                                        "cache"}, "a build's record, once its document is cached")
-        self.assertEqual(set(meta), {"revision", "bytes", "read"})
+        self.assertEqual(set(meta), {"revision", "bytes"})
         self.assertEqual((meta["revision"], meta["bytes"]), (record["revision"], self.file(ident).stat().st_size))
-        self.assertEqual(sorted(row[1] for row in meta["read"]), ["cube.py"], "what the build read, by digest")
         self.assertEqual(sorted(os.listdir(self.state / "documents" / ident)), ["document.json"],
                          "the bytes are the cache folder's, never the state folder's")
         compiled = list((self.cache / "pycache").glob("*/**/build123d/__init__.*.pyc"))  # the prefix mirrors its path
@@ -262,7 +261,7 @@ class CacheTest(unittest.TestCase):
         self.assertEqual((self.record(other), self.file(other).parent.exists()), ({}, False))
         self.assertIn("no engine server is running", self.cli("status").stdout)
 
-    def test_a_restart_answers_every_verb_from_the_cache_and_an_edit_is_said_never_rerun(self) -> None:
+    def test_a_restart_answers_every_verb_from_the_cache_and_an_edit_reruns_nothing(self) -> None:
         ident = self.write("cube")
         self.run_script("cube")
         live = {kind: self.folder / f"live.{kind}" for kind in ("xbf", "glb")}
@@ -274,7 +273,6 @@ class CacheTest(unittest.TestCase):
         inspected = self.cli("inspect", ident, "--json")  # starts the engine afresh
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
         self.assertEqual(json.loads(inspected.stdout)["closure"]["source"]["function"], "cube")
-        self.assertNotIn("stale", json.loads(inspected.stdout)["closure"])
         self.assertEqual(json.loads(inspected.stdout)["summary"]["state"]["state"], "held")
         cold = {kind: self.folder / f"cold.{kind}" for kind in ("xbf", "glb")}
         exported = self.cli("export", ident, *map(str, cold.values()))
@@ -288,7 +286,7 @@ class CacheTest(unittest.TestCase):
             self.assertEqual(snapped.returncode, 0, snapped.stderr)
             self.assertGreater((self.folder / "cold.png").stat().st_size, 0)
         status, structure = self.page(ident)
-        self.assertEqual((status, structure.get("stale")), (200, None))
+        self.assertEqual(status, 200)
         self.assertEqual(structure["closure"]["source"]["function"], "cube")
         listed = self.ask({"op": "status"})
         (row,) = [row for row in listed["models"] if row["id"] == ident]
@@ -300,23 +298,17 @@ class CacheTest(unittest.TestCase):
             self.assertIsNone(_say_not_held(ident), "cad_show shows it, with nothing to add")
         self.assertFalse(self.ran("cube"), "nothing ran the script")
 
-        # The code changes: the page and inspect say so, with the command; nothing reruns.
+        # The code changes: every surface answers the document of its last run, as it did, and says
+        # nothing of the edit -- when to run the code again is the agent's call; nothing reruns.
         self.write("cube", width=5.0)
         (self.project / "cube.ran").unlink(missing_ok=True)
-        command = f"cadgen run {self.project / 'cube.py'}"
-        status, structure = self.page(ident)
-        self.assertEqual(status, 200)
-        self.assertEqual((structure["stale"]["changes"], structure["stale"]["rebuild"]), (["cube.py changed"], command))
-        self.assertIn("the code changed since this was built", structure["stale"]["text"])
+        self.assertEqual(self.page(ident), (status, structure), "the page reads the last run, as before")
         inspected = self.cli("inspect", ident)
-        self.assertEqual(inspected.returncode, 0, inspected.stderr)
-        self.assertIn(f"inspecting the build of cube from before cube.py changed; run `{command}` to update it",
-                      inspected.stderr)
-        self.assertIn("the code changed since this was built", inspected.stdout.splitlines()[1])
-        inspected = self.cli("inspect", ident, "--query", "closure")
-        self.assertEqual(json.loads(inspected.stdout)["stale"]["rebuild"], command)
+        self.assertEqual((inspected.returncode, inspected.stderr), (0, ""))
+        self.assertTrue(inspected.stdout.splitlines()[1].startswith("state       held (in memory and disk), cached, "
+                                                                    "built "), inspected.stdout)
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.engine)}):
-            self.assertIn("the code changed since this was built", _say_not_held(ident))
+            self.assertIsNone(_say_not_held(ident))
         self.assertFalse(self.ran("cube"), "nothing reran it")
 
     def said(self, body: str = GOOD, width: float = 3.0) -> str:
@@ -559,7 +551,7 @@ class CacheTest(unittest.TestCase):
             seen: dict = {"build": [line for line in self.run_script("cube").stdout.splitlines() if "id:" in line]}
             time.sleep(IDLE * 4)  # idle: a save is tried
             status, structure = self.page(ident)
-            seen["page"] = (status, sorted(structure), structure.get("stale"))
+            seen["page"] = (status, sorted(structure))
             seen["state"] = self.ask({"op": "state", "id": ident})
             out = self.folder / f"{tag}.xbf"
             seen["export"] = (self.cli("export", ident, str(out)).returncode, out.read_bytes())
@@ -635,7 +627,7 @@ class KeptTest(unittest.TestCase):
         held.put({"id": ident, "kind": "shape", "root": str(folder), "home": "hand.py", "program": "hand.py",
                   "entry": "crate", "revision": "h1", "built": 1.0})
         held.cache.write(f"documents/{ident}/document.xbf", b"x" * 10)
-        held.update(ident, lambda found: {**found, "cache": {"revision": "h1", "bytes": 10, "read": []}})
+        held.update(ident, lambda found: {**found, "cache": {"revision": "h1", "bytes": 10}})
         daemon = mock.Mock(server=None)
         with mock.patch.object(registering, "FACTORY", lambda: held):
             book = Book(daemon)

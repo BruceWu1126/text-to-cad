@@ -1867,7 +1867,6 @@ class Daemon:
                 self.server.pressed = lambda: self.pool.shed(True)
                 self.server.lost = self.models.rebuild
                 self.server.revive = self.models.adopt
-                self.server.stale = self.models.stale
                 self.server.leaving = self.models.leaving
                 self.server.delete = self.models.delete
                 self.server.start()
@@ -1951,10 +1950,7 @@ class Daemon:
         if "document" in source:
             return "documents", request.get("cwd")  # a held document's bytes: no worker of its script
         if "path" in source:
-            builder = self.builders.get(file_id(source["path"]))
-            if builder is not None and self.pool.holds(builder):
-                return builder.script, None
-            return "documents", request.get("cwd")
+            return "documents", request.get("cwd")  # a file, read as a file: no model's worker
         # A script's worker is keyed by its canonical path: a process key, not a document's id. A held
         # document is asked of the worker that built it (``via``), whatever script defines its model.
         return canonical(source.get("via") or request.get("via") or request.get("script") or source["script"]), None
@@ -2079,9 +2075,6 @@ class Daemon:
                 model["cached"] = (self.models.where(ident) or "").endswith("disk")
                 if model["state"] == "held":
                     model["held"] = self.models.where(ident)
-                stale = self.models.stale(ident) if model["state"] in ("live", "held") else None
-                if stale:
-                    model["stale"] = stale
                 lost = self.models.rebuild(ident)
                 if lost is not None:
                     model["rebuild"] = lost["rebuild"]
@@ -2101,8 +2094,7 @@ class Daemon:
             lost = self.models.rebuild(ident)
             state = self.models.state(ident) if lost is None else lost["state"]
             held = {"held": self.models.where(ident)} if state == "held" else {}
-            stale = self.models.stale(ident) if state in ("live", "held") else None
-            send({"ok": True, "state": state, **held, **({"stale": stale} if stale else {}),
+            send({"ok": True, "state": state, **held,
                   **({"rebuild": lost["rebuild"], "error": lost["error"]} if lost else {})})
             return
         payload = b""
@@ -2355,7 +2347,7 @@ class Daemon:
                                                              "defaultPort": DEFAULT_PORT,
                                                              "documents": self.server.listing(every=True),
                                                              "memory": self.server.memory()},
-                "models": self.models.listing(every=True),
+                "models": self.models.listing(),
                 "cache": self.models.cache.status(),
                 "renders": [] if self.renders is None else self.renders.status(),
                 "sessions": (self.server.http.app.sessions() if self.server is not None

@@ -209,8 +209,7 @@ closure
 ```
 
 The state is the engine's: `live` (a worker holds it), `held` (the engine holds it, no
-worker), whether its cache has it on disk, and whether its code changed since it was
-built. `--json` prints the same as `{"summary", "closure"}`, and `--query closure` the
+worker), whether its cache has it on disk, and when it was built. `--json` prints the same as `{"summary", "closure"}`, and `--query closure` the
 closure alone. Nothing is built.
 
 ## Measurements

@@ -1,6 +1,7 @@
 """What the engine's verbs say of what they read, on tiny models in an engine of the test's own: a
-document whose code changed since its build, or whose last run failed, is said once on stderr by
-every verb that reads it, and by ``status`` in a word, and the verbs go on; a failed run's traceback
+document whose last run failed is said once on stderr by every verb that reads it, and by ``status``
+in a word, and the verbs go on; one whose code changed since is read as its last run, with nothing
+said, since when to run the code again is the agent's call; a failed run's traceback
 is printed once; a STEP holds no closure because the format carries none; a part ref answers where
 the part stands; and a mesh file answers what it holds, or what to do."""
 
@@ -53,7 +54,7 @@ if __name__ == "__main__":
 
 class VerbsTest(unittest.TestCase):
     """One engine and one script for the class. ``bad`` is built, opened (so the engine follows its
-    builds), then fails; the script is then edited, so ``box``, built by that run, is stale."""
+    builds), then fails; the script is then edited, after ``box`` was built by that run."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -89,9 +90,9 @@ class VerbsTest(unittest.TestCase):
     def status_line(self, ident: str) -> str:
         return next(line for line in self.cli("status").stdout.splitlines() if ident in line)
 
-    def said(self, ident: str, ref: str, words: str) -> None:
+    def said(self, ident: str, ref: str, words: str | None) -> None:
         """Every verb reading ``ident`` succeeds and says ``words`` (its verb's -ing form in place of
-        ``{doing}``) once on stderr."""
+        ``{doing}``) once on stderr; nothing at all on stderr where ``words`` is None."""
         from cadgen.engine.render import context
 
         verbs = [("export", [str(self.folder / f"{ident}.glb")]), ("inspect", []), ("inspect", [ref])]
@@ -100,13 +101,15 @@ class VerbsTest(unittest.TestCase):
         for verb, args in verbs:
             done = self.cli(verb, ident, *args)
             self.assertEqual(done.returncode, 0, done.stderr)
+            if words is None:
+                self.assertEqual(done.stderr, "", f"{verb} {args}")
+                continue
             doing = {"export": "exporting", "snapshot": "drawing"}.get(verb, "inspecting")
             self.assertEqual(done.stderr.count(words.format(doing=doing) + "\n"), 1, f"{verb} {args}: {done.stderr}")
 
-    def test_a_document_whose_code_changed_is_said_stale_by_every_verb_and_status(self) -> None:
-        self.said(self.box, "box/link", f"{{doing}} the build of box from before parts.py changed; "
-                                        f"run `{self.command}` to update it")
-        self.assertIn(f"stale: run `{self.command}`", self.status_line(self.box))
+    def test_a_document_whose_code_changed_is_read_as_its_last_run_with_nothing_said(self) -> None:
+        self.said(self.box, "box/link", None)
+        self.assertRegex(self.status_line(self.box), rf"^  live +box +{self.box}$")
 
     def test_a_document_whose_last_run_failed_is_said_to_be_its_previous_good_build(self) -> None:
         self.said(self.bad, "bad", f"the last run of bad failed; {{doing}} its previous good build; "

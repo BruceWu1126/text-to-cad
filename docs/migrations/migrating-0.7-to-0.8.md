@@ -426,7 +426,9 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   geometry), and the home's Recents lists them, most recent first. 0.7's Recents are not
   read: they start empty after the upgrade.
 - **Documents reopen after a restart** from the engine's cache, as last built; the code
-  stays the source, and a document whose code changed since says so. The cache
+  stays the source. A document is what its last run made: the engine does not watch your
+  script for edits or say that it changed, and nothing reruns it -- run it again when you want
+  the document to follow your code. The cache
   (`documents/<uuid>/document.xbf` in the cache folder, `~/.cache/cadgen` by 0.7's rule)
   keeps every document until you delete it: it has no size cap, and nothing evicts from it.
   `cadgen delete <id>` (or a model's script, or a file's path), or Delete on a model's row of

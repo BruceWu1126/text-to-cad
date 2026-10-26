@@ -27,8 +27,9 @@ bytes, saved in its registry folder once it has been idle (and at its drain, and
 document with a cache file is ``held`` -- the engine answers it without a worker -- in memory, on
 disk, or both (``where``): after a restart its id is taken up (``adopt``) from its record the first
 time anything names it, and its bytes are read through the documents worker when a verb needs them
-(``load``). It is the last built state, never a rerun: when a file its build read has changed since,
-it says so (``stale``), with the command that builds it again.
+(``load``). It is the last built state, never a rerun: the engine knows the document of its last
+run, never whether the code on disk has changed since; when to run the code again is the agent's
+call.
 """
 from __future__ import annotations
 
@@ -39,8 +40,6 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
-
-from cadgen.engine.cache import reads as cache_reads
 
 # A document's states, as ``cadgen status`` lists them (``state``).
 STATES = ("live", "held", "building", "failed", "unsaved", "detached")
@@ -124,8 +123,7 @@ class Models:
                                            "kind": "model",
                                            "builtAt": time.time(), "version": version,
                                            "files": list(report.get("files") or {}), "revision": recorded,
-                                           "facts": facts,
-                                           "read": cache_reads(report.get("closure"))}
+                                           "facts": facts}
                 if facts is not None:
                     from cadgen.engine.delta import delta
 
@@ -206,8 +204,8 @@ class Models:
         # What a restart needs of it and no more: what it is (``id``, ``kind``, ``key``), where its
         # code is (``root``, ``home``, ``entry``: the command that builds it again is ``cadgen run``
         # of its home, always), the revision the cache and the delta compare, when it was built (the
-        # home's order). What the build read is the cache's (``cache.read``), the closure its
-        # document's own (``previous``); which files it declared is no one's: they are exports.
+        # home's order). The closure is its document's own (``previous``); which files it declared
+        # is no one's: they are exports.
         found: dict[str, Any] = {
             "id": ident, "kind": "model", "root": root, "home": registering.relative(script, root),
             "entry": source["name"], "revision": recorded,
@@ -262,7 +260,7 @@ class Models:
             old = self.records.get(ident)
             self.records[ident] = {"id": ident, "source": source, "worker": None, "program": program,
                                    "kind": "shape", "builtAt": time.time(), "version": version, "files": [],
-                                   "revision": recorded, "read": []}
+                                   "revision": recorded}
         if old is not None and old.get("worker") is not None and self.daemon.builders.get(ident) is old["worker"]:
             del self.daemon.builders[ident]
         held = self.registry()
@@ -507,26 +505,21 @@ class Models:
                     del self.daemon.builders[ident]
                 row["worker"] = None
 
-    def listing(self, every: bool = False) -> list[dict[str, Any]]:
-        """The model documents (``every``: those with declared files too), each with
-        its ``state`` (``STATES``), for one held whose code changed since its build what changed
-        (``stale``, ``every`` only: ``status``'s), and for one not held the command that builds it again."""
+    def listing(self) -> list[dict[str, Any]]:
+        """The model documents, each with its ``state`` (``STATES``), and for one not held the command
+        that builds it again. One that declares files is listed like any other: they are exports."""
         self.prune()
         for ident in self.cache.documents():  # what the cache holds, listed after a restart too
             self.adopt(ident)
         with self.lock:
-            rows = [row for row in self.records.values() if every or not row["files"]]
             found = []
-            for row in rows:
+            for row in self.records.values():
                 ident = row["id"]
                 entry = {"id": ident, "script": row["source"]["script"],
                          "name": row["source"]["name"], "builtAt": row["builtAt"], "version": row["version"],
                          "kind": row["kind"], "state": self.state(ident)}
                 if entry["state"] == "held":
                     entry["held"] = self.where(ident)
-                stale = self.stale(ident) if every and entry["state"] in ("live", "held") else None  # ``status``'s
-                if stale:  # its code changed since: what changed, and the command
-                    entry["stale"] = {"changes": stale["changes"], "rebuild": stale["rebuild"]}
                 lost = self.rebuild(ident) if entry["state"] in ("unsaved", "detached") else None
                 if lost is not None and lost["rebuild"]:
                     entry["rebuild"] = lost["rebuild"]
@@ -628,13 +621,11 @@ class Models:
 
         record, meta = found
         held = self.registry()
-        root = held.root(record)
         program = registering.program(held, record)
         row = {"id": ident, "source": {"script": str(registering.home(held, record)), "name": record["entry"]},
                "worker": None, "program": str(program) if program else None, "kind": record["kind"],
                "builtAt": record.get("built"), "version": secrets.token_hex(8),
-               "files": [], "revision": meta["revision"],
-               "read": [[kind, os.path.normpath(root / path), digest] for kind, path, digest in meta.get("read") or []]}
+               "files": [], "revision": meta["revision"]}
         with self.lock:
             if ident in self.records:
                 return
@@ -714,24 +705,3 @@ class Models:
         structure = {**done["structure"], "exportRevision": fingerprint(done["structure"]), "path": ident,
                      "id": ident, "closure": done.get("closure"), "version": record["version"]}
         return structure, shapes, data
-
-    def stale(self, ident: str) -> dict[str, Any] | None:
-        """For a model document, whether the code changed since it was built -- each file its build
-        read compared with the file now (``cache.changes``), whether or not a worker holds it -- as
-        ``{"text", "changes", "rebuild"}``; None when it is as built. Asked by a verb, a page's open
-        or ``status``, never on its own; a file's digest is kept by its size and mtime, so an
-        unchanged file is not read again. Nothing reruns."""
-        with self.lock:
-            record = self.records.get(ident)
-        if record is None:
-            return None
-        from cadgen.engine.cache import changes
-
-        script = Path(record["source"]["script"])
-        changed = changes(record.get("read") or [], script.parent)
-        if not changed:
-            return None
-        command = self.command(ident)
-        name = record["source"]["name"]
-        return {"text": f"{name} ({ident}): the code changed since this was built ({', '.join(changed)}); "
-                        f"run `{command}` to build it again", "changes": changed, "rebuild": command}

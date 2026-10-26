@@ -331,10 +331,9 @@ def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as
 
 
 def told_state(source: Any, doing: str) -> None:
-    """A model document read by its id, said once on stderr once a verb has read it, when it is not
-    what its code makes now: its last run failed, so the previous good build is read, or its code
-    changed since it was built (``stale``). Both from what the engine reports of it (``model_info``);
-    the verb goes on: a notice, never a refusal, and nothing reruns."""
+    """A model document read by its id, said once on stderr once a verb has read it, when its last
+    run failed, so the previous good build is read: from what the engine reports of it
+    (``model_info``). The verb goes on: a notice, never a refusal, and nothing reruns."""
     from cadgen.engine.ids import is_id
 
     ident = os.fspath(source).partition("#")[0]
@@ -352,8 +351,8 @@ def told_state(source: Any, doing: str) -> None:
 
 
 def state_notice(model: dict[str, Any], doing: str) -> str | None:
-    """The words ``told_state`` says of a model document (``model_info``'s record), or None when it
-    is what its code makes now."""
+    """The words ``told_state`` says of a model document (``model_info``'s record), or None when its
+    last run did not fail."""
     from cadgen.engine.registry import rerun
 
     name = (model.get("source") or {}).get("name") or model.get("id")
@@ -361,11 +360,6 @@ def state_notice(model: dict[str, Any], doing: str) -> str | None:
         program = (model.get("source") or {}).get("script")  # the script that defines it, never a caller
         fix = f"; fix it and run `{rerun(program)}` to update it" if program else ""
         return f"the last run of {name} failed; {doing} its previous good build{fix}"
-    stale = model.get("stale")
-    if stale:
-        changed = " and ".join(text.replace(" is missing", " went missing") for text in stale.get("changes") or [])
-        return (f"{doing} the build of {name} from before {changed or 'its code changed'}; "
-                f"run `{stale['rebuild']}` to update it")
     return None
 
 
@@ -516,7 +510,6 @@ def summary_text(summary: dict[str, Any]) -> str:
         said += ", cached" if state.get("cached") else ", not cached"
         if state.get("builtAt"):
             said += f", built {_span(time.time() - state['builtAt'])} ago"
-        said += f"; stale: {state['stale']}" if state.get("stale") else ""
     lines.append(f"state       {said}")
     parts = summary["parts"]
     lines.append(f"parts       {parts['occurrences']} in {parts['root']}"
@@ -805,8 +798,6 @@ def status_text(answer: dict[str, Any]) -> str:
                 line += "  a shape handed over: no script to rerun"
             if row.get("state") == "failed":
                 line += "  serving its previous good build"
-            elif row.get("stale"):
-                line += f"  stale: run `{row['stale']['rebuild']}`"
             lines.append(line)
     return "\n".join(lines)
 
