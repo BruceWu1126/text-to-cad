@@ -45,13 +45,15 @@ browser through an owner-only redirect file (`browser_open`), and answers with t
 for the agent to give the person: "opened in your browser at <url>". The host's stdio process
 (`cadgen mcp`) makes that open, in the agent's own environment (its `BROWSER`, its display), from
 the page the engine's answer names (`_meta["dev.texttocad/open"]`, stripped before the host sees
-it); the engine, which runs in the environment of whatever started it, never opens a browser for
-a tool. Where a browser page already
+it), and tells the engine whether it opened before the host has the answer
+(`notifications/dev.texttocad/opened`); the engine, which runs in the environment of whatever
+started it, never opens a browser for a tool. Where a browser page already
 reads that document (the engine's `Server.in_page`: a version read within the last 90 seconds,
-or a browser opened on it in the last 30), it opens nothing and answers "already open in your
-browser at <url>"; where no browser can be opened from the stdio process (no display), it answers
-with the URL alone, as it does a client with no stdio process (a direct HTTP client): "nothing
-was opened".
+or a browser the stdio process said it opened on it in the last 30), it opens nothing and answers
+"already open in your browser at <url>"; an open that failed counts for nothing, so the next
+`cad_show` opens the page again. Where no browser can be opened from the stdio process (no
+display), it answers with the URL alone, as it does a client with no stdio process (a direct HTTP
+client): "nothing was opened".
 A tab is claimed only on evidence, never on a client's name. Strongest first: an extension the
 host declares; a view that reached the server (its first `cad_sync` or `cad_http` with the app
 capability: only a host that draws views makes one); the call's own metadata (the 0.163 app

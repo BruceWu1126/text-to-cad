@@ -19,7 +19,7 @@ from unittest import mock
 from urllib.parse import quote
 
 from cadgen._internal.picker import FilePicker
-from cadgen.mcp.browser import OPEN, deliver
+from cadgen.mcp.browser import OPEN, OPENED, deliver
 from cadgen.mcp.shim import initialize_params
 from cadgen.mcp.protocol import RequestContext, RpcError
 from cadgen.viewer.recents import RecentStore
@@ -118,10 +118,15 @@ class _Session(unittest.TestCase):
         return True
 
     def call(self, name: str, arguments: dict | None = None, meta: dict | None = None) -> dict:
-        """A tool's result as the host is given it: through the stdio peer, which opens what it asks."""
+        """A tool's result as the host is given it: through the stdio peer, which opens what it asks
+        and tells the server whether it opened (``tell``)."""
         context = RequestContext(1, {"threadId": "t", **(meta or {})})
         return deliver(self.server.handle("tools/call", {"name": name, "arguments": as_page(self.server, name, arguments)}, context),
-                       self.record)
+                       self.record, self.tell)
+
+    def tell(self, url: str, opened: bool) -> None:
+        """The stdio peer's word on a page it was asked to open, on its session (``Proxy._tell``)."""
+        self.server.notify(OPENED, {"url": url, "opened": opened})
 
     def launch(self, name: str, arguments: dict | None = None, meta: dict | None = None) -> dict:
         return self.call(name, arguments, meta)["structuredContent"]["launch"]
@@ -823,7 +828,8 @@ class TextServerTest(_Session):
                          "bracket.stl opened in your browser at http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab.\n"
                          "This app shows no CAD view itself: give the user this URL. The page follows the model: "
                          "rebuilds for a document, saves for a file, so show a model once, not after every rebuild.")
-        # Opened once, through a redirect file (the page's token is on no command line), and the engine told.
+        # Opened once, through a redirect file (the page's token is on no command line), and the engine
+        # told by the peer that it opened.
         (target,) = self.opened
         self.assertTrue(target.startswith("file:"), target)
         self.assertEqual(told, [self.bracket])
@@ -869,6 +875,8 @@ class TextServerTest(_Session):
         def refuse(*_args, **_kwargs):
             raise AssertionError("the server opened a browser")
 
+        told: list[str] = []
+        self.server._browser_opened = told.append
         context = RequestContext(1, {"threadId": "t"})
         with mock.patch.object(webbrowser, "open", refuse), mock.patch.object(browser_open, "open_page", refuse):
             raw = self.server.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}}, context)
@@ -876,16 +884,73 @@ class TextServerTest(_Session):
         self.assertEqual(raw["_meta"], {OPEN: {"url": link, "said": f"bracket.stl opened in your browser at {link}.",
                                                "failed": "No browser can be opened from here ({reason}); "
                                                          f"bracket.stl's page is {link}."}})
-        self.assertEqual(self.opened, [])
-        delivered = deliver(raw, self.record)
+        # Asked, not opened: nothing counts the page as open in a browser until the peer says it opened.
+        self.assertEqual((self.opened, told), ([], []))
+        delivered = deliver(raw, self.record, self.tell)
         self.assertNotIn("_meta", delivered)
         (target,) = self.opened
         self.assertTrue(target.startswith("file:") and "token" not in target, target)
+        self.assertEqual(told, [self.bracket])
         # Where the peer's open fails, its words say so in place of the claim that it opened.
         failed = deliver(self.server.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.loose}}, context),
                          lambda _target: False)["content"][0]["text"]
         self.assertTrue(failed.startswith("No browser can be opened from here (no browser could be started here"), failed)
         self.assertNotIn("opened in your browser", failed)
+
+    def test_a_page_the_peer_opened_is_open_and_a_second_show_opens_nothing(self) -> None:
+        pages: set[str] = set()
+        self.server._in_browser, self.server._browser_opened = pages.__contains__, pages.add
+        first = self.call("cad_show", {"source": self.bracket})["content"][0]["text"]
+        self.assertTrue(first.startswith("bracket.stl opened in your browser at "), first)
+        self.assertEqual(pages, {self.bracket})  # the peer said it opened
+        again = self.call("cad_show", {"source": self.bracket})["content"][0]["text"]
+        self.assertTrue(again.startswith("bracket.stl is already open in your browser at "), again)
+        self.assertEqual(len(self.opened), 1)
+
+    def test_a_page_the_peer_could_not_open_is_not_open_and_the_next_show_opens_it_again(self) -> None:
+        pages: set[str] = set()
+        self.server._in_browser, self.server._browser_opened = pages.__contains__, pages.add
+        tried: list[str] = []
+
+        def failing(target: str) -> bool:  # a BROWSER that exits non-zero
+            tried.append(target)
+            return False
+
+        context = RequestContext(1, {"threadId": "t"})
+        for attempt in (1, 2):
+            shown = deliver(self.server.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}}, context),
+                            failing, self.tell)["content"][0]["text"]
+            self.assertTrue(shown.startswith("No browser can be opened from here (no browser could be started here (no "
+                                             "display, or no browser to open)); bracket.stl's page is "
+                                             "http://127.0.0.1:3245/"), (attempt, shown))
+        self.assertEqual((len(tried), pages), (2, set()))
+
+    def test_a_word_on_a_page_this_session_did_not_ask_its_peer_for_counts_nothing_as_open(self) -> None:
+        told: list[str] = []
+        self.server._browser_opened = told.append
+        link = "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"
+        context = RequestContext(1, {"threadId": "t"})
+        # Never asked: a client's word alone counts no page as open.
+        self.server.notify(OPENED, {"url": link, "opened": True})
+        self.server.notify(OPENED, {"url": "http://127.0.0.1:3245/elsewhere", "opened": True})
+        # Asked of this session's peer: another session's word on that page is not this one's.
+        other = Server(page=self.server.page, recents=self.server.recents, viewer_url=self.viewer_url,
+                       browser_opened=told.append)
+        other.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {},
+                                                      "clientInfo": self.client}), None)
+        self.assertIn(OPEN, self.server.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}},
+                                               context)["_meta"])
+        other.notify(OPENED, {"url": link, "opened": True})
+        self.assertEqual(told, [])
+        # The peer's first word settles the ask: an open it said failed stays unopened, whatever follows.
+        self.server.notify(OPENED, {"url": link, "opened": False})
+        self.server.notify(OPENED, {"url": link, "opened": True})
+        self.assertEqual(told, [])
+        self.assertIn(OPEN, self.server.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}},
+                                               context)["_meta"])
+        self.server.notify(OPENED, {"url": link, "opened": True})
+        self.server.notify(OPENED, {"url": link, "opened": True})
+        self.assertEqual(told, [self.bracket])
 
     def test_a_client_with_no_stdio_peer_is_given_the_url_and_nothing_opens(self) -> None:
         # A direct HTTP client: no peer said it opens a browser, so nothing does.
@@ -899,6 +964,8 @@ class TextServerTest(_Session):
         self.assertTrue(shown["content"][0]["text"].startswith(
             "bracket.stl's page is http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab; nothing was opened, "
             "as this client opens no browser.\nThis app shows no CAD view itself: give the user this URL."), shown)
+        # Its word that the page opened anyway is no open this server asked for.
+        server.notify(OPENED, {"url": "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab", "opened": True})
         self.assertEqual((self.opened, told), ([], []))
 
     def test_a_peer_that_can_open_no_browser_is_asked_for_none(self) -> None:

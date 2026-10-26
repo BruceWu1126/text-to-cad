@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import subprocess
@@ -13,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cadgen.engine.client import request
+from cadgen.mcp.browser import OPENED
 from cadgen.mcp.protocol import RequestContext, RpcError
 from cadgen.mcp.shim import Proxy
 from cadgen.viewer.engine_client import EngineClient
@@ -39,9 +41,11 @@ class HttpSessionsTest(unittest.TestCase):
         cls.page = cls.root / 'page'
         cls.page.mkdir()
         (cls.page / 'index.html').write_text('<!doctype html><title>test app</title>', encoding='utf-8')
-        # The engine's browser refuses and records any page it is given: it should be given none.
+        # The engine's browser records any page it is given, and opens nothing: it should be given
+        # none. It exits 0, as a BROWSER that refused would have webbrowser go on to the platform's
+        # own browser (macOS's osascript), which no test may reach.
         cls.opened = cls.root / 'opened.jsonl'
-        cls.engine_browser = cls.browser('engine', 1)
+        cls.engine_browser = cls.browser('engine', 0)
         cls.env = engine_daemon.watched({**os.environ, 'CADGEN_ENGINE_DIR': str(cls.root / 'engine'),
                    'CADGEN_STATE_DIR': str(cls.root / 'state'), 'CADGEN_ENGINE_MESH': 'inline',
                    'CADGEN_VIEWER_DIST': str(cls.page), 'BROWSER': cls.engine_browser}, cls.addClassCleanup)
@@ -71,26 +75,32 @@ class HttpSessionsTest(unittest.TestCase):
     def recorded(self):
         return [json.loads(line) for line in self.opened.read_text(encoding='utf-8').splitlines()] if self.opened.exists() else []
 
-    @unittest.skipIf(os.name == 'nt', 'a BROWSER command here is a script run by its #! line')
-    def test_a_text_hosts_cad_show_opens_the_browser_from_the_stdio_peer_never_the_engine(self):
-        # The engine runs in the environment of whatever started it -- here a BROWSER that refuses
-        # and records -- and the stdio peer in its host's: only the peer's BROWSER is given the page.
+    @contextlib.contextmanager
+    def peer_environment(self, **more):
+        """The environment of a stdio peer made in this process: a display, where one is asked for, no
+        remote shell, and ``more`` (its BROWSER); its ``webbrowser`` reads them afresh."""
         import webbrowser
 
-        engine = request({'op': 'status'})['pid']  # running, started with the engine's environment
-        before = len(self.recorded())
-        shim = {'BROWSER': self.browser('shim', 0), 'DISPLAY': ':0'}  # a display, where one is asked for
-        with patch.dict(os.environ, shim), patch.object(webbrowser, '_tryorder', None), \
+        with patch.dict(os.environ, {'DISPLAY': ':0', **more}), patch.object(webbrowser, '_tryorder', None), \
                 patch.object(webbrowser, '_browsers', {}):
             for name in ('SSH_CONNECTION', 'SSH_TTY'):
                 os.environ.pop(name, None)
+            yield
+
+    @unittest.skipIf(os.name == 'nt', 'a BROWSER command here is a script run by its #! line')
+    def test_a_text_hosts_cad_show_opens_the_browser_from_the_stdio_peer_never_the_engine(self):
+        # The engine runs in the environment of whatever started it -- here a BROWSER that records --
+        # and the stdio peer in its host's: only the peer's BROWSER is given the page.
+        engine = request({'op': 'status'})['pid']  # running, started with the engine's environment
+        before = len(self.recorded())
+        with self.peer_environment(BROWSER=self.browser('shim', 0)):
             proxy = self.proxy(TEXT)
             model = str(self.model.resolve())
             shown = self.tool(proxy, 'cad_show', {'source': model})
             self.assertNotIn('_meta', shown)
             text = shown['content'][0]['text']
             self.assertRegex(text, r'^part\.stl opened in your browser at http://127\.0\.0\.1:\d+/[0-9a-f-]{36}\?token=')
-            # Opened once: the engine knows the page is opening, and a second show opens nothing.
+            # Opened once: the peer told the engine it opened the page, and a second show opens nothing.
             again = self.tool(proxy, 'cad_show', {'source': model})['content'][0]['text']
             self.assertTrue(again.startswith('part.stl is already open in your browser at '), again)
         opened = self.recorded()[before:]
@@ -98,6 +108,25 @@ class HttpSessionsTest(unittest.TestCase):
         self.assertNotEqual(opened[0]['pid'], engine)
         link = text.split(' at ', 1)[1].split('.\n', 1)[0]
         self.assertIn(f'url={link}'.replace('&', '&amp;'), opened[0]['page'])
+
+    @unittest.skipIf(os.name == 'nt', 'a BROWSER command here is a script run by its #! line')
+    def test_a_page_the_stdio_peer_could_not_open_is_opened_again_by_the_next_show(self):
+        # The peer's BROWSER exits non-zero: the answer says no browser opened, the engine counts no
+        # page as open, and the next show asks the peer again. The peer's opener is that BROWSER
+        # command alone: ``webbrowser.open`` would go on to the platform's own browser after it
+        # (macOS's osascript), which no test may reach.
+        import webbrowser
+
+        model = self.root / 'failing.stl'
+        model.write_bytes(b'solid part\nendsolid part\n')
+        before = len(self.recorded())
+        with self.peer_environment():
+            proxy = self.proxy(TEXT, opener=webbrowser.GenericBrowser(self.browser('failing', 1)).open)
+            for attempt in (1, 2):
+                text = self.tool(proxy, 'cad_show', {'source': str(model.resolve())})['content'][0]['text']
+                self.assertTrue(text.startswith('No browser can be opened from here (no browser could be started here'), (attempt, text))
+                self.assertIn("; failing.stl's page is http://127.0.0.1:", text)
+        self.assertEqual([row['who'] for row in self.recorded()[before:]], ['failing', 'failing'])
 
     def test_a_client_with_no_stdio_peer_is_given_the_url_and_nothing_opens(self):
         client = EngineClient()
@@ -120,6 +149,18 @@ class HttpSessionsTest(unittest.TestCase):
         self.assertRegex(shown['content'][0]['text'], r'^unopened\.stl\'s page is http://127\.0\.0\.1:\d+/\S+; nothing was '
                                                       r'opened, as this client opens no browser\.\n')
         self.assertEqual(self.recorded()[before:], [])
+        # Its word that the page opened is no open the engine asked a peer for: nothing counts the page
+        # as open, so a stdio peer's show of the model opens it.
+        link = shown['content'][0]['text'].split(' is ', 1)[1].split('; ', 1)[0]
+        status, _, _ = client.call('POST', '/mcp', json.dumps({'jsonrpc': '2.0', 'method': OPENED, 'params': {
+            'url': link, 'opened': True}}).encode('utf-8'), {**headers, **session})
+        self.assertEqual(status, 202)
+        opened = []
+        with self.peer_environment():
+            proxy = self.proxy(TEXT, opener=lambda target: opened.append(target) or True)
+            text = self.tool(proxy, 'cad_show', {'source': str(model.resolve())})['content'][0]['text']
+        self.assertTrue(text.startswith('unopened.stl opened in your browser at '), text)
+        self.assertEqual((len(opened), self.recorded()[before:]), (1, []))
 
     @staticmethod
     def call(proxy, method, params=None):
