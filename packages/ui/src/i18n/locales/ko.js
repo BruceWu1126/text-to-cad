@@ -91,7 +91,7 @@ export default {
 
   "home.byline": "무엇이든 만드세요.",
   "home.bylineOpenSource": "100% 오픈 소스, 무료.",
-  "home.recentFiles": "최근 파일",
+  "home.recentFiles": "최근",
   "home.launchFolder": "실행 폴더",
   "home.searchAria": "모델 검색",
   "home.searchPlaceholder": "검색",

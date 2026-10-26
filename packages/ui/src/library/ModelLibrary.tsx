@@ -138,7 +138,7 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
  * The host's home: the models opened before, from every view, to open again. The viewer's navbar
  * is over it (its logo's app menu, the host's update and Full size, as over a file). The TEXTTOCAD
  * wordmark is centred at its top over its byline, then the host's links — GitHub, Discord and X,
- * as icon links, which the app menu also holds — then "Recent Files" with its search, its grid/list switch and, where
+ * as icon links, which the app menu also holds — then "Recent" with its search, its grid/list switch and, where
  * the host has a chooser, Open, all three there with no models yet too; then the models, pinned first, as solid cards (a picture over the
  * name and when the file was edited) or as rows. A card can be pinned (its pin filled); a row can
  * also be removed. With none yet, one empty card opens the host's chooser. It is drawn on the

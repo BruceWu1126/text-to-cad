@@ -104,7 +104,7 @@ export default {
   // The home: the library of models opened before.
   "home.byline": "Build anything.",
   "home.bylineOpenSource": "100% open source and free.",
-  "home.recentFiles": "Recent Files",
+  "home.recentFiles": "Recent",
   "home.launchFolder": "Launch folder",
   "home.searchAria": "Search models",
   "home.searchPlaceholder": "Search",

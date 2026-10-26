@@ -91,7 +91,7 @@ export default {
 
   "home.byline": "何でも作ろう。",
   "home.bylineOpenSource": "100% オープンソースで無料。",
-  "home.recentFiles": "最近のファイル",
+  "home.recentFiles": "最近",
   "home.launchFolder": "起動フォルダー",
   "home.searchAria": "モデルを検索",
   "home.searchPlaceholder": "検索",

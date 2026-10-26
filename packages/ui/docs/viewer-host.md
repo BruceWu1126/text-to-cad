@@ -452,7 +452,7 @@ FileViewer draws ONE navbar, the same in every app, over every file and over a h
 Over the home it has only the logo and its menu (no Back to files), Back and Forward where
 the host hands a `history`, and the host's update, Full size and Open in browser, each where
 it stands over a file; the home's search, layout switch and Open stay
-in its Recent Files row, and its links under its title. Left: the text-to-cad "C" logo,
+in its Recent row, and its links under its title. Left: the text-to-cad "C" logo,
 which opens the app menu (`AppMenu`, `file-viewer/navigation/AppMenu.jsx`), then Back and
 Forward where the host hands a `history`, then the open file's name and its ⋯ menu. The
 logo, Back and Forward, the name and the ⋯ share one style (`NAV_ITEM_CLASS`):

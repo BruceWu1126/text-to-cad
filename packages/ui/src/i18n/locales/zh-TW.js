@@ -92,7 +92,7 @@ export default {
 
   "home.byline": "打造任何東西。",
   "home.bylineOpenSource": "100% 開放原始碼，完全免費。",
-  "home.recentFiles": "最近的檔案",
+  "home.recentFiles": "最近",
   "home.launchFolder": "啟動資料夾",
   "home.searchAria": "搜尋模型",
   "home.searchPlaceholder": "搜尋",

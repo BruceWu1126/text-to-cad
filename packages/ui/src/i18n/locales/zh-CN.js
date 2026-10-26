@@ -92,7 +92,7 @@ export default {
 
   "home.byline": "构建万物。",
   "home.bylineOpenSource": "100% 开源免费。",
-  "home.recentFiles": "最近文件",
+  "home.recentFiles": "最近",
   "home.launchFolder": "启动文件夹",
   "home.searchAria": "搜索模型",
   "home.searchPlaceholder": "搜索",
