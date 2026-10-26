@@ -3,10 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { TreeFilterInput } from "@text-to-cad/ui/primitives/tree-filter";
-import { TREE_GLYPH_CLASS, TREE_GLYPH_STROKE, TREE_ROW_INSET_PX, TreeRowLabel, TreeRowSurface } from "@text-to-cad/ui/primitives/tree-row";
+import { TREE_GLYPH_STROKE, TREE_ROW_INSET_PX, TreeRowLabel, TreeRowSurface } from "@text-to-cad/ui/primitives/tree-row";
 import { useI18n } from "@text-to-cad/ui/i18n";
 import { ageLabel, lastActivity } from "../../lib/age.js";
-import { DocumentGlyph } from "./DocumentGlyph.jsx";
+import { DOCUMENT_ROW_GLYPH_CLASS, DocumentGlyph } from "./DocumentGlyph.jsx";
 import { useControlUsage } from "../../usage/controls.js";
 
 /** The most the Models tab lists: the Home, one click away, has the rest. */
@@ -85,7 +85,7 @@ export function ModelList({ recent, current, onOpen }) {
     <TreeRowSurface as="button" type="button" active={row.path === current} className="disabled:opacity-50"
       style={{ paddingLeft: TREE_ROW_INSET_PX }} data-model-row="" data-path={row.path} disabled={row.missing}
       aria-current={row.path === current ? "true" : undefined} onClick={() => onOpen(row.path)}>
-      <DocumentGlyph model={built(row)} path={row.path} className={TREE_GLYPH_CLASS} strokeWidth={TREE_GLYPH_STROKE} />
+      <DocumentGlyph model={built(row)} path={row.path} className={DOCUMENT_ROW_GLYPH_CLASS} strokeWidth={TREE_GLYPH_STROKE} />
       <TreeRowLabel className="flex-1">{row.name}</TreeRowLabel>
       <span className="ml-2 shrink-0 text-muted-foreground" data-model-age="">{ageLabel(lastActivity(row), now, t, locale)}</span>
     </TreeRowSurface>

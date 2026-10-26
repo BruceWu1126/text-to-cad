@@ -361,7 +361,7 @@ switch and, where the server's computer has a file chooser (`pick` in its info),
 which opens the desktop's own chooser (`POST /__cad/pick`, `cadgen._internal.picker`) and shows
 the file picked. The grid's tiles are transparent with a 1px border, at least 240px wide (four across
 a 1280px window): a picture on the muted fill, then the kind's glyph (a model's cube, a
-file's file glyph, a file outline with its kind inside) beside its name over its last activity with no verb ("now", "5m ago", "2h
+file's plain file outline, whatever its kind) beside its name over its last activity with no verb ("now", "5m ago", "2h
 ago", "3d ago", then the short date). The list is a table: Name, Updated and Opened over 40px
 rows, each a document's glyph and name and its two ages. Every model is a tile and a row of
 its own, nothing folded, and none is tied to the script it was built from: a model shows its
@@ -371,7 +371,7 @@ neither), Pin or Unpin, and Delete, which asks first: a model's "Delete bracket?
 script and exported files kept, and no other model with it; a file's "Delete bracket.step from the viewer?" removes the
 engine's record of the file alone. From a file, Back to home in
 the menu the navbar's C logo opens leads back to it. The home has the same navbar, its logo
-the TEXTTOCAD wordmark rather than the C (a plain swap, no animation), the same menu (without Back to home, and with GitHub, Discord and X as
+the TEXTTOCAD wordmark rather than the C (both 16px tall, crossfading in 150ms), the same menu (without Back to home, and with GitHub, Discord and X as
 over a file) at the left and
 the update button at the right while a newer text-to-cad is out. The home is a step of
 the browser's history, as a file is: the browser's Back and Forward walk between them (the
