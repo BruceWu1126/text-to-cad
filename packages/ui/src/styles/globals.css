@@ -138,6 +138,7 @@
 .cad-library-layout button[aria-pressed=true] { background: var(--accent); color: var(--accent-foreground); }
 .cad-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 20px; margin: 0; padding: 0; list-style: none; }
 .cad-library-card, .cad-library-row { position: relative; min-width: 0; }
+.cad-library-main { position: relative; min-width: 0; }
 .cad-library-card { overflow: hidden; border: 1px solid var(--cad-library-line); border-radius: 10px; background: var(--cad-library-card); transition: border-color .15s ease, box-shadow .15s ease; }
 .cad-library-card:hover:not([data-missing]), .cad-library-card:focus-within { border-color: color-mix(in oklab, var(--ring) 70%, transparent); box-shadow: 0 6px 18px -8px rgb(0 0 0 / 0.18); }
 .cad-library-open { display: flex; width: 100%; min-width: 0; text-align: left; cursor: pointer; outline: none; color: inherit; background: none; border: 0; padding: 0; font: inherit; }
@@ -148,26 +149,46 @@
 .cad-library-thumbnail img { width: 100%; height: 100%; object-fit: contain; }
 .cad-library-thumbnail > svg { width: 28px; height: 28px; opacity: .7; }
 .cad-library-card .cad-library-thumbnail { width: 100%; aspect-ratio: 4 / 3; border-bottom: 1px solid var(--cad-library-line); }
-.cad-library-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 76px 12px 12px; }
-.cad-library-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); }
+.cad-library-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 52px 12px 12px; }
+.cad-library-name { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--foreground); }
+.cad-library-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A card's kind: a model's code glyph or a file's type icon, the name menu's own. */
+.cad-library-glyph { flex: none; width: 14px; height: 14px; color: var(--muted-foreground); }
 .cad-library-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-tiny, 0.6875rem); line-height: 16px; color: var(--muted-foreground); }
 .cad-library-card[data-missing] .cad-library-thumbnail, .cad-library-row[data-missing] .cad-library-thumbnail, [data-missing] .cad-library-name { opacity: .55; }
 /* A card's pin and remove sit at the right of its body; they show on hover or focus, a pin always
  * while the model is pinned, and always where nothing hovers (touch). */
-.cad-library-actions { position: absolute; display: flex; gap: 2px; color: var(--muted-foreground); }
+.cad-library-actions { position: absolute; display: flex; align-items: center; gap: 2px; color: var(--muted-foreground); }
+/* A pinned card says so at rest: its pin, beside the menu. */
+.cad-library-pinned { width: 12px; height: 12px; margin-right: 2px; color: var(--muted-foreground); }
 .cad-library-card .cad-library-actions { right: 8px; bottom: 12px; }
 .cad-library-actions button { opacity: 0; transition: opacity .15s ease; }
-.cad-library-card:hover .cad-library-actions button, .cad-library-row:hover .cad-library-actions button, .cad-library-actions:focus-within button, .cad-library-actions button[aria-pressed=true] { opacity: 1; }
-.cad-library-actions button[aria-pressed=true] { background: var(--accent); color: var(--foreground); }
+.cad-library-card:hover .cad-library-actions button, .cad-library-row:hover .cad-library-actions button, .cad-library-actions:focus-within button, .cad-library-actions button[data-state=open] { opacity: 1; }
+.cad-library-actions button[data-state=open] { background: var(--accent); color: var(--foreground); }
 @media (hover: none) { .cad-library-actions button { opacity: 1; } }
 .cad-library-list { margin: 0; padding: 0; list-style: none; overflow: hidden; border: 1px solid var(--cad-library-line); border-radius: 10px; background: var(--cad-library-card); }
 .cad-library-row + .cad-library-row { border-top: 1px solid var(--cad-library-line); }
-.cad-library-row .cad-library-open { align-items: center; gap: 12px; padding: 8px 76px 8px 8px; transition: background-color .15s ease; }
+.cad-library-row .cad-library-open { align-items: center; gap: 12px; padding: 8px 52px 8px 8px; transition: background-color .15s ease; }
 .cad-library-row .cad-library-open:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 60%, transparent); }
 .cad-library-row .cad-library-thumbnail { flex: none; width: 56px; aspect-ratio: 4 / 3; border-radius: 6px; border: 1px solid var(--cad-library-line); }
 .cad-library-row .cad-library-name { flex: 1 1 auto; }
 .cad-library-row .cad-library-status { flex: none; }
 .cad-library-row .cad-library-actions { right: 8px; top: 50%; transform: translateY(-50%); }
+/* The type chips over the list: All, Models, Files. */
+.cad-library-kinds { display: flex; gap: 4px; margin: -8px 0 16px; }
+/* A script's other models, folded under its card: "and 27 more", opened in place. */
+.cad-library-folded { border-top: 1px solid var(--cad-library-line); padding: 4px; }
+.cad-library-more, .cad-library-child { display: flex; width: 100%; min-width: 0; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: none; font: inherit; text-align: left; cursor: pointer; color: var(--muted-foreground); }
+.cad-library-more { font-size: var(--text-tiny, 0.6875rem); }
+.cad-library-more:hover, .cad-library-child:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 60%, transparent); color: var(--foreground); }
+.cad-library-more:focus-visible, .cad-library-child:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.cad-library-chevron { flex: none; width: 12px; height: 12px; transition: transform .1s ease; }
+.cad-library-more[aria-expanded=true] .cad-library-chevron { transform: rotate(90deg); }
+.cad-library-children { margin: 0; padding: 0; list-style: none; }
+.cad-library-child { justify-content: space-between; font-size: var(--text-xs, 0.75rem); }
+.cad-library-child .cad-library-name { flex: 1 1 auto; }
+.cad-library-child .cad-library-glyph { width: 12px; height: 12px; }
+.cad-library-row .cad-library-folded { padding: 4px 8px 6px 76px; }
 .cad-library-empty { margin: 48px 0 0; text-align: center; color: var(--muted-foreground); line-height: 1.6; }
 /* While the list is read: the cards' own shapes, pulsing. */
 .cad-library [data-loading] .cad-library-open { cursor: default; }
@@ -183,4 +204,4 @@
 .cad-library-row .cad-library-opening > svg { width: 14px; height: 14px; }
 .cad-library-error { margin-bottom: 16px; color: var(--destructive); }
 .cad-library-error p { margin: 0; }
-@media (prefers-reduced-motion: reduce) { .cad-library-card, .cad-library-actions button, .cad-library-row .cad-library-open { transition: none; } .cad-library [data-loading] .cad-library-thumbnail, .cad-library-placeholder { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .cad-library-card, .cad-library-actions button, .cad-library-row .cad-library-open, .cad-library-chevron { transition: none; } .cad-library [data-loading] .cad-library-thumbnail, .cad-library-placeholder { animation: none; } }
