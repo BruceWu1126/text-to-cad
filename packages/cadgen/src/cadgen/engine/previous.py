@@ -2,12 +2,16 @@
 digests, and the key a restart compares.
 
 When a build writes a model's xbf, the document's main label carries its closure
-(``manifest``, schema ``cadgen.engine closure/1``):
+(``manifest``, schema ``cadgen.engine closure/2``):
 
-- ``engine``: the xbf format (``FORMAT``), and, as information only, the release that wrote
-  it (``cadgen <VERSION>``, the version declared beside this very code: ``version``) and a
-  digest of the engine's own code;
-- ``libs``: the versions of build123d and OCP, which decide the geometry;
+- ``engine``: the keyed xbf format (``FORMAT``); as information only, the release that wrote it
+  (``cadgen <VERSION>``, the version declared beside this very code: ``version``) and a digest of
+  the engine's own code;
+- ``libs``: the versions of build123d and OCP (the kernel: OCCT's release leads its version),
+  which decide the geometry;
+- ``platform``: the keyed system and architecture (``platform.system()``, ``platform.machine()``):
+  an arm64 kernel and an x86-64 one write other bytes of one model; the Python version is recorded
+  as information only;
 - ``source``: ``{"kind": "script", "path", "function"}`` -- the script relative to the
   document's folder and the model's function;
 - ``modules``: ``[path, digest]`` per first-party module the script's load imported or the
@@ -22,22 +26,23 @@ When a build writes a model's xbf, the document's main label carries its closure
   relative to the document's folder (``null`` digest: a file it found missing), and a text's
   font (``font``);
 - ``bodies``: how many bodies the model is;
-- ``key``: one digest over the format, the libraries, the source, the modules and the
-  inputs; ``null`` where the closure cannot say all the model is made of (a body read a
-  pipe, or reaches what cannot be keyed). Neither the release nor the engine's code digest
-  is in it: a cadgen release or an engine edit that leaves the document alone keeps every
-  xbf current. ``FORMAT`` is what moves when the written document, or what the key covers,
-  changes (``xbf/1`` to ``xbf/2``), and every xbf then builds once, cleanly.
+- ``key``: one digest over the format, the libraries, the system and the architecture, and the
+  code: the source, the modules and the inputs; ``null`` where the closure
+  cannot say all the model is made of (a body read a pipe, or reaches what cannot be keyed).
+  Not the engine's code digest: an engine edit that leaves the document alone keeps every xbf
+  current. ``FORMAT`` is what moves when the written document, or what the key covers, changes
+  (``xbf/1`` to ``xbf/2``), and every xbf then builds once, cleanly. A cadgen release or Python
+  version change alone leaves the key current.
 
 No source text, no line, no input's contents (**the file is the document**, **names are the
 durable tie to code**).
 
 A build asks the document before it runs a model's body (``build._previous``): the closure
-made again now -- the script loaded, its modules digested, each input hashed again --
-against the one the document holds. The same key, in a document this engine wrote that
-reads whole, and the body is not run: the document on disk is what it would make, and it is
-not written. Otherwise the build runs, and its report names what changed (``changes``):
-``../src/lib/arm.py changed``, ``../STEP/gripper.step is missing``.
+made again now -- the script loaded, its modules digested, each input hashed again -- against
+the one the document holds. The same key, in a document this engine wrote that reads whole, and
+the body is not run: the document on disk is what it would make, and it is not written.
+Otherwise the build runs, and its report names what changed (``changes``): ``../src/lib/arm.py
+changed``, ``../STEP/gripper.step is missing``, ``arm64 became x86_64``.
 
 Only the whole document is taken, never a part of it. OCCT's BinXCAF reader does not
 give back the doubles it was given: it builds each direction and placement anew, and a
@@ -47,6 +52,17 @@ other bytes again). A document holding a body's result read back would so drift 
 cold build's bytes, build after build. So what is written is always made from what bodies
 made in this process, and a document read is never written: an edit after a restart runs
 the model.
+
+One move is made of a document's bytes, never of a read document (``migrated``): a cached
+document of the closure before this one (``EARLIER_SCHEMA``, written as ``EARLIER_FORMAT``:
+no platform, the release not keyed) is given, once, at the engine's start
+(``cache.Cache.migrate``), the closure this toolchain makes of it -- the release, the format and
+the platform this engine's, which that closure did not key; its libraries, its code and its
+inputs as it holds them; the key made again over them -- and this engine's writer, both edited
+into its main label where they are (``document.relabel``), every other byte as it was: the bytes
+a cold build here writes of a model nothing changed. So every model whose code, inputs and
+libraries are as its last build left them takes its document with nothing run, and one whose
+library moved since builds, saying so.
 """
 
 from __future__ import annotations
@@ -58,9 +74,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "cadgen.engine closure/1"
+SCHEMA = "cadgen.engine closure/2"
 # Bumped deliberately, never by a release: when the document an engine writes, or what the
-# key covers, changes. A document of another format is built again once (``build._previous``).
+# key covers, changes. A document of another format is built again once (``build._previous``),
+# but one of ``EARLIER_FORMAT``, which is moved (``migrated``).
 # xbf/2: the key covers the format alone of the engine, and no numpy; the closure holds no commit.
 # xbf/3: the kinematics are AP242's alone: couplings as its couplers, motions' interpolation, no
 # cadgen-only attribute, no gear pair.
@@ -68,11 +85,19 @@ SCHEMA = "cadgen.engine closure/1"
 # xbf/5: files read by motion functions join the closure.
 # xbf/6: the closure counts the build's animations, and a document with any is not taken.
 # xbf/7: the build's animations are a record on the main label (``animations.record``); the closure counts none.
-FORMAT = "xbf/7"
+# xbf/8: the closure names the toolchain that built it (closure/2): the system and architecture join the key.
+FORMAT = "xbf/8"
+# The closure and the format before the toolchain was keyed: a cached document of them is moved
+# to this closure in place, once (``migrated``), never built again for it.
+EARLIER_SCHEMA = "cadgen.engine closure/1"
+EARLIER_FORMAT = "xbf/7"
 # The libraries a key covers: what decides the geometry.
 KEYED_LIBRARIES = ("build123d", "OCP")
-# The start of a closure's text: the schema first, so a head scan finds it.
-_PREFIX = b'{"schema":"cadgen.engine closure/1",'
+# The keyed platform fields; the closure also records Python as information only.
+KEYED_PLATFORM = ("system", "arch")
+# The start of a closure's text: the schema first, so a head scan finds it; and an earlier one's.
+_PREFIX = f'{{"schema":"{SCHEMA}",'.encode()
+_EARLIER_PREFIX = f'{{"schema":"{EARLIER_SCHEMA}",'.encode()
 # How far into a document its main label's attributes are: right after the header.
 _HEAD_BYTES = 1 << 20
 
@@ -125,6 +150,16 @@ def _engine() -> dict[str, str]:
 
     return {"release": f"cadgen {version()}", "format": FORMAT,
             "digest": hashlib.sha256(_engine_version().encode()).hexdigest()[:32]}
+
+
+@functools.cache
+def _platform() -> dict[str, str]:
+    """The Python a body runs on and the machine it runs on: the system (``Darwin``, ``Linux``,
+    ``Windows``) and the architecture (``arm64``, ``x86_64``, ``AMD64``), as ``platform`` names
+    them. A worker runs the engine's own interpreter, so the engine and its workers say the same."""
+    import platform
+
+    return {"python": platform.python_version(), "system": platform.system(), "arch": platform.machine()}
 
 
 def _digest(value: Any) -> str:
@@ -209,7 +244,8 @@ def manifest(keys: dict[str, tuple], name: str, folder: Path, model: Any, module
             if row not in inputs:  # a child placed again holds its reads again
                 inputs.append(row)
     record: dict[str, Any] = {
-        "schema": SCHEMA, "engine": _engine(), "libs": _libraries(), "source": _source(model, folder),
+        "schema": SCHEMA, "engine": _engine(), "libs": _libraries(), "platform": _platform(),
+        "source": _source(model, folder),
         "modules": sorted([_relative(path, folder), digest] for path, digest in modules.items()),
         "symbols": _named(symbols or {}, folder),
         "inputs": inputs, "bodies": len(closure(keys, name)) if found is not None else None}
@@ -224,11 +260,13 @@ def _named(symbols: dict[str, dict[str, str]], folder: Path) -> dict[str, dict[s
 
 
 def key(record: dict[str, Any]) -> str:
-    """The digest a restart compares: the format, the libraries, the source, the modules and
-    the inputs. Not the release that wrote the document, nor the engine's code digest: the
-    format moves when what an engine writes does."""
+    """The digest a restart compares: the format, the libraries, the system and the architecture,
+    and the code: the source, the modules and the inputs. The release, Python version and engine's
+    code digest are recorded but not keyed; the format moves when what an engine writes does."""
     libs = {name: record["libs"].get(name) for name in KEYED_LIBRARIES}
-    return _digest([SCHEMA, record["engine"]["format"], libs, record["source"], record["modules"], record["inputs"]])
+    platform = {name: record["platform"].get(name) for name in KEYED_PLATFORM}
+    return _digest([SCHEMA, record["engine"]["format"], libs, platform,
+                    record["source"], record["modules"], record["inputs"]])
 
 
 def text(record: dict[str, Any]) -> str:
@@ -244,7 +282,8 @@ def again(record: dict[str, Any], model: Any, folder: Path, modules: dict[str, s
     each by name (a changed module names what changed in it where the record holds its names)."""
     from cadgen.engine.kernel import memo
 
-    now = {"schema": SCHEMA, "engine": _engine(), "libs": _libraries(), "source": _source(model, folder),
+    now = {"schema": SCHEMA, "engine": _engine(), "libs": _libraries(), "platform": _platform(),
+           "source": _source(model, folder),
            "modules": sorted([_relative(path, folder), digest] for path, digest in modules.items())}
     changes: list[str] = []
     if now["engine"]["format"] != record["engine"].get("format"):
@@ -252,6 +291,10 @@ def again(record: dict[str, Any], model: Any, folder: Path, modules: dict[str, s
     for name in sorted(set(now["libs"]) | set(record["libs"])):
         if now["libs"].get(name) != record["libs"].get(name):
             changes.append(f"{name} {record['libs'].get(name)} became {now['libs'].get(name)}")
+    held_platform = record.get("platform") or {}
+    for name in KEYED_PLATFORM:
+        if now["platform"][name] != held_platform.get(name):
+            changes.append(f"{held_platform.get(name)} became {now['platform'][name]}")
     if now["source"] != record["source"]:
         source = now["source"]
         changes.append(f"the model is now {source['path']}::{source['function']}")
@@ -298,24 +341,83 @@ def located(record: dict[str, Any], folder: Path) -> dict[str, Any]:
 def scan(path: Path) -> tuple[str | None, str | None]:
     """What wrote the document at ``path`` and the closure its main label holds, read from
     its head, where the main label's attributes are: ``(writer, closure text)``, each None
-    where the head holds none. A first look only: a document is taken once it reads whole."""
+    where the head holds none. A first look only: a document is taken once it reads whole. The
+    closure of whichever schema it holds -- an earlier engine's is what that document holds -- for
+    a build takes only a document of this engine's format (``build._previous``)."""
+    with open(path, "rb") as handle:
+        return _head(handle.read(_HEAD_BYTES))
+
+
+def _head(head: bytes, schema: str | None = None) -> tuple[str | None, str | None]:
+    """``scan`` of a document's first bytes: its writer, and its closure, of ``schema`` where one
+    is named."""
     import re
 
-    with open(path, "rb") as handle:
-        head = handle.read(_HEAD_BYTES)
     writer = re.search(rb"cadgen\.engine xbf/[0-9]+ \(cadgen [ -~]{1,64}?\)", head)
     found = None
-    at = head.find(_PREFIX)
+    schemas = "cadgen.engine closure/"  # every closure's schema starts so
+    at = head.find(f'{{"schema":"{schema}",'.encode() if schema else f'{{"schema":"{schemas}'.encode())
     if at >= 0:
         end = head.find(b"\x00", at)  # an ASCII string's bytes end before the next attribute's
         tail = head[at:end if end >= 0 else len(head)].decode("ascii", "replace")
         try:
             value, length = json.JSONDecoder().raw_decode(tail)
-            if isinstance(value, dict) and value.get("schema") == SCHEMA:
+            held = value.get("schema") if isinstance(value, dict) else None
+            if held == schema or (schema is None and str(held).startswith(schemas)):
                 found = tail[:length]
         except ValueError:
             found = None
     return (writer.group(0).decode() if writer else None, found)
+
+
+# How much of a cached document says whether it is of the closure before (``earlier``): its main
+# label's first attributes are its writer and its closure, right after the file's header.
+EARLIER_HEAD = 1 << 16
+
+
+def earlier(head: bytes) -> bool:
+    """Whether a document's first bytes (``EARLIER_HEAD`` of them) are of the closure and the format
+    before this one's (``EARLIER_SCHEMA``, ``EARLIER_FORMAT``): what the engine's start moves
+    (``migrated``). A document of a format before that one builds once, as it always did."""
+    from cadgen.engine.document import written_format
+
+    if _EARLIER_PREFIX not in head:
+        return False
+    writer, _found = _head(head, EARLIER_SCHEMA)
+    return written_format(writer) == EARLIER_FORMAT
+
+
+def restamped(found: dict[str, Any]) -> dict[str, Any]:
+    """A closure of the schema before (``EARLIER_SCHEMA``) as this one: the release, the format and
+    the platform this engine's, which that closure did not key; its libraries, its source, its
+    modules, its symbols, its inputs and its bodies as it holds them, so a library that moved since
+    it was built still builds, saying so; the key made again over them, or none where it had none
+    (a closure that cannot say all the model is made of). The fields in ``manifest``'s order, so
+    its text is the one a build here writes of a model nothing changed."""
+    record = {"schema": SCHEMA, "engine": _engine(), "libs": found["libs"], "platform": _platform(),
+              "source": found["source"], "modules": found["modules"], "symbols": found.get("symbols") or {},
+              "inputs": found["inputs"], "bodies": found.get("bodies")}
+    record["key"] = key(record) if found.get("key") is not None else None
+    return record
+
+
+def migrated(data: bytes) -> tuple[bytes, dict[str, Any], str | None] | None:
+    """A cached document's bytes of the closure and the format before this engine's
+    (``EARLIER_SCHEMA``, ``EARLIER_FORMAT``) moved to this one's: its main label's closure the one
+    this toolchain makes of it (``restamped``) and its writer this engine's, edited where they are
+    (``document.relabel``), every other byte as it was -- the bytes a cold build here writes of the
+    model when nothing it is made of changed. ``(bytes, closure, the key it held)``; None for a
+    document of another closure or format, which is left as it is. ``ValueError`` (nothing moved)
+    for bytes that do not read as a document this engine wrote."""
+    from cadgen.engine import document
+
+    writer, found = _head(data[:_HEAD_BYTES], EARLIER_SCHEMA)
+    if found is None or document.written_format(writer) != EARLIER_FORMAT:
+        return None
+    held = json.loads(found)
+    record = restamped(held)
+    moved = document.relabel(data, {document.WRITER_GUID: document._writer(), document.CLOSURE_GUID: text(record)})
+    return moved, record, held.get("key")
 
 
 def read_record(doc: Any) -> tuple[str | None, str | None]:

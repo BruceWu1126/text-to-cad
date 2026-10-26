@@ -812,7 +812,9 @@ def status_text(answer: dict[str, Any]) -> str:
     cache = answer.get("cache") or {}
     if cache.get("enabled"):
         failures = cache.get("failures") or []
+        moved = cache.get("moved")
         lines.append("cache " + cache_text(cache.get("root"), cache.get("documents"), cache.get("bytes"))
+                     + (f" · {moved} moved to this engine's closure at its start" if moved else "")
                      + (f" · last save failed: {failures[0]['error']}" if failures else ""))
     elif cache:
         lines.append("cache off: no cache folder")
