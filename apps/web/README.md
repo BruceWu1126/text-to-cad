@@ -456,7 +456,7 @@ daily version check, read from `/__cad/version` with the server's description as
 starts (`main.tsx`) and again whenever the person comes back to it, and its prompt copied for
 the person to paste into their agent's chat; its full install instructions open in a new tab.
 A Viewer the CAD server opens says what the server's channel allows (a store's copy hears nothing);
-one a skill opens names no channel, a skills-only install, which is told. Browser titles use "CAD | <filename>", or "CAD" when no file is selected.
+one a skill opens names no channel, a skills-only install, which is told. The browser title is the open file's or model's name alone ("bracket.step", "juno"), and "text-to-cad" on the home.
 Appearance (System, Light, Dark) is the app menu's Theme row, the tab's choice (`colorScheme`,
 over a file and on the home); the page has no light/dark button of its own. The original animated mark remains the shared LoadingIcon
 for loading states. The C and CAD marks are the UI package's; the favicons are this

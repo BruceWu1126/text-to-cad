@@ -112,7 +112,7 @@ test('the web host keeps the URL, the history, the title and the appearance, and
 
     // Once the catalog has the file, the page is named after it and it joins the library.
     await act(() => viewer().onShown('/m/one.step', ONE));
-    assert.equal(window.document.title, 'CAD | one.step');
+    assert.equal(window.document.title, 'one.step');
     assert.deepEqual(libraryCalls.filter(([url]) => url === '/__cad/recents'), [['/__cad/recents', { action: 'open', path: '/m/one.step' }]]);
     // CAD's telemetry, as the CAD app's: the consent read once, its answer in the app menu. (The
     // model shown is counted, by its format and only with consent, as it joins the library.)
@@ -166,7 +166,7 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     await act(async () => { window.history.replaceState({}, '', '/'); window.dispatchEvent(new window.PopStateEvent('popstate')); await new Promise(resolve => setTimeout(resolve, 10)); });
     assert.equal(viewer().file, '');
     await act(() => viewer().onShown(null));
-    assert.equal(window.document.title, 'CAD');
+    assert.equal(window.document.title, 'text-to-cad');
     assert.deepEqual(await viewer().library.list(), []);
     assert.equal(libraryCalls.at(-1)[0], '/__cad/recents');
     assert.equal(await viewer().library.thumbnail('abc'), '/__cad/thumbnail?name=abc');
