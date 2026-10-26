@@ -1408,6 +1408,9 @@ class Recorder:
 
     @_guarded(lambda: None)
     def started(self, *, client: dict[str, Any], presentation: str) -> None:
+        """Whose use this process's batches count: the agent app a session's initialize names, and how it shows CAD
+        (``cadgen.mcp.server``), or the browser viewer's page as the client ``cadgen-viewer`` in a ``browser``
+        (``cadgen.viewer.engine_app``)."""
         name, version = client.get("name"), client.get("version")
         with self._lock:
             self._context["client"] = {"name": _token(name or "unknown", 64), "version": _token(version, 32)}

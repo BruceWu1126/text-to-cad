@@ -627,22 +627,30 @@ class SenderTest(_Tmp):
     serves the browser viewer's page and the CAD app's sessions alike, each with a recorder of its own, and
     what commands and scripts counted goes as `cli`, whichever of them sends it."""
 
-    def test_each_batch_names_its_sender(self) -> None:
+    def engine(self, send):
+        """The engine's two recorders (``EngineApp``): the CAD app's sessions' and the browser viewer's page's, over
+        this test's settings, sending through ``send``."""
         import types
 
         from cadgen.viewer import engine_app
 
-        choose(True, by="cli", path=self.path)
-        sent: list[dict] = []
-
         def made(**options):
-            return Recorder(**{**options, "path": self.path, "send": lambda payload: sent.append(payload) or True})
+            return Recorder(**{**options, "path": self.path, "send": send})
 
         server = types.SimpleNamespace(port=4242, touch=mock.Mock(), url="http://127.0.0.1:4242")
         with mock.patch("cadgen.analytics.Recorder", side_effect=made):
             engine = engine_app.EngineApp(server, "127.0.0.1")
         self.addCleanup(engine.analytics.close)
         self.addCleanup(engine.viewer_analytics.close)
+        return engine
+
+    def test_each_batch_names_its_sender(self) -> None:
+        from cadgen import __version__
+        from cadgen.viewer import engine_app
+
+        choose(True, by="cli", path=self.path)
+        sent: list[dict] = []
+        engine = self.engine(lambda payload: sent.append(payload) or True)
         with mock.patch.object(engine_app, "ViewerApp"):
             page = engine.default_app(dist=str(self.tmp))
         self.assertIs(page.analytics, engine.viewer_analytics, "the browser viewer's page counts as the viewer")
@@ -650,7 +658,15 @@ class SenderTest(_Tmp):
             recorder.viewed()
             self.assertTrue(recorder.flush())
         # The sender a command starts sends as `cli` (``test_engine_telemetry``).
-        self.assertEqual([batch["process"] for batch in sent], ["viewer", "app"])
+        viewer, app = sent
+        self.assertEqual([viewer["process"], app["process"]], ["viewer", "app"])
+        # The viewer's batches are the browser page's usage: their client is the viewer itself, of this version, shown
+        # in a browser -- as `cadgen viewer` said of itself before the engine served its page, and as PostHog tells
+        # the viewer's use from the apps' by client. The CAD app's names the agent app a session's initialize does
+        # (``Server``), none before.
+        self.assertEqual((viewer["client"], viewer["presentation"]),
+                         ({"name": "cadgen-viewer", "version": __version__}, "browser"))
+        self.assertEqual([key for key in ("client", "presentation") if key in app], [])
 
     def test_what_commands_and_scripts_counted_goes_as_a_cli_batch_never_in_an_apps(self) -> None:
         """The spool holds what `python model.py` and `cadgen` commands counted: builds, the engine's health, a worker
@@ -659,9 +675,9 @@ class SenderTest(_Tmp):
         agent app built any of it, and its own batch keeps saying which one looked."""
         choose(True, by="cli", path=self.path)
         sent: list[dict] = []
-        send = lambda payload: sent.append(payload) or True  # noqa: E731
-        app = Recorder(process="app", path=self.path, send=send)
-        app.started(client={"name": "codex-mcp-client", "version": "0.159.0"}, presentation="tabs")
+        engine = self.engine(lambda payload: sent.append(payload) or True)
+        app, viewer = engine.analytics, engine.viewer_analytics
+        app.started(client={"name": "codex-mcp-client", "version": "0.159.0"}, presentation="tabs")  # a session's initialize
         app.called("cad_show", True)
         self.assertTrue(spool({"builds": [{"kind": "xbf", "via": "script", "outcome": "crashed", "seconds": 1.5}],
                                "health": {"workers": 1, "crashes": 1}, "crashes": [died(-11)]}, path=self.path))
@@ -678,15 +694,15 @@ class SenderTest(_Tmp):
         self.assertEqual(commands["install"], own["install"])
         self.assertNotEqual(commands["batch"], own["batch"])
         self.assertNotEqual(commands["session"], own["session"])
-        # The viewer's recorder likewise: the spool's batch is `cli`, its own the viewer's.
-        viewer = Recorder(process="viewer", path=self.path, send=send)
+        # The viewer's recorder likewise: the spool's batch is `cli`, its own the browser page's (`cadgen-viewer`).
         viewer.viewed()
         self.assertTrue(spool({"features": ["drawing"]}, path=self.path))
         self.assertTrue(viewer.flush())
         commands, own = sent[2:]
         self.assertEqual((commands["process"], commands.get("client"), commands["events"]),
                          ("cli", None, [{"name": "feature", "feature": "drawing", "count": 1}]))
-        self.assertEqual((own["process"], own["events"]), ("viewer", [{"name": "view", "calls": 1}]))
+        self.assertEqual((own["process"], own["client"]["name"], own["presentation"], own["events"]),
+                         ("viewer", "cadgen-viewer", "browser", [{"name": "view", "calls": 1}]))
         # With nothing spooled, an app's flush sends its own batch alone; with nothing of its own, the spool's alone.
         app.viewed()
         self.assertTrue(app.flush())
