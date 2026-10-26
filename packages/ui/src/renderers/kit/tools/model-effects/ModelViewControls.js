@@ -11,6 +11,7 @@ import { cn } from "@text-to-cad/ui/utils";
 import { FLOATING_SURFACE_CLASS } from "../../../../lib/floatingSurface.js";
 import { FILE_SHEET_PRECISION_SLIDER_CLASSES } from "../../inspector/FileSheet.js";
 import { useControlUsage } from "../../../../usage/controls.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 const AXES = Object.freeze(["x", "y", "z"]);
 
@@ -56,6 +57,7 @@ const keepOpen = event => event.preventDefault();
 function ClipAxisSelect({ viewSettings, onViewSettingsPatch, bounds }) {
   const { clip, amount } = clipState(viewSettings, bounds);
   const controls = useControlUsage();
+  const { t } = useI18n();
   const choose = nextAxis => {
       if (!nextAxis || nextAxis === clip.axis) return;
       controls.used(`clip_axis_${nextAxis}`);
@@ -73,7 +75,7 @@ function ClipAxisSelect({ viewSettings, onViewSettingsPatch, bounds }) {
   };
   return <DropdownMenu modal={false}>
     <DropdownMenuTrigger asChild>
-      <ToolbarButton tooltip={false} label={`Clip axis: ${clip.axis.toUpperCase()}`} data-clip-axis={clip.axis}
+      <ToolbarButton tooltip={false} label={t("clip.axisCurrent", { axis: clip.axis.toUpperCase() })} data-clip-axis={clip.axis}
         className="w-auto shrink-0 gap-0.5 px-1 text-tiny aria-expanded:bg-sidebar-accent aria-expanded:text-sidebar-accent-foreground">
         {clip.axis.toUpperCase()}<ChevronDown className="size-2.5 opacity-60" aria-hidden="true" />
       </ToolbarButton>
@@ -84,7 +86,7 @@ function ClipAxisSelect({ viewSettings, onViewSettingsPatch, bounds }) {
       {/* As narrow as its settings: first the axes, a compact group of the Theme row's buttons in a row
           as tall as an item; a rule; then the settings, Display's checkbox items, with no glyphs. */}
       <div className="flex min-h-7 items-center px-1 py-0.5" data-clip-axis-row="">
-        <MenuPrimitive.RadioGroup value={clip.axis} onValueChange={choose} aria-label="Clip axis" className="flex items-center gap-0.5">
+        <MenuPrimitive.RadioGroup value={clip.axis} onValueChange={choose} aria-label={t("clip.axis")} className="flex items-center gap-0.5">
           {AXIS_OPTIONS.map(option => <MenuPrimitive.RadioItem key={option.value} value={option.value} onSelect={keepOpen}
             className={AXIS_ITEM_CLASS} data-clip-axis-option={option.value}>{option.label}</MenuPrimitive.RadioItem>)}
         </MenuPrimitive.RadioGroup>
@@ -92,11 +94,11 @@ function ClipAxisSelect({ viewSettings, onViewSettingsPatch, bounds }) {
       <DropdownMenuSeparator />
       <DropdownMenuCheckboxItem checked={clip.partColors} onSelect={keepOpen} data-clip-part-colors=""
         onCheckedChange={checked => { controls.used("clip_part_colors"); onViewSettingsPatch({ clip: { partColors: checked === true } }); }}>
-        Part colours
+        {t("clip.partColours")}
       </DropdownMenuCheckboxItem>
       <DropdownMenuCheckboxItem checked={clip.invert} onSelect={keepOpen} data-clip-reverse=""
         onCheckedChange={checked => reverse(checked === true)}>
-        Reverse
+        {t("clip.reverse")}
       </DropdownMenuCheckboxItem>
     </DropdownMenuContent>
   </DropdownMenu>;
@@ -108,9 +110,10 @@ export function CrossSectionControls({ viewSettings, onViewSettingsPatch, bounds
   sliderClassName = FILE_SHEET_PRECISION_SLIDER_CLASSES }) {
   const { clip, range, amount } = clipState(viewSettings, bounds);
   const controls = useControlUsage();
+  const { t } = useI18n();
   return <div className={className}>
     <ClipAxisSelect viewSettings={viewSettings} onViewSettingsPatch={onViewSettingsPatch} bounds={bounds} />
-    <Slider thumbProps={{ "aria-label": "Clip amount" }} value={[amount]} min={0} max={100}
+    <Slider thumbProps={{ "aria-label": t("clip.amount") }} value={[amount]} min={0} max={100}
       step={0.1} disabled={!range}
       onValueChange={([value]) => { controls.changed("clip_amount"); onViewSettingsPatch({ clip: {
         enabled: value > 0, at: clipAtForAmount(clip, bounds, value / 100)
@@ -124,7 +127,8 @@ export function CrossSectionControls({ viewSettings, onViewSettingsPatch, bounds
 export function ExplodeControls({ viewSettings, onViewSettingsPatch, className = FILE_SHEET_PRECISION_SLIDER_CLASSES }) {
   const exploded = normalizeExplodedViewSettings(viewSettings?.exploded);
   const controls = useControlUsage();
-  return <Slider thumbProps={{ "aria-label": "Explode amount" }}
+  const { t } = useI18n();
+  return <Slider thumbProps={{ "aria-label": t("explode.amount") }}
     value={[exploded.enabled ? exploded.amount * 100 : 0]} min={0} max={100} step={1}
     onValueChange={([amount]) => { controls.changed("explode_amount"); onViewSettingsPatch({ exploded: { amount: amount / 100, enabled: amount > 0 } }); }}
     className={className} />;

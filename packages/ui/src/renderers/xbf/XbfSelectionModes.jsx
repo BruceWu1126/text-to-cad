@@ -3,6 +3,7 @@ import { CONNECTED_SELECTION, SELECT_GEOMETRY, connectedSelectionApplies } from 
 import { DropdownMenuCheckboxItem } from '@text-to-cad/ui/primitives/dropdown-menu';
 import SelectFilterMenu from "../kit/tools/select/SelectFilterMenu.jsx";
 import { useControlUsage } from "../../usage/controls.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { ModeGlyph, ToolModeIcon, modeGlyphIcon } from "../kit/tools/select/modeGlyphs.jsx";
 
 // Select's button, Measure's and Select's menu, which read on an engine document as the STEP
@@ -39,9 +40,9 @@ export const XBF_SELECT_DEFAULT = Object.freeze([...SELECT_GEOMETRY.map(kind => 
  */
 export function xbfSelectModes({ assembly, posable }) {
   return [
-    { id: 'all', label: 'All', kinds: XBF_SELECT_DEFAULT, icon: <ModeGlyph tool="select" mode="all" className="size-3.5" aria-hidden="true" /> },
-    ...SELECT_GEOMETRY.filter(item => assembly || !item.assemblyOnly).map(item => ({ id: item.id, label: item.label, kinds: [item.id], icon: glyphIcon(item.id) })),
-    ...(posable ? [{ id: 'position', label: 'Position', kinds: ['position'], icon: lucideIcon(PositionIcon) }] : []),
+    { id: 'all', label: 'All', key: 'pick.all', kinds: XBF_SELECT_DEFAULT, icon: <ModeGlyph tool="select" mode="all" className="size-3.5" aria-hidden="true" /> },
+    ...SELECT_GEOMETRY.filter(item => assembly || !item.assemblyOnly).map(item => ({ id: item.id, label: item.label, key: item.key, kinds: [item.id], icon: glyphIcon(item.id) })),
+    ...(posable ? [{ id: 'position', label: 'Position', key: 'pick.position', kinds: ['position'], icon: lucideIcon(PositionIcon) }] : []),
   ];
 }
 
@@ -58,13 +59,14 @@ export function xbfSelectModes({ assembly, posable }) {
 export function SelectModeMenu({ value, onChange, assembly, posable, connected, onConnectedChange, disabled = false }) {
   const options = CONNECTED_SELECTION.filter(option => connectedSelectionApplies(option.id, value));
   const controls = useControlUsage();
+  const { t } = useI18n();
   return <SelectFilterMenu value={value} onChange={onChange} modes={xbfSelectModes({ assembly, posable })} disabled={disabled}>
     {options.length ? options.map(option => <DropdownMenuCheckboxItem key={option.id} checked={connected[option.id] === true}
       onSelect={event => event.preventDefault()} onCheckedChange={checked => {
         controls.used(option.id === 'tangentFaces' ? 'select_group_faces' : 'select_group_edges');
         onConnectedChange(option.id, checked === true);
       }}>
-      {glyphIcon(GROUP_GLYPHS[option.id])}{option.label}
+      {glyphIcon(GROUP_GLYPHS[option.id])}{t(option.key)}
     </DropdownMenuCheckboxItem>) : null}
   </SelectFilterMenu>;
 }

@@ -8,9 +8,9 @@
  * thing, so a part file's filter offers no Parts.
  */
 export const SELECT_GEOMETRY = Object.freeze([
-  { id: 'parts', label: 'Parts', assemblyOnly: true },
-  { id: 'faces', label: 'Faces' },
-  { id: 'edges', label: 'Edges' },
+  { id: 'parts', label: 'Parts', key: 'pick.parts', assemblyOnly: true },
+  { id: 'faces', label: 'Faces', key: 'pick.faces' },
+  { id: 'edges', label: 'Edges', key: 'pick.edges' },
 ]);
 
 /**
@@ -35,8 +35,8 @@ export const treeShape = mode => (mode === 'none' ? 'all' : mode === 'topology' 
  * edge. Each applies while its kind of topology is ticked.
  */
 export const CONNECTED_SELECTION = [
-  { id: 'edgeChain', label: 'Group edges', kind: 'edges' },
-  { id: 'tangentFaces', label: 'Group faces', kind: 'faces' },
+  { id: 'edgeChain', label: 'Group edges', key: 'select.groupEdges', kind: 'edges' },
+  { id: 'tangentFaces', label: 'Group faces', key: 'select.groupFaces', kind: 'faces' },
 ];
 export const NO_CONNECTED_SELECTION = Object.freeze({ edgeChain: false, tangentFaces: false });
 

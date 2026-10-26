@@ -10,7 +10,7 @@ import { useViewerMobile } from "../../file-viewer/responsive.js";
 import { hasOpenPopup } from "../../lib/popups.js";
 import { useAnnotationSession } from "../../annotation/session.js";
 import { annotationAt, withGroups } from "../../annotation/geometry.js";
-import { AnnotationToolbar, DRAWING_TOOLS, annotationToolIcon, drawingToolVariant } from "../../annotation/toolbar.jsx";
+import { AnnotationToolbar, DRAWING_TOOLS, annotationToolIcon, drawingToolLabel, drawingToolVariant } from "../../annotation/toolbar.jsx";
 import { promptView, promptViews } from "../../annotation/views.js";
 import ViewerAlertCard, { useAlertDismissal } from "../kit/status/ViewerAlertCard.jsx";
 import ViewerLoadingOverlay from "../kit/status/ViewerLoadingOverlay.js";
@@ -46,6 +46,7 @@ import { drawingAnnotationDocument, drawingAnnotationSurface } from "./drawingAn
 import LayersSection from "./LayersSection.jsx";
 import { DXF_DECLINED_LIVE_COMMANDS, DXF_NO_CAMERA, DXF_NO_DISPLAY, DXF_TOOL, DXF_TOOL_MODES } from "./tools.js";
 import { DRAWING_SHORTCUTS, TOOL_SHORTCUTS, pressToolKey } from "../kit/tools/toolShortcuts.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 /**
  * A `.dxf` is drawn as a drawing: on a canvas, head on, in the pens it declares. No 3D, no fold
@@ -84,6 +85,7 @@ const SIDEBAR_POSITION = Object.freeze({ top: INSET, left: INSET, bottom: INSET 
 const SIDEBAR_POSITION_PHONE = Object.freeze({ top: INSET, left: INSET, bottom: `calc(var(--cad-quick-edit-peek, 0px) + ${INSET})` });
 
 function DxfSurface({ view, data }) {
+  const { t } = useI18n();
   const host = useViewerHost();
   const destination = usePromptDestination();
   const mobile = useViewerMobile();
@@ -471,15 +473,15 @@ function DxfSurface({ view, data }) {
   }, [onPreferenceChange]);
   const stripTool = (id, label, icon, extra = {}) => ({ id, label, icon, active: toolMode === id, disabled: !shown, onSelect: () => selectTool(id), ...extra });
   const tools = [
-    stripTool(DXF_TOOL.SELECT, "Select", SELECT_ICON, { shortcut: TOOL_SHORTCUTS.select }),
+    stripTool(DXF_TOOL.SELECT, t("tool.select"), SELECT_ICON, { shortcut: TOOL_SHORTCUTS.select }),
     // Pencil and Shapes: plain buttons, each the tool last chosen in it, its tooltip that tool and its key; the tools are the row's.
-    ...DRAWING_TOOLS.map(({ id, label, entries }) => {
+    ...DRAWING_TOOLS.map(({ id }) => {
       const variant = drawingToolVariant(id, annotation);
       const Icon = annotationToolIcon(variant);
-      return stripTool(id, label, <Icon className="size-3" strokeWidth={2} aria-hidden="true" />,
-        { tooltip: entries.find(entry => entry.id === variant)?.label ?? label, shortcut: DRAWING_SHORTCUTS[variant] });
+      return stripTool(id, drawingToolLabel(id, t), <Icon className="size-3" strokeWidth={2} aria-hidden="true" />,
+        { tooltip: drawingToolLabel(variant, t), shortcut: DRAWING_SHORTCUTS[variant] });
     }),
-    stripTool(DXF_TOOL.MEASURE, "Measure", MEASURE_ICON, { shortcut: TOOL_SHORTCUTS.measure })
+    stripTool(DXF_TOOL.MEASURE, t("tool.measure"), MEASURE_ICON, { shortcut: TOOL_SHORTCUTS.measure })
   ];
   toolKeysRef.current = tools;
   // The drawing tools' row under the strip, and Measure's (its measurements, while there are any); Select has none.

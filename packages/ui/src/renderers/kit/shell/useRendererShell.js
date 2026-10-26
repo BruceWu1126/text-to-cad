@@ -4,7 +4,8 @@ import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import { ViewerElementContext, useViewerHost, usePromptDestination } from "../../../host/context.js";
 import { hasOpenPopup } from "../../../lib/popups.js";
 import { useAnnotationSession } from "../../../annotation/session.js";
-import { DRAWING_TOOLS, annotationToolIcon, drawingToolVariant } from "../../../annotation/toolbar.jsx";
+import { DRAWING_TOOLS, annotationToolIcon, drawingToolLabel, drawingToolVariant } from "../../../annotation/toolbar.jsx";
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { DRAWING_SHORTCUTS, pressToolKey } from "../tools/toolShortcuts.js";
 import { useViewerHistory } from "./useViewerHistory.js";
 import { promptView, promptViews } from "../../../annotation/views.js";
@@ -195,6 +196,7 @@ export function useRendererShell({
   sceneScaleMode = VIEWER_SCENE_SCALE.CAD
 }) {
   const host = useViewerHost();
+  const { t } = useI18n();
   const controls = useControlUsage();
   const viewerElement = useContext(ViewerElementContext);
   const destination = usePromptDestination();
@@ -392,8 +394,8 @@ export function useRendererShell({
   const reportActionError = useCallback(error => {
     if (!error) return;
     setRuntimeAlert({ severity: "error", kind: "status", blocking: false,
-      title: "Couldn’t complete the action", message: error instanceof Error ? error.message : String(error) });
-  }, [setRuntimeAlert]);
+      title: t("alert.actionFailed"), message: error instanceof Error ? error.message : String(error) });
+  }, [setRuntimeAlert, t]);
   const runtimeAlert = onRuntimeAlert ? null : ownRuntimeAlert;
   const viewerLoading = Boolean(load.busy);
   const hasContent = Boolean(scene) && !viewerLoading;
@@ -681,10 +683,10 @@ export function useRendererShell({
   // when it is put down, and a press takes that one up; choosing another is the one row under the strip
   // (`RendererShell.jsx`, `annotation/toolbar.jsx`'s `AnnotationToolbar`), up while either is. A second press does nothing.
   // Its tooltip names what it draws with now, with that tool's key ("Rectangle R").
-  const drawing = DRAWING_TOOLS.map(({ id, label, entries }) => {
+  const drawing = DRAWING_TOOLS.map(({ id }) => {
     const variant = drawingToolVariant(id, annotation);
     const Icon = annotationToolIcon(variant);
-    return stripTool({ id, label, tooltip: entries.find(entry => entry.id === variant)?.label ?? label, shortcut: DRAWING_SHORTCUTS[variant],
+    return stripTool({ id, label: drawingToolLabel(id, t), tooltip: drawingToolLabel(variant, t), shortcut: DRAWING_SHORTCUTS[variant],
       icon: <Icon className="size-3" strokeWidth={2} aria-hidden="true" /> });
   });
   const tools = {

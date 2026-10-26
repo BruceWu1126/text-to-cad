@@ -55,9 +55,9 @@ const keepOpen = event => event.preventDefault();
  */
 export default function PlaybackMenu({ animation, autoplay, onAutoplayChange, side = "top", disabled = false }) {
   const { t } = useI18n();
-  return <ToolPopover allowInactive side={side} align="end" label="Playback settings" className="w-40"
-    trigger={<MenuTrigger label="Playback settings" disabled={disabled} className={MENU_TRIGGER_CLASS}><Settings className="size-3.5" strokeWidth={1.5} aria-hidden="true" /></MenuTrigger>}>
-    <SpeedSubmenu label="Speed" name="Animation speed" value={Number(animation.speed) || 1} values={PLAYBACK_SPEEDS} onChange={animation.onSpeedChange} />
+  return <ToolPopover allowInactive side={side} align="end" label={t("playback.settings")} className="w-40"
+    trigger={<MenuTrigger label={t("playback.settings")} disabled={disabled} className={MENU_TRIGGER_CLASS}><Settings className="size-3.5" strokeWidth={1.5} aria-hidden="true" /></MenuTrigger>}>
+    <SpeedSubmenu label={t("playback.speed")} name={t("playback.animationSpeed")} value={Number(animation.speed) || 1} values={PLAYBACK_SPEEDS} onChange={animation.onSpeedChange} />
     <DropdownMenuCheckboxItem checked={animation.loopEnabled !== false} onSelect={keepOpen}
       onCheckedChange={checked => animation.onLoopToggle(checked === true)}>{t("playback.loop")}</DropdownMenuCheckboxItem>
     <DropdownMenuCheckboxItem checked={autoplay === true} onSelect={keepOpen}

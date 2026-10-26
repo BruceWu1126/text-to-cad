@@ -15,11 +15,13 @@ import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } 
 import { MESH_DECLINED_LIVE_COMMANDS, MESH_TOOL, STL_TOOL_MODES, THREE_MF_TOOL_MODES } from "./tools.js";
 import { useMeshScene } from "./useMeshScene.js";
 import { TOOL_SHORTCUTS } from "../kit/tools/toolShortcuts.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 const SELECT_ICON = <MousePointer2 className="size-3" strokeWidth={2} aria-hidden="true" />;
 const NO_REFERENCES = Object.freeze([]);
 
 function MeshSurface({ view, data }) {
+  const { t } = useI18n();
   const document = useWorkspaceDocument({ view, data });
   const loaded = useMeshScene({ entry: document.entry, resources: document.client.resources });
   const scene = loaded.scene;
@@ -87,7 +89,7 @@ function MeshSurface({ view, data }) {
   const sceneTools = useSceneTools({ shell, scene, features, state: tools, measurable: parted, clearParts: selection.clear });
   const selectActive = parted && !previewing && Boolean(scene) && shell.toolMode === MESH_TOOL.SELECT;
   // Select on every mesh file: an STL's picks nothing, the view's plain navigation.
-  const strip = [shell.tools.own({ id: MESH_TOOL.SELECT, label: "Select", shortcut: TOOL_SHORTCUTS.select, icon: SELECT_ICON }), ...sceneTools.tools];
+  const strip = [shell.tools.own({ id: MESH_TOOL.SELECT, label: t("tool.select"), shortcut: TOOL_SHORTCUTS.select, icon: SELECT_ICON }), ...sceneTools.tools];
   // A 3MF's picked objects; an STL's Quick Edit carries the whole file and nothing picked in it.
   const { references, chips } = useSceneReferences({ scene: parted ? scene : null, selection, resource: shell.frame.resource });
   const resourcePath = shell.frame.resource?.path;
