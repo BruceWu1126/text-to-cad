@@ -20,6 +20,22 @@ Checks are small Python scripts in the project's ignored `tmp/` (or a `checks/` 
 for ones worth keeping); `cadgen inspect` answers what a ref names. A check calls the
 model, so it measures the model as its code is now.
 
+A dimension the person gave is checked where the engine already holds the geometry: an
+`assert` inside the model's body, on the shape it is about to return, or `cadgen inspect`
+(`cadgen inspect "$ID" bracket` gives a part's bounds, volume and mass). Never append the
+check to the model's script after its call: reading `.shape` there brings the shape into the
+script's own process and loads the CAD kernel there, about 3 s, after the engine has answered,
+on every run. A check script pays the same once, so it is for a derived number the person
+asked for.
+
+```python
+@model
+def bracket():
+    body = bracket_body(80, 6, 8)
+    assert abs(body.bounding_box().size.X - 80) < 1e-6, body.bounding_box().size   # in the worker, warm
+    return body
+```
+
 ## Opening geometry
 
 ```python
