@@ -1334,12 +1334,13 @@ class Recorder:
 
     def _channel(self) -> str:
         """Where this install came from: what this process was told itself, else the channel its plugin's server wrote
-        down for its installation -- read again for each batch, as the viewer outlives the server that
-        wrote it -- but never for the CAD server, which only its own plugin names (``cadgen/_internal/channel.py``)."""
+        down for its installation -- read again for each batch, as the engine outlives the server that wrote it, and
+        may have been started by a script that was told nothing: the CAD app's own recorder reads it too, since
+        the server that is told runs in another process (``cadgen/_internal/channel.py``)."""
         from cadgen._internal.channel import RECORD, UNKNOWN, recorded
 
-        if self._named is not None or self._context["process"] == "app":
-            return self._named or UNKNOWN
+        if self._named is not None:
+            return self._named
         return recorded(path=self.path.with_name(RECORD) if self.path else None) or UNKNOWN  # beside the settings
 
     @_guarded(lambda: None)

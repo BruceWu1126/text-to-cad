@@ -9,15 +9,16 @@ because a plugin's config pins a release of cadgen that may predate a setting: a
 environment variable it does not know, where a flag it does not know would stop the server.
 
 Only the server hears it, though, and most of CAD's work is not the server's: a skill's ``cadgen``
-command, a model script and the CAD Viewer a skill opens run with nothing a plugin set. So the
-server writes its channel down for its installation (``remember``): uv keeps one installation per
-requirement, and the plugin's server and its skills run the same requirement, so the same
-installation -- the one the engine daemon is named after. Any process of that installation that was
-not told a channel itself reports the one written down (``recorded``), re-read with each batch, as
-the viewer outlives the server that wrote it. Where two plugins pin the same release on one machine they share an
-installation, and the server that started last is the one written down: the app most likely in use.
-The CAD server itself never reads it: a server its plugin did not name is configured by hand, and says
-so as ``unknown``.
+command, a model script and the CAD Viewer a skill opens run with nothing a plugin set -- nor is the
+counting: the server's sessions are counted by the engine, whose environment is whoever started it,
+often ``python model.py``. So the server writes its channel down for its installation (``remember``): uv
+keeps one installation per requirement, and the plugin's server and its skills run the same requirement,
+so the same installation -- the one the engine daemon is named after. Any process of that installation
+that was not told a channel itself reports the one written down (``recorded``), re-read with each batch,
+as the engine outlives the server that wrote it. Where two plugins pin the same release on one machine
+they share an installation, and the server that started last is the one written down: the app most
+likely in use. A server no plugin named is configured by hand: what it counts says ``unknown``, unless
+a plugin's server once ran from its installation, whose channel it then shares.
 
 cadgen reads a channel as a token and nothing more: telemetry reports it, and nothing decides by
 its name but ``dev``, a development install (and a source tree, installed editable or imported from
@@ -85,10 +86,10 @@ def named() -> str | None:
     return DEV if _source_tree() else None
 
 
-def channel(*, recorded_too: bool = True) -> str:
+def channel() -> str:
     """This install's channel: what its plugin named, else ``dev`` for a source tree, else the one written down for
-    this installation (``recorded``; not with ``recorded_too=False``, as the CAD server asks), else ``unknown``."""
-    return named() or (recorded() if recorded_too else None) or UNKNOWN
+    this installation (``recorded``), else ``unknown``."""
+    return named() or recorded() or UNKNOWN
 
 
 def _record_path() -> Path:
