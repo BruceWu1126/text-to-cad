@@ -87,13 +87,17 @@ async function exported(page, file) {
   assert.ok(shown.revision.endsWith(`-${file}`), `the catalog hash of the bytes shown: ${shown.revision}`);
 }
 
-// A GLB of two nodes that draw has a GLB's every tool on its strip, Select in hand; its view's
-// controls end the strip, in the section of Explode and Clip: Projection, Display, then Preview.
-const GLB_TOOLS = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false', 'Explode:false', 'Clip:false'];
+// A GLB of two nodes that draw has a GLB's every tool on its strip, Select in hand, then Explode and Clip,
+// popovers from their tiles with no pressed state; its view's controls end the strip, in their section:
+// Projection, Display, then Preview.
+const GLB_TOOLS = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false'];
 const glbTools = async (pane) => {
   assert.deepEqual(await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button')
     .evaluateAll(buttons => buttons.filter(button => button.hasAttribute('aria-pressed') && !button.closest('[data-view-controls]')).map(button => `${button.getAttribute('aria-label')}:${button.getAttribute('aria-pressed')}`)),
-  GLB_TOOLS, 'Select, Pencil, Shapes, Measure, Explode and Clip');
+  GLB_TOOLS, 'Select, Pencil, Shapes and Measure');
+  for (const name of ['Explode', 'Clip']) {
+    assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name, exact: true }).getAttribute('aria-pressed'), null, `${name} is never pressed`);
+  }
   const strip = pane.getByRole('group', { name: 'Interaction tools' });
   assert.deepEqual(await strip.locator('[data-view-controls]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
     ['Projection: Orthographic', 'Display mode: Solid', 'Preview'], 'its view\'s controls end the strip');
@@ -491,9 +495,9 @@ test('a GLB\'s tools: Select picks a node into Quick Edit, Measure reads metres 
   const width = (await page.evaluate(() => window.__cadStage().bounds)).max[0];
   await display(page, { exploded: { enabled: true, amount: 1 } });
   await page.waitForFunction(rest => window.__cadStage().bounds.max[0] > rest + 1, width);
-  // Clip set, by its own slider: the model is cut, and Explode goes off (one motion at a time).
+  // Clip set, by its own slider in its popover: the model is cut, and Explode goes off (one motion at a time).
   await pane.getByRole('button', { name: 'Clip', exact: true }).click();
-  await pane.getByRole('slider', { name: 'Clip amount' }).press('End');
+  await page.getByRole('slider', { name: 'Clip amount' }).press('End');
   await page.waitForFunction(() => window.__cadStage().cut === 1 && window.cadHarness.a.controller.readState().display.exploded?.enabled !== true);
   assert.deepEqual(errors, []);
 });

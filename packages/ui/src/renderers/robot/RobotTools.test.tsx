@@ -182,7 +182,8 @@ async function openRobot({ phone = false } = {}) {
 }
 
 // The strip with Select in hand: a robot's four tools (`robot/tools.js`).
-const SELECT_IN_HAND = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false', 'Clip:false'];
+// The tools that can be in hand; Clip, a popover from its tile, is never one.
+const SELECT_IN_HAND = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false'];
 
 it('robot Select opens in hand, before Pencil, Shapes, Measure and Clip: it picks links and drags the knobs, and its filter picks either alone', async () => {
   const robot = await openRobot();
@@ -357,7 +358,8 @@ it('one motion at a time on a robot: Clip turned on puts the joints back, and a 
   robot.type('shoulder', '25');
   await waitFor(() => expect(robot.jointField('shoulder').value).toBe('25°'));
   robot.open('Clip');
-  const clip = () => within(robot.pane).getByRole('slider', { name: 'Clip amount' });
+  // Its row is a popover from its tile, out of the pane.
+  const clip = () => screen.getByRole('slider', { name: 'Clip amount' });
   const cut = () => clip().getAttribute('aria-valuenow');
   fireEvent.keyDown(clip(), { key: 'End' });
   await waitFor(() => expect([cut(), robot.jointField('shoulder').value]).toEqual(['100', '0°']));

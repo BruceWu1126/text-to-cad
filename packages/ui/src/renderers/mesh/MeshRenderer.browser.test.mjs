@@ -115,10 +115,10 @@ async function exported(page, file) {
   assert.ok(shown.revision.endsWith(`-${file}`), `the catalog hash of the bytes shown: ${shown.revision}`);
 }
 // A mesh file's strip: an STL's Select (in hand, picking nothing), Pencil, Shapes and Clip; a 3MF's Select (in hand),
-// Pencil, Shapes, Measure and Clip. Its view's controls end the strip, in Clip's section: Projection,
-// Display, then Preview.
-const STL_TOOLS = ['Select:true', 'Pencil:false', 'Shapes:false', 'Clip:false'];
-const THREE_MF_TOOLS = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false', 'Clip:false'];
+// Pencil, Shapes, Measure and Clip. Clip is a popover from its tile, never in hand: it has no pressed state. Its
+// view's controls end the strip, in Clip's section: Projection, Display, then Preview.
+const STL_TOOLS = ['Select:true', 'Pencil:false', 'Shapes:false'];
+const THREE_MF_TOOLS = ['Select:true', 'Pencil:false', 'Shapes:false', 'Measure:false'];
 const meshTools = async (pane, expected) => {
   assert.deepEqual(await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button')
     .evaluateAll(buttons => buttons.filter(button => button.hasAttribute('aria-pressed') && !button.closest('[data-view-controls]')).map(button => `${button.getAttribute('aria-label')}:${button.getAttribute('aria-pressed')}`)),

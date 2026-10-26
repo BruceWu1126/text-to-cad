@@ -213,26 +213,29 @@ that depends on it (Explode) is shown idle meanwhile, a robot's filter offers
 Position meanwhile, and the whole strip is disabled while loading. Unavailable and
 idle are different states.
 
-One tool owns pointer input, and it alone is lit on the strip. An effect a person set —
-an explosion, a cut, a pose — stays on the model once its tool
-is put down, with nothing on screen for it but the model. **A press on the tool in hand
+One tool owns pointer input, and it alone is lit on the strip. **A press on the tool in hand
 does nothing**: a tool is put down by taking up another (Select, most often), or by Escape, which
-takes Select up. A press on
-Explode or Clip with its effect set takes it up again, as it is; unset, it starts neutral.
+takes Select up. **Explode and Clip are no tools**: like Projection and Display, each is a
+popover from its tile, its row under its button — opened by a press, closed by a press away
+from it (a press on the model is a pick as well), by Escape or by its button again — and its
+button has no pressed state, whatever is in hand. What it sets stays on the model once the
+popover closes, until its Reset, as a Display setting does: an explosion, a cut, like a pose,
+has nothing on screen for it but the model and the dot in its tile's corner (`ChangedDot`).
+Opened again, it is as it was. Preview's tile alone is a mode.
 
 | Tool | Pressing it | Its sub-toolbar | Leaving it |
 | --- | --- | --- | --- |
 | Select | The default tool of every 3D file but an STL; picks what its filter ticks, or a GLB's nodes, a 3MF's objects (Shift adds; Delete deletes annotations and measurements); what is picked is Quick Edit's chips | None: its filter is the chevron after its button | The selection stays, lit and in Quick Edit, under any tool |
 | Pencil / Shapes | Draws on the view: Pencil with the pen, the highlighter or the eraser, Shapes with the rectangle, line, arrow, ellipse or text; each button is the tool last chosen in it | One row for both: the tools of the one that is up, then Color, Stroke width, Placement and Clear annotations (Undo and Redo are ⌘Z, ⇧⌘Z) | The annotations stay in the model, their chip in Quick Edit; each tool keeps what it draws with, the strip showing its icon |
 | Measure | Arms picking two entities and reading what the pair makes (an engine document's — an `.xbf`'s or a STEP's — exact vertices, edges and faces, what its filter ticks; on a mesh, two points on its surface, approximately, in its file's unit; a drawing's ends, centres and lines, in the unit it declares, else "units"); each result a chip in its colour | Its measurements, as chips, then Clear measurements; none while nothing is measured | Unfinished picks are cancelled; completed measurements stay, drawn on the model, their row back with the tool |
-| Explode / Clip | The effect as it is set, or neutral; an edit applies it (Explode's, as a motion: see below) | The slider, its amount beside it, Reset (Clip's: its axis first, whose dropdown holds its settings) | The effect stays on the model |
+| Explode / Clip | No tool: opens its popover, the tool in hand kept; an edit applies the effect (Explode's, as a motion: see below) | None: its popover is the row it was (the slider, its amount beside it, Reset; Clip's axis first, whose dropdown holds its settings) | Closing the popover leaves the effect on the model |
 
 **One motion at a time.** Every tool's state stands beside every other's — the selection,
 measurements, the annotations, Clip — except the two that move the parts: **Explode** and
-the **Position** pose. They replace each other: taking up Explode puts the pose back at its
+the **Position** pose. They replace each other: exploding puts the pose back at its
 default, and using Position (a knob dragged, a value set or a named pose chosen) takes
 Explode off, with nothing set aside to come back. While the model is exploded there are no
-knobs. Put down, Explode keeps its explosion under any other tool until Position is used. A
+knobs. Its popover closed, the explosion stays under every tool until Position is used. A
 routine played from the Animation section is the third motion: playing it puts Explode and the
 pose back at rest, and using either puts the routine back at rest; paused, its frame stays on the
 model as a pose does. Preview's routine is its own and moves nothing of the tools view's.
@@ -244,10 +247,10 @@ section, where Position shows a motion's frame read-only while it owns the pose)
 A tree is the file sidebar's, on screen under every tool; a pick in it takes Select up
 before it acts.
 
-**Removing an effect.** Explode's and Clip's sub-toolbars end in
+**Removing an effect.** Explode's and Clip's rows end in
 Reset ("Reset explode", "Reset clip"): always there, disabled while there
 is nothing to take away, it removes the effect — the amount back at zero, nothing else (Clip's
-axis and its settings stay as set) — and leaves the tool up. Position's way back is its Pose row's Default. A
+axis and its settings stay as set) — and leaves the popover up. Position's way back is its Pose row's Default. A
 measurement's chip X deletes it, and Measure's Clear measurements all of them; the Annotation chip's X clears the annotations.
 
 **Select and Measure are the tools with a menu on the strip** (Measure's on a STEP only), each its selection filter: the
@@ -304,7 +307,9 @@ edge is to hand from the start: nothing waits on a part's topology.
 under the strip, centred, 8px below it, on the strip's surface, its buttons the strip's
 24px tiles, its groups — what the tool does, then how it looks and what clears it — parted by a
 thin rule. It stays up for as long as its tool does, and has no heading: the tool's lit
-button above names it. Explode's and Clip's are one shape — what leads
+button above names it. Explode's and Clip's rows are the same component in a popover under their
+own tile (`model-effects/ModelTools.jsx`'s `EffectPopover`, shadcn's Popover as it ships, the row
+bringing its own surface), never under the strip: one shape — what leads
 the slider, the slider, its value right beside it and only as wide as
 its text, the tool's actions (neither has any), then Reset, last, at the same spot in both,
 with no rules — and one width (`SLIDER_SUB_TOOLBAR_CLASS`, 202px; a phone's 320px). The slider
@@ -388,7 +393,7 @@ Measurements are the person's alone: none of them goes to the agent, in Quick Ed
 snapshots, and measuring never opens Quick Edit. They stay, drawn on the model, under every other
 tool; a press on Measure while it is up does nothing.
 
-**Explode and Clip** have no enabled checkbox, and their sub-toolbars are drawn alike.
+**Explode and Clip** have no enabled checkbox, and their rows are drawn alike, each in its popover.
 Explode's: its slider, the amount (a percentage), **Reset explode**. Clip's: its axis — a
 borderless button reading the axis in hand, "X ⌄", lit while its menu is open — its slider, the
 amount, **Reset clip**. The axis's dropdown holds all of Clip's settings, on Display's surface
@@ -400,9 +405,10 @@ at the right: **Part colors** (ticked by default: each section cap in its
 part's normal colour, without hover or selection tints; unticked, every cap one amber) and
 **Reverse** (unticked by default: which side of the plane is kept). Caps stay opaque, a
 transparent part's too. A press on any of them leaves the menu open, and none of them applies a
-cut; on a cut, a new axis or Reverse turns it keeping its share. They are settings of the
+cut; on a cut, a new axis or Reverse turns it keeping its share. The menu is part of the popover:
+choosing in it, or Escape closing it, leaves the popover open. They are settings of the
 file's view (`clip.axis`, `clip.partColors`, `clip.invert`, stored and restored with its
-display), kept across tools, by Reset clip and by taking up an unset Clip. Explode opens at 0%, Clip at no
+display), kept as the popover closes and by Reset clip. Explode opens at 0%, Clip at no
 cut; an edit applies the effect, and the slider back at zero removes it. An axis alone is not
 an effect. The view settings own both effects, so a mode reset preserves them and a restored
 effect reappears on the model. Clip's slider, left to right, cuts deeper through the original
@@ -722,7 +728,7 @@ named poses are unchanged, the named pose chosen included; an update that change
 starts the pose at the new defaults, never fitting the old values onto other joints.
 Default restores the authored
 values (an SRDF's home included), stops motion and hands control back to
-Position. Using Position takes Explode off, and taking up Explode puts the pose back to its
+Position. Using Position takes Explode off, and exploding puts the pose back to its
 default ([one motion at a time](#tools-and-lifecycle)); while the model is exploded there are no
 knobs. Preview leaves the tools view's pose as it is and never shows it: it opens on the model
 at rest, and a pose set there is its own (see [Preview](#camera-animation-and-preview)). Kinematics, named poses and

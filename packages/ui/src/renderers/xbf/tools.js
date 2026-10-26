@@ -1,8 +1,9 @@
 import { createToolModes } from "../kit/tools/toolModes.js";
 
 // An engine document's tools are a STEP's, in a STEP's order: Select (its filter on the chevron
-// after it), Pencil and Shapes, Measure (its own filter after it), Explode (where it places two or more parts) and Clip.
-export const XBF_TOOL = Object.freeze({ SELECT: "select", PENCIL: "pencil", SHAPES: "shapes", MEASURE: "measure", EXPLODE: "exploded", CLIP: "clip" });
+// after it), Pencil and Shapes, Measure (its own filter after it); then the model's effects, Explode (where it
+// places two or more parts) and Clip, which are popovers from their tiles and never a tool in hand.
+export const XBF_TOOL = Object.freeze({ SELECT: "select", PENCIL: "pencil", SHAPES: "shapes", MEASURE: "measure" });
 
 export const XBF_TOOL_MODES = createToolModes({
   defaultMode: XBF_TOOL.SELECT,
