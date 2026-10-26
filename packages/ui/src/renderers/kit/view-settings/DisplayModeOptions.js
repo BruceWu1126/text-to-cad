@@ -56,11 +56,12 @@ export function GridIcon(props) {
   </svg>;
 }
 
+// Each mode says its name in the view's language by its `key`; `label` and `title` are its English.
 export const DISPLAY_MODE_OPTIONS = Object.freeze([
-  Object.freeze({ value: "solid", label: "Solid", title: "Shaded surfaces with visible CAD edges", Icon: SolidModeIcon }),
-  Object.freeze({ value: "shaded", label: "Shaded", title: "Shaded surfaces, no edges", Icon: ShadedModeIcon }),
-  Object.freeze({ value: "parts", label: "Parts", title: "Each part its own colour, with visible CAD edges", Icon: PartsModeIcon }),
-  Object.freeze({ value: "xray", label: "X-ray", title: "Transparent surfaces with visible and hidden CAD edges", Icon: XRayModeIcon }),
-  Object.freeze({ value: "hidden-line", label: "Hidden line", title: "Visible contours with obscured edges removed", Icon: HiddenLineModeIcon }),
-  Object.freeze({ value: "wireframe", label: "Wireframe", title: "All CAD edges through the model", Icon: WireframeModeIcon })
+  Object.freeze({ value: "solid", key: "mode.solid", label: "Solid", title: "Shaded surfaces with visible CAD edges", Icon: SolidModeIcon }),
+  Object.freeze({ value: "shaded", key: "mode.shaded", label: "Shaded", title: "Shaded surfaces, no edges", Icon: ShadedModeIcon }),
+  Object.freeze({ value: "parts", key: "mode.parts", label: "Parts", title: "Each part its own colour, with visible CAD edges", Icon: PartsModeIcon }),
+  Object.freeze({ value: "xray", key: "mode.xray", label: "X-ray", title: "Transparent surfaces with visible and hidden CAD edges", Icon: XRayModeIcon }),
+  Object.freeze({ value: "hidden-line", key: "mode.hidden-line", label: "Hidden line", title: "Visible contours with obscured edges removed", Icon: HiddenLineModeIcon }),
+  Object.freeze({ value: "wireframe", key: "mode.wireframe", label: "Wireframe", title: "All CAD edges through the model", Icon: WireframeModeIcon })
 ]);

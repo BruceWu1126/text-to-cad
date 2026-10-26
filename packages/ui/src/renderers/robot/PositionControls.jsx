@@ -7,6 +7,7 @@ import {
 } from "../kit/inspector/FileSheet.js";
 import { KinematicsPoseRow, NO_PRESET_VALUE, DEFAULT_POSE_VALUE, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
 import { useControlUsage } from "../../usage/controls.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 const CONTROL_SYNC_EPSILON = 0.001;
 const CONTROL_LOCAL_OVERRIDE_MS = 3500;
@@ -46,6 +47,7 @@ function clampInputValue(value, min, max, fallback) {
 // animation frame, and after a local change it ignores the pose's value until the two
 // agree (or a few seconds pass), so a slider never fights the hand moving it.
 const ControlRow = memo(function ControlRow({ control, value, onValueChange }) {
+  const { t } = useI18n();
   const label = String(control?.label || control?.id || "").trim();
   const [min, max] = sliderSpan(control);
   const safeValue = clampInputValue(value, min, max, 0);
@@ -130,14 +132,14 @@ const ControlRow = memo(function ControlRow({ control, value, onValueChange }) {
 
   return (
     <FileSheetSliderField
-      label={label || "Joint"}
+      label={label || t("position.joint")}
       value={formatControlValue(liveValue, control)}
       onValueCommit={(nextValue) => {
         commitValue(parseFileSheetNumberInput(nextValue, { fallback: liveValue, min, max }));
       }}
-      valueInputProps={{ ariaLabel: `${label || "Joint"} value in ${unitLabel}` }}
+      valueInputProps={{ ariaLabel: t("position.valueIn", { name: label || t("position.joint"), unit: unitLabel }) }}
     >
-        <TooltipHint content={`${formatControlValue(min, control)} to ${formatControlValue(max, control)}`}>
+        <TooltipHint content={t("position.range", { min: formatControlValue(min, control), max: formatControlValue(max, control) })}>
           <Slider
             className={cn(FILE_SHEET_PRECISION_SLIDER_CLASSES, "min-w-0")}
             min={min}
@@ -154,7 +156,7 @@ const ControlRow = memo(function ControlRow({ control, value, onValueChange }) {
               scheduleValueChange(next);
             }}
             onValueCommit={(nextValue) => { commitValue(nextValue?.[0]); }}
-            thumbProps={{ "aria-label": label || "Joint value" }}
+            thumbProps={{ "aria-label": label || t("position.jointValue") }}
           />
         </TooltipHint>
     </FileSheetSliderField>
@@ -174,10 +176,11 @@ function PoseControlRow({ pose, control }) {
 
 /** The Pose row: Default, then the SRDF's named group states, if it declares any. */
 export function PoseGroupStateRow({ pose }) {
+  const { t } = useI18n();
   const read = () => pose.getSnapshot();
   const { groupStateId, values } = useSyncExternalStore(pose.subscribe, read, read);
   return <KinematicsPoseRow
-    poses={pose.groupStates.map(state => ({ value: state.id, label: String(state.label || state.name || "").trim() || "State" }))}
+    poses={pose.groupStates.map(state => ({ value: state.id, label: String(state.label || state.name || "").trim() || t("pose.state") }))}
     onReset={pose.reset}
     activeValue={positionValuesAreDefault(values, pose.defaults) ? DEFAULT_POSE_VALUE : pose.groupStates.some(state => state.id === groupStateId) ? groupStateId : NO_PRESET_VALUE}
     onSelect={(value) => {
@@ -194,7 +197,8 @@ export function PoseGroupStateRow({ pose }) {
  * @param {{ pose: ReturnType<typeof import("./poseStore.js").createPoseStore> }} props
  */
 export default function PositionControls({ pose }) {
-  if (!pose.controls.length) return <FileSheetStatusText className="py-2">No movable joints.</FileSheetStatusText>;
+  const { t } = useI18n();
+  if (!pose.controls.length) return <FileSheetStatusText className="py-2">{t("position.noJoints")}</FileSheetStatusText>;
   return (
     <div className="space-y-1.5 pb-1.5 pt-0.5">
       {/* A pose is a way of SETTING the controls, so it leads them: Default for any robot, the

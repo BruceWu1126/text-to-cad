@@ -1,5 +1,6 @@
 import { Search, X } from 'lucide-react';
 import { cn } from '@text-to-cad/ui/utils';
+import { useI18n } from '@text-to-cad/ui/i18n';
 
 /**
  * The filter box above a tree, and the highlight its matches use. Shared by the
@@ -11,7 +12,9 @@ import { cn } from '@text-to-cad/ui/utils';
  * the rows' glyph column and its text starts where their names do: the rows sit 4px in (their
  * list's padding), each glyph 5px further (`TREE_ROW_INSET_PX`) and 12px wide, its name 4px after it.
  */
-export function TreeFilterInput({ label, placeholder, value, onChange, onKeyDown, trailing, yieldWhileTyping = false, dense = false, clearLabel = 'Clear filter', className, ...props }) {
+export function TreeFilterInput({ label, placeholder, value, onChange, onKeyDown, trailing, yieldWhileTyping = false, dense = false, clearLabel: givenClearLabel, className, ...props }) {
+  const { t } = useI18n();
+  const clearLabel = givenClearLabel ?? t('tree.clearFilter');
   return <div {...props} data-slot="tree-filter" className={cn('group/filter flex shrink-0 items-center gap-1',
     // Dense, the separator is an inset line rather than a border, so the row's full 24px centre its
     // buttons (a border would take a pixel from under them).
