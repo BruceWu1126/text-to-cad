@@ -29,8 +29,8 @@ Two things work differently today than in 0.5: animation is clips written in
 Python, which `animation=` takes and the build bakes into the sidecar as
 keyframes, and cadgen meshes every component at one display tolerance, so
 neither `@step` nor a model run takes a mesh tolerance. For both, and for every
-interface that changed after 0.5, follow
-[`skills/cad/references/migrations.md`](../../skills/cad/references/migrations.md).
+interface that changed after 0.5, finish with
+[Migrating 0.7 to 0.8](migrating-0.7-to-0.8.md), which starts from what 0.7 wrote.
 
 ### The one-paragraph summary
 
@@ -511,8 +511,8 @@ Choreography is clips: Python functions of time, declared with `cadgen.clip` and
 passed to `animation=` on the decorator. The build runs them and bakes their
 keyframes into the sidecar, so a page plays data and reads nothing beside the
 document. A v0.4 `.params.js` demo mode becomes such a clip:
-[`skills/cad/references/migrations.md`](../../skills/cad/references/migrations.md) ports a JavaScript clip
-module to Python clips, and the cad skill's kinematics reference documents the
+[Migrating 0.7 to 0.8](migrating-0.7-to-0.8.md) ports a JavaScript clip
+module to what 0.8 has, and the cad skill's kinematics reference documents the
 clip vocabulary. Delete the `.params.js`.
 
 **GIF export is deleted.** Snapshot writes PNG stills only, and a `.gif` output
@@ -638,7 +638,7 @@ prints `current ...` and never touches the kernel.
 
 A model run takes no tolerance flag and `@step` no tolerance: cadgen meshes every
 component itself, at one display tolerance, and every view and snapshot draws those
-meshes ([`skills/cad/references/migrations.md`](../../skills/cad/references/migrations.md)).
+meshes ([Migrating 0.7 to 0.8](migrating-0.7-to-0.8.md), step 2).
 A mesh decorator (`@stl`/`@glb`/`@threemf`) or a mesh export command may name its
 own, and there the chord tolerance is **relative**, a fraction of each component's
 bounding diagonal, where v0.4's was absolute millimetres: on a 200 mm part, v0.4's
