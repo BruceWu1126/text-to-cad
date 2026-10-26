@@ -85,18 +85,6 @@ applies. That box is only the body's metadata: only triangles are
 drawn, so composition gives an occurrence without them no bounds, and it
 cannot change the assembly's framing or hide the real parts.
 
-### Selector composition
-
-An assembly's selector runtime is composed from one part per placed occurrence
-(`buildSelectorCompositionPart`, `createSelectorRuntimeComposer` in
-`lib/selectors/runtime.js`). A part keeps its rows, its references as last
-placed and the bundle's own proxy buffers with the placement transform — never
-a placed copy of the proxy or lookup maps. The composer re-places a part's
-references only when its offsets move, and a composition that begins with the
-previous one extends that result instead of rebuilding it. The result is value
-for value the whole-runtime `composeSelectorRuntimes` result for the same
-components in the same order (`runtimeComposer.test.js`).
-
 ### Instancing and culling
 
 Repeated compatible opaque surfaces share instanced draws and retain

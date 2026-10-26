@@ -37,8 +37,8 @@ export function buildPartTransformMatrix(THREE, transform, matrix = new THREE.Ma
 export function displayTransformForPart(meshData, part) {
   // Composed packages declare partTransformsBaked: false — their shared component
   // geometry is occurrence-local, so the occurrence transform must be applied no
-  // matter which render mode is active. Baked meshDatas (partTransformsBaked: true)
-  // carry world-space vertices, so parts place with no extra transform.
+  // matter which render mode is active. Every other meshData carries world-space
+  // vertices, so its parts place with no extra transform.
   if (meshData?.partTransformsBaked === false) {
     return part?.transform || null;
   }

@@ -228,16 +228,14 @@ test("per-output views inherit the photographic lens without inheriting a confli
   });
 });
 
-test("render display retains CAD runtimes and animation", () => {
+test("render display retains animation", () => {
   const stepAnimation = resolveAnimationFrame(SLIDE_CLIPS, { clip: "slide", time: 1.5 });
   const job = {
     kind: "step",
     preview: true,
-    selectorRuntime: {},
     stepAnimation
   };
   const context = renderJobContext(twoPartMeshData(), job);
-  assert.equal(context.selectorRuntime, job.selectorRuntime);
   assert.equal(context.edgesVisible, false);
   const options = modelOptionsForRenderJob(context, job);
   assert.equal(options.callbacks.animation, stepAnimation);

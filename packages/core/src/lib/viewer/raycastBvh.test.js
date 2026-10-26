@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
 
-import { builtGeometryBvhBytes, ensureFacePickBvh, estimateGeometryBvhBytes, scheduleRuntimeRaycastBvh } from "./raycastBvh.js";
+import { builtGeometryBvhBytes, estimateGeometryBvhBytes, scheduleRuntimeRaycastBvh } from "./raycastBvh.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -40,39 +40,6 @@ test("scheduleRuntimeRaycastBvh builds an indirect BVH over indexed geometry and
   assert.equal(hitFirst[0]?.faceIndex, 0);
   assert.equal(hitLast[0]?.faceIndex, 2);
   assert.equal(mesh.userData.faceIds[hitLast[0].faceIndex], 12, "faceRuns keyed by triangle index resolve");
-});
-
-test("ensureFacePickBvh rebuilds when the proxy index array identity changes", async () => {
-  const proxy = {
-    facePositions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]),
-    faceIndices: new Uint32Array([0, 1, 2, 0, 2, 3])
-  };
-  const makeMesh = () => {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(proxy.facePositions, 3));
-    geometry.setIndex(new THREE.BufferAttribute(proxy.faceIndices, 1));
-    return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
-  };
-  const runtime = { facePickMesh: makeMesh() };
-  ensureFacePickBvh(runtime, { proxy });
-  await tick();
-  const first = runtime.facePickMesh.geometry.boundsTree;
-  assert.ok(first, "first BVH built in idle time");
-  assert.equal(first.__builtFromIndexArray, proxy.faceIndices);
-
-  // Same arrays, fresh geometry (a selector sync): the cached BVH is reattached.
-  runtime.facePickMesh = makeMesh();
-  ensureFacePickBvh(runtime, { proxy });
-  assert.equal(runtime.facePickMesh.geometry.boundsTree, first);
-
-  // New index array (a new selector composition): the cache misses and a new BVH is built.
-  proxy.faceIndices = new Uint32Array([0, 2, 1, 0, 3, 2]);
-  runtime.facePickMesh = makeMesh();
-  ensureFacePickBvh(runtime, { proxy });
-  await tick();
-  const second = runtime.facePickMesh.geometry.boundsTree;
-  assert.ok(second && second !== first, "index identity change rebuilds the BVH");
-  assert.equal(second.__builtFromIndexArray, proxy.faceIndices);
 });
 
 test("a component released while its BVH was queued never gets a tree built for it", async () => {
