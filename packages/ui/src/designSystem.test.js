@@ -48,3 +48,24 @@ test("every scroll region in the viewer's chrome is the ScrollArea primitive, ne
   assert.deepEqual(found, []);
   for (const file of SCROLL_REGIONS) assert.match(readFileSync(join(root, file), "utf8"), /<ScrollArea\b/, `${file} scrolls in a ScrollArea`);
 });
+
+// The Home (`library/`) is one type scale (docs/settings-ui.md): every text text-ui, 13px -- the
+// heading, the type filter, the search, the names, the table, its header included -- but a tile's
+// age, text-tiny and muted; a tile's and a row's glyph 16px.
+test("the Home is one type scale: text-ui throughout but a tile's age, and 16px glyphs", () => {
+  const css = readFileSync(join(root, "styles/globals.css"), "utf8");
+  const sizes = [...css.matchAll(/([^{}]*\.cad-library[^{}]*)\{([^}]*)\}/g)].flatMap(([, selector, body]) => {
+    const size = body.match(/font-size:\s*([^;]+);/)?.[1].trim();
+    return size ? [[selector.trim().replace(/\s+/g, " "), size]] : [];
+  });
+  assert.deepEqual(sizes, [
+    [".cad-library-heading", "var(--text-ui)"],
+    [".cad-library-status", "var(--text-tiny, 0.6875rem)"],
+    [".cad-library-columns", "var(--text-ui)"],
+    [".cad-library-row .cad-library-status", "var(--text-ui)"],
+  ]);
+  assert.match(css, /\.cad-library-glyph \{[^}]*width: 16px; height: 16px;/);
+  const page = readFileSync(join(root, "library/ModelLibrary.tsx"), "utf8");
+  assert.deepEqual([...page.matchAll(/\btext-(micro|tiny|xs)\b/g)].map(([name]) => name), []);
+  assert.match(page, /className="cad-library h-full overflow-y-auto text-ui"/);
+});

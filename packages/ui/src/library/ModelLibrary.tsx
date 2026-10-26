@@ -347,7 +347,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
         <div className="cad-library-controls">
           {kinds ? <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="xs" className="cad-library-kind text-tiny" aria-label={t("home.kindAria", { kind: t(`home.kind.${kind}`) })}>
+              <Button variant="ghost" size="xs" className="cad-library-kind text-ui" aria-label={t("home.kindAria", { kind: t(`home.kind.${kind}`) })}>
                 {t(`home.kind.${kind}`)}<ChevronDown aria-hidden="true" />
               </Button>
             </DropdownMenuTrigger>
@@ -359,7 +359,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
           </DropdownMenu> : null}
           <div className="cad-library-search">
             <Search aria-hidden="true" />
-            <Input className="h-6 text-tiny" type="search" aria-label={t("home.searchAria")} placeholder={t("home.searchPlaceholder")} value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} />
+            <Input className="h-6 text-ui" type="search" aria-label={t("home.searchAria")} placeholder={t("home.searchPlaceholder")} value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} />
           </div>
           {onLayoutChange ? <div className="cad-library-layout" role="group" aria-label={t("home.layout")}>
             <Button variant="ghost" size="icon-xs" aria-label={t("home.grid")} aria-pressed={layout === "grid"} onClick={() => { usage.used("home_layout_grid"); onLayoutChange("grid"); }}><LayoutGrid className="size-3.5" aria-hidden="true" /></Button>

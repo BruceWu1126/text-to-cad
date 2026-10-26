@@ -84,7 +84,10 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   buttons, sizes and places as over a file. Under it,
   the page, after Figma's Recents, with no hero (no wordmark, tagline or links: GitHub and
   Discord are the app menu's, X its footer's "Made by"; no light/dark button: Theme is the
-  menu's). It starts with **one control row**, every control 24px tall in `text-tiny`: at the
+  menu's). The Home is **one type scale**: every text `text-ui` (13px) — the heading, the
+  type filter, the search, the names, the table — but a tile's age, `text-tiny` (11px) and
+  muted; a tile's and a row's glyph is 16px (`src/designSystem.test.js` holds it). It starts
+  with **one control row**, every control 24px tall with 13px text: at the
   left **Recent**, a plain small heading (`text-ui`, weight 500, no fill or padding box: no tab); at the right,
   8px apart, the **type filter**, a stock DropdownMenu whose ghost `xs` trigger names what it
   shows ("All ▾") and whose radio items are All, Models and Files, there only where models and
@@ -94,7 +97,7 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   library alone: no Open, no folder of a launch. In the grid, a **tile** is transparent on the
   page in both themes, a 1px `border`, a 12px radius and no shadow, the same under the pointer;
   columns at least 240px (four across a 1280px window), 24px apart. Its picture sits on the
-  `muted` fill at 330:185, contained; its caption (12px by 16px) is its kind's glyph in a 24px
+  `muted` fill at 330:185, contained (its placeholder cube 24px); its caption (12px by 16px) is its kind's 16px glyph in a 24px
   column, then its name (`text-ui`, weight 500) over its last activity with no verb ("2h ago",
   `text-tiny`, muted). In the list, a **table**, one type in every cell (`text-ui`, 13px): a
   32px header row of muted labels (Name, Updated, Opened) over 40px rows, each its glyph and
