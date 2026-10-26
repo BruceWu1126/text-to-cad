@@ -2,7 +2,7 @@ import { viewerOriginUrl } from './origin.js';
 
 export class ExportRequestError extends Error {
   /** @param {string} message @param {number} status */
-  constructor(message, status) { super(message); this.status = status; }
+  constructor(message, status) { super(message); this.name = 'ExportRequestError'; this.status = status; }
 }
 /** @param {number} ms @param {AbortSignal} signal @returns {Promise<void>} */
 export function exportPause(ms, signal) {
