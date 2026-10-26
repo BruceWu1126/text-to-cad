@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { isEngineRefFile, parseCadRefSelector } from "@text-to-cad/core/lib/cadRefs.js";
 import { fetchXbfElementFacts } from "@text-to-cad/core/lib/xbf/xbfDocument.js";
 import { parseXbfElementId } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 import { formatPromptReference } from "@text-to-cad/core/prompt";
 import { InfoRow, MonoValue, formatNumber } from "../kit/inspector/referenceRows.jsx";
-import { isXbfAssemblyId } from "./xbfTree.js";
 
 // What is selected in an engine document, as Quick Edit's chips -- as the STEP renderer's were:
 // a part or subassembly a chip of its own, its card its part count (a
@@ -12,11 +10,11 @@ import { isXbfAssemblyId } from "./xbfTree.js";
 // face 3" alone, "base · 6 faces" for several -- its card the key measurements, which the engine
 // measures on the exact shape when the element is picked (`fetchXbfElementFacts`).
 //
-// Each selected thing is also a reference into the document. An .xbf's are the engine's canonical
-// refs (`xbfTree.js`: `refOf`, `elementRefOf`), the ones `cadgen inspect` and `select` read: a part
-// or subassembly by its label, or its occurrence path where the label is shared (`hand/finger.2`),
-// an element by its name, else its kind and number, under it (`hand/finger.2/face 7`). A STEP's are
-// its own grammar's (`cadRefs.js`: a part's label, `label/f:…`), where the names spell one.
+// Each selected thing is also a reference into the document: the engine's canonical refs
+// (`xbfTree.js`: `refOf`, `elementRefOf`), the ones `cadgen inspect` and `select` read, for an .xbf,
+// a STEP and a model alike: a part or subassembly by its label, or its occurrence path where the
+// label is shared (`hand/finger.2`), an element by its name, else its kind and number, under it
+// (`hand/finger.2/face 7`).
 
 const EMPTY = Object.freeze([]);
 const PLURAL = Object.freeze({ face: "faces", edge: "edges" });
@@ -134,28 +132,19 @@ export function xbfCopyText({ scene, tree, resource, ids }) {
  */
 export function xbfNodeRefs({ scene, tree, resource, ids }) {
   if (!scene) return [];
-  const { nodeCopy } = referencing({ scene, tree, resource });
+  const { nodeCopy } = referencing({ tree, resource });
   return ids.filter(id => tree.nodes.has(id)).map(nodeCopy).filter(Boolean);
 }
 
-// How a node and an element are referenced in `resource`: by the engine's refs in an .xbf and in a
-// document the engine holds by its id (a model's), by a STEP's own grammar in a STEP the engine
-// draws. A node's copy is its reference with the file's path, or the document's id.
-function referencing({ scene, tree, resource }) {
+// How a node and an element are referenced in `resource`: by the engine's canonical refs, which
+// every document the engine draws is named by (an .xbf, a STEP, a model by its id). A node's copy is
+// its reference with the file's path, or the document's id.
+function referencing({ tree, resource }) {
   const workspace = resource?.kind === "workspace-file" || resource?.kind === "cad-model";
-  const engine = workspace && isEngineRefFile(resource.path);
-  const referenceTo = selector => ({ resource: { ...resource }, target: { kind: "cad-selector", selectors: [selector] } });
-  const referenceOf = (selector) => {
-    if (!workspace || !selector) return null;
-    if (engine) return referenceTo(selector);
-    const parsed = parseCadRefSelector(selector);
-    return parsed && parsed.selectorType !== "opaque" ? referenceTo(parsed.canonical) : null;
-  };
-  // A STEP's part goes by its name in the document's paths (its label); a subassembly by its own.
-  const partSelector = id => String(scene.structure.instances[parseXbfElementId(id)?.instance]?.path || "").split("/").pop();
-  const nodeSelector = id => (engine ? tree.refOf(id) : isXbfAssemblyId(id) ? tree.nodes.get(id)?.label || "" : partSelector(id));
-  const elementSelector = (part, element) => (engine ? tree.elementRefOf(part, element.kind, element.ordinal, element.name)
-    : element.name ? `${partSelector(part)}/${element.name}` : "");
+  const referenceOf = selector => (workspace && selector
+    ? { resource: { ...resource }, target: { kind: "cad-selector", selectors: [selector] } } : null);
+  const nodeSelector = id => tree.refOf(id);
+  const elementSelector = (part, element) => tree.elementRefOf(part, element.kind, element.ordinal, element.name);
   const copyOf = (references, fallback) => (references.length ? references.map(formatPromptReference).join("\n") : fallback);
   const nodeCopy = id => {
     const reference = referenceOf(nodeSelector(id));
@@ -167,7 +156,7 @@ function referencing({ scene, tree, resource }) {
 function xbfSelectionChips({ scene, tree, resource, selectedIds, facts, onRemove, onHover }) {
   {
     if (!scene || !selectedIds.length) return { references: EMPTY, chips: EMPTY };
-    const { referenceOf, nodeSelector, elementSelector, copyOf, nodeCopy } = referencing({ scene, tree, resource });
+    const { referenceOf, nodeSelector, elementSelector, copyOf, nodeCopy } = referencing({ tree, resource });
     const partName = id => tree.nodes.get(id)?.label || scene.describePart(id)?.name || id;
     const chips = [];
     const references = [];

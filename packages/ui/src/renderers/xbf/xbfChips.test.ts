@@ -6,7 +6,7 @@ import { presentXbfTree, xbfCoveringIds } from '../../../dist/renderers/xbf/xbfT
 
 // What an engine document's selection copies: the engine's canonical refs, one line each, the file's
 // path first -- what `cadgen inspect DOC REF` and `select(DOC, REF)` read (cadgen.engine.refs) -- and
-// what a paste of one names. A STEP drawn by the same renderer keeps its own grammar's references.
+// what a paste of one names. A STEP is an engine document too, and copies the same.
 
 const part = (name: string, prototype: number, instance: number) => ({ name, prototype, instance });
 // A palm, a hand of three fingers of one part, a screw whose label holds a slash, and a part whose
@@ -81,9 +81,49 @@ it('a view hides and isolates by the refs Copy Prompt copies, a hidden assembly 
   expect(xbfCoveringIds(tree, [])).toEqual([]);
 });
 
-it('a STEP drawn by the engine keeps its own grammar\'s references', () => {
+it("a STEP is named as an .xbf is: the engine's canonical refs, an unnamed face by its number", () => {
   const step = at('/work/STEP/kit.step');
-  expect(copied(step, ['i0', 'i0/face/3'])).toEqual(['/work/STEP/kit.step#palm', '/work/STEP/kit.step#palm/f:palm.body.3;M:palm.relief']);
-  // An element its names do not spell is no reference there: its part's path, its kind and number.
-  expect(copied(step, ['i0/face/2'])).toEqual(['kit/palm face 2']);
+  expect(copied(step, ['i0', 'n0.1', 'i2', 'i0/face/3', 'i0/face/2', 'i4/edge/2'])).toEqual([
+    '/work/STEP/kit.step#palm',
+    '/work/STEP/kit.step#hand',
+    '/work/STEP/kit.step#kit/hand/finger.2',
+    '/work/STEP/kit.step#palm/f:palm.body.3;M:palm.relief',
+    '/work/STEP/kit.step#palm/face 2',
+    '/work/STEP/kit.step#"M3/M4 screw"/e:screw.body.2',
+  ]);
+});
+
+// A STEP of one part labelled with spaces, its document named as its part is (`cadgen inspect`).
+const LABEL = 'L bracket 80 x 60 x 6 mm';
+const bracketStructure = {
+  name: LABEL, version: '1-1', units: 'mm',
+  prototypes: [{ index: 0, key: 'k-bracket', name: LABEL, faceNames: { 7: 'f:bracket_body.body_bcndnk~ba6e1714f88b' }, edgeNames: {} }] as any[],
+  instances: [{ prototype: 0, path: `${LABEL}/${LABEL}`, matrix: [], color: null }],
+  tree: { name: LABEL, children: [part(LABEL, 0, 0)] },
+};
+const bracketScene = {
+  ...scene, structure: bracketStructure,
+  describeElement: (id: string) => {
+    const [, kind, ordinal] = /^i0\/(face|edge)\/(\d+)$/.exec(id) || [];
+    return kind ? { id, kind, ordinal: Number(ordinal), instance: 0, key: 'k-bracket',
+      name: (bracketStructure.prototypes[0] as any)[`${kind}Names`][ordinal] || '', path: `${LABEL}/${LABEL}` } : null;
+  },
+};
+
+it('a one-part STEP labelled with spaces gives a reference for its part, a named face and an unnamed one', () => {
+  const resource = at('/work/STEP/bracket.step');
+  const bracketTree = presentXbfTree(bracketStructure);
+  const { result } = renderHook(() => useXbfSelectionChips({ scene: bracketScene, tree: bracketTree, resource,
+    selectedIds: ['i0/face/7'], facts: new Map(), onRemove: () => {}, onHover: () => {} }));
+  // One reference, under the label as the engine writes it: whole, its spaces its own.
+  expect(result.current.references).toEqual([{ resource, target: { kind: 'cad-selector', selectors: [`${LABEL}/f:bracket_body.body_bcndnk~ba6e1714f88b`] } }]);
+  expect(xbfCopyText({ scene: bracketScene, tree: bracketTree, resource, ids: ['i0/face/7', 'i0/face/3', 'i0'] }).split('\n')).toEqual([
+    `/work/STEP/bracket.step#${LABEL}/f:bracket_body.body_bcndnk~ba6e1714f88b`,
+    `/work/STEP/bracket.step#${LABEL}/face 3`,
+    `/work/STEP/bracket.step#${LABEL}/${LABEL}`,
+  ]);
+  // Each pasted back is the reference it was copied from.
+  for (const line of xbfCopyText({ scene: bracketScene, tree: bracketTree, resource, ids: ['i0/face/7', 'i0/face/3'] }).split('\n')) {
+    expect(parsePromptReference(line)?.target).toEqual({ kind: 'cad-selector', selectors: [line.slice(line.indexOf('#') + 1)] });
+  }
 });
