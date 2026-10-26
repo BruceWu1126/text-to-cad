@@ -11,6 +11,7 @@ import { normalizePath } from '@text-to-cad/ui/cad-viewer';
 import { version } from '../package.json';
 import type { Bridge, HostContext } from './host/bridge';
 import { declaresOpenLinks } from './host/channel';
+import { hostDisplayName } from './host/hostName';
 import { captureSettled, fitCapture } from './host/capture';
 import { frameClipboard } from './host/clipboard';
 import { createLiveRegistry, describeView } from './host/live';
@@ -40,11 +41,15 @@ export function useHostContext(bridge: Pick<Bridge, 'hostContext' | 'onHostConte
 // What to do once this view's server has gone -- it answered before, and stopped: the host started
 // it, and only the host starts it again. (A chat that never carried a call is another state, with its
 // own words: `Unreachable`, `Connection.tsx`.)
-// Each said by its key in the view's language.
+// Each said by its key in the view's language, naming the host to quit and reopen (`{host}`: what
+// the host called itself at `ui/initialize`, as a person knows it; "this app" for one not known).
 export const LOST: Record<Presentation, string> = {
   tabs: 'cad.lost.tabs',
   inline: 'cad.lost.inline',
 };
+export function lostNotice(say: (key: string, params?: Record<string, unknown>) => string, presentation: Presentation, hostName: string | null | undefined): string {
+  return say(LOST[presentation], { host: hostDisplayName(hostName) ?? say('cad.lost.thisApp') });
+}
 
 // Inline, a view is a card in the chat: as tall as its width suits, within what the host allows.
 const INLINE_ASPECT = 0.62, INLINE_MIN_HEIGHT = 320, INLINE_MAX_HEIGHT = 560;
@@ -309,7 +314,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
     return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer}><Superseded still={still} label={translator(locale)('cad.superseded')} /></Frame>;
   }
   return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer}
-    overlay={lost ? <Banner message={translator(locale)(LOST[presentation])} /> : null}>
+    overlay={lost ? <Banner message={lostNotice(translator(locale), presentation, bridge.hostInfo.name)} /> : null}>
     <ModelView launch={launch} sequence={showing.sequence} alone={alone} bridge={bridge} client={client} tunnel={tunnel}
       tabStore={tabStore} live={live} links={links} appSettings={appSettings}
       update={!updateNotice ? null : !alone ? <UpdateButton notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)} onLink={openLink} />

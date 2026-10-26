@@ -22,6 +22,9 @@ export interface HostContext {
   [key: string]: unknown;
 }
 
+/** The host, as it names itself at `ui/initialize` (`hostInfo`, MCP Apps): Codex, Claude, Cursor... */
+export interface HostInfo { name?: string; version?: string }
+
 export interface ToolResult {
   _meta?: Record<string, unknown>;
   content?: Array<{ type: string; text?: string; [key: string]: unknown }>;
@@ -34,6 +37,8 @@ export interface CallOptions { signal?: AbortSignal; timeoutMs?: number }
 export interface Bridge {
   readonly hostContext: HostContext;
   readonly hostCapabilities: Record<string, unknown>;
+  /** What the host called itself at `ui/initialize`; empty before, and for a host that said nothing. */
+  readonly hostInfo: HostInfo;
   request<T = unknown>(method: string, params?: Record<string, unknown>, options?: CallOptions): Promise<T>;
   notify(method: string, params?: Record<string, unknown>): void;
   callTool(name: string, args: Record<string, unknown>, options?: CallOptions): Promise<ToolResult>;
@@ -77,6 +82,7 @@ export function createBridge(host: Pick<Window, 'postMessage'>, self: Pick<Windo
   const teardowns = new Set<() => void>();
   let lastResult: ToolResult | undefined;
   let hostContext: HostContext = {};
+  let hostInfo: HostInfo = {};
   let hostCapabilities: Record<string, unknown> = {};
 
   const post = (message: Message) => host.postMessage({ jsonrpc: '2.0', ...message }, '*');
@@ -134,6 +140,7 @@ export function createBridge(host: Pick<Window, 'postMessage'>, self: Pick<Windo
 
   return {
     get hostContext() { return hostContext; },
+    get hostInfo() { return hostInfo; },
     get hostCapabilities() { return hostCapabilities; },
     request,
     notify,
@@ -146,11 +153,12 @@ export function createBridge(host: Pick<Window, 'postMessage'>, self: Pick<Windo
     onHostContext(listener) { contexts.add(listener); return () => contexts.delete(listener); },
     onTeardown(listener) { teardowns.add(listener); return () => teardowns.delete(listener); },
     async initialize(appInfo, { displayModes = ['fullscreen'] } = {}) {
-      const result = await request<{ hostContext?: HostContext; hostCapabilities?: Record<string, unknown> }>('ui/initialize', {
+      const result = await request<{ hostContext?: HostContext; hostCapabilities?: Record<string, unknown>; hostInfo?: HostInfo }>('ui/initialize', {
         protocolVersion: PROTOCOL_VERSION, appInfo, appCapabilities: { availableDisplayModes: displayModes },
       }, { timeoutMs: 15_000 });
       hostContext = { ...(result?.hostContext || {}) };
       hostCapabilities = result?.hostCapabilities || {};
+      hostInfo = result?.hostInfo && typeof result.hostInfo === 'object' ? { ...result.hostInfo } : {};
       notify('ui/notifications/initialized');
       for (const listener of [...contexts]) listener(hostContext);
     },
