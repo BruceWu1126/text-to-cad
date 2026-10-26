@@ -1116,24 +1116,48 @@ class ListenTest(unittest.TestCase):
 
 
 class DaemonTest(unittest.TestCase):
+    """Through the daemon. The class shares one engine, so a test's first build takes the standby the
+    one before left, with the kernel loaded; each test builds scripts of a folder of its own, and
+    reads the workers of its own scripts (``mine``). A test whose subject is the engine's start, its
+    environment or all it holds starts an engine of its own (``own``)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.shared = cls.engine(cls.addClassCleanup)
+
+    @classmethod
+    def engine(cls, cleanup, **extra: str) -> tuple[Path, dict]:
+        """An engine folder and its environment, the engine stopped and the folder removed at ``cleanup``."""
+        state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
+        cleanup(shutil.rmtree, state, True)
+        env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(state),
+                                     "CADGEN_ENGINE_MESH": "inline", **extra}, cleanup)
+        cleanup(cls.stopped, state, env)
+        return state, env
+
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-daemon-")).resolve()
-        self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
-        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
-                                          "CADGEN_ENGINE_MESH": "inline"}, self.addCleanup)
-        self.addCleanup(self._stop)
+        self.addCleanup(shutil.rmtree, self.folder, True)
+        self.state, self.env = self.shared
         self.script = self.folder / "block.py"
 
-    def _stop(self) -> None:
-        self._stop_daemon()
-        shutil.rmtree(self.folder, ignore_errors=True)
-        shutil.rmtree(self.state, ignore_errors=True)
+    def own(self, **extra: str) -> None:
+        """An engine of the test's own from now on, started with ``extra`` in its environment."""
+        self.state, self.env = self.engine(self.addCleanup, **extra)
+
+    def mine(self, rows: list[dict]) -> list[dict]:
+        """The rows of ``status``'s ``workers`` or ``retired`` that are this test's scripts'."""
+        return [row for row in rows if Path(row["script"]).parent == self.folder]
+
+    @staticmethod
+    def stopped(state: Path, env: dict) -> None:
+        engine_daemon.run([sys.executable, "-m", "cadgen.engine", "stop"], env=env)
+        deadline = time.monotonic() + 20
+        while any(state.glob("*.door")) and time.monotonic() < deadline:
+            time.sleep(0.05)
 
     def _stop_daemon(self) -> None:
-        self.cli("stop")
-        deadline = time.monotonic() + 20
-        while any(self.state.glob("*.door")) and time.monotonic() < deadline:
-            time.sleep(0.05)
+        self.stopped(self.state, self.env)
 
     def cli(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
         return engine_daemon.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.folder, env=env or self.env)
@@ -1158,7 +1182,7 @@ class DaemonTest(unittest.TestCase):
 
         # The registry alone, a cache folder nothing can write: a restart is refused with the command
         # (what the cache reopens is ``test_cache``'s).
-        self.env = {**self.env, "CADGEN_CACHE_DIR": engine_daemon.unwritable(self.folder)}
+        self.own(CADGEN_CACHE_DIR=engine_daemon.unwritable(self.folder))
 
         marker = self.folder / "executed.txt"
         main = self.folder / "main.txt"
@@ -1209,7 +1233,7 @@ class DaemonTest(unittest.TestCase):
 
         aside = Path(tempfile.mkdtemp(prefix="engine-daemon-cache-")).resolve()
         self.addCleanup(shutil.rmtree, aside, True)
-        self.env = {**self.env, "CADGEN_CACHE_DIR": engine_daemon.unwritable(aside)}  # nothing kept: ``test_cache``'s
+        self.own(CADGEN_CACHE_DIR=engine_daemon.unwritable(aside))  # nothing kept: ``test_cache``'s
 
         address = self._bare()
         first = self.built("bracket")
@@ -1337,7 +1361,7 @@ if __name__ == '__main__':
         self.script.write_text(textwrap.dedent(MODEL.format(size='float(open("size.txt").read())')), encoding="utf-8")
         done = self.run_script("block.py")
         self.assertEqual(done.returncode, 0, done.stderr)
-        worker = json.loads(self.cli("status", "--json").stdout)["workers"][0]["pid"]
+        (worker,) = [row["pid"] for row in self.mine(json.loads(self.cli("status", "--json").stdout)["workers"])]
         if os.name == "nt":  # a folder a process stands in cannot be renamed
             moved = self.folder.with_name(self.folder.name + "-moved")
             os.rename(self.folder, moved)
@@ -1364,8 +1388,7 @@ if __name__ == '__main__':
         self.assertGreater(edited["memo"]["misses"], 0)
         self.assertTrue(edited["files"][str(self.folder / "XBF/block.xbf")]["written"])
         status = json.loads(self.cli("status", "--json").stdout)
-        self.assertEqual(len(status["workers"]), 1)
-        self.assertEqual(status["workers"][0]["builds"], 3)
+        self.assertEqual([row["builds"] for row in self.mine(status["workers"])], [3])
         # The daemon's only files are its door, its lock and its clients' pipes; the build's, its outputs.
         # The daemon's socket (on Windows the port file standing in for it) and its lock, nothing else.
         self.assertEqual({path.suffix or path.name for path in self.state.iterdir()},
@@ -1380,9 +1403,8 @@ if __name__ == '__main__':
         self.script.write_text(seen + textwrap.dedent(MODEL.format(size=10)), encoding="utf-8")
 
         def pid() -> int:
-            status = json.loads(self.cli("status", "--json").stdout)
-            self.assertEqual(len(status["workers"]), 1)
-            return status["workers"][0]["pid"]
+            (found,) = self.mine(json.loads(self.cli("status", "--json").stdout)["workers"])
+            return found["pid"]
 
         self.assertGreater(self.built("block", env={**self.env, "TURN": "1"})["memo"]["misses"], 0)
         first = pid()
@@ -1392,14 +1414,14 @@ if __name__ == '__main__':
         self.assertEqual((warm["memo"]["misses"], warm["cache"]), (0, {"used": True, "from": "memory"}),
                          "taken from the warm worker's memory, as a restart never is")
         self.assertEqual(pid(), first)
-        self.assertEqual(json.loads(self.cli("status", "--json").stdout)["retired"], [])
+        self.assertEqual(self.mine(json.loads(self.cli("status", "--json").stdout)["retired"]), [])
         self.assertEqual((self.folder / "seen.txt").read_text(encoding="utf-8").splitlines()[-1],
                          f"2 {turn['PATH']}", "the run adopted its caller's environment")
         # Another PYTHONPATH is another interpreter: its worker is replaced, and says why.
         other = {**self.env, "PYTHONPATH": os.pathsep.join([self.env["PYTHONPATH"], str(self.folder)])}
         self.built("block", env=other)
         self.assertNotEqual(pid(), first)
-        retired = json.loads(self.cli("status", "--json").stdout)["retired"]
+        retired = self.mine(json.loads(self.cli("status", "--json").stdout)["retired"])
         self.assertEqual([(row["pid"], row["reason"]) for row in retired], [(first, "environment")])
 
     def test_a_warm_build_writes_the_bytes_a_cold_one_does(self) -> None:
@@ -1501,8 +1523,8 @@ if __name__ == '__main__':
         self.assertTrue(again.stdout.startswith("took block.py::block cold"), again.stdout)
         self.assertIn("retired: the worker held", again.stdout)
         status = json.loads(self.cli("status", "--json").stdout)
-        self.assertEqual(status["workers"], [], "each worker left the pool when it was retired")
-        self.assertEqual([row["reason"] for row in status["retired"]], ["RSS", "RSS"])
+        self.assertEqual(self.mine(status["workers"]), [], "each worker left the pool when it was retired")
+        self.assertEqual([row["reason"] for row in self.mine(status["retired"])], ["RSS", "RSS"])
 
     def test_a_failing_body_answers_with_its_error(self) -> None:
         self.script.write_text("from cadgen.engine import xbf\n\n@xbf('XBF/block.xbf')\ndef block():\n    raise RuntimeError('no')\nif __name__ == '__main__':\n    block()\n", encoding="utf-8")
@@ -1582,7 +1604,7 @@ if __name__ == '__main__':
                          expected)
         views = [line for line in done.stdout.splitlines() if line.startswith("  view: ")]
         self.assertEqual([urlparse(line.removeprefix("  view: ")).path.strip("/") for line in views], expected)
-        workers = json.loads(self.cli("status", "--json").stdout)["workers"]
+        workers = self.mine(json.loads(self.cli("status", "--json").stdout)["workers"])
         self.assertEqual([(Path(w["script"]).name, w["builds"]) for w in workers], [("block.py", 2)],
                          "the daemon's worker built it, not the script's own process")
         done = engine_daemon.run([sys.executable, "block.py", "--step", "b.step", "--json"], cwd=self.folder,
@@ -1592,6 +1614,7 @@ if __name__ == '__main__':
                          ["XBF/block.xbf", "block.py", "peg.stl"])
 
     def test_decoration_only_declares_and_main_calls_only_its_selected_model(self) -> None:
+        self.own()  # no engine yet, so none an import started goes unseen
         self.script.write_text(textwrap.dedent("""
             from cadgen import model, xbf
 
@@ -1622,21 +1645,24 @@ if __name__ == '__main__':
 
 
     def test_the_viewer_moves_before_a_derived_file_is_written(self) -> None:
-        # A deliberately slow STL writer, put in place in the worker by the model's own module.
+        # An STL writer held until the test lets it go, put in place in the worker by the model's own module.
+        gate = self.folder / "gate"
+        gate.touch()  # the first build writes at once
         slow = textwrap.dedent("""
-            import time
+            import os, time
             from cadgen.engine import export
 
             if not getattr(export, "slow", False):
                 class Slow(type(export.KINDS["stl"])):
                     def write(self, view, path):
-                        time.sleep(3)
+                        while not os.path.exists(GATE_PATH):
+                            time.sleep(0.01)
                         super().write(view, path)
 
                 given = export.KINDS["stl"]
                 export.KINDS["stl"] = Slow(given.name, given.suffixes, given.writer, given.atomic)
                 export.slow = True
-        """) + textwrap.dedent(PAIR).replace('@xbf("XBF/pair.xbf")', '@xbf("XBF/pair.xbf")\n@stl("pair.stl")').replace(
+        """).replace("GATE_PATH", repr(str(gate))) + textwrap.dedent(PAIR).replace('@xbf("XBF/pair.xbf")', '@xbf("XBF/pair.xbf")\n@stl("pair.stl")').replace(
             "import xbf", "import stl, xbf")
         self.script = self.folder / "pair.py"
         self.script.write_text(slow.format(size=10), encoding="utf-8")
@@ -1650,12 +1676,14 @@ if __name__ == '__main__':
         stl = self.folder / "pair.stl"
         written = stl.stat().st_mtime_ns
         self.script.write_text(slow.format(size=12), encoding="utf-8")
+        gate.unlink()
         building = subprocess.Popen([sys.executable, "pair.py"], cwd=self.folder, env=self.env,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.addCleanup(building.wait)
         answer = get_json(f"{base}/api/doc/{ident}/version?after={before['version']}&wait=60", token)
         self.assertNotEqual(answer["version"], before["version"])
         self.assertEqual(stl.stat().st_mtime_ns, written, "the viewer moved before the STL was written")
+        gate.touch()
         self.assertEqual(building.wait(timeout=300), 0)
         self.assertNotEqual(stl.stat().st_mtime_ns, written)
 
@@ -1665,8 +1693,9 @@ if __name__ == '__main__':
         self.assertEqual(self.run_script("pair.py").returncode, 0)
         done = self.cli("export", "XBF/pair.xbf", "pair.glb", "pair.step")
         self.assertEqual(done.returncode, 0, done.stderr)
-        workers = sorted(Path(worker["script"]).name for worker in json.loads(self.cli("status", "--json").stdout)["workers"])
-        self.assertEqual(workers, ["documents", "pair.py"],
+        workers = json.loads(self.cli("status", "--json").stdout)["workers"]
+        self.assertEqual(([Path(row["script"]).name for row in self.mine(workers)],
+                          [row["script"] for row in workers if row["script"] == "documents"]), (["pair.py"], ["documents"]),
                          "a declared xbf is a file: the documents worker read it, never the model's worker")
         done = self.cli("export", "pair.step", "back.xbf")
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -1696,6 +1725,7 @@ if __name__ == '__main__':
         """``python model.py`` serves its document, so the daemon starts its server; the meshing
         pool waits for a page, a view or a mesh: the daemon's only child is the worker (with no
         standby, ``CADGEN_ENGINE_STANDBY=0``)."""
+        self.own()
         env = {name: value for name, value in self.env.items() if name != "CADGEN_ENGINE_MESH"}
         env["CADGEN_ENGINE_STANDBY"] = "0"
         self.script.write_text(textwrap.dedent(MODEL.format(size=3)), encoding="utf-8")
@@ -1715,6 +1745,7 @@ if __name__ == '__main__':
     def test_warming_starts_the_server_before_any_document(self) -> None:
         """What the viewer asks at its launch (``{"op": "warm"}``): the daemon, its server and the
         processes a first document waits on, started with no document served; asked again, nothing more."""
+        self.own()
         probe = ("import json; from cadgen.engine.client import request; "
                  "print(json.dumps([request({'op': 'warm'}), request({'op': 'warm'}), request({'op': 'status'})]))")
         done = engine_daemon.run([sys.executable, "-c", probe], cwd=self.folder, env=self.env)
@@ -1727,6 +1758,8 @@ if __name__ == '__main__':
     @unittest.skipIf(os.name == "nt", "a terminate signal is POSIX's")
     def test_a_terminated_daemon_stops_as_stop_does(self) -> None:
         import signal
+
+        self.own()
 
         probe = ("import json; from cadgen.engine.client import request; request({'op': 'warm'}); "
                  "print(request({'op': 'status'})['pid'])")
