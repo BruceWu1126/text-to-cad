@@ -441,7 +441,7 @@ and web stay consistent without host-specific copies of those controls.
 
 The Viewer has the one navbar every app shares (see
 [the host contract](../../packages/ui/docs/viewer-host.md#host-chrome-slots)): at the
-left the logo (the TEXTTOCAD wordmark on the home, the C over a file), which opens the app menu, then the open file's name after its kind's glyph,
+left the logo (the TEXTTOCAD wordmark on the home, the C over a file), which opens the app menu, then the open file's name (no glyph),
 which opens the name menu (Recent and Files), with its ⋯; at the right only the blue update button, while a newer text-to-cad
 is out. The app menu holds Back to files (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
 GitHub, Discord and, in gray, the version (a link to its release notes) and "Made by @…"

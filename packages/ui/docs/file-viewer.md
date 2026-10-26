@@ -95,7 +95,7 @@ bar in its place and gives it back as it closes. Over a file, left to right:
 - Back and Forward, where the host keeps the view's own history (`history`, a
   `ViewerHistory`: the CAD app's views; a browser's page has its own and hands none): two
   arrows, each there always and disabled where it has nowhere to go;
-- the open file's name, after its kind's glyph (a model's cube, a file's file glyph): a
+- the open file's name, alone (no glyph; its chevron where it opens the name menu): a
   button that opens the name menu where the view can show another document, and plain text
   otherwise;
 - the ⋯ file menu: Copy path, and Reveal in Finder / Show in Explorer / Show in file

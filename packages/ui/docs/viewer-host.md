@@ -481,7 +481,7 @@ and the host's update and actions, each where it stands over a file; the home's 
 layout switch stay in its control row, and its links are the app menu's. Left: the text-to-cad
 logo (the TEXTTOCAD wordmark over the home, the "C" over a document, a plain swap of one button),
 which opens the app menu (`AppMenu`, `file-viewer/navigation/AppMenu.jsx`), then Back and
-Forward where the host hands a `history`, then the open file's name, after its kind's glyph, and its ⋯ menu. The
+Forward where the host hands a `history`, then the open file's name, with no glyph, and its ⋯ menu. The
 logo, Back and Forward, the name and the ⋯ share one style (`NAV_ITEM_CLASS`):
 transparent at rest, the same accent background while the pointer is on them or their menu
 is open, a pointer cursor, and no tooltip. The name opens the name menu where the view can

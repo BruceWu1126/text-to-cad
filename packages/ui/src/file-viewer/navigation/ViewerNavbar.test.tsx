@@ -21,19 +21,20 @@ const ROWS = [
 const explorer = (list = async () => []) => ({ source: { list: vi.fn(list), search: vi.fn(async () => ({ paths: [], truncated: false })) }, onOpen: vi.fn() });
 const recent = (rows = ROWS) => ({ list: vi.fn(async () => rows), onOpen: vi.fn() });
 
-it('marks the name with its kind\'s glyph, and with a chevron where it opens the name menu; a plain name has none', () => {
+it('shows the name alone, with no glyph, and a chevron where it opens the name menu; a plain name has none', () => {
   const { rerender } = render(<ViewerNavbar file={FILE} explorer={explorer()} />);
   const trigger = document.querySelector('[data-file-name]')!;
   expect(trigger.tagName).toBe('BUTTON');
   expect(trigger.textContent).toBe('a.step');
-  expect(glyph()).toBe('file');
+  expect(glyph()).toBeUndefined();
+  expect([...trigger.querySelectorAll('svg')]).toEqual([chevron()]);
   expect(chevron()?.getAttribute('aria-hidden')).toBe('true');
   expect(chevron()?.getAttribute('class')).toContain('shrink-0');
   rerender(<ViewerNavbar file={FILE} explorer={null} />);
   expect(document.querySelector('[data-file-name]')!.tagName).toBe('SPAN');
   expect(chevron()).toBeNull();
   rerender(<ViewerNavbar file={MODEL} name="bracket" kind="model" explorer={null} />);
-  expect([document.querySelector('[data-file-name]')!.textContent, glyph()]).toEqual(['bracket', 'model']);
+  expect([document.querySelector('[data-file-name]')!.textContent, document.querySelector('[data-file-name] svg')]).toEqual(['bracket', null]);
 });
 
 it('opens Recent and Files as two tabs, on Files over a file and on Recent over a model', async () => {

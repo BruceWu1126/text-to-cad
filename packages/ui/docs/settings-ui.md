@@ -46,8 +46,8 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   host keeps the view's own history (`history`: the CAD app's views, which no browser holds),
   **Back** and **Forward**, two arrows walking it as a browser's do, from file to file and to
   and from the home (a step like a file), each there always and disabled where it has
-  nowhere to go; then the open file's name, after its kind's glyph (a model's cube, a
-  file's file glyph), and its ⋯. Each of these that
+  nowhere to go; then the open file's name, alone (no glyph: the name and, where it opens the
+  name menu, its chevron), and its ⋯. Each of these that
   is a control (`NAV_ITEM_CLASS`) is transparent at rest, takes the same accent background
   while the pointer is on it and while its menu is open, has a pointer cursor and no tooltip:
   it says what it is. The name

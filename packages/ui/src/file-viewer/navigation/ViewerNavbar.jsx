@@ -14,7 +14,6 @@ import { FLOATING_SURFACE_CLASS } from "../../lib/floatingSurface.js";
 import { useViewerMobile } from "../responsive.js";
 
 import { AppMenu } from "./AppMenu.jsx";
-import { DocumentGlyph } from "./DocumentGlyph.jsx";
 import { entryMenu } from "./entry-menu.js";
 import { FolderExplorer } from "./FolderExplorer.jsx";
 import { RecentList } from "./RecentList.jsx";
@@ -35,8 +34,7 @@ const TAB_CONTROLS = Object.freeze({ recent: "recent", files: "explorer" });
  * Left, in this order: the text-to-cad logo (the TEXTTOCAD wordmark over the home, the C over a
  * document), which opens the app's menu (`AppMenu`: Back to files
  * where the host has a home, then the person's settings, feedback and links); Back and Forward,
- * where the host keeps the view's own history (`history`); the open document's name, after its
- * kind's glyph, which opens the name menu (Recent, the host's library, and Files, the explorer)
+ * where the host keeps the view's own history (`history`); the open document's name, which opens the name menu (Recent, the host's library, and Files, the explorer)
  * where the view can show another; and the ⋯ menu of what the host can do with the file.
  *
  * Right, only what a host or a file adds: the host's update button while its install is behind
@@ -138,18 +136,16 @@ function NameMenu({ path, kind, explorer, recent, onPick }) {
 const firstTab = (kind, explorer, recent) => (!explorer ? "recent" : !recent ? "files" : kind === "model" ? "recent" : "files");
 
 /**
- * The open document's name, after its kind's glyph (a model's code glyph, a file's type icon).
- * Where the view can show another document it is also the name menu's door: the name, transparent
- * until the pointer is on it, opening Recent and Files under it. Where it cannot, it is the name
- * alone, in the same place.
+ * The open document's name, with no glyph. Where the view can show another document it is also the
+ * name menu's door: the name and its chevron, transparent until the pointer is on it, opening the
+ * menu under it. Where it cannot, it is the name alone, in the same place.
  */
 function FileName({ path, name: given, kind = "file", explorer, recent }) {
   const [open, setOpen] = useState(false);
   const mobile = useViewerMobile();
   const usage = useControlUsage();
   const name = given || path.split("/").pop() || path;
-  const glyph = <DocumentGlyph model={kind === "model"} path={path} className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} />;
-  if (!explorer && !recent) return <span className="flex min-w-0 items-center gap-1 px-1" data-file-name="">{glyph}<span className="truncate">{name}</span></span>;
+  if (!explorer && !recent) return <span className="flex min-w-0 items-center gap-1 px-1" data-file-name=""><span className="truncate">{name}</span></span>;
   // Opened, the explorer's filter has the keyboard, so typing finds a file at once; on Recent the
   // menu holds it, and Down takes it into the rows. A phone keeps its keyboard down, the menu
   // holding focus itself. Nothing else is focused for the person on opening.
@@ -170,7 +166,6 @@ function FileName({ path, name: given, kind = "file", explorer, recent }) {
   return <Popover open={open} onOpenChange={next => { if (next && !open) usage.used(TAB_CONTROLS[firstTab(kind, explorer, recent)]); setOpen(next); }}>
     <PopoverTrigger asChild>
       <button type="button" className={cn(NAV_ITEM_CLASS, "min-w-0 shrink gap-1 px-1 text-left")} data-file-name="">
-        {glyph}
         <span className="truncate">{name}</span>
         {/* The name opens its menu; the chevron says so. A plain name (no menu) has none. */}
         <ChevronDown className="ml-0.5 size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
