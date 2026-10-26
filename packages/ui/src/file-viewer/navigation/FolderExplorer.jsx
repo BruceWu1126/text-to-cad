@@ -8,6 +8,7 @@ import { TREE_GLYPH_CLASS, TREE_GLYPH_STROKE, TREE_INDENT_PX, TREE_ROW_INSET_PX,
 import { cn } from "@text-to-cad/ui/utils";
 import { useI18n } from "@text-to-cad/ui/i18n";
 import { FileIcon, FolderIcon } from "./icons.jsx";
+import { useControlUsage } from "../../usage/controls.js";
 
 // The wait after a keystroke before the filter searches; each keystroke cancels the search before it.
 const SEARCH_DELAY_MS = 150;
@@ -116,7 +117,10 @@ export function FolderExplorer({ source, file, folder: start = null, onOpen }) {
   const { t } = useI18n();
   const [folder, setFolder] = useState(() => start || parentFolder(file));
   const [listing, setListing] = useState({ folder: "", entries: null, error: null });
-  const [query, setQuery] = useState("");
+  const [query, setQueryState] = useState("");
+  // A search begun is a use (`usage/controls.js`); never what it looks for.
+  const usage = useControlUsage();
+  const setQuery = next => { if (!query.trim() && String(next).trim()) usage.used("explorer_filter"); setQueryState(next); };
   const [found, setFound] = useState(null);
   // The folders opened inline, by path, and what each holds once it has been read.
   const [open, setOpen] = useState(() => new Set());

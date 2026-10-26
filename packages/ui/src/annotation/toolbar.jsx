@@ -9,6 +9,7 @@ import { FLOATING_SURFACE_CLASS } from '../lib/floatingSurface.js';
 import SubToolbar, { SubToolbarSeparator } from '../renderers/kit/tools/SubToolbar.jsx';
 import { DRAWING_SHORTCUTS } from '../renderers/kit/tools/toolShortcuts.js';
 import { toolFamily } from './tools.js';
+import { useControlUsage } from '../usage/controls.js';
 
 /**
  * The drawing tools' sub-toolbar (`AnnotationToolbar`): one row, shared by the two strip tools that
@@ -248,6 +249,7 @@ const GROUP = 'flex items-center gap-1';
  * @param {{ annotation: import('./session.js').AnnotationSession, colorScheme?: 'light' | 'dark', placements?: boolean }} props
  */
 export function AnnotationToolbar({ annotation, colorScheme = 'light', placements = true }) {
+  const controls = useControlUsage();
   const disabled = !annotation.ready;
   const family = toolFamily(annotation.tool);
   const tool = DRAWING_TOOLS.find(entry => entry.id === family) ?? DRAWING_TOOLS[0];
@@ -266,7 +268,7 @@ export function AnnotationToolbar({ annotation, colorScheme = 'light', placement
     <AnnotationStylePickers label="Annotation style" className={GROUP} disabled={disabled || erasing} colors={annotationColors(colorScheme)}
       color={style.color} width={style.strokeWidth} placement={placements ? style.placement : null}
       onColor={annotation.selectColor} onWidth={annotation.selectStrokeWidth} onPlacement={annotation.selectPlacement}>
-      <ToolbarButton tooltip={false} label="Clear annotations" disabled={disabled || !annotation.hasContent} onClick={() => annotation.clear()}>{icon(Trash2)}</ToolbarButton>
+      <ToolbarButton tooltip={false} label="Clear annotations" disabled={disabled || !annotation.hasContent} onClick={() => { controls.used('annotate_clear'); annotation.clear(); }}>{icon(Trash2)}</ToolbarButton>
     </AnnotationStylePickers>
   </SubToolbar>;
 }

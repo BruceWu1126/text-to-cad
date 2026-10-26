@@ -10,6 +10,7 @@ import {
 } from "./jointHandleCanvas.js";
 import { add, advanceJointDrag, arcPoints, beginJointDrag, handleArmDirection, scale } from "./jointHandleMath.js";
 import { capturePointer, releasePointer } from "../../../../lib/pointerCapture.js";
+import { useControlUsage } from "../../../../usage/controls.js";
 
 // Above this many handles a model at rest shows knobs only: two dozen arms and
 // travel arcs over one model read as a hedgehog, not as controls.
@@ -92,6 +93,10 @@ function layoutJointHandles(runtime, handles, width, height) {
  * are switched off for as long as the knob is held; any other press is left alone.
  */
 export function useJointHandles({ handles = null, handlesRef: ownerHandlesRef = null, runtimeRef, hostRef, canvasRef, labelRef, layoutSeamRef, viewerReadyTick }) {
+  // A knob a person takes hold of, counted (`usage/controls.js`).
+  const usage = useControlUsage();
+  const usageRef = useRef(usage);
+  usageRef.current = usage;
   const renderedHandlesRef = useRef(handles);
   renderedHandlesRef.current = handles;
   const handlesRef = ownerHandlesRef || renderedHandlesRef;
@@ -209,6 +214,7 @@ export function useJointHandles({ handles = null, handlesRef: ownerHandlesRef = 
       event.stopPropagation();
       const controls = runtimeRef.current.controls;
       drag = { id: hit.id, pointerId: event.pointerId, grab, value: grab.value, pending: false, controlsWereEnabled: controls?.enabled !== false };
+      usageRef.current.used("position_knob");
       if (controls) controls.enabled = false;
       capturePointer(host, event.pointerId);
       setHover(hit.id);

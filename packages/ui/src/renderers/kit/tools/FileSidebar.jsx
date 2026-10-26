@@ -10,6 +10,7 @@ import { STRIP_BUTTON_CLASS, TOUCH_STRIP_BUTTON_CLASS } from "./stripTouch.js";
 import { capturePointer, releasePointer } from "../../../lib/pointerCapture.js";
 import ResizeGrip from "./ResizeGrip.jsx";
 import { ToolStackContext } from "./ToolStack.jsx";
+import { useControlUsage } from "../../../usage/controls.js";
 import { FILE_SIDEBAR_MIN_WIDTH, TOOL_PANEL_WIDTH, fileSidebarSizeId, clampToolPanelHeight, clampToolPanelWidth, normalizeToolStack } from "./toolStackLayout.js";
 
 const KEY_NUDGE_PX = 16;
@@ -224,6 +225,8 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   void metaTick;
   // A press of a tile: its section opens, or closes if it was the open one.
   const toggle = useCallback(id => setOpenId(current => (current === id ? null : id)), []);
+  // A section a person opens, by its id (`usage/controls.js`: `sidebar_tree`).
+  const controls = useControlUsage();
   // A phone's one tile: the panel opens on the section last open, or the first, and closes.
   const togglePanel = () => setOpenId(current => (current && ids.includes(current) ? null : ids.includes(lastOpen.current) ? lastOpen.current : tiles[0]?.id ?? null));
 
@@ -274,7 +277,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     {/* A phone's panel is headed by its sections' tabs, each with its tile's icon, and the panel's
         one X at the row's right end (its sections' heads then have none). */}
     {tabbed ? <div className="flex shrink-0 items-center gap-1 border-b border-border/60 p-1" data-file-sidebar-tabs="">
-      <ToggleGroup type="single" value={shown ?? ""} onValueChange={id => { if (id) setOpenId(id); }} aria-label="Sidebar sections" className="min-w-0 flex-1">
+      <ToggleGroup type="single" value={shown ?? ""} onValueChange={id => { if (id) { controls.used(`sidebar_${id}`); setOpenId(id); } }} aria-label="Sidebar sections" className="min-w-0 flex-1">
         {tiles.map(({ id, label, Icon, changed }) => <ToggleGroupItem key={id} value={id} aria-label={label} className="h-9" data-file-sidebar-tab={id}>
           {/* The dot at the icon's corner, not the wide tab's. */}
           <span className="relative inline-flex"><Icon className="size-4.5" aria-hidden="true" />
@@ -309,7 +312,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
       {tiles.length && !phone ? <div role="group" aria-label="File sidebar" data-file-sidebar-tools=""
         className={cn("pointer-events-auto inline-flex shrink-0 items-center gap-1 rounded-md p-1", FLOATING_CHROME_SURFACE_CLASS)}>
         {tiles.map(({ id, label, Icon, changed }) => <ToolbarButton key={id} label={label} tooltipSide="bottom" className={cn(STRIP_BUTTON_CLASS, changed && "relative")}
-          active={open === id} aria-pressed={open === id} onClick={() => toggle(id)} data-file-sidebar-tool={id} data-changed={changed ? "" : undefined}>
+          active={open === id} aria-pressed={open === id} onClick={() => { if (open !== id) controls.used(`sidebar_${id}`); toggle(id); }} data-file-sidebar-tool={id} data-changed={changed ? "" : undefined}>
           <Icon aria-hidden="true" />
           {changed ? <ChangedDot /> : null}
         </ToolbarButton>)}

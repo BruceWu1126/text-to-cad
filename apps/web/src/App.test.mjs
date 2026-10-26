@@ -122,6 +122,12 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(libraryCalls.filter(([url]) => url === '/__cad/analytics/activity'), [['/__cad/analytics/activity', { quickEdit: true }]]);
     libraryCalls.splice(libraryCalls.findIndex(([url]) => url === '/__cad/analytics/activity'), 1);
+    // So are the controls a person used, as the shared viewer counted them: names and seconds, nothing else.
+    viewer().host.usage.controls([{ control: 'display_xray', count: 1, seconds: 0 }]);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(libraryCalls.filter(([url]) => url === '/__cad/analytics/activity'),
+      [['/__cad/analytics/activity', { controls: [{ control: 'display_xray', count: 1, seconds: 0 }] }]]);
+    libraryCalls.splice(libraryCalls.findIndex(([url]) => url === '/__cad/analytics/activity'), 1);
     // The app menu: Analytics.
     assert.deepEqual(viewer().appSettings.map(setting => [setting.label, setting.checked]),
       [['Telemetry', false]]);

@@ -194,7 +194,7 @@ export interface CadWorkspaceService {
   /** Whether a newer text-to-cad is out: the update button's notice, or null. */
   version(): Promise<{ notice: CadUpdateNotice | null }>;
   /**
-   * What the page did -- a person touched it, sent a Quick Edit, or the page crashed (`crashOf`) --
+   * What the page did -- a person touched it, sent a Quick Edit, used its controls, or the page crashed (`crashOf`) --
    * noted by the server and sent only with consent. Never fails.
    */
   reportActivity(activity: CadActivity): void;
@@ -243,6 +243,8 @@ export interface CadPageCrash {
 export interface CadActivity {
   touched?: boolean;
   quickEdit?: boolean;
+  /** The view's controls a person used since the last report (`@text-to-cad/ui`'s `usage/controls.js`). */
+  controls?: { control: string; count: number; seconds: number }[];
   crash?: CadPageCrash;
 }
 

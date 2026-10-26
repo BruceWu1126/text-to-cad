@@ -5,6 +5,7 @@ import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
 import ReferenceChips from "../quick-edit/ReferenceChips.jsx";
 import SubToolbar, { SubToolbarSeparator } from "../SubToolbar.jsx";
 import MeasurementCard from "./MeasurementCard.jsx";
+import { useControlUsage } from "../../../../usage/controls.js";
 
 /**
  * Measure's results as chips, Quick Edit's own (`ReferenceChips.jsx`), in any view: each its
@@ -34,13 +35,14 @@ export function useMeasurementChips(measure) {
  */
 export function MeasurementsBar({ measure }) {
   const chips = useMeasurementChips(measure);
+  const controls = useControlUsage();
   if (!chips.length) return null;
   // As narrow as the strip, so it never crowds Quick Edit or the sidebar: the chips take two rows at
   // most, the rest under "+N more", and Clear stays at the end, beside them, never wrapped under.
   return <SubToolbar label="Measurements" className="w-max max-w-72 flex-nowrap" data-measurements="">
     <ReferenceChips chips={chips} label="Measurements" below rows={2} className="min-w-0 px-0.5" />
     <SubToolbarSeparator />
-    <ToolbarButton tooltip={false} label="Clear measurements" onClick={() => measure.clear()}>
+    <ToolbarButton tooltip={false} label="Clear measurements" onClick={() => { controls.used("measure_clear"); measure.clear(); }}>
       <Trash2 className="size-3" strokeWidth={2} aria-hidden="true" />
     </ToolbarButton>
   </SubToolbar>;

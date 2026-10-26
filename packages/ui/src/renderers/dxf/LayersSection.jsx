@@ -8,6 +8,7 @@ import {
 } from "@text-to-cad/ui/primitives/tree-row";
 import { cn } from "@text-to-cad/ui/utils";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
+import { useControlUsage } from "../../usage/controls.js";
 import { drawingReferenceId, layerRows } from "./drawingReferences.js";
 
 // The room the eye takes at a row's right end: the row's `--row-actions`.
@@ -25,11 +26,12 @@ function Swatch({ color }) {
 
 /** A layer's Hide/Reveal eye, as a tree row's is: over the row's right end, on hover, kept while hidden. */
 function LayerEye({ name, hidden, onToggle }) {
+  const usage = useControlUsage();
   const action = hidden ? "Reveal" : "Hide";
   return <div data-row-actions="" className={treeRowActionsClass(hidden)}>
     <TooltipHint content={action}>
       <Button type="button" variant="ghost" size="icon-xs" aria-label={`${action} layer ${name}`} aria-pressed={hidden} className="h-5 w-4 text-muted-foreground"
-        data-layer-visibility={name} onClick={event => { event.stopPropagation(); onToggle(name); }}>
+        data-layer-visibility={name} onClick={event => { event.stopPropagation(); usage.used("layer_visibility"); onToggle(name); }}>
         {hidden ? <EyeOff className="size-3" aria-hidden="true" /> : <Eye className="size-3" aria-hidden="true" />}
       </Button>
     </TooltipHint>

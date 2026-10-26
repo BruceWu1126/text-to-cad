@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ViewerNavbar } from '../../../dist/file-viewer/navigation/ViewerNavbar.js';
 import { RECENT_ROWS, recentRows } from '../../../dist/file-viewer/navigation/RecentList.js';
+import { ControlUsageProvider } from '../../../dist/usage/controls.js';
 
 beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -91,4 +92,18 @@ it('starts a model\'s Files in the folder its record registered', async () => {
   await act(async () => { await user.click(screen.getByRole('tab', { name: 'Files' })); });
   await screen.findByText('b.step');
   expect(files.source.list).toHaveBeenCalledWith('/home/me/models', expect.anything());
+});
+
+it("counts the name menu's tabs as a person sees them, Recent and Files (the explorer), and a row opened from Recent", async () => {
+  const user = userEvent.setup();
+  const reports: { control: string; count: number }[][] = [];
+  const view = render(<ControlUsageProvider report={counts => reports.push(counts)}>
+    <ViewerNavbar file={MODEL} name="bracket" kind="model" explorer={explorer()} recent={recent()} /></ControlUsageProvider>);
+  await user.click(document.querySelector<HTMLElement>('[data-file-name]')!); // opens on Recent
+  await user.click(screen.getByRole('tab', { name: 'Files' }));
+  await user.click(screen.getByRole('tab', { name: 'Recent' }));
+  await user.click((await screen.findByText('a.step', { selector: '[data-recent-row] *' })).closest('button')!);
+  view.unmount();
+  const said = Object.fromEntries(reports.flat().map(({ control, count }) => [control, count]));
+  expect(said).toEqual({ recent: 2, explorer: 1, recent_open: 1 });
 });

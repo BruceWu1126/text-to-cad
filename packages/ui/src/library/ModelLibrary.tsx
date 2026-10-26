@@ -14,6 +14,7 @@ import { entryMenu } from "../file-viewer/navigation/entry-menu.js";
 import type { EntryAction } from "../file-viewer/navigation/index.js";
 import type { FileActions } from "../file-viewer/types.js";
 import type { ViewerLinks } from "../host/types.js";
+import { useControlUsage } from "../usage/controls.js";
 import { ageLabel, lastActivity } from "../lib/age.js";
 
 /** A model someone opened: kept by the host, which also says where it is shown from. */
@@ -215,7 +216,10 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
   onError?(error: Error): void;
 }) {
   const [items, setItems] = useState<readonly Model[] | null>(null);
-  const [query, setQuery] = useState("");
+  const [query, setQueryState] = useState("");
+  // What a person does on the home, counted (`usage/controls.js`): a search begun, never what it looks for.
+  const usage = useControlUsage();
+  const setQuery = (next: string) => { if (!query.trim() && next.trim()) usage.used("home_search"); setQueryState(next); };
   const [error, setError] = useState("");
   const { t, locale } = useI18n();
   // The host's library as it is now: a host may hand a new one each render.
@@ -271,6 +275,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
   const [opening, setOpening] = useState<string | null>(null);
   const open = (item: Model) => {
     if (opening) return;
+    usage.used("home_open");
     setError("");
     setOpening(item.path);
     void current.current.open(item).catch(fail).finally(() => setOpening(null));
@@ -290,11 +295,14 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
   const [kind, setKind] = useState<LibraryKind>("all");
   // The scripts whose folded models are shown, by script: collapsed until a press opens one.
   const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
-  const unfold = (script: string) => setUnfolded(previous => {
-    const next = new Set(previous);
-    if (!next.delete(script)) next.add(script);
-    return next;
-  });
+  const unfold = (script: string) => {
+    if (!unfolded.has(script)) usage.used("home_fold");
+    setUnfolded(previous => {
+      const next = new Set(previous);
+      if (!next.delete(script)) next.add(script);
+      return next;
+    });
+  };
   // The host lists pinned models first; a search and a chip keep that order.
   const cards = libraryCards(all);
   const shown = shownCards(cards, query, kind);
@@ -306,6 +314,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
   const perform = (action: EntryAction, item: Model) => {
     const path = deletes(item) ? item.script : item.path;
     if (!path) return;
+    usage.used(action === "reveal" ? "home_reveal" : "home_copy_path");
     void Promise.resolve(fileActions?.perform?.[action]?.({ path, kind: "file" })).catch(fail);
   };
   // A card's one menu: Open, what the host can do with it on disk, Pin or Unpin, then Delete. A
@@ -319,7 +328,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
       <DropdownMenuContent align="end" className="min-w-40">
         <DropdownMenuItem disabled={item.missing} onSelect={() => open(item)}>{t("home.menuOpen")}</DropdownMenuItem>
         {(deletes(item) ? item.script : item.path) ? fileItems.map(entry => <DropdownMenuItem key={entry.action} onSelect={() => perform(entry.action, item)}>{entry.label}</DropdownMenuItem>) : null}
-        <DropdownMenuItem onSelect={() => change(item.pinned ? "unpin" : "pin", item)}>{t(item.pinned ? "home.unpin" : "home.pin")}</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => { usage.used(item.pinned ? "home_unpin" : "home_pin"); void change(item.pinned ? "unpin" : "pin", item); }}>{t(item.pinned ? "home.unpin" : "home.pin")}</DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(card)}>{t("home.delete")}</DropdownMenuItem>
       </DropdownMenuContent>
@@ -340,8 +349,8 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
         <AlertDialogDescription>{question?.body}</AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
-        <AlertDialogCancel>{t("home.cancel")}</AlertDialogCancel>
-        <AlertDialogAction variant="destructive" onClick={() => { if (confirming) remove(confirming); }}>{t("home.delete")}</AlertDialogAction>
+        <AlertDialogCancel onClick={() => usage.used("home_delete_cancel")}>{t("home.cancel")}</AlertDialogCancel>
+        <AlertDialogAction variant="destructive" onClick={() => { if (confirming) { usage.used("home_delete"); remove(confirming); } }}>{t("home.delete")}</AlertDialogAction>
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>;
@@ -410,14 +419,14 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
             <Input className="h-8" type="search" aria-label={t("home.searchAria")} placeholder={t("home.searchPlaceholder")} value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} />
           </div>
           {onLayoutChange ? <div className="cad-library-layout" role="group" aria-label={t("home.layout")}>
-            <Button variant="ghost" size="icon-sm" aria-label={t("home.grid")} aria-pressed={layout === "grid"} onClick={() => onLayoutChange("grid")}><LayoutGrid aria-hidden="true" /></Button>
-            <Button variant="ghost" size="icon-sm" aria-label={t("home.list")} aria-pressed={layout === "list"} onClick={() => onLayoutChange("list")}><List aria-hidden="true" /></Button>
+            <Button variant="ghost" size="icon-sm" aria-label={t("home.grid")} aria-pressed={layout === "grid"} onClick={() => { usage.used("home_layout_grid"); onLayoutChange("grid"); }}><LayoutGrid aria-hidden="true" /></Button>
+            <Button variant="ghost" size="icon-sm" aria-label={t("home.list")} aria-pressed={layout === "list"} onClick={() => { usage.used("home_layout_list"); onLayoutChange("list"); }}><List aria-hidden="true" /></Button>
           </div> : null}
         </div>
       </div>
       {kinds ? <div className="cad-library-kinds" role="group" aria-label={t("home.kindsAria")}>
         {(["all", "models", "files"] as const).map(value => <Button key={value} variant={kind === value ? "secondary" : "ghost"} size="xs"
-          aria-pressed={kind === value} onClick={() => setKind(value)}>{t(`home.kind.${value}`)}</Button>)}
+          aria-pressed={kind === value} onClick={() => { if (kind !== value) usage.used(`home_chip_${value}`); setKind(value); }}>{t(`home.kind.${value}`)}</Button>)}
       </div> : null}
       {error ? <div className="cad-library-error" role="alert"><p>{error}</p></div> : null}
       {items === null ? <Placeholders layout={layout} />

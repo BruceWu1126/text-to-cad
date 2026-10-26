@@ -41,6 +41,15 @@ import { xbfLookSubject } from "./xbfLookAt.js";
 import { readXbfView, xbfViewSignatures, xbfViewSlices } from "./xbfViewSlices.js";
 import { useXbfScene } from "./useXbfScene.js";
 import { useXbfMotion } from "./useXbfMotion.js";
+import { useControlUsage } from "../../usage/controls.js";
+
+// A part menu's item as telemetry names it (`usage/controls.js`), by the action it runs.
+const MENU_CONTROLS = Object.freeze({
+  onCopyReference: "menu_copy_reference", onSelect: "menu_select", onIsolate: "menu_isolate", onExitAllIsolate: "menu_exit_all_isolates",
+  onHideOther: "menu_hide_others", onHideAll: "menu_show_all", onHide: "menu_hide", onReveal: "menu_reveal",
+  onExpandSelected: "menu_expand", onCollapseSelected: "menu_collapse", onExpandAll: "menu_expand_all", onCollapseAll: "menu_collapse_all",
+  onZoomFit: "menu_zoom_fit", onZoomSelection: "menu_zoom_selection",
+});
 
 // An engine document in the viewer, exactly as a STEP is: the same tools in the same order
 // (Select with its filter, Pencil, Shapes, Measure, Explode, Clip), the same selection (Parts, Faces and
@@ -109,6 +118,7 @@ function XbfSurface({ view, data }) {
   const features = useMemo(() => viewFeaturesForKind("xbf", { parts: scene?.partCount || 0 }), [scene]);
 
   const shellRef = useRef(null);
+  const usage = useControlUsage();
   const preview = usePreviewState();
   const previewing = preview.previewing;
   const [toolMode, setToolMode] = useState(XBF_TOOL_MODES.defaultMode);
@@ -558,13 +568,13 @@ function XbfSurface({ view, data }) {
     lastPick.current = null;
     const hit = pickAtClient(clientX, clientY);
     if (!hit) { exitIsolate(); return; }
-    if (hit.kind) { lookAt(hit.id); return; }
+    if (hit.kind) { usage.used("look_at"); lookAt(hit.id); return; }
     const node = nodeOf(hit);
-    if (node && assembly) isolate([node]);
-  }, [pickAtClient, exitIsolate, lookAt, nodeOf, assembly, isolate]);
+    if (node && assembly) { usage.used("isolate"); isolate([node]); }
+  }, [pickAtClient, exitIsolate, lookAt, nodeOf, assembly, isolate, usage]);
   // Under Measure, as a STEP's: the face or edge Measure takes there is looked at, empty space
   // leaves isolation (the presses of the gesture were Measure's own).
-  const handleMeasureDoublePick = useCallback((id) => { if (id) lookAt(id); else exitIsolate(); }, [lookAt, exitIsolate]);
+  const handleMeasureDoublePick = useCallback((id) => { if (id) { usage.used("look_at"); lookAt(id); } else exitIsolate(); }, [lookAt, exitIsolate, usage]);
   // A pick under Explode or Clip takes Select up: it waits the double-click window first.
   const deferPickRef = useRef(false);
   deferPickRef.current = toolMode !== XBF_TOOL.SELECT;
@@ -609,9 +619,9 @@ function XbfSurface({ view, data }) {
     onCollapseAll: menu => setExpandedIds(now => now.filter(id => !menu.expandedExpandableTreeNodeIds.includes(id))),
     onZoomFit: () => shellRef.current?.frame.viewerRef.current?.resetZoom?.(),
     onZoomSelection: zoomToSelection
-  }).map(([name, action]) => [name, (menu) => { ensureSelect(); return action(menu); }])),
+  }).map(([name, action]) => [name, (menu) => { usage.used(MENU_CONTROLS[name]); ensureSelect(); return action(menu); }])),
   [copy, exitSingleIsolate, isolate, exitIsolate, hideOthers, showAll, hideNodes, selectedNodeIds, revealNodes, toggleExpanded,
-    zoomToSelection, ensureSelect]);
+    zoomToSelection, ensureSelect, usage]);
   const contextMenuItems = selectActive ? (press) => {
     const hit = pickAtClient(press.clientX, press.clientY);
     let menu = null;

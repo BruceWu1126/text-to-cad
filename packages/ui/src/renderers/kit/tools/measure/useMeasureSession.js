@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useControlUsage } from "../../../../usage/controls.js";
 import {
   applyMeasureRulerDelete,
   applyMeasureRulerHover,
@@ -49,11 +50,17 @@ export function useMeasureSession({ fileKey, revision, picking }) {
     const restore = list => () => set(current => (list.length || current?.draft ? { draft: current?.draft || null, hover: current?.hover || null, measurements: list } : null));
     history.current.record({ source: "measure", undo: restore(before), redo: restore(after) });
   }, [set]);
-  const onPick = useCallback((pick) => { step(set((current) => applyMeasureRulerPick(current, pick))); }, [set, step]);
+  // A measurement taken, deleted or cleared by a person, counted (`usage/controls.js`).
+  const controls = useControlUsage();
+  const onPick = useCallback((pick) => {
+    const change = set((current) => applyMeasureRulerPick(current, pick));
+    if (change[1].length > change[0].length) controls.used("measure_taken");
+    step(change);
+  }, [set, step, controls]);
   const onHoverPoint = useCallback((hover) => {
     set((current) => applyMeasureRulerHover(current, hover));
   }, [set]);
-  const onDelete = useCallback((id) => { step(set((current) => applyMeasureRulerDelete(current, id))); }, [set, step]);
+  const onDelete = useCallback((id) => { controls.used("measure_delete"); step(set((current) => applyMeasureRulerDelete(current, id))); }, [set, step, controls]);
   const cancelDraft = useCallback(() => set((current) => cancelMeasureRulerDraft(current)), [set]);
   const clear = useCallback(() => { step(set(null)); setActiveId(""); }, [set, step]);
   const measurements = state?.measurements || NO_MEASUREMENTS;
@@ -83,10 +90,11 @@ export function useMeasureSession({ fileKey, revision, picking }) {
   const removeSelected = useCallback(() => {
     const ids = selectedRef.current;
     if (!ids.length) return false;
+    controls.used("measure_delete");
     step(set((current) => ids.reduce((next, id) => applyMeasureRulerDelete(next, id), current)));
     setSelected(NO_MEASUREMENTS);
     return true;
-  }, [set, step]);
+  }, [set, step, controls]);
   // What the pointer rests on under Select: lit as a part is, until it moves off or the measurement goes.
   const [hovered, setHovered] = useState("");
   useEffect(() => {

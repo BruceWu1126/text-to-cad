@@ -1,5 +1,6 @@
 import type { PromptContextPort } from '@text-to-cad/core/prompt';
 import type { FileActions, FileSource } from '../file-viewer/types.js';
+import type { ControlCount } from '../usage/controls.js';
 
 /** Environmental effects are supplied by the app; shared UI never discovers a clipboard. */
 export interface ClipboardPort {
@@ -90,9 +91,11 @@ export interface ViewerHost {
   links?: ViewerLinks;
   /**
    * What the person used, for the host to count: its telemetry, never what they made. Absent, nothing is
-   * counted. `quickEdit`: a Quick Edit reached its destination -- copied, queued or sent.
+   * counted. `quickEdit`: a Quick Edit reached its destination -- copied, queued or sent. `controls`: which of
+   * the view's controls a person used since the last report, and how long a tool that stays on was on
+   * (`usage/controls.js`), at most every minute; absent, they are not counted.
    */
-  usage?: { used(feature: 'quickEdit'): void };
+  usage?: { used(feature: 'quickEdit'): void; controls?(counts: ControlCount[]): void };
   /**
    * `platform` names the keyboard's modifiers (⌘ on `darwin`, Ctrl elsewhere); `reducedMotion` is
    * the app's own motion setting, honoured beside the system's `prefers-reduced-motion`. `compact`

@@ -38,6 +38,7 @@ import { ViewerMobileContext } from '../../../../dist/file-viewer/responsive.js'
 import { TOOL_PANEL_WIDTH } from '../../../../dist/renderers/kit/tools/toolStackLayout.js';
 import { FILE_SIDEBAR_SURFACE_CLASS, FLOATING_CHROME_SURFACE_CLASS, FLOATING_SURFACE_CLASS } from '../../../../dist/lib/floatingSurface.js';
 import { SolidModeIcon } from '../../../../dist/renderers/kit/view-settings/DisplayModeOptions.js';
+import { ControlUsageProvider } from '../../../../dist/usage/controls.js';
 
 // jsdom lays nothing out, so the few sizes the chrome reads are given: a viewer 1280 × 800 whose
 // stack column (under the strip) and the sidebar panel's room (under its tiles) are each 600px
@@ -76,16 +77,19 @@ function tabSettings(initial: object = {}) {
   return store;
 }
 type Settings = ReturnType<typeof tabSettings>;
-function frame({ name = 'panel.harness', preferences = tabSettings(), state = undefined as unknown, mobile = false, onStateChange = (_: unknown) => {}, appearance = { colorScheme: 'light' } as object, notice = null as React.ReactNode, viewer = false } = {}) {
+function frame({ name = 'panel.harness', preferences = tabSettings(), state = undefined as unknown, mobile = false, onStateChange = (_: unknown) => {}, appearance = { colorScheme: 'light' } as object, notice = null as React.ReactNode, viewer = false,
+  usage = null as ((counts: { control: string; count: number; seconds: number }[]) => void) | null } = {}) {
   const props = { source: { id: 'one' }, file: { path: `/models/${name}`, name, kind: 'file' }, document: null, notice,
     onReady() {}, onOpenFile() {}, appearance, state, onStateChange, reload() {}, data: { services: { preferences } } };
   // `viewer`: inside a viewer's element, as FileViewer draws it, where the viewer's keys are its own.
   const element = () => {
     const shell = <ViewerHostContext.Provider value={testHost()}><ViewerMobileContext.Provider value={mobile}>
       <HarnessRenderer {...(props as any)} /></ViewerMobileContext.Provider></ViewerHostContext.Provider>;
-    if (!viewer) return shell;
+    // `usage`: the host's count of the controls a person used (`usage/controls.js`).
+    const counted = usage ? <ControlUsageProvider report={usage}>{shell}</ControlUsageProvider> : shell;
+    if (!viewer) return counted;
     const ref = { current: null as HTMLDivElement | null };
-    return <ViewerElementContext.Provider value={ref}><div ref={node => { ref.current = node; }}>{shell}</div></ViewerElementContext.Provider>;
+    return <ViewerElementContext.Provider value={ref}><div ref={node => { ref.current = node; }}>{counted}</div></ViewerElementContext.Provider>;
   };
   const view = render(element());
   return { ...view, preferences, remount: () => { view.unmount(); return render(element()); } };
@@ -629,4 +633,27 @@ it('Escape closes the Display menu and gives its tile the focus back, the tool i
   await waitFor(() => expect([displayMenu(), displayLit()]).toEqual([null, false]));
   await waitFor(() => expect(document.activeElement).toBe(displayButton()));
   expect(tool('Select').getAttribute('aria-pressed')).toBe('true');
+});
+
+it("what a person uses is counted for the host by name: a tool taken up and how long it was up, Display's Grid, Preview and its seconds, never the tool the file opened in or its return from Preview", async () => {
+  let now = 5_000_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const reports: { control: string; count: number; seconds: number }[][] = [];
+  const user = userEvent.setup();
+  const view = frame({ usage: counts => reports.push(counts) });
+  fireEvent.click(tool('Pencil'));
+  now += 5_000;
+  fireEvent.click(tool('Select'));
+  await openDisplay(user);
+  await user.click(within(displayMenu()!).getByRole('menuitemcheckbox', { name: 'Grid' }));
+  await enterPreview(user);
+  now += 3_000;
+  await user.click(screen.getByRole('button', { name: 'Exit preview' }));
+  expect(reports).toEqual([]); // said at most every minute, or as the view goes
+  view.unmount();
+  const said = Object.fromEntries(reports.flat().map(({ control, ...counts }) => [control, counts]));
+  expect(said).toEqual({ pencil: { count: 1, seconds: 5 }, display_grid: { count: 1, seconds: 0 }, preview: { count: 1, seconds: 3 },
+    // Select is counted once: the person took it up again; the file opened in it, and Preview gave it back.
+    select: { count: 1, seconds: 0 } });
+  vi.restoreAllMocks();
 });

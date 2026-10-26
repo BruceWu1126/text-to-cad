@@ -276,8 +276,9 @@ FEATURES = frozenset({"assembly", "declared_mesh", "kinematics", "animation", "d
 # What a person used in a CAD view, as its page names it (``@text-to-cad/ui``'s ``usage/controls.js``; the
 # receiver's ``CONTROLS``): the strip's tools and Preview, each a mode that stays on, their modes and settings,
 # Display's and Preview's settings, the routines and Position, the sidebar's sections and trees, a part's menu,
-# the view cube, Quick Edit's Copy, Queue and Send, the navbar's and app menu's items, Export by format, and the
-# home's. A name of this list and nothing else: a value of the page's (a render mode's name) only where it is one.
+# the view cube, Quick Edit's Copy, Queue and Send, the navbar's (its name menu's Recent and Files) and app menu's
+# items, Export by format, and the home's. A name of this list and nothing else: a value of the page's (a render
+# mode's name) only where it is one.
 CONTROLS = frozenset({
     "select", "pencil", "shapes", "measure", "explode", "clip", "preview",
     "select_filter_all", "select_filter_parts", "select_filter_faces", "select_filter_edges", "select_filter_position",
@@ -306,11 +307,12 @@ CONTROLS = frozenset({
     "menu_zoom_selection",
     "look_at", "isolate", "view_cube", "view_cube_drag", "fit",
     "quick_edit_copy", "quick_edit_queue", "quick_edit_send",
-    "navbar_back", "navbar_forward", "explorer", "explorer_filter", "file_copy_path", "file_reveal", "home",
+    "navbar_back", "navbar_forward", "recent", "recent_open", "explorer", "explorer_filter", "file_copy_path", "file_reveal",
+    "home",
     "theme_system", "theme_light", "theme_dark", "language", "feedback",
     "export_step", "export_stl", "export_threemf", "export_glb", "export_dxf", "export_xbf", "export_original",
-    "home_search", "home_layout_grid", "home_layout_list", "home_pin", "home_unpin", "home_remove", "home_delete",
-    "home_open", "home_pick", "home_folder",
+    "home_search", "home_chip_all", "home_chip_models", "home_chip_files", "home_layout_grid", "home_layout_list",
+    "home_open", "home_fold", "home_copy_path", "home_reveal", "home_pin", "home_unpin", "home_delete", "home_delete_cancel",
 })
 # The most one page's report (``Recorder.controlled``) may say of a control: a page reports at least every minute
 # it is shown, and counts a tool's seconds only while it is.

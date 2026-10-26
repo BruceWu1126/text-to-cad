@@ -122,14 +122,14 @@ export const CONTROLS = new Set([
   'look_at', 'isolate', 'view_cube', 'view_cube_drag', 'fit',
   // Quick Edit's Copy, Queue and Send.
   'quick_edit_copy', 'quick_edit_queue', 'quick_edit_send',
-  // The navbar, its file menu and explorer, and the app menu.
-  'navbar_back', 'navbar_forward', 'explorer', 'explorer_filter', 'file_copy_path', 'file_reveal', 'home',
+  // The navbar, its file menu and its name menu's Recent and Files (the explorer), and the app menu.
+  'navbar_back', 'navbar_forward', 'recent', 'recent_open', 'explorer', 'explorer_filter', 'file_copy_path', 'file_reveal', 'home',
   'theme_system', 'theme_light', 'theme_dark', 'language', 'feedback',
   // Export, by format.
   'export_step', 'export_stl', 'export_threemf', 'export_glb', 'export_dxf', 'export_xbf', 'export_original',
   // The home.
-  'home_search', 'home_layout_grid', 'home_layout_list', 'home_pin', 'home_unpin', 'home_remove', 'home_delete',
-  'home_open', 'home_pick', 'home_folder',
+  'home_search', 'home_chip_all', 'home_chip_models', 'home_chip_files', 'home_layout_grid', 'home_layout_list',
+  'home_open', 'home_fold', 'home_copy_path', 'home_reveal', 'home_pin', 'home_unpin', 'home_delete', 'home_delete_cancel',
 ]);
 const WHERE = new Set(['tool', 'route', 'request', 'build', 'command', 'page']);
 // Why a CAD tool's call failed (`cadgen/analytics.py`: `FAILURES`): the caller's, the view's, the machine's or

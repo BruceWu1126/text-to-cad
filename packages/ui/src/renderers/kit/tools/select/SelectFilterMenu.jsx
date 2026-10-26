@@ -1,6 +1,10 @@
 import { DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@text-to-cad/ui/primitives/dropdown-menu";
 import { ToolSettingsMenu } from "../ToolModeMenu.jsx";
 import { pickModeOf } from "./selectFilter.js";
+import { useControlUsage } from "../../../../usage/controls.js";
+
+// A mode as telemetry names it (`usage/controls.js`): `select_filter_faces`; Measure's kinds in the plural.
+const PLURAL = Object.freeze({ vertex: "vertices", edge: "edges", face: "faces" });
 
 /**
  * What a picking tool takes, as a CAD tool's selection priority is: the chevron after its button on
@@ -18,11 +22,15 @@ import { pickModeOf } from "./selectFilter.js";
  */
 export default function SelectFilterMenu({ value, onChange, modes, disabled = false, children = null, name = "select", triggerName = "Selection filter" }) {
   const mode = pickModeOf(value, modes);
+  const controls = useControlUsage();
   return <ToolSettingsMenu label="Selection filter"
     triggerLabel={`${triggerName}: ${mode === modes[0] ? "everything" : mode.label}`}
     disabled={disabled} trigger="chevron" triggerProps={{ [`data-${name}-filter-trigger`]: mode === modes[0] ? "all" : mode.id }}>
     <DropdownMenuLabel className="text-tiny font-normal text-muted-foreground">Pick</DropdownMenuLabel>
-    <DropdownMenuRadioGroup value={mode.id} onValueChange={id => onChange([...modes.find(candidate => candidate.id === id).kinds])}>
+    <DropdownMenuRadioGroup value={mode.id} onValueChange={id => {
+      controls.used(`${name}_filter_${PLURAL[id] ?? id}`);
+      onChange([...modes.find(candidate => candidate.id === id).kinds]);
+    }}>
       {modes.map(({ id, label, icon }, index) => <DropdownMenuRadioItem key={id} value={id} {...{ [`data-${name}-filter`]: index === 0 ? "all" : id }}>
         {icon}{label}
       </DropdownMenuRadioItem>)}
