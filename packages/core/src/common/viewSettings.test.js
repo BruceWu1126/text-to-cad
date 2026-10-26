@@ -182,8 +182,9 @@ test("a file that is not a CAD model has no edges, explode or section, and shows
   assert.equal(normalizeViewSettings(saved).mode, "wireframe", "the saved settings still mean Wireframe on the next STEP file");
 });
 
-test("what each kind of file offers: a STEP every mode, any other 3D file Solid, and Parts where it has several parts", () => {
-  assert.equal(viewFeaturesForKind("step"), ALL_VIEW_FEATURES);
+test("what each kind of file offers: an engine document every mode, any other 3D file Solid, and Parts where it has several parts", () => {
+  assert.equal(viewFeaturesForKind("xbf", { parts: 2 }), ALL_VIEW_FEATURES);
+  assert.equal(viewFeaturesForKind("xbf", { parts: 1 }), STEP_PART_VIEW_FEATURES, "a part file has no Parts and no Explode");
   assert.deepEqual(STEP_PART_VIEW_FEATURES, { modes: ["solid", "shaded", "xray", "hidden-line", "wireframe"], settings: ["edges", "clip"] });
   assert.deepEqual(viewFeaturesForKind("stl", { parts: 1 }), { modes: ["solid"], settings: ["clip"] });
   assert.deepEqual(viewFeaturesForKind("3mf", { parts: 3 }), { modes: ["solid", "parts"], settings: ["clip"] });
@@ -235,7 +236,7 @@ test("the floor is matte until Glossy is chosen, and a snapshot's Preview is the
   assert.equal(previewSettingsChanged(glossy), true);
   // The viewer's Preview, nothing changed, and a snapshot's `preview` resolve through the same recipe.
   const viewer = resolveViewSceneSettings({ display: {}, ...PREVIEW }).render.configuration.backdrop;
-  const snapshot = renderJobContext(mesh(), { kind: "step", display: {}, ...PREVIEW }).sceneSettings.render.configuration.backdrop;
+  const snapshot = renderJobContext(mesh(), { kind: "xbf", display: {}, ...PREVIEW }).sceneSettings.render.configuration.backdrop;
   assert.equal(snapshot.groundFinish, "matte");
   assert.deepEqual(snapshot, viewer);
 });
@@ -247,6 +248,6 @@ test("Preview's floor stands at the model's lowest point until Model origin is c
   assert.equal(previewSettingsChanged(origin), true);
   assert.equal(resolveViewSceneSettings({ display: {}, ...PREVIEW, previewSettings: origin }).render.configuration.backdrop.groundPlacement, "origin");
   const viewer = resolveViewSceneSettings({ display: {}, ...PREVIEW }).render.configuration.backdrop;
-  const snapshot = renderJobContext(mesh(), { kind: "step", display: {}, ...PREVIEW }).sceneSettings.render.configuration.backdrop;
+  const snapshot = renderJobContext(mesh(), { kind: "xbf", display: {}, ...PREVIEW }).sceneSettings.render.configuration.backdrop;
   assert.deepEqual([viewer.groundPlacement, snapshot.groundPlacement], ["lowest", "lowest"]);
 });

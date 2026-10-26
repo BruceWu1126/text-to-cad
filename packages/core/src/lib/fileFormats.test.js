@@ -6,7 +6,6 @@ import {
   fileExtensionFromPath,
   isMeshRenderFormat,
   meshAssetKeyForEntry,
-  normalizeRenderFormat,
   renderFormatFromPath,
   RENDER_FORMAT
 } from "./fileFormats.js";
@@ -30,15 +29,6 @@ test("the mesh format predicate stays narrow", () => {
   assert.equal(isMeshRenderFormat(RENDER_FORMAT.GLB), true);
   assert.equal(isMeshRenderFormat(RENDER_FORMAT.STEP), false);
   assert.equal(isMeshRenderFormat(RENDER_FORMAT.URDF), false);
-});
-
-test("normalizeRenderFormat preserves tab-state format aliases and defaults", () => {
-  assert.equal(normalizeRenderFormat("stp"), RENDER_FORMAT.STEP);
-  assert.equal(normalizeRenderFormat("gltf"), RENDER_FORMAT.GLB);
-  assert.equal(normalizeRenderFormat("srdf"), RENDER_FORMAT.SRDF);
-  assert.equal(normalizeRenderFormat("3mf"), RENDER_FORMAT.THREE_MF);
-  assert.equal(normalizeRenderFormat("unknown"), RENDER_FORMAT.STEP);
-  assert.equal(normalizeRenderFormat("unknown", { defaultFormat: RENDER_FORMAT.DXF }), RENDER_FORMAT.DXF);
 });
 
 test("meshAssetKeyForEntry chooses native mesh keys and STEP GLB sidecars", () => {

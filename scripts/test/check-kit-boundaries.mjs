@@ -20,7 +20,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const KIT_ROOT = 'packages/ui/src/renderers/kit';
 
 // Core modules that belong to one file family, or to the STEP assembly pipeline.
-const FAMILY_CORE_IMPORT = /^@text-to-cad\/core\/(?:glb\/|lib\/(?:assembly|dxf|glb|parts|render|selectors|step|urdf)\/|lib\/(?:cadRefs|entryAssets|fileFormats|renderCapabilities|renderAssetClient)\.js|common\/(?:cadScene|renderMeshScene|recordEffects|articulation|topology\w*|applySceneState)\.js)/;
+const FAMILY_CORE_IMPORT = /^@text-to-cad\/core\/(?:glb\/|lib\/(?:dxf|glb|parts|render|selectors|step|urdf|xbf)\/|lib\/(?:cadRefs|entryAssets|fileFormats|renderCapabilities|renderAssetClient)\.js|common\/(?:renderMeshScene|articulation|topology\w*)\.js)/;
 
 const FORBIDDEN_WORDS = [
   ['a file format', /urdf|srdf|(?<![a-z])sdf(?![a-z])|glb|gltf|dxf|(?<![a-z])stl(?![a-z])|3mf|b-?rep(?![a-z])/i],
@@ -161,13 +161,13 @@ export function checkFileViewerBoundary(repo, { shared = SLICE_SHARED } = {}) {
   return { errors, sourceCount: files.length };
 }
 
-// ONE SCENE BUILDER PER FILE FAMILY, TWO CALLERS. The snapshot CLI's headless stage
+// ONE SCENE BUILDER PER FILE FAMILY, TWO CALLERS. The OCCT parity bench's headless page
 // (`HEADLESS_SCENE`) and the viewer's renderer for a family draw that family's files with
 // the same core module: the same loader, the same builder, the same look and the same
 // player (a robot's pose is cadgen's articulation, played by `common/articulation.js` in
 // both). So each shared piece is imported by BOTH from ONE module, is defined
 // nowhere else, and the headless render path imports no mesh flattener of its own — a
-// snapshot that drew a GLB, a mesh or a robot its own way is exactly what this stops.
+// still that drew a GLB, a mesh or a robot its own way is exactly what this stops.
 export const HEADLESS_ENTRY = 'packages/core/src/common/headlessRenderEntry.js';
 export const HEADLESS_SCENE = 'packages/core/src/common/headlessScene.js';
 export const SHARED_SCENE_PIECES = [
@@ -179,12 +179,16 @@ export const SHARED_SCENE_PIECES = [
     viewer: ['packages/ui/src/renderers/robot/RobotRenderer.jsx', ['createRobotScene']], headless: ['createRobotScene'] },
   { what: 'the robot loader', module: 'packages/core/src/lib/urdf/loadRobot.js',
     viewer: ['packages/ui/src/renderers/robot/useRobotDocument.js', ['loadRobotMeshes', 'robotModel']], headless: ['loadRobot'] },
+  { what: 'the engine document scene', module: 'packages/core/src/lib/xbf/xbfScene.js',
+    viewer: ['packages/ui/src/renderers/xbf/useXbfScene.js', ['createXbfScene']], headless: ['createXbfScene'] },
+  { what: 'the engine document loader', module: 'packages/core/src/lib/xbf/xbfDocument.js',
+    viewer: ['packages/ui/src/renderers/xbf/useXbfScene.js', ['loadXbfDocument']], headless: ['loadXbfDocument'] },
   { what: 'the surface look', module: 'packages/core/src/common/sceneSettings.js',
     viewer: ['packages/ui/src/renderers/kit/shell/ShellViewport.jsx', ['resolveSceneSurfaceLook']], headless: ['resolveSceneSurfaceLook'] },
 ];
 // Defined once, in their module: a second definition is a second way to draw a family.
 const SHARED_BUILDER_NAMES = ['createGlbScene', 'createMeshScene', 'buildMeshScene', 'createRobotScene', 'buildRobotParts',
-  'resolveSceneSurfaceLook'];
+  'createXbfScene', 'resolveSceneSurfaceLook'];
 // What the headless render path used to flatten a family with, and must not reach for again.
 const HEADLESS_RENDER_PATH = [HEADLESS_ENTRY, HEADLESS_SCENE, 'packages/core/src/common/renderMeshScene.js'];
 const MESH_FLATTENERS = ['buildMeshDataFromGlbBuffer', 'buildMeshDataFromStlBuffer', 'buildMeshDataFrom3MfBuffer', 'robotVisualParts', 'buildRobotParts'];
@@ -281,5 +285,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     }
     process.exitCode = 1;
   }
-  else console.log(`Kit boundaries passed (${kit.sourceCount} format-blind sources); renderer slices passed (${RENDERER_SLICES.join(', ')}: ${slices.sourceCount} sources); the file viewer imports no slice (${host.sourceCount} sources); the viewer and the snapshot CLI share ${shared.pieceCount} scene pieces.`);
+  else console.log(`Kit boundaries passed (${kit.sourceCount} format-blind sources); renderer slices passed (${RENDERER_SLICES.join(', ')}: ${slices.sourceCount} sources); the file viewer imports no slice (${host.sourceCount} sources); the viewer and the parity page share ${shared.pieceCount} scene pieces.`);
 }

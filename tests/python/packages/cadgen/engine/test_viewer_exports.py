@@ -136,7 +136,7 @@ class ViewerExportHttpTest(unittest.TestCase):
             self.assertEqual(len(data), job['bytes'])
             self.assertGreater(len(data), 84)
             self.assertIn('attachment;', headers['content-disposition'])
-            self.assertEqual(http(f"/__cad/exports/{job['id']}/release", {})[0], 200)
+            # Fetched whole, the file is gone: the page offers to export it again.
             self.assertEqual(http(f"/__cad/exports/{job['id']}/file")[0], 410)
             def export(request_id):
                 payload['requestId'] = request_id

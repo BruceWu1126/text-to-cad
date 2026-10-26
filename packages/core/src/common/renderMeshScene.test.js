@@ -42,6 +42,7 @@ function twoPartMeshData() {
       min: [0, 0, 0],
       max: [3, 1, 0]
     },
+    partCount: 2,
     parts: [
       {
         id: "left",
@@ -119,7 +120,7 @@ test("snapshot scene policy composes display Render quality with technical quali
   assert.equal(normal.displaySettings.guides.axis.enabled, false, "and no axes");
   assert.equal(normal.sceneSettings.appearance, "light", "in light, the CLI's default");
   for (const mode of ["solid", "xray", "wireframe"]) {
-    const gridded = renderJobContext(twoPartMeshData(), { kind: "step", display: { mode, grid: true } });
+    const gridded = renderJobContext(twoPartMeshData(), { kind: "xbf", display: { mode, grid: true } });
     assert.equal(gridded.displaySettings.guides.grid.enabled, true, `${mode} draws the grid switched on`);
     assert.equal(gridded.displaySettings.guides.grid.density, 1);
     assert.equal(gridded.displaySettings.guides.axis.enabled, false, "and no axes");
@@ -191,7 +192,7 @@ test("snapshot scene disposal releases owned stage resources without touching mo
 
 test("Preview accepts common camera, selection, clipping, and quality controls", () => {
   const context = renderJobContext(twoPartMeshData(), {
-    kind: "step",
+    kind: "xbf",
     camera: { preset: "front" },
     preview: true,
     display: {
@@ -208,9 +209,9 @@ test("Preview accepts common camera, selection, clipping, and quality controls",
   assert.equal(context.sceneSettings.view.surfaces.colorMode, "original", "Preview's own part colours, not the display mode's");
 });
 
-test("only a STEP job has edges; Clip cuts every 3D file and Explode a STEP or a GLB of several parts", () => {
+test("only an engine document has edges; Clip cuts every 3D file and Explode an assembly or a GLB of several parts", () => {
   const display = { mode: "wireframe", clip: { enabled: true, axis: "x" }, exploded: { enabled: true, amount: 0.5 } };
-  const step = renderJobContext(twoPartMeshData(), { kind: "step", display });
+  const step = renderJobContext(twoPartMeshData(), { kind: "xbf", display });
   assert.equal(step.sceneSettings.view.mode, "wireframe");
   assert.equal(step.displaySettings.clip.enabled, true);
   const view = (kind, parts = 0) => {

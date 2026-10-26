@@ -208,9 +208,9 @@ clipboard, pick), and its one write to the person's machine is a browser downloa
 `POST /__cad/exports` `{requestId, epoch, source: {doc, revision}, format}` queues an export
 (202) of the displayed document as its code built it
 ([the app README](../README.md#export-and-job-status)); `GET /__cad/exports` is the session's
-epoch, `GET /__cad/exports/<id>` a job's state (`?after=&wait=`), `GET /__cad/exports/<id>/file`
-the download, and `POST /__cad/exports/<id>/cancel` and `/release` end it. CLI exports remain
-outside this HTTP interface.
+epoch, `GET /__cad/exports/<id>` a job's state (`?after=&wait=`), and `GET /__cad/exports/<id>/file`
+the download, whose file goes once the browser has it whole or after ten minutes. CLI exports
+remain outside this HTTP interface.
 
 Backend tests live in `tests/python/packages/cadgen/viewer` and are run by
 `scripts/test/test-python.sh`. The web app's `npm run test` covers its JavaScript
