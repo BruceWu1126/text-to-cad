@@ -310,11 +310,9 @@ it again.
 - **A restart reopens what was built.** The engine keeps each model document's bytes in
   the platform's cache folder (`~/.cache/cadgen/documents/`), once it is idle, so after a
   restart its id answers every verb as last built (`cadgen status`: `held`, on `disk`).
-  When a file its build read changed since, whether or not its worker lives, the page and
-  `cad_show` say "the code changed since this was built" with the rebuild command, every
-  verb that reads it says what it read ("exporting the build of arm from before arm.py
-  changed; run `cadgen run /work/arm.py` to update it"), and `cadgen status` marks it stale; nothing
-  reruns.
+  A document is what its last run made: the engine never checks the code on disk against
+  it, no surface says the script changed, and nothing reruns. After an edit, run the script
+  (`cadgen run /work/arm.py`) to update the document and its open pages.
   The cache keeps every document until you delete it (`cadgen delete <id>`, or Delete on the home); nothing evicts from it.
 - **A shape with no script** (a notebook cell, a REPL, a script that only holds a
   shape) is handed over: `model(shape, name="plate")` makes a document of it, held,
