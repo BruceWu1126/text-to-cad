@@ -166,6 +166,28 @@ test("a crash is PostHog's $exception: its type and frames, only cadgen's in the
       chunk_id: '0de4d024-c159-4f6d-b15a-cc4ef7a6856d', in_app: true }]);
 });
 
+test("a page's frame in a vendor chunk (react, radix, three, lucide) is not in the app: the page's own frame is blamed", async () => {
+  const { asked, store } = posthog();
+  // The frames as the CAD Viewer's build names its chunks and the page reports them (`vendor-<package>-<hash>.js`),
+  // one spelled with the folder a build lists them under.
+  const frames = [
+    { file: 'index-BBBqlHHP.js', function: 'Kt', line: 1, column: 48213, chunk_id: '0de4d024-c159-4f6d-b15a-cc4ef7a6856d' },
+    { file: 'vendor-ui-BEAz7hOp.js', function: 'Dn', line: 1, column: 1021, chunk_id: '5c1d8e2f-3a4b-4c6d-8e9f-0a1b2c3d4e5f' },
+    { file: 'vendor-react-BmFJxwSH.js', function: 'Wc', line: 1, column: 9000, chunk_id: '6d2e9f30-4b5c-4d7e-9f0a-1b2c3d4e5f60' },
+    { file: 'assets/vendor-three-kX55hSI2.js', function: 'Nr', line: 1, column: 77 },
+    { file: 'XbfRenderer-9l7eq1L2.js', function: 'draw', line: 1, column: 12 }, // the page's own, whatever its name
+    { file: '<user>', function: '<user>' },
+  ];
+  await store.insert(rowsOf({ ...BATCH, events: [{ name: 'exception', where: 'page', type: 'TypeError', handled: false, count: 1, frames }] }));
+  const [{ stacktrace }] = asked[0].body.batch[0].properties.$exception_list;
+  assert.deepEqual(stacktrace.frames.map(frame => [frame.filename, frame.in_app]), [
+    ['index-BBBqlHHP.js', true], ['vendor-ui-BEAz7hOp.js', false], ['vendor-react-BmFJxwSH.js', false],
+    ['assets/vendor-three-kX55hSI2.js', false], ['XbfRenderer-9l7eq1L2.js', true], ['<user>', false],
+  ]);
+  // A vendor frame keeps its chunk id: PostHog still shows its source, it just is not ours.
+  assert.equal(stacktrace.frames[1].chunk_id, '5c1d8e2f-3a4b-4c6d-8e9f-0a1b2c3d4e5f');
+});
+
 test('where the host could not tell, an event names no country; what a schema left out, it leaves out', async () => {
   const { asked, store } = posthog();
   // As cadgen 0.7.7 to 0.7.11 send it, over JSON (which leaves out what is undefined): no process, which was

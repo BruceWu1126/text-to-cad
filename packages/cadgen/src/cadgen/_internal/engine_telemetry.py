@@ -25,8 +25,9 @@ imports none of it. It counts these events (``analytics.EVENTS``):
   worker that died, its exit status (``analytics.died``).
 
 What a verb counted is kept in the spool beside the settings (``analytics.spool``), as a command's counts
-are: the CAD app's or the viewer's next send takes it or, with nothing taking it for a window, the sender
-a command starts (``telemetry_send``). Nothing is counted where the environment turns telemetry off
+are: the CAD app's or the viewer's next send takes it (as a ``cli`` batch of its own, naming no app) or, with
+nothing taking it for a window, the sender a command starts (``telemetry_send``). Nothing is counted where
+the environment turns telemetry off
 (``analytics.refused``, read first), in an engine worker (what a build asks for is that build's), or for a
 server's own work (``cadgen viewer``, ``cadgen mcp``: each counts what it serves). Never raises.
 """

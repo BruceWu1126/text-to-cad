@@ -204,11 +204,15 @@ class EngineApp:
         self._default = None
         self._mcp = None
         self.session_factory = session_factory
+        from cadgen import __version__
         from cadgen.analytics import Recorder
         # Each sender's own recorder, so a batch says who sent it (``cadgen.analytics.PROCESSES``): the
-        # CAD app's sessions (``mcp/http.py``) are the app's, the browser viewer's page the viewer's.
+        # CAD app's sessions (``mcp/http.py``) are the app's, the browser viewer's page the viewer's. The app's
+        # client is the agent app a session's initialize names (``mcp/server.py``); the viewer's is the viewer
+        # itself, of this version, shown in a browser -- the page's usage, told from the apps' by client.
         self.analytics = Recorder(process="app")
         self.viewer_analytics = Recorder(process="viewer")
+        self.viewer_analytics.started(client={"name": "cadgen-viewer", "version": __version__}, presentation="browser")
         self.analytics.start()
         self.viewer_analytics.start()
 
