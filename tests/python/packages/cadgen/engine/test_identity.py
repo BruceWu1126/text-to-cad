@@ -34,7 +34,7 @@ class ReattachmentTest(unittest.TestCase):
     def test_two_missing_candidates_choose_the_latest_and_keep_the_other(self):
         source = self.folder / "new" / "part.py"
         source.parent.mkdir()
-        source.write_text(SCRIPT.format(options=""))
+        source.write_text(SCRIPT.format(options=""), encoding="utf-8")
         for at, built in enumerate((2, 7)):
             script = self.folder / f"gone{at}" / "part.py"
             ident = model_id(script, "part")
@@ -83,7 +83,7 @@ class ReattachmentDaemonTest(unittest.TestCase):
         project = self.folder / "project"
         project.mkdir()
         script = project / "part.py"
-        script.write_text(SCRIPT.format(options=""))
+        script.write_text(SCRIPT.format(options=""), encoding="utf-8")
         self.run_script(script)
         self.stop()
         first = model_id(script, "part")
@@ -118,14 +118,14 @@ class ReattachmentDaemonTest(unittest.TestCase):
         self.assertEqual(self.registry.get(third), before, "copy leaves the extant original untouched")
         copied = model_id(copy / "renamed.py", "part")
         self.assertIsNotNone(self.registry.get(copied))
-        script.write_text(script.read_text().replace("part()", "different()"))
+        script.write_text(script.read_text(encoding="utf-8").replace("part()", "different()"), encoding="utf-8")
         self.run_script(script)
         self.assertIsNotNone(self.registry.get(model_id(script, "different")))
         self.assertEqual(self.registry.get(third), before, "a renamed function leaves its prior document")
 
     def test_an_explicit_name_survives_a_file_move_with_the_same_id(self):
         script = self.folder / "named.py"
-        script.write_text(SCRIPT.format(options='(name="named")'))
+        script.write_text(SCRIPT.format(options='(name="named")'), encoding="utf-8")
         self.run_script(script)
         self.stop()
         ident = model_id(script, "part", "named")
@@ -146,7 +146,7 @@ class IdentityMigrationTest(unittest.TestCase):
             folder = Path(canonical(temporary))
             held = Registry(folder / "state", folder / "cache")
             script = folder / "part.py"
-            script.write_text(SCRIPT.format(options=""))
+            script.write_text(SCRIPT.format(options=""), encoding="utf-8")
             old = str(uuid.uuid5(NAMESPACE, "key::arm"))
             plain = model_id(script, "part")
             for ident, extra in ((old, {"key": "arm"}), (plain, {})):

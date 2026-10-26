@@ -98,7 +98,7 @@ class IdsTest(unittest.TestCase):
 
         def load(path: Path, function: str, decorator: str = "@model"):
             path.parent.mkdir(exist_ok=True)
-            path.write_text(f"from cadgen.engine import model, xbf\n{decorator}\ndef {function}():\n    return None\n")
+            path.write_text(f"from cadgen.engine import model, xbf\n{decorator}\ndef {function}():\n    return None\n", encoding="utf-8")
             spec = importlib.util.spec_from_file_location(f"ids_{path.stem}", path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
