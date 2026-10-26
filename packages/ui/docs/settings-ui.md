@@ -98,9 +98,9 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   columns at least 240px (four across a 1280px window), 24px apart. Its picture sits on the
   `muted` fill at 330:185, contained; its caption (12px by 16px) is its kind's glyph in a 24px
   column, then its name (`text-ui`, weight 500) over its last activity with no verb ("2h ago",
-  `text-tiny`, muted). In the list, a **table**: a 32px header row of muted `text-tiny` labels
-  (Name, Updated, Opened) over 40px rows, each its glyph and name, then its `updated` and
-  `opened` ages in two 160px columns (Opened dropped under a 560px page), transparent with the
+  `text-tiny`, muted). In the list, a **table**, one type in every cell (`text-ui`, 13px): a
+  32px header row of muted labels (Name, Updated, Opened) over 40px rows, each its glyph and
+  name, then its `updated` and `opened` ages, muted, in two 160px columns (Opened dropped under a 560px page), transparent with the
   hover fill. Each has a **pin** toggle and **one ⋯ menu** (a stock DropdownMenu), shown on hover
   or focus, at a tile's picture's top-right (Figma's star) or a row's end; a pinned one keeps its
   filled pin at rest. The menu holds Open, a file's Copy path and Reveal where the host can, Pin or

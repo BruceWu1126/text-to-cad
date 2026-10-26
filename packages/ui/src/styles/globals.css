@@ -187,12 +187,14 @@
 .cad-library-actions button[data-state=open] { background: var(--accent); color: var(--foreground); }
 .cad-library-pin[aria-pressed=true] { color: var(--foreground); }
 @media (hover: none) { .cad-library-actions button { opacity: 1; } }
-/* The list, Figma's table: a 32px header row of muted text-tiny labels (Name, Updated, Opened) over 40px
-   rows, each its glyph and name (text-ui), then its two ages in fixed 160px columns; rows transparent, the
-   hover fill under the pointer, the pin and ⋯ at the row's end. A narrow page drops Opened. */
+/* The list, Figma's table: one type in every cell (text-ui, 13px), the header's labels (Name, Updated,
+   Opened) muted in a 32px row over 40px rows, each its glyph and name, then its two ages, muted, in fixed
+   160px columns; rows transparent, the hover fill under the pointer, the pin and ⋯ at the row's end. A
+   narrow page drops Opened. */
 .cad-library-table { --cad-library-columns: minmax(0, 1fr) 160px 160px; }
 .cad-library-columns { display: grid; grid-template-columns: var(--cad-library-columns); align-items: center; height: 32px; padding: 0 64px 0 12px;
-  border-bottom: 1px solid var(--border); font-size: var(--text-tiny); line-height: 1; color: var(--muted-foreground); user-select: none; }
+  border-bottom: 1px solid var(--border); font-size: var(--text-ui); line-height: 1; color: var(--muted-foreground); user-select: none; }
+.cad-library-row .cad-library-status { font-size: var(--text-ui); line-height: 18px; }
 .cad-library-list { margin: 4px 0 0; padding: 0; list-style: none; }
 .cad-library-row .cad-library-main { border-radius: calc(var(--radius) - 2px); transition: background-color .15s ease; }
 .cad-library-row:not([data-missing]) .cad-library-main:hover { background: color-mix(in oklab, var(--accent) 60%, transparent); }
