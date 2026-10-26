@@ -40,6 +40,12 @@ def _stand_in(calls: list, *, child_error: Exception | None = None, leaves_a_dae
 
 
 class PythonTestRunnerIsolation(unittest.TestCase):
+    def setUp(self) -> None:
+        # Where nothing names an engine's folder (the guard below): none, for the stand-ins here.
+        patched = mock.patch.object(runner, "default_engine_door", return_value=None)
+        patched.start()
+        self.addCleanup(patched.stop)
+
     def test_each_file_has_an_engine_directory_of_its_own_never_the_developers(self):
         calls = []
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": "developer-engine"}), \
@@ -86,6 +92,34 @@ class PythonTestRunnerIsolation(unittest.TestCase):
         (path, top, verbose, env), _kwargs = one.call_args
         self.assertEqual((path, top, verbose), ("only.py", os.path.realpath(REPO_ROOT), False))
         self.assertIn("CADGEN_ENGINE_DIR", env)
+
+
+class DefaultEngineGuard(unittest.TestCase):
+    """A test never leaves an engine where nothing names its folder (the developer's engine's
+    place): one found as a file ends is stopped, and fails the run naming the files running."""
+
+    def run_with(self, answering: list[bool]) -> tuple[int, str, list]:
+        stopped: list = []
+        door = "/default/cadgen-engine/0123456789ab.door"
+        ran = lambda path, top, verbose, env: (path, 0, "Ran 1 test in 0.001s\n\nOK\n", 0.0)  # noqa: E731
+        said = io.StringIO()
+        with mock.patch.object(runner, "default_engine_door", return_value=door), \
+                mock.patch.object(runner, "engine_answers", side_effect=answering), \
+                mock.patch.object(runner, "_run_one_file", side_effect=ran), \
+                mock.patch.object(runner, "_engine_python", side_effect=lambda top, code, **env: stopped.append((code, env))), \
+                mock.patch.object(runner.sys, "stderr", said):
+            code = runner.run_files(["leaves.py"], str(REPO_ROOT), 1, False)
+        return code, said.getvalue(), stopped
+
+    def test_an_engine_a_file_left_in_the_default_folder_is_stopped_and_fails_the_run(self):
+        code, said, stopped = self.run_with([False, True])  # none before the run, one after the file
+        self.assertEqual(code, 1)
+        self.assertIn("/default/cadgen-engine/0123456789ab.door, after leaves.py", said)
+        self.assertEqual(stopped, [("from cadgen.engine import api; api.stop()", {"CADGEN_ENGINE_DIR": "/default/cadgen-engine"})])
+
+    def test_the_developer_s_own_engine_running_there_before_the_run_is_left_alone(self):
+        code, said, stopped = self.run_with([True])
+        self.assertEqual((code, stopped), (0, []))
 
 
 class HangGuard(unittest.TestCase):
