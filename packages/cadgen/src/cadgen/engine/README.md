@@ -625,6 +625,8 @@ status 1, no traceback; caught, nothing said. Builds run in the daemon's warm wo
 `CADGEN_ENGINE_MEMORY_MB` sets the server's memory budget (**Document lifetime**); the document
 cache has no size to set, keeping every document until a person deletes it
 (`CADGEN_ENGINE_CACHE_IDLE`, its idle seconds, is the tests' seam).
+`CADGEN_ENGINE_DEFAULT_PORT` stands in for 3245 as the default port (`daemon.default_port`): the
+tests' seam, so a suite holds or frees a default of its own and never touches the machine's 3245.
 `CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_VIEWER_WARM=0` keeps `cadgen viewer`
 from warming the engine at its launch (**The viewer and the snapshot**). `CADGEN_ENGINE_MESH=processes|inline`
 picks how parts are meshed. The default, `processes`, uses a warm pool of
