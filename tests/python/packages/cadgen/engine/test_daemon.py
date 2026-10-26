@@ -1200,7 +1200,7 @@ class DaemonTest(unittest.TestCase):
         self.script.write_text(textwrap.dedent(MODEL.format(size=size)), encoding="utf-8")
         return self.built("block")
 
-    def test_inspection_never_builds_missing_or_stale_script_models(self):
+    def test_inspection_never_builds_a_missing_or_edited_script_model(self):
         from cadgen.engine.ids import model_id
 
         # The registry alone, a cache folder nothing can write: a restart is refused with the command

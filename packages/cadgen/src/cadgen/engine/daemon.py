@@ -1867,7 +1867,6 @@ class Daemon:
                 self.server.pressed = lambda: self.pool.shed(True)
                 self.server.lost = self.models.rebuild
                 self.server.revive = self.models.adopt
-                self.server.stale = self.models.stale
                 self.server.leaving = self.models.leaving
                 self.server.delete = self.models.delete
                 self.server.start()
@@ -2079,9 +2078,6 @@ class Daemon:
                 model["cached"] = (self.models.where(ident) or "").endswith("disk")
                 if model["state"] == "held":
                     model["held"] = self.models.where(ident)
-                stale = self.models.stale(ident) if model["state"] in ("live", "held") else None
-                if stale:
-                    model["stale"] = stale
                 lost = self.models.rebuild(ident)
                 if lost is not None:
                     model["rebuild"] = lost["rebuild"]
@@ -2101,8 +2097,7 @@ class Daemon:
             lost = self.models.rebuild(ident)
             state = self.models.state(ident) if lost is None else lost["state"]
             held = {"held": self.models.where(ident)} if state == "held" else {}
-            stale = self.models.stale(ident) if state in ("live", "held") else None
-            send({"ok": True, "state": state, **held, **({"stale": stale} if stale else {}),
+            send({"ok": True, "state": state, **held,
                   **({"rebuild": lost["rebuild"], "error": lost["error"]} if lost else {})})
             return
         payload = b""

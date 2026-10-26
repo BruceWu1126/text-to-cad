@@ -27,10 +27,8 @@ bytecode is under ``pycache/``, ``daemon.bytecode``), and never
 lists, counts or removes anything else there. The record is authoritative: a cache file missing,
 or not the size its record says, is simply not cached.
 
-Once per revision: the record gains ``cache: {revision, bytes, read}``, and a document
-whose revision is the cache's is never written again. ``read`` is what the build read, with digests
-(``reads``): the script and every module its model reached (each file's bytes, SHA-256) and the
-files its bodies read (the closure's own digests), which is what staleness compares (``changes``).
+Once per revision: the record gains ``cache: {revision, bytes}``, and a document
+whose revision is the cache's is never written again.
 
 Read: at start the daemon indexes which records have a cache file (``Cache.ensure_index``: a listing
 and a stat each, no record and no byte read). A document with one answers every verb by loading its
@@ -49,15 +47,13 @@ the engine does everything it did, and saves nothing.
 from __future__ import annotations
 
 import collections
-import hashlib
 import os
 import sys
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
-__all__ = ["CACHE_IDLE_SECONDS", "FILE", "SHUTDOWN_SECONDS", "Cache", "changes", "idle", "reads"]
+__all__ = ["CACHE_IDLE_SECONDS", "FILE", "SHUTDOWN_SECONDS", "Cache", "idle"]
 
 FILE = "document.xbf"
 # How long a document sits with no build and no read before it is saved: past the gap between a
@@ -77,68 +73,6 @@ def idle() -> float:
     except ValueError:
         given = -1.0
     return given if given > 0 else CACHE_IDLE_SECONDS
-
-
-# --- what a build read, and whether it is what it was -----------------------------------------
-
-_DIGESTS: dict[tuple, str] = {}  # (kind, path, size, mtime_ns) -> digest: a file is hashed once per version
-_DIGESTS_KEPT = 4096
-
-
-def _digest(kind: str, path: str) -> str | None:
-    """A file's digest as the build named it: SHA-256 of its bytes for a source and a file read
-    through the engine (``memo._file_key``), BLAKE2b-256 for one a body opened itself
-    (``memo._read_digest``); None for a file that is not there."""
-    try:
-        stat = os.stat(path)
-    except OSError:
-        return None
-    version = (kind, path, stat.st_size, stat.st_mtime_ns)
-    found = _DIGESTS.get(version)
-    if found is not None:
-        return found
-    hasher = hashlib.blake2b(digest_size=32) if kind == "read" else hashlib.sha256()
-    try:
-        with open(path, "rb") as handle:
-            for chunk in iter(lambda: handle.read(1 << 22), b""):
-                hasher.update(chunk)
-    except OSError:
-        return None
-    if len(_DIGESTS) >= _DIGESTS_KEPT:
-        _DIGESTS.clear()
-    found = _DIGESTS[version] = hasher.hexdigest()
-    return found
-
-
-def reads(closure: dict[str, Any] | None) -> list[list[Any]]:
-    """What a build read, by absolute path, from its report's closure (``previous.located``): each
-    module its model reached, the script among them (``["source", path, sha256]``, digested now, as
-    the build answers), and each file its bodies read (``["file" | "read", path, digest]``, the
-    closure's own digests, taken as they were read). A font is named by a family, not read by a
-    path the engine can check without the kernel: it is left out."""
-    found: list[list[Any]] = []
-    for path, _symbols in (closure or {}).get("modules") or []:
-        found.append(["source", path, _digest("source", path)])
-    for row in (closure or {}).get("inputs") or []:
-        if row[0] in ("file", "read") and row[1]:
-            found.append([row[0], row[1], row[2]])
-    return found
-
-
-def changes(read: list[list[Any]], root: Path | str) -> list[str]:
-    """What differs now from what a build read (``reads``), each said by name, relative to
-    ``root``: ``parts.py changed``, ``data/plate.csv is missing``. Empty: the code is as built."""
-    said = []
-    for kind, path, digest in read:
-        now = _digest(kind, path)
-        if now == digest:
-            continue
-        try:
-            shown = Path(os.path.relpath(path, root)).as_posix()
-        except ValueError:  # another drive
-            shown = Path(path).as_posix()
-        said.append(f"{shown} is missing" if now is None else f"{shown} changed")
-    return said
 
 
 # --- the daemon's cache ------------------------------------------------------------------------
@@ -374,13 +308,7 @@ class Cache:
         record = held.get(ident)
         if record is None or record.get("revision") != revision:
             return  # a build since recorded a newer revision: its own save follows
-        row = self.models.row(ident)
-        read = (row or {}).get("read") if (row or {}).get("revision") == revision else None
-        from cadgen.engine.registry import relative
-
-        root = held.root(record)
-        meta = {"revision": revision, "bytes": len(data),
-                "read": [[kind, relative(path, root), digest] for kind, path, digest in read or []]}
+        meta = {"revision": revision, "bytes": len(data)}
         held.cache.write(self.inside(ident), data)
         held.update(ident, lambda found: {**found, "cache": meta}
                     if found is not None and found.get("revision") == revision else None)

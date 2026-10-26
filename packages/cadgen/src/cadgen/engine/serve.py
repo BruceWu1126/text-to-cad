@@ -667,9 +667,6 @@ class Server:
         # A document id this server does not hold yet, taken up from the engine's cache where it has
         # it (``models.Models.adopt``): registered, and read when it is asked for.
         self.revive: Callable[[str], None] = lambda _ident: None
-        # Whether a model document no worker holds was built from code that changed since
-        # (``models.Models.stale``): ``{"text", "changes", "rebuild"}``, said in its structure, or None.
-        self.stale: Callable[[str], dict[str, Any] | None] = lambda _ident: None
         # Told of a model document as the budget takes it out of memory, its id, its generation and
         # its xbf bytes (``Served.xbf``): the daemon's cache keeps them when it does not hold them
         # yet (``models.Models.leaving``), so the document is read again from there.
@@ -1502,10 +1499,8 @@ class Server:
 
                     self.prefetch(doc)  # a page is about to ask for every part
                     found = self.posed(doc, pose)
-                    stale = self.stale(ident) if ident in self.model_loaders else None
                     # A part's buffer is sent immutable: its URL names the tessellation it was made at.
-                    found = {**found, "tessellation": TESSELLATION}
-                    return self.json(handler, {**found, "stale": stale} if stale else found)
+                    return self.json(handler, {**found, "tessellation": TESSELLATION})
                 if len(parts) == 4 and parts[3] == "pose" and method == "POST":
                     return self.pose(handler, doc)
                 if len(parts) >= 5 and parts[3] == "part":

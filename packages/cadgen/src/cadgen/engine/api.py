@@ -660,7 +660,7 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
     path = _document(source, "inspect", named)
     if query == "build":
         if not isinstance(path, Path):
-            found = _ask({"op": "document", "id": path})["document"]  # a model's live record says stale
+            found = _ask({"op": "document", "id": path})["document"]  # a model's: its live record
             if "path" not in found:
                 return {"file": None, "live": _ask({"op": "model_info", "id": path})["model"]}
             path = Path(found["path"])
@@ -697,15 +697,11 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None) ->
 
     structure = get("")
     if query == "summary":
-        closure = structure.get("closure")
-        if closure and structure.get("stale"):
-            closure = {**closure, "stale": structure["stale"]}
-        return {"summary": _summary(structure, path, get, ident), "closure": closure}
+        return {"summary": _summary(structure, path, get, ident), "closure": structure.get("closure")}
     if ref is None:
         if not structure.get("closure"):
             raise EngineError(f"{source} holds no build closure")
-        # A model held with no worker whose code changed since it was built says so (``stale``).
-        return {**structure["closure"], "stale": structure["stale"]} if structure.get("stale") else structure["closure"]
+        return structure["closure"]
     found: list[Facts] = []
     volumes: dict[str, float] = {}
     boxes: dict[str, Any] = {}
@@ -817,9 +813,8 @@ def couplings_of(kinematics: dict[str, Any]) -> list[dict[str, Any]]:
 def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], Any], ident: str) -> dict[str, Any]:
     """What a served document holds, at a glance (``cadgen inspect DOC``): its name and id; its
     state -- a model's (``live``, ``held``, ...: ``ModelDocuments.state``), where the engine holds
-    it, whether its cache has it and whether its code changed since (``stale``), or ``file`` for a
-    file's document; its parts (occurrences, distinct parts, the root's name); its bounds and volume,
-    each part's (``.../volume``, measured by the engine) placed where its occurrences stand; its
+    it and whether its cache has it, or ``file`` for a file's document; its parts (occurrences,
+    distinct parts, the root's name); its bounds and volume, each part's (``.../volume``, measured by the engine) placed where its occurrences stand; its
     materials and their masses, where any part has one; its joints, mechanism states, configuration
     sequences and animations; and a model's declared files. Nothing is built."""
     from cadgen.engine.refs import placed_facts
@@ -832,7 +827,6 @@ def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], A
         model = answer.get("model")
     if model is not None:
         state = {"state": model.get("state"), "held": model.get("held"), "cached": bool(model.get("cached")),
-                 "stale": (model.get("stale") or structure.get("stale") or {}).get("text"),
                  "builtAt": model.get("builtAt"), "script": (model.get("source") or {}).get("script")}
     else:
         state = {"state": "file", "path": str(path) if isinstance(path, Path) else structure.get("path")}

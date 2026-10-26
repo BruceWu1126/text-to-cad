@@ -157,7 +157,7 @@ class NotHeldRefusalTest(unittest.TestCase):
         # Built before, its worker crashed before anything kept it: no worker, no bytes, no cache file.
         engine.models.records[ident] = {"id": ident, "source": {"script": str(script), "name": "cell"}, "worker": None,
                                         "program": str(script), "kind": "model", "version": "g1", "builtAt": 0,
-                                        "files": [], "revision": "r1", "read": []}
+                                        "files": [], "revision": "r1"}
         answers: list[dict] = []
         engine.handle({"op": "document", "id": ident}, answers.append)
         (answer,) = answers
