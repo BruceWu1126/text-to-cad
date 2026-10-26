@@ -29,14 +29,15 @@ test('a ready file is one plain same-origin download link, clicked once and remo
   assert.doesNotMatch(clicked[0].href, /token/);
 });
 
-test('restoration keeps requests, names and whether each was delivered; never a file', () => {
+test('restoration keeps the exports under way, their requests and names; never a file', () => {
   let held;
   const port = createBrowserDownloads({ document: page().document, key: 'test', storage: { ...storage, getItem: () => held, setItem: (_key, value) => held = value, removeItem: () => held = undefined } });
-  const value = [{ filename: 'x.stl', delivered: true, request: { requestId: 'a', epoch: 'e', source: { doc: 'd' }, format: 'stl' } }];
+  const value = [{ request: { requestId: 'a', epoch: 'e', source: { doc: 'd' }, format: 'stl' }, filename: 'x.stl' }];
   port.remember(value);
   assert.deepEqual(port.restore(), value);
-  held = JSON.stringify([{ filename: 'y.stl', request: { requestId: 'b', epoch: 'e', source: { doc: 'd' }, format: 'stl' } }, { filename: 3 }]);
-  assert.deepEqual(port.restore().map(row => [row.filename, row.delivered]), [['y.stl', false]]);
+  // A record keeps its request and name alone; a malformed one is dropped.
+  held = JSON.stringify([{ filename: 'y.stl', extra: true, request: { requestId: 'b', epoch: 'e', source: { doc: 'd' }, format: 'stl' } }, { filename: 3 }]);
+  assert.deepEqual(port.restore(), [{ request: { requestId: 'b', epoch: 'e', source: { doc: 'd' }, format: 'stl' }, filename: 'y.stl' }]);
   port.remember([]);
   assert.equal(held, undefined);
 });

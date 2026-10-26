@@ -56,13 +56,15 @@ export interface ViewerLinks {
    */
   open?(url: string): Promise<void>;
 }
-/** One export the page started: its request, the name it downloads as, and whether the browser was handed it. */
-export interface ExportRecord { request: import('@text-to-cad/core/client').ExportRequest; filename: string; delivered: boolean }
+/** One export the page started and has not yet handed to the browser: its request and the name it downloads as. */
+export interface ExportRecord { request: import('@text-to-cad/core/client').ExportRequest; filename: string }
 /** The browser's own downloads. No picker, handle or server path crosses this port. */
 export interface DownloadPort {
   /** Hands the browser a same-origin file URL to download as `filename`; where it goes is the browser's setting. */
   save(url: string, filename: string): void;
+  /** The exports still under way when the page was last here, to pick up again. */
   restore?(): ExportRecord[];
+  /** Keeps the exports under way, for `restore` after a reload; never a file. */
   remember?(value: ExportRecord[]): void;
 }
 export interface ViewerHost {
