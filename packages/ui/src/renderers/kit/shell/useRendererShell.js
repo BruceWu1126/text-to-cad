@@ -564,9 +564,12 @@ export function useRendererShell({
       // preview; another viewer's popup is not this one's business.
       if (hasOpenPopup(viewerElement.current)) return;
       if (previewing) { setPreviewing(false); return; }
-      // Annotate's surface spends its own Escape (its editor deselects, or drops the stroke in hand).
-      if (annotateToolActive && event.target instanceof Element && event.target.closest("[data-cad-annotation-overlay]")) return;
-      if (annotationRef.current.selected.length) { annotationRef.current.select([]); return; }
+      // Picked ink goes first, wherever the key landed: Annotate's surface, which takes the keyboard
+      // on a press, lets go of it on its own Escape; with nothing picked, its Escape is the ladder's.
+      if (annotationRef.current.selected.length) {
+        if (!(annotateToolActive && event.target instanceof Element && event.target.closest("[data-cad-annotation-overlay]"))) annotationRef.current.select([]);
+        return;
+      }
       if (escapeRef.current?.()) return;
       // A renderer that left it: the tool in hand goes down, back to the file's default (Select).
       if (toolModes && toolMode !== toolModes.defaultMode) selectDefaultTool();

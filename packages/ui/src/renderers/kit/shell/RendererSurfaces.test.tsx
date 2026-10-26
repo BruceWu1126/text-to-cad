@@ -231,6 +231,23 @@ it("under Select a press on the annotation picks its mark before anything under 
   viewport.annotationAt = null;
 });
 
+it("Escape on the drawing surface with no ink picked puts Pencil or Shapes down and takes Select up", () => {
+  // The surface takes the keyboard on a press, so after a stroke its Escape is the one the key reaches.
+  mount(testHost(), undefined, 'panel-one.harness', { current: document.body });
+  const strip = within(screen.getByRole('group', { name: 'Interaction tools' }));
+  for (const name of ['Pencil', 'Shapes']) {
+    fireEvent.click(strip.getByRole('button', { name }));
+    act(() => viewport.props.annotation.add([ink(`${name}-mark`)]));
+    // The real surface is the viewport's (stood in here): a focusable layer marked as it is.
+    const surface = document.body.appendChild(Object.assign(document.createElement('div'), { tabIndex: -1 }));
+    surface.setAttribute('data-cad-annotation-overlay', '');
+    act(() => { surface.focus(); });
+    fireEvent.keyDown(surface, { key: 'Escape' });
+    surface.remove();
+    expect([strip.getByRole('button', { name }).getAttribute('aria-pressed'), strip.getByRole('button', { name: 'Select' }).getAttribute('aria-pressed')]).toEqual(['false', 'true']);
+  }
+});
+
 it("Pencil and Shapes are two plain tools on the strip; one row under the strip is theirs both: the tools of the one that is up, then Color, Stroke width, Placement and Clear, disabled with nothing to do", async () => {
   mount(testHost(), undefined, 'panel-one.harness');
   const strip = within(screen.getByRole('group', { name: 'Interaction tools' }));
