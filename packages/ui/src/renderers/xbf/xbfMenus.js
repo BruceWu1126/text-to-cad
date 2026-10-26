@@ -64,7 +64,7 @@ export function xbfPartMenu({ tree, nodeId, assembly, hiddenIds, isolatedIds, se
     showExitAllIsolate: isolatedIds.length > 1, exitAllIsolateDisabled: isolatedIds.length < 2,
     showHideOther: true, hideOtherDisabled: hidden,
     showVisibility: !focused, visibilityDisabled: focused,
-    showHideAll: false, hideAllDisabled: false, hideAllLabel: "Show all",
+    showHideAll: false, hideAllDisabled: false,
     showExpandCollapse: assembly && shape === "all",
     ...expansion,
     expandSelectedDisabled: expansion.collapsedActionNodeIds.length < 1,

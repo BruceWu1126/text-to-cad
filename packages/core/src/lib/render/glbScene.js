@@ -190,9 +190,9 @@ export function createGlbScene(THREE, document, { sibling = false } = {}) {
       const node = nodes.get(index);
       const occurrence = String(node.object.userData?.cadOccurrenceId || "").trim();
       return { name: nodeName(node), facts: [
-        { label: "Node", value: `nodes[${index}]` },
-        { label: "Triangles", value: node.meshes.reduce((sum, mesh) => sum + triangles(mesh), 0).toLocaleString("en-US") },
-        ...(occurrence ? [{ label: "STEP occurrence", value: occurrence }] : [])
+        { label: "Node", key: "part.node", value: `nodes[${index}]` },
+        { label: "Triangles", key: "part.triangles", value: node.meshes.reduce((sum, mesh) => sum + triangles(mesh), 0).toLocaleString("en-US") },
+        ...(occurrence ? [{ label: "STEP occurrence", key: "part.stepOccurrence", value: occurrence }] : [])
       ] };
     },
     /** Light what nodes draw: `hovered` and `selected` are nodes as a pick names them (`n12`). */

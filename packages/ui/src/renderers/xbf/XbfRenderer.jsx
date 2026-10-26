@@ -644,7 +644,7 @@ function XbfSurface({ view, data }) {
     }
     menu ||= xbfModelMenu({ tree, assembly, expandedIds, hiddenCount: hiddenIds.length, zoomSelectionAvailable, shape,
       copyText: assembly ? "" : singleChip([tree.roots[0]?.selectionId].filter(Boolean)) });
-    return viewportMenuEntries(menu, { actions: partMenuActions });
+    return viewportMenuEntries(menu, { actions: partMenuActions, t });
   } : null;
 
   // ---- the strip --------------------------------------------------------------------------------

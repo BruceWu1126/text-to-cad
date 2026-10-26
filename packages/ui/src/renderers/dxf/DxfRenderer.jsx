@@ -160,8 +160,8 @@ function DxfSurface({ view, data }) {
   const paintRef = useRef(() => {});
   const requestPaint = useCallback(() => paintRef.current(), []);
   const scene = useMemo(() => (drawing ? createDrawingScene(drawing, {
-    onHighlight: ink => { highlightRef.current = ink; }, unit: units.declared ? units.unit : ""
-  }) : null), [drawing, units]);
+    onHighlight: ink => { highlightRef.current = ink; }, unit: units.declared ? units.unit : "", t
+  }) : null), [drawing, units, t]);
   const selection = useSceneSelection({ scene, requestRender: requestPaint });
   const selectionRef = useRef(selection);
   selectionRef.current = selection;

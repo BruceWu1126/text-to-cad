@@ -9,6 +9,7 @@ import { robotVisibilityState } from "./visibility.js";
 import { useTreeSearch } from "../kit/inspector/modelTreeSearch.js";
 import { buildRobotTree, robotComponentNodeId, robotLinkNodeId, robotTreeAncestorIds } from "./robotTree.js";
 import { revealRow } from "../kit/inspector/VirtualRows.jsx";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 // The robot's kinematic tree, drawn with the Model tree's rows and filter: links nest under
 // their parent link through the joint between them (the row's muted text), and its visuals (or
@@ -68,6 +69,7 @@ const objectGlyph = node => node.kind === "component"
   : null;
 
 function RobotRow({ node, depth = 0, pinned = false, highlighted, expanded, toggle, selection, rowRefs, hiddenIds, onVisibilityChange }) {
+  const { t } = useI18n();
   const open = pinned || expanded.has(node.id), branch = node.children.length > 0;
   const { choose, enter, leave } = rowHandlers(node, selection);
   const visibility = robotVisibilityState(node.partIds, hiddenIds), actions = rowActions(visibility);
@@ -79,10 +81,10 @@ function RobotRow({ node, depth = 0, pinned = false, highlighted, expanded, togg
       onMouseEnter={enter} onMouseLeave={leave}>
       {/* Its owners' faint lines, each under its 16px disclosure column. */}
       <TreeRowGuides depth={depth} column={16}/>
-      {pinned ? rootGlyph : branch ? <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${node.label}`} aria-expanded={open}
+      {pinned ? rootGlyph : branch ? <button type="button" aria-label={t(open ? "tree.collapse" : "tree.expand", { name: node.label })} aria-expanded={open}
         className="grid h-6 w-4 shrink-0 place-items-center rounded focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => toggle(node)}><TreeRowChevron expanded={open}/></button> : objectGlyph(node) || <span className="w-4 shrink-0"/>}
-      <button type="button" aria-label={`Select ${node.label}`} aria-pressed={highlighted.has(node.id)}
+      <button type="button" aria-label={t("tree.select", { name: node.label })} aria-pressed={highlighted.has(node.id)}
         onClick={choose} onFocus={enter} onBlur={leave}
         className={cn("flex h-full min-w-0 flex-1 items-center gap-1.5 rounded pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", actions.name)}>
         {/* Name first: in a narrow panel the joint takes the truncation, never the link. */}
@@ -98,13 +100,14 @@ function RobotRow({ node, depth = 0, pinned = false, highlighted, expanded, togg
 // A search hit is the tree row without its place: the name, then its owners muted —
 // or, when the query found the link by its joint, that joint.
 function RobotSearchRow({ match, highlighted, cursor, selection, hiddenIds, onVisibilityChange }) {
+  const { t } = useI18n();
   const { entry, indices, alias } = match, { node } = entry;
   const { choose, enter, leave } = rowHandlers(node, selection);
   const visibility = robotVisibilityState(node.partIds, hiddenIds), actions = rowActions(visibility);
   const owners = entry.prefix.slice(0, -1);
   return <li className="min-w-0" data-search-row={node.id}>
     <TreeRowSurface dense active={highlighted.has(node.id)} cursor={cursor} className="group/row gap-0 pr-0" style={actions.style || undefined} onMouseEnter={enter} onMouseLeave={leave}>
-      <button type="button" aria-label={`Select ${node.label}`} aria-pressed={highlighted.has(node.id)} onClick={choose}
+      <button type="button" aria-label={t("tree.select", { name: node.label })} aria-pressed={highlighted.has(node.id)} onClick={choose}
         className={cn("flex h-full min-w-0 flex-1 items-center gap-1.5 rounded pl-2 pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", actions.name)}>
         <TreeRowLabel className="max-w-full shrink-0"><TreeFilterHighlight indices={indices} text={entry.label}/></TreeRowLabel>
         {alias
@@ -129,6 +132,7 @@ function RobotSearchRow({ match, highlighted, cursor, selection, hiddenIds, onVi
  * @param {(path: string) => void} [props.onOpenFile] Opens a file the description names, by the host path the payload resolved for it.
  */
 export default function LinksSection({ robot = null, components = EMPTY, parts = EMPTY, selection, active = true, onOpenFile = null, hiddenPartIds = EMPTY, onVisibilityChange }) {
+  const { t } = useI18n();
   const hiddenIds = useMemo(() => new Set(hiddenPartIds), [hiddenPartIds]);
   const tree = useMemo(() => buildRobotTree(robot, { components, parts }), [robot, components, parts]);
   const [userExpanded, setUserExpanded] = useState(null);
@@ -169,18 +173,18 @@ export default function LinksSection({ robot = null, components = EMPTY, parts =
 
   return <>
     {/* Headed by its filter, always there: Escape or its X clears it. */}
-    <ToolPanel id="tree" label="Links" fit="tree" resizable collapsible={false} hidden={!active}
-      header={<TreeFilterInput label="Filter links" placeholder="Filter…" value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} dense className="px-0 shadow-none"/>}>
-      <div className="flex flex-col text-tiny" aria-label="Robot links">
-        <div ref={listRef} className="px-1 py-1" aria-label="Robot tree area"
+    <ToolPanel id="tree" label={t("robot.links")} fit="tree" resizable collapsible={false} hidden={!active}
+      header={<TreeFilterInput label={t("robot.filterLinks")} placeholder={t("tree.filterPlaceholder")} value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} dense className="px-0 shadow-none"/>}>
+      <div className="flex flex-col text-tiny" aria-label={t("robot.linksTree")}>
+        <div ref={listRef} className="px-1 py-1" aria-label={t("robot.treeArea")}
           onClick={event => { if (!event.target.closest("li,button,input")) clearSelection(); }}>
-          {searching && <p role="status" className="px-2 py-1 text-micro text-muted-foreground">{found.total > found.matches.length ? `First ${found.matches.length} of ${found.total.toLocaleString()} matches` : `${found.total} ${found.total === 1 ? "match" : "matches"}`}</p>}
+          {searching && <p role="status" className="px-2 py-1 text-micro text-muted-foreground">{found.total > found.matches.length ? t("tree.firstMatches", { shown: found.matches.length, total: found.total.toLocaleString() }) : t(found.total === 1 ? "tree.match" : "tree.matches", { count: found.total })}</p>}
           {searching ? found.matches.length
-            ? <ul aria-label="Link search results">{found.matches.map(match => <RobotSearchRow key={match.entry.node.id} {...{ match, highlighted, cursor: match.entry.node.id === cursorId, selection, hiddenIds, onVisibilityChange }}/>)}</ul>
-            : deferredQuery.trim() && <p className="px-3 py-6 text-center text-tiny text-muted-foreground">{`No link matches “${deferredQuery.trim()}”`}</p>
+            ? <ul aria-label={t("robot.searchResults")}>{found.matches.map(match => <RobotSearchRow key={match.entry.node.id} {...{ match, highlighted, cursor: match.entry.node.id === cursorId, selection, hiddenIds, onVisibilityChange }}/>)}</ul>
+            : deferredQuery.trim() && <p className="px-3 py-6 text-center text-tiny text-muted-foreground">{t("robot.noMatch", { query: deferredQuery.trim() })}</p>
           : tree.roots.length
-            ? <ul aria-label="Robot links">{tree.roots.map(node => <RobotRow key={node.id} pinned={tree.roots.length === 1 && node.children.length > 0} {...{ node, highlighted, expanded, toggle, selection, rowRefs, hiddenIds, onVisibilityChange }}/>)}</ul>
-            : <p role="status" className="p-2 text-tiny text-muted-foreground">{robot ? "This description has no links." : "Loading links…"}</p>}
+            ? <ul aria-label={t("robot.linksTree")}>{tree.roots.map(node => <RobotRow key={node.id} pinned={tree.roots.length === 1 && node.children.length > 0} {...{ node, highlighted, expanded, toggle, selection, rowRefs, hiddenIds, onVisibilityChange }}/>)}</ul>
+            : <p role="status" className="p-2 text-tiny text-muted-foreground">{robot ? t("robot.noLinks") : t("robot.loadingLinks")}</p>}
         </div>
       </div>
     </ToolPanel>
