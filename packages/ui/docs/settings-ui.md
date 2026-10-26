@@ -78,7 +78,7 @@ none.
   host shows the view small — the same buttons, sizes and places as over a file. Under it,
   the page: the TEXTTOCAD wordmark and byline, then GitHub (its mark, a link to the project:
   it is open source), Discord and X, as icon links (GitHub and Discord are the app menu's
-  too, X its footer's "Made by"; no light/dark button: Theme is the menu's), then Recent Files with its search, grid/list switch
+  too, X its footer's "Made by"; no light/dark button: Theme is the menu's), then Recent with its search, grid/list switch
   and Open where the host has a file chooser: the models opened before, pinned first, as cards
   or rows.
   The update shows only for a release

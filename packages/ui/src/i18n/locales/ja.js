@@ -18,6 +18,8 @@ export default {
   "file.opening": "開いています…",
   "file.missing": "ファイルが存在しません",
   "file.notHeld": "このモデルは保持されていません",
+  "file.notSaved": "このモデルは保存されていません",
+  "file.detached": "このモデルのスクリプトがありません",
   "file.openFailed": "このファイルを開けませんでした",
   "file.displayFailed": "このファイルを表示できませんでした",
   "file.goHome": "ホームへ戻る",
@@ -72,7 +74,7 @@ export default {
 
   "home.byline": "何でも作ろう。",
   "home.bylineOpenSource": "100% オープンソースで無料。",
-  "home.recentFiles": "最近のファイル",
+  "home.recentFiles": "最近",
   "home.launchFolder": "起動フォルダー",
   "home.searchAria": "モデルを検索",
   "home.searchPlaceholder": "検索",
@@ -124,8 +126,6 @@ export default {
   "alert.copyFailed": "詳細をコピーできませんでした。上のテキストを選択してコピーしてください。",
   "alert.retry": "再試行",
   "alert.reportIssue": "問題を報告",
-  "alert.stale.title": "ビルド後にコードが変更されました",
-  "alert.stale.message": "最後のビルドを表示しています。再実行はされていません。もう一度ビルドするには、次を実行してください:",
 
   "loading.lastStep": "直前のステップ: {label}",
   "loading.openingModel": "モデルを開いています",

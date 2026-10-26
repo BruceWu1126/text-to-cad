@@ -19,6 +19,8 @@ export default {
   "file.opening": "正在開啟…",
   "file.missing": "檔案不存在",
   "file.notHeld": "此模型已不再保留",
+  "file.notSaved": "此模型未儲存",
+  "file.detached": "此模型的指令碼已不存在",
   "file.openFailed": "無法開啟這個檔案",
   "file.displayFailed": "無法顯示這個檔案",
   "file.goHome": "回到首頁",
@@ -73,7 +75,7 @@ export default {
 
   "home.byline": "打造任何東西。",
   "home.bylineOpenSource": "100% 開放原始碼，完全免費。",
-  "home.recentFiles": "最近的檔案",
+  "home.recentFiles": "最近",
   "home.launchFolder": "啟動資料夾",
   "home.searchAria": "搜尋模型",
   "home.searchPlaceholder": "搜尋",
@@ -125,8 +127,6 @@ export default {
   "alert.copyFailed": "無法複製詳細資料。請選取上方內容後自行複製。",
   "alert.retry": "重試",
   "alert.reportIssue": "回報問題",
-  "alert.stale.title": "自上次建置以來程式碼已變更",
-  "alert.stale.message": "你正在檢視上次的建置結果，沒有重新執行。若要重新建置，請執行：",
 
   "loading.lastStep": "上一個步驟：{label}",
   "loading.openingModel": "正在開啟模型",

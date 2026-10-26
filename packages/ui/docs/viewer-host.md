@@ -43,8 +43,8 @@ mounted renderers own scenes, document controllers and temporary resource leases
 Unmounting one view releases its work without disposing another view's services
 or admitted cache writes. Hosts dispose a service when its workspace closes.
 
-`FileViewer`'s optional `presentation.error` receives `message`, `missing`, and
-`reload`, which rereads only the file that produced the error; a callback from a
+`FileViewer`'s optional `presentation.error` receives `message`, `missing`, `error`
+(what the source raised, for a host to read its own fields on), and `reload`, which rereads only the file that produced the error; a callback from a
 departed file cannot reload its replacement.
 
 ## Interface map and implementations
@@ -344,16 +344,18 @@ changes (`kit/viewport/thumbnail.js`; a DXF paints its fitted drawing on a canva
 of its own). A view that goes before it settles rejects it. `useModelThumbnail`
 keeps one per revision of a file per mounted view (a model rebuilt while it is
 open is pictured again once its new revision is drawn), and only for the file the
-view still shows.
+view still shows. A model's document is pictured as a file is, by its id: its catalog
+row's revision is the build the engine holds, so a rebuild is a new revision.
 On the home, a card on screen with no picture, or one taken before its file last
 changed (`pictured` against `modified`), is pictured out of sight wherever the host
 keeps pictures (`onThumbnail`): `CadViewer` mounts a viewer of its own for it, over
 its own client — its own renderers and live binding, compact, behind the page at the
-picture's size — one model at a time, each once per visit, and a STEP only once the
-cadgen engine holds it (`client.engineHolds`), and keeps the picture through
-`onThumbnail` as it keeps the file on screen's. The home never starts the engine's
-read of a STEP (a large one's is long): one it does not hold keeps its placeholder
-until a view shows it.
+picture's size — one model at a time, each once per visit, and a STEP or a model's
+document (by its id) only once the cadgen engine holds it (`client.engineHolds`), and
+keeps the picture through `onThumbnail` as it keeps the file on screen's. The home never
+starts the engine's read of a STEP (a large one's is long) nor a model's build: one it
+does not hold — a model that is `unsaved` or `detached` among them — keeps its
+placeholder until a view shows it.
 `readState().display` and `setDisplaySettings(patch)` use the same sparse display
 schema as snapshots: `mode` selects `solid`, `shaded`, `parts`, `xray`, `hidden-line`,
 or `wireframe` (each a look at its own defaults), `grid` switches the measuring grid,
@@ -450,7 +452,7 @@ FileViewer draws ONE navbar, the same in every app, over every file and over a h
 Over the home it has only the logo and its menu (no Back to files), Back and Forward where
 the host hands a `history`, and the host's update, Full size and Open in browser, each where
 it stands over a file; the home's search, layout switch and Open stay
-in its Recent Files row, and its links under its title. Left: the text-to-cad "C" logo,
+in its Recent row, and its links under its title. Left: the text-to-cad "C" logo,
 which opens the app menu (`AppMenu`, `file-viewer/navigation/AppMenu.jsx`), then Back and
 Forward where the host hands a `history`, then the open file's name and its ⋯ menu. The
 logo, Back and Forward, the name and the ⋯ share one style (`NAV_ITEM_CLASS`):
@@ -530,8 +532,11 @@ never resizes it.
 
 A file that will not open leaves the navbar over a page of the host's
 (`presentation.error`). `CadViewer`'s says "File does not exist" and the file's path
-when it is missing (`isMissingFileError`) -- for a document named by its id, "This model is no
-longer held" and the engine's words, which name the command that builds it again -- and "Could
+when it is missing (`isMissingFileError`) -- for a document named by its id, the engine's words,
+which name the command that builds it again, under a title of the state the engine names
+(the client's error's `state`, from the catalog's `missingState`): "This model is not saved"
+(`unsaved`), "This model’s script is gone" (`detached`), else "This model is no longer held" --
+and "Could
 not open that file" and the reason otherwise, each with a Go home button where the host has a home.
 
 The viewport's edges and corners are the shell's, never the host's: the tool strip at the

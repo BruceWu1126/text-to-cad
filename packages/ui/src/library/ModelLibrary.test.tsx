@@ -31,8 +31,8 @@ it('heads the home with the TEXTTOCAD wordmark over GitHub, Discord and X and no
   expect([...nav.querySelectorAll('a, button')].map(node => [node.getAttribute('aria-label'), node.getAttribute('href')]))
     .toEqual([['GitHub', links.github], ['Discord', links.discord], ['X', links.x]]);
   expect(screen.queryByText('Build things')).toBeNull();
-  // The links row is followed straight by Recent Files: no update row.
-  expect(nav.nextElementSibling?.querySelector('h1')?.textContent).toBe('Recent Files');
+  // The links row is followed straight by Recent: no update row.
+  expect(nav.nextElementSibling?.querySelector('h1')?.textContent).toBe('Recent');
 });
 
 it('offers Open only where the host has a chooser, and opens and pins through the host', async () => {

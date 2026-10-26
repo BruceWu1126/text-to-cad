@@ -358,8 +358,9 @@ navbar draws no arrows of its own here). Under Recents the home lists the folder
 recent launch (`serverInfo.start`, read again each time the home is shown): its subfolders and CAD
 files, a file opening by its id. A `/<id>` the server knows no file for, and no model the engine
 holds, shows "This model is no longer held" with the engine's words -- the command that builds it
-again, `cadgen run <the program that built it>` -- and Go home; a file that is not there shows "File
-does not exist".
+again, `cadgen run <the program that built it>` -- and Go home, titled for the state the engine
+names: "This model is not saved" (`unsaved`) or "This model’s script is gone" (`detached`); a file
+that is not there shows "File does not exist".
 
 A file is opened by its path (Select File, the home) and shown by its id: the page asks the
 catalog for the file (`GET /__cad/catalog?file=<abs>`), whose row carries the document's `id`,
@@ -453,7 +454,11 @@ composer has no camera action: its note to the agent is Quick Edit.
 A model's page is `/<id>`, its document's id, which `python SCRIPT.py` prints (`view:`). The
 page reads the document the engine holds, by id (`GET /__cad/catalog?id=`); it never builds or
 imports a script, and no folder lists one. A model has no file of its own: no Select File, no
-file menu, and it never enters saved recents or thumbnail storage. Once its worker retires or
+file menu. It is in the library by its id (the engine's record), and its picture is taken by
+its id as a file's is: on screen once it settles, once per build, and on the home only while
+the engine holds it. Once its worker retires or
 the engine restarts, its page shows it from the engine's cache, as last built; only once the cache
 holds no file of it (deleted by hand, or never saved: the engine's state `unsaved`) does its page
-say it is no longer held and name the command that builds it again. Rebuilding the model updates the same view through the document version stream.
+say it is not saved and name the command that builds it again. The page shows the engine's last
+build and says nothing of the script it came from: an edit not yet built is no state of the page's;
+what it shows is the engine's own run, building or failed. Rebuilding the model updates the same view through the document version stream.

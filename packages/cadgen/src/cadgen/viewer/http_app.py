@@ -306,13 +306,14 @@ class CadApp:
     def read_catalog(self, file=None, ident=None) -> dict:
         """The catalog of one document -- ``file``, an absolute path, registered by its id
         (``remember``), or ``ident``, a document's id: a file's or a model's the engine holds -- its
-        row, with its ``id``, or none when it has none (``missing`` says why for an id), and its
+        row, with its ``id``, or none when it has none (``missing`` says why for an id, and
+        ``missingState`` is the engine's state for it), and its
         revision -- a digest of the entries, which a client that only watches for change compares
         instead of reading the catalog again. A file is written whole, by rename, by every writer
         cadgen has, so a read never meets one half written."""
         from .model_catalog import entry as model_entry, held
 
-        missing = ""
+        missing = state = ""
         entry = None
         if ident:
             if not is_id(ident):
@@ -323,7 +324,10 @@ class CadApp:
             else:
                 entry = model_entry(ident)
                 if entry is None:
-                    missing = held(ident)[1] if self.engine_documents.server is not None else f"no document {ident} is held"
+                    if self.engine_documents.server is not None:
+                        _model, missing, state = held(ident)
+                    else:
+                        missing = f"no document {ident} is held"
         elif file:
             path = absolute_path(file)
             entry = catalog_entry(path)
@@ -335,6 +339,10 @@ class CadApp:
         answer = {"schemaVersion": CAD_CATALOG_SCHEMA_VERSION, "entries": entries, "revision": catalog_revision(entries)}
         if missing:
             answer["missing"] = missing
+        if state:
+            # The engine's state for the model it does not hold (``unsaved``, ``detached``): the
+            # page's title for it.
+            answer["missingState"] = state
         return answer
 
     # --- gates ------------------------------------------------------------

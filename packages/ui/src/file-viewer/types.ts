@@ -189,7 +189,10 @@ export interface FileViewerProps {
     /** The host's home, shown with no file: a page of its own under the navbar, which has only its logo's menu, Back and Forward, update, Full size and Open in browser there. */
     home?: ReactNode;
     loading?: ReactNode;
-    /** A file that will not open: `missing` when it does not exist; `reload` rereads only this file. */
-    error?: (failure: { message: string; missing: boolean; reload?: () => void }) => ReactNode;
+    /**
+     * A file that will not open: `missing` when it does not exist; `error`, what the source raised
+     * (a host reads its own fields on it); `reload` rereads only this file.
+     */
+    error?: (failure: { message: string; missing: boolean; error?: unknown; reload?: () => void }) => ReactNode;
   };
 }

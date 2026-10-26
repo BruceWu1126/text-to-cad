@@ -366,5 +366,15 @@ test('an id the engine does not hold is missing, in the engine\'s words', async 
   assert.equal(isMissingFileError(failure), true);
   assert.match(failure.message, /run `python \/m\/parts.py` to build it again/);
   assert.equal(new URL(calls[0]).searchParams.get('id'), id, 'a document id is asked for by id');
+  assert.equal(failure.state, undefined, 'the engine named no state');
+  client.dispose();
+});
+
+test('an id the engine does not hold carries the state the engine names for it', async () => {
+  const id = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab';
+  const client = createCadClient({ origin: 'http://one.test', pollIntervalMs: 0, fetch: async () => json({ entries: [],
+    missing: `cube (${id}) is detached: /m/parts.py is gone, and nothing builds it again; delete it from the home`, missingState: 'detached' }) });
+  const failure = await client.resolveEntry(id).catch((error) => error);
+  assert.deepEqual([isMissingFileError(failure), failure.state], [true, 'detached']);
   client.dispose();
 });
