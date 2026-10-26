@@ -308,7 +308,7 @@ code fails, they also send a crash report: the error's type and where in cadgen 
 dependencies) it failed, never its message, and with any of your own code a bare placeholder. Our server adds the country each request
 comes from (worked out from its IP address, which it doesn't keep) and stores it all with PostHog. Never file names,
 paths, contents or prompts. The first `cadgen` command says so once, and sending starts then. Turn it off, which
-also deletes what was sent, with `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen telemetry off`, **Share anonymous usage data** in either app's menu (the logo at
+also deletes what was sent, with `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen telemetry off`, **Telemetry** in either app's menu (the logo at
 the top left, over any model), or by asking your agent. `DO_NOT_TRACK=1` or `CADGEN_TELEMETRY=0` turns it off for
 one process, and `CADGEN_TELEMETRY=1` on, without changing your setting; nothing is sent by default in CI or from a
 development install. Nothing waits to send: a command or a model script sends nothing itself, and what it counted,
