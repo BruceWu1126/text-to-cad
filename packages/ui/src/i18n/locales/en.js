@@ -45,7 +45,7 @@ export default {
   "file.revealFileManager": "Show in file manager",
 
   // The app's menu, from the navbar's logo.
-  "menu.backToFiles": "Back to files",
+  "menu.backToHome": "Back to home",
   "menu.theme": "Theme",
   "menu.language": "Language",
   "menu.languageAutomatic": "Automatic ({language})",

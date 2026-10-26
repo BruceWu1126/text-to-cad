@@ -37,7 +37,7 @@ export default {
   "file.revealExplorer": "エクスプローラーで表示",
   "file.revealFileManager": "ファイルマネージャーで表示",
 
-  "menu.backToFiles": "ファイル一覧へ戻る",
+  "menu.backToHome": "ホームへ戻る",
   "menu.theme": "テーマ",
   "menu.language": "言語",
   "menu.languageAutomatic": "自動（{language}）",

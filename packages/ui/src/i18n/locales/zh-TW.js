@@ -38,7 +38,7 @@ export default {
   "file.revealExplorer": "在檔案總管中顯示",
   "file.revealFileManager": "在檔案管理員中顯示",
 
-  "menu.backToFiles": "回到檔案列表",
+  "menu.backToHome": "回到首頁",
   "menu.theme": "主題",
   "menu.language": "語言",
   "menu.languageAutomatic": "自動（{language}）",

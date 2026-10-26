@@ -171,12 +171,12 @@ the selection through `promptContext.deliver`. Neither route detects the platfor
 
 `navigation.openFile(path)` shows a file, by its absolute path (or a document by its id), in this view: a pick
 in the name menu (a Recent row, a file in Files), a renderer's link. `navigation.home()`, where the host has a home,
-shows it in this view: from a file, the app menu's Back to files (the menu the navbar's
+shows it in this view: from a file, the app menu's Back to home (the menu the navbar's
 logo opens) leads to it; over the home the same navbar has the logo and its menu, with no
-Back to files. `CadViewer` implements both
+Back to home. `CadViewer` implements both
 over the host's `onShow(path)` (`''` is the home), and gives a host a home only with a
 `library`: a host whose own navigation shows one file (Codex's file handler) passes none,
-and its view shows that file and nothing else — no home, its menu no Back to files, no
+and its view shows that file and nothing else — no home, its menu no Back to home, no
 name menu, and no `openFile`, so a renderer's link to another file (a robot's mesh) is plain
 text there. A host that keeps a view's own history,
 where no browser does (the CAD app's views), hands it as `history` (`ViewerHistory`:
@@ -476,7 +476,7 @@ browser — and what it still adds is its own, as its notice at the viewport's t
 (`notice`, the column Quick Edit hangs under: the CAD app's Full size and its update notice).
 In Preview, in
 every host, the navbar steps aside for Preview's own bar. Over the home the navbar has only
-the logo and its menu (no Back to files), Back and Forward where the host hands a `history`,
+the logo and its menu (no Back to home), Back and Forward where the host hands a `history`,
 and the host's update and actions, each where it stands over a file; the home's type filter, search and
 layout switch stay in its control row, and its links are the app menu's. Left: the text-to-cad
 logo (the TEXTTOCAD wordmark over the home, the "C" over a document, a plain swap of one button),
@@ -499,7 +499,7 @@ browser). The navbar holds no settings and none of the view's controls.
 The app menu is FileViewer's, built from the host's `navigation.home`, `links` and
 `environment.platform` and the person's `FileViewerProps.appSettings` (which `CadViewer`
 passes on), the same over a file and over the home. It is a dropdown on the floating surface.
-First **Back to files**, where the host has a home; then
+First **Back to home**, where the host has a home; then
 the host's on/off settings (`appSettings`, below) as checkbox items, checked at the right,
 which a press turns without closing the menu; then, where the host has a tracker
 (`links.issues`), **Send feedback**, a link to a new issue titled "Feedback: "

@@ -284,7 +284,7 @@ is no Materials editor or persisted material override. See [View styles](docs/re
 [loading](docs/loading.md).
 
 The navbar leads with the logo (the TEXTTOCAD wordmark over the home, the C over a document,
-morphing between them), which opens the app's menu: Back to files where the host
+morphing between them), which opens the app's menu: Back to home where the host
 has a home, the person's settings (Share anonymous usage data), Send feedback
 (a new issue titled "Feedback: " where the host has a tracker), GitHub, Discord and, in
 gray, the version and who made it. Where the host keeps the view's own history (the CAD
@@ -296,7 +296,7 @@ actions (the web viewer's Export); the view's own controls (a 3D view's Projecti
 Preview) end its tool strip, never the navbar. A host whose own frame is its navigation shows
 the view alone (`chrome: "bare"`, the CAD app's file handler), with no navbar at all. With no
 file a view shows the host's home, the model library, under the same navbar (its logo and menu,
-without Back to files, Back and Forward where the host keeps the view's history, and the host's
+without Back to home, Back and Forward where the host keeps the view's history, and the host's
 update and actions): one control row (Recent; the type filter, the search, grid or list),
 then the library alone: the documents opened or built before, pinned first, as Figma-style
 tiles with their pictures or as a table of rows, each with its pin and a ⋯ menu ending in

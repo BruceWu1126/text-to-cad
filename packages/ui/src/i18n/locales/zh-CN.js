@@ -38,7 +38,7 @@ export default {
   "file.revealExplorer": "在资源管理器中显示",
   "file.revealFileManager": "在文件管理器中显示",
 
-  "menu.backToFiles": "返回文件列表",
+  "menu.backToHome": "返回主页",
   "menu.theme": "主题",
   "menu.language": "语言",
   "menu.languageAutomatic": "自动（{language}）",

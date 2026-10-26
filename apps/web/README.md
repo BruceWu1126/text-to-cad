@@ -366,9 +366,9 @@ name, its glyph and its age. The pin and the ⋯ appear on hover (at a tile's pi
 pinned one keeps its pin. The ⋯ menu holds Open, a file's Copy path and Reveal (a model has
 neither), Pin or Unpin, and Delete, which asks first: a model's "Delete bracket?" removes the engine's record and its saved build, its
 script and exported files kept, and no other model with it; a file's "Delete bracket.step from the viewer?" removes the
-engine's record of the file alone. From a file, Back to files in
+engine's record of the file alone. From a file, Back to home in
 the menu the navbar's C logo opens leads back to it. The home has the same navbar, its logo
-the TEXTTOCAD wordmark rather than the C (a plain swap, no animation), the same menu (without Back to files, and with GitHub, Discord and X as
+the TEXTTOCAD wordmark rather than the C (a plain swap, no animation), the same menu (without Back to home, and with GitHub, Discord and X as
 over a file) at the left and
 the update button at the right while a newer text-to-cad is out. The home is a step of
 the browser's history, as a file is: the browser's Back and Forward walk between them (the
@@ -443,7 +443,7 @@ The Viewer has the one navbar every app shares (see
 [the host contract](../../packages/ui/docs/viewer-host.md#host-chrome-slots)): at the
 left the logo (the TEXTTOCAD wordmark on the home, the C over a file), which opens the app menu, then the open file's name (no glyph),
 which opens the name menu (Models and Files), with its ⋯; at the right only the blue update button, while a newer text-to-cad
-is out. The app menu holds Back to files (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
+is out. The app menu holds Back to home (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
 GitHub, Discord and, in gray, the version (a link to its release notes) and "Made by @…"
 (X), as in the CAD app, over a file and on the home alike.
 Projection, Display and Preview are the view's, at the tool strip's end, never the navbar's;

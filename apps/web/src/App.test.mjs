@@ -175,7 +175,7 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     assert.equal(viewer().file, TWO);
     assert.equal(new URL(window.location.href).pathname, `/${TWO}`);
     assert.equal(viewer().library.pick, undefined);
-    // Back to files leads to the bare URL: the home is a step of the browser's history, as a file is,
+    // Back to home leads to the bare URL: the home is a step of the browser's history, as a file is,
     // so the browser's Back and Forward walk between them (the page hands no history of its own).
     const beforeHome = window.history.length;
     await act(async () => { viewer().onShow(''); await new Promise(resolve => setTimeout(resolve, 10)); });

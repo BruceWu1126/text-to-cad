@@ -76,7 +76,7 @@ cleanup, while it still belongs to the same source.
 ## The navbar and the explorer
 
 The navbar is drawn over every file from the moment one is asked for, and over the
-host's home — only its logo and menu, without Back to files, Back and Forward where the
+host's home — only its logo and menu, without Back to home, Back and Forward where the
 host keeps the view's history, and the host's update and actions, where they stand over
 a file — never for a `compact` view (a
 picture: the home's thumbnails), never where the host asks for the view alone
@@ -87,11 +87,11 @@ bar in its place and gives it back as it closes. Over a file, left to right:
 
 - the text-to-cad "C" logo (named Menu, with no chevron; over the home the TEXTTOCAD wordmark,
   a plain swap of the same button), which opens the app menu
-  (`navigation/AppMenu.jsx`): Back to files where the host has a home
+  (`navigation/AppMenu.jsx`): Back to home where the host has a home
   (`navigation.home`), the person's settings (`appSettings`), Send feedback, GitHub,
   Discord and, in gray, the version and who made it. FileViewer builds it from
   `host.links`, `appSettings` and `environment.platform`. A host with no home has the
-  logo and the menu too, without Back to files;
+  logo and the menu too, without Back to home;
 - Back and Forward, where the host keeps the view's own history (`history`, a
   `ViewerHistory`: the CAD app's views; a browser's page has its own and hands none): two
   arrows, each there always and disabled where it has nowhere to go;

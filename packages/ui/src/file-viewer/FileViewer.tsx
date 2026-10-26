@@ -116,11 +116,11 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
     ? { source, folder, onOpen: onOpenFile, onFolderChange: onExplorerFolderChange } : null,
     [navigationPath, folder, source, onOpenFile, onExplorerFolderChange]);
   const recentMenu = useMemo(() => recent && onOpenFile ? { list: () => recent.list(), onOpen: onOpenFile } : null, [recent, onOpenFile]);
-  // The logo's app menu: the host's links and the person's settings (Back to files is `onHome`).
+  // The logo's app menu: the host's links and the person's settings (Back to home is `onHome`).
   const menu = useMemo(() => host.links || appSettings?.length || colorScheme || language ? { links: host.links, appSettings, colorScheme, language, platform: appearance.platform } : null,
     [host.links, appSettings, colorScheme, language, appearance.platform]);
   // The navbar is drawn over every file and over the host's home — there only the logo's menu (no
-  // Back to files), Back and Forward where the host keeps the view's history, and the host's update
+  // Back to home), Back and Forward where the host keeps the view's history, and the host's update
   // and actions, each where it is over a file — never over a view drawn small with no chrome
   // (`compact`: an offscreen picture), never where the host asks for the view alone (`chrome: "bare"`),
   // and not while the renderer's Preview is up, which draws its own bar in its place.

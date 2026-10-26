@@ -694,7 +694,7 @@ navbar's logo over every file and over the home (FileViewer builds it from the h
 it failed to as well). Its rows, a rule between each group, are only
 what the host supplies, the person's settings in the order Language, Telemetry, Theme:
 
-- **Back to files**, where the host has a home
+- **Back to home**, where the host has a home
   (`navigation.home`): it shows the home in this view. The home's own menu has none.
 - **Language**, where the host hands the person's language (`language`, both apps): one row,
   its name and then the language in force, whose submenu offers **Automatic (<the inferred

@@ -37,7 +37,7 @@ export default {
   "file.revealExplorer": "파일 탐색기에서 보기",
   "file.revealFileManager": "파일 관리자에서 보기",
 
-  "menu.backToFiles": "파일 목록으로",
+  "menu.backToHome": "홈으로",
   "menu.theme": "테마",
   "menu.language": "언어",
   "menu.languageAutomatic": "자동({language})",
