@@ -5,8 +5,8 @@ backend is the installation's engine, hosting the `cadgen.viewer` HTTP app.
 The built client ships inside the same wheel. `cadgen viewer [FILE ...]` opens the
 engine's one page and exits. The page addresses every document by path, `/<uuid>`: a
 model's id, or a file's id once a launcher (or the page itself) registers it, derived from
-the file's canonical path. `/` is the home: Recents, Open, and the folder of the most recent
-launch. Python scripts are never documents. There is no hosted deployment.
+the file's canonical path. `/` is the home: the library alone, the documents opened or built
+before. Python scripts are never documents. There is no hosted deployment.
 
 This app is the browser host of `@text-to-cad/ui/file-viewer`, not the owner of
 the shared CAD interface.
@@ -81,11 +81,11 @@ For the spawned backend, `scripts/directoryRoot.mjs` uses `INIT_CWD`, then the
 process working directory, accepting either only outside `apps/web`. If neither
 qualifies, Vite defaults to the app's parent, `<checkout>/apps`. npm sets
 `INIT_CWD` to the directory where you invoked it, so `--prefix` selects the app
-without changing that folder. It is only the folder the home shows
+without changing that folder. It is only the folder a launch's relative files are read from
 (`serverInfo.start`, the most recent launch's): the backend opens any file by its absolute path.
 
 Dev announces itself to the same engine with
-`python -m cadgen.viewer --api-only --json` (a launch: its folder becomes the home's), then
+`python -m cadgen.viewer --api-only --json` (a launch, from its folder), then
 proxies `/__cad` with the engine token. Vite owns the client and closing it leaves the engine
 running. `VIEWER_PYTHON` names the interpreter with cadgen installed (default `python3`).
 `VIEWER_BACKEND_URL` and `CAD_ENGINE_TOKEN` attach to an existing engine
@@ -119,7 +119,7 @@ port, which the installation keeps (`cadgen status` says which and why). `--port
 pins its HTTP port and `--host ADDRESS` pins its bind address. If the running engine has a different
 port or address, the launch fails with that conflict; it never replaces a server
 or starts a second engine. A taken port that `--port` names fails, naming its holder. There are no page sessions: every launch
-reuses the one page, and its folder replaces the last launch's as the one the home shows.
+reuses the one page, and its folder replaces the last launch's as the one its relative files are read from.
 `--dist DIR` (or `CADGEN_VIEWER_DIST`) selects a built client.
 
 The JSON record includes `url`, `apiUrl`, `token`, `port`, `pid`, `start` (the folder the home
@@ -281,15 +281,19 @@ and native service adapters. Shared renderers own all model interaction. STEP an
 robots open in Select, its selection filter the chevron after its button; the tool in hand's
 controls are one row under the strip. An assembly's Features (Links for a robot), Position
 and an SDF's metadata are the file sidebar's, a tile each at the top-left, whatever the tool. The
-file's name in the navbar opens the explorer.
+file's name in the navbar opens its name menu: Recent and Files (the explorer).
 STEP and robot files have tools on a strip at the top centre; GLB, STL and 3MF have none,
 a GLB's clips or not.
 Every 3D file's strip ends in Display (its settings, a popover that opens down) and
 Preview, with the view cube at the bottom-right and Quick Edit at the top-right. DXF is a
 2D canvas with pan, zoom, snapshot and Quick Edit, without a 3D toolbar or file sidebar.
 
-The explorer is a popover under the file's name: the file's folder, one folder at a
-time, with "Filter files..." to find a file anywhere under it. Below 600px of
+The name menu is a popover under the file's name, two tabs over the explorer's own rows:
+**Recent**, the library's eight latest documents, models and files alike, by last activity, each
+its kind's glyph, its name and its age ("2h ago"), the one on screen marked; and **Files**, the
+explorer: the file's folder (a model's, the folder its record registered), one folder at a
+time, with "Filter files..." to find a file anywhere under it. It opens on Recent over a model
+and on Files over a file. Below 600px of
 FileViewer width (a phone) the chrome is touch-sized and the file sidebar's tiles lead the tool strip. Preview is the shared shell's button after Display on the strip: it takes the whole page,
 hiding the navbar, the tool strip and Quick Edit, opens still (Orbit, in its settings, is
 off at every entry), draws the model in Render — the one place it is drawn — and keeps its
@@ -349,30 +353,39 @@ No snapshot is written while drawing or typing, and no image is rendered.
 
 ### The home
 
-The bare URL is the home: the library of models every CAD view shares
-(`@text-to-cad/ui/library`), and Open, the desktop's file chooser (`POST /__cad/pick`),
-where the server's computer has one (`serverInfo.pick`). From a file, Back to files in
+The bare URL is the home: the library every CAD view shares (`@text-to-cad/ui/library`),
+and nothing else: its search, its grid/list switch, the type chips (All, Models, Files) where
+both kinds are listed, and the cards. A card is its picture, its kind's glyph (a model's code
+glyph, a file's type icon), its name and its last activity with no verb ("now", "5m ago",
+"2h ago", "3d ago", then the short date); a script that declares several models is one card,
+named for its main model, its other models folded under it ("and 27 more"). Its ⋯ menu holds
+Open, Copy path and Reveal (a model's path is its script's), Pin or Unpin, and Delete, which
+asks first: a model's "Delete bracket?" removes the engine's record and its saved build, its
+script and exported files kept; a file's "Delete bracket.step from the viewer?" removes the
+engine's record of the file alone. From a file, Back to files in
 the menu the navbar's C logo opens leads back to it. The home has the same navbar, its C
 menu (without Back to files) at the left and the update button at the right while a newer
 text-to-cad is out; under its wordmark are GitHub, Discord and X. The home is a step of
 the browser's history, as a file is: the browser's Back and Forward walk between them (the
-navbar draws no arrows of its own here). Under Recents the home lists the folder of the most
-recent launch (`serverInfo.start`, read again each time the home is shown): its subfolders and CAD
-files, a file opening by its id. A `/<id>` the server knows no file for, and no model the engine
+navbar draws no arrows of its own here). A `/<id>` the server knows no file for, and no model the engine
 holds, shows "This model is no longer held" with the engine's words -- the command that builds it
 again, `cadgen run <the program that built it>` -- and Go home, titled for the state the engine
 names: "This model is not saved" (`unsaved`) or "This model’s script is gone" (`detached`); a file
 that is not there shows "File does not exist".
 
-A file is opened by its path (Select File, the home) and shown by its id: the page asks the
+A file is opened by its path (the name menu, the home) and shown by its id: the page asks the
 catalog for the file (`GET /__cad/catalog?file=<abs>`), whose row carries the document's `id`,
 and moves to `/<id>`. Rows join by that id (`client.entryOf`), so a symlinked or case-variant
-spelling of one file is one row. A model (a document with no file of its own) has no Select File
-and no file menu; a file's Select File lists that file's folder.
+spelling of one file is one row. A model (a document with no file of its own) has no file menu;
+its Files lists the folder its record registered (the catalog row's `folder`), a file's its own folder.
 
-The home reads the library over `GET /__cad/recents`, pins, unpins and removes over
-`POST /__cad/recents`, and draws each card's picture from `GET /__cad/thumbnail`. The
-file on screen joins it once the catalog has it (`{action: "open"}`), and its picture
+The home reads the library over `GET /__cad/recents`, each row with two times, `updated` (a
+file's time on disk, a model's run) and `opened` (when a page last opened it), ordered pinned
+first, then by the later of the two; it pins, unpins, removes a file's record (`remove`) and
+deletes a model's document (`delete`) over `POST /__cad/recents`, and draws each card's picture
+from `GET /__cad/thumbnail`. A model's script is never read for any of it. The document on
+screen says it was opened once the catalog has it (`{action: "open"}`: a file joins the
+library, a model's record notes the time), and its picture
 once it has settled — the model framed whole from the default direction, whatever the
 camera (`{action: "thumbnail"}`). `cadgen.viewer.recents` keeps the library in the
 user's state directory, shared with the CAD app.
@@ -423,8 +436,8 @@ and web stay consistent without host-specific copies of those controls.
 
 The Viewer has the one navbar every app shares (see
 [the host contract](../../packages/ui/docs/viewer-host.md#host-chrome-slots)): at the
-left the C logo, which opens the app menu, then the open file's name, which opens the
-explorer, with its ⋯; at the right only the blue update button, while a newer text-to-cad
+left the C logo, which opens the app menu, then the open file's name after its kind's glyph,
+which opens the name menu (Recent and Files), with its ⋯; at the right only the blue update button, while a newer text-to-cad
 is out. The app menu holds Back to files (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
 GitHub, Discord and, in gray, the version (a link to its release notes) and "Made by @…"
 (X), as in the CAD app, over a file and on the home alike.
@@ -455,8 +468,9 @@ composer has no camera action: its note to the agent is Quick Edit.
 
 A model's page is `/<id>`, its document's id, which `python SCRIPT.py` prints (`view:`). The
 page reads the document the engine holds, by id (`GET /__cad/catalog?id=`); it never builds or
-imports a script, and no folder lists one. A model has no file of its own: no Select File, no
-file menu. It is in the library by its id (the engine's record), and its picture is taken by
+imports a script, and no folder lists one. A model has no file of its own: no file menu; its
+name menu opens on Recent, and its Files lists the folder its record registered. It is in the
+library by its id (the engine's record), and its picture is taken by
 its id as a file's is: on screen once it settles, once per build, and on the home only while
 the engine holds it. Once its worker retires or
 the engine restarts, its page shows it from the engine's cache, as last built; only once the cache

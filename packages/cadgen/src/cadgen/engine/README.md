@@ -2663,7 +2663,8 @@ holds (unsaved, detached) is refused with its state and the command that builds 
 (`cadgen run <the script that defines it>`; **Document lifetime**).
 `--query build` returns saved-file metadata/closure or live-build metadata; `--query closure` and
 `--query geometry` select the other queries explicitly. In the CAD Viewer a model's page is
-`/<id>`; it has no file of its own, so no Select File and no file menu.
+`/<id>`; it has no file of its own, so no file menu, and its name menu's Files lists the folder
+its record registered (the catalog row's `folder`).
 
 A shape with no function -- a REPL's, a notebook cell's -- is handed over instead: `model(shape,
 name="bracket")` returns the same kind of handle (**Shapes handed over**).
