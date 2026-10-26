@@ -126,7 +126,10 @@ export function useDrawingView({ drawing, restored = null, colorScheme = "light"
     const drawable = drawingRef.current;
     const { width, height } = sizeRef.current;
     if (!drawable?.bounds || width <= 0 || height <= 0) return;
-    const fitted = fitTransform(drawable.bounds, width, height);
+    // The drawing frames clear of the view's tool strip, which the view measures as `--cad-tools-bottom`.
+    const frame = containerRef.current?.closest?.("[data-slot=cad-file-view]");
+    const strip = frame ? Number.parseFloat(getComputedStyle(frame).getPropertyValue("--cad-tools-bottom")) : 0;
+    const fitted = fitTransform(drawable.bounds, width, height, { top: Number.isFinite(strip) ? strip : 0 });
     fitScaleRef.current = fitted.scale;
     if (force || !movedRef.current) {
       movedRef.current = false;
