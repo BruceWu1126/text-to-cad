@@ -964,10 +964,11 @@ the view's right edge, the settings panel (`kit/shell/PreviewSettings.jsx`), whi
 from that edge with the file sidebar's own motion (`SIDEBAR_SLIDE_CLASS`), closed each time Preview
 opens and put away by its button or its own X: **Orbit** — its heading's checkbox turns the camera about the model, off every
 time Preview opens, and its **Speed** is a dropdown of speeds — then Render's own settings
-page (see [Display settings](#display-settings-and-section-primitives)). At the top-left, the
-file sidebar offers its **Position** and **Animation** alone, their tiles bare: Preview's own
-pose and routine. Escape leaves Preview too, once an open dropdown has closed. Explode and
-Clip are the tools view's alone. Nothing sits under the model, nor at the bottom centre.
+page (see [Display settings](#display-settings-and-section-primitives)). Preview has no file
+sidebar (hidden, so a tree keeps its state); a file with routines has Preview's own routine in a
+playbar under the model (`kit/tools/playbar/PreviewPlaybar.jsx`), which fades with the bar.
+Escape leaves Preview too, once an open dropdown has closed. Explode and Clip are the tools
+view's alone.
 
 **Preview is drawn in Render**, whatever the file's display mode: it is a view of its own
 over the tools view, drawing the file's Render settings, and the file's own mode and its
@@ -976,8 +977,8 @@ a live `setDisplaySettings` refuses it as it refuses any mode it does not know, 
 left in it reads as the defaults. Render settings edited in Preview are the file's Render settings;
 leaving returns the tools view to the file's mode.
 
-**Routines** play from the file sidebar's **Animation** section, in the tools view and the
-Preview alike (`kit/tools/playbar/AnimationSection.jsx`): its heading holds **Reset animation**,
+**Routines** play from the file sidebar's **Animation** section in the tools view
+(`kit/tools/playbar/AnimationSection.jsx`), and from Preview's playbar in Preview: its heading holds **Reset animation**,
 which stops the routine and puts the model at rest, disabled while it is; its body is the
 routine in hand, a dropdown of the routines where there are two or more, then **Play** or
 **Pause**, the scrubber (`AnimationTimeControl`) and **Playback settings** (a cog: the routine's

@@ -530,12 +530,12 @@ language for the app menu's Language row: `choice` null is Automatic, `inferred`
 means; both apps keep the choice in the person's settings (`/__cad/language`, the `language`
 section of `settings.json`), so it holds for every CAD view. `appSettings` (`{ id, section, label, checked, disabled?, onCheckedChange }[]`,
 a `CadViewer` prop) are the host's own on/off settings: checkbox items of the app menu, in the
-order they come (Share anonymous usage data, in both apps), the same in the
+order they come (Telemetry, in both apps), the same in the
 logo's menu and the home's; nothing of them reaches a renderer, and Display holds none. The
 host owns what each one does and where it is kept.
 `@text-to-cad/ui/consent` is the usage stats toggle both apps share:
 `useAnalyticsConsent(consent)`, which turns the host's consent call into its `appSettings` row
-(Share anonymous usage data). Nothing asks: cadgen's telemetry is on by default once a `cadgen` command
+(Telemetry). Nothing asks: cadgen's telemetry is on by default once a `cadgen` command
 has said so. The host supplies the call and where the answer is kept.
 `@text-to-cad/ui/update` is the update button both apps share, from cadgen's version check:
 `UpdateButton`, the blue button a host hands the viewer as its `update` (`CadViewerProps.update`,
