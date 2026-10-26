@@ -187,7 +187,8 @@ class Document:
         for key, size in done["shapes"]:
             shapes[key] = payload[at:at + size]
             at += size
-        return Source(done["structure"], shapes, live=False)
+        placements = {tuple(path): matrix for path, matrix in done.get("placements") or ()}
+        return Source(done["structure"], shapes, live=False, local_placements=placements)
 
     def _outside(self, verb: str) -> None:
         if self._inside:

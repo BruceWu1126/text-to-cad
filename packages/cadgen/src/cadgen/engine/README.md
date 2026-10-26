@@ -30,7 +30,9 @@ result, transferred into the caller and the kernel loaded on first access, never
 `arm.build(verify=, profile=)` is the debug seam, a `Report`. Inside another model's body a call
 builds the child document as before and returns its handle too, whose `.shape` is the result in
 that process: a body composes `peg().shape`, and a child called for its files alone stays a bare
-`peg()`.
+`peg()`. Read on either side, `.shape` is one tree: every sub-assembly at the placement its parent
+gives it and every part at its own in its assembly, as the body built them -- transferred, each
+node's placement in its parent (`export.Source.locals`), never pushed down into the leaves.
 
 ```python
 @model

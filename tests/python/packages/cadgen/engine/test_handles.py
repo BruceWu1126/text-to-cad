@@ -175,6 +175,52 @@ print("RESULT " + json.dumps({"built": arm(handle.shape), "posed": arm(posed(han
 """
 
 
+# A child whose sub-assemblies stand turned and moved, and two readers of its ``.shape``: a body
+# (``inside``, which notes what it read) and the program itself.
+NESTED = """
+import json
+import pathlib
+
+import build123d as bd
+from cadgen import model
+
+
+def tree(node, path=()):
+    location = node.location.wrapped.Transformation()
+    box = node.bounding_box()
+    rows = [{"path": list(path), "kind": node.wrapped.ShapeType().name, "label": node.label,
+             "location": [round(location.Value(row, column), 6) + 0.0 for row in (1, 2, 3) for column in (1, 2, 3, 4)],
+             "box": [round(value, 6) + 0.0 for value in (*box.min, *box.max)]}]
+    for at, child in enumerate(node.children or ()):
+        rows += tree(child, path + (at,))
+    return rows
+
+
+@model
+def arm():
+    base = bd.Box(40, 40, 10).located(bd.Location((0, 0, 5)))
+    servo = bd.Box(20, 10, 8).located(bd.Location((10, 0, 0)))
+    screw = bd.Cylinder(1.5, 6).located(bd.Location((1, 2, 3), (0, 30, 0)))
+    base.label, servo.label, screw.label = "base", "servo", "screw"
+    clamp = bd.Compound(children=[screw], label="clamp").located(bd.Location((0, 5, 0), (90, 0, 0)))
+    elbow = bd.Compound(children=[servo, clamp], label="elbow").located(bd.Location((100, 0, 0), (0, 0, 180)))
+    return bd.Compound(children=[base, elbow], label="arm")
+
+
+@model
+def inside():
+    shape = arm().shape
+    pathlib.Path(__file__).with_name("inside.json").write_text(json.dumps(tree(shape)), encoding="utf-8")
+    return shape
+
+
+if __name__ == "__main__":
+    inside()
+    print("RESULT " + json.dumps({"inside": json.loads(pathlib.Path(__file__).with_name("inside.json").read_text()),
+                                  "caller": tree(arm().shape)}))
+"""
+
+
 def _served(url: str, ident: str) -> dict:
     """The document a page serves (``/api/doc/<id>``), with the token its URL carries."""
     page, _, query = url.partition("?")
@@ -316,6 +362,21 @@ class HandleTest(unittest.TestCase):
         self.assertEqual(found["refused"], "posed() was given hinge's .shape, which carries its parts and not its "
                                            "joints: pass the handle the model call returns, posed(hinge(), 'open')")
 
+    def test_a_child_s_shape_is_one_tree_in_the_body_and_in_the_caller(self) -> None:
+        # Read in the calling process, a child's sub-assemblies keep the placements the body gave
+        # them, and each part is the shape the body made, where the body put it: every node's
+        # kind (a solid, not the compound the document wraps it in), label, placement and box are
+        # the body's.
+        project = self.project("nested", {"nested.py": NESTED})
+        found = self.run_python("nested.py", cwd=project)
+        self.assertEqual([row["path"] for row in found["caller"]], [[], [0], [1], [1, 0], [1, 1], [1, 1, 0]])
+        elbow = next(row for row in found["caller"] if row["label"] == "elbow")
+        self.assertEqual(elbow["location"][3], 100.0, "the elbow stands where the body put it, turned")
+        self.maxDiff = None
+        self.assertEqual(found["caller"], found["inside"])
+        # After a restart the document comes from the engine's cache, read as its xbf: the same tree.
+        self.assertEqual(self.cli("stop").returncode, 0)
+        self.assertEqual(self.run_python("nested.py", cwd=project)["caller"], found["inside"])
 
 UNREACHED = """
 import sys

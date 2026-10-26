@@ -657,7 +657,8 @@ def _posed_document(handle: Any, pose: Any) -> Any:
     source = handle._transferred()
     if source.structure.get("kinematics") is None:
         raise KinematicsError(f"{handle.name} has no joints to pose")
-    shape = Source(posed_structure(source.structure, pose), source.shapes, live=False).shape()
+    shape = Source(posed_structure(source.structure, pose), source.shapes, live=False,
+                   local_placements=source.local_placements).shape()
     shape.__dict__[TRANSFERRED] = handle.name
     return shape
 
@@ -695,6 +696,21 @@ def _occurrence(tree: Any, path: tuple[int, ...]) -> tuple[Any, list[str]]:
         names.append(component.name or component.prototype.name)
         node = component.prototype
     return location, names
+
+
+def _local(tree: Any, path: tuple[int, ...]) -> Any:
+    """An occurrence's placement in its assembly's frame: its component's, a part's own placement
+    after it (as ``_occurrence`` composes them); None for the root."""
+    from cadgen.engine.document import Part
+
+    if not path:
+        return None
+    node = tree.root
+    for at in path[:-1]:
+        node = node.components[at].prototype
+    component = node.components[path[-1]]
+    held = component.prototype
+    return component.location.Multiplied(held.shape.Location()) if isinstance(held, Part) else component.location
 
 
 def _common(left: tuple[int, ...], right: tuple[int, ...]) -> int:

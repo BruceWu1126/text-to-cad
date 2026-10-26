@@ -409,7 +409,8 @@ def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
 
     _writer, closure = previous.read_record(source.xcaf)
     answer = {"structure": source.structure, "closure": json.loads(closure) if closure else None,
-              "shapes": [[key, len(part)] for key, part in zip(keys, data)]}
+              "shapes": [[key, len(part)] for key, part in zip(keys, data)],
+              "placements": [[list(path), matrix] for path, matrix in source.locals().items()]}
     if request.get("whole"):
         # The drain's: the whole document as the xbf bytes ``@xbf`` writes, after the shapes -- for
         # one taken from the engine's cache, the bytes it was taken with (a read is never written).
