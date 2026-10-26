@@ -220,7 +220,9 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
     engine's request threads. There are no page sessions: the explorer opens where it was last, else
     the person's home folder, and a launch's folder resolves only the relative files it names; each
     MCP session owns its views and resource. The
-    stdio shim owns only connection metadata. Sidebar sharing stays in memory, and host
+    stdio shim owns only connection metadata, and the one act a text host's `cad_show` asks of
+    the person's machine: it opens their browser, in the environment its host gave it, and the
+    engine, which runs in whatever environment started it, never does. Sidebar sharing stays in memory, and host
     quirks stay in the shim and page. MCP's shared `cad_http` exposes only telemetry
     status and opt-out to agents; other viewer routes require the session capability
     delivered in UI-only launch metadata. Only the person can opt in through a page
@@ -335,7 +337,8 @@ src/cadgen/
                          #   launches (server), which host started the shim and how it
                          #   presents CAD (host), open views (views), the viewer routes
                          #   in-process (tunnel), roots, the page (ui), and the CAD Viewer
-                         #   link for a host that renders no MCP Apps (browser)
+                         #   link for a host that renders no MCP Apps, which the shim opens
+                         #   (browser)
   urdf.py, sdf.py,       # the robot validators: one public namespace per format, its
   srdf.py                #   `validate` verb, and the checks behind it (*_source.py,
                          #   *_validation.py, sdf_external.py, findings.py, xml_common.py)

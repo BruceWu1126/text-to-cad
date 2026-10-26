@@ -42,10 +42,16 @@ A client that renders no MCP Apps never loads this page. Its `cad_show` opens th
 model's page in this machine's CAD Viewer, `/<id>` (the file registered by its id, as
 a launch registers it), started if none runs (`cadgen/mcp/browser.py`), in the person's
 browser through an owner-only redirect file (`browser_open`), and answers with the page's URL
-for the agent to give the person: "opened in your browser at <url>". Where a browser page already
+for the agent to give the person: "opened in your browser at <url>". The host's stdio process
+(`cadgen mcp`) makes that open, in the agent's own environment (its `BROWSER`, its display), from
+the page the engine's answer names (`_meta["dev.texttocad/open"]`, stripped before the host sees
+it); the engine, which runs in the environment of whatever started it, never opens a browser for
+a tool. Where a browser page already
 reads that document (the engine's `Server.in_page`: a version read within the last 90 seconds,
 or a browser opened on it in the last 30), it opens nothing and answers "already open in your
-browser at <url>"; where no browser can be opened here (no display), it answers with the URL alone.
+browser at <url>"; where no browser can be opened from the stdio process (no display), it answers
+with the URL alone, as it does a client with no stdio process (a direct HTTP client): "nothing
+was opened".
 A tab is claimed only on evidence, never on a client's name. Strongest first: an extension the
 host declares; a view that reached the server (its first `cad_sync` or `cad_http` with the app
 capability: only a host that draws views makes one); the call's own metadata (the 0.163 app

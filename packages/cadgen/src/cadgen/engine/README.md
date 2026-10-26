@@ -447,6 +447,14 @@ Page protocol 9 requires the capability, on `cad_http` and on the page's own `ca
 for the removed telemetry tool. Sidebar views alone are shared through
 an in-memory registry; thread views remain session-local. The host's stdio process
 proxies JSON-RPC and owns no page, tool implementation, catalog or view state.
+Its one act of its own is a text host's browser open: the engine runs in the environment of
+whatever started it (another agent's shell, another `BROWSER`, no display), so it never opens a
+browser for a `cad_show`. The stdio process says at initialize that it opens one, and whether its
+environment can (`_meta["dev.texttocad/transport"].browser`, `{"refusal": null | "<why not>"}`);
+the engine's `cad_show` answer then carries the page in `_meta["dev.texttocad/open"]`
+(`{"url", "said", "failed"}`), which the stdio process opens through an owner-only redirect file
+with `webbrowser` (its own `BROWSER`) and strips, saying why not in place of `said` where no
+browser opens. A client that declared no such peer is given the URL in words, and nothing opens.
 Active HTTP calls keep the daemon alive; quiet MCP sessions expire after an hour. The host's
 stdio process holds the engine from its start while the host runs (**The door**), under a name it
 opens its sessions with: it ends them itself at its input's end and on SIGTERM, and when its hold's
