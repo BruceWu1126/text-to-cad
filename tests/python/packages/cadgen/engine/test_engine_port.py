@@ -6,6 +6,7 @@ engine that nothing uses is retired: an older one's wherever it serves, and neve
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shutil
@@ -287,8 +288,14 @@ class EnginePortTest(unittest.TestCase):
         if mine:  # else another program's already: the same roll
             holder = socket.socket()
             self.addCleanup(holder.close)
-            holder.bind(("127.0.0.1", 3245))
-            holder.listen(1)
+            try:
+                holder.bind(("127.0.0.1", 3245))
+            except OSError as error:  # another engine or suite took the machine's default port first
+                if error.errno != errno.EADDRINUSE:
+                    raise
+                mine = False
+            else:
+                holder.listen(1)
         done = self.started()
         self.assertEqual(done.returncode, 0, done.stderr)
         port = json.loads(done.stdout)["port"]
