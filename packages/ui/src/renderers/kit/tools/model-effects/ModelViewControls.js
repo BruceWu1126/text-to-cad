@@ -49,7 +49,7 @@ const keepOpen = event => event.preventDefault();
 
 /** Clip's axis and settings, left of its slider: a borderless button reading the axis in hand, as the
  *  row's other buttons are, whose dropdown holds all of Clip but the cut, as narrow as they are —
- *  first X, Y and Z, the Theme row's buttons (the axis in hand lit), a rule, then **Part colors** (each
+ *  first X, Y and Z, the Theme row's buttons (the axis in hand lit), a rule, then **Part colours** (each
  *  part's cap in its own colour; off, every cap one amber) and **Reverse** (which side of the plane
  *  is kept). None of them applies a cut; an axis or Reverse turns a cut keeping its share. They are
  *  settings, so Reset, which takes the cut away, leaves them be. */
@@ -92,7 +92,7 @@ function ClipAxisSelect({ viewSettings, onViewSettingsPatch, bounds }) {
       <DropdownMenuSeparator />
       <DropdownMenuCheckboxItem checked={clip.partColors} onSelect={keepOpen} data-clip-part-colors=""
         onCheckedChange={checked => { controls.used("clip_part_colors"); onViewSettingsPatch({ clip: { partColors: checked === true } }); }}>
-        Part colors
+        Part colours
       </DropdownMenuCheckboxItem>
       <DropdownMenuCheckboxItem checked={clip.invert} onSelect={keepOpen} data-clip-reverse=""
         onCheckedChange={checked => reverse(checked === true)}>

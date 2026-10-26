@@ -380,7 +380,7 @@ shapes share one) — and the row shows and sets the tool in hand's own — and 
 second, from the left: the **tools of the one that is up**, a button each, the one in hand pressed (with Pencil up, Pen,
 Highlighter, Eraser; with Shapes up, Rectangle, Line, Arrow, Ellipse, Text: choosing one is how the strip tool changes what it
 draws with); a thin rule; then what is drawn next, each a dropdown whose button shows its value, no
-chevron: **Color** (no heading, a grid of swatches, unnamed but for assistive technology: the neons and
+chevron: **Colour** (no heading, a grid of swatches, unnamed but for assistive technology: the neons and
 one neutral that reads against the viewer, white in dark mode and near-black in light, then
 the colour wheel, which opens the system's colour picker for any other colour, kept once the
 picker closes), **Stroke width** (no heading, four weights, 1, 2, 4 and 6px, the pen drawn to look the
@@ -453,7 +453,7 @@ and in its type, as narrow as its content, with no heading and no glyphs: first 
 compact group of the app menu's Theme buttons (24px squares, its radius, no track) in a row as
 tall as an item (a phone's 40px, as Theme's row), the axis in hand in the accent a highlighted
 item wears; a rule; then two of Display's `DropdownMenuCheckboxItem`s, plain text with the check
-at the right: **Part colors** (ticked by default: each section cap in its
+at the right: **Part colours** (ticked by default: each section cap in its
 part's normal colour, without hover or selection tints; unticked, every cap one amber) and
 **Reverse** (unticked by default: which side of the plane is kept). Caps stay opaque, a
 transparent part's too. A press on any of them leaves the menu open, and none of them applies a

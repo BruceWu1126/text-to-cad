@@ -264,7 +264,7 @@ it("Pencil and Shapes are two plain tools on the strip; one row under the strip 
   expect([row.closest('[data-cad-tool-stack]'), row.closest('[data-tool-panel]')]).toEqual([null, null]);
   const panel = () => within(screen.getByRole('toolbar', { name: 'Annotation controls' }));
   expect(panel().getAllByRole('button').map(button => button.getAttribute('aria-label')))
-    .toEqual(['Pen', 'Highlighter', 'Eraser', 'Color', 'Stroke width', 'Placement', 'Clear annotations']);
+    .toEqual(['Pen', 'Highlighter', 'Eraser', 'Colour', 'Stroke width', 'Placement', 'Clear annotations']);
   const clear = () => panel().getByRole('button', { name: 'Clear annotations' }).hasAttribute('disabled');
   expect(clear()).toBe(true);
   // Ink enables Clear. Undo and Redo are the keyboard's, ⌘Z and ⇧⌘Z (below), with no buttons.

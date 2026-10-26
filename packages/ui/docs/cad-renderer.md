@@ -1050,7 +1050,7 @@ Explode and Clip follow Measure on the strip; Explode only with two or more part
 (`kit/tools/model-effects/ModelTools.jsx`'s `useModelTools`, handed to the shell as
 `subToolbar`) are the tool in hand's alone, with no enable checkbox: Explode's slider, its
 amount and Reset explode; Clip's axis (`ClipAxisSelect`, "X ⌄", whose dropdown holds the
-axes as one row of radio items, then Part colors and Reverse, drawn as Display's menu), its slider, its amount and Reset clip
+axes as one row of radio items, then Part colours and Reverse, drawn as Display's menu), its slider, its amount and Reset clip
 (`ModelViewControls.js`). A press on one unset starts it neutral; one with
 its effect set takes it up as it is; the one in hand does nothing. An edit applies the effect
 and the slider at zero removes it; Reset puts the amount back at zero — Clip's axis and settings
@@ -1310,7 +1310,7 @@ every width (a phone's wraps where it has no room, its buttons 36px tiles):
 
 - The **tools of the one that is up**, a button each, the one in hand pressed: choosing one is how Pencil and Shapes change
   what they draw with.
-- After a rule, **Color**, **Stroke width** (a straight line at the weight) and **Placement**, dropdowns, then
+- After a rule, **Colour**, **Stroke width** (a straight line at the weight) and **Placement**, dropdowns, then
   **Clear annotations**: two sections, no more. They show and set the tool in hand's own slot; under the **Eraser**, which
   puts nothing down, the three are disabled (greyed out, still on the row so it does not jump) and Clear stays as it was.
 

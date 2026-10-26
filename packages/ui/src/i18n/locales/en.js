@@ -245,10 +245,10 @@ export default {
   // The colour picker's controls.
   "colorPicker.saturationBrightness": "Saturation and brightness",
   "colorPicker.hue": "Hue",
-  "colorPicker.opacity": "Color opacity",
-  "colorPicker.hex": "Hex color",
+  "colorPicker.opacity": "Colour opacity",
+  "colorPicker.hex": "Hex colour",
   "colorPicker.eyedropper": "Eyedropper",
-  "colorPicker.pickFromScreen": "Pick color from screen",
+  "colorPicker.pickFromScreen": "Pick colour from screen",
   "colorPicker.opacityHeading": "Opacity",
   "preview.preparing": "Preparing preview…",
   "playback.loop": "Loop",

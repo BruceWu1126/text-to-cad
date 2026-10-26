@@ -88,7 +88,7 @@ export function useModelTools({ view, features, store, mesh, disabled }) {
       controls: <CrossSectionControls viewSettings={view} onViewSettingsPatch={store.patch} bounds={clipBounds}
         className="flex min-w-0 flex-1 items-center gap-1" sliderClassName={SUB_TOOLBAR_SLIDER_CLASS} /> }
   ].filter(tool => features.settings.includes(tool.id));
-  // Neutral is the amount at zero, nothing else: Clip's axis and its settings (Part colors, Reverse) stay as set.
+  // Neutral is the amount at zero, nothing else: Clip's axis and its settings (Part colours, Reverse) stay as set.
   const neutral = id => id === "exploded" ? { exploded: { enabled: false, amount: 0 } } : { clip: { enabled: false } };
   return {
     tools: definitions.map(tool => {

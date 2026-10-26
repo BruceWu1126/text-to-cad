@@ -26,7 +26,7 @@ it("the drawing controls are ONE row of two sections: the tool's own tools, a ru
   expect(row.className.split(/\s+/)).toContain('flex-nowrap');
   expect(row.className.split(/\s+/)).not.toContain('flex-col');
   expect(within(screen.getByRole('group', { name: 'Annotation style' })).getAllByRole('button').map(button => button.getAttribute('aria-label')))
-    .toEqual(['Color', 'Stroke width', 'Placement', 'Clear annotations']);
+    .toEqual(['Colour', 'Stroke width', 'Placement', 'Clear annotations']);
   // Undo and Redo are the keyboard's alone.
   expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
 });
@@ -48,13 +48,13 @@ it("the row starts with the tools of Pencil (the pen first, pressed) or of Shape
 
 it("each drawing kind keeps its own style on the row: the pen's red, the highlighter's yellow, Shapes' red; changing one leaves the others", async () => {
   render(<Panel />);
-  const swatch = () => screen.getByRole('button', { name: 'Color' }).querySelector('span')!.style.backgroundColor;
-  const checked = async () => [...(await open('Color')).querySelectorAll('[data-checked]')].map(item => item.getAttribute('aria-label'));
+  const swatch = () => screen.getByRole('button', { name: 'Colour' }).querySelector('span')!.style.backgroundColor;
+  const checked = async () => [...(await open('Colour')).querySelectorAll('[data-checked]')].map(item => item.getAttribute('aria-label'));
   expect(await checked()).toEqual(['Neon red']);
   fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
   fireEvent.click(screen.getByRole('button', { name: 'Highlighter' }));
   expect(await checked()).toEqual(['Neon yellow']);
-  fireEvent.click(within(screen.getByRole('menu', { name: 'Color' })).getByRole('menuitem', { name: 'Neon cyan' }));
+  fireEvent.click(within(screen.getByRole('menu', { name: 'Colour' })).getByRole('menuitem', { name: 'Neon cyan' }));
   expect(swatch()).toBe('rgb(0, 229, 255)');
   fireEvent.click(screen.getByRole('button', { name: 'Pen' }));
   expect(swatch()).toBe('rgb(255, 45, 85)');
@@ -63,7 +63,7 @@ it("each drawing kind keeps its own style on the row: the pen's red, the highlig
 
 it('the Eraser greys out Color, Stroke width and Placement, still on the row; Clear annotations stays as it was', () => {
   render(<Panel />);
-  const disabled = () => ['Color', 'Stroke width', 'Placement', 'Clear annotations'].map(name => screen.getByRole('button', { name }).hasAttribute('disabled'));
+  const disabled = () => ['Colour', 'Stroke width', 'Placement', 'Clear annotations'].map(name => screen.getByRole('button', { name }).hasAttribute('disabled'));
   expect(disabled()).toEqual([false, false, false, true]);
   fireEvent.click(screen.getByRole('button', { name: 'Eraser' }));
   expect(disabled()).toEqual([true, true, true, true]);
@@ -113,14 +113,14 @@ it('the colours are the neons and the one neutral that reads against the viewer:
 
 it('Color is a dropdown: its button the colour in hand, its menu, with no heading, a grid of the scheme\'s swatches, the current one marked, then a custom colour from the system picker', async () => {
   render(<Panel colorScheme="dark" />);
-  let menu = await open('Color');
+  let menu = await open('Colour');
   expect(menu.querySelector('[data-slot=dropdown-menu-label]')).toBeNull();
   const neons = ANNOTATION_COLORS.slice(0, 7).map(option => option.label);
-  expect(within(menu).getAllByRole('menuitem').map(item => item.getAttribute('aria-label'))).toEqual([...neons, 'White', 'Custom color']);
+  expect(within(menu).getAllByRole('menuitem').map(item => item.getAttribute('aria-label'))).toEqual([...neons, 'White', 'Custom colour']);
   expect([...menu.querySelectorAll('[data-checked]')].map(item => item.getAttribute('aria-label'))).toEqual(['Neon red']);
   fireEvent.click(within(menu).getByRole('menuitem', { name: 'Neon green' }));
   expect(session.style.color).toBe('#39ff14');
-  menu = await open('Color');
+  menu = await open('Colour');
   expect([...menu.querySelectorAll('[data-checked]')].map(item => item.getAttribute('aria-label'))).toEqual(['Neon green']);
   // The picker's colour is taken as it closes.
   const picker = document.querySelector<HTMLInputElement>('input[type=color][data-color-picker]')!;
