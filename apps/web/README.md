@@ -191,8 +191,9 @@ token: the session cookie authenticates it, as it does every request the page ma
 
 Each export has one small single-line toast (Sonner, at the view's top right under the navbar):
 a spinner while it is queued or running, and while a dropped connection is asked again,
-**Preparing part.step…**; then a check once the file is handed to the browser, **Exported part.step**,
-which goes by itself; or the engine's one-line reason, which stays until dismissed. Exports
+**Preparing part.step…**, dismissed the moment the file is handed to the browser's download
+(the toast shows the prepare, never a download; there is no success toast); or the engine's
+one-line reason, which stays until dismissed. Exports
 run independently; choosing a format again starts another.
 
 The queue accepts up to 16 unfinished jobs per viewer session, executes them in order,

@@ -8,7 +8,6 @@
 export default {
   "export.button": "Export",
   "export.preparing": "Preparing {name}…",
-  "export.exported": "Exported {name}",
   "export.dismiss": "Dismiss export status",
   "export.failed": "Export failed",
 

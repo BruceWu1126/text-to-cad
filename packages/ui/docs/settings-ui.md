@@ -1080,12 +1080,13 @@ mounted once with the export controls), at the view's top right, 16px under the 
 16px from the edge, at every width. It is as small as a menu item: one line of the menu's text
 (`text-tiny`, regular weight), its padding (6px by 10px), a 14px icon, under 32px tall and as
 wide as its line (above a 600px window; under it Sonner spans the screen less its 16px insets),
-set through the Toaster's `toastOptions` and `offset` in `export/ExportControls.tsx`. Its icon
-is Sonner's own state: its spinner while the job is queued or running and while a
-dropped connection is asked again (**Preparing part.step…**), its check once the file is handed
-to the browser (**Exported part.step**, gone after Sonner's default), or its error icon with the
-engine's one-line reason, kept until its dismiss, the one button a toast has. No other action
-earns a toast. Export is an icon button at
+set through the Toaster's `toastOptions` and `offset` in `export/ExportControls.tsx`. It says
+what the page does, which is prepare the file, not download it: Sonner's spinner while the
+job is queued or running and while a dropped connection is asked again (**Preparing
+part.step…**), dismissed the moment the file is handed to the browser's download (whose own
+downloads say the rest), with no success toast of its own; or, where the export fails, its
+error icon with the engine's one-line reason, kept until its dismiss, the one button a toast
+has. No other action earns a toast. Export is an icon button at
 the navbar's right end, named on hover as the view controls are, never in the tool strip.
 It opens a dropdown as the file's ⋯ does, on Display's surface and in its type, as wide as its
 items (shadcn's 8rem least), aligned to the button's end (`export/ExportControls.tsx`): the formats the file's kind writes, plain items, known

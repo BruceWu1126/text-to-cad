@@ -121,10 +121,10 @@ it('a choice starts its export at once with a spinning toast; the menu stays the
   expect(downloads.save).not.toHaveBeenCalled();
 });
 
-it('a ready file is handed to the browser once, and only then does its toast say it was exported, with a check and no buttons', async () => {
+it('a ready file is handed to the browser once, and its toast goes that moment: there is no success toast', async () => {
   const { service, jobs, finish } = server();
   const seen: (string | undefined)[] = [];
-  // What the toast says at the moment the browser is handed the file: still that it is exporting.
+  // What the toast says at the moment the browser is handed the file: still that it is being prepared.
   const downloads = { save: vi.fn(() => { seen.push(toasts()[0]?.dataset.type); }), remember: vi.fn() };
   mount(service, downloads);
   const user = userEvent.setup({ skipHover: true });
@@ -132,8 +132,7 @@ it('a ready file is handed to the browser once, and only then does its toast say
   await shown('loading', 'Preparing part.step…');
   const [id] = [...jobs.keys()];
   await finish(id);
-  const { buttons } = await shown('success', 'Exported part.step');
-  expect(buttons).toEqual([]);
+  await waitFor(() => expect(toasts()).toEqual([]));
   expect(downloads.save).toHaveBeenCalledTimes(1);
   expect(downloads.save).toHaveBeenCalledWith(`/s/session/__cad/exports/${id}/file`, 'part.step');
   expect(seen).toEqual(['loading']);
@@ -175,7 +174,7 @@ it('a dropped connection keeps the toast spinning until the poll resumes, then t
   await waitFor(() => expect(service.status).toHaveBeenCalledTimes(2), { timeout: 3000 });
   await shown('loading', 'Preparing part.step…');
   await finish(id);
-  await shown('success', 'Exported part.step');
+  await waitFor(() => expect(toasts()).toEqual([]));
   expect(downloads.save).toHaveBeenCalledTimes(1);
 });
 
@@ -188,8 +187,9 @@ it('an export under way when the page reloaded picks up again by its request; on
   });
   const downloads = { save: vi.fn(), remember: vi.fn(), restore: () => [{ request: request('kept'), filename: 'kept.step' }, { request: request('restarted'), filename: 'gone.step' }] };
   mount(service, downloads);
-  await waitFor(() => expect(toasts().map(item => [item.dataset.type, item.querySelector('[data-title]')?.textContent]).sort()).toEqual([
-    ['error', 'The export session restarted. Open Export again.'], ['success', 'Exported kept.step']]));
+  // The one handed over has no toast left; the refused one says why.
+  await waitFor(() => expect(toasts().map(item => [item.dataset.type, item.querySelector('[data-title]')?.textContent])).toEqual([
+    ['error', 'The export session restarted. Open Export again.']]));
   expect(downloads.save).toHaveBeenCalledTimes(1);
   expect(downloads.save).toHaveBeenCalledWith('/s/session/__cad/exports/kept/file', 'kept.step');
   // Each names the session it was made in: a server restarted since refuses it, never runs it again.

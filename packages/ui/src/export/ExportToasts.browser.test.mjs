@@ -60,8 +60,7 @@ createRoot(document.getElementById('root')).render(<App/>);
     await page.getByRole('button', { name: 'Export', exact: true }).click();
     const menuFont = await page.getByRole('menuitem', { name: 'STEP' }).evaluate(item => getComputedStyle(item).fontSize);
     await page.getByRole('menuitem', { name: 'STEP' }).click();
-    for (const [type, title] of [['loading', 'Preparing probe_couple.step…'], ['success', 'Exported probe_couple.step']]) {
-      if (type === 'success') await page.evaluate(() => window.finish());
+    for (const [type, title] of [['loading', 'Preparing probe_couple.step…']]) {
       const toast = page.locator(`[data-sonner-toast][data-type="${type}"][data-mounted="true"]`);
       await toast.waitFor();
       const box = await toast.evaluate(item => {
@@ -86,6 +85,9 @@ createRoot(document.getElementById('root')).render(<App/>);
       if (width > 600) assert.ok(box.width <= box.text + 50, `${label}: ${box.width}px wide for ${box.text}px of text`);
       console.log(`${label}: ${box.width.toFixed(1)}x${box.height.toFixed(1)}px, text ${box.text.toFixed(1)}px at ${box.font}`);
     }
+    // Handed to the browser, the file needs no toast of its own: the one there goes.
+    await page.evaluate(() => window.finish());
+    await page.locator('[data-sonner-toast]').waitFor({ state: 'detached' });
     assert.deepEqual(errors, []);
     await page.close();
   }

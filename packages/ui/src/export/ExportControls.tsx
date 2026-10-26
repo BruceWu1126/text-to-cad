@@ -24,10 +24,11 @@ const retryable = (error: unknown) => !(error instanceof ExportRequestError) || 
 const running = (job: ExportJob) => job.state === 'queued' || job.state === 'running' || job.state === 'cancelling';
 
 /**
- * One export, as a browser download is: its toast spins while the job is queued or running, and
- * also while the connection is down and asked again; once the file is ready it is handed to the
- * browser (whose own downloads decide where it goes) and the toast says it was exported, or the
- * toast is the engine's one-line reason, kept until dismissed. A request made from the menu learns
+ * One export, as a browser download is: its toast says it is being prepared ("Preparing
+ * bracket.step…", spinning) while the job is queued or running, and also while the connection is
+ * down and asked again; once the file is ready it is handed to the browser (whose own downloads
+ * decide where it goes, and say so) and the toast goes that moment, with no success toast of its
+ * own; or the toast is the engine's one-line reason, kept until dismissed. A request made from the menu learns
  * its session's epoch first and is kept with it (`onRequest`), so a reload reconnects to its job
  * by it, and a server restarted since refuses it rather than running it again.
  */
@@ -57,10 +58,10 @@ async function runExport({ record, service, downloads, t, signal, onRequest }: {
       const name = job.filename || record.filename;
       if (job.state === 'ready') {
         downloads.save(service.fileUrl(job.id), name);
-        toast.success(t()('export.exported', { name }), { id });
+        toast.dismiss(id);
       } else if (job.fetched) {
         // A request kept across a reload whose file the browser had already fetched whole.
-        toast.success(t()('export.exported', { name }), { id });
+        toast.dismiss(id);
       } else fail(job.error || job.stage);
       return;
     } catch (failure) {
