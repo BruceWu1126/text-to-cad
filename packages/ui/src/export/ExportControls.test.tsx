@@ -48,17 +48,17 @@ async function exportOnce(user: ReturnType<typeof userEvent.setup>, format = 'ST
 }
 
 it('the menu is the formats the file\'s kind writes, there at once: nothing is asked of the server before a choice', async () => {
-  const kinds: [string, string[], string][] = [
-    ['/bracket.step', ['STEP', 'STL', '3MF', 'GLB', 'XBF'], 'Exports the model as authored, not as shown. GLB includes its animations.'],
-    ['/part.xbf', ['STEP', 'STL', '3MF', 'GLB', 'XBF'], 'Exports the model as authored, not as shown. GLB includes its animations.'],
-    ['0f8e2a7c-3b1d-5e4f-9a6b-7c8d9e0f1a2b', ['STEP', 'STL', '3MF', 'GLB', 'XBF'], 'Exports the model as authored, not as shown. GLB includes its animations.'],
-    ['/scene.glb', ['STL', '3MF'], 'Exports the model as authored, not as shown.'],
-    ['/part.stl', ['3MF', 'GLB'], 'Exports the model as authored, not as shown.'],
-    ['/kit.3mf', ['STL', 'GLB'], 'Exports the model as authored, not as shown.'],
+  const kinds: [string, string[]][] = [
+    ['/bracket.step', ['STEP', 'STL', '3MF', 'GLB', 'XBF']],
+    ['/part.xbf', ['STEP', 'STL', '3MF', 'GLB', 'XBF']],
+    ['0f8e2a7c-3b1d-5e4f-9a6b-7c8d9e0f1a2b', ['STEP', 'STL', '3MF', 'GLB', 'XBF']],
+    ['/scene.glb', ['STL', '3MF']],
+    ['/part.stl', ['3MF', 'GLB']],
+    ['/kit.3mf', ['STL', 'GLB']],
   ];
   // A document the view draws flat on z=0 writes a DXF too; a mesh file never does.
-  kinds.push(['/plate.xbf#planar', ['STEP', 'STL', '3MF', 'GLB', 'DXF', 'XBF'], kinds[0][2]], ['/scene.glb#planar', ['STL', '3MF'], kinds[3][2]]);
-  for (const [shown, labels, note] of kinds) {
+  kinds.push(['/plate.xbf#planar', ['STEP', 'STL', '3MF', 'GLB', 'DXF', 'XBF']], ['/scene.glb#planar', ['STL', '3MF']]);
+  for (const [shown, labels] of kinds) {
     const [file, planar] = [shown.replace('#planar', ''), shown.endsWith('#planar')];
     const { service } = server();
     const { unmount } = mount(service, { save: vi.fn() }, { view: { ...part, file, name: file.split('/').pop()!, ...(planar ? { planar } : {}) } });
@@ -66,13 +66,11 @@ it('the menu is the formats the file\'s kind writes, there at once: nothing is a
     await user.click(screen.getByRole('button', { name: 'Export', exact: true }));
     const items = within(menu()!).getAllByRole('menuitem');
     expect(items.map(item => item.textContent), shown).toEqual(labels);
-    // Plain items: no checks, no icons, no heading, no button, no select; the note last, muted.
+    // Plain items alone: no checks, no icons, no heading, no button, no select, no rule, no note.
     for (const item of items) expect(item.querySelector('svg')).toBeNull();
     expect(within(menu()!).queryByRole('button')).toBeNull();
     expect(within(menu()!).queryByRole('combobox')).toBeNull();
-    const footer = menu()!.querySelector('[data-export-note]')!;
-    expect([footer.textContent, footer.className.includes('text-muted-foreground')]).toEqual([note, true]);
-    expect(items.at(-1)!.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(menu()!).queryByRole('separator')).toBeNull();
     expect([service.epoch, service.create].map(call => call.mock.calls.length)).toEqual([0, 0]);
     unmount();
   }
@@ -241,8 +239,6 @@ it('the menu and the toast speak the page language, never the server stage', asy
   mount(service, { save: vi.fn() }, { locale: 'ja' });
   const user = userEvent.setup({ skipHover: true });
   await user.click(screen.getByRole('button', { name: 'エクスポート', exact: true }));
-  expect(screen.getByRole('menu', { name: 'エクスポート' }).querySelector('[data-export-note]')!.textContent)
-    .toBe('表示状態に関係なく、作成時のモデルをエクスポートします。GLB にはモデルのアニメーションが含まれます。');
   await user.click(screen.getByRole('menuitem', { name: 'STEP' }));
   expect(await screen.findByText(/^開始を待っています · /)).toBeTruthy();
   expect(screen.queryByText(/Waiting for worker/)).toBeNull();

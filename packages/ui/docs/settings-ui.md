@@ -1009,8 +1009,7 @@ from the kind and the scene the view already holds, so nothing loads before it s
 (`export/formats.ts`: a STEP's, an xbf's and a held model's STEP, STL, 3MF, GLB and XBF, and
 DXF where the view draws it flat on z=0, an xbf's XBF its own bytes; a GLB's, an STL's or a
 3MF's the other two mesh kinds); after a rule, Show exports while there are
-any; last, after a rule, one muted line: the model goes as authored, not as shown, and an
-engine document's GLB with its animations. A view with neither formats nor exports has no
+any, and nothing else: no note, no closing rule. A view with neither formats nor exports has no
 Export. A format chosen closes the menu and starts its export at once; nothing is asked
 first, and what the server refuses is said in that export's toast.
 A finished file is a plain browser download, started once by itself; where it lands is

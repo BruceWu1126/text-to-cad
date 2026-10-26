@@ -4,8 +4,6 @@
  */
 export default {
   "export.button": "エクスポート",
-  "export.note": "表示状態に関係なく、作成時のモデルをエクスポートします。",
-  "export.noteAnimated": "表示状態に関係なく、作成時のモデルをエクスポートします。GLB にはモデルのアニメーションが含まれます。",
   "export.show": "エクスポートを表示 ({count})",
   "export.jobs": "エクスポートジョブ",
   "export.toast": "エクスポート {name}",

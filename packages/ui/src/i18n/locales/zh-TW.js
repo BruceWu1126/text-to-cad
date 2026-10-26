@@ -5,8 +5,6 @@
  */
 export default {
   "export.button": "匯出",
-  "export.note": "依原始模型匯出，與目前顯示無關。",
-  "export.noteAnimated": "依原始模型匯出，與目前顯示無關。GLB 包含模型中的動畫。",
   "export.show": "顯示匯出 ({count})",
   "export.jobs": "匯出工作",
   "export.toast": "匯出 {name}",

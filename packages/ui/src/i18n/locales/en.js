@@ -7,8 +7,6 @@
  */
 export default {
   "export.button": "Export",
-  "export.note": "Exports the model as authored, not as shown.",
-  "export.noteAnimated": "Exports the model as authored, not as shown. GLB includes its animations.",
   "export.show": "Show exports ({count})",
   "export.jobs": "Export jobs",
   "export.toast": "Export {name}",

@@ -4,7 +4,7 @@ import { ExportRequestError, exportPause, type ExportJob, type ExportRequest, ty
 import type { DownloadPort, ExportRecord } from '../host/types.js';
 import { Button } from '../primitives/button.jsx';
 import { Spinner } from '../primitives/spinner.js';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '../primitives/dropdown-menu.jsx';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../primitives/dropdown-menu.jsx';
 import { TooltipHint } from '../primitives/tooltip.jsx';
 import { FLOATING_SURFACE_CLASS } from '../lib/floatingSurface.js';
 import { NAVBAR_CONTROL_CLASS } from '../lib/navbarRow.js';
@@ -203,12 +203,6 @@ export function ExportControls({ service, downloads, file, children }: {
       {attempts.length ? <>
         {choices.length ? <DropdownMenuSeparator /> : null}
         <DropdownMenuItem onSelect={() => setReveal(n => n + 1)}>{t('export.show', { count: attempts.length })}</DropdownMenuItem>
-      </> : null}
-      {choices.length ? <>
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-muted-foreground" data-export-note="">
-          {t(choices.some(choice => choice.animations) ? 'export.noteAnimated' : 'export.note')}
-        </DropdownMenuLabel>
       </> : null}
     </DropdownMenuContent>
   </DropdownMenu> : null;
