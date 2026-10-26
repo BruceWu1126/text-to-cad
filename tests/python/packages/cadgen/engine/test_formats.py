@@ -689,6 +689,46 @@ class RobotTest(FixtureTest):
             {"path": str(outputs["alone"]), "width": 240, "height": 180}]}]}), daemon=False)
         self.assertLessEqual(mismatch(pixels(outputs["hidden"].read_bytes()), pixels(outputs["alone"].read_bytes())), 0.001)
 
+    def test_a_clip_at_the_robot_s_mid_height_in_metres_keeps_its_lower_half(self) -> None:
+        """``display.clip.at`` is in the robot's metres, as the viewer reads it, though the stills draw the
+        robot in millimetres: a plane at mid-height keeps the lower half of the robot, from ``--display`` and
+        from a Quick Edit packet's view replayed through ``--job`` alike."""
+        from cadgen.engine.snapshot import draw_pictures, job_pictures
+
+        gl()
+        base = '<link name="base"><visual><origin xyz="0 0 0.02"/><geometry><box size="0.2 0.2 0.04"/></geometry></visual></link>'
+        arm = ('<link name="arm"><visual><origin xyz="0 0 0.11"/><geometry><box size="0.03 0.03 0.22"/></geometry></visual>'
+               '</link><joint name="shoulder" type="revolute"><parent link="base"/><child link="arm"/><origin xyz="0 0 0.04"/>'
+               '<axis xyz="0 1 0"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint>')
+        path = self.folder / "arm.urdf"  # 0.26 m tall, standing on z = 0
+        path.write_text(f'<robot name="arm">{base}{arm}</robot>', encoding="utf-8")
+        clip = {"enabled": True, "axis": "z", "at": 0.13}  # the viewer's number: metres, mid-height
+
+        def rows(picture: Path) -> tuple[int, int]:
+            from PIL import Image
+
+            with Image.open(picture) as image:
+                alpha = np.asarray(image.convert("RGBA"))[..., 3]
+            hit = np.flatnonzero((alpha > 0).any(1))
+            return int(hit[0]), int(hit[-1])
+
+        def job(name: str, display: dict, transparent: bool) -> Path:
+            out = self.folder / f"{name}.png"
+            packet = {"input": str(path), "jobs": [{"camera": "front", "display": display,
+                                                     "output": {"transparent": transparent},
+                                                     "outputs": [{"path": str(out), "width": 240, "height": 180}]}]}
+            draw_pictures(job_pictures(packet), daemon=False)
+            return out
+
+        whole, cut = rows(job("whole", {}, True)), rows(job("cut", {"clip": clip}, True))
+        self.assertEqual(whole[1], cut[1], "the base stands where it stood")
+        self.assertAlmostEqual((cut[1] - cut[0] + 1) / (whole[1] - whole[0] + 1), 0.5, delta=0.02,
+                               msg="the plane at 0.13 m keeps the lower half of the 0.26 m robot")
+        direct = self.folder / "direct.png"
+        snapshot(path, direct, display={"clip": clip}, camera="front", size=(240, 180), daemon=False)
+        replayed = job("replayed", {"clip": clip}, False)
+        self.assertLessEqual(mismatch(pixels(direct.read_bytes()), pixels(replayed.read_bytes())), 0.001)
+
     def test_a_package_mesh_is_found_in_the_package_the_description_is_in(self) -> None:
         """``package://NAME/...`` (#611): the package's folder is the nearest above the description named
         NAME, or holding a ``package.xml`` that names it; no such folder, or a path out of it, is refused."""
@@ -766,6 +806,38 @@ class DxfTest(FixtureTest):
 
 
 # --- pictures --------------------------------------------------------------------------------------
+
+
+# --- units -----------------------------------------------------------------------------------------
+
+
+class UnitTest(FixtureTest):
+    """A length asked of a file -- where ``display.clip.at`` stands -- is in the file's unit, as the
+    viewer reads one (``sceneUnits.js``); each reader says what one of them is in the millimetres drawn."""
+
+    def test_each_reader_says_what_one_of_the_file_s_units_is_in_millimetres(self) -> None:
+        write_stl(self.folder / "part.stl", box_soup((20, 10, 4)))
+        write_3mf(self.folder / "kit.3mf")  # its model unit is the centimetre
+        write_glb(self.folder / "rig.glb")
+        (self.folder / "kinematics.urdf").write_text(KINEMATICS, encoding="utf-8")
+        found = {name: formats.read(self.folder / name).structure["millimetresPerUnit"]
+                 for name in ("part.stl", "kit.3mf", "rig.glb", "kinematics.urdf")}
+        self.assertEqual(found, {"part.stl": 1.0, "kit.3mf": 10.0, "rig.glb": 1000.0, "kinematics.urdf": 1000.0})
+
+    def test_the_clip_s_plane_stands_at_its_at_in_the_file_s_unit(self) -> None:
+        from types import SimpleNamespace
+
+        from cadgen.engine.render.clip import plane
+
+        bounds = (np.zeros(3), np.array([200.0, 200.0, 260.0]))  # a 0.26 m robot, drawn in millimetres
+        robot = SimpleNamespace(millimetres_per_unit=1000.0, rest_bounds=lambda: bounds)
+        self.assertAlmostEqual(plane(robot, {"axis": "z", "at": 0.13}).Location().Z(), 130.0)
+        self.assertAlmostEqual(plane(robot, {"axis": "z"}).Location().Z(), 130.0, msg="without at, the middle at rest")
+        self.assertEqual(plane(robot, {"axis": "z", "at": 0.13, "invert": True}).Axis().Direction().Z(), 1.0,
+                         "invert keeps the upper side")
+        document = SimpleNamespace(millimetres_per_unit=1.0, rest_bounds=lambda: bounds)
+        self.assertAlmostEqual(plane(document, {"axis": "y", "at": 12.5}).Location().Y(), 12.5,
+                               msg="a document's millimetres")
 
 
 class PictureTest(FixtureTest):
