@@ -89,6 +89,7 @@ class Models:
         self.daemon = daemon
         self.records: dict[str, dict[str, Any]] = {}
         self.lock = threading.RLock()
+        self.identity_lock = threading.RLock()
         from cadgen.engine.cache import Cache
 
         self.cache = Cache(self)
@@ -148,6 +149,34 @@ class Models:
                     self.cache.remove(ident)  # this build found its cache file broken: the idle save writes it again
                 self.cache.touch(ident)
 
+    def reattach(self, ident: str, source: dict[str, Any], pid: int | None = None) -> list[str]:
+        """Prepare an identity before a worker asks its cache, including an unsaved live document."""
+        from cadgen.engine.identity import reattach
+
+        held = self.registry()
+        if held is None:
+            return []
+        lines: list[str] = []
+
+        def save(record):
+            row = self.row(record["id"])
+            if row is None or self.cache.current(record["id"], row["revision"]):
+                return
+            data = self.held_bytes(record["id"], row["version"])
+            worker = row.get("worker")
+            if data is None and worker is not None and worker.pid != pid:
+                _structure, _shapes, data = self.load(record["id"], worker, whole=True)
+            if data:
+                self.cache._write(record["id"], row["revision"], data)
+
+        with self.identity_lock:
+            old = reattach(held, ident, source, before=save, log=lines.append)
+            if old is not None:
+                self.forget(old)
+                with self.cache.lock:
+                    self.cache.indexed = False
+        return lines
+
     def facts(self, ident: str, report: dict[str, Any], recorded: str) -> tuple[dict | None, dict | None]:
         """A build's facts (``delta.facts``) and the last build's, of document ``ident``: the
         worker's, else -- a model taken from its key, nothing built -- the ones its record holds
@@ -194,7 +223,7 @@ class Models:
         found: dict[str, Any] = {
             "id": ident, "kind": "model", "root": root, "home": registering.relative(script, root),
             "entry": source["name"], "namespace": root, "name": source.get("explicit_name") or source["name"],
-            "revision": recorded,
+            "revision": recorded, "fingerprint": source.get("fingerprint"), "module": source.get("module"),
             "built": old["built"] if old.get("revision") == recorded and old.get("built") else time.time()}
         if not old:
             found["created"] = found["built"]
@@ -204,9 +233,11 @@ class Models:
             found["line"] = source["line"]
         if facts is not None:
             found["facts"] = facts
-        for key in ("opened", "pinned", "preview", "cache"):  # the home's and the cache's, kept across builds
+        for key in ("opened", "pinned", "preview", "cache", "relocated"):  # the home's and the cache's, kept across builds
             if key in old:
                 found[key] = old[key]
+        if not (report.get("cache") or {}).get("used"):
+            found.pop("relocated", None)  # a fresh document has paths at its new home
         held.put(found)
 
     def hand_over(self, request: dict[str, Any]) -> dict[str, Any]:

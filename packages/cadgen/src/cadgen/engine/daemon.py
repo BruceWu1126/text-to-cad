@@ -2001,6 +2001,13 @@ class Daemon:
     def _handle(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
         self.touch()
         op = request.get("op")
+        if op == "reattach":
+            try:
+                lines = self.models.reattach(request["id"], request["source"], request.get("pid"))
+                send({"ok": True, "lines": lines})
+            except (OSError, ValueError) as error:
+                send(refused(error))
+            return
         if op == "models":
             send({"ok": True, "models": self.models.listing()})
             return

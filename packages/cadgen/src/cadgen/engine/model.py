@@ -156,6 +156,9 @@ class Model:
                              "document from the file it is in. Where the code is in no file (a notebook cell, a "
                              f"REPL), build the shape and hand it over: model(shape, name={self.name!r})")
         self.script = Path(canonical(filename))
+        from cadgen.engine.identity import fingerprint
+
+        self.fingerprint = fingerprint(self.script)
         self.outputs: list[Output] = []
         # The name within the script folder; None keeps the script/function id.
         self.explicit_name: str | None = None
@@ -171,7 +174,8 @@ class Model:
     @property
     def source(self) -> dict[str, Any]:
         return {"script": str(self.script), "name": self.name,
-                "line": self.function.__code__.co_firstlineno, "explicit_name": self.explicit_name}
+                "line": self.function.__code__.co_firstlineno, "explicit_name": self.explicit_name,
+                "fingerprint": self.fingerprint, "module": self.function.__module__}
 
     def declared(self, by: str) -> "Model":
         """One declaration more on this function: ``model`` (bare ``@model``) or a file kind. A

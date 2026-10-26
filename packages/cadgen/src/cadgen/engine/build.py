@@ -932,6 +932,16 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
     from cadgen.engine import document, previous
     from cadgen.engine.kernel import memo
 
+    from cadgen.engine import registry
+    held = registry.current() if cache is not None else None
+    if held is not None:
+        record = held.get(model.id)
+        if record is None or str(registry.home(held, record)) != str(model.script):
+            from cadgen.engine import api
+
+            answer = api._ask({"op": "reattach", "id": model.id, "source": model.source, "pid": os.getpid()})
+            for line in answer.get("lines", []):
+                print(line, file=sys.stderr)
     targets = model.targets()
     xbf = next((Path(path) for kind, path in targets if kind == "xbf"), None)
     name = f"{model.script}::{model.name}"
@@ -968,9 +978,18 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
     if found.get("key") is None:
         return {"used": False, "reason": "its cache holds no key" if where == "cache" else "its last build wrote no key"}, None
     modules, _unkeyable = context.modules(model)
-    now, changes = previous.again(found, model, folder, modules, context.named(model))
+    compared = found
+    if held is not None:
+        from cadgen.engine.identity import relocated
+
+        compared = relocated(held, model.id, found, model.script, folder)
+        origin = ((held.get(model.id) or {}).get("relocated") or {}).get("module")
+        if origin and origin != model.function.__module__:
+            symbols = context.symbols if context.script is None or model.script == context.script else context.others[model.script]
+            modules, _unkeyable = symbols.modules(model.function, aliases={model.function.__module__: origin})
+    now, changes = previous.again(compared, model, folder, modules, context.named(model))
     keyed = time.perf_counter()
-    if now != found["key"]:
+    if now != (previous.key(compared) if compared is not found else found["key"]):
         changes = changes or ["its closure changed"]
         shown_changes = changes[:3] + ([f"{len(changes) - 3} more"] if len(changes) > 3 else [])
         return {"used": False, "reason": ", ".join(shown_changes), "changed": changes}, None
