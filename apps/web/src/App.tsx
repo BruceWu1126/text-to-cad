@@ -160,7 +160,10 @@ export default function App({ client, server, tabStore, notice = null, language:
   const askedRefused = useEngineReconnect(engineGone, { pid: server.pid, ask: () => client.serverInfo({ fresh: true })
     .then(info => info, error => (isEngineRefused(error) ? { refused: true } : null)) });
   const refused = askedRefused ?? readRefused;
-  return <div className="relative flex h-svh flex-col overflow-hidden">{engineGone ? <EngineStopped locale={locale} refused={refused} /> : null}<div className="min-h-0 flex-1">
+  return <div className="relative flex h-svh flex-col overflow-hidden">{engineGone ? <EngineStopped locale={locale} refused={refused} /> : null}
+    {/* The engine gone, its notice is the page's one: what is under it (a view's own "can't reach"
+        card among it) is out of reach and unheard until it is back. */}
+    <div className="min-h-0 flex-1" inert={engineGone || undefined} aria-hidden={engineGone || undefined}>
     <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={next => { void show(next); }} onShown={shown}
       library={library} onThumbnail={client.keepThumbnail} appSettings={appSettings}
       update={updateNotice ? <UpdateButton notice={updateNotice} copy={prompt => browserClipboard.writeText(prompt)} onLink={openTab} /> : null}
