@@ -349,7 +349,7 @@ class CacheTest(unittest.TestCase):
         """A run of ``cube.py`` that took its document from the engine's cache: no body ran."""
         done = self.run_script("cube")
         self.assertIn("took cube.py::cube cold in", done.stdout)
-        self.assertIn("the engine's cache holds the model's key, 1 bodies loaded, nothing ran", done.stdout)
+        self.assertIn("the engine's cache holds the model's key, 1 body loaded, nothing ran", done.stdout)
         self.assertNotIn("the body ran", done.stderr)
 
     def corrupt(self, ident: str) -> None:

@@ -219,8 +219,9 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
     if memo.get("bodies_loaded"):
         taken = (report.get("cache") or {}).get("from")
         holder = "the engine's cache" if taken == "cache" else "its document in memory"
+        loaded = memo.get("bodies_loaded", 0)
         line = (f"took {report['model']}{worker} in {wall:.2f}s: {holder} holds the model's key, "
-                f"{memo.get('bodies_loaded', 0)} bodies loaded, nothing ran") + _waited(report, "took")
+                f"{loaded} bod{'y' if loaded == 1 else 'ies'} loaded, nothing ran") + _waited(report, "took")
         line += _delta(report.get("delta"))
     else:
         counted = {status: bodies.count(status) for status in ("run", "replayed") if bodies.count(status)}
