@@ -69,10 +69,16 @@ for (const fixture of fixtures) {
   if (!fs.existsSync(path.join(root, fixture.file))) fail(`missing test input ${fixture.file}`);
 }
 
-const angle = process.platform === "darwin" ? "metal" : "swiftshader";
+// CI's Linux renders in software (SwiftShader); CAD_TEST_SWIFTSHADER=1 does so on a Mac too, and
+// VIEWER_E2E_CPU_THROTTLE=N slows each page's CPU N times (CDP), to reproduce a slow runner locally.
+const angle = process.platform === "darwin" && process.env.CAD_TEST_SWIFTSHADER !== "1" ? "metal" : "swiftshader";
+const cpuThrottle = Number(process.env.VIEWER_E2E_CPU_THROTTLE || 0);
+// VIEWER_E2E_PREVIEW_FRAME_MS=N draws a frame of N ms every frame while Preview is up, as a software
+// GPU accumulating Render's samples on a slow runner does (CI's camera gate once took 46 s to settle there).
+const previewFrameMs = Number(process.env.VIEWER_E2E_PREVIEW_FRAME_MS || 0);
 const browserFlags = [`--use-angle=${angle}`, "--ignore-gpu-blocklist"];
 if (angle === "swiftshader") browserFlags.push("--enable-unsafe-swiftshader");
-console.log(`viewer browser e2e: Chromium ANGLE=${angle}`);
+console.log(`viewer browser e2e: Chromium ANGLE=${angle}${cpuThrottle > 1 ? `, CPU throttled ${cpuThrottle}x` : ""}`);
 const browser = await chromium.launch({
   headless: true,
   args: browserFlags,
@@ -116,6 +122,21 @@ async function newPage() {
     await route.continue();
   });
   const page = await context.newPage();
+  if (cpuThrottle > 1) await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: cpuThrottle });
+  if (previewFrameMs > 0) {
+    await page.addInitScript((ms) => {
+      // A frame every frame while Preview is up, each one ms long: Render accumulating its samples
+      // in software, which on a slow runner is drawing for tens of seconds after the camera stops.
+      const draw = () => {
+        if (document.querySelector("[data-preview-view]")) {
+          const end = performance.now() + ms;
+          while (performance.now() < end) { /* the frame's draw */ }
+        }
+        requestAnimationFrame(draw);
+      };
+      requestAnimationFrame(draw);
+    }, previewFrameMs);
+  }
   page.setDefaultTimeout(30_000);
   page.on("response", response => {
     if (response.status() < 400 || !response.url().startsWith(`${viewerOrigin}/__cad/`)) return;
@@ -329,12 +350,20 @@ async function selectViewingMode(page, current, next) {
   if (!(await page.getByRole("button", { name: press, exact: true }).count())) fail(`viewing mode: expected ${current} before switching to ${next}`);
   const button = page.getByRole("button", { name: press, exact: true });
   if (next !== "Render") {
-    // Preview's bar hides two seconds after the pointer last moved over the view, and a person's pointer, moving to
-    // Exit preview, brings it back: this pointer does the same (Playwright checks what is under the point first).
-    const box = await page.locator("[data-preview-view]").first().boundingBox();
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.waitForFunction(() => !document.querySelector("[data-preview-bar]")?.hasAttribute("data-hidden"));
-    await button.hover();  // resting on the bar holds it
+    // Preview's bar hides two seconds after the pointer last rests over the view (counted from the frame
+    // that shows it), and a person's pointer, moving to Exit preview, brings it back and holds it while it
+    // rests there: this pointer does the same. Playwright checks what is under a point before it moves
+    // there, so a press alone on a hidden bar would never bring it back.
+    const visible = () => page.locator('[data-preview-bar][data-state="visible"]').waitFor({ state: "attached" });
+    const view = await page.locator("[data-preview-view]").first().boundingBox();
+    await page.mouse.move(view.x + view.width / 2, view.y + view.height / 2);
+    await visible();
+    const box = await button.boundingBox();
+    const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+    await page.mouse.move(x, y);
+    await visible();
+    await page.mouse.move(x + 1, y);  // over the bar while it shows: resting there holds it
+    await visible();
   }
   await button.click();
   await page.getByRole("button", { name: arrive, exact: true }).waitFor();

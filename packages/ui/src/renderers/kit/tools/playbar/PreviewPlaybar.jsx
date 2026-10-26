@@ -54,7 +54,7 @@ export default function PreviewPlaybar({ runtime, autoplay, onAutoplayChange, di
   if (!animationControlsHaveContent(runtime)) return null;
   const playing = runtime.playing === true;
   const noun = runtime.noun || "Animation";
-  return <div role="toolbar" aria-label={`${noun} playback`} data-preview-playbar="" data-hidden={shown ? undefined : ""} {...idle?.hold("playbar")}
+  return <div role="toolbar" aria-label={`${noun} playback`} data-preview-playbar="" data-state={shown ? "visible" : "hidden"} {...idle?.hold("playbar")}
     className={cn("absolute bottom-4 left-1/2 z-30 flex w-96 max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-1 px-2 py-1", PREVIEW_FADE_CLASS,
       shown ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0")}>
     <RoutineMenu runtime={runtime} disabled={disabled} />

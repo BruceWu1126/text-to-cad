@@ -578,7 +578,7 @@ it("Preview's bar is its name and its two controls alone; it and the playbar go 
     // The bar and the playbar, hidden or shown: always together.
     const playbar = () => document.querySelector<HTMLElement>('[data-preview-playbar]')!;
     const hidden = () => {
-      const both = [previewBar()!.hasAttribute('data-hidden'), playbar().hasAttribute('data-hidden')];
+      const both = [previewBar()!.getAttribute('data-state') === 'hidden', playbar().getAttribute('data-state') === 'hidden'];
       expect(both[0]).toBe(both[1]);
       return both[0];
     };
@@ -587,9 +587,10 @@ it("Preview's bar is its name and its two controls alone; it and the playbar go 
       .toEqual(['panel.harness', ['Preview settings', 'Exit preview'], 0]);
     expect(screen.getByText('Host notice').closest('[data-preview-chrome]')!.hasAttribute('hidden')).toBe(true);
     expect(hidden()).toBe(false);
+    // Two seconds counted from the frame that shows it (16 ms frames here), so a long frame is never idle time.
     await wait(1900);
     expect(hidden()).toBe(false);
-    await wait(100);
+    await wait(200);
     expect(hidden()).toBe(true);
     expect([previewBar()!.className, playbar().className]).toEqual([expect.stringMatching(/\bopacity-0\b/), expect.stringMatching(/\bopacity-0\b/)]);
     // Hidden, the playbar's routine is as it was: nothing played or stopped it.
@@ -598,7 +599,7 @@ it("Preview's bar is its name and its two controls alone; it and the playbar go 
     const view = document.querySelector('[data-slot="cad-file-view"]')!;
     fireEvent.pointerMove(view);
     expect(hidden()).toBe(false);
-    await wait(2000);
+    await wait(2100);
     expect(hidden()).toBe(true);
     // A tap on the view, on a touch screen, brings it back too.
     fireEvent.pointerDown(view, { pointerType: 'touch' });
@@ -609,11 +610,11 @@ it("Preview's bar is its name and its two controls alone; it and the playbar go 
     await wait(5000);
     expect(hidden()).toBe(false);
     fireEvent.click(within(previewBar()!).getByRole('button', { name: 'Preview settings' }));
-    await wait(2000);
+    await wait(2100);
     expect(hidden()).toBe(true);
     // The focus a press leaves on one of its controls does not hold it (jsdom's focus is no keyboard's) ...
     act(() => { within(previewBar()!).getByRole('button', { name: 'Exit preview' }).focus(); });
-    await wait(2000);
+    await wait(2100);
     expect(hidden()).toBe(true);
     act(() => { within(previewBar()!).getByRole('button', { name: 'Exit preview' }).blur(); });
     // ... the keyboard's does: it brings it back, the playbar's as well as the bar's.
@@ -624,7 +625,7 @@ it("Preview's bar is its name and its two controls alone; it and the playbar go 
     await wait(5000);
     expect(hidden()).toBe(false);
     act(() => { within(previewBar()!).getByRole('button', { name: 'Exit preview' }).blur(); });
-    await wait(2000);
+    await wait(2100);
     expect(hidden()).toBe(true);
     act(() => { within(playbar()).getByRole('button', { name: /^Play / }).focus(); });
     expect(hidden()).toBe(false);

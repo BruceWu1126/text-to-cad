@@ -955,7 +955,8 @@ sliders icon, pressed while its panel is open, a second press closing it) and th
 (**Exit preview**), their hints below them; nothing else, in every host (no Full size, no update,
 no Quick Edit). It and the playbar, where the file has routines, come and go together, as a
 video player's controls do (`usePreviewIdle`): up as Preview opens, gone after two seconds with no
-pointer movement over the view, and at once when the pointer leaves the view or the window
+pointer movement over the view (counted from the frame that shows them, ending at a frame, so a slow
+GPU's long frame is never idle time; each says `data-state="visible"` or `"hidden"`), and at once when the pointer leaves the view or the window
 (`pointerleave`/`mouseleave` on the view, `blur` of the window), back on the next movement or a tap, and on keyboard focus of
 anything in either; they stay while the pointer is on either, while something in one has the
 focus (a menu of theirs open among them) and while the settings are open. Gone, they let presses

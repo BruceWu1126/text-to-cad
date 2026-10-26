@@ -1,6 +1,6 @@
 import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import PreviewChrome, { createPreviewIdle } from '../../../../dist/renderers/kit/tools/PreviewChrome.js';
 
 afterEach(cleanup);
@@ -59,4 +59,42 @@ it('hides the bar at once when the pointer leaves the view or the window, unless
     expect(idle.shown()).toBe(true);
     idle.setActive(false, null);
   } finally { root.remove(); }
+});
+
+it("counts the pointer's rest from the frame that shows the chrome: a long frame is never idle time", () => {
+  const frames: FrameRequestCallback[] = [];
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+  vi.stubGlobal('cancelAnimationFrame', (handle: number) => { frames[handle - 1] = () => {}; });
+  const frame = () => { for (const callback of frames.splice(0)) callback(0); };
+  const root = document.createElement('div');
+  document.body.append(root);
+  try {
+    const idle = createPreviewIdle();
+    idle.setActive(true, root);
+    fireEvent.pointerMove(root);
+    // The frame the move lands in takes ten seconds to draw (a software GPU drawing Render): still up.
+    vi.advanceTimersByTime(10_000);
+    expect(idle.shown()).toBe(true);
+    frame();
+    frame();  // drawn: the count starts
+    vi.advanceTimersByTime(2_000);
+    expect(idle.shown()).toBe(true);
+    // The count over, it goes at the next frame; a move that frame brings first keeps it up.
+    fireEvent.pointerMove(root);
+    frame();
+    expect(idle.shown()).toBe(true);
+    frame();
+    frame();
+    vi.advanceTimersByTime(2_000);
+    frame();
+    expect(idle.shown()).toBe(false);
+    fireEvent.pointerMove(root);
+    expect(idle.shown()).toBe(true);
+    idle.setActive(false, null);
+  } finally {
+    root.remove();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  }
 });

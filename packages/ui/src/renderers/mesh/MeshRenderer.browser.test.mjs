@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { harnessBundle } from '../harness/bundle.mjs';
+import { pressInPreview } from '../harness/preview.mjs';
 import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
 import { strToU8, zipSync } from 'three/examples/jsm/libs/fflate.module.js';
@@ -199,16 +200,6 @@ const differingPixels = (left, right) => {
 const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 // Render is Preview's: in by Preview at the strip's end and out by Exit preview in Preview's bar, each once the view has
 // come together under its cover.
-// Preview's bar and playbar hide two seconds after the pointer last moved over the view, and a person's pointer,
-// moving to one of their controls, brings them back: a test's pointer does the same before it presses one (Playwright
-// checks what is under the point before it moves there, so a hidden bar would never come back).
-async function pressInPreview(page, pane, control) {
-  const box = await pane.locator('[data-preview-view]').boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-bar]')?.hasAttribute('data-hidden'));
-  await control.hover();  // resting on the bar holds it
-  await control.click();
-}
 async function togglePreview(page, pane, enter) {
   const press = pane.getByRole('button', { name: enter ? 'Preview' : 'Exit preview', exact: true });
   if (enter) await press.click(); else await pressInPreview(page, pane, press);

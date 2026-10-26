@@ -4,7 +4,8 @@ import { cn } from "@text-to-cad/ui/utils";
 import { VIEWPORT_INSET_PX } from "../shell/viewportLayout.js";
 import { SIDEBAR_SLIDE_CLASS } from "./FileSidebar.jsx";
 
-/** How long Preview's chrome stays up after the pointer last moved, as a video player's controls do. */
+/** How long Preview's chrome stays up after the pointer last moved, as a video player's controls do:
+ * counted from the frame that shows it, so a long frame (a slow GPU drawing Render) is not idle time. */
 export const PREVIEW_IDLE_MS = 2000;
 // How what fades goes and comes back.
 export const PREVIEW_FADE_CLASS = "transition-opacity duration-300 motion-reduce:transition-none";
@@ -20,28 +21,41 @@ export const PREVIEW_FADE_CLASS = "transition-opacity duration-300 motion-reduce
  * place in the tab order, so the keyboard brings them back.
  *
  * A store outside React (one per frame): the pieces read it (`usePreviewShown`) and nothing else
- * re-renders as it changes, so a hover in Preview redraws two rows, never the frame.
+ * re-renders as it changes, so a hover in Preview redraws two rows, never the frame. A move shows it
+ * at once, and its idle count starts once the frame after that move has been drawn and ends at a
+ * frame: the time a long frame takes is never counted as the pointer resting, and a move that came
+ * during it keeps the chrome up. Each piece says which it is in `data-state` ("visible" or "hidden").
  */
+// The frame after this one, and its cancel: where there is no frame clock (a test's DOM), a task.
+const nextFrame = callback => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(callback) : setTimeout(callback));
+const cancelFrame = handle => (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame(handle) : clearTimeout(handle));
 // Focus the keyboard gave (`:focus-visible`), or any where the browser cannot say.
 const keyboardFocus = element => { try { return element.matches(":focus-visible"); } catch { return true; } };
 
 export function createPreviewIdle() {
-  let shown = true, active = false, held = false, root = null, timer, leaving;
+  let shown = true, active = false, held = false, root = null, timer, leaving, counting;
   const holders = new Set();
   const listeners = new Set();
   const set = next => { if (next !== shown) { shown = next; for (const listener of [...listeners]) listener(); } };
   const holding = () => held || holders.size > 0;
+  const still = () => { clearTimeout(timer); cancelFrame(counting); };
   const wake = () => {
     set(true);
-    clearTimeout(timer);
-    if (active && !holding()) timer = setTimeout(() => set(false), PREVIEW_IDLE_MS);
+    still();
+    // Two frames on, the frame drawing the chrome has been drawn, however long it took: the count
+    // starts. And it ends at a frame: a move waiting for that frame is handled first, and keeps it up.
+    if (active && !holding()) {
+      counting = nextFrame(() => {
+        counting = nextFrame(() => { timer = setTimeout(() => { counting = nextFrame(() => set(false)); }, PREVIEW_IDLE_MS); });
+      });
+    }
   };
   // The pointer gone from the view or the window: down at once, unless something holds it (its
   // settings, the keyboard's focus, or the pointer on a menu of theirs, whose portal is outside the
   // view: the pointer reaches it after leaving, so the check waits for the events of the one move).
   const leave = () => {
     clearTimeout(leaving);
-    leaving = setTimeout(() => { if (active && !holding()) { clearTimeout(timer); set(false); } });
+    leaving = setTimeout(() => { if (active && !holding()) { still(); set(false); } });
   };
   const listen = (element, on) => {
     if (!element) return;
@@ -66,7 +80,7 @@ export function createPreviewIdle() {
       listen(root, false);
       active = next; root = next ? element : null; holders.clear();
       listen(root, true);
-      if (active) wake(); else { clearTimeout(timer); clearTimeout(leaving); set(true); }
+      if (active) wake(); else { still(); clearTimeout(leaving); set(true); }
     },
     /** Its settings open: held for as long as they are. */
     setHeld(next) { if (next !== held) { held = next; wake(); } },
@@ -134,7 +148,7 @@ export default function PreviewChrome({ active, name = "", controls = null, pane
 function PreviewBar({ name, controls, idle }) {
   const shown = usePreviewShown(idle);
   const reach = shown ? "pointer-events-auto" : "pointer-events-none";
-  return <div data-preview-bar="" data-hidden={shown ? undefined : ""} {...idle?.hold("bar")}
+  return <div data-preview-bar="" data-state={shown ? "visible" : "hidden"} {...idle?.hold("bar")}
     className={cn("pointer-events-none absolute inset-x-0 top-0 z-30 flex h-9 items-center justify-between gap-2 px-2", PREVIEW_FADE_CLASS,
       shown ? "opacity-100" : "opacity-0")}>
     <span data-preview-name="" className={cn("min-w-0 truncate px-1 text-sm text-muted-foreground [text-shadow:0_0_6px_var(--background)]", reach)}>{name}</span>
