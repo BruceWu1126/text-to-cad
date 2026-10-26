@@ -11,12 +11,12 @@ exits, each batch under an id of its own and stamped with the time it was made:
 
 - who, by random ids only: an install id made on this machine, an id for the sending process, and one
   for the batch, so a batch sent again is never counted twice;
-- what runs: which process (``app``, ``viewer``, or ``cli``: the sender a command starts,
-  ``cadgen._internal.telemetry_send``), cadgen's version, where it was
+- what runs: which process (``app``, ``viewer``, or ``cli``: what ``cadgen`` commands and model scripts
+  counted, a batch of its own from whichever process sends it), cadgen's version, where it was
   installed from (its channel, ``cadgen/_internal/channel.py``: a plugin directory, the Cursor
   Marketplace, GitHub, a development install, or ``unknown``), the operating system and processor,
   and from the apps the agent app's name and version and how that app shows CAD (tabs, inline or
-  text) -- or, from the browser viewer, ``cadgen-viewer`` and ``browser``;
+  text) -- or, from the browser viewer, ``cadgen-viewer`` and ``browser``; a ``cli`` batch names no app;
 - ``tool`` (the CAD app): how many times each CAD tool was called, and how many of those failed;
 - ``tool_failure`` (the CAD app): how many of a tool's calls failed for each reason (``FAILURES``): one
   word cadgen chose where the call failed -- the caller named no file, or no view; a view that did not
@@ -57,8 +57,10 @@ A command sends nothing itself. What it counts -- a build, a snapshot, a drawing
 the settings for the next process that sends (``spool``): only while sharing is on, under the answer in
 force, capped, and deleted by a no. The engine's verbs (``cadgen.engine.api``: a ``python model.py``, a
 ``cadgen export`` or ``snapshot``, ``cadgen.export()``) are counted into it by cadgen's observer of
-them (``cadgen._internal.engine_telemetry``), and with nothing taking it for a window, a command starts a
-sender that sends it and exits (``cadgen._internal.telemetry_send``, the process ``cli``).
+them (``cadgen._internal.engine_telemetry``). Whichever process takes it sends it as a batch of its own,
+the process ``cli`` with no app named (``Recorder._spooled``): never in the CAD app's or the viewer's
+batch, whose client and presentation say who looked, not who built. With nothing taking it for a
+window, a command starts a sender that sends it and exits (``cadgen._internal.telemetry_send``).
 
 Never a path or a file name of the person's, a model, an argument, a message, a prompt or anything
 typed. A batch with nothing in it is never sent: a process the host started and nobody used counts
@@ -1291,7 +1293,8 @@ class _Tally:
 
 class Recorder:
     """Notes one process's use -- tool calls, view activity, files on screen, builds, snapshots,
-    features, a view's controls and the engine daemon's health -- and sends it while sharing is on. Every method is guarded
+    features, a view's controls and the engine daemon's health -- and sends it while sharing is on, and with it, as
+    a batch of its own, what commands and scripts kept for a sender (``_spooled``). Every method is guarded
     (see the module docstring): it never raises, and none waits on the network."""
 
     def __init__(self, *, process: str = "app", path: Path | None = None,
@@ -1322,6 +1325,12 @@ class Recorder:
         self._off = False  # a no this process could not keep: nothing more is sent from it
         self._timer: threading.Event | None = None
         self._describe()
+        # What ``cadgen`` commands and model scripts counted (``spool``) goes as a batch of its own, the process
+        # ``cli`` with no client or presentation, whichever process sends it: a ``cli`` recorder takes it into its
+        # own tally (``_drain``); any other holds a ``cli`` recorder for it, sent, told a choice and closed with this
+        # one, never on a timer of its own.
+        self._spooled: Recorder | None = (None if self._context["process"] == "cli"
+                                          else Recorder(process="cli", path=path, send=self._send))
 
     @_guarded(lambda: None)
     def _describe(self) -> None:
@@ -1378,16 +1387,24 @@ class Recorder:
         background. A no that could not be kept still holds for this process: it sends nothing more."""
         chosen = choose(share, by=by, path=self.path)  # forget=None: the id waits as pending
         decision = self._decision()
-        with self._lock:  # nothing noted before a choice is sent after it
+        for recorder in (self, self._spooled):
+            if recorder is not None:
+                recorder._chose(decision, share, chosen["saved"])
+        if not share:
+            self._background(lambda: forget_pending(path=self.path))
+        return chosen
+
+    def _chose(self, decision: Any, share: bool, saved: bool) -> None:
+        """A choice made in this process: nothing noted before it is sent after it, and a no that could not be kept
+        still holds here (``_off``)."""
+        with self._lock:
             self._tally, self._unsent = _Tally(), None
             self._basis = decision
             self._choices += 1
         if not share:
-            self._off = self._off or not chosen["saved"]
-            self._background(lambda: forget_pending(path=self.path))
-        elif chosen["saved"]:
+            self._off = self._off or not saved
+        elif saved:
             self._off = False
-        return chosen
 
     @_guarded(lambda: None)
     def started(self, *, client: dict[str, Any], presentation: str) -> None:
@@ -1520,8 +1537,12 @@ class Recorder:
 
     @_guarded(lambda: None)
     def _drain(self) -> None:
-        """Take what commands kept for a sender (``spool``): only what they counted under the answer in force
-        now -- the rest was noted under another, and is dropped as this process's own would be."""
+        """Take what commands and scripts kept for a sender (``spool``) into this ``cli`` recorder's tally: only what
+        they counted under the answer in force now -- the rest was noted under another, and is dropped as this
+        process's own would be. An app's or the viewer's recorder takes nothing: its ``cli`` recorder does
+        (``_spooled``), so what was built never rides in a batch that names who looked."""
+        if self._context["process"] != "cli":
+            return
         settings = self.path or settings_path()
         kept = _take_spool(settings)
         if not kept:
@@ -1534,15 +1555,26 @@ class Recorder:
     @_guarded(lambda: False)
     def flush(self) -> bool:
         """Send what was used since the last batch, if sharing is on; drop it if not. A deletion still owed
-        is asked for first, then the batches exiting processes kept (``send_kept``), then the batch this one
-        could not send (``_resend``): while that is still owed, what came since waits for a later batch. A
-        batch with no use in it is not sent. It waits on the network: only the background sender calls it."""
+        is asked for first, then the batches exiting processes kept (``send_kept``), then what commands and
+        scripts kept, as a ``cli`` batch of its own (``_spooled``), then the batch this one could not send
+        (``_resend``): while that is still owed, what came since waits for a later batch. A batch with no use in
+        it is not sent. It waits on the network: only the background sender calls it. Whether this process's own
+        batch was taken."""
         if self._collect is not None:
             self._collect(self)
-        self._drain()
         settings = self.path or settings_path()
         forget_pending(path=settings)
         self.send_kept()
+        if self._spooled is not None:
+            self._spooled._send_own(settings)
+        return self._send_own(settings)
+
+    @_guarded(lambda: False)
+    def _send_own(self, settings: Path) -> bool:
+        """This recorder's batch: what commands kept, where this is their sender (``_drain``), the batch not taken
+        last time (``_resend``), then a new one (``_batch``) -- kept whole when the receiver does not take it. Whether
+        the new one was taken."""
+        self._drain()
         if not self._resend(settings):
             return False
         taken = self._batch(settings)
@@ -1679,6 +1711,8 @@ class Recorder:
             self._timer.set()
         if self._collect is not None:
             self._collect(self)
+        if self._spooled is not None:
+            self._spooled.close()  # its ``cli`` batch kept as this one's is, under its own context
         settings = self.path or settings_path()
         with self._lock:
             unsent, self._unsent = self._unsent, None

@@ -2,7 +2,8 @@
 
 A command sends nothing itself: it keeps what it counted in the spool beside the settings
 (``analytics.spool``), which the CAD app's and the viewer's background sends take every window
-(``analytics.FLUSH_SECONDS``). With neither running, nothing would. So a command that finds the spool's
+(``analytics.FLUSH_SECONDS``), each as a ``cli`` batch of its own (``Recorder._spooled``). With neither
+running, nothing would. So a command that finds the spool's
 oldest line older than a window, and no sender started within one (the time of the state folder's one
 lock, ``file_lock.STATE_LOCK``, which only a sender's start changes), starts this module detached (``start_if_due``): no window, a process group or session of its own, its
 output nowhere, the telemetry switches of the command's environment not inherited
