@@ -11,9 +11,6 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("skills/urdf/scripts")
 
 from cadgen.urdf_source import symmetric_inertia_eigenvalues, validate_urdf_file
 

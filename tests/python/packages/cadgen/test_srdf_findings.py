@@ -13,10 +13,8 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import RetryingTemporaryDirectory
 
-add_repo_path("skills/srdf/scripts")
 
 from cadgen import srdf
 

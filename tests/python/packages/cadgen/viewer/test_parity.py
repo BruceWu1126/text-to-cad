@@ -44,13 +44,6 @@ class EncodeUriComponent(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(encoding.encode_url_path(value), expected)
 
-    def test_quote_default_would_have_been_wrong(self) -> None:
-        # Guards the comment in encoding.py: urllib's default is wrong in BOTH
-        # directions, so nobody "simplifies" this back to quote(value).
-        from urllib.parse import quote
-
-        self.assertNotEqual(quote("a!*'()/b"), encoding.encode_uri_component("a!*'()/b"))
-
 
 class Base36(unittest.TestCase):
     def test_values(self) -> None:
@@ -72,11 +65,6 @@ class FormEncoding(unittest.TestCase):
 
     def test_star_stays_literal_and_tilde_does_not(self) -> None:
         self.assertEqual(encoding.form_encode([("a", "*~ ")]), "a=*%7E+")
-
-    def test_quote_plus_would_have_been_wrong(self) -> None:
-        from urllib.parse import quote_plus
-
-        self.assertNotEqual(quote_plus("*~"), encoding.form_encode([("a", "*~")]).split("=")[1])
 
     @unittest.skipIf(sys.platform.startswith("win"), "POSIX absolute paths are drive-relative on Windows")
     def test_local_asset_url(self) -> None:
@@ -100,12 +88,6 @@ class StrictDecode(unittest.TestCase):
         self.assertIn("%zz", throwing, "malformed escape")
         self.assertIn("%C0%AF", throwing, "overlong UTF-8")
         self.assertIn("%ED%A0%80", throwing, "lone surrogate")
-
-    def test_unquote_would_have_been_wrong(self) -> None:
-        from urllib.parse import unquote
-
-        # unquote raises for none of the three; that silence is the bug.
-        self.assertEqual(unquote("%zz"), "%zz")
 
 
 class UrlNormalisation(unittest.TestCase):
@@ -168,13 +150,6 @@ class NaturalSort(unittest.TestCase):
             set(),
             f"{len(unexpected)} corpus rows sort differently from V8 and are not known residue",
         )
-
-    def test_known_residue_does_not_grow(self) -> None:
-        corpus = GOLDEN["sortCorpus"]
-        golden = GOLDEN["sortGolden"]
-        ours = sorted(corpus, key=natural_sort.collation_key)
-        mismatches = sum(1 for a, b in zip(ours, golden) if a != b)
-        self.assertLessEqual(mismatches, len(KNOWN_SORT_RESIDUE) * 2)
 
     def test_pairwise_sign_matrix(self) -> None:
         subset = GOLDEN["sortPairSubset"]

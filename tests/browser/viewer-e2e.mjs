@@ -160,11 +160,9 @@ async function newPage() {
             url: location.href,
             text: document.body.innerText.slice(0, 24000),
             buttons: [...document.querySelectorAll('button')].filter(node => node.getBoundingClientRect().height).map(node => ({ label: node.getAttribute('aria-label'), text: node.innerText.slice(0, 120), disabled: node.disabled })).slice(0, 120),
-            placement: window.__cadModelPlacement,
             canvases: [...document.querySelectorAll('canvas')].map(canvas => canvas.getBoundingClientRect().toJSON()),
             camera: window.__cadCamera?.(),
             load: window.__cadViewerLoad,
-            badge: document.querySelector('[data-file-status]')?.dataset.fileStatus,
           })),
           new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('diagnostic state timed out')), 3000); }),
         ]);
@@ -222,11 +220,9 @@ async function openFile(page, file) {
   return canvas;
 }
 
-/** The staged model's bounds, from whichever seam its renderer publishes. */
+/** The staged model's bounds, from the stage its renderer publishes (`__cadStage`). */
 const MODEL_BOUNDS_SCRIPT = () => {
   window.__cadModelBounds = () => {
-    const placement = window.__cadModelPlacement;
-    if (Array.isArray(placement?.boundsMin)) return { min: placement.boundsMin, max: placement.boundsMax };
     const stage = window.__cadStage?.();
     return stage?.bounds ? { min: stage.bounds.min, max: stage.bounds.max } : null;
   };

@@ -13,8 +13,8 @@ import { PNG } from 'pngjs';
 // The robot renderer end to end in a real browser, over the fixture descriptions in `__fixtures__`
 // as cadgen resolved them (`make_fixtures.py`; the Python suite holds the files current): a URDF of
 // primitives, the SRDF paired with it (a "home" state, a named pose, an end effector), an SDF, a
-// long chain, a four-bar linkage cadgen closes, and the two cadgen refuses, whose refusal must raise
-// an alert instead of a robot. This server answers `GET /__cad/robot` as the viewer's does, from
+// long chain, a four-bar linkage cadgen closes, and the two cadgen refuses (their alerts are
+// `useRobotDocument.test.tsx`'s and `ViewportError.test.tsx`'s: no GPU needed). This server answers `GET /__cad/robot` as the viewer's does, from
 // those files, so the page here is the page a CAD Viewer serves. Scene, pose store and handle adapter
 // have unit tests; these are the flows a person actually uses.
 
@@ -752,23 +752,6 @@ test('an SDF is the same robot with a section of its own; a snapshot depicts the
   assert.deepEqual([captured.file, captured.type, captured.references.length], ['/models/swing.sdf', 'image/png', 1], 'one context, of the file');
 
   assert.deepEqual(robot.errors, []);
-});
-
-test('files cadgen refuses say why, in its words: an SRDF with no URDF beside it, and a robot whose link mesh is missing', async (t) => {
-  const lonely = await open(t, 'lonely.srdf', { panel: false });
-  const alert = lonely.pane.getByText('No URDF beside this SRDF', { exact: true });
-  await alert.waitFor();
-  const said = (await lonely.pane.innerText()).replace(/\s+/g, ' ');
-  assert.match(said, /exactly one \.urdf file with the same <robot name>/, 'it says what was looked for');
-  assert.match(said, /no \.urdf in \/models declares <robot name='nobody'>/, 'and carries cadgen’s sentence: the folder, the name, what the folder holds');
-  assert.match(said, /Put the robot's URDF next to this SRDF/);
-  assert.equal(await lonely.pane.getByText('Reading model').count(), 0, 'it does not load forever');
-  assert.deepEqual(lonely.errors, []);
-
-  const gone = await open(t, 'gone.urdf', { panel: false });
-  await gone.pane.getByText('Couldn’t load the model', { exact: true }).waitFor();
-  assert.match((await gone.pane.innerText()).replace(/\s+/g, ' '), /missing mesh file: 'meshes\/absent\.stl'/);
-  assert.deepEqual(gone.errors, []);
 });
 
 test('a pose step costs the same on a long chain: one matrix, no component', async (t) => {
