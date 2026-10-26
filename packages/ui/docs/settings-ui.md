@@ -48,8 +48,8 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   host keeps the view's own history (`history`: the CAD app's views, which no browser holds),
   **Back** and **Forward**, two arrows walking it as a browser's do, from file to file and to
   and from the home (a step like a file), each there always and disabled where it has
-  nowhere to go; then the open file's name, after its kind's glyph (a model's code glyph, a
-  file's type icon), and its ⋯. Each of these that
+  nowhere to go; then the open file's name, after its kind's glyph (a model's cube, a
+  file's file glyph), and its ⋯. Each of these that
   is a control (`NAV_ITEM_CLASS`) is transparent at rest, takes the same accent background
   while the pointer is on it and while its menu is open, has a pointer cursor and no tooltip:
   it says what it is. The name
@@ -139,7 +139,13 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   registered) and lists one folder at a time — its subfolders, then its CAD files — in compact rows: one 24px
   line of 12px text each, its kind a small light glyph in one column 5px in from the row's
   left end and 4px before the name (a folder its disclosure chevron, with no folder icon; a
-  file its type's icon), as the file sidebar's trees draw theirs. A press on a subfolder opens it
+  file its type's icon), as the file sidebar's trees draw theirs. A CAD file's icon is the
+  viewer's own file glyph (`fileGlyphs.jsx`, through `EntryIcon.jsx`): lucide's file outline on
+  its 24-unit grid and stroke, with what the file holds drawn small inside it, so a file reads
+  as a file at a glance — the same in the explorer, the Home, the name menu and the navbar:
+  STEP and xbf a cube, STL and 3MF a triangle cut into facets, GLB three axes, DXF a flat
+  polyline, a robot description (URDF, SRDF, SDF) two joints and their link. A model, built
+  from code, is lucide's plain cube (`Box`). A press on a subfolder opens it
   inline, under itself, its rows 10px further in and hung from a faint line under its
   chevron, read once when it first opens; another press closes it, and Right and Left do the
   same from the keyboard. A double-click opens it in the explorer's place, as a crumb does —
