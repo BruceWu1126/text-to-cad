@@ -146,6 +146,7 @@ from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape, TopTools_Ind
 
 from cadgen.engine.kernel.history import _map, _object_key, listed
 from cadgen.engine.kernel.imported import ELEMENT_NAMES
+from cadgen.engine.refs import ELEMENT_NAME
 from cadgen.engine.sources import assigned as _assigned_names
 from cadgen.engine.sources import returning as _returning
 
@@ -161,14 +162,6 @@ _UNNAMED = frozenset({"", "NONE", "NULL"})
 # The operations that only place or hold the shapes they are given: an element of an
 # input no name reaches stays unnamed in what they return, never theirs.
 _PLACEMENTS = frozenset({"moved", "located", "compound", "copy", "deepcopy"})
-# An element name as the viewer's ref grammar admits it (``packages/core``'s ``cadRefs``:
-# ELEMENT_NAME_SOURCE): a kind, then an atom and its steps.
-_SEGMENT = r"[A-Za-z_][A-Za-z0-9_]*"
-_NUMBER = r"[1-9][0-9]*"
-_FEATURE_NAME = rf"{_SEGMENT}(?:\.{_SEGMENT})?"
-_ATOM = rf"{_FEATURE_NAME}(?:\.{_NUMBER}|~[0-9a-f]{{12}})"
-_STEP = rf";(?:(?:(?:M|MG[fev]|G[fev]|U)(?:{_NUMBER})?|L):{_FEATURE_NAME}(?:\+[fev]:{_ATOM})*|D{_NUMBER})"
-ELEMENT_NAME = re.compile(rf"[fev]:(?:[0-9a-f]{{12}}|{_ATOM}(?:{_STEP})*)")
 
 # A shape's map of one kind of its sub-shapes in its own frame, by TShape and orientation:
 # what naming asks of every result on every run. A TShape's sub-shapes never change once
