@@ -79,3 +79,12 @@ test("the navbar's logo and the Home's grid share the 16px gutter", () => {
   assert.match(navbar, /cn\(NAVBAR_ROW_CLASS, "pl-3 /);
   assert.match(navbar, /"cad-navbar-logo justify-start px-1"/);
 });
+
+// A size of the scale given to a primitive replaces the primitive's own (a button's text-xs), and
+// survives a colour after it: cn() knows the scale's names as sizes.
+test("cn() merges the scale's sizes as font sizes", async () => {
+  const { cn } = await import("./lib/utils.js");
+  assert.equal(cn("h-6 text-xs", "text-ui"), "h-6 text-ui");
+  assert.equal(cn("text-tiny", "text-muted-foreground"), "text-tiny text-muted-foreground");
+  assert.equal(cn("text-ui", "text-foreground"), "text-ui text-foreground");
+});
