@@ -317,7 +317,8 @@ document or revision never retargets it. A Quick Edit that reached its destinati
 fed by it, and every renderer, menu and the home count through `useControlUsage()` — `used(name)` for
 a press, `changed(name)` for a setting (a burst of moves is one change), `active(name, on)` for a
 control that stays on (the tool in hand, Preview: a use each time it turns on, and its seconds while
-it is on and the page is shown). A host receives, at most every minute it has something to say, as
+it is on and the page is shown; Explode and Clip, popovers rather than tools in hand, are a `used` each
+time one opens, with no seconds). A host receives, at most every minute it has something to say, as
 the page is hidden and as the view goes, `[{ control, count, seconds }]`: a name of `CONTROLS`, a
 closed list that cadgen and the receiver hold too (a name not on it is dropped here), and two whole
 numbers. Never a value typed, a setting's value (unless it is itself a name on the list: a render

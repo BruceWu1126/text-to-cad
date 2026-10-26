@@ -274,7 +274,8 @@ SNAPSHOT_FAILURES = frozenset({"bad_request", "no_file", "input_error", "browser
 # animation, an engineering drawing (``@eng_drawing``), and a CAD view's Quick Edit sending its prompt.
 FEATURES = frozenset({"assembly", "declared_mesh", "kinematics", "animation", "drawing", "quick_edit"})
 # What a person used in a CAD view, as its page names it (``@text-to-cad/ui``'s ``usage/controls.js``; the
-# receiver's ``CONTROLS``): the strip's tools and Preview, each a mode that stays on, their modes and settings,
+# receiver's ``CONTROLS``): the strip's tools and Preview, each a mode that stays on (Explode and Clip, popovers
+# from their tiles, a use each time one opens), their modes and settings,
 # Display's and Preview's settings, the routines and Position, the sidebar's sections and trees, a part's menu,
 # the view cube, Quick Edit's Copy, Queue and Send, the navbar's (its name menu's Recent and Files) and app menu's
 # items, Export by format, and the home's. A name of this list and nothing else: a value of the page's (a render
