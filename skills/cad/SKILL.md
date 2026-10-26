@@ -9,11 +9,8 @@ license: MIT
 Provenance: maintained in [earthtojake/text-to-cad](https://github.com/earthtojake/text-to-cad).
 Use the installed local skill files for the current interface.
 
-The viewer page is the open document, the script is its feature tree, and running the
-script is the rebuild: a model is a Python function, a run rebuilds it in cadgen's warm engine,
-and the page the person has open updates. Export is the download button at the navbar's right:
-pick a format, the engine prepares the file, the browser saves it. Nothing is written to disk
-until someone asks for a file.
+A model is a Python function; running its script rebuilds it in cadgen's warm engine, and the
+page the person has open updates. Files are exports, made when asked.
 
 ## Start with the task
 
@@ -135,8 +132,10 @@ run, and the open page follows every run.
 
 - **Running the script is the rebuild.** It writes no file. The engine's warm worker for
   the script replays every operation an edit did not reach, so a comment re-runs nothing
-  and a dimension edit re-runs what reads it. Decoration only declares: keep the calls
-  under `if __name__ == "__main__":` so other scripts can import the models.
+  and a dimension edit re-runs what reads it
+  ([what a run runs](references/model-contract.md#what-a-run-runs)). Decoration only
+  declares: keep the calls under `if __name__ == "__main__":` so other scripts can import
+  the models.
 - **`@memo` marks stages, never parts.** The engine already replays every kernel call, so
   mark only a function holding seconds of kernel work that an edit elsewhere leaves
   alone, such as a whole sub-assembly stage; never a part, never a helper called many
@@ -155,9 +154,6 @@ run, and the open page follows every run.
   Python opens, each tracked by its bytes. The clock, environment variables and
   randomness are not seen: a body is a function of its code and its inputs. Compose
   project models by calling them, never by reading a file the project exported.
-- **References** to faces, edges and parts come from `cadgen inspect <id> [ref]`, and the
-  body picks the same element with build123d's selectors; verify with a snapshot when in
-  doubt ([references](references/inspection-and-validation.md#references)).
 - **A shape with no function** (a notebook cell, a REPL) is handed over:
   `model(shape, name="plate")` returns the same handle, and no command builds it again.
 - **The engine never reruns code.** A restart reopens every document from the engine's
@@ -174,8 +170,8 @@ run, and the open page follows every run.
 
 A file is an action on the document the engine holds, never part of the model: no code
 change and no rebuild, written at once. It holds what the document held when it was
-written, a STEP its materials too, so a change made after it is in the file only once it
-is written again. Write one when the person asks for it:
+written, so a change made after it is in the file only once it is written again. Write one
+when the person asks for it:
 
 ```bash
 cadgen export "$ID" STEP/bracket.step STL/bracket.stl GLB/bracket.glb 3MF/bracket.3mf
@@ -216,16 +212,14 @@ After every run, read its line and the delta under it; a contradiction with what
 intended is fixed before anything else. A number the person gave is checked by an assert
 inside the model's body on what the geometry measures, a bound, a distance or a volume, or by
 `cadgen inspect`, never by restating the constant, and never by code after the call in the
-model's script: reading `.shape` there loads the CAD kernel in the script's own process, about
-3 s, after the engine has answered. A derived number they asked for is a check script; neither
-is ever read off a picture. A structural or appearance change, new parts, placements, colours or a mechanism,
+model's script ([inspection](references/inspection-and-validation.md)). A derived number they
+asked for is a check script; neither is ever read off a picture. A structural or appearance
+change, new parts, placements, colours or a mechanism,
 gets the snapshots it takes to judge it, usually one from the angle that shows the change,
 more when a view leaves the question open, and a posed one for a mechanism state; never
-several angles by habit. After a Quick Edit, the picture to take is the person's own view
-replayed (`--camera authored` with the packet), not a fresh angle. For a large assembly,
-isolate the parts the edit touched or hide what covers them and frame them, instead of
-drawing the whole model. Resolve a reference with `cadgen inspect` only when a prompt names
-one.
+several angles by habit. For a large assembly, isolate the parts the edit touched or hide
+what covers them and frame them, instead of drawing the whole model. Resolve a reference with
+`cadgen inspect` only when a prompt names one.
 
 ```bash
 cadgen snapshot "$ID" tmp/review.png
@@ -314,10 +308,6 @@ print(closest_points(plate, post).distance)   # 0: the standoff sits on the plat
 - A check that fails or cannot decide has shown nothing about the design.
 - A retry that leaves out or shrinks a specified feature (a fillet skipped, a radius
   reduced) builds a different design from the one asked for.
-- Every run says where its time went and how each body went (`run` or `replayed`). A
-  body that runs on every run is named, with why, in the report
-  `bracket.build().models[0]["retention"]` returns
-  ([what a run runs](references/model-contract.md#what-a-run-runs)).
 
 ## Hand off
 
@@ -355,6 +345,5 @@ own work; review with `cadgen snapshot`.
   every later run of its model and every rewrite of its file, so share it once.
   Return that link to the user. If it fails to launch, say so.
 
-The viewer never runs a script: run the changed models first. Exact selection and
-measurement need a model's document, an `.xbf` or a STEP; mesh viewers measure
-approximately, on triangles.
+Exact selection and measurement need a model's document, an `.xbf` or a STEP; mesh viewers
+measure approximately, on triangles.
