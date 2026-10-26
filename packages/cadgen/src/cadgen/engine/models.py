@@ -14,9 +14,9 @@ What outlives the process is the registry's (``registry``): each ``model`` and `
 is recorded there as it is registered (``record``, ``hand_over``), synchronously, so after a restart
 its id is known -- ``held`` from its cache file, or ``unsaved`` with the command that builds it
 again (none for a shape) when the cache holds no file of it, or
-``detached`` once its script is gone -- and nothing is run to bring it back. A ``key=`` claims its id
-for one declaration: another declaration's build or hand-over
-of that key is refused, naming the one that holds it (``claimed``). A served
+``detached`` once its script is gone -- and nothing is run to bring it back. An explicit ``name=`` claims its id
+for one declaration within its script folder: another declaration is refused, naming both
+locations (``identity.claimed``). A served
 document's generation (``version``, what a page shows and the viewer's export compares) is a token
 of its build's own, never a counter that starts again, so an id and a generation never name two
 documents across a restart; a run of the same closure in the worker holding the last build keeps it
@@ -117,7 +117,7 @@ class Models:
                         if held is not None:
                             claimed(held, source, source["explicit_name"])
                     self.record(report, recorded, facts)
-                except ValueError as error:  # a key another declaration holds: the build is refused, by name
+                except ValueError as error:  # a name another declaration holds: the build is refused, by name
                     report["ok"], report["error"] = False, f"{source['name']}: {error}"
                     root["ok"] = False
                     root.setdefault("error", report["error"])
@@ -245,8 +245,7 @@ class Models:
         documents worker -- checked, and made the structure the server serves -- then held as a
         drained document is (``server.keep``, and the cache), its page registered, and recorded as a
         ``kind: "shape"``, with the ``program`` that handed it over where there is one: the engine did
-        not run it, so nothing builds it again. Refused (``ValueError``) for a key another declaration holds, or bytes that
-        are no document. The answer carries its page."""
+        not run it, so nothing builds it again. Refused (``ValueError``) for bytes that are no document. The answer carries its page."""
         import hashlib
 
         from cadgen.engine import registry as registering

@@ -119,7 +119,7 @@ def file_id(path: str | os.PathLike) -> str:
 
 
 def model_id(script: str | os.PathLike, function: str, name: str | None = None) -> str:
-    """A model's document id: its script's canonical path and its function's name."""
+    """A model's id: script/function by default, folder/explicit name when given."""
     return derived_id(os.path.dirname(canonical(script)), check_name(name)) if name is not None else derived_id(script, function)
 
 

@@ -51,6 +51,7 @@ the two disagree, the engine's README is right.
 
 | Document | What it is for | Go there when |
 |---|---|---|
+| [`STORE.md`](STORE.md) | Identity, registry records, cache paths, re-attachment and the JSON identity migration | changing persistent document identity or storage |
 | [`src/cadgen/engine/README.md`](src/cadgen/engine/README.md) | The engine: models and decorators, the engine server and its workers, the door, progress, the viewer and the snapshot, exports, kinematics, couplings and configuration sequences, materials, imports, placements, the mesh and its wire format, element names, references, body retention, queries, memo functions and the build closure | changing anything a build, an export, a snapshot or a served document does |
 
 ## The design laws
@@ -113,8 +114,11 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
    (`ids.derived_id`): a model's script and function (`ids.model_id`), an opened file's path and
    no name (`ids.file_id`, inside the engine only: its public name stays its path), a shape handed
    over its calling script, or the working folder, and its name -- the same in every process,
-   worked out without asking the engine. `key="..."` replaces it with `uuid5(NAMESPACE, "key::" +
-   key)`, global, and refused, naming the other, when another declaration claims the key. A
+   worked out without asking the engine. Identity is namespace plus name: in 0.8 the namespace is
+   the script's folder, with no project detection. A model's name is its identity within its
+   namespace, the function's name by default, `name=` gives it another. An explicit name uses the
+   folder as the formula's scope; duplicate explicit names within it are refused with both
+   declaration locations. Unnamed functions in different files keep their script/function ids. A
    function in a file is a model (the registry points at its script), and a shape is handed over
    (`model(shape, name=...)`: held and kept, never rebuilt); every one is recorded and kept in
    the engine's document cache alike. A function is declared by `@model` (no file) or by its file
@@ -136,7 +140,7 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
 9. **Names are the durable tie to code.** An element's name is spelled from the function that
    made its feature and the author's name for that feature, never from a line or a file: moving
    code renames nothing, and the file holds no line to go stale.
-10. **A file decorator requires an explicit output path.** `out` is its only argument;
+10. **A file decorator requires an explicit output path.** `out` is required; `name=` optionally names the model;
     omitted paths and `None` are refused. Whenever the model it decorates runs in a
     build -- the build's target, or a child another model's body calls -- or is taken from its
     key, that file is written, once per build, from the model's own document, exactly as an export
@@ -258,6 +262,8 @@ Laws 1 to 13 and 19 to 23 are the engine's; 14 to 18 hold for the whole package.
     which is the disk by definition and is read again when its bytes change; and the registry's
     record, which a run wrote. An existence check that only words a state reads no code (a model
     whose script is gone is `detached`, the engine's **Document lifetime**).
+    The one startup exception is the JSON identity migration ([STORE.md](STORE.md)): it hashes
+    existing scripts once for older records, without importing them or reading/re-writing an XBF.
     *Pressure-test*: build a model, then edit its script, its modules and the files its bodies
     read, without running it: every page, the home, every verb and tool and `cadgen status` answer
     as they did before the edit, and no process of the engine has opened a file of the model's code

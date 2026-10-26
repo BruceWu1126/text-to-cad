@@ -1,7 +1,7 @@
 """The registry: one self-describing record per document the engine knows, in the user's state folder.
 
 ``<state>/documents/<id>/document.json`` is a document's record, one shape for every kind:
-``{schema, id, kind, root, home, entry, revision, built, key?, facts?, program?, cache?, opened?,
+``{schema, id, kind, root, home, entry, namespace, name, fingerprint?, revision, built, facts?, program?, cache?, opened?,
 pinned?, preview?}``. ``kind`` is ``model``, a model built from a script (``home`` and ``entry``: the
 script and the function it points at; the command that builds it again is always ``cadgen run``
 of its home); ``shape``, a shape a program handed over (``home``: the script that handed it over,
@@ -13,7 +13,7 @@ holds its document (``cache``: ``{revision, bytes, read}``), whose bytes live in
 cache folder, not here (``Registry.cache``: ``<cache>/documents/<id>/document.xbf``, the engine's
 ``cache`` module): regenerable, wiped at no loss, never the source of anything; the record is
 authoritative, and a cache file missing or unreadable is simply not cached. Ids are the
-documents' own (``ids``: one formula of the canonical path and the name, or a ``key=``'s); the
+documents' own (``ids``: one formula of the canonical path and the name); the
 registry is their reverse map, never their authority.
 
 A record is relocatable: ``root`` is the one absolute folder in it, and ``home`` (the script, or

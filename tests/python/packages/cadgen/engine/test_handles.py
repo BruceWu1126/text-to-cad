@@ -325,7 +325,7 @@ class HandleTest(unittest.TestCase):
         record = Registry(self.state).get(ident)
         self.assertEqual((record["kind"], record["entry"], record["program"]), ("shape", "crate", "hand.py"))
         self.assertEqual(set(record) - {"cache"}, {"schema", "id", "kind", "root", "home", "entry", "program",
-                                                   "revision", "built", "created"}, "a model's shape, and the program that showed it")
+                                                   "revision", "built", "created", "namespace", "name"}, "a model's shape, and the program that showed it")
         from cadgen.viewer.recents import RecentStore
 
         [shown] = [entry.public() for entry in RecentStore(self.state).list() if entry.path == ident]

@@ -4,8 +4,8 @@ A model is a parameterless function that returns a build123d shape. It becomes a
 through exactly one of two declarations: bare ``@model`` (a document with no file), or one or
 more file decorators -- ``@xbf``, ``@step``, ``@glb``, ``@stl``, ``@threemf`` and ``@dxf`` (the
 drawing of a planar result: a sketch, a face, wires or edges) -- a document with those files;
-``@model`` stacked with a file decorator is refused. Its identity is ``script.py::function``: the
-function's name is the model's name, and renaming the function renames it. Every file decorator
+``@model`` stacked with a file decorator is refused. By default its id uses ``script.py::function``.
+An explicit ``name=`` uses the script folder and that name instead, independent of the declaring file. Every file decorator
 requires its output path: ``@xbf("XBF/part.xbf")`` or ``@step(out="part.step")``. Relative paths
 are relative to the script. Everything else is the model's code: its material, colours, joints,
 the pose its joints are connected at (the pose every file shows), its mechanism states, couplings

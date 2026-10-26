@@ -127,8 +127,10 @@ Each call the script's `__main__` makes prints how its model built, the delta un
 handle's `.id` and `.url`). An unchanged rerun prints `took ... nothing ran` instead. Give the
 user the page once ([Show the model](#show-the-model)) and use the id for every command
 after it. The id comes from the
-script's path and the function's name (or `@model(key="...")`), so it is the same run after
-run, and the open page follows every run.
+script's path and the function's name, or the script's folder and an explicit `@model(name="...")`,
+so it is the same run after run, and the open page follows every run. A model's name is its identity
+within its namespace, the function's name by default, `name=` gives it another. In 0.8 the namespace
+is the script's folder; two explicit names in it must differ.
 
 - **Running the script is the rebuild.** It writes no file. The engine's warm worker for
   the script replays every operation an edit did not reach, so a comment re-runs nothing

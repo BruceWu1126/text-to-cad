@@ -863,6 +863,8 @@ the body `{"share":false}`); only you can opt in.
 
 Projects written against a 0.8 pre-release may use names the release renamed or removed:
 
+`key="x"` is now `name="x"`.
+
 | Before | Now |
 | --- | --- |
 | `from cadgen.engine import model, memo, ...` | `from cadgen import model, memo, ...` |
@@ -877,7 +879,7 @@ Projects written against a 0.8 pre-release may use names the release renamed or 
 | `@xbf` + `@glb` stacked so a GLB bakes its animations | `@model`; `cadgen export <id> model.glb` or `export(x, "model.glb")` bakes them |
 | a model call returning its shape (`base = plate()` used as a shape) | the call returns the document's handle: compose `plate().shape` |
 | `@model(store="copy")`, `store="pointer"`, `store="memory"` | none: no store argument. A model lives in a `.py` file; a cell's shape is handed over, `model(shape, name="plate")` |
-| `@model(id="<uuid>")` | none: an id is derived (the script and the function), or `key="plate"` names one |
+| `@model(id="<uuid>")` | none: an id is derived (the script and the function), or `name="plate"` names one within its script's folder |
 | `@model` stacked with `@xbf`, `@step` or another file decorator | one or the other; the stack is refused |
 | `Model.export(...)`, `Model.snapshot(...)`, `Model.document` on the decorated function | the handle a call returns: `arm().export(...)`, `arm().snapshot(...)`, or `export(arm(), ...)` |
 | `cadgen export DOC OUT --pose NAME`, `export(..., pose=)` | a model returning `posed(assembly, NAME)`, exported |
