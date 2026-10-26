@@ -87,6 +87,9 @@ export default {
   "explorer.files": "Files",
   "explorer.noModels": "No models yet",
   "explorer.modelsFailed": "Couldn't read the models",
+  "explorer.filterModelsLabel": "Filter models",
+  "explorer.filterModelsPlaceholder": "Filter models...",
+  "explorer.noModelsMatch": "No models match",
 
   // The home: the library of models opened before.
   "home.recentFiles": "Recent",

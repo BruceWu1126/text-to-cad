@@ -288,7 +288,7 @@ Preview, with the view cube at the bottom-right and Quick Edit at the top-right.
 
 The name menu is a popover under the file's name, two tabs over the explorer's own rows:
 **Models**, the library's eight latest models (no file), by last activity, each its glyph, its
-name and its age ("2h ago"), the one on screen marked; and **Files**, the
+name and its age ("2h ago"), the one on screen marked, under "Filter models..."; and **Files**, the
 explorer: the file's folder (a model's, the folder its record registered), one folder at a
 time, with "Filter files..." to find a file anywhere under it. It opens on Models over a model
 and on Files over a file. Below 600px of

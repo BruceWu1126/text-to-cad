@@ -80,6 +80,33 @@ it('lists models alone on Models, by last activity, each row its glyph, name and
   expect(document.querySelector('[data-file-explorer]')).toBeNull();
 });
 
+it('filters Models under "Filter models...", which has the keyboard on opening, Down taking it into the rows and Up back', async () => {
+  const user = userEvent.setup();
+  const rows = [...ROWS, { path: '7a2d3b5f-2c3d-6e4f-9a5b-0123456789ab', name: 'arm plate', kind: 'model', opened: now - 3600, updated: null, missing: false }];
+  const reports: { control: string; count: number }[][] = [];
+  const view = render(<ControlUsageProvider report={counts => reports.push(counts)}>
+    <ViewerNavbar file={MODEL} name="bracket" kind="model" explorer={explorer()} recent={recent(rows)} /></ControlUsageProvider>);
+  await user.click(document.querySelector<HTMLElement>('[data-file-name]')!);
+  await screen.findByText('arm plate');
+  const filter = screen.getByRole('textbox', { name: 'Filter models' });
+  expect([filter.getAttribute('placeholder'), document.activeElement]).toEqual(['Filter models...', filter]);
+  const names = () => [...document.querySelectorAll('[data-model-row]')].map(row => row.querySelector('[data-model-age]')!.previousElementSibling!.textContent);
+  expect(names()).toEqual(['bracket', 'arm plate']);
+  await user.keyboard('ARM');
+  expect(names()).toEqual(['arm plate']);
+  await user.keyboard('{ArrowDown}');
+  expect(document.activeElement).toBe(document.querySelector('[data-model-row]'));
+  await user.keyboard('{ArrowUp}');
+  expect(document.activeElement).toBe(filter);
+  await user.clear(filter);
+  await user.keyboard('gone');
+  // a.step and gone.stl are files: nothing of Models matches.
+  expect([names(), screen.getByText('No models match').tagName]).toEqual([[], 'P']);
+  view.unmount();
+  const said = Object.fromEntries(reports.flat().map(({ control, count }) => [control, count]));
+  expect(said).toEqual({ models: 1, models_filter: 2 });
+});
+
 it('keeps Models to the eight latest, and a menu with one of the two has no tabs', async () => {
   const many = Array.from({ length: 12 }, (_, index) => ({ path: `/m/${index}`, name: `m${index}`, kind: 'model', opened: index, updated: null }));
   expect(modelRows([...many, { path: '/m/a.step', name: 'a.step', kind: 'file', opened: 99, updated: null }]).map(row => row.name))

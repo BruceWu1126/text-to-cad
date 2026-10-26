@@ -75,6 +75,9 @@ export default {
   "explorer.files": "파일",
   "explorer.noModels": "아직 모델이 없습니다",
   "explorer.modelsFailed": "모델을 읽을 수 없습니다",
+  "explorer.filterModelsLabel": "모델 필터",
+  "explorer.filterModelsPlaceholder": "모델 필터…",
+  "explorer.noModelsMatch": "일치하는 모델이 없습니다",
 
   "home.recentFiles": "최근",
   "home.searchAria": "모델 검색",

@@ -135,8 +135,11 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   no tabs, and one with neither a plain name. **Models** (`ModelList.jsx`) is the host's library's
   models alone (no file: those are Files' and the Home's), by last activity, eight at most, in the
   explorer's compact rows: the model's glyph, its name, and at the right its age with no verb ("2h
-  ago"); the model on screen is highlighted, a press opens a model as a pick in the explorer does,
-  Up and Down walk the rows, and there is no footer: the home is one click away. **Files** is the file explorer (`FolderExplorer.jsx`),
+  ago"), under its filter, as Files' rows are under theirs ("Filter models...", the explorer's
+  `TreeFilterInput`, matching every word in a model's name, before the eight are taken; "No
+  models match" where none does); the model on screen is highlighted, a press opens a model as a
+  pick in the explorer does, Up and Down walk the filter and the rows, and there is no footer: the
+  home is one click away. **Files** is the file explorer (`FolderExplorer.jsx`),
   below. The menu is as tall as its rows up to 28rem or the room below it: past that its list
   scrolls. It floats over the view and the file sidebar, so opening it resizes and moves
   nothing. The explorer starts in the open file's folder (a model's: the folder its record
@@ -159,8 +162,8 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   and only the folder it is in, left alone beside the "…", is cut (its name a hint while it
   is). The folder it is in reads in the foreground color, the others muted; there is no up
   arrow, and the open file is highlighted, the list opening scrolled to centre its row, once (a
-  long folder's too). Opened on Files, its filter has the keyboard, so typing
-  finds a file at once; opened on Models, the menu holds it and Down takes it into the rows; on
+  long folder's too). Opened on either tab, its filter has the keyboard, so typing
+  finds a file or a model at once, and Down takes it into the rows; on
   a phone the menu itself holds focus, keeping the keyboard down. "Filter files..." under the breadcrumb searches
   every file nested under the folder (the server's bounded search, debounced 150ms, each
   keystroke cancelling the search before it); a search that stopped early says "Stopped

@@ -119,7 +119,8 @@ one of the two has no tabs. **Models** (`navigation/ModelList.jsx`) lists the mo
 host's library (`FileViewerProps.recent`, a `list()` of `RecentDocument`s; a row whose `kind` is
 a model's or a shape's), by last activity (the later of each row's `opened` and `updated`),
 eight at most, in the explorer's compact rows: the model's glyph, the name, and its age with no
-verb at the right; the model on screen is highlighted, a row opens it through
+verb at the right, under "Filter models..." (every word in the name, the filter taking the
+keyboard as the explorer's does); the model on screen is highlighted, a row opens it through
 `navigation.openFile`, and there is no footer.
 **Files** is the explorer (`navigation/FolderExplorer.jsx`). It starts in the open file's
 folder, or a document's `folder` where it has no file of its own (a model's registered folder),

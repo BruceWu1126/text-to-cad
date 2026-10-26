@@ -76,6 +76,9 @@ export default {
   "explorer.files": "文件",
   "explorer.noModels": "还没有模型",
   "explorer.modelsFailed": "无法读取模型",
+  "explorer.filterModelsLabel": "筛选模型",
+  "explorer.filterModelsPlaceholder": "筛选模型…",
+  "explorer.noModelsMatch": "没有匹配的模型",
 
   "home.recentFiles": "最近",
   "home.searchAria": "搜索模型",

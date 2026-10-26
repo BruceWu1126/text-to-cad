@@ -75,6 +75,9 @@ export default {
   "explorer.files": "ファイル",
   "explorer.noModels": "まだモデルはありません",
   "explorer.modelsFailed": "モデルを読み込めませんでした",
+  "explorer.filterModelsLabel": "モデルを絞り込む",
+  "explorer.filterModelsPlaceholder": "モデルを絞り込む…",
+  "explorer.noModelsMatch": "一致するモデルはありません",
 
   "home.recentFiles": "最近",
   "home.searchAria": "モデルを検索",
