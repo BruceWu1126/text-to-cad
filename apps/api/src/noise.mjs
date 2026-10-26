@@ -50,6 +50,12 @@ export const NEVER_OURS = [
   // A page's cancellation: an AbortError is what the page's own `abort()`, or the browser leaving the page, makes
   // -- a view's feed aborting its request as the view unmounts. Asked for, never a crash: cadgen 0.7.20 and earlier.
   { name: 'page_cancelled', test: row => row.where === 'page' && row.type === 'AbortError' },
+  // A page's crash none of whose frames is in a script of the page's (each `<?>`): a script the browser runs in the
+  // page that it never shipped threw it -- an extension's (a wallet's `Object.connect`, typed by its own minified
+  // class, `i`), an automation's (`UtilityScript.evaluate`). The page's own code is always in a script it names.
+  // cadgen 0.7.26 and earlier (core's `crashOf`).
+  { name: 'not_the_pages', test: row => row.where === 'page' && row.frames.length > 0
+    && row.frames.every(frame => frame.file === '<?>') },
 ];
 
 /**

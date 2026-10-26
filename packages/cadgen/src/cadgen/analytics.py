@@ -54,7 +54,8 @@ exits, each batch under an id of its own and stamped with the time it was made:
   dependencies (a page's: its script asset), a function and a line, the person's own code a bare
   ``<user>``; a build worker that died, its exit status. Never the error's message. Each process
   reports its own (``report``, ``collect_crashes``); a command's and a worker's are kept with its counts,
-  and a page's go to the server that served it.
+  and a page's go to the server that served it -- never one in none of the page's scripts, which a script
+  the browser runs in the page threw (an extension's: ``crashOf`` in @text-to-cad/core).
 
 A command sends nothing itself. What it counts -- a build, a snapshot, a drawing, a crash -- is kept beside
 the settings for the next process that sends (``spool``): only while sharing is on, under the answer in

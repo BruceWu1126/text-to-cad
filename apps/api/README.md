@@ -102,8 +102,10 @@ it arrives.
   person's code above it (a model asking for a build123d name that does not exist, or
   a colour that is not a string); a `WorkerDied` with status `-15`, `-2` or `-1` (a
   worker stopped by SIGTERM, SIGINT or SIGHUP); a `RecursionError` with `<user>`
-  among its frames (the person's code is in the cycle); and an `AbortError` at a `page`
-  (a cancellation the page or the browser asked for, `crashOf` in core's `client/crash.js`).
+  among its frames (the person's code is in the cycle); an `AbortError` at a `page`
+  (a cancellation the page or the browser asked for, `crashOf` in core's `client/crash.js`);
+  and a `page` crash none of whose frames is in a script of the page's, every one `<?>` (an
+  extension's script, or an automation's, run in the page).
   Only `exception` rows are ever
   dropped, and dropping one is not a refusal: the batch is answered `204` and its other
   rows are stored. Each batch that had any logs one `console.info` line counting them
