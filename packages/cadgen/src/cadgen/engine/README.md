@@ -897,8 +897,11 @@ installation that host's server holds.
 ## Document lifetime
 
 A document outlives the worker that built it, the engine's memory and the engine itself, and lives
-until a person deletes it (**Delete**; [models.py](models.py), [serve.py](serve.py)). Its state
-(`models.STATES`, what `cadgen status` lists):
+until a person deletes it (**Delete**; [models.py](models.py), [serve.py](serve.py)). What the
+engine knows of a model comes from a run alone (law 23): a run of its script pushes the model's
+code, its key and its document, and outside a run the engine reads and watches no script and runs
+nothing -- a file document's bytes, which are the disk, and the registry's records, which runs
+wrote, are no model's code. A document's state (`models.STATES`, what `cadgen status` lists):
 
 - `live`: a live worker holds it, with its memo and its trace.
 - `held`: no worker holds it and the engine answers it all the same: in memory, on disk (**The
