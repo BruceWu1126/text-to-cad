@@ -18,7 +18,8 @@ exits, each batch under an id of its own and stamped with the time it was made:
   Marketplace, GitHub, a development install, or ``unknown``), the operating system and processor,
   and from the apps the agent app's name and version and how that app shows CAD (tabs, inline or
   text) -- or, from the browser viewer, ``cadgen-viewer`` and ``browser``; a ``cli`` batch names no app;
-- ``tool`` (the CAD app): how many times each CAD tool was called, and how many of those failed;
+- ``tool`` (the CAD app): how many times each CAD tool was called, and how many of those failed -- a call
+  naming no tool of cadgen's counted as ``cad_unknown``'s (``UNKNOWN_TOOL``), never by the name it sent;
 - ``tool_failure`` (the CAD app): how many of a tool's calls failed for each reason (``FAILURES``): one
   word cadgen chose where the call failed -- the caller named no file, or no view; a view that did not
   answer; the CAD Viewer that did not start; cadgen's own bug -- never the failure's message;
@@ -305,6 +306,9 @@ HANDED = 16  # the most of each kind one command's counts carry (``Recorder.take
 # drown what does. A view's own activity is noted from its sync (``viewed``) and as it adds the model
 # on screen to the library (``opened``).
 UNCOUNTED = frozenset({"cad_sync", "cad_http", "cad_capture_reply"})
+# The tool a call naming none of cadgen's tools is counted as (``cadgen.mcp.server``): the name a host sent is its
+# own string, never sent.
+UNKNOWN_TOOL = "cad_unknown"
 # A file's format, by extension: what the viewer opens (``cadgen.viewer.scanner.SOURCE_EXTENSIONS``), the
 # engine's document (``.xbf``) among them.
 FILE_KINDS = {".step": "step", ".stp": "step", ".stl": "stl", ".3mf": "3mf", ".glb": "glb", ".dxf": "dxf",
@@ -322,9 +326,11 @@ VIAS = frozenset({"script", "command"})
 OUTCOMES = frozenset({"ok", "failed", "crashed", "cancelled"})
 # Why a CAD tool's call failed, named where it failed (``cadgen.mcp.server.ToolFailed``), never read from its
 # message. The caller's: it named no file (``no_path``), one by a relative path (``relative_path``), a path with
-# no file (``no_file``) or a file CAD does not open (``not_cad``); no view, or one that is gone or shows no model
-# (``no_view``); a view that shows its host's file alone (``wrong_view``); arguments the tool could not read
-# (``bad_request``). The view's: it did not answer in time (``timeout``), answered with an error or without
+# no file (``no_file``) or a file CAD does not open (``not_cad``); no view, one that is gone or shows no model, or
+# a call to a tool of cadgen's its host was not listed -- a tab's or a view's, where the host shows none
+# (``no_view``); a view that shows its host's file alone (``wrong_view``); arguments the tool could not read, or a
+# call naming no tool of cadgen's (``bad_request``, as ``UNKNOWN_TOOL``'s). The view's: it
+# did not answer in time (``timeout``), answered with an error or without
 # an image (``view_error``), or with one too large for the host (``too_large``). The machine's: the CAD Viewer
 # did not start (``no_viewer``). cadgen's: anything else it raised (``bug``, reported as an ``exception`` too).
 # ``other``: a failure that named none of these.

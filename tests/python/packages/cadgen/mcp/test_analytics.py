@@ -460,6 +460,31 @@ class ServerCountsTest(_Tmp):
         server.analytics.flush()
         self.assertIn({"name": "tool_failure", "tool": "cad_show", "reason": "other", "count": 1}, sent[-1]["events"])
 
+    def test_a_call_no_tool_answered_is_a_failed_call_never_by_a_name_cadgen_has_no_tool_by(self) -> None:
+        # Answered with an error before any tool runs, each is counted all the same: a tool of cadgen's this host was
+        # not listed (a text host shows no views) as its own, no view; a name cadgen has no tool by, or none at all,
+        # as `cad_unknown`'s -- never the host's string; arguments that are no object as that tool's bad request.
+        server, sent = self.serve("claude-directory", client="some-agent")
+        self.assertTrue(server.text, "no extension, no known launcher: a text host")
+        choose(True, by="cli", path=self.path)
+        context = RequestContext(1, {"threadId": "t"})
+        for params in ({"name": "cad_view", "arguments": {}}, {"name": "cad_secret_bracket", "arguments": {}},
+                       {"name": None}, {"name": "cad_show", "arguments": ["secret"]}):
+            with self.subTest(params=params), self.assertRaises(RpcError) as refused:
+                server.handle("tools/call", params, context)
+            self.assertEqual(refused.exception.code, -32602)
+        self.assertTrue(server.analytics.flush())
+        [payload] = sent
+        self.assertEqual(payload["events"], [
+            {"name": "tool", "tool": "cad_show", "calls": 1, "errors": 1},
+            {"name": "tool", "tool": "cad_unknown", "calls": 2, "errors": 2},
+            {"name": "tool", "tool": "cad_view", "calls": 1, "errors": 1},
+            {"name": "tool_failure", "tool": "cad_show", "reason": "bad_request", "count": 1},
+            {"name": "tool_failure", "tool": "cad_unknown", "reason": "bad_request", "count": 2},
+            {"name": "tool_failure", "tool": "cad_view", "reason": "no_view", "count": 1},
+        ])
+        self.assertNotIn("secret", json.dumps(payload))
+
     def test_every_failure_names_its_reason_where_it_is_raised_from_the_vocabulary(self) -> None:
         import ast
         import inspect

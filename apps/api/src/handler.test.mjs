@@ -135,6 +135,12 @@ test("schema 4 says why a tool's calls failed, one row per tool and reason, by a
     { ...BATCH, schema: 4, events: [{ ...failures[0], path: 'secret.step' }] },
     { ...BATCH, schema: 4, events: [failures[0], failures[0]] }, // one tool and reason, counted once
   ]) assert.equal((await send(memory(), 'POST', '/v1/events', bad)).status, 400, JSON.stringify(bad));
+  // A call naming no tool of cadgen's is `cad_unknown`'s (cadgen/analytics.py: `UNKNOWN_TOOL`), a tool like any
+  // other: the name the host sent is never sent, so no other needs reading.
+  const unknown = [{ name: 'tool', tool: 'cad_unknown', calls: 2, errors: 2 },
+    { name: 'tool_failure', tool: 'cad_unknown', reason: 'bad_request', count: 2 }];
+  assert.equal((await send(store, 'POST', '/v1/events', { ...BATCH, schema: 4, events: unknown })).status, 204);
+  assert.deepEqual(store.rows.map(fieldsOf).slice(-2), unknown.map(({ name, ...counts }) => ({ event: name, ...counts })));
 });
 
 // Schema 5: the daemon's batch, named, with why its builds and snapshots failed.
