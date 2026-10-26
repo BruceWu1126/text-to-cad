@@ -77,8 +77,8 @@ test("a locale's translator fills braces, is one function per locale, and an unk
 });
 
 test("a locale that misses a key reads English; a key nobody has reads as itself", () => {
-  assert.equal(translateIn("zh-CN", "home.byline"), "构建万物。");
-  assert.equal(translateIn("en", "home.byline"), "Build anything.");
+  assert.equal(translateIn("zh-CN", "home.kind.all"), "全部");
+  assert.equal(translateIn("en", "home.kind.all"), "All");
   assert.equal(translateIn("zh-CN", "no.such.key"), "no.such.key");
   assert.equal(translateIn("fr", "file.missing"), "File does not exist", "an unsupported locale reads English");
 });

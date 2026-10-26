@@ -88,8 +88,6 @@ export default {
   "explorer.recentFailed": "Couldn't read the recent files",
 
   // The home: the library of models opened before.
-  "home.byline": "Build anything.",
-  "home.bylineOpenSource": "100% open source and free.",
   "home.recentFiles": "Recent",
   "home.searchAria": "Search models",
   "home.searchPlaceholder": "Search",
@@ -102,7 +100,6 @@ export default {
   "home.filesAria": "Files",
   "home.loadingFiles": "Loading files",
   "home.modelsAria": "CAD models",
-  "home.linksAria": "CAD links",
   "home.fileUnavailable": "File unavailable",
   "home.pinned": "Pinned",
   "home.actionsAria": "Actions for {name}",
@@ -122,6 +119,10 @@ export default {
   "home.kind.all": "All",
   "home.kind.models": "Models",
   "home.kind.files": "Files",
+  "home.kindAria": "Show {kind}",
+  "home.columnName": "Name",
+  "home.columnUpdated": "Updated",
+  "home.columnOpened": "Opened",
   "home.openingAria": "Opening {name}",
   "home.ageNow": "now",
   "home.ageMinutes": "{n}m ago",

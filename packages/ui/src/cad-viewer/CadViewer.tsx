@@ -198,7 +198,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   const goHome = useMemo(() => homed ? <Button size="sm" variant="outline" onClick={home}>{t("file.goHome")}</Button> : null, [homed, home, t]);
   const presentation = useMemo(() => ({
     home: library ? <ModelLibrary library={library} layout={layout} onLayoutChange={changeLayout} picture={picture}
-      links={host.links} fileActions={host.fileActions} onError={onError} /> : undefined,
+      fileActions={host.fileActions} /> : undefined,
     loading: <div className="relative h-full"><ViewerLoadingOverlay viewerLoading /></div>,
     // A document named by its id that the engine does not hold says why, and the command that
     // builds it again (the engine's words), under a title of the state the engine names; a file
@@ -208,7 +208,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
         title={isDocumentId(path) ? t(NOT_HELD_TITLES[String((error as { state?: unknown } | null)?.state)] ?? "file.notHeld") : t("file.missing")}
         description={isDocumentId(path) ? message : undefined} />
       : <EmptyState icon={FileWarning} title={t("file.openFailed")} description={message} tone="warn" action={goHome} />,
-  }), [library, layout, changeLayout, path, picture, host.links, host.fileActions, entry, onError, goHome, t]);
+  }), [library, layout, changeLayout, path, picture, host.fileActions, entry, goHome, t]);
   // What a person does on the screen is counted for the host (`usage/controls.js`); never what a picture drawn
   // out of sight does, which is outside it.
   return <I18nProvider locale={locale}>

@@ -1,19 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
-import { Box, ChevronRight, Ellipsis, LayoutGrid, List, Pin, Search } from "lucide-react";
+import { Box, ChevronDown, ChevronRight, Ellipsis, LayoutGrid, List, Pin, Search } from "lucide-react";
 import { Button } from "../primitives/button.jsx";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../primitives/alert-dialog.jsx";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../primitives/dropdown-menu.jsx";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../primitives/dropdown-menu.jsx";
 import { Input } from "../primitives/input.jsx";
 import { Spinner } from "../primitives/spinner.jsx";
 import { useI18n } from "../i18n/index.js";
 import type { LibraryLayout } from "../tab-store/tabRecord.js";
-import wordmark from "../assets/logo-texttocad.svg";
-import { HomeLinks } from "../file-viewer/navigation/NavbarLinks.jsx";
 import { DocumentGlyph } from "../file-viewer/navigation/DocumentGlyph.jsx";
 import { entryMenu } from "../file-viewer/navigation/entry-menu.js";
 import type { EntryAction } from "../file-viewer/navigation/index.js";
 import type { FileActions } from "../file-viewer/types.js";
-import type { ViewerLinks } from "../host/types.js";
 import { useControlUsage } from "../usage/controls.js";
 import { ageLabel, lastActivity } from "../lib/age.js";
 
@@ -75,7 +72,7 @@ export function filterModels<Model extends LibraryModel>(items: readonly Model[]
   return items.filter(item => matches(item, words));
 }
 
-/** What the type chips above the list show: everything, the documents built from code, or the files. */
+/** What the type filter over the list shows: everything, the documents built from code, or the files. */
 export type LibraryKind = "all" | "models" | "files";
 const ofKind = (item: LibraryModel, kind: LibraryKind) => kind === "all" || (kind === "models") === deletes(item);
 
@@ -123,7 +120,7 @@ export function libraryCards<Model extends LibraryModel>(items: readonly Model[]
   return cards;
 }
 
-/** The cards a search and a type chip leave: a card stays when its model or one folded under it matches. */
+/** The cards a search and the type filter leave: a card stays when its model or one folded under it matches. */
 export function shownCards<Model extends LibraryModel>(cards: readonly LibraryCard<Model>[], query: string, kind: LibraryKind = "all"): LibraryCard<Model>[] {
   const words = wordsOf(query);
   return cards.filter(card => ofKind(card.item, kind) && [card.item, ...card.folded].some(item => matches(item, words)));
@@ -184,13 +181,12 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
 
 /**
  * The host's home: the models opened before, from every view, to open again. The viewer's navbar
- * is over it (its logo's app menu, the host's update and Full size, as over a file). The TEXTTOCAD
- * wordmark is centred at its top over its byline, then the host's links — GitHub, Discord and X,
- * as icon links, which the app menu also holds — then "Recent" with its search and its grid/list
- * switch, both there with no models yet too; then, where models and files are both listed, the
- * type chips (All, Models, Files); then the documents, pinned first, as solid cards (a picture over
- * the kind's glyph, the name and how long ago it was last opened or updated, with no verb) or as
- * rows. A script that declares several models is one card, named for its main model, the others
+ * is over it (its logo's app menu, the host's update and Full size, as over a file); the host's
+ * links are that menu's. The page starts with its control row, one line of 24px controls: at the
+ * left "Recent", in the small-tab style; at the right the type filter ("All ▾": All, Models, Files),
+ * there where models and files are both listed, the search and the grid/list switch, both there
+ * with no models yet too. Then the documents, pinned first, as cards (a picture over the kind's
+ * glyph, the name and how long ago it was last opened or updated, with no verb) or as rows. A script that declares several models is one card, named for its main model, the others
  * folded under it ("and 27 more"), opened in place. Each card has one ⋯ menu: Open, Copy path and
  * Reveal where the host can, Pin or Unpin, then Delete, which asks first (an AlertDialog saying what
  * goes and what stays on disk) and takes the card off the list at once; a pinned card shows its pin. It is the
@@ -202,7 +198,7 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
  * (`wantsPicture`) is handed to `picture`, where the viewer draws one out of sight — one card at a
  * time, each once while the page is up — and the list is read again once one is kept.
  */
-export function ModelLibrary<Model extends LibraryModel>({ library, layout = "grid", onLayoutChange, picture, links, fileActions, onError }: {
+export function ModelLibrary<Model extends LibraryModel>({ library, layout = "grid", onLayoutChange, picture, fileActions }: {
   library: ModelLibrarySource<Model>;
   /** What the host can do with a file on disk (Copy path, Reveal): each card's menu offers it. */
   fileActions?: FileActions;
@@ -211,9 +207,6 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
   onLayoutChange?(layout: LibraryLayout): void;
   /** Draw and keep a model's picture; true once it is kept. */
   picture?(model: Model): Promise<boolean>;
-  /** The host's links, under the wordmark: GitHub, Discord and X. */
-  links?: ViewerLinks;
-  onError?(error: Error): void;
 }) {
   const [items, setItems] = useState<readonly Model[] | null>(null);
   const [query, setQueryState] = useState("");
@@ -303,10 +296,10 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
       return next;
     });
   };
-  // The host lists pinned models first; a search and a chip keep that order.
+  // The host lists pinned models first; a search and the type filter keep that order.
   const cards = libraryCards(all);
   const shown = shownCards(cards, query, kind);
-  // The chips filter only where there is something to tell apart: models and files both listed.
+  // The type filter is there only where there is something to tell apart: models and files both listed.
   const kinds = all.some(deletes) && all.some(item => !deletes(item));
   const now = Date.now();
   // What the host can do with a document on disk (the file, a model's script): the file menu's items.
@@ -405,29 +398,32 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
   // A page: it scrolls, with the platform's own scrollbar, only when there is more of it than fits.
   return <div className="cad-library h-full overflow-y-auto text-ui" data-library-layout={layout}>
     <main className="cad-library-content" aria-label={t("home.modelsAria")}>
-      <img className="cad-library-wordmark" src={wordmark} alt="text-to-cad" />
-      <p className="cad-library-byline">{t("home.byline")} <span>{t("home.bylineOpenSource")}</span></p>
-      {links ? <nav className="cad-library-links" aria-label={t("home.linksAria")}>
-        <HomeLinks links={links} onError={onError} />
-      </nav> : null}
+      {/* One line of 24px controls, there with no models too: the row keeps its shape from the first open to the hundredth. */}
       <div className="cad-library-toolbar">
         <h1 className="cad-library-heading">{t("home.recentFiles")}</h1>
         <div className="cad-library-controls">
-          {/* There with no models too: the toolbar keeps its shape from the first open to the hundredth. */}
+          {kinds ? <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="xs" className="cad-library-kind text-tiny" aria-label={t("home.kindAria", { kind: t(`home.kind.${kind}`) })}>
+                {t(`home.kind.${kind}`)}<ChevronDown aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-32">
+              <DropdownMenuRadioGroup aria-label={t("home.kindsAria")} value={kind} onValueChange={(value: string) => { if (kind !== value) usage.used(`home_chip_${value as LibraryKind}`); setKind(value as LibraryKind); }}>
+                {(["all", "models", "files"] as const).map(value => <DropdownMenuRadioItem key={value} value={value} className="">{t(`home.kind.${value}`)}</DropdownMenuRadioItem>)}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu> : null}
           <div className="cad-library-search">
             <Search aria-hidden="true" />
-            <Input className="h-8" type="search" aria-label={t("home.searchAria")} placeholder={t("home.searchPlaceholder")} value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} />
+            <Input className="h-6 text-tiny" type="search" aria-label={t("home.searchAria")} placeholder={t("home.searchPlaceholder")} value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} />
           </div>
           {onLayoutChange ? <div className="cad-library-layout" role="group" aria-label={t("home.layout")}>
-            <Button variant="ghost" size="icon-sm" aria-label={t("home.grid")} aria-pressed={layout === "grid"} onClick={() => { usage.used("home_layout_grid"); onLayoutChange("grid"); }}><LayoutGrid aria-hidden="true" /></Button>
-            <Button variant="ghost" size="icon-sm" aria-label={t("home.list")} aria-pressed={layout === "list"} onClick={() => { usage.used("home_layout_list"); onLayoutChange("list"); }}><List aria-hidden="true" /></Button>
+            <Button variant="ghost" size="icon-xs" aria-label={t("home.grid")} aria-pressed={layout === "grid"} onClick={() => { usage.used("home_layout_grid"); onLayoutChange("grid"); }}><LayoutGrid className="size-3.5" aria-hidden="true" /></Button>
+            <Button variant="ghost" size="icon-xs" aria-label={t("home.list")} aria-pressed={layout === "list"} onClick={() => { usage.used("home_layout_list"); onLayoutChange("list"); }}><List className="size-3.5" aria-hidden="true" /></Button>
           </div> : null}
         </div>
       </div>
-      {kinds ? <div className="cad-library-kinds" role="group" aria-label={t("home.kindsAria")}>
-        {(["all", "models", "files"] as const).map(value => <Button key={value} variant={kind === value ? "secondary" : "ghost"} size="xs"
-          aria-pressed={kind === value} onClick={() => { if (kind !== value) usage.used(`home_chip_${value}`); setKind(value); }}>{t(`home.kind.${value}`)}</Button>)}
-      </div> : null}
       {error ? <div className="cad-library-error" role="alert"><p>{error}</p></div> : null}
       {items === null ? <Placeholders layout={layout} />
         : (query || kind !== "all") && all.length && !shown.length ? <p className="cad-library-empty" role="status">{t("home.noMatchingModels")}</p>

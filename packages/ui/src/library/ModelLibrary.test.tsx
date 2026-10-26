@@ -31,18 +31,20 @@ async function menu(name: string) {
 }
 const items = (open: HTMLElement) => within(open).getAllByRole('menuitem').map(item => item.textContent);
 
-it('heads the home with the TEXTTOCAD wordmark over GitHub, Discord and X and nothing else (the update, Full size and theme are the navbar\'s); no tagline', async () => {
-  const links = { version: '0.7.4', release: 'r', x: 'https://x.com/earthtojake', github: 'https://github.com/earthtojake/text-to-cad', discord: 'https://discord.gg/x',
-    issues: 'https://github.com/earthtojake/text-to-cad/issues/new' };
-  render(<ModelLibrary library={library([])} links={links} />);
-  const nav = await screen.findByRole('navigation', { name: 'CAD links' });
-  expect(screen.getByRole('img', { name: 'text-to-cad' }).getAttribute('src')).toMatch(/texttocad/);
-  // Links, not a menu: the person's settings are the app menu's, from a file's navbar.
-  expect([...nav.querySelectorAll('a, button')].map(node => [node.getAttribute('aria-label'), node.getAttribute('href')]))
-    .toEqual([['GitHub', links.github], ['Discord', links.discord], ['X', links.x]]);
-  expect(screen.queryByText('Build things')).toBeNull();
-  // The links row is followed straight by Recent: no update row.
-  expect(nav.nextElementSibling?.querySelector('h1')?.textContent).toBe('Recent');
+it('starts with its control row: Recent at the left, the search and the grid/list switch at the right, and no wordmark or links (the app menu\'s)', async () => {
+  render(<ModelLibrary library={library([])} onLayoutChange={() => {}} />);
+  await screen.findByText('Open a CAD file to see it here.');
+  const main = screen.getByRole('main', { name: 'CAD models' });
+  const row = main.firstElementChild!;
+  expect(row.querySelector('h1')?.textContent).toBe('Recent');
+  expect([...row.querySelectorAll('input, button')].map(node => node.getAttribute('aria-label'))).toEqual(['Search models', 'Grid', 'List']);
+  // The search keeps its placeholder; every control is the row's 24px.
+  expect(screen.getByRole('searchbox', { name: 'Search models' }).getAttribute('placeholder')).toBe('Search');
+  expect(screen.getByRole('searchbox', { name: 'Search models' }).className).toContain('h-6');
+  expect(['Grid', 'List'].map(name => screen.getByRole('button', { name }).getAttribute('data-size'))).toEqual(['icon-xs', 'icon-xs']);
+  expect(main.querySelector('img')).toBeNull();
+  expect(screen.queryByRole('navigation')).toBeNull();
+  expect(screen.queryByRole('link')).toBeNull();
 });
 
 it('opens and pins through the host, and with nothing yet says how a file gets here, with no Open of its own', async () => {
@@ -154,27 +156,40 @@ it('gives each card one menu: Open, Copy path and Reveal where the host can, Pin
   expect(items(await menu('bracket.step'))).toEqual(['Open', 'Pin', 'Delete']);
 });
 
-it('marks each card with its kind\'s glyph, and the chips filter models from files', async () => {
+it('marks each card with its kind\'s glyph, and the type filter ("All ▾") shows models or files', async () => {
   const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
-  render(<ModelLibrary library={library([model('bracket.step'), model('arm', { path: id, kind: 'model', script: '/work/parts/arm.py' })])} />);
+  const source = library([model('bracket.step'), model('arm', { path: id, kind: 'model', script: '/work/parts/arm.py' })]);
+  const names = () => within(screen.getByRole('list', { name: 'Files' })).getAllByRole('listitem').map(item => within(item).getAllByRole('button')[0].getAttribute('aria-label'));
+  // A fresh home each time: a second menu opened in one jsdom render stays shut.
+  const choose = async (value: string) => {
+    cleanup();
+    render(<ModelLibrary library={source} />);
+    await screen.findByRole('button', { name: 'Open arm' });
+    const trigger = screen.getByRole('button', { name: 'Show All' });
+    await act(async () => { fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' }); });
+    const open = await screen.findByRole('menu');
+    expect(within(open).getAllByRole('menuitemradio').map(item => [item.textContent, item.getAttribute('aria-checked')]))
+      .toEqual([['All', 'true'], ['Models', 'false'], ['Files', 'false']]);
+    await act(async () => { fireEvent.click(within(open).getByRole('menuitemradio', { name: value })); });
+    expect(screen.getByRole('button', { name: `Show ${value}` }).textContent).toBe(value);
+  };
+  render(<ModelLibrary library={source} />);
   const arm = await screen.findByRole('button', { name: 'Open arm' });
   expect(arm.querySelector('[data-glyph]')?.getAttribute('data-glyph')).toBe('model');
   expect(screen.getByRole('button', { name: 'Open bracket.step' }).querySelector('[data-glyph]')?.getAttribute('data-glyph')).toBe('file');
-  const chips = screen.getByRole('group', { name: 'Show' });
-  expect(within(chips).getAllByRole('button').map(chip => [chip.textContent, chip.getAttribute('aria-pressed')]))
-    .toEqual([['All', 'true'], ['Models', 'false'], ['Files', 'false']]);
-  const names = () => within(screen.getByRole('list', { name: 'Files' })).getAllByRole('listitem').map(item => within(item).getAllByRole('button')[0].getAttribute('aria-label'));
-  fireEvent.click(within(chips).getByRole('button', { name: 'Models' }));
-  expect(names()).toEqual(['Open arm']);
-  fireEvent.click(within(chips).getByRole('button', { name: 'Files' }));
-  expect(names()).toEqual(['Open bracket.step']);
-  fireEvent.click(within(chips).getByRole('button', { name: 'All' }));
+  // A stock dropdown at the right of the control row, before the search, in the row's 24px.
+  const trigger = screen.getByRole('button', { name: 'Show All' });
+  expect([trigger.textContent, trigger.getAttribute('data-size'), trigger.nextElementSibling?.querySelector('input')?.getAttribute('aria-label')]).toEqual(['All', 'xs', 'Search models']);
   expect(names()).toEqual(['Open bracket.step', 'Open arm']);
+  await choose('Models');
+  expect(names()).toEqual(['Open arm']);
+  await choose('Files');
+  expect(names()).toEqual(['Open bracket.step']);
   cleanup();
-  // With one kind alone there is nothing to tell apart: no chips.
+  // With one kind alone there is nothing to tell apart: no filter.
   render(<ModelLibrary library={library([model('bracket.step')])} />);
   await screen.findByRole('button', { name: 'Open bracket.step' });
-  expect(screen.queryByRole('group', { name: 'Show' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /^Show / })).toBeNull();
 });
 
 it('folds a script\'s models under one card named for its main model, collapsed until opened in place', async () => {

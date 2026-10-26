@@ -201,16 +201,17 @@ test('a model document on screen is pictured by its id once it settles, once per
   await vi.waitFor(() => expect(kept).toEqual([['build 1', id], ['build 2', id]]));
 });
 
-test("the person's settings go to the app menu over every file; the home shows the host's links", async () => {
+test("the person's settings and the host's links go to the app menu over every file and the home; the home has no links of its own", async () => {
   const client = cadClient();
   const appSettings = [{ id: 'analytics', label: 'Share anonymous usage data', checked: false, onCheckedChange: () => {} }];
   render(<CadViewer client={client as never} host={ports(client, { links: viewerLinks({ version: '0.7.4' }) })} tabStore={createTabStore(memoryTabRecord())}
     live={createLiveRegistry()} file="/models/parts/a.step" library={library} appSettings={appSettings} onShow={() => {}} />);
   // FileViewer's navbar logo opens them (its own suite).
   expect(props().appSettings).toBe(appSettings);
+  expect(props().host.links).toEqual(expect.objectContaining({ version: '0.7.4' }));
   const home = render(props().presentation!.home as ReactElement);
-  const row = await home.findByRole('navigation', { name: 'CAD links' });
-  expect([...row.querySelectorAll('a, button')].map(node => node.getAttribute('aria-label'))).toEqual(['GitHub', 'Discord', 'X']);
+  await home.findByRole('heading', { name: 'Recent' });
+  expect(home.queryByRole('link')).toBeNull();
 });
 
 test('a document named by its id is its row, joined by id: the host hears its file and its id, and one the engine does not hold says why', async () => {
