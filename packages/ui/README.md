@@ -279,8 +279,8 @@ effects in the [host contract](docs/viewer-host.md), not in renderer components.
 
 One per-file settings store serves controls, live commands and persistence.
 Presets use the canonical grouped schema; see [Display modes](docs/render-mode.md), and
-[render types](docs/render-types.md) for the rule that viewer code asks what a format can do,
-never what it is.
+[render types](docs/render-types.md) for the rule that shared viewer code never asks what a
+format is, and the format → icon map it does read.
 Expensive changes use [staged viewport updates](docs/view-updates.md): controls
 remain authoritative, preparation is replaceable, and captures await presentation.
 The camera is part of the file's view: a refresh restores the one the file on screen
