@@ -171,6 +171,32 @@ class NotHeldRefusalTest(unittest.TestCase):
         self.assertIsInstance(api._failed(answers[0]), NotHeld, "an id it never built is refused the same")
 
 
+class ListingTest(unittest.TestCase):
+    """The engine's list of its model documents: one that declares files is listed like any other,
+    since a declared file is an export of it, never a tie between the two."""
+
+    def test_a_model_that_declares_outputs_is_listed_like_any_other(self) -> None:
+        from cadgen.engine import daemon
+
+        folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="engine-listing-")))
+        self.addCleanup(shutil.rmtree, folder, True)
+        engine = daemon.Daemon()
+        self.addCleanup(engine.pool.stop)
+        idents = []
+        for name, files in (("plain", []), ("declares", [str(folder / "XBF" / "declares.xbf"), str(folder / "declares.step")])):
+            script = folder / f"{name}.py"
+            script.write_text("", encoding="utf-8")
+            ident = model_id(script, name)
+            idents.append(ident)
+            engine.models.records[ident] = {"id": ident, "source": {"script": str(script), "name": name},
+                                            "worker": None, "program": str(script), "kind": "model",
+                                            "version": "g1", "builtAt": 0, "files": files, "revision": "r1"}
+        for op in ("models", "status"):
+            answers: list[dict] = []
+            engine.handle({"op": op}, answers.append)
+            self.assertEqual(sorted(row["id"] for row in answers[-1]["models"]), sorted(idents), op)
+
+
 class StatusTextTest(unittest.TestCase):
     def test_the_serving_line_counts_what_was_opened_beside_the_documents_held(self) -> None:
         from cadgen.engine.cli import status_text

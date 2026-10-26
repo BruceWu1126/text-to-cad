@@ -1723,8 +1723,9 @@ if __name__ == '__main__':
         self.assertEqual(self.run_script("pair.py").returncode, 0)
         done = self.cli("export", "XBF/pair.xbf", "pair.glb", "pair.step")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(len(json.loads(self.cli("status", "--json").stdout)["workers"]), 1,
-                         "the worker that built the document wrote its exports")
+        workers = sorted(Path(worker["script"]).name for worker in json.loads(self.cli("status", "--json").stdout)["workers"])
+        self.assertEqual(workers, ["documents", "pair.py"],
+                         "a declared xbf is a file: the documents worker read it, never the model's worker")
         done = self.cli("export", "pair.step", "back.xbf")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertTrue((self.folder / "back.xbf").is_file())

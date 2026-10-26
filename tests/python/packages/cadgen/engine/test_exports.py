@@ -450,6 +450,41 @@ class BuildFilesTest(unittest.TestCase):
         self.assertIn(f"plate.xbf changed and cannot be written: {refusal}", report["error"])
         self.assertEqual({path: path.stat().st_mtime_ns for path in out.iterdir()}, stats)
 
+    def test_a_verb_given_a_declared_file_reads_the_file_and_consults_no_model(self) -> None:
+        """A declared file is an export of its model, never a tie to it: ``cadgen export
+        <declared>.xbf out.step`` reads the file as a file document, in the documents worker, though
+        the worker that built the model holds its document -- the same STEP, no model consulted."""
+        from cadgen.engine import daemon, worker
+        from cadgen.engine.ids import file_id
+
+        script = self.write("plate.py", """
+            import build123d as bd
+            from cadgen.engine import xbf
+
+
+            @xbf("out/plate.xbf")
+            def plate():
+                return bd.Box(4, 5, 6)
+        """)
+        [report] = engine_build.build(script, ["plate"], cwd=self.folder)
+        self.assertTrue(report["ok"], report)
+        declared = self.folder / "out" / "plate.xbf"
+        said: list[str] = []
+        with mock.patch.object(engine_build, "held", side_effect=AssertionError("a model was consulted")):
+            done = worker._export({"source": {"path": str(declared)}, "destinations": [str(self.folder / "file.step")]},
+                                  said.append)
+        self.assertEqual([Path(row["path"]).name for row in done["files"]], ["file.step"])
+        self.assertTrue(any(line.startswith("read plate.xbf in ") for line in said), said)
+        translate(engine_build.held(script, "plate"), None, self.folder / "model.step")
+        self.assertEqual((self.folder / "file.step").read_bytes(), (self.folder / "model.step").read_bytes())
+        # The daemon sends a file path to the documents worker, never to the worker that wrote it.
+        engine = daemon.Daemon()
+        self.addCleanup(engine.pool.stop)
+        engine.builders[file_id(declared)] = mock.sentinel.builder
+        with mock.patch.object(engine.pool, "holds", return_value=True):
+            self.assertEqual(engine._routed({"source": {"path": str(declared)}, "cwd": str(self.folder)}),
+                             ("documents", str(self.folder)))
+
     def test_a_derived_decorator_alone_writes_its_one_file(self) -> None:
         script = self.write("solo.py", """
             import build123d as bd

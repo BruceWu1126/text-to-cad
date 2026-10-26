@@ -822,22 +822,17 @@ def _taken_outputs(model: Any, report: dict[str, Any], log: Callable[[str], None
     written.stats = {str(target.path): _stat(target.path) for target in plan}
 
 
-def held(script: Path | None = None, name: str | None = None, *, path: Path | None = None) -> Any:
+def held(script: Path | None = None, name: str | None = None) -> Any:
     """The document this process last built, as an ``export.Source``: model ``name`` of
-    ``script`` (any of its models when ``name`` is None and it has one), or the model whose
-    xbf is ``path`` while the file is as the build left it. None when it holds none."""
+    ``script`` (any of its models when ``name`` is None and it has one). None when it holds none.
+    Never looked up by a file: a declared file is an export, read as a file."""
     from cadgen.engine import export
 
     found = []
     for key, written in _WRITTEN.items():
         model_script, _sep, function = key.rpartition("::")
         xbf = next((Path(target) for target in written.stats if target.endswith(".xbf")), None)
-        if path is not None:
-            if xbf is None or file_id(xbf) != file_id(path):
-                continue
-            if _stat(xbf) != written.stats.get(str(xbf)):
-                continue
-        elif script is not None and (model_script != canonical(script) or (name is not None and function != name)):
+        if script is not None and (model_script != canonical(script) or (name is not None and function != name)):
             continue
         if (written.kept is not None and written.tree is not None or written.data is not None
                 or (xbf is not None and _stat(xbf) == written.stats.get(str(xbf)))):

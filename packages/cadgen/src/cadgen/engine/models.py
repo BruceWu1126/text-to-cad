@@ -505,16 +505,15 @@ class Models:
                     del self.daemon.builders[ident]
                 row["worker"] = None
 
-    def listing(self, every: bool = False) -> list[dict[str, Any]]:
-        """The model documents (``every``: those with declared files too), each with
-        its ``state`` (``STATES``), and for one not held the command that builds it again."""
+    def listing(self) -> list[dict[str, Any]]:
+        """The model documents, each with its ``state`` (``STATES``), and for one not held the command
+        that builds it again. One that declares files is listed like any other: they are exports."""
         self.prune()
         for ident in self.cache.documents():  # what the cache holds, listed after a restart too
             self.adopt(ident)
         with self.lock:
-            rows = [row for row in self.records.values() if every or not row["files"]]
             found = []
-            for row in rows:
+            for row in self.records.values():
                 ident = row["id"]
                 entry = {"id": ident, "script": row["source"]["script"],
                          "name": row["source"]["name"], "builtAt": row["builtAt"], "version": row["version"],

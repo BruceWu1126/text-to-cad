@@ -1950,10 +1950,7 @@ class Daemon:
         if "document" in source:
             return "documents", request.get("cwd")  # a held document's bytes: no worker of its script
         if "path" in source:
-            builder = self.builders.get(file_id(source["path"]))
-            if builder is not None and self.pool.holds(builder):
-                return builder.script, None
-            return "documents", request.get("cwd")
+            return "documents", request.get("cwd")  # a file, read as a file: no model's worker
         # A script's worker is keyed by its canonical path: a process key, not a document's id. A held
         # document is asked of the worker that built it (``via``), whatever script defines its model.
         return canonical(source.get("via") or request.get("via") or request.get("script") or source["script"]), None
@@ -2350,7 +2347,7 @@ class Daemon:
                                                              "defaultPort": DEFAULT_PORT,
                                                              "documents": self.server.listing(every=True),
                                                              "memory": self.server.memory()},
-                "models": self.models.listing(every=True),
+                "models": self.models.listing(),
                 "cache": self.models.cache.status(),
                 "renders": [] if self.renders is None else self.renders.status(),
                 "sessions": (self.server.http.app.sessions() if self.server is not None
