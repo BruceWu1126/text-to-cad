@@ -154,6 +154,9 @@ run, and the open page follows every run.
   Python opens, each tracked by its bytes. The clock, environment variables and
   randomness are not seen: a body is a function of its code and its inputs. Compose
   project models by calling them, never by reading a file the project exported.
+- **References** to faces, edges and parts come from `cadgen inspect <id> [ref]`, and the
+  body picks the same element with build123d's selectors; verify with a snapshot when in
+  doubt ([references](references/inspection-and-validation.md#references)).
 - **A shape with no function** (a notebook cell, a REPL) is handed over:
   `model(shape, name="plate")` returns the same handle, and no command builds it again.
 - **The engine never reruns code.** A restart reopens every document from the engine's
