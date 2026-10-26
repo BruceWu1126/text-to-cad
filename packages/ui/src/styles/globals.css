@@ -110,19 +110,9 @@
   }
 }
 
-/* The navbar's logo, the app menu's trigger (`ViewerNavbar.jsx`): the TEXTTOCAD wordmark over the home and the C
- * over a document, both 16px tall (one baseline and cap height: the marks share their vertical box), the
- * wordmark 16 * 32.56 / 5.56 = about 94px wide. Both stand at the box's left: going between the home and a page
- * they crossfade in 150ms while the box's width follows; where motion is reduced it cuts straight. */
-.cad-navbar-logo-box { position: relative; display: block; width: 16px; height: 16px; overflow: hidden; transition: width .15s ease; }
-.cad-navbar-logo[data-logo=wordmark] .cad-navbar-logo-box { width: calc(16px * 32.56 / 5.56); }
-.cad-navbar-wordmark, .cad-navbar-mark { position: absolute; top: 0; left: 0; height: 16px; max-width: none; transition: opacity .15s ease; user-select: none; -webkit-user-drag: none; }
-.cad-navbar-wordmark { width: auto; opacity: 0; }
-.cad-navbar-mark { width: 16px; }
-.cad-navbar-logo[data-logo=wordmark] .cad-navbar-wordmark { opacity: 1; }
-.cad-navbar-logo[data-logo=wordmark] .cad-navbar-mark { opacity: 0; }
-@media (prefers-reduced-motion: reduce) { .cad-navbar-logo-box, .cad-navbar-wordmark, .cad-navbar-mark { transition: none; } }
-.cad-navbar-logo[data-motion=reduced] :is(.cad-navbar-logo-box, .cad-navbar-wordmark, .cad-navbar-mark) { transition: none; }
+/* The navbar's logo, the app menu's trigger (`ViewerNavbar.jsx`): the C mark, 16px, the same over the home
+ * and over a document. */
+.cad-navbar-mark { display: block; width: 16px; height: 16px; max-width: none; user-select: none; -webkit-user-drag: none; }
 
 /* The host's home (`library/`): the models opened before, to open again, on the page's own
  * colour, the navbar's. One type scale: every text is text-ui (13px) -- the heading, the type filter,

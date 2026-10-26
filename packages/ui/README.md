@@ -100,7 +100,7 @@ src/
 dist/               generated ESM, declarations, CSS, assets and worker modules
 ```
 
-The loading icon's and the wordmarks' provenance is [src/assets/README.md](src/assets/README.md);
+The loading icon's and the marks' provenance is [src/assets/README.md](src/assets/README.md);
 the DXF and robot renderers' fixtures are described beside them
 ([dxf](src/renderers/dxf/__fixtures__/README.md), [robot](src/renderers/robot/__fixtures__/README.md)).
 
@@ -290,8 +290,8 @@ Authored material color, finish and opacity are read-only in every style. There
 is no Materials editor or persisted material override. See [View styles](docs/render-mode.md) and
 [loading](docs/loading.md).
 
-The navbar leads with the logo (the TEXTTOCAD wordmark over the home, the C over a document,
-morphing between them), which opens the app's menu: Back to home where the host
+The navbar leads with the logo (the C mark, over the home and over a document alike), which
+opens the app's menu: Back to home where the host
 has a home, the person's settings (Language, Telemetry, Theme), Send feedback
 (a new issue titled "Feedback: " where the host has a tracker), GitHub, Discord and, in
 gray, the version and who made it. Where the host keeps the view's own history (the CAD

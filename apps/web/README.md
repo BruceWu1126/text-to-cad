@@ -383,8 +383,8 @@ pinned one keeps its pin. The ⋯ menu holds Open, a file's Copy path and Reveal
 neither), Pin or Unpin, and Delete, which asks first: a model's "Delete bracket?" removes the engine's record and its saved build, its
 script and exported files kept, and no other model with it; a file's "Delete bracket.step from the viewer?" removes the
 engine's record of the file alone. From a file, Back to home in
-the menu the navbar's C logo opens leads back to it. The home has the same navbar, its logo
-the TEXTTOCAD wordmark rather than the C (both 16px tall, crossfading in 150ms), the same menu (without Back to home, and with GitHub, Discord and X as
+the menu the navbar's C logo opens leads back to it. The home has the same navbar, the same C
+logo (one 16px mark on every page) and the same menu (without Back to home, and with GitHub, Discord and X as
 over a file) at the left and
 the update button at the right while a newer text-to-cad is out. The home is a step of
 the browser's history, as a file is: the browser's Back and Forward walk between them (the
@@ -460,7 +460,7 @@ and the web stay consistent without host-specific copies of those controls.
 
 The Viewer has the one navbar every app shares (see
 [the host contract](../../packages/ui/docs/viewer-host.md#host-chrome-slots)): at the
-left the logo (the TEXTTOCAD wordmark on the home, the C over a file), which opens the app menu, then the open file's name (no glyph),
+left the logo (the C mark, on the home and over a file alike), which opens the app menu, then the open file's name (no glyph),
 which opens the name menu (Models and Files), with its ⋯; at the right the blue update button, while a newer text-to-cad
 is out, and Export over a file that writes formats. The app menu holds Back to home (the home), the
 person's settings (Language — Automatic or a named language —, Telemetry, Theme), Send feedback (a new issue titled "Feedback: "),

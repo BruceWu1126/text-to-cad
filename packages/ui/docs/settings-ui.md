@@ -39,12 +39,9 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   chrome (`chrome: "page"`: the web viewer's, and the CAD app's sidebar, tabs and cards), never in a
   host that shows the view alone (`chrome: "bare"`, the CAD app's file handler: below), and never in Preview, which draws its
   own bar in its place, in every host (see [Preview](#camera-animation-and-preview)). Left: the text-to-cad logo,
-  named Menu, with no chevron: over the home the TEXTTOCAD
-  wordmark and over a document the "C", both 16px tall (one baseline and cap height: only the
-  width changes, the wordmark about 94px wide), in one box in the row's 24px button: going
-  between the home and a page the two crossfade in 150ms while the box's width follows, cut
-  straight under `prefers-reduced-motion` or the host's `reducedMotion`. Its mark's left edge is
-  the page's 16px gutter, the Home grid's left edge, over the home and over a page alike (the
+  named Menu, with no chevron: the "C" mark, 16px, in the row's 24px button, the same over the
+  home and over a document (no wordmark, and nothing that changes between the two). Its left edge
+  is the page's 16px gutter, over the home and over a page alike (the
   row starts 12px in, the button's padding is 4px). The logo opens the
   **app menu** (see [Settings](#settings)) — a host with no home has it too — then, where the
   host keeps the view's own history (`history`: the CAD app's views, which no browser holds),
@@ -60,7 +57,7 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   is the file menu: Copy path, and Reveal in Finder / Show in Explorer / Show in file
   manager, each only where the host can do it, and no ⋯ where it can do none. The name has
   no right-click menu and there are no crumbs. The left's controls sit edge to edge, spaced
-  by their own padding alone: the logo's 24px button (the C; the wordmark's is about 102px), Back, Forward and the ⋯ in 20px ones,
+  by their own padding alone: the logo's 24px button, Back, Forward and the ⋯ in 20px ones,
   and the name 4px in from its edges, so about 7px separate one glyph from the next. Right, only what a host or a file adds: first, the
   update — a blue download button, there only when the host
   found a newer release, whose menu says the step to it, how this host updates and what
