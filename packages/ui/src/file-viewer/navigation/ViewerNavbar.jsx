@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, ChevronDown, Ellipsis } from "lucide-react";
-import { useRef, useState } from "react";
+import { useContext, useRef, useState } from "react";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@text-to-cad/ui/primitives/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@text-to-cad/ui/primitives/popover";
@@ -8,9 +8,11 @@ import { useI18n } from "@text-to-cad/ui/i18n";
 import { cn } from "@text-to-cad/ui/utils";
 
 import logo from "../../assets/logo-c.svg";
+import wordmark from "../../assets/logo-texttocad.svg";
 import { NAVBAR_CONTROLS_CLASS, NAVBAR_ROW_CLASS } from "../../lib/navbarRow.js";
 import { FLOATING_SURFACE_CLASS } from "../../lib/floatingSurface.js";
 import { useViewerMobile } from "../responsive.js";
+import { ViewerHostContext } from "../../host/context.js";
 
 import { AppMenu } from "./AppMenu.jsx";
 import { DocumentGlyph } from "./DocumentGlyph.jsx";
@@ -31,7 +33,8 @@ const TAB_CONTROLS = Object.freeze({ recent: "recent", files: "explorer" });
  * update and its actions. A host that shows the view alone (`chrome: "bare"`: the CAD app's cards and
  * tabs) has no navbar, and Preview hides it in every host, drawing its own bar in its place.
  *
- * Left, in this order: the text-to-cad logo, which opens the app's menu (`AppMenu`: Back to files
+ * Left, in this order: the text-to-cad logo (the TEXTTOCAD wordmark over the home, the C over a
+ * document, morphing between them), which opens the app's menu (`AppMenu`: Back to files
  * where the host has a home, then the person's settings, feedback and links); Back and Forward,
  * where the host keeps the view's own history (`history`); the open document's name, after its
  * kind's glyph, which opens the name menu (Recent, the host's library, and Files, the explorer)
@@ -54,11 +57,22 @@ const TAB_CONTROLS = Object.freeze({ recent: "recent", files: "explorer" });
  */
 const NAV_ITEM_CLASS = "flex h-6 shrink-0 cursor-pointer items-center rounded-md outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground";
 
-/** The text-to-cad logo, the size of the row's other icon buttons: the app's menu. */
-function LogoMenu({ onHome, menu }) {
+/**
+ * The text-to-cad logo, the app's menu: over the home the TEXTTOCAD wordmark, 20px tall; over a
+ * document the C, the size of the row's other icon buttons. One button holds both, so a move between
+ * the home and a page morphs one into the other (`cad-navbar-logo`, about 250ms: the wordmark
+ * collapsing to the C and growing back; cut straight where motion is reduced).
+ */
+function LogoMenu({ onHome, menu, home = false }) {
   const { t } = useI18n();
-  return <AppMenu onHome={onHome} {...menu} trigger={<button type="button" aria-label={t("navbar.menu")} className={cn(NAV_ITEM_CLASS, "w-6 justify-center")} data-navbar-menu="">
-    <img src={logo} alt="" className="size-4" draggable={false} />
+  // The host's own motion setting, beside the platform's (`prefers-reduced-motion`, in the CSS).
+  const still = useContext(ViewerHostContext)?.environment.reducedMotion === true;
+  return <AppMenu onHome={onHome} {...menu} trigger={<button type="button" aria-label={t("navbar.menu")} className={cn(NAV_ITEM_CLASS, "cad-navbar-logo justify-center px-1")}
+    data-navbar-menu="" data-logo={home ? "wordmark" : "mark"} data-motion={still ? "reduced" : undefined}>
+    <span className="cad-navbar-logo-box" aria-hidden="true">
+      <img src={wordmark} alt="" className="cad-navbar-wordmark" draggable={false} />
+      <img src={logo} alt="" className="cad-navbar-mark" draggable={false} />
+    </span>
   </button>} />;
 }
 
@@ -203,7 +217,7 @@ export function ViewerNavbar({ onHome: goHome, menu = null, history = null, file
   return (
     <header className={cn(NAVBAR_ROW_CLASS, "border-border bg-background text-foreground", className)} data-viewer-navbar="">
       <nav aria-label={t("navbar.viewer")} className="flex min-w-0 flex-1 items-center overflow-hidden text-sm">
-        {onHome || menu ? <LogoMenu onHome={onHome} menu={menu} /> : null}
+        {onHome || menu ? <LogoMenu onHome={onHome} menu={menu} home={!file} /> : null}
         {history ? <HistoryButtons viewHistory={history} /> : null}
         {file ? <span className="flex min-w-0 items-center">
           <FileName path={file} name={name} kind={kind} explorer={explorer} recent={recent} />

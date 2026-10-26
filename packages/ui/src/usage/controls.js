@@ -70,7 +70,7 @@ export const CONTROLS = Object.freeze(/** @type {const} */ ([
   // Export, by format.
   'export_step', 'export_stl', 'export_threemf', 'export_glb', 'export_dxf', 'export_xbf', 'export_original',
   // The home.
-  'home_search', 'home_chip_all', 'home_chip_models', 'home_chip_files', 'home_layout_grid', 'home_layout_list',
+  'home_search', 'home_filter_all', 'home_filter_models', 'home_filter_files', 'home_layout_grid', 'home_layout_list',
   'home_open', 'home_fold', 'home_copy_path', 'home_reveal', 'home_pin', 'home_unpin', 'home_delete', 'home_delete_cancel',
 ]));
 

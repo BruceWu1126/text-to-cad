@@ -283,7 +283,8 @@ Authored material color, finish and opacity are read-only in every style. There
 is no Materials editor or persisted material override. See [View styles](docs/render-mode.md) and
 [loading](docs/loading.md).
 
-The navbar leads with the C logo, which opens the app's menu: Back to files where the host
+The navbar leads with the logo (the TEXTTOCAD wordmark over the home, the C over a document,
+morphing between them), which opens the app's menu: Back to files where the host
 has a home, the person's settings (Share anonymous usage data), Send feedback
 (a new issue titled "Feedback: " where the host has a tracker), GitHub, Discord and, in
 gray, the version and who made it. Where the host keeps the view's own history (the CAD
@@ -296,9 +297,10 @@ Preview) end its tool strip, never the navbar. A host whose own frame is its nav
 the view alone (`chrome: "bare"`, the CAD app's cards and tabs), with no navbar at all. With no
 file a view shows the host's home, the model library, under the same navbar (its logo and menu,
 without Back to files, Back and Forward where the host keeps the view's history, and the host's
-update and actions): its wordmark, byline and GitHub,
-Discord and X, then the library alone: the documents opened or built before, pinned first,
-with their pictures, each card's ⋯ menu ending in Delete, which asks first. A file that
+update and actions): one control row (Recent; the type filter, the search, grid or list),
+then the library alone: the documents opened or built before, pinned first, as Figma-style
+tiles with their pictures or as a table of rows, each with its pin and a ⋯ menu ending in
+Delete, which asks first. A file that
 does not exist shows "File does not exist" and its path, and any other failure to open
 "Could not open that file" and why, each with Go home where the host has a home. A
 renderer's loading and update status is its own, in its viewport. An error appears as a

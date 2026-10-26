@@ -31,18 +31,20 @@ async function menu(name: string) {
 }
 const items = (open: HTMLElement) => within(open).getAllByRole('menuitem').map(item => item.textContent);
 
-it('heads the home with the TEXTTOCAD wordmark over GitHub, Discord and X and nothing else (the update, Full size and theme are the navbar\'s); no tagline', async () => {
-  const links = { version: '0.7.4', release: 'r', x: 'https://x.com/earthtojake', github: 'https://github.com/earthtojake/text-to-cad', discord: 'https://discord.gg/x',
-    issues: 'https://github.com/earthtojake/text-to-cad/issues/new' };
-  render(<ModelLibrary library={library([])} links={links} />);
-  const nav = await screen.findByRole('navigation', { name: 'CAD links' });
-  expect(screen.getByRole('img', { name: 'text-to-cad' }).getAttribute('src')).toMatch(/texttocad/);
-  // Links, not a menu: the person's settings are the app menu's, from a file's navbar.
-  expect([...nav.querySelectorAll('a, button')].map(node => [node.getAttribute('aria-label'), node.getAttribute('href')]))
-    .toEqual([['GitHub', links.github], ['Discord', links.discord], ['X', links.x]]);
-  expect(screen.queryByText('Build things')).toBeNull();
-  // The links row is followed straight by Recent: no update row.
-  expect(nav.nextElementSibling?.querySelector('h1')?.textContent).toBe('Recent');
+it('starts with its control row: Recent at the left, the search and the grid/list switch at the right, and no wordmark or links (the app menu\'s)', async () => {
+  render(<ModelLibrary library={library([])} onLayoutChange={() => {}} />);
+  await screen.findByText('Open a CAD file to see it here.');
+  const main = screen.getByRole('main', { name: 'CAD models' });
+  const row = main.firstElementChild!;
+  expect(row.querySelector('h1')?.textContent).toBe('Recent');
+  expect([...row.querySelectorAll('input, button')].map(node => node.getAttribute('aria-label'))).toEqual(['Search models', 'Grid', 'List']);
+  // The search keeps its placeholder; every control is the row's 24px.
+  expect(screen.getByRole('searchbox', { name: 'Search models' }).getAttribute('placeholder')).toBe('Search');
+  expect(screen.getByRole('searchbox', { name: 'Search models' }).className).toContain('h-6');
+  expect(['Grid', 'List'].map(name => screen.getByRole('button', { name }).getAttribute('data-size'))).toEqual(['icon-xs', 'icon-xs']);
+  expect(main.querySelector('img')).toBeNull();
+  expect(screen.queryByRole('navigation')).toBeNull();
+  expect(screen.queryByRole('link')).toBeNull();
 });
 
 it('opens and pins through the host, and with nothing yet says how a file gets here, with no Open of its own', async () => {
@@ -66,9 +68,11 @@ it('opens and pins through the host, and with nothing yet says how a file gets h
   expect(inPlace.change).toHaveBeenLastCalledWith('pin', expect.objectContaining({ name: 'b.stl' }));
   const files = within(screen.getByRole('list', { name: 'Files' })).getAllByRole('listitem');
   expect(files.map(item => within(item).getAllByRole('button')[0].getAttribute('aria-label'))).toEqual(['Open b.stl', 'Open a.step']);
-  // A pinned card says so at rest; its menu offers Unpin.
-  expect(within(files[0]).getByRole('img', { name: 'Pinned' })).toBeTruthy();
-  expect(within(files[1]).queryByRole('img', { name: 'Pinned' })).toBeNull();
+  // Each card has its pin by its ⋯ (Figma's star), pressed while it is pinned; its menu offers Unpin.
+  expect(within(files[0]).getByRole('button', { name: 'Unpin' }).getAttribute('aria-pressed')).toBe('true');
+  expect(within(files[1]).getByRole('button', { name: 'Pin' }).getAttribute('aria-pressed')).toBe('false');
+  await act(async () => { fireEvent.click(within(files[1]).getByRole('button', { name: 'Pin' })); });
+  expect(inPlace.change).toHaveBeenLastCalledWith('pin', expect.objectContaining({ name: 'a.step' }));
   cleanup();
   render(<ModelLibrary library={library([model('b.stl', { pinned: true })])} />);
   await screen.findByRole('button', { name: 'Open b.stl' });
@@ -122,6 +126,34 @@ it('names a card by its file and how long ago it was last active, and switches b
   expect(screen.getByRole('button', { name: 'Actions for bracket.step' })).toBeTruthy();
 });
 
+it('lists rows under a Name, Updated and Opened header: each its glyph and name, then both ages with no verb, its pin and ⋯ at its end', async () => {
+  const hour = 3600, now = Date.now() / 1000;
+  const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
+  render(<ModelLibrary library={library([
+    model('plate.step', { opened: now - 5 * hour, updated: now - 30 * hour }),
+    model('arm', { path: id, kind: 'model', script: '/work/parts/arm.py', opened: null, updated: now - 2 * hour }),
+    model('gone.step', { missing: true, updated: null, opened: now - 3 * 86400 }),
+  ])} layout="list" onLayoutChange={() => {}} />);
+  await screen.findByRole('button', { name: 'Open plate.step' });
+  const list = screen.getByRole('list', { name: 'Files' });
+  // The header row is the columns' labels, for the eye: each row names itself.
+  const header = list.previousElementSibling!;
+  expect([header.getAttribute('aria-hidden'), [...header.children].map(cell => cell.textContent)]).toEqual(['true', ['Name', 'Updated', 'Opened']]);
+  const cells = (name: string) => {
+    const row = screen.getByRole('button', { name: `Open ${name}` });
+    return [row.querySelector('[data-glyph]')?.getAttribute('data-glyph') ?? null, row.querySelector('.cad-library-label')?.textContent,
+      ...[...row.querySelectorAll('[data-column]')].map(cell => [cell.getAttribute('data-column'), cell.textContent])];
+  };
+  expect(cells('plate.step')).toEqual(['file', 'plate.step', ['updated', '1d ago'], ['opened', '5h ago']]);
+  // A model no page has opened has an empty Opened; a file that is gone says so where its time on disk was.
+  expect(cells('arm')).toEqual(['model', 'arm', ['updated', '2h ago'], ['opened', '']]);
+  expect(cells('gone.step')).toEqual(['file', 'gone.step', ['updated', 'File unavailable'], ['opened', '3d ago']]);
+  // No picture in a row; its pin and ⋯ follow its button, at its end.
+  expect(list.querySelector('.cad-library-thumbnail')).toBeNull();
+  const row = within(list).getAllByRole('listitem')[0];
+  expect(within(row).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Open plate.step', 'Pin', 'Actions for plate.step']);
+});
+
 it('gives each card one menu: Open, Copy path and Reveal where the host can, Pin, then Delete', async () => {
   const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
   const copied: string[] = [], revealed: string[] = [];
@@ -154,27 +186,40 @@ it('gives each card one menu: Open, Copy path and Reveal where the host can, Pin
   expect(items(await menu('bracket.step'))).toEqual(['Open', 'Pin', 'Delete']);
 });
 
-it('marks each card with its kind\'s glyph, and the chips filter models from files', async () => {
+it('marks each card with its kind\'s glyph, and the type filter ("All ▾") shows models or files', async () => {
   const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
-  render(<ModelLibrary library={library([model('bracket.step'), model('arm', { path: id, kind: 'model', script: '/work/parts/arm.py' })])} />);
+  const source = library([model('bracket.step'), model('arm', { path: id, kind: 'model', script: '/work/parts/arm.py' })]);
+  const names = () => within(screen.getByRole('list', { name: 'Files' })).getAllByRole('listitem').map(item => within(item).getAllByRole('button')[0].getAttribute('aria-label'));
+  // A fresh home each time: a second menu opened in one jsdom render stays shut.
+  const choose = async (value: string) => {
+    cleanup();
+    render(<ModelLibrary library={source} />);
+    await screen.findByRole('button', { name: 'Open arm' });
+    const trigger = screen.getByRole('button', { name: 'Show All' });
+    await act(async () => { fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' }); });
+    const open = await screen.findByRole('menu');
+    expect(within(open).getAllByRole('menuitemradio').map(item => [item.textContent, item.getAttribute('aria-checked')]))
+      .toEqual([['All', 'true'], ['Models', 'false'], ['Files', 'false']]);
+    await act(async () => { fireEvent.click(within(open).getByRole('menuitemradio', { name: value })); });
+    expect(screen.getByRole('button', { name: `Show ${value}` }).textContent).toBe(value);
+  };
+  render(<ModelLibrary library={source} />);
   const arm = await screen.findByRole('button', { name: 'Open arm' });
   expect(arm.querySelector('[data-glyph]')?.getAttribute('data-glyph')).toBe('model');
   expect(screen.getByRole('button', { name: 'Open bracket.step' }).querySelector('[data-glyph]')?.getAttribute('data-glyph')).toBe('file');
-  const chips = screen.getByRole('group', { name: 'Show' });
-  expect(within(chips).getAllByRole('button').map(chip => [chip.textContent, chip.getAttribute('aria-pressed')]))
-    .toEqual([['All', 'true'], ['Models', 'false'], ['Files', 'false']]);
-  const names = () => within(screen.getByRole('list', { name: 'Files' })).getAllByRole('listitem').map(item => within(item).getAllByRole('button')[0].getAttribute('aria-label'));
-  fireEvent.click(within(chips).getByRole('button', { name: 'Models' }));
-  expect(names()).toEqual(['Open arm']);
-  fireEvent.click(within(chips).getByRole('button', { name: 'Files' }));
-  expect(names()).toEqual(['Open bracket.step']);
-  fireEvent.click(within(chips).getByRole('button', { name: 'All' }));
+  // A stock dropdown at the right of the control row, before the search, in the row's 24px.
+  const trigger = screen.getByRole('button', { name: 'Show All' });
+  expect([trigger.textContent, trigger.getAttribute('data-size'), trigger.nextElementSibling?.querySelector('input')?.getAttribute('aria-label')]).toEqual(['All', 'xs', 'Search models']);
   expect(names()).toEqual(['Open bracket.step', 'Open arm']);
+  await choose('Models');
+  expect(names()).toEqual(['Open arm']);
+  await choose('Files');
+  expect(names()).toEqual(['Open bracket.step']);
   cleanup();
-  // With one kind alone there is nothing to tell apart: no chips.
+  // With one kind alone there is nothing to tell apart: no filter.
   render(<ModelLibrary library={library([model('bracket.step')])} />);
   await screen.findByRole('button', { name: 'Open bracket.step' });
-  expect(screen.queryByRole('group', { name: 'Show' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /^Show / })).toBeNull();
 });
 
 it('folds a script\'s models under one card named for its main model, collapsed until opened in place', async () => {
@@ -358,18 +403,27 @@ it('reads its list again every couple of seconds while the home is up, keeping t
   } finally { vi.useRealTimers(); }
 });
 
-it("counts what a person does on the home by name: a chip, a fold opened, a search begun, a card opened, a delete cancelled and one confirmed", async () => {
+it("counts what a person does on the home by name: a type chosen, a fold opened, a search begun, a card opened, a delete cancelled and one confirmed", async () => {
   const reports: { control: string; count: number; seconds: number }[][] = [];
   const script = '/work/juno/juno.py';
   const ids = ['0', '1'].map(digit => `8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f1${digit}`);
   const source = library([model('juno', { path: ids[0], kind: 'model', script, updated: 10 }),
     model('wheel', { path: ids[1], kind: 'model', script, updated: 5 }), model('bracket.step')]);
+  // The type filter's choice, in a home of its own: a second menu opened in one jsdom render stays shut.
+  const choose = async (value: string) => {
+    const view = render(<ControlUsageProvider report={counts => reports.push(counts)}><ModelLibrary library={source} /></ControlUsageProvider>);
+    await screen.findByRole('button', { name: 'Open juno' });
+    await act(async () => { fireEvent.pointerDown(screen.getByRole('button', { name: 'Show All' }), { button: 0, ctrlKey: false, pointerType: 'mouse' }); });
+    await act(async () => { fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitemradio', { name: value })); });
+    view.unmount();
+    cleanup();
+  };
+  await choose('Models');
+  await choose('All'); // already shown: no use
+  expect(reports.flat()).toEqual([{ control: 'home_filter_models', count: 1, seconds: 0 }]);
+  reports.length = 0;
   const view = render(<ControlUsageProvider report={counts => reports.push(counts)}><ModelLibrary library={source} /></ControlUsageProvider>);
   await screen.findByRole('button', { name: 'Open juno' });
-  const chips = screen.getByRole('group', { name: 'Show' });
-  fireEvent.click(within(chips).getByRole('button', { name: 'Models' }));
-  fireEvent.click(within(chips).getByRole('button', { name: 'Models' })); // already shown: no use
-  fireEvent.click(within(chips).getByRole('button', { name: 'All' }));
   const more = screen.getByRole('button', { name: 'and 1 more' });
   fireEvent.click(more);
   fireEvent.click(more); // folding it again is no use
@@ -380,7 +434,7 @@ it("counts what a person does on the home by name: a chip, a fold opened, a sear
   await act(async () => { fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' })); });
   view.unmount();
   const said = Object.fromEntries(reports.flat().map(({ control, count }) => [control, count]));
-  expect(said).toEqual({ home_chip_models: 1, home_chip_all: 1, home_fold: 1, home_search: 1, home_open: 1, home_delete_cancel: 1 });
+  expect(said).toEqual({ home_fold: 1, home_search: 1, home_open: 1, home_delete_cancel: 1 });
   // A delete the person confirms is counted as one.
   cleanup();
   reports.length = 0;
@@ -390,4 +444,31 @@ it("counts what a person does on the home by name: a chip, a fold opened, a sear
   await act(async () => { fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' })); });
   again.unmount();
   expect(reports.flat()).toEqual([{ control: 'home_delete', count: 1, seconds: 0 }]);
+});
+
+it('counts the pin, from its button or the menu, the grid/list switch, and Copy path and Reveal', async () => {
+  const reports: { control: string; count: number; seconds: number }[][] = [];
+  const fileActions = { platform: 'darwin' as const, perform: { 'copy-path': () => {}, reveal: () => {} } };
+  const source = library([model('bracket.step'), model('plate.step', { pinned: true })]);
+  const home = () => render(<ControlUsageProvider report={counts => reports.push(counts)}>
+    <ModelLibrary library={source} fileActions={fileActions} onLayoutChange={() => {}} /></ControlUsageProvider>);
+  let view = home();
+  await screen.findByRole('button', { name: 'Open bracket.step' });
+  const bracket = screen.getByRole('button', { name: 'Open bracket.step' }).closest('li')!;
+  await act(async () => { fireEvent.click(within(bracket).getByRole('button', { name: 'Pin' })); });
+  fireEvent.click(screen.getByRole('button', { name: 'List' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Grid' }));
+  await act(async () => { fireEvent.click(within(await menu('bracket.step')).getByRole('menuitem', { name: 'Copy path' })); });
+  view.unmount();
+  cleanup();
+  // A menu each render (jsdom): Reveal, then Unpin from the menu.
+  for (const item of ['Reveal in Finder', 'Unpin']) {
+    view = home();
+    await screen.findByRole('button', { name: 'Open plate.step' });
+    await act(async () => { fireEvent.click(within(await menu('plate.step')).getByRole('menuitem', { name: item })); });
+    view.unmount();
+    cleanup();
+  }
+  const said = Object.fromEntries(reports.flat().map(({ control, count }) => [control, count]));
+  expect(said).toEqual({ home_pin: 1, home_layout_list: 1, home_layout_grid: 1, home_copy_path: 1, home_reveal: 1, home_unpin: 1 });
 });

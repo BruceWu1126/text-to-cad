@@ -71,7 +71,7 @@ are for reading and maintaining the contracts.
 | `RobotRendererOptions` (URDF, SRDF, SDF), `RobotLiveController`, `RobotLiveState` (`selectedLinks`, `selectedPartIds`) | [Robot registration](../src/renderers/robot/index.ts) | `@text-to-cad/ui/renderers/robot` |
 | `ViewerCommands`, `ViewerCommandSource` (the host requests every viewer renderer takes) | [Viewer commands](../src/renderers/workspace/commands.ts) | `@text-to-cad/ui/renderers/workspace` |
 | `createLiveRegistry`, `LiveRegistry` (the host's handle on the mounted view: its renderers' `live`) | [Live registry](../src/host/liveRegistry.ts) | `@text-to-cad/ui/host` |
-| `ModelLibrary`, `ModelLibrarySource`, `useModelThumbnail`, `ageLabel`, `lastActivity` (a host's home, under the navbar, the library alone: the CAD title and byline over the host's links (GitHub, Discord, X), then the documents opened or built before, pinned first, then by last activity (the later of a row's `opened` and `updated`), as cards or rows, each its kind's glyph, its name and its age with no verb, filtered by the type chips (All, Models, Files) where both are listed; a script's models one card, its others folded under it; one ⋯ menu a card: Open, Copy path and Reveal where `fileActions` can, Pin or Unpin, then Delete, which asks first (`change("delete")` for a model, `change("remove")` for a file) and takes the card off at once; placeholder cards or rows while the list is read (again every two seconds while the home is up, so a model rebuilt meanwhile is pictured again), and a spinner over the model being opened, which takes no second press until `open` settles) | [Model library](../src/library/ModelLibrary.tsx), [thumbnails](../src/library/thumbnails.ts) | `@text-to-cad/ui/library` |
+| `ModelLibrary`, `ModelLibrarySource`, `useModelThumbnail`, `ageLabel`, `lastActivity` (a host's home, under the navbar, the library alone: one control row of 24px controls — Recent, then at the right the type filter ("All ▾": All, Models, Files, where both are listed), the search and the grid/list switch — then the documents opened or built before, pinned first, then by last activity (the later of a row's `opened` and `updated`), as tiles (the picture, its kind's glyph, its name and its age with no verb) or as a table's rows (Name, then `updated` and `opened` as ages); a script's models one card, its others folded under it; on each a pin toggle and one ⋯ menu: Open, Copy path and Reveal where `fileActions` can, Pin or Unpin, then Delete, which asks first (`change("delete")` for a model, `change("remove")` for a file) and takes the card off at once; placeholder cards or rows while the list is read (again every two seconds while the home is up, so a model rebuilt meanwhile is pictured again), and a spinner over the model being opened, which takes no second press until `open` settles) | [Model library](../src/library/ModelLibrary.tsx), [thumbnails](../src/library/thumbnails.ts) | `@text-to-cad/ui/library` |
 | `CadViewer` (FileViewer over a CAD client, one file by absolute path or the home: the five CAD renderers, catalog following, the home, the "File does not exist" and "Could not open that file" pages, the library's pictures) | [CAD viewer](../src/cad-viewer/CadViewer.tsx) | `@text-to-cad/ui/cad-viewer` |
 | `createCadFileSource` (a CAD client as a read-only `FileSource`: `stat` through the client's `resolveEntry`, `list` through `folder`, `search` through `search`), `createCadFileActions` (the file menu's Copy path, the absolute path, and Reveal), `normalizePath`, `baseName`, `joinPath`, `contentRevision` | [Catalog](../src/cad-viewer/catalog.ts) | `@text-to-cad/ui/catalog` |
 | `ViewerLinks`, `viewerLinks` (the version, GitHub, Discord, where a new issue opens, the newest release and how to update, and how a link is followed), `issueUrl` (a new issue filled in — its title, labels and body — its address kept under `ISSUE_URL_MAX`) | [Host types](../src/host/types.ts), [links](../src/file-viewer/navigation/links.js) | `@text-to-cad/ui/links` |
@@ -477,9 +477,9 @@ viewport's top-right (`notice`, the column Quick Edit hangs under: the CAD app's
 its update notice; over its home, the same corner at the page's top-right). In Preview, in
 every host, the navbar steps aside for Preview's own bar. Over the home the navbar has only
 the logo and its menu (no Back to files), Back and Forward where the host hands a `history`,
-and the host's update and actions, each where it stands over a file; the home's search and
-layout switch stay
-in its Recent row, and its links under its title. Left: the text-to-cad "C" logo,
+and the host's update and actions, each where it stands over a file; the home's type filter, search and
+layout switch stay in its control row, and its links are the app menu's. Left: the text-to-cad
+logo (the TEXTTOCAD wordmark over the home, the "C" over a document, one button morphing between them),
 which opens the app menu (`AppMenu`, `file-viewer/navigation/AppMenu.jsx`), then Back and
 Forward where the host hands a `history`, then the open file's name, after its kind's glyph, and its ⋯ menu. The
 logo, Back and Forward, the name and the ⋯ share one style (`NAV_ITEM_CLASS`):
@@ -510,8 +510,8 @@ gray, "v<version> · Made by @<handle>": the version links its release notes
 as it is (`v0.7.15`), and any other build's with its id (`v0.7.15-dev.b80844940`, the commit
 it was built from, `-dirty` with uncommitted changes): `viewerLinks({ version, build })`,
 where each app's Vite config names the build through `@text-to-cad/ui/build-id`, and a new
-issue names it the same way. The home also has GitHub, which says the project is open
-source, Discord and X as icon links under its wordmark (`HomeLinks`), in that order.
+issue names it the same way. The home has no links of its own: they are this menu's, over
+the home as over a file.
 
 An alert card's Report Issue opens a new issue too,
 titled "Issue: " and labelled `bug`, filled in from the card (`kit/status/reportIssue.js`): its
