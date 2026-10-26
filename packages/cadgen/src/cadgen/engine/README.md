@@ -210,8 +210,9 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
 7. **Provenance is served live, never written.** What made an element -- the
    feature, its operation, the function, file and line of its call -- lives in
    the trace of the worker that built the document, and is asked of it while it
-   lives (`made_by` on the facts endpoints, `cadgen inspect`). A document
-   opened with no such worker has none to give, and says so (`made_by: null`).
+   lives (`made_by` on the facts endpoints, `cadgen inspect`). A model's document
+   opened with no such worker has none to give, and says so (`made_by: null`); a
+   file -- a model's declared xbf among them -- names no model and answers none.
 8. **Poses and motion definitions, never frames.** The document carries
    kinematics -- the mechanism, its mechanism states (each a pose: where its parts
    stand) and its configuration sequences (each a definition: waypoints and an
@@ -252,8 +253,10 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
 14. **Connected means warm.** A page watches a document while it has a version wait outstanding
     or completed a sync within `serve.LIVE` seconds. Heartbeats use the document's id (`ids`): a
     file's `file_id`, a model's `model_id` or `key_id`; they never turn a model into a file path.
-    No timer retires a worker: memory does, and it retires a worker whose document a page watches
-    only when no other is left to retire. The worker-count cap never retires a watched worker; it
+    A watched model document keeps the worker that built it warm; a watched file -- a model's
+    declared xbf among them -- keeps no worker, whichever model's run wrote it. No timer retires
+    a worker: memory does, and it retires a worker whose document a page watches only when no
+    other is left to retire. The worker-count cap never retires a watched worker; it
     is exceeded instead. Memory may take a document out of memory, for the cache to give back,
     only when nothing watches it (**Document lifetime**). Closing a page never stops the engine or its worker.
 
@@ -311,9 +314,10 @@ serves one document and keeps one Recents entry for it too, while a page names a
 it was given. The server keys everything by the id: its served documents and
 the models registered to be served, their watchers and syncs, their builds, the documents a build
 holds; `GET /api/doc/<id>` takes it, and a document served at a pose is `<id>~<digest>`. The
-daemon keys by it the worker that built each document (`builders`, from which `connected` asks
-the server's watched ids) and the live models' book (`models.py`); a worker keys by it what its
-builds named (`build._BUILT`, which `made_by` answers from) and the served documents it patches.
+daemon keys by it the worker that built each model document (`builders`, from which `connected`
+asks the server's watched ids; a file the build wrote is no key there) and the live models' book
+(`models.py`); a worker keys by it what its builds named (`build._BUILT`, which `made_by` answers
+from).
 The worker pool alone is keyed otherwise: by the canonical path of the script a worker runs, a
 process's key, not a document's.
 
@@ -1021,7 +1025,10 @@ edited is written again from the document with nothing run. Nothing is recorded 
 written, and nothing records which model wrote a file: an exported or declared file on disk is a
 plain file to every surface. A verb given its path reads the file, in the documents worker, never
 the document of the model whose build wrote it (`Daemon._routed`), and the engine lists a model that
-declares files like any other.
+declares files like any other. A page given its path serves it as it serves any file: its version
+is the file's, it is read again when the file's bytes change (**The page's route**), and it names no
+model -- no `made_by`, no worker kept warm, and nothing of a run sent to it, its progress and its
+failure among them.
 
 **The last run.** A document is what its model's last run made, and that is all the engine knows
 of the code: it never compares a script, a module or an input file on disk with what a build read,
@@ -1170,7 +1177,9 @@ the daemon:
   phase finished a line with its time, the one in flight repainted in place -- and nothing when
   it is not (`progress.Bar`; `api.build_script(progress=)` takes the frames instead, `False` none);
 - keeps a busy worker's last, which `cadgen status` shows (**The engine server and its workers**);
-- wakes the pages waiting on a served document among the frame's `outputs` (below);
+- wakes the pages waiting on the model document it builds (below); a file among the frame's
+  `outputs`, a declared xbf among them, is no document of the build's: its page hears nothing of
+  the run and follows the file's bytes;
 - sends it on to a build request queued behind it, one of the same script (`Daemon.behind`): a
   rerun after its client was killed (a shell's time limit) waits for the build that client left
   running, nothing cancelled. Its client says so on stderr at once ("waiting for the build of
@@ -1183,13 +1192,17 @@ Each model's report holds its last frame (`progress`), so a failed build
 says where it was; a worker that dies during a build fails it with where it was in the words.
 
 **The page's route.** `GET /api/doc/<id>/version?after=V&progress=N&wait=S` answers
-`{"version", "patch", "building", "failed", "progress"}` once the version is not `V`, or the
+`{"version", "building", "failed", "progress"}` once the version is not `V`, or the
 count `progress` is not `N`, or after `S` seconds (60 at most); without `progress=` it waits on
-the version alone. `building` is the last frame of the build writing the document now, null when
+the version alone. `building` is the last frame of the build of the model's document now, null when
 none is; `failed` is the last build of it that failed, `{"model", "error", "progress"}` -- its
 error, and its last frame -- null once another begins or one succeeds; `progress` is a count that
 moves whenever either does. A page sends back the last answer's `progress`, so each frame and the
-build's end wake it, and nothing polls.
+build's end wake it, and nothing polls. A file's `building` and `failed` are null and its `progress`
+stays: a file names no model. A file's version is its modification time and size: the server
+looks at them each time the file is asked for and at least twice a second while a page waits on
+it, and reads the file again when they changed -- whatever program wrote it, a model's run writing
+the xbf it declares among them: no run sends a file's page anything (**Document lifetime**).
 
 ## The viewer and the snapshot
 
@@ -1294,10 +1307,10 @@ scene made), and the annotation's ink and the measurements are drawn over the pi
 for gets a render process of its own, started on its first picture and holding the document --
 each part's buffer from the daemon's one mesh cache (nothing meshed again), its OCCT shapes, a
 scene and its presentations on a hidden OpenGL context: a picture of it is a frame of that
-process, answered as PNG bytes that the verb writes to OUT (tom: about a tenth of a second). When
-the served document is patched -- a build of it, or its file rewritten -- the process is sent the
-new version at once with the buffers of the parts it lacks: the parts it shares with the last keep
-their shapes, the new ones are made, and its scene is made again before any picture asks. It goes
+process, answered as PNG bytes that the verb writes to OUT (tom: about a tenth of a second). A
+picture of a version the process does not hold -- a model built again, a file rewritten -- sends
+it that version first, with the buffers of the parts it lacks: the parts it shares with the last
+keep their shapes, the new ones are made, and its scene is made again. It goes
 with the daemon, and after a picture that leaves it over the workers' memory cap it says so
 (`retired`) and exits. `daemon=False`, and a model's own document in its worker, draw in that
 process. The context is a hidden window: Cocoa on macOS, an X server's (Xvfb on a machine with no
@@ -1549,8 +1562,8 @@ child whose file cannot be written fails the build. A part is written free
 (`document.unchecked`): OCCT marks a shape put in a compound as no longer free, which would
 make a child's part, placed in its caller's assembly, other bytes than its own build's.
 
-The xbf is saved first and the viewer woken with it: the worker waits for the daemon to hold
-the patch (`{"op": "patched"}` on its pipe) before it writes a derived file.
+The xbf is saved first, then each derived file. Nothing of them is sent to a page: one serving
+a declared file follows that file's bytes (**Document lifetime**).
 
 **Functions** (`api`, also `cadgen.export`, `cadgen.snapshot` and `cadgen.inspect`; `serve`,
 `status`, `stop`, `delete` and `server` only the CLI calls): one per command, each through the daemon. No function builds source text;
@@ -2077,7 +2090,7 @@ type, exact bounding box and `BRepCheck` verdict (and a round face's radii);
 circle's radius and sweep); `.../vertex/<ordinal>` its position;
 `.../groups` how a pick of one face or edge grows, as a STEP's selector table
 says: each face's tangent group (faces joined across tangent edges of one
-solid) and each edge's chain (edges that run on through a shared vertex). Each also answers `made_by`: the element's name, the feature that made
+solid) and each edge's chain (edges that run on through a shared vertex). An element of a model's document also answers `made_by`: the element's name, the feature that made
 it (its name's last step), that feature's operation, the function, file and line
 of its call, and, for a name that folds its derivation, the derivation spelled
 out. It comes from the trace of the worker that built the document, asked over
@@ -2085,9 +2098,11 @@ the worker's pipe (a `where` request, answered by the worker's reading thread,
 during a build too) and never from a file: a document served cold, with no live
 worker that built it (for example, after a daemon restart), answers
 `made_by: null`, and so does an element the served version names otherwise than
-that worker's last build. The line is the call's in the run that named the part.
+that worker's last build. The line is the call's in the run that named the part. A file's
+element -- a model's declared xbf among them -- answers no `made_by`: a file names no model,
+whichever run wrote it.
 `cadgen inspect DOC REF` serves the document on demand and resolves `REF` (**References**):
-an element answers its facts and `made_by`, with its canonical `ref`, its occurrence's `path`
+an element answers its facts and, of a model's document, `made_by`, with its canonical `ref`, its occurrence's `path`
 (`hand/finger.2`), its part, key, kind, ordinal and name, its points (centroid, position,
 endpoints, box) placed where that occurrence stands; a part or an assembly answers what it
 weighs: each part's volume, measured on its solids (`.../part/<key>/volume`), times its material's
@@ -2122,14 +2137,8 @@ document served at that pose, its `kinematics.pose` the values it stands at.
 snapshot**), the same for every document; `GET /api/look/environment` is its environment, the
 Radiance image `render/studio.hdr`.
 `GET /api/doc/<id>/version?after=V&wait=S` answers as soon as the version is not
-`V` (or after `S` seconds, at most 60): the page waits on it, so a build's patch
-reaches it at once. The answer carries the patch's timings.
-
-Between the worker and the daemon a patch is one frame on the worker's pipe: a
-JSON line `{"id", "patch": {"path", "structure", "meshes": [[key, size,
-unmeshed]], "shapes": [[key, size]], "timings"}, "bytes": N}`, then exactly `N`
-bytes: the meshes' buffers, then the shapes' binary shape bytes, in the order
-listed.
+`V` (or after `S` seconds, at most 60): the page waits on it, so a model's new build,
+or a file's new bytes, reaches it at once.
 
 `GET /api/doc/<id>/part/<key>` returns one part's buffer. A client reads it
 with typed-array views, without parsing. It is sent immutable, so a page asks
@@ -2277,7 +2286,7 @@ fixture both suites assert.
 A ref resolves inside the engine, for `inspect` and the viewer, never in a model:
 `cadgen inspect DOC REF` (`cadgen.inspect(source, ref)`) answers what it names, placed where its
 occurrence stands -- an element's kind, ordinal, name and canonical ref, the kernel's facts of it,
-and `made_by`, the feature and the function, file and line of the call that made it; a part's or
+and, of a model's document, `made_by`, the feature and the function, file and line of the call that made it; a part's or
 an assembly's volume and mass, and its world `bounds` (each part's measured box placed where it
 stands), with a part's `placement`: the origin and the x, y and z axes of its instance's matrix.
 Nothing is built or measured again for them. A model that changes what a person picked reads that answer and

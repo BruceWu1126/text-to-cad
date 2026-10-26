@@ -1,7 +1,7 @@
 """Serving a document: its structure, one plain buffer per part in the wire format, the
 same buffer whichever way it is meshed, a document read again after another process
-rebuilt it, a worker's build patched in without its file being read, and the cap on the
-buffers held."""
+rebuilt it, a model's declared xbf served as a file following its bytes alone, and the cap on
+the buffers held."""
 
 from __future__ import annotations
 
@@ -151,13 +151,13 @@ def shelf():
 """
 
 
-class DocumentInMemoryTest(unittest.TestCase):
-    """A worker's build reaches a served page without its file being read: the structure
-    made from the build's tree is the file's, a patch replaces the document in place, and
-    a page waiting on the version is answered by it."""
+class DeclaredFileTest(unittest.TestCase):
+    """A model's declared xbf served as a file: the structure made from the build's tree is the
+    file's, and a page waiting on the file's version is answered when the model's run rewrites
+    it, from the file, with nothing of the model consulted."""
 
     def setUp(self) -> None:
-        self.folder = Path(tempfile.mkdtemp(prefix="engine-patch-")).resolve()
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-declared-")).resolve()
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
         self.script = self.folder / "shelf.py"
         self.path = self.folder / "XBF/shelf.xbf"
@@ -179,8 +179,10 @@ class DocumentInMemoryTest(unittest.TestCase):
         self.assertTrue(any(p["faceColors"] for p in read["prototypes"]), "a painted face is in it")
         self.assertTrue(any(i["color"] for i in read["instances"]), "an instance's own colour is in it")
 
-    def test_a_patch_replaces_the_document_and_answers_the_page(self) -> None:
-        from cadgen.engine import document, worker
+    def test_a_declared_xbf_served_as_a_file_follows_its_bytes_and_consults_no_model(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine import document
 
         self.build(4)
         server = Server(port=0, mesh_mode="inline")
@@ -188,39 +190,26 @@ class DocumentInMemoryTest(unittest.TestCase):
         ident = server.add(self.path)
         before = server.document(ident)
         server.mesh_all(before, None)
-        held = server.hold([str(self.path)])  # as the daemon does while a build writes the file
-        export = self.folder / "shelf.step"
-        sent = []
-        patcher = worker.Patcher({"served": server.versions(), "held": server.cache.keys(),
-                                  "shapes": server.shape_keys()}, lambda message, payload: sent.append(
-                                      (message["patch"], payload, export.stat().st_mtime_ns)))
-        document.SAVED_LISTENERS.append(patcher.saved)
-        try:
-            reports = self.build(6)
-        finally:
-            document.SAVED_LISTENERS.remove(patcher.saved)
-        patcher.finish(reports)
-        self.assertEqual(len(sent), 1)
-        header, payload, export_then = sent[0]
-        self.assertLess(export_then, export.stat().st_mtime_ns, "sent before the exports were written")
-        self.assertEqual(len(header["meshes"]), 1, "only the changed post is meshed by the worker")
-        self.assertEqual([key for key, _size in header["shapes"]], [header["meshes"][0][0]])
-        self.assertEqual(server.document(ident).version, before.version, "a held file is not read again")
         answers = []
-        waiting = threading.Thread(target=lambda: answers.append(server.wait(ident, before.version, 60)))
-        waiting.start()
-        server.patch(header, payload, time.time())
-        waiting.join()
-        after = answers[0]
-        stat = self.path.stat()
-        self.assertEqual(after.version, f"{stat.st_mtime_ns}-{stat.st_size}")
-        self.assertIsNotNone(after.patch, "the document came from the patch, not the file")
-        self.assertEqual(json.loads(json.dumps(after.structure)),
-                         json.loads(json.dumps(document.Loaded(self.path).structure())))
-        changed = header["meshes"][0][0]
-        self.assertEqual(server.cache.get(changed)[:4], b"XBM2", "the worker's mesh is held")
-        server.release(held)
-        self.assertIs(server.document(ident), after, "the file the patch describes is not read again")
+        consulted = AssertionError("a model was consulted")
+        with mock.patch.object(engine_build, "held", side_effect=consulted), \
+                mock.patch.object(engine_build, "taken", side_effect=consulted), \
+                mock.patch.object(engine_build, "made_by", side_effect=consulted), \
+                mock.patch.object(document, "saved", side_effect=consulted):
+            waiting = threading.Thread(target=lambda: answers.append(server.wait(ident, before.version, 60)))
+            waiting.start()  # a page waits on the file's version while the model runs again
+            self.build(6)
+            waiting.join(60)
+            self.assertFalse(waiting.is_alive(), "the page's wait was answered")
+            after = answers[0]
+            stat = self.path.stat()
+            self.assertEqual(after.version, f"{stat.st_mtime_ns}-{stat.st_size}", "the file's own version")
+            self.assertEqual(json.loads(json.dumps(after.structure)),
+                             json.loads(json.dumps(document.Loaded(self.path).structure())))
+            self.assertIs(server.document(ident), after, "the file, unchanged since, is not read again")
+            kept = {p["key"] for p in before.structure["prototypes"]} & {p["key"] for p in after.structure["prototypes"]}
+            self.assertTrue(kept, "the parts the edit left alone keep their keys")
+            self.assertTrue(all(server.cache.get(key) is not None for key in kept), "and their tessellations")
 
 
 class ServedStepTest(unittest.TestCase):

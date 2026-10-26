@@ -449,8 +449,8 @@ def inspect_parser(prog: str = "cadgen inspect") -> argparse.ArgumentParser:
 
 def inspect_main(argv: list[str] | None = None, prog: str = "cadgen inspect") -> int:
     """``cadgen inspect DOC``: the build closure the xbf holds; ``cadgen inspect DOC REF``: what the
-    kernel measures of the elements a ref names, and what made each (``made_by``, null for a
-    document no live worker built)."""
+    kernel measures of the elements a ref names, and what made each (``made_by``, null for a model's
+    document no live worker built; none of a file, which names no model)."""
     return run("inspect", argv, prog)
 
 

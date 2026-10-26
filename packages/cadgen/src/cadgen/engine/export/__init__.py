@@ -257,7 +257,7 @@ _STRUCTURES: dict[int, tuple[Any, Any, dict[str, Any]]] = {}
 
 def structure_of(tree: Any, path: Path | None) -> dict[str, Any]:
     """The structure of a build's tree (``document.tree_structure``), made once per tree
-    and path: the worker's patch and the build's exports share it."""
+    and path: the build's exports and a held model's verbs share it."""
     from cadgen.engine import document
 
     held = _STRUCTURES.get(id(tree))

@@ -44,7 +44,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from cadgen.engine.addresses import document_id
 from cadgen.engine.ids import canonical, file_id
 
 __all__ = ["BuildError", "build", "load_script"]
@@ -63,7 +62,8 @@ class Unreadable(ValueError):
 @dataclass
 class _Written:
     signature: tuple
-    stats: dict[str, tuple | None]
+    # The xbf the model declares, if any: the path a source of its document names (``export.Source``).
+    declared: Path | None
     # The document as written, kept in memory: the next build patches it (``document.Kept``).
     kept: Any = None
     # The build closure the file holds (``previous.manifest``, as text), or None.
@@ -100,9 +100,9 @@ _TOKENS = __import__("itertools").count(1)
 # Per model: the document this process last wrote, kept to be patched by the next build,
 # and each declared file as it left it.
 _WRITTEN: dict[str, _Written] = {}
-# Per document this process last built (its id: each xbf's, and its model's): per part key, what
-# the build made of the part -- what ``made_by`` answers from. In memory only: provenance
-# is served while this process lives, never written.
+# Per model this process last built (its id): per part key, what the build made of the part --
+# what ``made_by`` answers from. A file the build wrote is no key here: a file names no model. In
+# memory only: provenance is served while this process lives, never written.
 _BUILT: dict[str, dict[str, _Named]] = {}
 # Per model, the functions its last run in this process ran or replayed, apart from their
 # arguments: a model calling one a verification found impure is not taken from its file.
@@ -717,9 +717,6 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
 
     report["facts"] = facts(tree, name, signature)
     timings["facts"] = round(time.perf_counter() - clock, 4)
-    for kind, path in targets:
-        if kind == "xbf":
-            _BUILT[file_id(path)] = built
     _BUILT[model.id] = built
     _write(model, plan, tree, signature, report, log)
     timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
@@ -764,8 +761,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
         return sources[0]
 
     _outputs(plan, report, log, lambda path: document.write_bytes(path, data or b"", made_from), source, kept=True)
-    _WRITTEN[key] = _Written(signature, {str(target.path): _stat(target.path) for target in plan}, kept, tree.closure,
-                             made_from, xbf=data)
+    _WRITTEN[key] = _Written(signature, xbf, kept, tree.closure, made_from, xbf=data)
     report["id"] = model.id
     report["source"] = {"script": str(model.script), "name": model.name}
     report["key"] = model.key
@@ -774,8 +770,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
 def _outputs(plan: list, report: dict[str, Any], log: Callable[[str], None],
              save: Callable[[Path], tuple[bool, int]], source: Callable[[], Any], kept: bool = False) -> None:
     """A model's declared files, each exactly an export of its document appended to the run: the xbf
-    first (``save``: the document's own bytes, and the viewer woken with it, before any derived file
-    is written), then each derived file translated from the document (``source``:
+    first (``save``: the document's own bytes), then each derived file translated from the document (``source``:
     ``export.translate``) -- every one landed only where the file does not hold its bytes already
     (``atomic_replace.put``), as ``cadgen export`` writes. Nothing remembers what was written: every
     run that reaches a declared file translates it and compares, so a file someone deleted or edited
@@ -819,7 +814,6 @@ def _taken_outputs(model: Any, report: dict[str, Any], log: Callable[[str], None
     data = written.xbf if written.xbf is not None else written.data or b""
     _outputs(plan, report, log, lambda path: document.write_bytes(path, data, written.tree),
              lambda: held(model.script, model.name))
-    written.stats = {str(target.path): _stat(target.path) for target in plan}
 
 
 def held(script: Path | None = None, name: str | None = None) -> Any:
@@ -831,20 +825,15 @@ def held(script: Path | None = None, name: str | None = None) -> Any:
     found = []
     for key, written in _WRITTEN.items():
         model_script, _sep, function = key.rpartition("::")
-        xbf = next((Path(target) for target in written.stats if target.endswith(".xbf")), None)
         if script is not None and (model_script != canonical(script) or (name is not None and function != name)):
             continue
-        if (written.kept is not None and written.tree is not None or written.data is not None
-                or (xbf is not None and _stat(xbf) == written.stats.get(str(xbf)))):
-            found.append((written, xbf, function))
+        found.append((written, function))  # each holds its document: built and kept, or the cache's bytes
     if len(found) != 1:
         return None
-    written, xbf, function = found[0]
+    written, function = found[0]
     if written.data is not None:
         return held_source(written.data, function)
-    if written.kept is None or written.tree is None:
-        return export.Source.read(xbf)
-    return export.Source.built(written.kept.doc, written.tree, xbf)
+    return export.Source.built(written.kept.doc, written.tree, written.declared)
 
 
 def taken(script: Path, name: str) -> bytes | None:
@@ -1000,7 +989,7 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
             return {"used": False, "reason": "its cache does not hold the closure its head shows",
                     "unreadable": True}, None
         timings["read"] = round(time.perf_counter() - keyed, 4)
-        _WRITTEN[name] = _Written(("loaded", found["key"]), {}, None, text, data=data)
+        _WRITTEN[name] = _Written(("loaded", found["key"]), None, None, text, data=data)
     else:
         # What the bodies made stays the memo's, as a replay would keep it: an edit after
         # any number of these builds replays all it leaves alone.
@@ -1055,12 +1044,13 @@ _KINDS = {"face": "faces", "edge": "edges", "vertex": "vertices"}
 
 def made_by(document: str, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
     """What made element ``ordinal`` (1-based) of kind ``kind`` (face, edge, vertex) of
-    part ``key`` of ``document`` (its id, or the xbf's path), as this process's last build
-    of it named it: the element's name, the feature that made it (its last step's), that feature's
+    part ``key`` of ``document`` (its model's id), as this process's last build of it named
+    it: the element's name, the feature that made it (its last step's), that feature's
     operation and the function, file and line of its call, and, where the name folds
     part of its derivation, the derivation spelled out. None for a document this process
-    did not build, or an element its build gave no name."""
-    named = _BUILT.get(document_id(document), {}).get(key)
+    did not build -- a file among them, which names no model -- or an element its build gave no
+    name."""
+    named = _BUILT.get(document, {}).get(key)
     if named is None or not named.names:
         return None
     texts = named.names.get(_KINDS[kind]) or []

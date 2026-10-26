@@ -117,49 +117,6 @@ def get_json(url: str, token: str) -> dict:
     return json.loads(get(url, token))
 
 
-class PatcherTest(unittest.TestCase):
-    """What a worker meshes for a build: only parts a served document lacks, never a whole
-    document whose meshes the daemon has not made yet."""
-
-    def setUp(self) -> None:
-        self.folder = Path(tempfile.mkdtemp(prefix="engine-patcher-")).resolve()
-        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
-        self.script = self.folder / "pair.py"
-
-    def build(self, size: int):
-        from cadgen.engine import build as engine_build
-        from cadgen.engine import document
-
-        self.script.write_text(textwrap.dedent(PAIR.format(size=size)), encoding="utf-8")
-        os.utime(self.script, ns=(time.time_ns(), time.time_ns()))
-        self.assertTrue(engine_build.build(self.script, ["pair"], cwd=self.folder)[-1]["ok"])
-        return document.saved(self.folder / "XBF/pair.xbf")
-
-    def patch(self, request: dict, tree) -> list:
-        from cadgen.engine.worker import Patcher
-
-        sent: list = []
-        patcher = Patcher(request, lambda message, payload: sent.append(message))
-        patcher.saved(self.folder / "XBF/pair.xbf", tree)
-        return sent
-
-    def test_a_document_nobody_serves_is_meshed_by_no_build(self) -> None:
-        tree = self.build(10)
-        self.assertEqual(self.patch({}, tree), [])
-
-    def test_a_served_document_s_unchanged_parts_are_not_meshed_by_the_build(self) -> None:
-        first = self.build(10)
-        served = sorted({part.key for part in first.parts})
-        edited = self.build(12)
-        from cadgen.engine.ids import file_id
-
-        ident = file_id(self.folder / "XBF/pair.xbf")
-        # The daemon serves the first build's document and holds no mesh yet (a cold daemon).
-        sent = self.patch({"served": {ident: "0-0"}, "served_keys": {ident: served}, "held": [], "shapes": []}, edited)
-        self.assertEqual(len(sent), 1)
-        self.assertEqual(len(sent[0]["patch"]["meshes"]), 1, "the changed part alone")
-
-
 LOADS = """
 import build123d as bd
 from cadgen.engine import xbf
@@ -225,19 +182,16 @@ class WorkerLoopTest(unittest.TestCase):
         self.worker.stdin.write((json.dumps(request) + "\n").encode())
         self.worker.stdin.flush()
 
-    def until_settled(self, ident: int, seen: list | None = None) -> list:
-        """The frames up to request ``ident``'s ``settled``; its reports."""
-        reports = []
+    def until_answered(self, ident: int, seen: list | None = None) -> list:
+        """The frames up to request ``ident``'s answer, its last frame; its reports."""
         while True:
             frame = self.next()
             if seen is not None:
                 seen.append(frame)
-            if frame.get("id") == ident and "done" in frame:
-                reports = frame["done"]
             if frame.get("id") == ident and "failed" in frame:
                 self.fail(frame["failed"])
-            if frame.get("id") == ident and frame.get("settled"):
-                return reports
+            if frame.get("id") == ident and "done" in frame:
+                return frame["done"]
 
     def loads(self) -> int:
         return (self.folder / "loads.txt").read_text(encoding="utf-8").count("load")
@@ -247,24 +201,24 @@ class WorkerLoopTest(unittest.TestCase):
         self.ask(1, ["block"])
         self.ask(2, ["peg"])
         seen: list = []
-        self.until_settled(1, seen)
-        self.until_settled(2, seen)
+        self.until_answered(1, seen)
+        self.until_answered(2, seen)
         self.assertFalse(any("collected" in frame for frame in seen), "no collection between the two answers")
         self.assertIsInstance(self.next().get("collected"), float, "it collected once idle")
 
     def test_one_run_s_calls_share_a_load_until_a_file_changes(self) -> None:
-        self.until_settled(self._asked(1, None, "one"))  # a cold build: bodies ran, nothing kept
-        self.until_settled(self._asked(2, ["block"], "one"))  # nothing ran: this load is kept
+        self.until_answered(self._asked(1, None, "one"))  # a cold build: bodies ran, nothing kept
+        self.until_answered(self._asked(2, ["block"], "one"))  # nothing ran: this load is kept
         self.assertEqual(self.loads(), 2)
-        taken = self.until_settled(self._asked(3, ["peg"], "one"))
+        taken = self.until_answered(self._asked(3, ["peg"], "one"))
         self.assertEqual(self.loads(), 2, "the run's next call is served from its load")
         self.assertEqual(taken[0]["cache"], {"used": True, "from": "memory"})
         self.script.write_text(self.script.read_text(encoding="utf-8") + "# edited\n", encoding="utf-8")
-        self.until_settled(self._asked(4, ["block"], "one"))
+        self.until_answered(self._asked(4, ["block"], "one"))
         self.assertEqual(self.loads(), 3, "an edit between two calls of one run loads the script again")
-        self.until_settled(self._asked(5, ["peg"], "two"))
+        self.until_answered(self._asked(5, ["peg"], "two"))
         self.assertEqual(self.loads(), 4, "another run loads the script again")
-        self.until_settled(self._asked(6, ["peg"], None))
+        self.until_answered(self._asked(6, ["peg"], None))
         self.assertEqual(self.loads(), 5, "a request of no run loads it again")
 
     def _asked(self, ident: int, functions: list | None, run: str | None) -> int:
@@ -337,10 +291,9 @@ class ClientGoneTest(unittest.TestCase):
 
         worker = object.__new__(Worker)  # its pipes stood in for: no process
         worker.process = SimpleNamespace(stdout=io.BytesIO(stdout), stderr=io.BytesIO(stderr))
-        worker.answers, worker.asked, worker.progress, worker.touched = queue.Queue(), {}, None, set()
+        worker.answers, worker.asked, worker.progress = queue.Queue(), {}, None
         worker.followers = []
-        worker.on_progress = worker.on_patch = lambda *_args: None
-        worker.on_settled = lambda *_args: None
+        worker.on_progress = lambda *_args: None
 
         def gone(_message: dict) -> None:
             raise BrokenPipeError("the client hung up")
@@ -1263,7 +1216,6 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(first["files"], {})
         self.assertEqual(first["id"], address)
         self.assertNotIn("address", first, "a report names its document by its id alone")
-        self.assertEqual(first["meshed"], 0)
         url = urlparse(first["url"])
         doc = url.path.strip("/")
         endpoint = f"{url.scheme}://{url.netloc}/api/doc/{doc}"
@@ -1473,7 +1425,10 @@ if __name__ == '__main__':
         self.assertTrue(build(10)["files"][str(xbf)]["written"])
         self.assertEqual(xbf.read_bytes(), cold, "a fresh worker writes the same bytes")
 
-    def test_a_served_document_follows_the_build_without_its_file_being_read(self) -> None:
+    def test_a_served_declared_xbf_follows_its_file_when_its_model_runs_again(self) -> None:
+        """A model's declared xbf opened as a file is a file: a run that rewrites it sends the page
+        nothing, and the page's version moves because the file's bytes did -- its version is the
+        file's, and its parts are read from it."""
         self.script = self.folder / "pair.py"
         self.script.write_text(textwrap.dedent(PAIR.format(size=10)), encoding="utf-8")
         self.assertEqual(self.run_script("pair.py").returncode, 0)
@@ -1488,46 +1443,27 @@ if __name__ == '__main__':
         for prototype in before["prototypes"]:  # the page has every part
             self.assertEqual(get(f"{api}/part/{prototype['key']}", token)[:4], b"XBM2")
         self.script.write_text(textwrap.dedent(PAIR.format(size=12)), encoding="utf-8")
-        self.assertEqual(self.run_script("pair.py").returncode, 0)
+        ran = self.run_script("pair.py")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
         answer = get_json(f"{api}/version?after={before['version']}&wait=60", token)
         stat = (self.folder / "XBF/pair.xbf").stat()
-        self.assertEqual(answer["version"], f"{stat.st_mtime_ns}-{stat.st_size}")
-        self.assertIsNotNone(answer["patch"], "the document came from the worker, not from its file")
-        self.assertEqual(answer["patch"]["meshes"], 1, "the worker meshed the changed part alone")
+        self.assertEqual(answer["version"], f"{stat.st_mtime_ns}-{stat.st_size}", "the file's own version")
+        self.assertNotIn("patch", answer, "nothing of the run reached the page")
         after = get_json(api, token)
         keys = lambda s: {p["name"]: p["key"] for p in s["prototypes"]}  # noqa: E731
         self.assertNotEqual(keys(after)["block"], keys(before)["block"])
         self.assertEqual(keys(after)["peg"], keys(before)["peg"])
         self.assertEqual(get(f"{api}/part/{keys(after)['block']}", token)[:4], b"XBM2")
 
-    def test_a_build_meshes_only_what_it_changed_of_a_served_document(self) -> None:
-        self.script = self.folder / "pair.py"
-        self.script.write_text(textwrap.dedent(PAIR.format(size=10)), encoding="utf-8")
-        self.assertEqual(self.built("pair")["meshed"], 0, "nobody serves it: nothing meshed")
-        # A fresh daemon serves the file: its worker has built nothing yet.
-        self.cli("stop")
-        served = self.cli("serve", "XBF/pair.xbf")
-        self.assertEqual(served.returncode, 0, served.stderr)
-        from urllib.parse import urlsplit, parse_qs
-        url = urlsplit(served.stdout.strip())
-        base, query = f"{url.scheme}://{url.netloc}", parse_qs(url.query)
-        ident, token = url.path.strip("/"), query["token"][0]
-        before = get_json(f"{base}/api/doc/{ident}", token)
-        self.script.write_text(textwrap.dedent(PAIR.format(size=12)), encoding="utf-8")
-        self.assertEqual(self.built("pair")["meshed"], 1, "the changed part alone, not the whole document")
-        answer = get_json(f"{base}/api/doc/{ident}/version?after={before['version']}&wait=60", token)
-        self.assertEqual(answer["patch"]["meshes"], 1)
-        self.assertEqual(self.built("pair")["meshed"], 0)
-
-    def where(self, ref: str) -> dict:
-        found = engine_daemon.run([sys.executable, "-m", "cadgen.cli", "inspect", "XBF/block.xbf", ref], cwd=self.folder,
+    def where(self, ref: str, doc: str = "XBF/block.xbf") -> dict:
+        found = engine_daemon.run([sys.executable, "-m", "cadgen.cli", "inspect", doc, ref], cwd=self.folder,
                                   env=self.env)
         self.assertEqual(found.returncode, 0, found.stderr)
         return json.loads(found.stdout)
 
     def test_an_element_answers_what_made_it_from_the_worker_that_built_it(self) -> None:
-        self.build(10)
-        face = self.where("block/face 1")
+        ident = self.build(10)["id"]
+        face = self.where("block/face 1", ident)
         made = face["made_by"]
         line = next(n for n, text in enumerate(self.script.read_text(encoding="utf-8").splitlines(), 1)
                     if "bd.fillet" in text)
@@ -1536,14 +1472,20 @@ if __name__ == '__main__':
         self.assertTrue(made["feature"].startswith("block.") and made["operation"])
         self.assertGreater(face["area"], 0)
         # By its element name, the same element.
-        self.assertEqual(self.where(face["name"])["ordinal"], 1)
-        # A daemon started again with no build serves the file cold: no worker holds a
-        # trace of it, so ``made_by`` is null -- and every fact the kernel measures is
+        self.assertEqual(self.where(face["name"], ident)["ordinal"], 1)
+        drop = ("made_by", "meshed")
+        # The xbf the run wrote is a file: it names no model, so its element answers no ``made_by``,
+        # the worker that wrote it live or not -- and every fact the kernel measures is the model's.
+        declared = self.where("block/face 1")
+        self.assertNotIn("made_by", declared)
+        self.assertEqual({k: v for k, v in declared.items() if k not in drop},
+                         {k: v for k, v in face.items() if k not in drop})
+        # A daemon started again with no build serves the model from its cache cold: no worker
+        # holds a trace of it, so ``made_by`` is null -- and every fact the kernel measures is
         # what it was. Nothing of the provenance was written anywhere.
         self._stop_daemon()
-        cold = self.where("block/face 1")
+        cold = self.where("block/face 1", ident)
         self.assertIsNone(cold.pop("made_by"))
-        drop = ("made_by", "meshed")
         self.assertEqual({k: v for k, v in cold.items() if k not in drop}, {k: v for k, v in face.items() if k not in drop})
         self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/block.xbf", "block.py"])

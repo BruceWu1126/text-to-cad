@@ -385,40 +385,56 @@ class DaemonProgressTest(unittest.TestCase):
         self.assertIn("wrote XBF/slow.xbf", err)
         self.assertFalse({"\r", "▕", "✓"} & set(err), err)
 
-    def test_a_page_waiting_on_a_served_document_is_woken_by_its_build_s_progress(self) -> None:
+    def test_a_page_waiting_on_a_model_is_woken_by_its_build_s_progress_and_its_file_s_page_hears_nothing(
+            self) -> None:
+        from cadgen.engine.ids import model_id
+
         self.write()
         for name in ("one", "two", "three"):
             (self.folder / f"{name}.go").touch()
         first = self.start("slow.py")
         engine_daemon.communicate(first, self.env)
         self.assertEqual(first.returncode, 0)
-        served = self.cli("serve", "XBF/slow.xbf")
-        self.assertEqual(served.returncode, 0, served.stderr)
         from urllib.parse import urlsplit, parse_qs
-        page = urlsplit(served.stdout.strip())
-        query = parse_qs(page.query)
-        base, ident, token = f"{page.scheme}://{page.netloc}", page.path.strip("/"), query["token"][0]
-        route = f"{base}/api/doc/{ident}/version"
 
-        def get(query: str) -> dict:
-            with urllib.request.urlopen(urllib.request.Request(f"{route}?{query}",
-                        headers={"Authorization": "Bearer " + token}), timeout=120) as response:
-                return json.loads(response.read())
+        def route(document: str):
+            served = self.cli("serve", document)
+            self.assertEqual(served.returncode, 0, served.stderr)
+            page = urlsplit(served.stdout.strip())
+            token = parse_qs(page.query)["token"][0]
+            base = f"{page.scheme}://{page.netloc}/api/doc/{page.path.strip('/')}/version"
+
+            def get(query: str) -> dict:
+                with urllib.request.urlopen(urllib.request.Request(f"{base}?{query}",
+                            headers={"Authorization": "Bearer " + token}), timeout=120) as response:
+                    return json.loads(response.read())
+            return get
+
+        get = route(model_id(self.folder / "slow.py", "slow"))  # the model's page
+        file = route("XBF/slow.xbf")  # the xbf it declares, opened as a file
+        quiet = {"building": None, "failed": None}
+
+        def heard(answer: dict) -> dict:
+            return {key: answer[key] for key in quiet}
 
         idle = get("")
-        self.assertEqual((idle["building"], idle["failed"]), (None, None))
+        self.assertEqual(heard(idle), quiet)
         version, mark = idle["version"], idle["progress"]
+        before = file("")
+        self.assertEqual(heard(before), quiet)
         self.write(size=4)
         building = self.start("slow.py")
         seen = []
         while not seen or seen[-1]["detail"] != "one":
             answer = get(f"after={version}&progress={mark}&wait=60")
-            self.assertEqual(answer["version"], version, "the version moves only when the xbf does")
+            self.assertEqual(answer["version"], version, "the version moves only when the build is done")
             mark = answer["progress"]
             if answer["building"]:
                 seen.append(answer["building"])
         self.assertEqual(seen[-1]["model"], "slow.py::slow")
         self.assertIn(str(self.folder / "XBF" / "slow.xbf"), seen[-1]["outputs"])
+        self.assertEqual((heard(file("")), file("")["progress"]), (quiet, before["progress"]),
+                         "a file's page hears nothing of the model writing it")
         for name in ("one", "two", "three"):
             (self.folder / f"{name}.go").touch()
         moved = False
@@ -430,7 +446,7 @@ class DaemonProgressTest(unittest.TestCase):
         self.assertIsNone(answer["failed"])
         engine_daemon.communicate(building, self.env)
         self.assertEqual(building.returncode, 0)
-        # A build that fails says so to the page, and where it was.
+        # A build that fails says so to the model's page, and where it was; the file's, nothing.
         self.write(size=5, last="seal", fail=True)
         for name in ("one", "two", "three"):
             (self.folder / f"{name}.go").touch()
@@ -444,6 +460,7 @@ class DaemonProgressTest(unittest.TestCase):
         self.assertEqual(answer["failed"]["progress"]["detail"], "seal")
         engine_daemon.communicate(failed, self.env)
         self.assertEqual(failed.returncode, 1)
+        self.assertEqual((heard(file("")), file("")["progress"]), (quiet, before["progress"]))
 
 
 def setUpModule() -> None:

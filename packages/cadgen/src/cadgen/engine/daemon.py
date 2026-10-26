@@ -38,7 +38,7 @@ parts' tessellations in its memory under one budget (``serve.memory_budget``,
 ``CADGEN_ENGINE_MEMORY_MB``; past it, or on the system's memory-pressure signal, what is held
 is evicted: ``serve.Server.trim``), and draws them (``draw``): each served document a
 snapshot asks for gets a render process of its own (``render/service.py``), started on its
-first picture, sent every version the document is patched to, gone with the daemon or under the
+first picture, sent each new version of it at the picture that asks for it, gone with the daemon or under the
 workers' memory cap; render processes are not workers, and do not count toward the count cap.
 
 Its only files are the operating system's coordination, in its own folder, ``state_dir``: a lock,
@@ -399,11 +399,8 @@ class Worker:
     line and, when the object has ``bytes``, exactly that many bytes after the line. A
     reader thread takes every frame as it comes: a build's ``log`` lines go to that
     build's caller, and so do its ``progress`` frames (``progress.py``), the last of which it
-    keeps (``progress``, what ``status`` shows) and hands to ``on_progress``; each served
-    document it saves -- a ``patch`` frame, sent the moment
-    the xbf is in place, before the exports -- to ``on_patch``, its ``done``/``failed``
-    answer to the waiting ``build`` call, and its closing ``settled`` to ``on_settled``,
-    which lets the server look at those files again. ``where`` asks the worker what made
+    keeps (``progress``, what ``status`` shows) and hands to ``on_progress``; its
+    ``done``/``failed`` answer to the waiting ``build`` call. ``where`` asks the worker what made
 one element of a document it built (``worker``): a request of its own, answered on the
 same pipe, even while a build runs. Requests reach the worker on its original stdin, which it
 reads on a handle of its own; its standard input is the null device, so nothing a model loads
@@ -412,9 +409,7 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
 A ``standby`` worker loads the kernel before it says it is ready (``worker.load_kernel``) and
 builds no script until a build takes it (``adopt``)."""
 
-    def __init__(self, script: str, environment: dict[str, str],
-                 on_patch: Callable[[dict[str, Any], bytes, float], None] = lambda *_args: None,
-                 on_settled: Callable[..., None] = lambda _worker, _every=False: None, cwd: str | None = None,
+    def __init__(self, script: str, environment: dict[str, str], cwd: str | None = None,
                  on_progress: Callable[["Worker", dict[str, Any]], None] = lambda _worker, _frame: None,
                  on_saved: Callable[["Worker", dict[str, Any], bytes], None] = lambda _worker, _header, _payload: None,
                  standby: bool = False) -> None:
@@ -439,18 +434,15 @@ builds no script until a build takes it (``adopt``)."""
         self.asked: dict[str, "queue.Queue[Any]"] = {}
         self.questions = itertools.count(1)
         self.sink: Callable[[dict[str, Any]], None] | None = None
-        self.on_patch = on_patch
-        self.on_settled = on_settled
         self.on_progress = on_progress
         self.on_saved = on_saved
         self.saves = itertools.count(1)
-        # The running request's last progress frame, and every file its frames named.
+        # The running request's last progress frame.
         self.progress: dict[str, Any] | None = None
         # When the running build began (``time.time()``), None while no build runs; and the requests
         # queued behind it, each sent its progress frames as its own build would be (``Daemon.behind``).
         self.building: float | None = None
         self.followers: list[Callable[[dict[str, Any]], None]] = []
-        self.touched: set[str] = set()
         self.document_read = False
         self.answers: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
         self.started = time.time()
@@ -464,7 +456,6 @@ builds no script until a build takes it (``adopt``)."""
         self.rss: float | None = None
         # Over its memory cap after a build (``worker.retirement``): it exits, and is never asked again.
         self.retired = False
-        self.held: list[Any] = []  # what the daemon holds for this worker's build until it settles
         threading.Thread(target=self._stderr, daemon=True).start()
         threading.Thread(target=self._reader, daemon=True).start()
         ready = self.answers.get()
@@ -510,7 +501,6 @@ builds no script until a build takes it (``adopt``)."""
                 if not line.startswith(b"{"):
                     continue
                 message = json.loads(line)
-                arrived = time.time()
                 size = int(message.get("bytes") or 0)
                 payload = _read_exactly(stream, size) if size else b""
                 if "log" in message:
@@ -519,7 +509,6 @@ builds no script until a build takes it (``adopt``)."""
                     self._tell({"log": message["notice"], "stream": "notice"})
                 elif "progress" in message:
                     frame = self.progress = message["progress"]
-                    self.touched.update(frame.get("outputs") or ())
                     self._tell({"progress": frame})
                     for follow in list(self.followers):
                         try:
@@ -530,19 +519,6 @@ builds no script until a build takes it (``adopt``)."""
                         self.on_progress(self, frame)
                     except Exception:  # noqa: BLE001 - where a build is never fails it
                         pass
-                elif "patch" in message:
-                    try:
-                        self.on_patch(message["patch"], payload, arrived)
-                    except Exception:  # noqa: BLE001 - a document that cannot be patched is read from its file
-                        pass
-                    try:
-                        # Held (or not): the build goes on to its derived files.
-                        self._write({"op": "patched", "path": message["patch"].get("path")})
-                    except (OSError, ValueError):
-                        pass
-                elif "settled" in message:
-                    if message.get("op", "build") == "build":
-                        self.on_settled(self)
                 elif "collected" in message:
                     pass  # the worker collected while idle (``worker.py``): nothing waits on it
                 elif "saved" in message:
@@ -564,7 +540,6 @@ builds no script until a build takes it (``adopt``)."""
             self.answers.put(None)  # gone: every build it held settles
             for waiting in list(self.asked.values()):
                 waiting.put(None)
-            self.on_settled(self, True)
 
     def alive(self) -> bool:
         return self.process.poll() is None
@@ -605,7 +580,7 @@ builds no script until a build takes it (``adopt``)."""
         with self.lock:
             self.sink = send
             self.document_read = bool(request.get("expected"))
-            self.progress, self.touched = None, set()
+            self.progress = None
             self.building = time.time() if request.get("op") == "build" else None
             try:
                 self._write(request, payload)
@@ -658,13 +633,6 @@ def refused(error: Exception) -> dict[str, Any]:
     if isinstance(error, NotHeld):
         found.update(state=error.state, rebuild=error.rebuild)
     return found
-
-
-def _written(report: dict[str, Any]) -> list[str]:
-    """Every file a build's report names: its model's, and each child model's
-    (``child_models``: the models its run ran, each of which wrote its own)."""
-    return [*(report.get("files") or {}),
-            *(path for child in (report.get("child_models") or {}).values() for path in child.get("files") or {})]
 
 
 def _read_exactly(stream: Any, size: int) -> bytes:
@@ -1641,8 +1609,8 @@ class Daemon:
         self.address_id: tuple[int, int] | None = None
         self.server = None
         self.token = secrets.token_hex(16) if WINDOWS else ""
-        # Per document a build made (its id: each xbf's ``file_id``, each model's ``model_id``),
-        # the worker that built it last: the one that holds its provenance (``provenance``).
+        # Per model document a build made (its ``model_id``), the worker that built it last: the one
+        # that holds its provenance (``provenance``). A file the build wrote is no key: it names no model.
         self.builders: dict[str, Worker] = {}
         self.renders = None  # the served documents' render processes (``render.service.Renders``)
         self.serving = threading.Lock()
@@ -1685,7 +1653,7 @@ class Daemon:
 
     def _spare(self, environment: dict[str, str]) -> Worker:
         """A standby (``Pool.stand``): a worker of no script yet, standing in the daemon's folder."""
-        return Worker(STANDBY, environment, self.patched, self.settled, cwd=os.getcwd(), on_progress=self.progressed,
+        return Worker(STANDBY, environment, cwd=os.getcwd(), on_progress=self.progressed,
                       on_saved=self.models.cache.saved, standby=True)
 
     def hold(self, reader: Any, send: Callable[[dict[str, Any]], None], host: Any = None, holder: Any = None) -> None:
@@ -1723,26 +1691,29 @@ class Daemon:
             self.touch()
 
     def connected(self, worker: Worker) -> bool:
-        """A page watching any document this worker built keeps its memo warm."""
+        """A page watching any model document this worker built keeps its memo warm. A file a page
+        watches keeps no worker, whichever model's run wrote it: a file names no model."""
         server = self.server
         return server is not None and any(self.builders.get(ident) is worker for ident in server.watched())
 
     def _start(self, script: str, environment: dict[str, str], cwd: str | None) -> Worker:
-        return Worker(script, environment, self.patched, self.settled, cwd=cwd, on_progress=self.progressed,
+        return Worker(script, environment, cwd=cwd, on_progress=self.progressed,
                       on_saved=self.models.cache.saved)
 
     def progressed(self, _worker: Worker, frame: dict[str, Any]) -> None:
-        """A build's progress frame: the pages waiting on a served document it writes are woken
-        with it (``serve.Server.building``)."""
+        """A build's progress frame: the pages waiting on the model document it builds are woken
+        with it (``serve.Server.building``). A file it writes is no document of the build's: a page
+        serving it follows its bytes, and hears nothing of the run."""
         server = self.server
         if server is not None and not _worker.document_read:
-            outputs = [*(frame.get("outputs") or []), *self.models.paths(_worker, frame.get("model"))]
-            if outputs:
-                server.building({**frame, "outputs": outputs})
+            documents = self.models.paths(_worker, frame.get("model"))
+            if documents:
+                server.building(frame, documents)
 
     def _built(self, worker: Worker, answer: dict[str, Any], *, verb: bool = False) -> None:
-        """A request of ``worker`` answered: each served document its build wrote is built no
-        longer, and one whose model failed says what failed, and where (``serve.Server.built``).
+        """A request of ``worker`` answered: each model document it built is built no longer, and
+        one whose model failed says what failed, and where (``serve.Server.built``); a file it wrote
+        is told nothing.
         ``verb``: an export, a snapshot or a result asked of a document, whose failure -- a pose
         refused, a draw that failed, the worker gone -- is the request's, never its document's
         build: no document is marked failed by it (the worker's progress frame is its last
@@ -1751,16 +1722,15 @@ class Daemon:
         server = self.server
         if server is None or (verb and "failed" in answer):
             return
-        outcomes: dict[str, Any] = {path: None for path in worker.touched}
+        outcomes: dict[str, Any] = {}
         done = answer.get("done")
         reports = done.get("reports") if isinstance(done, dict) else done
         for report in reports if isinstance(reports, list) else []:
             frame = report.get("progress") or {}
             failed = None if report.get("ok") else {"model": report.get("model"), "error": report.get("error"),
                                                     "progress": frame}
-            for path in [*(frame.get("outputs") or ()), *(report.get("files") or {}),
-                         *self.models.paths(worker, report.get("model"))]:
-                outcomes[path] = failed
+            for ident in self.models.paths(worker, report.get("model")):
+                outcomes[ident] = failed
             # Each child model the run built is a document of its own, built as its own row says: its
             # body's progress marked it building, and only this marks it built (or failed).
             for identity, child in (report.get("child_models") or {}).items():
@@ -1819,15 +1789,6 @@ class Daemon:
             return None
         return worker.where(ident, key, kind, ordinal)
 
-    def patched(self, header: dict[str, Any], payload: bytes, arrived: float) -> None:
-        """A worker's document for a served path, put in place of the one served, and sent on to
-        its render process when it has one."""
-        server = self.server
-        if server is not None:
-            server.patch(header, payload, arrived)
-            if self.renders is not None and header.get("path"):
-                self.renders.patched(file_id(header["path"]))
-
     def serve(self, request: dict[str, Any]) -> Any:
         """The daemon's server, started on the first request that needs one."""
         from cadgen.engine.serve import MESHES, Server, memory_budget
@@ -1878,16 +1839,6 @@ class Daemon:
         if started:
             self.models.attach(server)  # the documents taken up from the cache before it ran: registered with it
         return server
-
-    def settled(self, worker: Worker, every: bool = False) -> None:
-        """A worker is done with a build's documents (``every``: it is gone): their files
-        may be looked at again."""
-        with self.workers_lock:
-            held = [paths for paths in worker.held] if every else worker.held[:1]
-            del worker.held[:len(held)]
-        if self.server is not None:
-            for paths in held:
-                self.server.release(paths)
 
     def document(self, ident: str) -> tuple[dict[str, Any], bytes]:
         """What the document ``ident`` is while this engine holds it, as an export reads it, and the
@@ -2004,12 +1955,6 @@ class Daemon:
                         import base64
 
                         answer["payload"] = base64.b64encode(returned).decode("ascii")
-                    done = answer.get("done")
-                    # An export from a script built it first: that worker holds the xbf now.
-                    for row in (done.get("reports") or []) if isinstance(done, dict) else []:
-                        for path in _written(row):
-                            if path.endswith(".xbf"):
-                                self.builders[file_id(path)] = worker
                     if not request.get("expected"):
                         self._built(worker, answer, verb=True)
                     send(answer)
@@ -2180,27 +2125,13 @@ class Daemon:
                         fresh = worker.builds == 0
                         order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
                                  "cwd": request.get("cwd"), "verify": bool(request.get("verify")),
-                                 "profile": bool(request.get("profile")), "acknowledged": True,
-                                 "run": request.get("run")}
+                                 "profile": bool(request.get("profile")), "run": request.get("run")}
                         if request.get("env"):
                             order["env"] = request["env"]  # the run's own (``worker.adopt``)
                         cached = self.models.cache.folder()
                         if cached is not None:
                             order["cache"] = cached  # what a fresh worker takes a model from, by its key
-                        server = self.server
-                        if server is not None:
-                            # The worker sends each served document it builds back as a patch,
-                            # with the meshes and shapes the server does not hold; until it has,
-                            # the server does not read those files again.
-                            order.update(served=server.versions(), held=server.cache.keys(), shapes=server.shape_keys(),
-                                         served_keys=server.served_keys())
-                            worker.held.append(server.hold(list(order["served"])))
                         answer = worker.build(order, send)
-                        for report in answer.get("done") or []:
-                            # Its children's too: the worker that built a child's xbf holds its trace.
-                            for path in _written(report):
-                                if path.endswith(".xbf"):
-                                    self.builders[file_id(path)] = worker
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
                         if ahead is not None:
                             # The build it waited for, the one its own replays: began how long before it asked.

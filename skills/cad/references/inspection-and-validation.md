@@ -176,8 +176,9 @@ $ cadgen inspect "$ID" "bracket/face 7"
 
 The bore's wall is face 1 of the cylinder `hole`, modified by the cut whose result
 `body` took. `made_by` comes from the worker that built the document, while it lives:
-it is `null` once that worker has retired (run the script again for it) and for a file
-no worker built. A ref of several selectors answers a list; one
+it is `null` once that worker has retired (run the script again for it), and a file --
+the xbf a model declares among them -- answers none: a file names no model. A ref of
+several selectors answers a list; one
 that names nothing is refused (exit 2).
 
 Without a REF, `cadgen inspect DOC` prints what the document holds, one screen, then what
