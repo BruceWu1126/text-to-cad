@@ -251,3 +251,16 @@ test("the host's Full size and Open in browser are the navbar's host actions, Fu
   rerender(view({}));
   expect(props().navbarActions ?? null).toBeNull();
 });
+
+test("a model's Files starts where the explorer was last this tab, else the person's home folder, never the script's", async () => {
+  const client = Object.assign(cadClient(), { serverInfo: vi.fn(async () => ({ home: '/Users/me' })) });
+  const tabStore = createTabStore(memoryTabRecord());
+  const id = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab';
+  render(<CadViewer client={client as never} host={ports(client)} tabStore={tabStore} live={createLiveRegistry()} file={id} library={library} onShow={() => {}} />);
+  // First, home: nothing was browsed in this tab yet.
+  await vi.waitFor(() => expect(props().explorerFolder).toBe('/Users/me'));
+  // The folder the explorer is in is the tab's, and where Files starts from then on.
+  act(() => props().onExplorerFolderChange!('/Users/me/parts'));
+  expect(tabStore.settings.getSnapshot().explorer.folder).toBe('/Users/me/parts');
+  expect(props().explorerFolder).toBe('/Users/me/parts');
+});

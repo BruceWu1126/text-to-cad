@@ -212,7 +212,9 @@ class ServerInfo(HttpLayerTestCase):
         # Where a developer's relative links resolve, spelled with "/". A viewer has no root.
         self.assertEqual(info["start"], self.fixture.root.replace(os.sep, "/"))
         # No tolerance: the page reads each part's one display mesh by its key.
-        self.assertEqual(list(info), ["app", "identityToken", "platform", "user",
+        # Where the explorer starts with nowhere else to: the person's home folder, spelled with "/".
+        self.assertEqual(info["home"], os.path.expanduser("~").replace(os.sep, "/"))
+        self.assertEqual(list(info), ["app", "identityToken", "platform", "user", "home",
                                       "start", "port", "pid"])
         self.assertEqual(headers["cache-control"], "no-store")
 

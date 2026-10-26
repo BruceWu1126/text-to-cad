@@ -119,7 +119,7 @@ it('keeps Models to the eight latest, and a menu with one of the two has no tabs
   expect(screen.queryByRole('tab')).toBeNull();
 });
 
-it('starts a model\'s Files in the folder its record registered', async () => {
+it('starts a model\'s Files in the folder it is handed (where the explorer was last, else home)', async () => {
   const user = userEvent.setup();
   const files = explorer(async () => [{ path: '/home/me/models/b.step', name: 'b.step', kind: 'file' }]);
   render(<ViewerNavbar file={MODEL} name="bracket" kind="model" explorer={{ ...files, folder: '/home/me/models' }} recent={recent()} />);

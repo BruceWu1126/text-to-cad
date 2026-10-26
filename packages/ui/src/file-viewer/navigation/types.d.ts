@@ -30,9 +30,11 @@ export const FolderExplorer: ComponentType<{
   source: Pick<FileSource, "list" | "search">;
   /** The open file, by its absolute path (a document with no file of its own: its id). */
   file: string;
-  /** Where it starts: the open file's folder unless given (a model's registered folder). */
+  /** Where it starts: the open file's folder unless given (a model's: where the explorer was last, else home). */
   folder?: string | null;
   onOpen: (path: string) => void;
+  /** The folder it is in, each time it changes (its first included). */
+  onFolderChange?: (folder: string) => void;
 }>;
 /** The folders from the top of `path`'s filesystem down to it, `/`-separated. */
 export function folderTrail(path: string): { name: string; path: string }[];
@@ -73,8 +75,8 @@ export const ViewerNavbar: ComponentType<{
   name?: string;
   /** What the open document is: a model (built from code) or a file. Its glyph before the name, and the name menu's first tab. */
   kind?: "model" | "file";
-  /** The name menu's Files: the explorer, rooted at `folder` where given (a model's registered folder). */
-  explorer?: { source: Pick<FileSource, "list" | "search">; folder?: string | null; onOpen: (path: string) => void } | null;
+  /** The name menu's Files: the explorer, rooted at `folder` where given (a model's: where it was last, else home). */
+  explorer?: { source: Pick<FileSource, "list" | "search">; folder?: string | null; onOpen: (path: string) => void; onFolderChange?: (folder: string) => void } | null;
   /** The name menu's Recent: the host's library, in the explorer's style, a row opening its document. */
   recent?: { list(): Promise<readonly import("../types.js").RecentDocument[]>; onOpen: (path: string) => void } | null;
   fileMenu?: { platform: Platform; capabilities: ReadonlySet<EntryAction>; onAction: (action: EntryAction, path: string) => void } | null;

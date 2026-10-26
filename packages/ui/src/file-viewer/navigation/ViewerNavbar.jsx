@@ -109,7 +109,7 @@ function FileMenu({ path, platform, capabilities, onAction }) {
  * What the name opens: Models and Files, two stock tabs sized to their labels on top of the
  * explorer's own style, each there only where the host has it (one alone has no tabs). Models is
  * the host's library's models, by last activity, a row opening its model; Files is the explorer
- * (`FolderExplorer`). Built anew on each opening, on Models over a model and on Files over a file.
+ * (`FolderExplorer`), from the file's folder, or for a model where the explorer was last. Built anew on each opening, on Models over a model and on Files over a file.
  */
 function NameMenu({ path, kind, explorer, recent, onPick }) {
   const { t } = useI18n();
@@ -117,7 +117,8 @@ function NameMenu({ path, kind, explorer, recent, onPick }) {
   const [tab, setTab] = useState(() => firstTab(kind, explorer, recent));
   // The tab on screen as last chosen: a press and the focus it brings both ask for the same tab.
   const shownTab = useRef(tab);
-  const files = explorer ? <FolderExplorer source={explorer.source} file={path} folder={explorer.folder} onOpen={next => onPick(explorer.onOpen, next)} /> : null;
+  const files = explorer ? <FolderExplorer source={explorer.source} file={path} folder={explorer.folder} onFolderChange={explorer.onFolderChange}
+    onOpen={next => onPick(explorer.onOpen, next)} /> : null;
   const models = recent ? <ModelList recent={recent} current={path} onOpen={next => { usage.used("models_open"); onPick(recent.onOpen, next); }} /> : null;
   if (!files || !models) return files ?? models;
   // A tab a person turns to is a use of it, as the one the menu opens on is (`FileName`).

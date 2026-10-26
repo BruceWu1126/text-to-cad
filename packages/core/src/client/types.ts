@@ -26,6 +26,8 @@ export interface CadServerInfo {
   start?: string;
   /** `darwin`, `win32` or `linux`: which file manager Reveal opens. */
   platform?: string;
+  /** The person's home folder, `/`-separated: where the explorer starts with nowhere else to. */
+  home?: string;
   [key: string]: unknown;
 }
 /** A model in the library every CAD view shares (`GET /__cad/recents`): times in seconds. */

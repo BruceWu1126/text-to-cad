@@ -412,7 +412,8 @@ built by `scripts/bundle/bundle.sh`.
 A model is shown by its document's id, as the web Viewer shows it: the view reads the document
 the engine holds and never builds or imports a script, and no folder lists one. It is in the
 library by the engine's record, which its run wrote, with its picture; its name menu opens on
-Recent, and its Files lists the folder its record registered. Rebuilding the model updates the
+Models, and its Files lists the folder the explorer was last in this view, else the person's
+home folder: never the script's. Rebuilding the model updates the
 same view through the document version stream.
 
 The stdio peer exits with its host session; it deletes only that MCP session.

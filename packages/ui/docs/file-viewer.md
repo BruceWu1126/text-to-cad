@@ -123,7 +123,9 @@ verb at the right, under "Filter models..." (every word in the name, the filter 
 keyboard as the explorer's does); the model on screen is highlighted, a row opens it through
 `navigation.openFile`, and there is no footer.
 **Files** is the explorer (`navigation/FolderExplorer.jsx`). It starts in the open file's
-folder, or a document's `folder` where it has no file of its own (a model's registered folder),
+folder, or `explorerFolder` for a document with no file of its own (a model's: the folder the
+explorer was last in, which `onExplorerFolderChange` hands the host each time it changes, else
+the person's home folder; never the script's),
 its filter taking the keyboard (on a phone the menu holds focus itself, so no
 keyboard comes up). It lists one folder at a time through `source.list`: the folder's
 subfolders, then its CAD files, the open file highlighted, in compact rows (a folder's glyph

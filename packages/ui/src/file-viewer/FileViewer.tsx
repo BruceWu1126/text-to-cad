@@ -24,7 +24,7 @@ class RenderBoundary extends Component<{ children: ReactNode; title: string; onE
  * The complete file view: one file, by its absolute path, under the one navbar. Its only knowledge
  * of formats comes from registrations. With no file it shows the host's home.
  */
-export function FileViewer({ file, host, renderers, state, onStateChange, colorScheme, language, appSettings, update, history, recent, notice, navbarActions, overlay, onError, presentation, chrome = "page" }: FileViewerProps) {
+export function FileViewer({ file, host, renderers, state, onStateChange, colorScheme, language, appSettings, update, history, recent, explorerFolder = null, onExplorerFolderChange, notice, navbarActions, overlay, onError, presentation, chrome = "page" }: FileViewerProps) {
   // The language the host names (`environment.locale`): this frame's own strings, and everything
   // drawn under it (`I18nProvider`), the nodes the host hands it included.
   const locale = host.environment.locale;
@@ -92,12 +92,13 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
     {shownActions.map(({ id, label, hint, icon: Icon, disabled, active, onInvoke }) => <TooltipHint key={id} content={hint ?? label}><Button type="button" variant="ghost" size="icon-xs" className="size-6 text-muted-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground" aria-label={label} disabled={disabled} aria-pressed={active} onClick={() => { try { void Promise.resolve(onInvoke()).catch(error => onError?.(error)); } catch (error) { onError?.(error instanceof Error ? error : new Error(String(error))); } }}><Icon className="size-3.5" aria-hidden="true" /></Button></TooltipHint>)}
   </> : null;
   // The on-disk file the view browses from and acts on: the file's own path, or none for a document
-  // with no file of its own (a model's, by its id): it has no file menu, and its Files tab starts in
-  // the folder its record registered (`folder`).
+  // with no file of its own (a model's, by its id): it has no file menu, and its Files tab starts
+  // where the explorer was last, else the person's home folder (`explorerFolder`), never the
+  // folder of the script it was built from.
   const navigationPath = shown ? (shown.file.navigationPath === undefined ? shown.file.path : shown.file.navigationPath)
     : path && !isDocumentId(path) ? path : null;
   const model = !navigationPath && Boolean(path) && (shown ? shown.file.navigationPath === null : isDocumentId(path));
-  const folder = navigationPath ? null : shown?.file.folder ?? null;
+  const folder = navigationPath ? null : explorerFolder;
   // What the host can do with the file on screen: its ⋯ menu.
   const perform = host.fileActions?.perform;
   const fileMenu = useMemo(() => {
@@ -108,11 +109,12 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
     } : null;
   }, [navigationPath, perform, host.fileActions?.platform, onError]);
   // The name opens its menu where this view shows another document: Files -- the explorer, rooted at
-  // the file's folder, or a model's registered folder -- where the host's files can be browsed, and
+  // the file's folder, or for a model where the explorer was last -- where the host's files can be browsed, and
   // Models, the host's library's models, where it has one. A pick shows the document here. A view that shows
   // its file alone opens neither.
-  const explorer = useMemo(() => (navigationPath || folder) && source.list && source.search && onOpenFile ? { source, folder, onOpen: onOpenFile } : null,
-    [navigationPath, folder, source, onOpenFile]);
+  const explorer = useMemo(() => (navigationPath || folder) && source.list && source.search && onOpenFile
+    ? { source, folder, onOpen: onOpenFile, onFolderChange: onExplorerFolderChange } : null,
+    [navigationPath, folder, source, onOpenFile, onExplorerFolderChange]);
   const recentMenu = useMemo(() => recent && onOpenFile ? { list: () => recent.list(), onOpen: onOpenFile } : null, [recent, onOpenFile]);
   // The logo's app menu: the host's links and the person's settings (Back to files is `onHome`).
   const menu = useMemo(() => host.links || appSettings?.length || colorScheme || language ? { links: host.links, appSettings, colorScheme, language, platform: appearance.platform } : null,

@@ -420,8 +420,8 @@ the defaults), thrown out with the tab and kept across a reload. The host suppli
 lives through one adapter, `TabRecordStorage` — a synchronous read and write of the
 whole record: the web over `sessionStorage`, the CAD app over memory
 (`memoryTabRecord`) — and the package owns the record's shape, version and normalization. `settings` is
-`{ toolStack, appearance, library }`: tab-wide (the file sidebar's and tool stack's layout, the
-appearance, the home's layout), and what every renderer reads as its preferences;
+`{ toolStack, appearance, library, explorer }`: tab-wide (the file sidebar's and tool stack's layout, the
+appearance, the home's layout, the folder the explorer was last in), and what every renderer reads as its preferences;
 `files` holds the view of the file on screen, under `[absolute path, renderer id]`, and no
 other: a write keeps the newest alone (`TAB_FILE_LIMIT`), and `CadViewer` drops the view
 of a file it leaves — for another file or for the home — once the

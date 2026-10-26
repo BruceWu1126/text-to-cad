@@ -26,7 +26,7 @@ inspects a format's parts, joints or topology. No pick or tool opens or closes t
 
 | The host (web, desktop) supplies | The shared UI decides |
 | --- | --- |
-| Where the tab record lives (`TabRecordStorage`: the web's sessionStorage, the CAD app's memory) | The record: its settings (the file sidebar's and tool stack's layout, the appearance, the home's layout) and the view of the file on screen (its camera, Display settings, its playback settings, and renderer slices), what is written when, and what is never stored (`@text-to-cad/ui/tab-store`, `kit/shell/fileView.js`) |
+| Where the tab record lives (`TabRecordStorage`: the web's sessionStorage, the CAD app's memory) | The record: its settings (the file sidebar's and tool stack's layout, the appearance, the home's layout, the folder the explorer was last in) and the view of the file on screen (its camera, Display settings, its playback settings, and renderer slices), what is written when, and what is never stored (`@text-to-cad/ui/tab-store`, `kit/shell/fileView.js`) |
 | `chrome` (the navbar, `"page"`, or the view alone, `"bare"`), `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings), `colorScheme` (the person's theme and how it changes) | The navbar's order and look, over a file and over the home, the app menu (one menu in the viewer and on the home) and what a new issue says |
 | `host.files`, `fileActions`, `navigation`, `clipboard`, `promptContext`, `promptFiles` | When a copy, capture or open happens and what it carries |
 | `host.environment`: color scheme, keyboard `platform`, `reducedMotion` | How the chrome honours them |
@@ -142,8 +142,12 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   home is one click away. **Files** is the file explorer (`FolderExplorer.jsx`),
   below. The menu is as tall as its rows up to 28rem or the room below it: past that its list
   scrolls. It floats over the view and the file sidebar, so opening it resizes and moves
-  nothing. The explorer starts in the open file's folder (a model's: the folder its record
-  registered) and lists one folder at a time — its subfolders, then its CAD files — in compact rows: one 24px
+  nothing. The explorer starts in the open file's folder; a model, which has no file of its
+  own, starts it where the explorer was last in this tab (the tab's `explorer.folder`, kept as
+  it moves), else in the person's home folder (the server's `home`), never in the folder of the
+  script that built it. It lists one folder at a time — its subfolders, then its CAD files,
+  `.xbf` among them, hidden folders left out but the engine's cache (`~/.cache/cadgen` and the
+  folders on the way to it), which holds each model's `documents/<id>/document.xbf` — in compact rows: one 24px
   line of 12px text each, its kind a small light glyph in one column 5px in from the row's
   left end and 4px before the name (a folder its disclosure chevron, with no folder icon; a
   file its type's icon), as the file sidebar's trees draw theirs. A CAD file's icon is the

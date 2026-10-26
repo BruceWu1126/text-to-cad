@@ -263,18 +263,24 @@ it('has no file menu on a document with no file of its own, which its name names
   expect(labels()).not.toContain('File actions');
   expect(list).not.toHaveBeenCalled();
   cleanup();
-  // Registered from a folder, with the host's library: the name opens Models first, and Files lists that folder.
+  // With the host's library and where the explorer was last: the name opens Models first, and Files
+  // lists that folder -- never the folder of the script the model was registered from -- and says
+  // each folder it is in, for the host to keep.
   const user = userEvent.setup();
   const registered = { ...model, navigation: { openFile: vi.fn() }, files: { ...model.files,
     stat: async (path: string) => ({ path, name: 'bracket', navigationPath: null, folder: '/models/parts', kind: 'file' as const, extension: 'xbf', size: 0 }) } };
   const rows = [{ path: id, name: 'bracket', kind: 'model', opened: null, updated: Date.now() / 1000 }];
-  render(<FileViewer file={id} host={registered as any} renderers={[renderer]} state={{}} onStateChange={() => {}} recent={{ list: async () => rows }} />);
+  const kept = vi.fn();
+  render(<FileViewer file={id} host={registered as any} renderers={[renderer]} state={{}} onStateChange={() => {}} recent={{ list: async () => rows }}
+    explorerFolder="/home/me/last" onExplorerFolderChange={kept} />);
   await screen.findByText('shown');
   expect(fileName().tagName).toBe('BUTTON');
   await user.click(fileName());
   expect(screen.getByRole('tab', { name: 'Models' }).getAttribute('aria-selected')).toBe('true');
   await user.click(screen.getByRole('tab', { name: 'Files' }));
-  await waitFor(() => expect(list).toHaveBeenCalledWith('/models/parts', expect.anything()));
+  await waitFor(() => expect(list).toHaveBeenCalledWith('/home/me/last', expect.anything()));
+  expect(list).not.toHaveBeenCalledWith('/models/parts', expect.anything());
+  expect(kept).toHaveBeenCalledWith('/home/me/last');
   expect(labels()).not.toContain('File actions');
 });
 
