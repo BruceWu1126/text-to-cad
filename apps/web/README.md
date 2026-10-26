@@ -353,18 +353,23 @@ No snapshot is written while drawing or typing, and no image is rendered.
 ### The home
 
 The bare URL is the home: the library every CAD view shares (`@text-to-cad/ui/library`),
-and nothing else: its search, its grid/list switch, the type chips (All, Models, Files) where
-both kinds are listed, and the cards. A card is its picture, its kind's glyph (a model's code
-glyph, a file's type icon), its name and its last activity with no verb ("now", "5m ago",
-"2h ago", "3d ago", then the short date); a script that declares several models is one card,
-named for its main model, its other models folded under it ("and 27 more"). Its ⋯ menu holds
-Open, Copy path and Reveal (a model's path is its script's), Pin or Unpin, and Delete, which
-asks first: a model's "Delete bracket?" removes the engine's record and its saved build, its
+and nothing else, laid out after Figma's Recents. It starts with one control row of 24px
+controls: "Recent" at the left as a static tab, and at the right the type filter, a dropdown
+("All ▾": All, Models, Files) where both kinds are listed, the search and the grid/list
+switch. The grid's tiles are transparent with a 1px border, at least 240px wide (four across
+a 1280px window): a picture on the muted fill, then the kind's glyph (a model's code glyph, a
+file's type icon) beside its name over its last activity with no verb ("now", "5m ago", "2h
+ago", "3d ago", then the short date). The list is a table: Name, Updated and Opened over 40px
+rows, each a document's glyph and name and its two ages. A script that declares several
+models is one card, named for its main model, its other models folded under it ("and 27
+more"). The pin and the ⋯ appear on hover (at a tile's picture's corner, at a row's end); a
+pinned one keeps its pin. The ⋯ menu holds Open, Copy path and Reveal (a model's path is its
+script's), Pin or Unpin, and Delete, which asks first: a model's "Delete bracket?" removes the engine's record and its saved build, its
 script and exported files kept; a file's "Delete bracket.step from the viewer?" removes the
 engine's record of the file alone. From a file, Back to files in
 the menu the navbar's C logo opens leads back to it. The home has the same navbar, its C
-menu (without Back to files) at the left and the update button at the right while a newer
-text-to-cad is out; under its wordmark are GitHub, Discord and X. The home is a step of
+menu (without Back to files, and with GitHub, Discord and X as over a file) at the left and
+the update button at the right while a newer text-to-cad is out. The home is a step of
 the browser's history, as a file is: the browser's Back and Forward walk between them (the
 navbar draws no arrows of its own here). A `/<id>` the server knows no file for, and no model the engine
 holds, shows "This model is no longer held" with the engine's words -- the command that builds it

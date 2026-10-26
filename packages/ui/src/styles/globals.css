@@ -113,8 +113,7 @@
 /* The host's home (`library/`): the models opened before, to open again, on the page's own
  * colour, the navbar's. Centred, a grid of about four solid cards a row at a typical width, or a
  * list of rows. */
-.cad-library { width: 100%; height: 100%; background: var(--background); --cad-library-card: var(--card); --cad-library-line: var(--border); }
-.dark .cad-library { --cad-library-card: color-mix(in oklab, var(--background) 88%, white); --cad-library-line: oklch(1 0 0 / 8%); }
+.cad-library { width: 100%; height: 100%; background: var(--background); }
 /* Below the last row: 40px, or room to scroll it clear of a host's composer floating over the bottom
    (`--cad-host-bottom-inset`), whichever is more. Added together, a library that fits would still scroll. */
 .cad-library-content { box-sizing: border-box; width: 100%; max-width: 1128px; margin: 0 auto; padding: 16px 24px max(40px, calc(var(--cad-host-bottom-inset, 0px) + 16px)); container-type: inline-size; }
@@ -160,7 +159,7 @@
 /* A card's kind: a model's code glyph or a file's type icon, the name menu's own. */
 .cad-library-glyph { flex: none; width: 14px; height: 14px; color: var(--muted-foreground); }
 .cad-library-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-tiny, 0.6875rem); line-height: 14px; color: var(--muted-foreground); }
-.cad-library-card[data-missing] .cad-library-thumbnail, .cad-library-row[data-missing] .cad-library-thumbnail, [data-missing] .cad-library-name, .cad-library-card[data-missing] .cad-library-body { opacity: .55; }
+.cad-library-card[data-missing] .cad-library-thumbnail, [data-missing] .cad-library-name, .cad-library-card[data-missing] .cad-library-body { opacity: .55; }
 /* A card's pin and ⋯ (Figma's star): at its picture's top-right, shown on hover or focus, the pin always
  * while the model is pinned, and both always where nothing hovers (touch). On a picture they stand on the
  * page's colour, so a light or a dark model never hides them. */
@@ -174,16 +173,24 @@
 .cad-library-actions button[data-state=open] { background: var(--accent); color: var(--foreground); }
 .cad-library-pin[aria-pressed=true] { color: var(--foreground); }
 @media (hover: none) { .cad-library-actions button { opacity: 1; } }
-.cad-library-list { margin: 0; padding: 0; list-style: none; overflow: hidden; border: 1px solid var(--cad-library-line); border-radius: 10px; background: var(--cad-library-card); }
-.cad-library-row + .cad-library-row { border-top: 1px solid var(--cad-library-line); }
-.cad-library-row .cad-library-open { align-items: center; gap: 12px; padding: 8px 52px 8px 8px; transition: background-color .15s ease; }
-.cad-library-row .cad-library-open:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 60%, transparent); }
-.cad-library-row .cad-library-thumbnail { flex: none; width: 56px; aspect-ratio: 4 / 3; border-radius: 6px; border: 1px solid var(--cad-library-line); }
-.cad-library-row .cad-library-name { flex: 1 1 auto; }
-.cad-library-row .cad-library-status { flex: none; }
+/* The list, Figma's table: a 32px header row of muted text-tiny labels (Name, Updated, Opened) over 40px
+   rows, each its glyph and name (text-ui), then its two ages in fixed 160px columns; rows transparent, the
+   hover fill under the pointer, the pin and ⋯ at the row's end. A narrow page drops Opened. */
+.cad-library-table { --cad-library-columns: minmax(0, 1fr) 160px 160px; }
+.cad-library-columns { display: grid; grid-template-columns: var(--cad-library-columns); align-items: center; height: 32px; padding: 0 64px 0 12px;
+  border-bottom: 1px solid var(--border); font-size: var(--text-tiny); line-height: 1; color: var(--muted-foreground); user-select: none; }
+.cad-library-list { margin: 4px 0 0; padding: 0; list-style: none; }
+.cad-library-row .cad-library-main { border-radius: calc(var(--radius) - 2px); transition: background-color .15s ease; }
+.cad-library-row:not([data-missing]) .cad-library-main:hover { background: color-mix(in oklab, var(--accent) 60%, transparent); }
+.cad-library-row .cad-library-open { display: grid; grid-template-columns: var(--cad-library-columns); align-items: center; height: 40px; padding: 0 64px 0 12px; border-radius: inherit; }
+.cad-library-row .cad-library-name { gap: 8px; }
 .cad-library-row .cad-library-actions { right: 8px; top: 50%; transform: translateY(-50%); }
+@container (max-width: 560px) {
+  .cad-library-table { --cad-library-columns: minmax(0, 1fr) 96px; }
+  .cad-library-table [data-column=opened] { display: none; }
+}
 /* A script's other models, folded under its card: "and 27 more", opened in place. */
-.cad-library-folded { border-top: 1px solid var(--cad-library-line); padding: 4px; }
+.cad-library-folded { padding: 4px; }
 /* On a tile, inside its caption: "and 27 more" at the end of the age's line, so every tile is one height;
    opened, its models list under the name, their text on the name's line (16 + 24 + 12px in). */
 .cad-library-card .cad-library-folded { position: absolute; right: 8px; bottom: 7px; border-top: 0; padding: 0; }
@@ -198,20 +205,22 @@
 .cad-library-child { justify-content: space-between; font-size: var(--text-xs, 0.75rem); }
 .cad-library-child .cad-library-name { flex: 1 1 auto; }
 .cad-library-child .cad-library-glyph { width: 12px; height: 12px; }
-.cad-library-row .cad-library-folded { padding: 4px 8px 6px 76px; }
+/* Under a row: "and 27 more" from the name's glyph, its models in the row's own columns. */
+.cad-library-row .cad-library-folded { padding: 0 0 4px 26px; }
+.cad-library-row .cad-library-child { display: grid; grid-template-columns: var(--cad-library-columns); height: 32px; padding: 0 64px 0 8px; }
+.cad-library-row .cad-library-child .cad-library-name { gap: 8px; }
 .cad-library-empty { margin: 48px 0 0; text-align: center; color: var(--muted-foreground); line-height: 1.6; }
 /* While the list is read: the cards' own shapes, pulsing. */
 .cad-library [data-loading] .cad-library-open { cursor: default; }
 .cad-library [data-loading] .cad-library-thumbnail, .cad-library-placeholder { animation: cad-library-pulse 1.4s ease-in-out infinite; }
 .cad-library-placeholder { display: block; width: 60%; height: 10px; margin: 3px 0; border-radius: 4px; background: var(--muted); }
 .cad-library-placeholder[data-short] { width: 32%; }
-.cad-library-row .cad-library-placeholder { flex: none; width: 40%; }
+.cad-library-row .cad-library-placeholder { width: 40%; }
 @keyframes cad-library-pulse { 50% { opacity: .5; } }
 /* The model being opened: a spinner over its picture until the host has it on screen. */
 .cad-library-thumbnail { position: relative; }
 .cad-library-opening { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in oklab, var(--background) 45%, transparent); color: var(--foreground); }
 .cad-library-opening > svg { width: 20px; height: 20px; opacity: 1; }
-.cad-library-row .cad-library-opening > svg { width: 14px; height: 14px; }
 .cad-library-error { margin-bottom: 16px; color: var(--destructive); }
 .cad-library-error p { margin: 0; }
-@media (prefers-reduced-motion: reduce) { .cad-library-actions button, .cad-library-row .cad-library-open, .cad-library-chevron { transition: none; } .cad-library [data-loading] .cad-library-thumbnail, .cad-library-placeholder { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .cad-library-actions button, .cad-library-row .cad-library-main, .cad-library-chevron { transition: none; } .cad-library [data-loading] .cad-library-thumbnail, .cad-library-placeholder { animation: none; } }

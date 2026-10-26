@@ -296,9 +296,10 @@ Preview) end its tool strip, never the navbar. A host whose own frame is its nav
 the view alone (`chrome: "bare"`, the CAD app's cards and tabs), with no navbar at all. With no
 file a view shows the host's home, the model library, under the same navbar (its logo and menu,
 without Back to files, Back and Forward where the host keeps the view's history, and the host's
-update and actions): its wordmark, byline and GitHub,
-Discord and X, then the library alone: the documents opened or built before, pinned first,
-with their pictures, each card's ⋯ menu ending in Delete, which asks first. A file that
+update and actions): one control row (Recent; the type filter, the search, grid or list),
+then the library alone: the documents opened or built before, pinned first, as Figma-style
+tiles with their pictures or as a table of rows, each with its pin and a ⋯ menu ending in
+Delete, which asks first. A file that
 does not exist shows "File does not exist" and its path, and any other failure to open
 "Could not open that file" and why, each with Go home where the host has a home. A
 renderer's loading and update status is its own, in its viewport. An error appears as a

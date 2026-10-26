@@ -86,7 +86,7 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   before, in any view or the web viewer). The sidebar (`cad_home`) and a tab with nothing to show open on it; a
   model opened from it is shown in place. With no navbar there is no way back to it from a
   file but a show of the home; it has no navbar either, the card's corner (Full size, the
-  update) at its top-right; under its wordmark are GitHub, Discord and X.
+  update) at its top-right; it starts with its control row, its links the app menu's.
 - **A view browses nothing of its own.** The name menu (Recent and Files, the explorer) is the
   navbar's, under the file's name, and a tab or a card has no navbar: the agent's shows and the home's library are
   how another file reaches it.

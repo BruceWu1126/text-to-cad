@@ -163,14 +163,22 @@ function Thumbnail<Model extends LibraryModel>({ item, load, seen, opening = fal
   </span>;
 }
 
-/** Where the models will be while the list is read: cards (or rows) in their own places, pulsing. */
+/** The list's header row: Name, Updated, Opened, over the columns its rows draw (a label each, for the eye: a row names itself). */
+function Columns() {
+  const { t } = useI18n();
+  return <div className="cad-library-columns" aria-hidden="true">
+    <span>{t("home.columnName")}</span><span data-column="updated">{t("home.columnUpdated")}</span><span data-column="opened">{t("home.columnOpened")}</span>
+  </div>;
+}
+
+/** Where the models will be while the list is read: cards (or rows, under their header) in their own places, pulsing. */
 function Placeholders({ layout }: { layout: LibraryLayout }) {
   const { t } = useI18n();
   const status = <li className="sr-only" role="status">{t("home.loadingFiles")}</li>;
   return layout === "list"
-    ? <ul className="cad-library-list" aria-label={t("home.filesAria")} aria-busy="true" data-loading="">{status}{[0, 1, 2].map(index => <li key={index} className="cad-library-row" aria-hidden="true">
-      <span className="cad-library-open"><span className="cad-library-thumbnail" /><span className="cad-library-placeholder" /></span>
-    </li>)}</ul>
+    ? <div className="cad-library-table"><Columns /><ul className="cad-library-list" aria-label={t("home.filesAria")} aria-busy="true" data-loading="">{status}{[0, 1, 2].map(index => <li key={index} className="cad-library-row" aria-hidden="true">
+      <span className="cad-library-open"><span className="cad-library-placeholder" /></span>
+    </li>)}</ul></div>
     : <ul className="cad-library-grid" aria-label={t("home.filesAria")} aria-busy="true" data-loading="">{status}{[0, 1, 2, 3].map(index => <li key={index} className="cad-library-card" aria-hidden="true">
       <span className="cad-library-open">
         <span className="cad-library-thumbnail" />
@@ -349,11 +357,19 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>;
-  const status = (item: Model) => item.missing ? t("home.fileUnavailable") : ageLabel(lastActivity(item), now, t, locale);
-  const name = (item: Model) => <span className="cad-library-name">
-    <DocumentGlyph model={deletes(item)} path={item.path} className="cad-library-glyph" />
+  const age = (seconds: number | null) => ageLabel(seconds, now, t, locale);
+  const status = (item: Model) => item.missing ? t("home.fileUnavailable") : age(lastActivity(item));
+  // A row's glyph is its spinner while it is being opened: a row has no picture to show it over.
+  const name = (item: Model, busy = false) => <span className="cad-library-name">
+    {busy ? <Spinner className="cad-library-glyph" aria-label={t("home.openingAria", { name: item.name })} />
+      : <DocumentGlyph model={deletes(item)} path={item.path} className="cad-library-glyph" />}
     <span className="cad-library-label">{item.name}</span>
   </span>;
+  // A row's two times, each in its column, with no verb: when it last changed, and when a page last opened it.
+  const dates = (item: Model) => <>
+    <span className="cad-library-status" data-column="updated">{item.missing ? t("home.fileUnavailable") : age(item.updated)}</span>
+    <span className="cad-library-status" data-column="opened">{age(item.opened)}</span>
+  </>;
   // A script's other models, under its card: "and 27 more", opened in place, each a row that opens it.
   const folded = (card: LibraryCard<Model>): ReactNode => {
     const script = card.item.script;
@@ -366,24 +382,23 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
       {expanded ? <ul className="cad-library-children" aria-label={t("home.foldedAria", { name: card.item.name })}>
         {card.folded.map(item => <li key={item.path}>
           <button type="button" className="cad-library-child" disabled={item.missing} aria-label={t("home.openAria", { name: item.name })} onClick={() => open(item)}>
-            {name(item)}<span className="cad-library-status">{status(item)}</span>
+            {name(item)}{layout === "list" ? dates(item) : <span className="cad-library-status">{status(item)}</span>}
           </button>
         </li>)}
       </ul> : null}
     </div>;
   };
   const models = layout === "list"
-    ? <ul className="cad-library-list" aria-label={t("home.filesAria")}>{shown.map(card => { const item = card.item; return <li key={item.path} className="cad-library-row" data-missing={item.missing || undefined} data-opening={opening === item.path || undefined}>
+    ? <div className="cad-library-table"><Columns /><ul className="cad-library-list" aria-label={t("home.filesAria")}>{shown.map(card => { const item = card.item; return <li key={item.path} className="cad-library-row" data-missing={item.missing || undefined} data-opening={opening === item.path || undefined}>
       <div className="cad-library-main">
         <button type="button" className="cad-library-open" disabled={item.missing} aria-label={t("home.openAria", { name: item.name })} aria-busy={opening === item.path || undefined} onClick={() => open(item)}>
-          <Thumbnail item={item} load={load} seen={seen} opening={opening === item.path} />
-          {name(item)}
-          <span className="cad-library-status">{status(item)}</span>
+          {name(item, opening === item.path)}
+          {dates(item)}
         </button>
         {actions(card)}
       </div>
       {folded(card)}
-    </li>; })}</ul>
+    </li>; })}</ul></div>
     : <ul className="cad-library-grid" aria-label={t("home.filesAria")}>{shown.map(card => { const item = card.item; return <li key={item.path} className="cad-library-card" data-missing={item.missing || undefined} data-opening={opening === item.path || undefined}>
       <div className="cad-library-main">
         <button type="button" className="cad-library-open" disabled={item.missing} aria-label={t("home.openAria", { name: item.name })} aria-busy={opening === item.path || undefined} onClick={() => open(item)}>

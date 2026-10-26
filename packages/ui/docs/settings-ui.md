@@ -77,19 +77,31 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   files) and, where the host keeps the view's history, **Back** and **Forward** at the left
   and, at the right end, the host's update, when there is one, and its actions — the same
   buttons, sizes and places as over a file. Under it,
-  the page: the TEXTTOCAD wordmark and byline, then GitHub (its mark, a link to the project:
-  it is open source), Discord and X, as icon links (GitHub and Discord are the app menu's
-  too, X its footer's "Made by"; no light/dark button: Theme is the menu's), then Recent with its
-  search and grid/list switch, the type chips (All, Models, Files: shadcn Buttons, the chosen one
-  secondary) where models and files are both listed, then the documents opened or built before,
-  pinned first, then by last activity, as cards or rows. The home is the library alone: no Open,
-  no folder of a launch. A card is its picture, its kind's glyph, its name and its last activity
-  with no verb ("2h ago"); a pinned one shows its pin at rest. Its one ⋯ menu (a stock
-  DropdownMenu) holds Open, Copy path and Reveal where the host can, Pin or Unpin, a rule, then
-  Delete (destructive), which asks first in a stock AlertDialog saying what goes and what stays
-  on disk, Cancel / Delete; the card leaves the list at once. A script that declares several
-  models is one card, named for its main model, its others folded under it ("and 27 more"),
-  collapsed until opened in place.
+  the page, after Figma's Recents, with no hero (no wordmark, tagline or links: GitHub and
+  Discord are the app menu's, X its footer's "Made by"; no light/dark button: Theme is the
+  menu's). It starts with **one control row**, every control 24px tall in `text-tiny`: at the
+  left **Recent**, a static tab (the only list) on the `muted` fill at weight 600; at the right,
+  8px apart, the **type filter**, a stock DropdownMenu whose ghost `xs` trigger names what it
+  shows ("All ▾") and whose radio items are All, Models and Files, there only where models and
+  files are both listed; the **search**, a stock Input 24px tall and 200px wide ("Search"); and
+  the **grid/list switch**, two `icon-xs` buttons, the chosen one on the `muted` fill. Then the
+  documents opened or built before, pinned first, then by last activity. The home is the
+  library alone: no Open, no folder of a launch. In the grid, a **tile** is transparent on the
+  page in both themes, a 1px `border`, a 12px radius and no shadow, the same under the pointer;
+  columns at least 240px (four across a 1280px window), 24px apart. Its picture sits on the
+  `muted` fill at 330:185, contained; its caption (12px by 16px) is its kind's glyph in a 24px
+  column, then its name (`text-ui`, weight 500) over its last activity with no verb ("2h ago",
+  `text-tiny`, muted). In the list, a **table**: a 32px header row of muted `text-tiny` labels
+  (Name, Updated, Opened) over 40px rows, each its glyph and name, then its `updated` and
+  `opened` ages in two 160px columns (Opened dropped under a 560px page), transparent with the
+  hover fill. Each has a **pin** toggle and **one ⋯ menu** (a stock DropdownMenu), shown on hover
+  or focus, at a tile's picture's top-right (Figma's star) or a row's end; a pinned one keeps its
+  filled pin at rest. The menu holds Open, Copy path and Reveal where the host can, Pin or
+  Unpin, a rule, then Delete (destructive), which asks first in a stock AlertDialog saying
+  what goes and what stays on disk, Cancel / Delete; the card leaves the list at once. A
+  script that declares several models is one card, named for its main model, its others
+  folded under it ("and 27 more", at the end of a tile's age line or under a row), collapsed
+  until opened in place.
   The update shows only for a release
   later than the version the page names, whatever the host says. A file that will not open
   shows a page under the navbar: "File does not exist" and the file's path, or "Could not

@@ -126,6 +126,34 @@ it('names a card by its file and how long ago it was last active, and switches b
   expect(screen.getByRole('button', { name: 'Actions for bracket.step' })).toBeTruthy();
 });
 
+it('lists rows under a Name, Updated and Opened header: each its glyph and name, then both ages with no verb, its pin and ⋯ at its end', async () => {
+  const hour = 3600, now = Date.now() / 1000;
+  const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
+  render(<ModelLibrary library={library([
+    model('plate.step', { opened: now - 5 * hour, updated: now - 30 * hour }),
+    model('arm', { path: id, kind: 'model', script: '/work/parts/arm.py', opened: null, updated: now - 2 * hour }),
+    model('gone.step', { missing: true, updated: null, opened: now - 3 * 86400 }),
+  ])} layout="list" onLayoutChange={() => {}} />);
+  await screen.findByRole('button', { name: 'Open plate.step' });
+  const list = screen.getByRole('list', { name: 'Files' });
+  // The header row is the columns' labels, for the eye: each row names itself.
+  const header = list.previousElementSibling!;
+  expect([header.getAttribute('aria-hidden'), [...header.children].map(cell => cell.textContent)]).toEqual(['true', ['Name', 'Updated', 'Opened']]);
+  const cells = (name: string) => {
+    const row = screen.getByRole('button', { name: `Open ${name}` });
+    return [row.querySelector('[data-glyph]')?.getAttribute('data-glyph') ?? null, row.querySelector('.cad-library-label')?.textContent,
+      ...[...row.querySelectorAll('[data-column]')].map(cell => [cell.getAttribute('data-column'), cell.textContent])];
+  };
+  expect(cells('plate.step')).toEqual(['file', 'plate.step', ['updated', '1d ago'], ['opened', '5h ago']]);
+  // A model no page has opened has an empty Opened; a file that is gone says so where its time on disk was.
+  expect(cells('arm')).toEqual(['model', 'arm', ['updated', '2h ago'], ['opened', '']]);
+  expect(cells('gone.step')).toEqual(['file', 'gone.step', ['updated', 'File unavailable'], ['opened', '3d ago']]);
+  // No picture in a row; its pin and ⋯ follow its button, at its end.
+  expect(list.querySelector('.cad-library-thumbnail')).toBeNull();
+  const row = within(list).getAllByRole('listitem')[0];
+  expect(within(row).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Open plate.step', 'Pin', 'Actions for plate.step']);
+});
+
 it('gives each card one menu: Open, Copy path and Reveal where the host can, Pin, then Delete', async () => {
   const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
   const copied: string[] = [], revealed: string[] = [];
