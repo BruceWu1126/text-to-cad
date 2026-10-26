@@ -1404,8 +1404,17 @@ class Server:
                         raise ValueError("wait is a number of seconds")
                     seconds = min(max(seconds, 0.0), WAIT_LIMIT)
                     given = (query.get("progress") or [""])[0]
-                    doc = self.wait(ident, after, seconds, int(given) if given.isdigit() else None,
-                                    page=bool(getattr(handler, "page", False)))
+                    try:
+                        doc = self.wait(ident, after, seconds, int(given) if given.isdigit() else None,
+                                        page=bool(getattr(handler, "page", False)))
+                    except KeyError:
+                        if self.holds(ident):
+                            raise
+                        # Deleted while the page waited (`cadgen delete`): not found, as every read of it is now.
+                        lost = self.lost(ident)
+                        if lost is not None:
+                            return self.send(handler, 404, json.dumps(lost).encode(), "application/json")
+                        return self.error(handler, 404, "not found")
                     build = self.build_of(ident)
                     return self.json(handler, {"version": doc.version, **build})
                 doc = self.document(ident)

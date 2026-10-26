@@ -100,6 +100,31 @@ class ServeTest(unittest.TestCase):
         self.assertEqual(answer["version"], version)
         self.assertEqual(waited.call_args.args[2], 0.0, "a negative wait waits not at all")
 
+    def test_a_version_wait_on_a_model_deleted_meanwhile_ends_not_found(self) -> None:
+        # A page waits on a model's next version; `cadgen delete` forgets the model: the wait ends 404,
+        # as every read of it does now, never as the server's own failure.
+        held = self.server.document(self.ident)
+        model = "a0000000-0000-5000-8000-00000000000d"
+        self.server.register_model(model, "rack", lambda: (dict(held.structure), dict(held.shapes)), 1)
+        version = json.loads(self.get(f"/api/doc/{model}/version"))["version"]
+        answered: list = []
+
+        def wait() -> None:
+            try:
+                self.get(f"/api/doc/{model}/version?after={version}&wait=10")
+                answered.append(200)
+            except urllib.error.HTTPError as error:
+                answered.append(error.code)
+
+        waiter = threading.Thread(target=wait)
+        waiter.start()
+        deadline = time.monotonic() + 10
+        while model not in self.server.watchers and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.server.forget_model(model)
+        waiter.join(15)
+        self.assertEqual(answered, [404])
+
     def test_inline_and_processes_mesh_the_same_buffers(self) -> None:
         keys = [p["key"] for p in self.structure()["prototypes"]]
         first = json.loads(self.get(f"/api/doc/{self.ident}/mesh?mode=inline&drop=1", "POST"))
