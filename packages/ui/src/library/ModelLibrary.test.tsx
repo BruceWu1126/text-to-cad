@@ -476,3 +476,10 @@ it('counts the pin, from its button or the menu, the grid/list switch, and Copy 
   const said = Object.fromEntries(reports.flat().map(({ control, count }) => [control, count]));
   expect(said).toEqual({ home_pin: 1, home_layout_list: 1, home_layout_grid: 1, home_copy_path: 1, home_reveal: 1, home_unpin: 1 });
 });
+
+it("marks a drawing's picture, which a dark card turns light, and no other", async () => {
+  render(<ModelLibrary library={library([model('gasket.dxf'), model('kit.step')])} />);
+  const picture = async (name: string) => (await screen.findByRole('button', { name: `Open ${name}` })).querySelector('.cad-library-thumbnail')!;
+  expect((await picture('gasket.dxf')).hasAttribute('data-drawing')).toBe(true);
+  expect((await picture('kit.step')).hasAttribute('data-drawing')).toBe(false);
+});

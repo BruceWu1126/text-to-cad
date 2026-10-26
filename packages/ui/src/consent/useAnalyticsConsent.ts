@@ -13,7 +13,7 @@ export interface AnalyticsConsent {
 }
 
 /**
- * The app menu's Share anonymous usage data toggle, from the host's server (`consent()` reads, `consent(share)`
+ * The app menu's Telemetry toggle, from the host's server (`consent()` reads, `consent(share)`
  * answers): read once, read again whenever the person comes back to the page (another view, the agent or
  * the CLI may have changed it meanwhile), and changed by a click. Nothing asks: cadgen's telemetry is on
  * by default once a `cadgen` command has said so. Each read and answer takes a number and only the latest

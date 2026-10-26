@@ -194,10 +194,12 @@ times faster than parsing the STEP.
 ## Pictures
 
 After every run, read its line and the delta under it; a contradiction with what you
-intended is fixed before anything else. A number the person gave is checked by an assert on
-what the geometry measures, a bound, a distance or a volume, never by restating the
-constant; a derived number they asked for is a check script; neither is ever read off a
-picture. A structural or appearance change, new parts, placements, colours or a mechanism,
+intended is fixed before anything else. A number the person gave is checked by an assert
+inside the model's body on what the geometry measures, a bound, a distance or a volume, or by
+`cadgen inspect`, never by restating the constant, and never by code after the call in the
+model's script: reading `.shape` there loads the CAD kernel in the script's own process, about
+3 s, after the engine has answered. A derived number they asked for is a check script; neither
+is ever read off a picture. A structural or appearance change, new parts, placements, colours or a mechanism,
 gets the snapshots it takes to judge it, usually one from the angle that shows the change,
 more when a view leaves the question open, and a posed one for a mechanism state; never
 several angles by habit. After a Quick Edit, the picture to take is the person's own view

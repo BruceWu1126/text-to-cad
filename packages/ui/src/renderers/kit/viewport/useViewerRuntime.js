@@ -811,6 +811,8 @@ export function useViewerRuntime({
       const ownsKey = (event) => {
         const target = event.target;
         if (target instanceof Node && keyOwner.contains(target)) return true;
+        // The file viewer around it has the keyboard (it takes it as its file is shown): its view's.
+        if (target instanceof Element && target.hasAttribute("data-viewer-layout") && target.contains(keyOwner)) return true;
         const ownerDocument = keyOwner.ownerDocument;
         return pointerOverViewer && (target === ownerDocument.body || target === ownerDocument.documentElement || target === ownerDocument);
       };

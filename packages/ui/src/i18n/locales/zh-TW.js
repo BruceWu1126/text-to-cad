@@ -11,7 +11,7 @@ export default {
 
   "app.start.notAnswering": "CAD 檢視器沒有回應",
   "app.engine.notRunning": "引擎沒有在執行；它恢復後頁面會重新連線。",
-  "app.engine.startIt": "執行 python <model>.py 或 cadgen viewer 來啟動它。",
+  "app.engine.startIt": "執行 cadgen run <script>.py 或 cadgen viewer 來啟動它。",
   "app.engine.linkReplaced": "此頁面的連結已被取代；開啟新連結後頁面會重新連線。",
   "app.engine.openNewLink": "執行 cadgen viewer 並開啟它印出的連結。",
 
@@ -230,4 +230,17 @@ export default {
   "colorPicker.eyedropper": "滴管",
   "colorPicker.pickFromScreen": "從螢幕選取顏色",
   "colorPicker.opacityHeading": "不透明度",
+  "preview.preparing": "正在準備預覽…",
+  "playback.loop": "循環",
+  "playback.autoplay": "自動播放",
+  "select.pick": "選取",
+  "chip.copied": "已複製",
+  "explode.label": "分解",
+  "quickEdit.describe": "描述你的修改…",
+  "status.buildPreview": "預覽",
+  "status.buildPreviewHint": "建置結果的預覽。此修訂儲存後，將由儲存的檔案取代。",
+  "tree.showAll": "全部顯示",
+  "tree.exitIsolation": "結束",
+  "robot.none": "無",
+  "robot.meshObject": "網格物件",
 };

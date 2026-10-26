@@ -123,7 +123,7 @@ class VerbsTest(unittest.TestCase):
         # Its previous good build is still served, and the program stopped there: the line after says so.
         self.assertEqual(lines[-3:], ["AssertionError: blade count must be positive",
                                       "failed parts.py::bad; serving its previous good build",
-                                      "the run stopped at bad: a model it calls after this one is not built"])
+                                      "the run stopped at bad"])  # its last call: nothing after it goes unbuilt
         self.assertEqual(self.failed.stderr.count("Traceback"), 1, self.failed.stderr)
 
     def test_a_refused_pose_leaves_the_document_as_it_was(self) -> None:
@@ -159,6 +159,8 @@ class VerbsTest(unittest.TestCase):
             self.assertTrue(done.stdout.startswith(f"wrote {out} ("), f"{verb} {out}: {done.stdout}")
             if verb == "export":  # a small file's size in KB (or bytes), never "0.0 MB"
                 self.assertRegex(done.stdout, r"\((\d+ B|\d+\.\d KB)\) in ", done.stdout)
+            else:  # a model's picture says its display as a file's does
+                self.assertRegex(done.stdout, r"\(64x48, solid\) in ", done.stdout)
 
     def test_a_step_cadgen_exported_holds_no_closure_because_the_format_carries_none(self) -> None:
         self.assertEqual(self.cli("export", self.box, str(self.folder / "box.step")).returncode, 0)

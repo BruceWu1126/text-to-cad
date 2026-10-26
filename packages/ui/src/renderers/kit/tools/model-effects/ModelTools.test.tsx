@@ -98,7 +98,7 @@ it('offers Explode and Clip on every STEP, a single part too, and idles them whi
   expect(offered()).toEqual(['exploded:false', 'clip:false']);
 });
 
-it('Clip\'s axis dropdown holds its settings: the axes as one row of radio items, a rule, then Part colors and Reverse; all kept as its popover closes and by Reset, which only takes the cut away; both persist in the display', async () => {
+it('Clip\'s axis dropdown holds its settings: the axes as one row of radio items, a rule, then Part colours and Reverse; all kept as its popover closes and by Reset, which only takes the cut away; both persist in the display', async () => {
   const user = userEvent.setup({ pointerEventsCheck: 0, skipHover: true });
   const store = createViewSettingsStore();
   function Harness() {
@@ -116,7 +116,7 @@ it('Clip\'s axis dropdown holds its settings: the axes as one row of radio items
   // The menu is named by its trigger, as every dropdown here is.
   const menu = () => screen.getByRole('menu', { name: /^Clip axis: [XYZ]$/ });
   const item = (name: string) => screen.getByRole('menuitemcheckbox', { name });
-  const ticks = () => ['Part colors', 'Reverse'].map(name => item(name).getAttribute('aria-checked'));
+  const ticks = () => ['Part colours', 'Reverse'].map(name => item(name).getAttribute('aria-checked'));
   // What the menu holds, top to bottom: the three axes (one group), then the two settings — no heading.
   const reads = () => [...menu().querySelectorAll('[role=menuitemradio], [role=menuitemcheckbox], [data-slot=dropdown-menu-label]')]
     .map(node => `${node.getAttribute('role')}:${node.getAttribute('aria-label') || node.textContent}:${node.getAttribute('aria-checked')}`);
@@ -131,17 +131,17 @@ it('Clip\'s axis dropdown holds its settings: the axes as one row of radio items
   axisButton().focus();
   await user.keyboard('{Enter}');
   expect(reads()).toEqual(['menuitemradio:X:true', 'menuitemradio:Y:false', 'menuitemradio:Z:false',
-    'menuitemcheckbox:Part colors:true', 'menuitemcheckbox:Reverse:false']);
+    'menuitemcheckbox:Part colours:true', 'menuitemcheckbox:Reverse:false']);
   expect(within(menu()).getByRole('group', { name: 'Clip axis' })).toBeTruthy();
   expect(document.activeElement?.textContent).toBe('X');
   await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}');
-  expect(document.activeElement).toBe(item('Part colors'));
+  expect(document.activeElement).toBe(item('Part colours'));
   await user.keyboard(' ');
   await user.click(item('Reverse'));
   // An axis chosen keeps the menu open, the button reads it; none of them applies a cut.
   await user.click(screen.getByRole('menuitemradio', { name: 'Y' }));
   expect([reads(), axisButton().textContent, clip().enabled, clip().axis, clip().partColors, clip().invert]).toEqual([
-    ['menuitemradio:X:false', 'menuitemradio:Y:true', 'menuitemradio:Z:false', 'menuitemcheckbox:Part colors:false', 'menuitemcheckbox:Reverse:true'],
+    ['menuitemradio:X:false', 'menuitemradio:Y:true', 'menuitemradio:Z:false', 'menuitemcheckbox:Part colours:false', 'menuitemcheckbox:Reverse:true'],
     'Y', false, 'y', false, true]);
   await user.keyboard('{Escape}');
   // Escape closed the menu alone: the popover it opened in is still up, as every choice in it kept it.

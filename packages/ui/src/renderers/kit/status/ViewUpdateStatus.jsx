@@ -58,10 +58,11 @@ export function ViewUpdateStatus({ status, onRetry, className }) {
  * and under the alert of one that failed -- and gone once the saved file replaces it in place.
  */
 export function ViewPreviewLabel({ className }) {
+  const { t } = useI18n();
   return <div className={cn('pointer-events-auto flex min-w-0 items-center gap-1.5 bg-transparent text-xs font-medium text-foreground', className)}
     role="status" aria-live="polite" data-view-preview-label>
-    <TooltipHint content="A preview of the build result. The saved file replaces it after this revision is saved.">
-      <span className="flex items-center gap-1.5"><Eye className="size-3.5 shrink-0" aria-hidden="true" />Preview</span>
+    <TooltipHint content={t("status.buildPreviewHint")}>
+      <span className="flex items-center gap-1.5"><Eye className="size-3.5 shrink-0" aria-hidden="true" />{t("status.buildPreview")}</span>
     </TooltipHint>
   </div>;
 }

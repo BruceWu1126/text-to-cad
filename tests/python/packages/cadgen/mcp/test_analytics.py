@@ -622,6 +622,36 @@ class ServerCountsTest(_Tmp):
         self.assertEqual((code, answer["sharing"], answer["saved"]), (200, False, False))
 
 
+class SenderTest(_Tmp):
+    """Every batch says who sent it (``PROCESSES``), whichever process holds the recorder: the engine
+    serves the browser viewer's page and the CAD app's sessions alike, each with a recorder of its own."""
+
+    def test_each_batch_names_its_sender(self) -> None:
+        import types
+
+        from cadgen.viewer import engine_app
+
+        choose(True, by="cli", path=self.path)
+        sent: list[dict] = []
+
+        def made(**options):
+            return Recorder(**options, path=self.path, send=lambda payload: sent.append(payload) or True)
+
+        server = types.SimpleNamespace(port=4242, touch=mock.Mock(), url="http://127.0.0.1:4242")
+        with mock.patch("cadgen.analytics.Recorder", side_effect=made):
+            engine = engine_app.EngineApp(server, "127.0.0.1")
+        self.addCleanup(engine.analytics.close)
+        self.addCleanup(engine.viewer_analytics.close)
+        with mock.patch.object(engine_app, "ViewerApp"):
+            page = engine.default_app(dist=str(self.tmp))
+        self.assertIs(page.analytics, engine.viewer_analytics, "the browser viewer's page counts as the viewer")
+        for recorder in (page.analytics, engine.analytics):  # the page's, then the CAD app's sessions'
+            recorder.viewed()
+            self.assertTrue(recorder.flush())
+        # The sender a command starts sends as `cli` (``test_engine_telemetry``).
+        self.assertEqual([batch["process"] for batch in sent], ["viewer", "app"])
+
+
 class InstallChannelTest(_Tmp):
     """Where the install came from (`cadgen/_internal/channel.py`): only the CAD server is told, by its plugin; it
     writes the channel down for its installation, and every other process of it -- the build daemon, the Viewer a

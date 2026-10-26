@@ -81,12 +81,12 @@ it('edits the full By-part palette, and nested popups own Escape and give the fo
   await user.click(screen.getByRole('button', { name: 'Add colour' }));
   expect(store.getSnapshot().preview.parts.colors.length).toBe(initial + 1);
   await user.click(screen.getByRole('button', { name: `Part colour ${initial + 1}`, exact: true }));
-  const hex = screen.getByRole('textbox', { name: 'Hex color' });
+  const hex = screen.getByRole('textbox', { name: 'Hex colour' });
   await user.clear(hex);
   await user.type(hex, '#22c55e{Enter}');
   expect(store.getSnapshot().preview.parts.colors.at(-1)).toBe('#22c55e');
   await user.keyboard('{Escape}');
-  expect(screen.queryByRole('textbox', { name: 'Hex color' })).toBeNull();
+  expect(screen.queryByRole('textbox', { name: 'Hex colour' })).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Remove last colour' }));
   expect(store.getSnapshot().preview.parts.colors.length).toBe(initial);
   expect(store.getSnapshot().display.mode).toBe('xray');

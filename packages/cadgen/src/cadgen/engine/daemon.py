@@ -1946,8 +1946,8 @@ class Daemon:
                     worker = self.lease(key, environment, cwd)
                     expected = request.get("expected") or {}
                     if "modelRevision" in expected and "document" not in request["source"]:
-                        # The lease excludes a rebuild: validate the generation here,
-                        # including a rebuild that produced identical geometry.
+                        # The lease excludes a rebuild: validate the generation here. A run that
+                        # changed nothing kept it (``Models.register``); any other is a new one.
                         with self.models.lock:
                             model = self.models.records.get(expected.get("id") or "")
                             matches = (model is not None and model["worker"] is worker

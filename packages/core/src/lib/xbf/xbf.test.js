@@ -577,3 +577,8 @@ test("Explode moves each instance's carrier by the document's tree, and puts it 
   scene.dispose();
   document.release();
 });
+
+test("a read the engine refuses carries its status: a 404 is a document the engine no longer holds", async () => {
+  const gone = async () => new Response(JSON.stringify({ error: "not found" }), { status: 404, headers: { "content-type": "application/json" } });
+  await assert.rejects(waitForXbfVersion(`${URL_BASE}`, "v1", { fetch: gone }), error => error.status === 404 && /answered 404 \(not found\)/.test(error.message));
+});

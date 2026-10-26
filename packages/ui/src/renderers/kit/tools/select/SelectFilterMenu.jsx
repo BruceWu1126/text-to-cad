@@ -2,6 +2,7 @@ import { DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, Dropd
 import { ToolSettingsMenu } from "../ToolModeMenu.jsx";
 import { pickModeOf } from "./selectFilter.js";
 import { useControlUsage } from "../../../../usage/controls.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 // A mode as telemetry names it (`usage/controls.js`): `select_filter_faces`; Measure's kinds in the plural.
 const PLURAL = Object.freeze({ vertex: "vertices", edge: "edges", face: "faces" });
@@ -21,12 +22,13 @@ const PLURAL = Object.freeze({ vertex: "vertices", edge: "edges", face: "faces" 
  *   disabled?: boolean, children?: import("react").ReactNode, name?: string, triggerName?: string }} props
  */
 export default function SelectFilterMenu({ value, onChange, modes, disabled = false, children = null, name = "select", triggerName = "Selection filter" }) {
+  const { t } = useI18n();
   const mode = pickModeOf(value, modes);
   const controls = useControlUsage();
   return <ToolSettingsMenu label="Selection filter"
     triggerLabel={`${triggerName}: ${mode === modes[0] ? "everything" : mode.label}`}
     disabled={disabled} trigger="chevron" triggerProps={{ [`data-${name}-filter-trigger`]: mode === modes[0] ? "all" : mode.id }}>
-    <DropdownMenuLabel className="text-tiny font-normal text-muted-foreground">Pick</DropdownMenuLabel>
+    <DropdownMenuLabel className="text-tiny font-normal text-muted-foreground">{t("select.pick")}</DropdownMenuLabel>
     <DropdownMenuRadioGroup value={mode.id} onValueChange={id => {
       controls.used(`${name}_filter_${PLURAL[id] ?? id}`);
       onChange([...modes.find(candidate => candidate.id === id).kinds]);

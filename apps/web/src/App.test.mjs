@@ -222,7 +222,11 @@ test('a page whose engine is gone says so in its language, over the page, until 
     catalog = 'stopped';
     await act(() => client.refresh({ file: ONE }).catch(() => {}));
     assert.match(alert()?.textContent ?? '', /エンジンが動いていません。戻るとページは自動で再接続します。/);
-    assert.match(alert()?.textContent ?? '', /python <model>\.py か cadgen viewer を実行して起動してください。/);
+    assert.match(alert()?.textContent ?? '', /cadgen run <script>\.py か cadgen viewer を実行して起動してください。/);
+    // The one notice: the page under it, a view's own card among it, is out of reach and unheard.
+    assert.equal(window.document.querySelectorAll('[role="alert"]').length, 1);
+    const under = alert()?.nextElementSibling;
+    assert.deepEqual([under?.hasAttribute('inert'), under?.getAttribute('aria-hidden')], [true, 'true']);
     assert.doesNotMatch(alert()?.textContent ?? '', /Failed to fetch|\{/, 'never the failure itself');
     assert.equal(snapshot() !== undefined, true, 'the page stays under it');
     catalog = 'restarted';
@@ -234,6 +238,7 @@ test('a page whose engine is gone says so in its language, over the page, until 
     catalog = 'back';
     await act(() => client.refresh({ file: ONE }));
     assert.equal(alert() === null, true, 'gone with the first read that answers');
+    assert.equal(window.document.querySelector('[inert]'), null, 'the page in reach again');
   } finally {
     globalThis.fetch = fetchBefore;
     await act(() => root.unmount());
@@ -249,7 +254,7 @@ test('the notice says the page reconnects, and how to start the engine', async (
   try {
     await act(() => root.render(createElement(EngineStopped, { locale: 'en' })));
     assert.equal(dom.window.document.querySelector('[role="alert"]')?.textContent,
-      'The engine is not running; the page reconnects when it is back.Run python <model>.py or cadgen viewer to start it.');
+      'The engine is not running; the page reconnects when it is back.Run cadgen run <script>.py or cadgen viewer to start it.');
     await act(() => root.render(createElement(EngineStopped, { locale: 'en', refused: true })));
     assert.equal(dom.window.document.querySelector('[role="alert"]')?.textContent,
       "This page's link was replaced; the page reconnects once its new link is opened.Run cadgen viewer and open the link it prints.");

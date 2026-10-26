@@ -116,7 +116,10 @@ function Thumbnail<Model extends LibraryModel>({ item, load, seen, opening = fal
     observer.observe(element.current);
     return () => { active = false; observer.disconnect(); };
   }, [item.path, item.thumbnail, item.missing, item.updated, load]);
-  return <span className="cad-library-thumbnail" ref={element}>
+  // A drawing's picture is its line work on nothing, in the light theme's pen (`useDrawingView`'s
+  // `thumbnail`): a dark card turns it light, its colours kept.
+  const drawing = /\.dxf$/i.test(item.path) ? "" : undefined;
+  return <span className="cad-library-thumbnail" ref={element} data-drawing={drawing}>
     {image ? <img src={image} alt="" /> : <Box strokeWidth={1} aria-hidden="true" />}
     {opening ? <span className="cad-library-opening"><Spinner aria-label={t("home.openingAria", { name: item.name })} /></span> : null}
   </span>;

@@ -175,6 +175,51 @@ class DeltaTest(unittest.TestCase):
 
 
 class RunLineTest(unittest.TestCase):
+    def test_a_declared_file_written_by_a_run_is_sized_as_export_sizes_it(self) -> None:
+        from types import SimpleNamespace
+
+        from cadgen.engine import build
+
+        heard: list[str] = []
+        target = SimpleNamespace(kind="xbf", path=Path(tempfile.gettempdir()) / "sized.xbf")
+        build._outputs([target], {}, heard.append, lambda _path: (True, 21_990), lambda: None)
+        self.assertRegex(heard[0], r"^wrote .*sized\.xbf \(21\.5 KB\) in \d+\.\d\ds$")
+
+    def test_a_run_s_report_is_flushed_as_it_is_said(self) -> None:
+        # Through a pipe stdout is block-buffered: the `view:` line would wait for whatever the script
+        # does after the call (a self-check loading the kernel), and the page with it.
+        import io
+        from unittest import mock
+
+        from cadgen.engine import cli
+
+        class Pipe(io.StringIO):
+            flushed = ""
+
+            def flush(self) -> None:
+                self.flushed = self.getvalue()
+
+        pipe = Pipe()
+        report = {"ok": True, "model": "m.py::m", "memo": {"bodies_loaded": 1}, "timings": {}, "bodies": {},
+                  "cache": {"from": "memory"}, "id": "an-id", "url": "http://127.0.0.1:1/an-id"}
+        with mock.patch("sys.stdout", pipe):
+            cli._reported([report], 0.1, None, False)
+        self.assertTrue(pipe.flushed.endswith("  view: http://127.0.0.1:1/an-id\n"), pipe.flushed)
+
+    def test_a_stopped_run_names_unbuilt_models_only_where_its_code_calls_one_after(self) -> None:
+        from types import SimpleNamespace
+
+        from cadgen.engine import model as engine_model
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-after-"))
+        self.addCleanup(shutil.rmtree, folder, True)
+        script = folder / "parts.py"
+        script.write_text("first()\nsecond()\nprint('done')\n", encoding="utf-8")
+        models = {"first": engine_model.Model(lambda: None), "second": engine_model.Model(lambda: None), "print": print}
+        frame = lambda line: SimpleNamespace(f_code=SimpleNamespace(co_filename=str(script)), f_lineno=line, f_globals=models)  # noqa: E731
+        self.assertTrue(engine_model._calls_after(frame(1)), "second() comes after first()")
+        self.assertFalse(engine_model._calls_after(frame(2)), "only a print after the last model")
+
     def test_one_miss_and_one_hit_are_singular(self) -> None:
         from cadgen.engine import cli
 
@@ -183,6 +228,9 @@ class RunLineTest(unittest.TestCase):
         self.assertEqual(cli._describe(report, 0.1, None), "built m.py::m in 0.10s: bodies 1 run; 1 miss, 1 hit")
         report["memo"] = {"misses": 2, "hits": 0}
         self.assertEqual(cli._describe(report, 0.1, None), "built m.py::m in 0.10s: bodies 1 run; 2 misses, 0 hits")
+        took = {"ok": True, "model": "m.py::m", "memo": {"bodies_loaded": 3}, "timings": {}, "bodies": {}, "cache": {"from": "memory"}}
+        self.assertEqual(cli._describe(took, 0.1, None), "took m.py::m in 0.10s: its document in memory holds the model's key, "
+                                                          "3 bodies loaded, nothing ran")
 
     def test_a_build_that_waited_for_its_scripts_running_one_says_what_it_did_with_it(self) -> None:
         from cadgen.engine import cli
@@ -192,7 +240,7 @@ class RunLineTest(unittest.TestCase):
                 "bodies": {"turbine.py::turbine": "loaded"}, "cache": {"used": True, "from": "memory"}, "waited": waited}
         self.assertEqual(cli._describe(took, 3.61, False),
                          "took turbine.py::turbine warm in 3.61s: its document in memory holds the model's key, "
-                         "1 bodies loaded, nothing ran; took the build of turbine.py it waited 206s for")
+                         "1 body loaded, nothing ran; took the build of turbine.py it waited 206s for")
         replayed = {"ok": True, "model": "turbine.py::turbine", "memo": {"misses": 0, "hits": 0}, "timings": {},
                     "bodies": {"turbine.py::turbine": "replayed"}, "waited": waited}
         self.assertEqual(cli._describe(replayed, 3.61, False),

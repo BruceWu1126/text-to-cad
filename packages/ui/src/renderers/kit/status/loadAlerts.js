@@ -9,6 +9,15 @@ export function isViewerServiceFailure(failure, detail) {
   return ["service", "worker", "daemon", "broker", "status", "timeout"].includes(kind) || /\b(?:artifact|model) (?:worker|broker)\b|\bworker unavailable\b|\bservice unavailable\b|artifact request failed|lost its protocol|no cold retry|no unaccounted retry/i.test(detail);
 }
 
+// The client names each request's operation by a token (`@text-to-cad/core/client`'s `request`):
+// a sentence says it in words, the details keep the token. A token this kit has no words for (a
+// family's own read) is the file being loaded; an operation already in words is said as it is.
+const OPERATION_WORDS = Object.freeze({
+  "engine-document": "loading the model", catalog: "looking up the file", folder: "reading the folder",
+  search: "searching the folder", server: "reaching the viewer",
+});
+const operationWords = operation => OPERATION_WORDS[operation] || (/\s/.test(operation) ? operation : "loading the file");
+
 export function failureAlert(fileRef, error, failure, compile = false) {
   const detail = String(failure?.detail || error || "").trim();
   let kind = failure?.kind || (/^(Failed to fetch|Load failed|NetworkError.*|network failed)$/i.test(detail)
@@ -26,7 +35,7 @@ export function failureAlert(fileRef, error, failure, compile = false) {
   const common = { severity: "error", kind, details: diagnostics };
   if (kind === "network") return {
     ...common, summary: "Connection lost", title: "Can’t reach the viewer",
-    message: `The browser lost contact with the viewer while ${operation} for “${fileRef}”. Check that the viewer is running and this tab has the correct address, then reload.`,
+    message: `The browser lost contact with the viewer while ${operationWords(operation)} for “${fileRef}”. Check that the viewer is running and this tab has the correct address, then reload.`,
     ...(failure?.method === "POST" ? {
       recovery: "The build may still be running on the server. Reloading checks its status before starting any work."
     } : {}),
@@ -42,7 +51,7 @@ export function failureAlert(fileRef, error, failure, compile = false) {
   };
   if (kind === "http" || kind === "response") return {
     ...common, summary: "Request failed", title: "The viewer couldn’t complete the request",
-    message: `${failure?.status ? `The server returned HTTP ${failure.status}` : "The server returned an unexpected response"} while ${operation} for “${fileRef}”.`,
+    message: `${failure?.status ? `The server returned HTTP ${failure.status}` : "The server returned an unexpected response"} while ${operationWords(operation)} for “${fileRef}”.`,
     reason: detail,
     recovery: "Reload to try again. If this continues, check the viewer’s terminal output for the request shown in Details.",
     reload: true

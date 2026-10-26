@@ -230,12 +230,6 @@ environment names its version in `TEXT_TO_CAD_RELEASE` (the release workflow's b
 step), so it shows `v0.7.15`; for any other build, `vite dev` included, the commit of
 this checkout, with `-dirty` when it had uncommitted changes: `v0.7.15-dev.b80844940`.
 
-It also names the build, for the version the app menu shows (`__TEXT_TO_CAD_BUILD__`,
-from `@text-to-cad/ui/build-id`): none for the release's own build, whose
-environment names its version in `TEXT_TO_CAD_RELEASE` (the release workflow's bundle
-step), so it shows `v0.7.15`; for any other build, `vite dev` included, the commit of
-this checkout, with `-dirty` when it had uncommitted changes: `v0.7.15-dev.b80844940`.
-
 ## Testing
 
 ```bash
@@ -299,8 +293,8 @@ off at every entry), draws the model in Render — the one place it is drawn —
 own bar in the navbar's place, over the view's top edge on no surface: the file's name at
 its left, Preview settings (Orbit, then Render's settings, a panel sliding in from the right
 edge) and Exit preview at its right, fading with the playbar while the pointer rests. Routines play
-from the sidebar's Animation section, in either view (in Preview, on entry only with
-Autoplay on); the host passes no Preview props.
+from the sidebar's Animation section in the tools view, and from Preview's playbar under the model
+in Preview (on entry only with Autoplay on); the host passes no Preview props.
 The file on screen keeps its view in the tab — its camera, Display settings
 (explode and clip included) and pose — so a refresh restores it; leaving the file for
 another or for the home drops it, and opening it again frames it anew (see
@@ -401,7 +395,7 @@ user's state directory, shared with the CAD app.
 ### Usage stats (telemetry)
 
 cadgen's usage stats (`cadgen/analytics.py`) are on by default once a `cadgen` command has said
-so, once, in its output; nothing in the Viewer asks. **Share anonymous usage data** in the app menu turns
+so, once, in its output; nothing in the Viewer asks. **Telemetry** in the app menu turns
 them off or on, and the answer is kept in the user's state directory, so one answer counts for
 both apps. The page reads and answers it through the CAD client (`consent`, `/__cad/analytics`),
 and reports a person touching the page (at most every 2 s) to `/__cad/analytics/activity`; a
@@ -446,7 +440,7 @@ The Viewer has the one navbar every app shares (see
 [the host contract](../../packages/ui/docs/viewer-host.md#host-chrome-slots)): at the
 left the logo (the TEXTTOCAD wordmark on the home, the C over a file), which opens the app menu, then the open file's name (no glyph),
 which opens the name menu (Models and Files), with its ⋯; at the right only the blue update button, while a newer text-to-cad
-is out. The app menu holds Back to home (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
+is out. The app menu holds Back to home (the home), the person's settings (Telemetry), Send feedback (a new issue titled "Feedback: "),
 GitHub, Discord and, in gray, the version (a link to its release notes) and "Made by @…"
 (X), as in the CAD app, over a file and on the home alike.
 Projection, Display and Preview are the view's, at the tool strip's end, never the navbar's;

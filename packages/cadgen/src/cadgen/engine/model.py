@@ -114,6 +114,29 @@ def _told(error: BaseException, said: str | None = None) -> None:
     sys.excepthook = quiet
 
 
+def _calls_after(frame: Any) -> bool:
+    """Whether the program's code calls a model after the line ``frame`` stands at: what its stopping
+    there leaves unbuilt. Read from the source of the frame's file (a call is a model's when its name,
+    or ``module.name``, is one in the frame's globals); one that cannot be read is said to."""
+    import ast
+
+    try:
+        tree = ast.parse(Path(frame.f_code.co_filename).read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        return True
+    names = frame.f_globals
+
+    def model_at(node: ast.expr) -> bool:
+        if isinstance(node, ast.Name):
+            return isinstance(names.get(node.id), Model)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            return isinstance(getattr(names.get(node.value.id), node.attr, None), Model)
+        return False
+
+    return any(isinstance(node, ast.Call) and node.lineno > frame.f_lineno and model_at(node.func)
+               for node in ast.walk(tree))
+
+
 class Model:
     """A decorated function: the body, the script it lives in, the outputs it declares."""
 
@@ -193,7 +216,8 @@ class Model:
         # and resumes after it; importing the engine never runs or exits a script.
         # A call the program's own code makes (``python caller.py``) is reported, wherever the
         # model is defined: ``caller.py`` calling ``parts.cube()`` prints cube's id and view.
-        program = sys._getframe(1).f_globals.get("__name__") == "__main__"
+        caller = sys._getframe(1)
+        program = caller.f_globals.get("__name__") == "__main__"
         previous = getattr(_CONTEXT, "program", False)
         _CONTEXT.program = program
         try:
@@ -213,7 +237,8 @@ class Model:
                 # Said only if nothing catches it: the program stops here, and Python, not the
                 # engine, decides which calls run (law 11), so the models it calls after this one
                 # are not built -- and each keeps the document of its last run until it runs again.
-                _told(error, f"the run stopped at {self.name}: a model it calls after this one is not built")
+                _told(error, f"the run stopped at {self.name}" + (": a model it calls after this one is not built"
+                                                                    if _calls_after(caller) else ""))
             raise error
         return api.Document(self.name, self.script, built.models[0], Path.cwd())
 

@@ -380,7 +380,7 @@ shapes share one) — and the row shows and sets the tool in hand's own — and 
 second, from the left: the **tools of the one that is up**, a button each, the one in hand pressed (with Pencil up, Pen,
 Highlighter, Eraser; with Shapes up, Rectangle, Line, Arrow, Ellipse, Text: choosing one is how the strip tool changes what it
 draws with); a thin rule; then what is drawn next, each a dropdown whose button shows its value, no
-chevron: **Color** (no heading, a grid of swatches, unnamed but for assistive technology: the neons and
+chevron: **Colour** (no heading, a grid of swatches, unnamed but for assistive technology: the neons and
 one neutral that reads against the viewer, white in dark mode and near-black in light, then
 the colour wheel, which opens the system's colour picker for any other colour, kept once the
 picker closes), **Stroke width** (no heading, four weights, 1, 2, 4 and 6px, the pen drawn to look the
@@ -453,7 +453,7 @@ and in its type, as narrow as its content, with no heading and no glyphs: first 
 compact group of the app menu's Theme buttons (24px squares, its radius, no track) in a row as
 tall as an item (a phone's 40px, as Theme's row), the axis in hand in the accent a highlighted
 item wears; a rule; then two of Display's `DropdownMenuCheckboxItem`s, plain text with the check
-at the right: **Part colors** (ticked by default: each section cap in its
+at the right: **Part colours** (ticked by default: each section cap in its
 part's normal colour, without hover or selection tints; unticked, every cap one amber) and
 **Reverse** (unticked by default: which side of the plane is kept). Caps stay opaque, a
 transparent part's too. A press on any of them leaves the menu open, and none of them applies a
@@ -964,10 +964,11 @@ the view's right edge, the settings panel (`kit/shell/PreviewSettings.jsx`), whi
 from that edge with the file sidebar's own motion (`SIDEBAR_SLIDE_CLASS`), closed each time Preview
 opens and put away by its button or its own X: **Orbit** — its heading's checkbox turns the camera about the model, off every
 time Preview opens, and its **Speed** is a dropdown of speeds — then Render's own settings
-page (see [Display settings](#display-settings-and-section-primitives)). At the top-left, the
-file sidebar offers its **Position** and **Animation** alone, their tiles bare: Preview's own
-pose and routine. Escape leaves Preview too, once an open dropdown has closed. Explode and
-Clip are the tools view's alone. Nothing sits under the model, nor at the bottom centre.
+page (see [Display settings](#display-settings-and-section-primitives)). Preview has no file
+sidebar (hidden, so a tree keeps its state); a file with routines has Preview's own routine in a
+playbar under the model (`kit/tools/playbar/PreviewPlaybar.jsx`), which fades with the bar.
+Escape leaves Preview too, once an open dropdown has closed. Explode and Clip are the tools
+view's alone.
 
 **Preview is drawn in Render**, whatever the file's display mode: it is a view of its own
 over the tools view, drawing the file's Render settings, and the file's own mode and its
@@ -976,8 +977,8 @@ a live `setDisplaySettings` refuses it as it refuses any mode it does not know, 
 left in it reads as the defaults. Render settings edited in Preview are the file's Render settings;
 leaving returns the tools view to the file's mode.
 
-**Routines** play from the file sidebar's **Animation** section, in the tools view and the
-Preview alike (`kit/tools/playbar/AnimationSection.jsx`): its heading holds **Reset animation**,
+**Routines** play from the file sidebar's **Animation** section in the tools view
+(`kit/tools/playbar/AnimationSection.jsx`), and from Preview's playbar in Preview: its heading holds **Reset animation**,
 which stops the routine and puts the model at rest, disabled while it is; its body is the
 routine in hand, a dropdown of the routines where there are two or more, then **Play** or
 **Pause**, the scrubber (`AnimationTimeControl`) and **Playback settings** (a cog: the routine's
@@ -1028,7 +1029,9 @@ nothing is prepared ahead: Preview prepares as it is entered, under its cover.
 ## Keyboard
 
 Escape and Copy belong to one viewer: the one with focus, or the one last
-pressed in while focus is on the page. Editable targets keep their own keys.
+pressed in while focus is on the page. Editable targets keep their own keys. A file
+shown takes the keyboard where nothing has it, in a page of its own (never a card in a
+chat's frame), so its tool keys work with no press in it first (`file-viewer/takeKeyboard.js`).
 
 - **Escape**, innermost first: an open popup in this viewer (a menu, the app menu
   included, a Select, a color picker, Display, the explorer) closes itself; then Preview closes;

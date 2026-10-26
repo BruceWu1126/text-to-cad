@@ -422,16 +422,20 @@ def _shown(names: list[str], limit: int = 8) -> str:
 
 
 def _nearest(root: Node, text: str) -> str:
-    """The occurrences an unknown owner most resembles, for its error: by their canonical owners
-    and their paths."""
+    """The occurrences an unknown owner most resembles, for its error: each once, by its canonical
+    owner, matched by that owner or by its path, the closest first and equals in the tree's order."""
     import difflib
 
-    candidates: dict[str, None] = {}
-    for node in root.walk():
-        candidates[owner_text(root, node)] = None
-        candidates[path_text(root, node)] = None
-    candidates.pop("", None)
-    near = difflib.get_close_matches(text, list(candidates), n=5, cutoff=0.5)
+    scored: list[tuple[float, int, str]] = []
+    for order, node in enumerate(root.walk()):
+        owner = owner_text(root, node)
+        if not owner:
+            continue
+        score = max(difflib.SequenceMatcher(None, text, spelled).ratio()
+                    for spelled in {owner, path_text(root, node)} if spelled)
+        if score >= 0.5:
+            scored.append((-score, order, owner))
+    near = [owner for _score, _order, owner in sorted(scored)[:5]]
     if not near:
         near = [owner_text(root, node) for node in root.walk()][:8]
     return _shown(near)

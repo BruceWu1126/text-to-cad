@@ -127,9 +127,12 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     const incoming = applyViewerOriginToEntries(catalog?.entries, origin);
     // The document the path asked for is the row the server answered: its id joins every spelling.
     if (asked && incoming.length === 1 && incoming[0].id && !isDocumentId(asked)) aliases.set(asked, incoming[0].id);
+    // An id the engine no longer holds (deleted while it was on screen): its row goes with it.
+    let gone = '';
     if (isDocumentId(asked)) {
       if (typeof catalog?.missing === 'string' && !incoming.length) {
         missing.set(asked, { text: catalog.missing, state: typeof catalog.missingState === 'string' ? catalog.missingState : '' });
+        gone = asked;
       } else missing.delete(asked);
     }
     const answered = new Set(incoming.map(entryKey));
@@ -137,7 +140,7 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     const shown = new Set([...activeFiles.keys(), preferredFile].map(keyOf));
     const previous = new Map(snapshot.entries.map((entry) => [entryKey(entry), entry]));
     const entries = [
-      ...snapshot.entries.filter((entry) => !answered.has(entryKey(entry)) && shown.has(entryKey(entry))),
+      ...snapshot.entries.filter((entry) => !answered.has(entryKey(entry)) && shown.has(entryKey(entry)) && entryKey(entry) !== gone),
       ...incoming.map((entry) => {
         const before = previous.get(entryKey(entry));
         return before && JSON.stringify(before) === JSON.stringify(entry) ? before : entry;

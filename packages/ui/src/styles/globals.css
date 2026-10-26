@@ -164,6 +164,9 @@
 .cad-library-card .cad-library-open { flex-direction: column; }
 .cad-library-thumbnail { display: grid; place-items: center; overflow: hidden; background: var(--cad-library-backdrop, var(--muted)); color: var(--muted-foreground); }
 .cad-library-thumbnail img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+/* A drawing's picture is dark line work on nothing (`useDrawingView`'s `thumbnail`): on a dark card its
+ * lightness turns over and its hues stay. */
+.dark .cad-library-thumbnail[data-drawing] img { filter: invert(1) hue-rotate(180deg); }
 .cad-library-thumbnail > svg { width: 24px; height: 24px; opacity: .7; }
 .cad-library-card .cad-library-thumbnail { width: 100%; aspect-ratio: 330 / 185; }
 /* The caption, 12px by 16px: the kind's glyph in a 24px column, then the name (text-ui, 500) over its age. */

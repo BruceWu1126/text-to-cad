@@ -219,8 +219,9 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
     if memo.get("bodies_loaded"):
         taken = (report.get("cache") or {}).get("from")
         holder = "the engine's cache" if taken == "cache" else "its document in memory"
+        loaded = memo.get("bodies_loaded", 0)
         line = (f"took {report['model']}{worker} in {wall:.2f}s: {holder} holds the model's key, "
-                f"{memo.get('bodies_loaded', 0)} bodies loaded, nothing ran") + _waited(report, "took")
+                f"{loaded} bod{'y' if loaded == 1 else 'ies'} loaded, nothing ran") + _waited(report, "took")
         line += _delta(report.get("delta"))
     else:
         counted = {status: bodies.count(status) for status in ("run", "replayed") if bodies.count(status)}
@@ -327,6 +328,10 @@ def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as
         if not report.get("ok"):
             failed = True
             print(report.get("error", ""), file=sys.stderr)
+    # The call's answer is read now, its page opened from its `view:` line: a pipe (an agent's shell)
+    # would hold it until the script exits, after whatever the script does next -- a self-check that
+    # loads the CAD kernel here takes seconds.
+    sys.stdout.flush()
     return 1 if failed else 0
 
 

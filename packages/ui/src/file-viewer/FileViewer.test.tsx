@@ -322,3 +322,16 @@ it('a missing-file presentation can reread the requested file through its inject
   act(() => retry());
   expect(stat.mock.calls.map(([path]) => path)).toEqual([FILE, FILE]);
 });
+
+it('takes the keyboard as its file is shown, so a tool key works with no press first; never from a field that has it', async () => {
+  const view = open({});
+  await screen.findByText('shown');
+  await waitFor(() => expect(document.activeElement?.classList.contains('text-to-cad-file-viewer')).toBe(true));
+  view.unmount();
+  const field = document.body.appendChild(document.createElement('input'));
+  field.focus();
+  open({});
+  await screen.findByText('shown');
+  expect(document.activeElement).toBe(field);
+  field.remove();
+});

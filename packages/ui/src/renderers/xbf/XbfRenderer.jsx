@@ -39,7 +39,7 @@ import { isXbfAssemblyId, presentXbfTree, xbfAssemblyIds, xbfCoveringIds, xbfPic
 import { XBF_DECLINED_LIVE_COMMANDS, XBF_TOOL, XBF_TOOL_MODES } from "./tools.js";
 import { xbfLookSubject } from "./xbfLookAt.js";
 import { readXbfView, xbfViewSignatures, xbfViewSlices } from "./xbfViewSlices.js";
-import { useXbfScene } from "./useXbfScene.js";
+import { goneFromEngine, useXbfScene } from "./useXbfScene.js";
 import { useXbfMotion } from "./useXbfMotion.js";
 import { useControlUsage } from "../../usage/controls.js";
 
@@ -96,6 +96,14 @@ function XbfSurface({ view, data }) {
   const host = useViewerHost();
   const document = useWorkspaceDocument({ view, data });
   const loaded = useXbfScene({ client: document.client, file: view.file.path });
+  // A document the engine no longer holds is opened again, once, the catalog asked again first (it
+  // still has the row it had): the file viewer then says what became of it, in the document's words.
+  const reopened = useRef(false);
+  useEffect(() => {
+    if (!goneFromEngine(loaded.error) || reopened.current) return;
+    reopened.current = true;
+    void Promise.resolve(document.client?.refresh?.({ file: view.file.path })).catch(() => {}).finally(() => view.reload());
+  }, [loaded.error, view, document.client]);
   const scene = loaded.scene;
   const source = loaded.document?.source?.url || "";
   // What every later read of the document's engine is made with: the fetch it was read with.
@@ -104,7 +112,8 @@ function XbfSurface({ view, data }) {
   // updates by itself when one succeeds. The view shows the engine's last build and says nothing of
   // the code it came from: a script edited since is the engine's business, not the page's.
   const loadAlert = useMemo(() => workspaceLoadAlert({
-    catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene)
+    // One the engine no longer holds is opened again (above), never said as a load that failed.
+    catalogError: document.catalogError, error: goneFromEngine(loaded.error) ? null : loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene)
   }) || (loaded.failed ? buildFailedAlert(document.modelKey, loaded.failed, Boolean(scene)) : null)
     || (loaded.empty ? noGeometryAlert(document.modelKey) : null),
   [document.catalogError, loaded.error, loaded.failed, loaded.empty, document.modelKey, scene]);

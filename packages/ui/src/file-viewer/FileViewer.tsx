@@ -1,7 +1,7 @@
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { FileText } from "lucide-react";
 import { isDocumentId } from "@text-to-cad/core/lib/cadRefs.js";
-import { Component, useCallback, useMemo, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { Button } from "../primitives/button.jsx";
 import { Spinner } from "../primitives/spinner.js";
@@ -12,6 +12,7 @@ import type { FileNavigationAction, FileViewerProps, JsonValue, FileViewerState 
 import { ViewerMobileContext, useViewerMobileMeasure } from "./responsive.js";
 import { ViewerElementContext, ViewerHostContext } from '../host/context.js';
 import { I18nProvider, translator } from "../i18n/index.js";
+import { mayTakeKeyboard } from "./takeKeyboard.js";
 
 class RenderBoundary extends Component<{ children: ReactNode; title: string; onError?: (error: Error) => void }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -57,6 +58,14 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
   const onNavigationActionsChange = useCallback((actions: readonly FileNavigationAction[]) => { if (currentKey.current === key) setNavActions({ key, actions }); }, [key]);
   const onReady = useCallback((ready: boolean) => { if (currentKey.current === key) setReadiness((previous) => previous?.key === key && previous.ready === ready ? previous : { key, ready }); }, [key]);
   const ready = loaded.status === "ready" && (readiness?.key === key ? readiness.ready : true);
+  // A file shown takes the keyboard, so its tool keys (V, M, P …) work with no press in it first:
+  // where nothing has it, in a page of its own (never a card in a chat's frame) and never in a compact
+  // view drawn out of sight (`takeKeyboard.js`).
+  useEffect(() => {
+    const element = viewerElement.current;
+    if (!ready || !element || appearance.compact) return;
+    if (mayTakeKeyboard(element.ownerDocument, element.ownerDocument.defaultView as Window)) element.focus({ preventScroll: true });
+  }, [ready, key, appearance.compact]);
   const rendererStateKey = loaded.status === "ready" ? JSON.stringify([loaded.file.path, loaded.renderer.id]) : "";
   // A departing renderer flushes its last per-file state during unmount. That write belongs to its
   // own key even after another file opens; whether it is kept is the host's (`CadViewer` keeps the

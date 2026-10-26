@@ -190,9 +190,9 @@ function ColorMenu({ value, colors, onChange, disabled }) {
   return <>
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
-        <ToolbarButton tooltip={false} label="Color" disabled={disabled}>{colorGlyph(value)}</ToolbarButton>
+        <ToolbarButton tooltip={false} label="Colour" disabled={disabled}>{colorGlyph(value)}</ToolbarButton>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" sideOffset={4} collisionPadding={8} aria-label="Color"
+      <DropdownMenuContent align="start" sideOffset={4} collisionPadding={8} aria-label="Colour"
         className={cn(FLOATING_SURFACE_CLASS, 'w-auto min-w-0 p-1.5 data-[state=closed]:animate-none!')}>
         <div className="grid grid-cols-3 gap-1">
           {colors.map(option => <DropdownMenuItem key={option.value} aria-label={option.label} data-color={option.value}
@@ -200,7 +200,7 @@ function ColorMenu({ value, colors, onChange, disabled }) {
             className="size-7 justify-center rounded-md p-0 data-[checked]:bg-accent">
             <span className="size-4 rounded-full" style={swatch(option.value)} aria-hidden="true" />
           </DropdownMenuItem>)}
-          <DropdownMenuItem aria-label="Custom color" data-color="custom" onSelect={pick} className="size-7 justify-center rounded-md p-0">
+          <DropdownMenuItem aria-label="Custom colour" data-color="custom" onSelect={pick} className="size-7 justify-center rounded-md p-0">
             <span className="size-4 rounded-full" style={WHEEL} aria-hidden="true" />
           </DropdownMenuItem>
         </div>

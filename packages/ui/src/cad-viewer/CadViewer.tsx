@@ -138,7 +138,10 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   // departing renderer writes its view once more as it unmounts; that write is a cleanup of the
   // commit that changed `file`, and every cleanup of a commit runs before its effects, this one
   // included, so it cannot bring the view back. The tab's settings are not a file's, and stay.
-  useEffect(() => { tabStore.files.retain(path || null); }, [tabStore, path]);
+  // A view is kept under the file's own name (`shown`), and a host may address the file by its
+  // document's id: until the catalog says which file that is (a reload, as the page starts), nothing
+  // is dropped, or the reload would lose the very view it is meant to bring back.
+  useEffect(() => { if (!path || shown) tabStore.files.retain(shown); }, [tabStore, path, shown]);
 
   // Refresh the catalog when the person comes back to the page: a model may have been rebuilt meanwhile.
   useEffect(() => {

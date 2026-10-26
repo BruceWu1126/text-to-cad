@@ -135,7 +135,7 @@ const renderers = [createDxfRenderer({ client, preferences }), createGlbRenderer
 
 Public entry points include `/host`, `/file-viewer`, `/tab-store`, `/navigation`,
 `/renderers/dxf`, `/renderers/glb`, `/renderers/mesh`, `/renderers/robot`, `/renderers/xbf`, `/renderers/workspace`, `/file-viewer/presentation`, `/file-viewer/empty`,
-`/cad-viewer`, `/catalog`, `/links`, `/library`, `/consent` (the app menu's Share anonymous usage data row and its state), `/loading-icon`, `/utils`, `/primitives/*`,
+`/cad-viewer`, `/catalog`, `/links`, `/library`, `/consent` (the app menu's Telemetry row and its state), `/loading-icon`, `/utils`, `/primitives/*`,
 `/tokens.css`, and `/styles.css`. `/catalog` (a CAD client as a `FileSource`, the file menu's
 Copy path and Reveal, and the one spelling of an absolute path: `normalizePath`, `baseName`,
 `joinPath`) and `/links` (the navbar's link defaults) are pure modules, with no React, for a
@@ -285,7 +285,7 @@ is no Materials editor or persisted material override. See [View styles](docs/re
 
 The navbar leads with the logo (the TEXTTOCAD wordmark over the home, the C over a document,
 morphing between them), which opens the app's menu: Back to home where the host
-has a home, the person's settings (Share anonymous usage data), Send feedback
+has a home, the person's settings (Telemetry), Send feedback
 (a new issue titled "Feedback: " where the host has a tracker), GitHub, Discord and, in
 gray, the version and who made it. Where the host keeps the view's own history (the CAD
 app's views), Back and Forward follow, disabled where they have nowhere to go. It names the

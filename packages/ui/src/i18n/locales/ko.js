@@ -10,7 +10,7 @@ export default {
 
   "app.start.notAnswering": "CAD 뷰어가 응답하지 않습니다",
   "app.engine.notRunning": "엔진이 실행 중이 아닙니다. 다시 실행되면 페이지가 다시 연결됩니다.",
-  "app.engine.startIt": "python <model>.py 또는 cadgen viewer를 실행해 시작하세요.",
+  "app.engine.startIt": "cadgen run <script>.py 또는 cadgen viewer를 실행해 시작하세요.",
   "app.engine.linkReplaced": "이 페이지의 링크가 바뀌었습니다. 새 링크를 열면 페이지가 다시 연결됩니다.",
   "app.engine.openNewLink": "cadgen viewer를 실행하고 출력된 링크를 여세요.",
 
@@ -229,4 +229,17 @@ export default {
   "colorPicker.eyedropper": "스포이트",
   "colorPicker.pickFromScreen": "화면에서 색상 선택",
   "colorPicker.opacityHeading": "불투명도",
+  "preview.preparing": "미리 보기 준비 중…",
+  "playback.loop": "반복",
+  "playback.autoplay": "자동 재생",
+  "select.pick": "선택 대상",
+  "chip.copied": "복사됨",
+  "explode.label": "분해",
+  "quickEdit.describe": "변경 내용을 입력하세요…",
+  "status.buildPreview": "미리 보기",
+  "status.buildPreviewHint": "빌드 결과 미리 보기입니다. 이 리비전이 저장되면 저장된 파일로 바뀝니다.",
+  "tree.showAll": "모두 표시",
+  "tree.exitIsolation": "종료",
+  "robot.none": "없음",
+  "robot.meshObject": "메시 개체",
 };

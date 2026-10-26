@@ -15,6 +15,7 @@ import { copiedQuickEdit, createQuickEditContext, pastedLines, quickEditSelectio
 import { insertAtCaret, markSelectedPills, noteText, pasteNodes, selectPillAt } from "./noteEditor.js";
 import ReferenceChips from "./ReferenceChips.jsx";
 import { useControlUsage } from "../../../../usage/controls.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 // The sheet's open stop: most of the screen, so the note has room; the box fills it, the note
 // taking what its header and buttons leave. Its handle is the sheet's top 24px.
@@ -87,6 +88,7 @@ export function quickEditReferenceIds(selection) {
  */
 export default function QuickEdit({ resource, references = EMPTY, chips = null, annotation = null, prompt = null, nameReference = null, onCopy, onEscape, onClear, disabled = false,
   hidden = false, docked = false, className, style }) {
+  const { t } = useI18n();
   const host = useViewerHost();
   const controls = useControlUsage();
   const destination = usePromptDestination();
@@ -427,7 +429,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
       {docked && folded ? <div className="flex items-center gap-1.5" data-quick-edit-peek="">
         <button type="button" aria-expanded={false} onClick={unfold} data-quick-edit-fold=""
           className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-md border border-input bg-background/80 px-3 text-left text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/45">
-          <PenLine className="size-4 shrink-0" aria-hidden="true" /><span className="truncate">Describe your changes…</span>
+          <PenLine className="size-4 shrink-0" aria-hidden="true" /><span className="truncate">{t("quickEdit.describe")}</span>
         </button>
         {peekActions()}
       </div> : null}

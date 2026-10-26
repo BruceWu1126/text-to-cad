@@ -32,7 +32,7 @@ import {
 } from "@text-to-cad/core/lib/drawing2d/index.js";
 import { IDLE_PIXEL_RATIO_CAP, getPixelRatioCap } from "../kit/viewport/pixelRatio.js";
 import { capturePointer, releasePointer } from "../../lib/pointerCapture.js";
-import { readDrawingThemeColors } from "./themeColors.js";
+import { DRAWING_THEME_FALLBACK, readDrawingThemeColors } from "./themeColors.js";
 
 /** Wheel notches to zoom factor. A notch is ~100 px of delta on most mice. */
 const WHEEL_ZOOM_SPEED = 0.0015;
@@ -126,7 +126,10 @@ export function useDrawingView({ drawing, restored = null, colorScheme = "light"
     const drawable = drawingRef.current;
     const { width, height } = sizeRef.current;
     if (!drawable?.bounds || width <= 0 || height <= 0) return;
-    const fitted = fitTransform(drawable.bounds, width, height);
+    // The drawing frames clear of the view's tool strip, which the view measures as `--cad-tools-bottom`.
+    const frame = containerRef.current?.closest?.("[data-slot=cad-file-view]");
+    const strip = frame ? Number.parseFloat(getComputedStyle(frame).getPropertyValue("--cad-tools-bottom")) : 0;
+    const fitted = fitTransform(drawable.bounds, width, height, { top: Number.isFinite(strip) ? strip : 0 });
     fitScaleRef.current = fitted.scale;
     if (force || !movedRef.current) {
       movedRef.current = false;
@@ -343,8 +346,11 @@ export function useDrawingView({ drawing, restored = null, colorScheme = "light"
   }, [fit, moveTo, zoomBy]);
 
   /**
-   * The drawing on its own, for a library card: fitted whole to `width` × `height`, in the theme's
-   * pens on its background, painted on a canvas of its own — the pane's view is left as it is.
+   * The drawing on its own, for a library card: fitted whole to `width` × `height`, painted on a
+   * canvas of its own — the pane's view is left as it is. Like a 3D card's picture it has no
+   * background (the card's picture area shows through), and its pen is the light theme's whatever
+   * the theme it was taken in: one picture serves both themes, and a dark card inverts it
+   * (`.cad-library-thumbnail[data-drawing]`).
    */
   const thumbnail = useCallback(({ width, height }) => new Promise((resolve, reject) => {
     const drawable = drawingRef.current;
@@ -354,9 +360,9 @@ export function useDrawingView({ drawing, restored = null, colorScheme = "light"
     canvas.height = Math.max(1, Math.round(height));
     const context = canvas.getContext("2d");
     if (!context) { reject(new Error("The browser cannot draw the drawing's picture.")); return; }
-    const { background, foreground } = readDrawingThemeColors(containerRef.current, schemeRef.current);
-    clearSurface(context, { width: canvas.width, height: canvas.height, background });
-    drawDrawing(context, drawable, { transform: fitTransform(drawable.bounds, canvas.width, canvas.height), foreground });
+    clearSurface(context, { width: canvas.width, height: canvas.height });
+    drawDrawing(context, drawable, { transform: fitTransform(drawable.bounds, canvas.width, canvas.height),
+      foreground: DRAWING_THEME_FALLBACK.light.foreground });
     canvas.toBlob((blob) => {
       if (blob) resolve(blob);
       else reject(new Error("The browser could not encode this drawing as a PNG."));

@@ -1,5 +1,6 @@
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { CoordValue, InfoRow, MonoValue } from "../kit/inspector/referenceRows.jsx";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 // The card of a Quick Edit chip (`robotReferences.jsx`): what a selected link or object IS. Its
 // heading names it, so the rows never repeat the name.
@@ -84,12 +85,13 @@ function GeometryEntry({ entry, onOpenFile }) {
 }
 
 function GeometryRows({ label, entries, onOpenFile }) {
+  const { t } = useI18n();
   if (!entries) return null;
   // Its files are links, which keep their own click: nothing to copy.
   return <InfoRow label={label} copy={false}>
     {entries.length
       ? entries.map((entry, index) => <GeometryEntry key={`${entry.filename || entry.type}:${index}`} {...{ entry, onOpenFile }}/>)
-      : <span className="text-muted-foreground">None</span>}
+      : <span className="text-muted-foreground">{t("robot.none")}</span>}
   </InfoRow>;
 }
 
@@ -167,9 +169,10 @@ export function RobotLinkDetails({ facts, onOpenFile, onSelectLink, hasLinkRow =
 }
 
 function ComponentDetails({ component }) {
+  const { t } = useI18n();
   const size = component.sizeMillimetres;
   return <div className="flex min-w-0 flex-col text-tiny font-normal" aria-label="Component details">
-    <InfoRow label="Type">Mesh object</InfoRow>
+    <InfoRow label="Type">{t("robot.meshObject")}</InfoRow>
     <InfoRow label="Link">{component.link}</InfoRow>
     {/* A cadgen mesh export groups an object BY colour, so it tells two rows of one link apart. */}
     {component.color && <InfoRow label="Colour"><span className="inline-flex items-baseline gap-1.5">

@@ -47,7 +47,7 @@ export async function runAnnotateScenario({ page, pane, errors, update }) {
   const choose = async (setting, name) => {
     await controls.getByRole('group', { name: 'Annotation style' }).getByRole('button', { name: setting, exact: true }).click();
     // Color's is a grid of swatches, each a plain item; the rest are radio lists.
-    await page.getByRole(setting === 'Color' ? 'menuitem' : 'menuitemradio', { name, exact: true }).click();
+    await page.getByRole(setting === 'Colour' ? 'menuitem' : 'menuitemradio', { name, exact: true }).click();
   };
   // A shape: its button in the row, Shapes up.
   const shape = name => chooseTool('Shapes', name);
@@ -98,7 +98,7 @@ export async function runAnnotateScenario({ page, pane, errors, update }) {
   assert.equal(await tool('Shapes').locator('svg').evaluate(icon => icon.getAttribute('class').includes('lucide-square')), true, 'Shapes opens on the rectangle');
   // One row, in order, all on one line: the tools of Pencil, then Color, Stroke width, Placement and Clear.
   const row = await controls.getByRole('button').evaluateAll(buttons => buttons.map(button => [button.getAttribute('aria-label'), button.getBoundingClientRect().top]));
-  assert.deepEqual(row.map(([name]) => name), ['Pen', 'Highlighter', 'Eraser', 'Color', 'Stroke width', 'Placement', 'Clear annotations']);
+  assert.deepEqual(row.map(([name]) => name), ['Pen', 'Highlighter', 'Eraser', 'Colour', 'Stroke width', 'Placement', 'Clear annotations']);
   assert.equal(await controls.getByRole('button', { name: 'Pen', exact: true }).getAttribute('aria-pressed'), 'true', 'the pen is in hand');
   assert.ok(row.every(([, top]) => top === row[0][1]), 'every control on one line');
   assert.equal(await controls.evaluate(row => Boolean(row.closest('[data-cad-tool-stack], [data-tool-panel]'))), false, 'not a panel of the stack');
@@ -143,10 +143,10 @@ export async function runAnnotateScenario({ page, pane, errors, update }) {
 
   // Another colour for what is drawn next: a green rectangle beside the red stroke. Each drawing kind keeps its
   // own colour: the pen's is green now, and Shapes' is still the red it opened with until it is chosen too.
-  await choose('Color', 'Neon green');
+  await choose('Colour', 'Neon green');
   await shape('Rectangle');
-  assert.equal(await controls.getByRole('button', { name: 'Color', exact: true }).locator('span').evaluate(swatch => swatch.style.backgroundColor), 'rgb(255, 45, 85)', "Shapes' colour is its own");
-  await choose('Color', 'Neon green');
+  assert.equal(await controls.getByRole('button', { name: 'Colour', exact: true }).locator('span').evaluate(swatch => swatch.style.backgroundColor), 'rgb(255, 45, 85)', "Shapes' colour is its own");
+  await choose('Colour', 'Neon green');
   await drag(at(-60, -120), at(60, -40));
   await until('a green rectangle beside the red', seen => seen.green > 100 && seen.red > 50);
   await annotateHistory('Clear annotations').click();
@@ -156,7 +156,7 @@ export async function runAnnotateScenario({ page, pane, errors, update }) {
   // The Highlighter, a button of Pencil's row: the strip's Pencil shows it, and a drag puts a stroke down (Quick Edit's chip);
   // it opens in the highlighter's own yellow, not the pen's green.
   await chooseTool('Pencil', 'Highlighter');
-  assert.equal(await controls.getByRole('button', { name: 'Color', exact: true }).locator('span').evaluate(swatch => swatch.style.backgroundColor), 'rgb(255, 230, 0)', "the highlighter's colour is its own");
+  assert.equal(await controls.getByRole('button', { name: 'Colour', exact: true }).locator('span').evaluate(swatch => swatch.style.backgroundColor), 'rgb(255, 230, 0)', "the highlighter's colour is its own");
   assert.equal(await draw.locator('svg').evaluate(icon => icon.getAttribute('class').includes('lucide-highlighter')), true, 'Pencil shows the highlighter');
   assert.equal(await draw.getAttribute('aria-pressed'), 'true');
   await drag(at(-80, 10), at(60, 40));
@@ -170,7 +170,7 @@ export async function runAnnotateScenario({ page, pane, errors, update }) {
   await drag(at(-80, 10), at(60, 40));
   // The eraser draws nothing: its row greys out Color, Stroke width and Placement.
   await chooseTool('Pencil', 'Eraser');
-  for (const setting of ['Color', 'Stroke width', 'Placement']) assert.equal(await controls.getByRole('button', { name: setting, exact: true }).isDisabled(), true, `${setting} is greyed out under the Eraser`);
+  for (const setting of ['Colour', 'Stroke width', 'Placement']) assert.equal(await controls.getByRole('button', { name: setting, exact: true }).isDisabled(), true, `${setting} is greyed out under the Eraser`);
   await chooseTool('Pencil', 'Pen');
   await shape('Rectangle');
   await drag(at(-60, -120), at(60, -40));

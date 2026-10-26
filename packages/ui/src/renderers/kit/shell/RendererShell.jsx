@@ -650,7 +650,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                   previewCovered ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0 transition-opacity duration-300 motion-reduce:transition-none")}
                 style={{ backgroundColor: frame.sceneBackdrop }}>
                 {previewCovered ? <span role="status" className="flex items-center gap-2 text-tiny text-muted-foreground">
-                  <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />Preparing preview…
+                  <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />{t("preview.preparing")}
                 </span> : null}
               </div>
 
