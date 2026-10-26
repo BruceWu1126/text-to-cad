@@ -27,5 +27,8 @@ Any one of these says the project was written for 0.7:
 1. Run the project's scripts with this skill's `python` and `cadgen`, never the 0.7 command
    its docs pin (that keeps building on 0.7), with an absolute `PYTHONPATH`: the engine runs
    each script in its own folder, so a relative entry resolves from there.
-2. Follow the guide's checklist in order, rerunning the root script after each step: each
+2. Keep a STEP the project's 0.7 build wrote, to compare placements part by part at the
+   end: a stage that moves parts inside a sub-assembly can build on 0.8 with some parts a few
+   millimetres off and nothing said.
+3. Follow the guide's checklist in order, rerunning the root script after each step: each
    error names the next thing 0.8 wants. Tell the person before deleting 0.7 files.

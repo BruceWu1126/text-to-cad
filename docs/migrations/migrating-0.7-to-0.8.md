@@ -134,7 +134,10 @@ and `OCP` in its own environment: the import binds at once and the CAD kernel (a
 engine finds current never loads it in your process. `from build123d import Box` reads
 the name and loads the kernel at that line, as does a module-level `bd.Color(...)` or
 `bd.Align.CENTER` default, so write build123d attribute-style. The `cadgen.build123d`
-proxy is gone.
+proxy is gone. Module-level work runs in your process on every run too: a 0.7 script that
+computed its kinematics at import (`KINEMATICS = kinematics()` for the decorator) pays it on
+every no-op; once the mates are in the body (step 4), compute them there. Measured on a
+628-part arm: 1.3 s of the calling process's CPU per run at module level, 0.1 s in the body.
 
 **The root holds exactly eighteen names**: `model`, the file decorators `xbf`, `step`,
 `glb`, `stl`, `threemf` and `dxf`, `memo`, `Material`, `materials`, `paint`,
@@ -251,6 +254,27 @@ Mechanically:
    sub-assembly stage of a thousand kernel calls or more (measured at 1.3 to 3 s each, twice
    as fast on an edit), never a part and never a helper called many times. A stage a person
    opens on its own stays a `@model`.
+8. **A stage's result is now the live tree, its sub-assemblies' placements kept.** In 0.7 a
+   child model's result came back from the store with every sub-assembly at the identity and
+   each leaf carrying its whole placement in the child's frame. In 0.8 a `@memo` stage, a plain
+   function and a child's `.shape` read inside a body hand over the tree as it was built, each
+   compound keeping its own `location`. Code that moves leaves with `.moved()` (or reads a
+   leaf's `.location`) expecting the 0.7 shape now works in the sub-assembly's frame: a
+   sub-assembly turned 180 degrees moves its leaves the other way, silently, a few millimetres
+   at a time. Where a stage's code does that, return the 0.7 shape from the stage before it:
+
+   ```python
+   def as_leaves(node, outer=None):                   # every placement pushed into the leaves
+       here = (outer or bd.Location()) * node.location
+       if not node.children:
+           leaf = node.located(here)
+           leaf.label, leaf.color = node.label, node.color
+           return leaf
+       return bd.Compound(children=[as_leaves(c, here) for c in node.children],
+                          label=node.label, color=node.color)
+   ```
+
+   and compare the migrated model's placements with a 0.7 build of the same code (step 10).
 
 A run takes no options. 0.7's `--force`, `--json`, `--verbose`, `--profile`,
 `--mesh-tolerance` and `--no-daemon` are unrecognized arguments; there is nothing to
@@ -710,6 +734,13 @@ gone. Read instead:
 - the mechanism from your own data (step 1's records), or from `cadgen inspect <id> --json`,
   whose summary lists the joints, their ranges, the states and the sequences.
 
+Three things differ from what 0.7's store handed such a tool. `read_step` gives the STEP's root
+assembly wrapped in a compound of the same name: tree-position ids (`o1.2.15`) count from the
+assembly inside it. A part's `.color` is the sRGB a person picks (`#A7ACB0` reads 0.655, where
+0.7's store gave the linear 0.386), so a glTF writer converts it to linear. And no per-face
+colour is read back: a vendor board's painted faces take the part's colour. Equal parts share
+one shape (`node.wrapped.TShape()`); a digest of the part's own BRep at its origin keys them.
+
 ### 9. Delete 0.7 leftovers
 
 - **Sidecars**: `<name>.step.json` and `.params.js` files beside your STEP files are read
@@ -757,8 +788,11 @@ gone. Read instead:
    tree. For a mechanism, try Position's sliders and presets, and play each motion.
 4. Run your checks and tests: they call the models now.
 5. Export what you deliver and compare it with the 0.7 files you kept, by snapshot
-   (`cadgen snapshot STEP/old.step a.png` beside `cadgen snapshot <uuid> b.png`) or by
-   measurement: `cadgen inspect` on both files gives their part counts and bounds.
+   (`cadgen snapshot STEP/old.step a.png` beside `cadgen snapshot <uuid> b.png`) and by
+   measurement: `cadgen inspect` on both files gives their part counts and bounds, and
+   `cadgen inspect STEP/old.step <part>` beside `cadgen inspect <uuid> <part>` each part's world
+   bounds. Equal overall bounds do not prove equal placements: compare the parts of every
+   sub-assembly a stage moved (step 2, item 8). Keep the 0.7 STEP until they agree.
 
 ## Telemetry
 
@@ -809,6 +843,9 @@ the body `{"share":false}`); only you can opt in.
   tools.
 - **`AttributeError: 'Document' object has no attribute 'moved'`** (or another shape
   method): a child model's call used as a shape. Compose `child().shape` (step 2).
+- **The model builds, but some parts sit a few millimetres from where 0.7 put them**, with the
+  same overall bounds. A stage moves leaves inside a sub-assembly that keeps its own placement
+  in 0.8: hand it the 0.7 shape (step 2, item 8).
 - **A joint's value as built is not 0, or every state looks turned.** The child's rigid
   frame is not the revolute joint's own frame (step 4).
 - **A build fails naming a pair the built tree contradicts.** A part moved after its
