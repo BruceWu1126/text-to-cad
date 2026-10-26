@@ -55,6 +55,30 @@ it('draws the navbar over every file, named by its name, and over the home with 
   expect(screen.queryByRole('menuitem', { name: 'Back to files' })).toBeNull();
 });
 
+it('heads the home with the TEXTTOCAD wordmark and a document with the C, one menu button morphing between them', async () => {
+  const homed = { ...host, links: viewerLinks({ version: '0.7.4' }), navigation: { openFile() {}, home() {} } };
+  const view = (file: string | null, extra: object = {}) => <FileViewer file={file} host={{ ...homed, ...extra } as any} renderers={[renderer]} state={{}} onStateChange={() => {}}
+    presentation={{ home: <p>home</p> } as any} />;
+  const { rerender } = render(view(null));
+  await screen.findByText('home');
+  const logo = screen.getByRole('button', { name: 'Menu' });
+  const images = () => [...logo.querySelectorAll('img')].map(image => image.getAttribute('src'));
+  expect(logo.getAttribute('data-logo')).toBe('wordmark');
+  expect(images()).toEqual([expect.stringMatching(/texttocad/), expect.stringMatching(/C(%20| )logo/)]);
+  // A page: the same button (so the one turns into the other), now the C.
+  rerender(view(FILE));
+  await screen.findByText('shown');
+  expect(screen.getByRole('button', { name: 'Menu' })).toBe(logo);
+  expect(logo.getAttribute('data-logo')).toBe('mark');
+  rerender(view(null));
+  await screen.findByText('home');
+  expect(logo.getAttribute('data-logo')).toBe('wordmark');
+  // A host that asks for still motion cuts straight, as the platform's setting does in the CSS.
+  expect(logo.getAttribute('data-motion')).toBeNull();
+  rerender(view(null, { environment: { colorScheme: 'light', reducedMotion: true } }));
+  expect(screen.getByRole('button', { name: 'Menu' }).getAttribute('data-motion')).toBe('reduced');
+});
+
 it('draws no navbar where the host asks for the view alone (`chrome: "bare"`): over a file or the home, whatever it hands the navbar', async () => {
   const homed = { ...host, links: viewerLinks({ version: '0.7.4' }), navigation: { openFile() {}, home() {} } };
   const everything = { host: homed, chrome: 'bare', history: { canGoBack: true, canGoForward: false, back() {}, forward() {} },

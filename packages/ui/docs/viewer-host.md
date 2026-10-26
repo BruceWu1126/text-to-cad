@@ -477,9 +477,9 @@ viewport's top-right (`notice`, the column Quick Edit hangs under: the CAD app's
 its update notice; over its home, the same corner at the page's top-right). In Preview, in
 every host, the navbar steps aside for Preview's own bar. Over the home the navbar has only
 the logo and its menu (no Back to files), Back and Forward where the host hands a `history`,
-and the host's update and actions, each where it stands over a file; the home's search and
-layout switch stay
-in its Recent row, and its links under its title. Left: the text-to-cad "C" logo,
+and the host's update and actions, each where it stands over a file; the home's type filter, search and
+layout switch stay in its control row, and its links are the app menu's. Left: the text-to-cad
+logo (the TEXTTOCAD wordmark over the home, the "C" over a document, one button morphing between them),
 which opens the app menu (`AppMenu`, `file-viewer/navigation/AppMenu.jsx`), then Back and
 Forward where the host hands a `history`, then the open file's name, after its kind's glyph, and its ⋯ menu. The
 logo, Back and Forward, the name and the ⋯ share one style (`NAV_ITEM_CLASS`):

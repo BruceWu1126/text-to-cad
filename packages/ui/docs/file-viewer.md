@@ -85,7 +85,8 @@ picture: the home's thumbnails), never where the host asks for the view alone
 Preview is up (`RendererViewProps.onPreviewChange`): the CAD viewer's Preview draws its own
 bar in its place and gives it back as it closes. Over a file, left to right:
 
-- the text-to-cad "C" logo (named Menu, with no chevron), which opens the app menu
+- the text-to-cad "C" logo (named Menu, with no chevron; over the home the TEXTTOCAD wordmark,
+  the same button morphing between the two), which opens the app menu
   (`navigation/AppMenu.jsx`): Back to files where the host has a home
   (`navigation.home`), the person's settings (`appSettings`), Send feedback, GitHub,
   Discord and, in gray, the version and who made it. FileViewer builds it from

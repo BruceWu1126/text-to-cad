@@ -367,8 +367,10 @@ pinned one keeps its pin. The ⋯ menu holds Open, Copy path and Reveal (a model
 script's), Pin or Unpin, and Delete, which asks first: a model's "Delete bracket?" removes the engine's record and its saved build, its
 script and exported files kept; a file's "Delete bracket.step from the viewer?" removes the
 engine's record of the file alone. From a file, Back to files in
-the menu the navbar's C logo opens leads back to it. The home has the same navbar, its C
-menu (without Back to files, and with GitHub, Discord and X as over a file) at the left and
+the menu the navbar's C logo opens leads back to it. The home has the same navbar, its logo
+the TEXTTOCAD wordmark rather than the C (the one morphs into the other as a file opens or
+the home comes back), the same menu (without Back to files, and with GitHub, Discord and X as
+over a file) at the left and
 the update button at the right while a newer text-to-cad is out. The home is a step of
 the browser's history, as a file is: the browser's Back and Forward walk between them (the
 navbar draws no arrows of its own here). A `/<id>` the server knows no file for, and no model the engine
@@ -440,7 +442,7 @@ and web stay consistent without host-specific copies of those controls.
 
 The Viewer has the one navbar every app shares (see
 [the host contract](../../packages/ui/docs/viewer-host.md#host-chrome-slots)): at the
-left the C logo, which opens the app menu, then the open file's name after its kind's glyph,
+left the logo (the TEXTTOCAD wordmark on the home, the C over a file), which opens the app menu, then the open file's name after its kind's glyph,
 which opens the name menu (Recent and Files), with its ⋯; at the right only the blue update button, while a newer text-to-cad
 is out. The app menu holds Back to files (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
 GitHub, Discord and, in gray, the version (a link to its release notes) and "Made by @…"
