@@ -368,8 +368,7 @@ neither), Pin or Unpin, and Delete, which asks first: a model's "Delete bracket?
 script and exported files kept, and no other model with it; a file's "Delete bracket.step from the viewer?" removes the
 engine's record of the file alone. From a file, Back to files in
 the menu the navbar's C logo opens leads back to it. The home has the same navbar, its logo
-the TEXTTOCAD wordmark rather than the C (the one morphs into the other as a file opens or
-the home comes back), the same menu (without Back to files, and with GitHub, Discord and X as
+the TEXTTOCAD wordmark rather than the C (a plain swap, no animation), the same menu (without Back to files, and with GitHub, Discord and X as
 over a file) at the left and
 the update button at the right while a newer text-to-cad is out. The home is a step of
 the browser's history, as a file is: the browser's Back and Forward walk between them (the

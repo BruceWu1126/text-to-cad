@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, ChevronDown, Ellipsis } from "lucide-react";
-import { useContext, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@text-to-cad/ui/primitives/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@text-to-cad/ui/primitives/popover";
@@ -12,7 +12,6 @@ import wordmark from "../../assets/logo-texttocad.svg";
 import { NAVBAR_CONTROLS_CLASS, NAVBAR_ROW_CLASS } from "../../lib/navbarRow.js";
 import { FLOATING_SURFACE_CLASS } from "../../lib/floatingSurface.js";
 import { useViewerMobile } from "../responsive.js";
-import { ViewerHostContext } from "../../host/context.js";
 
 import { AppMenu } from "./AppMenu.jsx";
 import { DocumentGlyph } from "./DocumentGlyph.jsx";
@@ -34,7 +33,7 @@ const TAB_CONTROLS = Object.freeze({ recent: "recent", files: "explorer" });
  * tabs) has no navbar, and Preview hides it in every host, drawing its own bar in its place.
  *
  * Left, in this order: the text-to-cad logo (the TEXTTOCAD wordmark over the home, the C over a
- * document, morphing between them), which opens the app's menu (`AppMenu`: Back to files
+ * document), which opens the app's menu (`AppMenu`: Back to files
  * where the host has a home, then the person's settings, feedback and links); Back and Forward,
  * where the host keeps the view's own history (`history`); the open document's name, after its
  * kind's glyph, which opens the name menu (Recent, the host's library, and Files, the explorer)
@@ -59,20 +58,15 @@ const NAV_ITEM_CLASS = "flex h-6 shrink-0 cursor-pointer items-center rounded-md
 
 /**
  * The text-to-cad logo, the app's menu: over the home the TEXTTOCAD wordmark, 20px tall; over a
- * document the C, the size of the row's other icon buttons. One button holds both, so a move between
- * the home and a page morphs one into the other (`cad-navbar-logo`, about 250ms: the wordmark
- * collapsing to the C and growing back; cut straight where motion is reduced).
+ * document the C, the size of the row's other icon buttons. A plain swap, with no animation: the
+ * one button shows the one or the other.
  */
 function LogoMenu({ onHome, menu, home = false }) {
   const { t } = useI18n();
-  // The host's own motion setting, beside the platform's (`prefers-reduced-motion`, in the CSS).
-  const still = useContext(ViewerHostContext)?.environment.reducedMotion === true;
   return <AppMenu onHome={onHome} {...menu} trigger={<button type="button" aria-label={t("navbar.menu")} className={cn(NAV_ITEM_CLASS, "cad-navbar-logo justify-center px-1")}
-    data-navbar-menu="" data-logo={home ? "wordmark" : "mark"} data-motion={still ? "reduced" : undefined}>
-    <span className="cad-navbar-logo-box" aria-hidden="true">
-      <img src={wordmark} alt="" className="cad-navbar-wordmark" draggable={false} />
-      <img src={logo} alt="" className="cad-navbar-mark" draggable={false} />
-    </span>
+    data-navbar-menu="" data-logo={home ? "wordmark" : "mark"}>
+    {home ? <img src={wordmark} alt="" className="cad-navbar-wordmark" draggable={false} />
+      : <img src={logo} alt="" className="cad-navbar-mark" draggable={false} />}
   </button>} />;
 }
 

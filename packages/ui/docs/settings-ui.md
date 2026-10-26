@@ -41,9 +41,7 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   own bar in its place, in every host (see [Preview](#camera-animation-and-preview)). Left: the text-to-cad logo,
   named Menu, with no chevron: over the home the TEXTTOCAD
   wordmark, 20px tall (about 117px wide), and over a document the "C", 16px in the row's 24px
-  button. It is one button, so going between the home and a page morphs one into the other in
-  250ms (the box narrowing to the C as the wordmark folds into its left edge and the C fades
-  in, and back), cut straight under `prefers-reduced-motion` or the host's `reducedMotion`. The logo opens the
+  button: a plain swap between the home and a page, with no animation. The logo opens the
   **app menu** (see [Settings](#settings)) — a host with no home has it too — then, where the
   host keeps the view's own history (`history`: the CAD app's views, which no browser holds),
   **Back** and **Forward**, two arrows walking it as a browser's do, from file to file and to

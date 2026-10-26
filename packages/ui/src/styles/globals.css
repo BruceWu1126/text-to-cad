@@ -111,18 +111,9 @@
 }
 
 /* The navbar's logo, the app menu's trigger (`ViewerNavbar.jsx`): the TEXTTOCAD wordmark over the home, 20px
- * tall (about 117px wide), and the C over a document, 16px in the row's 24px button. One box holds both: going
- * between the home and a page, it narrows to the C (or widens to the wordmark) in 250ms while the wordmark
- * folds into its left edge and the C fades in over it. Where motion is reduced it cuts straight. */
-.cad-navbar-logo-box { position: relative; display: block; width: 16px; height: 20px; overflow: hidden; transition: width .25s cubic-bezier(.2, 0, 0, 1); }
-.cad-navbar-logo[data-logo=wordmark] .cad-navbar-logo-box { width: calc(20px * 32.56 / 5.56); }
-.cad-navbar-wordmark { position: absolute; top: 0; left: 0; width: auto; max-width: none; height: 20px; opacity: 0; transform: scaleX(.14); transform-origin: left center;
-  transition: opacity .2s ease, transform .25s cubic-bezier(.2, 0, 0, 1); user-select: none; -webkit-user-drag: none; }
-.cad-navbar-logo[data-logo=wordmark] .cad-navbar-wordmark { opacity: 1; transform: none; }
-.cad-navbar-mark { position: absolute; top: 2px; left: 0; width: 16px; height: 16px; transition: opacity .2s ease; user-select: none; -webkit-user-drag: none; }
-.cad-navbar-logo[data-logo=wordmark] .cad-navbar-mark { opacity: 0; }
-@media (prefers-reduced-motion: reduce) { .cad-navbar-logo-box, .cad-navbar-wordmark, .cad-navbar-mark { transition: none; } }
-.cad-navbar-logo[data-motion=reduced] :is(.cad-navbar-logo-box, .cad-navbar-wordmark, .cad-navbar-mark) { transition: none; }
+ * tall (about 117px wide), and the C over a document, 16px in the row's 24px button: a plain swap. */
+.cad-navbar-wordmark { display: block; width: auto; max-width: none; height: 20px; user-select: none; -webkit-user-drag: none; }
+.cad-navbar-mark { display: block; width: 16px; height: 16px; user-select: none; -webkit-user-drag: none; }
 
 /* The host's home (`library/`): the models opened before, to open again, on the page's own
  * colour, the navbar's. Centred, a grid of about four solid cards a row at a typical width, or a
