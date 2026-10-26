@@ -2039,6 +2039,20 @@ children, and each a new handle on the SAME `TShape` (`kernel/memo.py`, `_sharin
 does `copy.deepcopy(shape)` in a model. A model that wants a B-rep of its own copies it
 with `BRepBuilderAPI_Copy`.
 
+A shape can hold one sub-shape's TShape at two places: OCCT makes a prism's two caps of one
+face's edges and vertices placed twice (each lateral edge ends on one vertex TShape at both its
+ends), and a piece fused beside a moved piece of the same shape keeps the edges both had. OCCT's
+unify (`ShapeUpgrade_UnifySameDomain`, which build123d runs on every boolean's result and in
+`clean`) chains the edges it merges by their vertices' TShapes, whatever their places: on such a
+shape it can chain an edge at one place with one at the other and fail ("Courbes non jointives",
+tom2's shortened yoke; build123d then warns "Boolean operation unable to clean" and keeps the faces
+unmerged). So a unify -- build123d's or a model's own -- that fails on a shape holding a TShape at
+two places is made again, with its settings, on a copy whose every sub-shape stands at one place
+(`BRepBuilderAPI_Copy`: the same geometry; `kernel/memo.py`, `_one_place`, counted: the memo's
+`copied_apart`); one that succeeds is the kernel's, untouched, so no name or face moves where
+nothing failed. cadgen 0.7 handed every child model's result over re-made, each sub-shape at one
+place; 0.8 hands a child's or a `@memo` stage's result on live, so the remaking is the unify's.
+
 build123d's own operations never change a shape they are given in place. `ShapeFix_Shape`
 does (it fixes the sub-shapes it is handed): run by a model on a shape a placement shares,
 it is given a copy of that shape first, a `copy` feature of the model's, and the other

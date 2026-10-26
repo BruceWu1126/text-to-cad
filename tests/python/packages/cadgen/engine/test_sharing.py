@@ -132,6 +132,78 @@ class CopyOnWriteTest(MemoCase):
         self.assertEqual(self._flags(second), {True}, "the hazard the copy guards against is real")
 
 
+class OnePlaceTest(MemoCase):
+    """OCCT's unify chains the edges it merges by their vertices' TShapes, whatever place each stands
+    at, and a prism's two caps are one face's edges and vertices placed twice: a unify that fails on
+    such a shape -- build123d's, after each boolean and in ``clean``, or a model's own -- is made
+    again on a copy whose every sub-shape stands at one place, with its settings; one that succeeds
+    is the kernel's, untouched."""
+
+    @staticmethod
+    def _ear():
+        # A sheet-metal ear, as tom2's link profiles make one: an outline with rounded corners,
+        # extruded to the gauge.
+        import build123d as bd
+
+        outline = [(0, 0), (30, 0), (30, 12), (22, 12), (22, 8), (8, 8), (8, 12), (0, 12)]
+        face = bd.Face(bd.Wire.make_polygon([(x, 15, z) for x, z in outline], close=True))
+        face = face.fillet_2d(1.0, [vertex for vertex in face.vertices() if abs(vertex.center().Z - 12) < 1e-6])
+        return bd.Solid.extrude(face, (0, 2.032, 0))
+
+    def test_a_unify_failing_on_a_shape_placed_twice_is_made_again_on_a_copy_with_its_settings(self) -> None:
+        from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
+
+        ear = self._ear()
+        self.assertTrue(memo._placed_twice(ear.wrapped), "a prism's caps: one TShape at two places")
+        original = getattr(ShapeUpgrade_UnifySameDomain, "__kernel_memo_class__", ShapeUpgrade_UnifySameDomain).__mro__[1]
+        given = []
+
+        tolerances = []
+
+        class Chaining(original):  # the kernel's failure on such a shape, every time it meets one
+            def Build(self, *args):  # noqa: N802
+                given.append(self.Shape())
+                if memo._placed_twice(self.Shape()):
+                    raise RuntimeError("Courbes non jointives")
+                return super().Build(*args)
+
+            def SetLinearTolerance(self, value):  # noqa: N802
+                tolerances.append(value)
+                return super().SetLinearTolerance(value)
+
+        unify = memo._one_place(Chaining)(ear.wrapped, True, True, True)
+        unify.SetLinearTolerance(1e-5)
+        before = memo.stats()["copied_apart"]
+        unify.Build()
+        self.assertEqual(memo.stats()["copied_apart"] - before, 1)
+        self.assertEqual(len(given), 2, "made again once")
+        self.assertFalse(memo._placed_twice(unify.Shape()))
+        self.assertEqual(tolerances, [1e-5, 1e-5], "with the settings it was given")
+        self.assertTrue(memo._placed_twice(ear.wrapped), "the shape it was given stays as it was")
+        with self.assertRaisesRegex(RuntimeError, "Courbes"):  # one whose shape is at one place: as it failed
+            failing = memo._one_place(type("Always", (original,), {"Build": lambda self: (_ for _ in ()).throw(
+                RuntimeError("Courbes non jointives"))}))(unify.Shape(), True, True, True)
+            failing.Build()
+
+    def test_build123d_s_and_a_model_s_unify_run_on_the_kernel_s_shape_where_they_succeed(self) -> None:
+        import build123d as bd
+        from build123d.topology import shape_core
+        from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
+
+        self.assertTrue(getattr(shape_core.ShapeUpgrade_UnifySameDomain, "__kernel_one_place__", False))
+        self.assertTrue(issubclass(ShapeUpgrade_UnifySameDomain, shape_core.ShapeUpgrade_UnifySameDomain.__mro__[1]))
+        before = memo.stats()["copied_apart"]
+        with memo.run(None):
+            ear = self._ear()
+            fused = ear.fuse(bd.Solid.make_box(20, 2.032, 6, bd.Plane(origin=(25, 15, -2)))).clean()
+            unify = ShapeUpgrade_UnifySameDomain(ear.wrapped, True, True, True)
+            unify.Build()
+        self.assertEqual(memo.stats()["copied_apart"], before, "nothing failed: nothing copied")
+        self.assertTrue(fused.is_valid)
+        self.assertAlmostEqual(fused.volume, ear.volume + 20 * 2.032 * 6 - 5 * 2.032 * 4, places=6)
+        self.assertTrue(memo._placed_twice(unify.Shape()), "the kernel's own result, its caps as it made them")
+
+
 MODEL = """
 from pathlib import Path
 
