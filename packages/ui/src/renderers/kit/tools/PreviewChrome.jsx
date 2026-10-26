@@ -13,7 +13,7 @@ export const PREVIEW_FADE_CLASS = "transition-opacity duration-300 motion-reduce
  * Preview's chrome, its bar at the top and its playbar at the bottom, shown and gone together: up as
  * Preview opens, gone after `PREVIEW_IDLE_MS` with no pointer movement over the view (its root), back
  * on the next movement and on a press (a tap, on a touch screen). It stays while held (its settings
- * open) and while the pointer is on either piece or something in one has the focus — a menu of theirs
+ * open) and while the pointer is on either piece or something in one has the keyboard's focus — a menu of theirs
  * open among them, its portal being theirs in React's tree. `hold(piece)` is the handlers each piece
  * spreads on its own element. Gone, the pieces are transparent and let presses through, but keep their
  * place in the tab order, so the keyboard brings them back.
@@ -21,6 +21,9 @@ export const PREVIEW_FADE_CLASS = "transition-opacity duration-300 motion-reduce
  * A store outside React (one per frame): the pieces read it (`usePreviewShown`) and nothing else
  * re-renders as it changes, so a hover in Preview redraws two rows, never the frame.
  */
+// Focus the keyboard gave (`:focus-visible`), or any where the browser cannot say.
+const keyboardFocus = element => { try { return element.matches(":focus-visible"); } catch { return true; } };
+
 export function createPreviewIdle() {
   let shown = true, active = false, held = false, root = null, timer;
   const holders = new Set();
@@ -60,7 +63,8 @@ export function createPreviewIdle() {
       if (!handlers.has(piece)) handlers.set(piece, {
         onPointerOver: () => hold(`${piece}:over`, true),
         onPointerOut: event => { if (!event.currentTarget.contains(event.relatedTarget)) hold(`${piece}:over`, false); },
-        onFocus: () => hold(`${piece}:focus`, true),
+        // Keyboard focus holds it; the focus a press leaves on a button does not (it would never go).
+        onFocus: event => { if (keyboardFocus(event.target)) hold(`${piece}:focus`, true); },
         onBlur: event => { if (!event.currentTarget.contains(event.relatedTarget)) hold(`${piece}:focus`, false); },
       });
       return handlers.get(piece);
