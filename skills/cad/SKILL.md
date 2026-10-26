@@ -29,7 +29,7 @@ Nothing is written to disk until someone asks for a file.
 | **Articulate a mechanism** | build123d joints in the body, then `cadgen.ap242`. | [Kinematics](references/kinematics.md) |
 | **Explode, reveal or showcase a model** | `cadgen.gltf`'s `animation()` in the body. | [Animation](references/animation.md) |
 | **Open an existing XBF, STEP/STP, STL, 3MF or GLB** | Show it to the user. | [Show the model](#show-the-model) |
-| **Code or commands written for an older cadgen fail** | Their migration. | [Migrations](references/migrations.md) |
+A project built with cadgen 0.7 may need migrating: see [migrations](references/migrations.md).
 
 For 2D DXF drawings use `$dxf`; this skill owns any 3D part the drawing projects.
 Use the corresponding robot-description skill for URDF, SRDF or SDF.
@@ -157,9 +157,10 @@ run, and the open page follows every run.
   doubt ([references](references/inspection-and-validation.md#references)).
 - **A shape with no function** (a notebook cell, a REPL) is handed over:
   `model(shape, name="plate")` returns the same handle, and no command builds it again.
-- **The engine never reruns code.** When it no longer holds a document (it restarted, or
-  dropped the document to free memory), the page, `cadgen inspect <id>` and `cad_show`
-  print the command that brings it back (`cadgen run src/bracket.py`). Run it.
+- **The engine never reruns code.** A restart reopens every document from the engine's
+  cache, as last built. When the cache holds no file of one (deleted by hand, or never
+  saved), the page, `cadgen inspect <id>` and `cad_show` print the command that brings it
+  back (`cadgen run src/bracket.py`). Run it.
 - Model units are millimetres, +Z up. `$step-parts` finds real vendor models of
   purchasable parts such as fasteners, bearings and servos.
 - An image without a scale sets no fit dimension, and a drawing's units, projection and
