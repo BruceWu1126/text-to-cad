@@ -84,7 +84,7 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   the host restored after an update, a past chat's card) says so: the page
   reads only its own protocol's.
 - **Every view but a file handler's has a home**: the library (the documents opened or built
-  before, in any view or the web viewer). Back to files, first in the menu the navbar's logo
+  before, in any view or the web viewer). Back to home, first in the menu the navbar's logo
   opens, goes to it. The sidebar (`cad_home`) and a tab with nothing to show open on it; a
   model opened from it is shown in place. The home has the same navbar (the logo's menu, Back
   and Forward, the update button, Full size and Open in browser); it starts with its control

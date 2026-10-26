@@ -3,7 +3,7 @@
 The shared React interface for text-to-cad. `FileViewer` is the complete file view:
 one file by its absolute path (`/a/b.step`, `C:/a/b.step`, `/`-separated in every
 app), or the host's home with none, under a navbar — the logo that opens the app's
-menu, the file's name and the name menu it opens (Recent and Files), the file menu — with the file's
+menu, the file's name and the name menu it opens (Models and Files), the file menu — with the file's
 content and the loading and error states ([FileViewer](docs/file-viewer.md)).
 `CadViewer` (`@text-to-cad/ui/cad-viewer`) is the CAD viewer every app shows:
 FileViewer over a CAD client, with the five CAD renderers, the home (the model
@@ -289,7 +289,7 @@ has a home, the person's settings (Share anonymous usage data), Send feedback
 (a new issue titled "Feedback: " where the host has a tracker), GitHub, Discord and, in
 gray, the version and who made it. Where the host keeps the view's own history (the CAD
 app's views), Back and Forward follow, disabled where they have nowhere to go. It names the
-file after its kind's glyph — the name opens Recent and Files — and offers its ⋯ menu (Copy path, Reveal). They share one look: transparent until the
+file (no glyph) — the name opens Models and Files — and offers its ⋯ menu (Copy path, Reveal). They share one look: transparent until the
 pointer is on them or their menu is open, with no tooltip. At the right is only what a host
 or a file adds: the host's update button, a dismissed alert's icon and, last, the host's
 actions (the web viewer's Export); the view's own controls (a 3D view's Projection, Display and
