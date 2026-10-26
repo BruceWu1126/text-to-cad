@@ -4,7 +4,7 @@
  */
 export default {
   "export.button": "エクスポート",
-  "export.exporting": "{name} をエクスポート中…",
+  "export.preparing": "{name} を準備中…",
   "export.exported": "{name} をエクスポートしました",
   "export.dismiss": "エクスポートの状態を非表示",
   "export.failed": "エクスポートに失敗しました",
