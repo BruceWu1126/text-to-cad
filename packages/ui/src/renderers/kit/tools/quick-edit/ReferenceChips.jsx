@@ -188,7 +188,7 @@ function useCardPlace() {
 // its hint; a click copies the chip's whole reference, what its title copies.
 function IdRow({ chip }) {
   const shown = elideMiddle(chip.id);
-  const value = <span className="block whitespace-nowrap font-mono" data-chip-id="">{shown}</span>;
+  const value = <span className="inline-block max-w-full whitespace-nowrap align-top font-mono" data-chip-id="">{shown}</span>;
   return <InfoRow label="ID" copy={() => (typeof chip.copy === "function" ? chip.copy() : chip.copy || chip.id)}>
     {shown === chip.id ? value : <TooltipHint content={chip.id}>{value}</TooltipHint>}
   </InfoRow>;

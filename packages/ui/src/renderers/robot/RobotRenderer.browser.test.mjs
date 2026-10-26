@@ -468,8 +468,10 @@ test('Select picks a visual at once; a selection outlives Select; Links shows wh
   await card.getByText('shoulder', { exact: true }).first().waitFor();
   assert.match(await card.innerText(), /arm/, 'the SRDF planning group of the link');
   assert.match(await card.innerText(), /^upper_arm\s+ID\s+upper_arm\s/, 'headed by the link\'s name, its id the name too');
-  // A link's facts are in the card's one face and size, never monospace, in compact rows.
-  const faces = await card.locator('[data-info-row] *').evaluateAll(nodes => [...new Set(nodes
+  // A link's facts are in the card's one face and size, never monospace, in compact rows; its ID, one
+  // monospace line, is the reference, not a fact.
+  assert.match(await card.locator('[data-chip-id]').evaluate(node => getComputedStyle(node).fontFamily), /mono/i, 'the ID in monospace');
+  const faces = await card.locator('[data-info-row]:not(:has([data-chip-id])) *').evaluateAll(nodes => [...new Set(nodes
     .filter(node => !node.childElementCount && node.textContent.trim())
     .map(node => `${getComputedStyle(node).fontFamily} | ${getComputedStyle(node).fontSize}`))]);
   assert.equal(faces.length, 1, `one face and size: ${faces.join(' / ')}`);
