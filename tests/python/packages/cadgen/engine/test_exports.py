@@ -455,7 +455,6 @@ class BuildFilesTest(unittest.TestCase):
         <declared>.xbf out.step`` reads the file as a file document, in the documents worker, though
         the worker that built the model holds its document -- the same STEP, no model consulted."""
         from cadgen.engine import daemon, worker
-        from cadgen.engine.ids import file_id
 
         script = self.write("plate.py", """
             import build123d as bd
@@ -480,10 +479,8 @@ class BuildFilesTest(unittest.TestCase):
         # The daemon sends a file path to the documents worker, never to the worker that wrote it.
         engine = daemon.Daemon()
         self.addCleanup(engine.pool.stop)
-        engine.builders[file_id(declared)] = mock.sentinel.builder
-        with mock.patch.object(engine.pool, "holds", return_value=True):
-            self.assertEqual(engine._routed({"source": {"path": str(declared)}, "cwd": str(self.folder)}),
-                             ("documents", str(self.folder)))
+        self.assertEqual(engine._routed({"source": {"path": str(declared)}, "cwd": str(self.folder)}),
+                         ("documents", str(self.folder)))
 
     def test_a_derived_decorator_alone_writes_its_one_file(self) -> None:
         script = self.write("solo.py", """

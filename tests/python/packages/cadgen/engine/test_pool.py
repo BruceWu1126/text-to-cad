@@ -26,7 +26,6 @@ if str(SRC) not in sys.path:
 
 from cadgen.engine.addresses import document_id  # noqa: E402
 from cadgen.engine.daemon import Daemon, Pool  # noqa: E402
-from cadgen.engine.ids import file_id  # noqa: E402
 
 _PIDS = itertools.count(1)
 
@@ -347,46 +346,45 @@ class ConnectedPoolTest(unittest.TestCase):
     def test_version_wait_and_recent_sync_keep_the_builder_warm(self) -> None:
         from cadgen.engine.serve import LIVE, Server
 
-        with tempfile.TemporaryDirectory() as folder:
-            daemon = Daemon(cap=2)
-            daemon.pool.start = Fake
-            server = daemon.server = Server(mesh_mode="inline")
-            self.addCleanup(daemon.shutdown)
-            path = Path(folder).resolve() / "part.xbf"
-            ident = server.put(path, {"version": "one", "prototypes": []}, {})
-            builder, other = daemon.pool.lease("a.py", {}), daemon.pool.lease("b.py", {})
-            daemon.builders[file_id(path)] = builder
-            daemon.pool.release(builder)  # the least recently used, and under the cap alone
-            waiting = threading.Event()
-            original = server.changed.wait_for
+        daemon = Daemon(cap=2)
+        daemon.pool.start = Fake
+        server = daemon.server = Server(mesh_mode="inline")
+        self.addCleanup(daemon.shutdown)
+        path = _address("a")  # the model document a's worker built
+        ident = server.put(path, {"version": "one", "prototypes": []}, {})
+        builder, other = daemon.pool.lease("a.py", {}), daemon.pool.lease("b.py", {})
+        daemon.builders[ident] = builder
+        daemon.pool.release(builder)  # the least recently used, and under the cap alone
+        waiting = threading.Event()
+        original = server.changed.wait_for
 
-            def wait_for(*args, **kwargs):
-                waiting.set()
-                return original(*args, **kwargs)
+        def wait_for(*args, **kwargs):
+            waiting.set()
+            return original(*args, **kwargs)
 
-            with mock.patch.object(server.changed, "wait_for", side_effect=wait_for):
-                thread = threading.Thread(target=server.wait, args=(ident, "one", 60), daemon=True)
-                thread.start()
-                try:
-                    self.assertTrue(waiting.wait(5), "the page is waiting on the version")
-                    # Past LIVE and a day on: an outstanding wait still marks it watched.
-                    daemon.pool.memory = lambda: 150.0  # two workers of 100 MB: one is over
-                    with mock.patch("time.monotonic", return_value=builder.used + 24 * 3600):
-                        daemon.pool.release(other)
-                        self.assertTrue(other.stopped, "over the cap, the unwatched worker goes")
-                        self.assertFalse(builder.stopped, "the watched one, least recently used, stays")
-                finally:
-                    server.put(path, {"version": "two", "prototypes": []}, {})
-                    thread.join(5)
-                self.assertFalse(thread.is_alive())
-            self.assertFalse(server.watchers, "the completed wait releases its watcher")
-            synced = server.synced[ident]
-            with mock.patch("time.monotonic", return_value=synced + LIVE - 1):
-                self.assertTrue(daemon.connected(builder), "a recent sync keeps it watched")
-            with mock.patch("time.monotonic", return_value=synced + LIVE + 1):
-                self.assertFalse(daemon.connected(builder))
-            builder.rss = 200.0
-            self.assertEqual(daemon.pool.shed(), [builder], "alone over the cap, a watched one goes too")
+        with mock.patch.object(server.changed, "wait_for", side_effect=wait_for):
+            thread = threading.Thread(target=server.wait, args=(ident, "one", 60), daemon=True)
+            thread.start()
+            try:
+                self.assertTrue(waiting.wait(5), "the page is waiting on the version")
+                # Past LIVE and a day on: an outstanding wait still marks it watched.
+                daemon.pool.memory = lambda: 150.0  # two workers of 100 MB: one is over
+                with mock.patch("time.monotonic", return_value=builder.used + 24 * 3600):
+                    daemon.pool.release(other)
+                    self.assertTrue(other.stopped, "over the cap, the unwatched worker goes")
+                    self.assertFalse(builder.stopped, "the watched one, least recently used, stays")
+            finally:
+                server.put(path, {"version": "two", "prototypes": []}, {})
+                thread.join(5)
+            self.assertFalse(thread.is_alive())
+        self.assertFalse(server.watchers, "the completed wait releases its watcher")
+        synced = server.synced[ident]
+        with mock.patch("time.monotonic", return_value=synced + LIVE - 1):
+            self.assertTrue(daemon.connected(builder), "a recent sync keeps it watched")
+        with mock.patch("time.monotonic", return_value=synced + LIVE + 1):
+            self.assertFalse(daemon.connected(builder))
+        builder.rss = 200.0
+        self.assertEqual(daemon.pool.shed(), [builder], "alone over the cap, a watched one goes too")
 
     def test_a_day_idle_under_the_memory_cap_keeps_every_worker(self) -> None:
         daemon = Daemon(cap=2)
@@ -451,20 +449,18 @@ class ConnectedPoolTest(unittest.TestCase):
         daemon.pool.start = Fake
         server = daemon.server = Server(mesh_mode="inline")
         self.addCleanup(daemon.shutdown)
-        with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder).resolve() / "part.xbf"
-            ident = server.put(path, {"version": "one", "prototypes": []}, {})
-            worker = daemon.pool.lease("a.py", {})
-            daemon.builders[file_id(path)] = worker
-            with mock.patch.object(server, "document", side_effect=ValueError("unreadable")):
-                with self.assertRaisesRegex(ValueError, "unreadable"):
-                    server.wait(ident, "one", 60)
-            self.assertFalse(server.watchers)
-            self.assertTrue(daemon.connected(worker))
-            worker.retired = True
-            daemon.pool.release(worker)
-            self.assertTrue(worker.stopped)
-            self.assertEqual(daemon.pool.retired[0]["reason"], "RSS")
+        ident = server.put(_address("a"), {"version": "one", "prototypes": []}, {})
+        worker = daemon.pool.lease("a.py", {})
+        daemon.builders[ident] = worker
+        with mock.patch.object(server, "document", side_effect=ValueError("unreadable")):
+            with self.assertRaisesRegex(ValueError, "unreadable"):
+                server.wait(ident, "one", 60)
+        self.assertFalse(server.watchers)
+        self.assertTrue(daemon.connected(worker))
+        worker.retired = True
+        daemon.pool.release(worker)
+        self.assertTrue(worker.stopped)
+        self.assertEqual(daemon.pool.retired[0]["reason"], "RSS")
 
 
 GATED = """
@@ -553,6 +549,29 @@ class DaemonPoolTest(unittest.TestCase):
                          [("b.py", "LRU"), ("a.py", "LRU")], "b was served before c")
         # A retired script's next build is a fresh worker's: a restart, which takes its xbf whole.
         self.assertTrue(self.build("a").startswith("took a.py::a cold"))
+
+    def test_a_page_watching_a_model_s_declared_xbf_keeps_no_worker_of_the_model(self) -> None:
+        """A declared xbf opened as a file is a file: a page watching it keeps no model's worker
+        warm, so at the count cap (one, here) the next script's build retires the worker that wrote
+        it, exactly as with no page open."""
+        from urllib.parse import parse_qs, urlsplit
+        import urllib.request
+
+        self.script("a")
+        self.script("b")
+        self.build("a")
+        served = self.cli("serve", "XBF/a.xbf")
+        self.assertEqual(served.returncode, 0, served.stderr)
+        url = urlsplit(served.stdout.strip())
+        version = f"{url.scheme}://{url.netloc}/api/doc/{url.path.strip('/')}/version?wait=0"
+        token = parse_qs(url.query)["token"][0]
+        with urllib.request.urlopen(urllib.request.Request(version, headers={"Authorization": "Bearer " + token}),
+                                    timeout=60) as response:  # a page's sync: the file is watched now
+            self.assertIn("version", json.loads(response.read()))
+        self.build("b")
+        status = self.status()
+        self.assertEqual([Path(w["script"]).name for w in status["workers"]], ["b.py"], "the cap holds")
+        self.assertEqual([(Path(row["script"]).name, row["reason"]) for row in status["retired"]], [("a.py", "LRU")])
 
     def test_a_new_script_s_first_build_takes_the_standby_and_another_stands_by(self) -> None:
         # The runners' standby is off; and the host's memory pressure, which keeps a standby from

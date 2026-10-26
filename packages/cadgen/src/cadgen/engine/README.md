@@ -253,8 +253,10 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
 14. **Connected means warm.** A page watches a document while it has a version wait outstanding
     or completed a sync within `serve.LIVE` seconds. Heartbeats use the document's id (`ids`): a
     file's `file_id`, a model's `model_id` or `key_id`; they never turn a model into a file path.
-    No timer retires a worker: memory does, and it retires a worker whose document a page watches
-    only when no other is left to retire. The worker-count cap never retires a watched worker; it
+    A watched model document keeps the worker that built it warm; a watched file -- a model's
+    declared xbf among them -- keeps no worker, whichever model's run wrote it. No timer retires
+    a worker: memory does, and it retires a worker whose document a page watches only when no
+    other is left to retire. The worker-count cap never retires a watched worker; it
     is exceeded instead. Memory may take a document out of memory, for the cache to give back,
     only when nothing watches it (**Document lifetime**). Closing a page never stops the engine or its worker.
 
@@ -312,9 +314,10 @@ serves one document and keeps one Recents entry for it too, while a page names a
 it was given. The server keys everything by the id: its served documents and
 the models registered to be served, their watchers and syncs, their builds, the documents a build
 holds; `GET /api/doc/<id>` takes it, and a document served at a pose is `<id>~<digest>`. The
-daemon keys by it the worker that built each document (`builders`, from which `connected` asks
-the server's watched ids) and the live models' book (`models.py`); a worker keys by it what its
-builds named (`build._BUILT`, which `made_by` answers from) and the served documents it patches.
+daemon keys by it the worker that built each model document (`builders`, from which `connected`
+asks the server's watched ids; a file the build wrote is no key there) and the live models' book
+(`models.py`); a worker keys by it what its builds named (`build._BUILT`, which `made_by` answers
+from) and the served documents it patches.
 The worker pool alone is keyed otherwise: by the canonical path of the script a worker runs, a
 process's key, not a document's.
 

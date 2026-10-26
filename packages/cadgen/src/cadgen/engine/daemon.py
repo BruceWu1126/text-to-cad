@@ -660,13 +660,6 @@ def refused(error: Exception) -> dict[str, Any]:
     return found
 
 
-def _written(report: dict[str, Any]) -> list[str]:
-    """Every file a build's report names: its model's, and each child model's
-    (``child_models``: the models its run ran, each of which wrote its own)."""
-    return [*(report.get("files") or {}),
-            *(path for child in (report.get("child_models") or {}).values() for path in child.get("files") or {})]
-
-
 def _read_exactly(stream: Any, size: int) -> bytes:
     chunks = []
     while size:
@@ -1641,8 +1634,8 @@ class Daemon:
         self.address_id: tuple[int, int] | None = None
         self.server = None
         self.token = secrets.token_hex(16) if WINDOWS else ""
-        # Per document a build made (its id: each xbf's ``file_id``, each model's ``model_id``),
-        # the worker that built it last: the one that holds its provenance (``provenance``).
+        # Per model document a build made (its ``model_id``), the worker that built it last: the one
+        # that holds its provenance (``provenance``). A file the build wrote is no key: it names no model.
         self.builders: dict[str, Worker] = {}
         self.renders = None  # the served documents' render processes (``render.service.Renders``)
         self.serving = threading.Lock()
@@ -1723,7 +1716,8 @@ class Daemon:
             self.touch()
 
     def connected(self, worker: Worker) -> bool:
-        """A page watching any document this worker built keeps its memo warm."""
+        """A page watching any model document this worker built keeps its memo warm. A file a page
+        watches keeps no worker, whichever model's run wrote it: a file names no model."""
         server = self.server
         return server is not None and any(self.builders.get(ident) is worker for ident in server.watched())
 
@@ -2004,12 +1998,6 @@ class Daemon:
                         import base64
 
                         answer["payload"] = base64.b64encode(returned).decode("ascii")
-                    done = answer.get("done")
-                    # An export from a script built it first: that worker holds the xbf now.
-                    for row in (done.get("reports") or []) if isinstance(done, dict) else []:
-                        for path in _written(row):
-                            if path.endswith(".xbf"):
-                                self.builders[file_id(path)] = worker
                     if not request.get("expected"):
                         self._built(worker, answer, verb=True)
                     send(answer)
@@ -2196,11 +2184,6 @@ class Daemon:
                                          served_keys=server.served_keys())
                             worker.held.append(server.hold(list(order["served"])))
                         answer = worker.build(order, send)
-                        for report in answer.get("done") or []:
-                            # Its children's too: the worker that built a child's xbf holds its trace.
-                            for path in _written(report):
-                                if path.endswith(".xbf"):
-                                    self.builders[file_id(path)] = worker
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
                         if ahead is not None:
                             # The build it waited for, the one its own replays: began how long before it asked.
