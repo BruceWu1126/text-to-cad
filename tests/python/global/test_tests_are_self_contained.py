@@ -51,11 +51,13 @@ def _test_files():
     for extension in ("py", "sh"):
         paths.update((REPO_ROOT / "scripts" / "test").rglob(f"*.{extension}"))
     for package in (REPO_ROOT / "packages" / "core", REPO_ROOT / "packages" / "ui",
-                    REPO_ROOT / "apps" / "web", REPO_ROOT / "apps" / "mcp"):
+                    REPO_ROOT / "apps" / "web", REPO_ROOT / "apps" / "mcp", REPO_ROOT / "apps" / "api", REPO_ROOT):
         for folder in ("src", "scripts", "tests"):
             for extension in ("js", "mjs", "cjs", "jsx", "ts", "tsx"):
                 for pattern in (f"*.test.{extension}", f"*.spec.{extension}"):
-                    paths.update((package / folder).rglob(pattern))
+                    paths.update(path for path in (package / folder).rglob(pattern) if "node_modules" not in path.parts)
+    # The docs site's CI checks (`npm --prefix apps/docs run check` runs them).
+    paths.update((REPO_ROOT / "apps" / "docs" / "scripts").rglob("*.mjs"))
     for path in sorted(paths):
         if "__pycache__" in path.parts or path.resolve() in EXEMPT:
             continue
