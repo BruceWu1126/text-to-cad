@@ -498,5 +498,14 @@ class LifetimeDaemonTest(unittest.TestCase):
             _say_not_held(unsaved)
         self.assertFalse((self.folder / "arm.ran").exists(), "nothing ran the script to restore it")
 
+
+def setUpModule() -> None:
+    # The registry, cache and engine folder every test here reads are its own, never the developer's
+    # (``engine_daemon.isolate``): ListingTest's in-process daemon lists what the registry holds.
+    from tests.python.support import engine_daemon
+
+    engine_daemon.isolate(unittest.addModuleCleanup)
+
+
 if __name__ == "__main__":
     unittest.main()
