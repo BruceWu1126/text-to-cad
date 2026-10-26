@@ -2689,6 +2689,10 @@ def main(argv: list[str] | None = None, *, port: int | None = None, rotate: bool
     # Before it can be reached: a cached document of the closure before this engine's is moved to
     # it in place, once, so no build meets one (``cache.Cache.migrate``).
     daemon.models.cache.migrate()
+    # Identity is a JSON/cache-path pass, independent of the closure's XBF migration.
+    from cadgen.engine.identity import migrate
+
+    migrate(daemon.models.registry())
     daemon.stand()
     if foreground:
         try:

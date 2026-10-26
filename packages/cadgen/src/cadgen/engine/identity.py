@@ -127,3 +127,61 @@ def relocated(held: Registry, ident: str, closure: dict[str, Any], script, folde
             "symbols": {moved(path): value for path, value in closure.get("symbols", {}).items()},
             "inputs": inputs if closure.get("inputs") is not None else None}
 
+
+def migrate(held: Registry | None, *, log=None) -> dict[str, Any]:
+    """One independent startup pass over JSON. Unreadable records stay, named in one log line."""
+    import sys
+    import uuid
+    from pathlib import Path
+    from cadgen.engine.ids import NAMESPACE
+    from cadgen.engine.registry import DOCUMENTS, RECORD
+
+    filled, moved, skipped = 0, 0, []
+    if held is not None:
+        for ident in held.state.names(DOCUMENTS):
+            location = f"{DOCUMENTS}/{ident}/{RECORD}"
+            try:
+                record = held.get(ident)
+                if record is None:
+                    raise ValueError("unreadable record or unsupported schema/id")
+                if record.get("kind") not in ("model", "shape", "file"):
+                    raise ValueError("unknown document kind")
+                if not all(isinstance(record.get(field), str) and record[field] for field in ("root", "home")):
+                    raise ValueError("missing root/home")
+                if record["kind"] != "file" and not isinstance(record.get("entry"), str):
+                    raise ValueError("missing entry")
+                found = dict(record)
+                found.setdefault("namespace", record["root"])
+                legacy = record.get("key")
+                keyed = isinstance(legacy, str) and ident == str(uuid.uuid5(NAMESPACE, "key::" + legacy))
+                name = legacy if keyed and record["kind"] == "model" else record.get("entry") or Path(record["home"]).name
+                found.setdefault("name", name)
+                if "fingerprint" not in found:
+                    found["fingerprint"] = fingerprint(home(held, record)) if record["kind"] == "model" else None
+                if keyed and record["kind"] == "model" and "line" not in found:
+                    import ast
+
+                    try:
+                        tree = ast.parse(home(held, record).read_bytes())
+                        function = next(node for node in ast.walk(tree)
+                                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                                        and node.name == record["entry"])
+                        found["line"] = min([function.lineno, *(d.lineno for d in function.decorator_list)])
+                    except (OSError, SyntaxError, StopIteration):
+                        pass  # a missing/unparsable script still has a relocatable record
+                if keyed:
+                    scope = found["namespace"] if record["kind"] == "model" else home(held, record)
+                    found["id"] = derived_id(scope, found["name"])
+                    found.pop("key", None)
+                    repoint(held, record, found)
+                    moved += 1
+                elif held.put(found):
+                    filled += 1
+            except (OSError, ValueError, TypeError, KeyError) as error:
+                skipped.append(f"{location}: {error}")
+    result = {"filled": filled, "moved": moved, "skipped": skipped}
+    line = f"identity migration: filled {filled}, moved {moved}, skipped {len(skipped)}"
+    if skipped:
+        line += "; " + "; ".join(skipped)
+    (log or (lambda message: print(f"cadgen: {message}", file=sys.stderr)))(line)
+    return result

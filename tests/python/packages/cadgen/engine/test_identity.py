@@ -101,16 +101,19 @@ class ReattachmentDaemonTest(unittest.TestCase):
         self.assertEqual(self.registry.get(second)["preview"], {"thumbnail": "kept.png"})
         self.assertEqual(self.registry.get(second)["opened"], 3)
         # A second move, with the same daemon and the original cache's paths still in its bytes.
-        script.rename(moved / "renamed.py")
-        script = moved / "renamed.py"
+        single = self.folder / "single"
+        single.mkdir()
+        script.rename(single / "renamed.py")
+        script = single / "renamed.py"
         self.run_script(script, warm=True)
         third = model_id(script, "part")
         self.assertIsNone(self.registry.get(second))
         self.assertEqual(self.cached(third), digest)
         self.stop()
+        self.run_script(script, warm=True)
         before = self.registry.get(third)
         copy = self.folder / "copy"
-        shutil.copytree(moved, copy)
+        shutil.copytree(single, copy)
         self.run_script(copy / "renamed.py")
         self.assertEqual(self.registry.get(third), before, "copy leaves the extant original untouched")
         copied = model_id(copy / "renamed.py", "part")
@@ -131,6 +134,50 @@ class ReattachmentDaemonTest(unittest.TestCase):
         self.run_script(self.folder / "elsewhere.py", warm=True)
         self.assertEqual(self.cached(ident), digest)
         self.assertEqual(self.registry.get(ident)["home"], "elsewhere.py")
+
+
+class IdentityMigrationTest(unittest.TestCase):
+    def test_json_migration_moves_a_legacy_key_and_skips_malformed_records_idempotently(self):
+        import uuid
+        from cadgen.engine.identity import migrate
+        from cadgen.engine.ids import NAMESPACE, derived_id
+
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(canonical(temporary))
+            held = Registry(folder / "state", folder / "cache")
+            script = folder / "part.py"
+            script.write_text(SCRIPT.format(options=""))
+            old = str(uuid.uuid5(NAMESPACE, "key::arm"))
+            plain = model_id(script, "part")
+            for ident, extra in ((old, {"key": "arm"}), (plain, {})):
+                held.put({"id": ident, "kind": "model", "root": str(folder), "home": "part.py", "entry": "part",
+                          "created": 1, "built": 2, "preview": {"thumbnail": "kept.png"}, **extra})
+                held.cache.write(f"documents/{ident}/document.xbf", b"opaque xbf bytes: never parsed")
+            bad = model_id(folder / "bad.py", "broken")
+            held.state.write(f"documents/{bad}/document.json", b"{bad json")
+            # A well-formed JSON record with invalid fields is equally unreadable for this pass.
+            wrong = model_id(folder / "wrong.py", "broken")
+            held.put({"id": wrong, "kind": "model", "root": 42, "home": "wrong.py", "entry": "broken"})
+            logs = []
+            result = migrate(held, log=logs.append)
+            self.assertEqual((result["filled"], result["moved"], len(result["skipped"])), (1, 1, 2))
+            self.assertEqual(len(logs), 1)
+            self.assertIn(bad, logs[0])
+            self.assertIn(wrong, logs[0])
+            new = derived_id(folder, "arm")
+            self.assertIsNone(held.get(old))
+            self.assertEqual((held.get(new)["namespace"], held.get(new)["name"]), (str(folder), "arm"))
+            self.assertEqual(held.get(new)["fingerprint"], fingerprint(script))
+            self.assertEqual(held.get(plain)["name"], "part")
+            self.assertEqual(held.cache.read(f"documents/{new}/document.xbf"), b"opaque xbf bytes: never parsed")
+            self.assertEqual(held.state.read(f"documents/{bad}/document.json"), b"{bad json")
+            before = {str(p): (p.read_bytes(), p.stat().st_mtime_ns) for root in (held.state.root, held.cache.root)
+                      for p in root.rglob("*") if p.is_file()}
+            second = migrate(held, log=logs.append)
+            self.assertEqual((second["filled"], second["moved"]), (0, 0))
+            self.assertEqual(before, {str(p): (p.read_bytes(), p.stat().st_mtime_ns)
+                                     for root in (held.state.root, held.cache.root)
+                                     for p in root.rglob("*") if p.is_file()})
 
 
 def setUpModule():
