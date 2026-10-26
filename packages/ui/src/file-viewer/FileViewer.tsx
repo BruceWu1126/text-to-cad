@@ -109,7 +109,7 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
   }, [navigationPath, perform, host.fileActions?.platform, onError]);
   // The name opens its menu where this view shows another document: Files -- the explorer, rooted at
   // the file's folder, or a model's registered folder -- where the host's files can be browsed, and
-  // Recent, the host's library, where it has one. A pick shows the document here. A view that shows
+  // Models, the host's library's models, where it has one. A pick shows the document here. A view that shows
   // its file alone opens neither.
   const explorer = useMemo(() => (navigationPath || folder) && source.list && source.search && onOpenFile ? { source, folder, onOpen: onOpenFile } : null,
     [navigationPath, folder, source, onOpenFile]);

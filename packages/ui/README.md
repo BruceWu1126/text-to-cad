@@ -60,9 +60,9 @@ file sidebar's trees (Model tree, Links) are 24px lines in its smaller 11px text
 ([the file sidebar](docs/settings-ui.md#the-file-sidebar-and-the-tool-stack)). Both inset
 row backgrounds 4px from their horizontal edges, including selected, hovered and
 filtered rows; nesting adds indentation inside that gutter.
-The name menu is a popover under the navbar's file name: Recent and Files as stock Tabs over
-the explorer's rows (`RecentList.jsx`, `FolderExplorer.jsx`),
-18rem wide, no taller than 28rem or the room below it, with no resize handle. It
+The name menu is a popover under the navbar's file name: Models and Files as stock Tabs over
+the explorer's rows (`ModelList.jsx`, `FolderExplorer.jsx`),
+17.5rem wide, no taller than 28rem or the room below it, with no resize handle. It
 floats over the view and never resizes it or moves its tools. A file's controls are
 the viewer's own: the tool strip at the view's top centre, the tool in hand's sub-toolbar
 under it, and the file sidebar's tiles at its top-left, a section's panel under them bounded by the viewer's height.

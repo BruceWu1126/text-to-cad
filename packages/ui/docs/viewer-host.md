@@ -551,7 +551,7 @@ handles placement and hides the toolbar in
 Preview; the host owns callbacks and preferences. None of these imply platform
 detection or move application-specific release/network behavior into shared UI.
 
-The name menu is a popover under the file's name (`RecentList.jsx` and `FolderExplorer.jsx`
+The name menu is a popover under the file's name (`ModelList.jsx` and `FolderExplorer.jsx`
 under two stock Tabs; [FileViewer](file-viewer.md#the-navbar-and-the-explorer)): it floats over
 the view and never resizes it.
 

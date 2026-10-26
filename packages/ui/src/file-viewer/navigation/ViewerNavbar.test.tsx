@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ViewerNavbar } from '../../../dist/file-viewer/navigation/ViewerNavbar.js';
-import { RECENT_ROWS, recentRows } from '../../../dist/file-viewer/navigation/RecentList.js';
+import { MODEL_ROWS, modelRows } from '../../../dist/file-viewer/navigation/ModelList.js';
 import { ControlUsageProvider } from '../../../dist/usage/controls.js';
 
 beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }));
@@ -37,51 +37,58 @@ it('shows the name alone, with no glyph, and a chevron where it opens the name m
   expect([document.querySelector('[data-file-name]')!.textContent, document.querySelector('[data-file-name] svg')]).toEqual(['bracket', null]);
 });
 
-it('opens Recent and Files as two tabs, on Files over a file and on Recent over a model', async () => {
+it('opens Models and Files as two tabs sized to their labels, on Files over a file and on Models over a model', async () => {
   const user = userEvent.setup();
   render(<ViewerNavbar file={FILE} explorer={explorer()} recent={recent()} />);
   await user.click(document.querySelector<HTMLElement>('[data-file-name]')!);
-  const tabs = within(document.querySelector<HTMLElement>('[data-file-explorer]')!).getAllByRole('tab');
-  expect(tabs.map(tab => [tab.textContent, tab.getAttribute('aria-selected')])).toEqual([['Recent', 'false'], ['Files', 'true']]);
+  const menu = document.querySelector<HTMLElement>('[data-file-explorer]')!;
+  const tabs = within(menu).getAllByRole('tab');
+  expect(tabs.map(tab => [tab.textContent, tab.getAttribute('aria-selected')])).toEqual([['Models', 'false'], ['Files', 'true']]);
+  // The tabs as wide as their labels, not the menu; the menu the explorer's natural width.
+  expect(within(menu).getByRole('tablist').className).toMatch(/\bw-fit\b/);
+  expect(menu.className).toContain('w-[17.5rem]');
   // Files is the explorer itself: its breadcrumb and filter.
   expect(document.querySelector('[data-file-explorer] [data-folder-explorer]')).not.toBeNull();
   expect(screen.getByRole('textbox', { name: 'Filter files' })).toBeTruthy();
   cleanup();
   render(<ViewerNavbar file={MODEL} name="bracket" kind="model" explorer={{ ...explorer(), folder: '/home/me/models' }} recent={recent()} />);
   await user.click(document.querySelector<HTMLElement>('[data-file-name]')!);
-  expect(screen.getByRole('tab', { name: 'Recent' }).getAttribute('aria-selected')).toBe('true');
-  expect(await screen.findByText('bracket', { selector: '[data-recent-row] *' })).toBeTruthy();
+  expect(screen.getByRole('tab', { name: 'Models' }).getAttribute('aria-selected')).toBe('true');
+  expect(await screen.findByText('bracket', { selector: '[data-model-row] *' })).toBeTruthy();
 });
 
-it('lists Recent by last activity, each row its glyph, name and age, the one on screen marked, and a row opens its document', async () => {
+it('lists models alone on Models, by last activity, each row its glyph, name and age, the one on screen marked, and a row opens its model', async () => {
   const user = userEvent.setup();
-  const menu = recent();
+  const other = { path: '7a2d3b5f-2c3d-6e4f-9a5b-0123456789ab', name: 'arm', kind: 'model', opened: now - 3 * 3600, updated: null, missing: true };
+  const menu = recent([...ROWS, other]);
   render(<ViewerNavbar file={MODEL} name="bracket" kind="model" explorer={explorer()} recent={menu} />);
   await user.click(document.querySelector<HTMLElement>('[data-file-name]')!);
-  await screen.findByText('gone.stl');
-  const rows = [...document.querySelectorAll<HTMLElement>('[data-recent-row]')];
+  await screen.findByText('arm');
+  const rows = [...document.querySelectorAll<HTMLElement>('[data-model-row]')];
+  // No file: a.step and gone.stl are Files' and the Home's.
   expect(rows.map(row => [row.querySelector('[data-glyph]')?.getAttribute('data-glyph'), row.textContent])).toEqual([
-    ['model', 'bracket5m ago'], ['file', 'a.step2h ago'], ['file', 'gone.stl3d ago']]);
-  expect(rows.map(row => row.getAttribute('aria-current'))).toEqual(['true', null, null]);
-  expect((rows[2] as HTMLButtonElement).disabled).toBe(true);
+    ['model', 'bracket5m ago'], ['model', 'arm3h ago']]);
+  expect(rows.map(row => row.getAttribute('aria-current'))).toEqual(['true', null]);
+  expect((rows[1] as HTMLButtonElement).disabled).toBe(true);
   // No footer, no extra rows: the Home is one click away.
-  expect(document.querySelector('[data-recent-list]')!.querySelectorAll('button').length).toBe(3);
+  expect(document.querySelector('[data-model-list] [data-model-row]:last-of-type')).toBe(rows[1]);
   // Down from the menu walks into the rows.
   fireEvent.keyDown(document.querySelector('[data-file-explorer]')!, { key: 'ArrowDown' });
   expect(document.activeElement).toBe(rows[0]);
-  await user.click(rows[1]);
-  expect(menu.onOpen).toHaveBeenCalledWith(FILE);
+  await user.click(rows[0]);
+  expect(menu.onOpen).toHaveBeenCalledWith(MODEL);
   expect(document.querySelector('[data-file-explorer]')).toBeNull();
 });
 
-it('keeps Recent to the eight latest, and a menu with one of the two has no tabs', async () => {
-  const many = Array.from({ length: 12 }, (_, index) => ({ path: `/m/${index}.step`, name: `${index}.step`, opened: index, updated: null }));
-  expect(recentRows(many).map(row => row.name)).toEqual(['11.step', '10.step', '9.step', '8.step', '7.step', '6.step', '5.step', '4.step']);
-  expect(RECENT_ROWS).toBe(8);
+it('keeps Models to the eight latest, and a menu with one of the two has no tabs', async () => {
+  const many = Array.from({ length: 12 }, (_, index) => ({ path: `/m/${index}`, name: `m${index}`, kind: 'model', opened: index, updated: null }));
+  expect(modelRows([...many, { path: '/m/a.step', name: 'a.step', kind: 'file', opened: 99, updated: null }]).map(row => row.name))
+    .toEqual(['m11', 'm10', 'm9', 'm8', 'm7', 'm6', 'm5', 'm4']);
+  expect(MODEL_ROWS).toBe(8);
   const user = userEvent.setup();
   render(<ViewerNavbar file={MODEL} name="bracket" kind="model" recent={recent()} />);
   await user.click(document.querySelector<HTMLElement>('[data-file-name]')!);
-  await screen.findByText('a.step');
+  await screen.findByText('bracket', { selector: '[data-model-row] *' });
   expect(screen.queryByRole('tab')).toBeNull();
 });
 
@@ -95,16 +102,16 @@ it('starts a model\'s Files in the folder its record registered', async () => {
   expect(files.source.list).toHaveBeenCalledWith('/home/me/models', expect.anything());
 });
 
-it("counts the name menu's tabs as a person sees them, Recent and Files (the explorer), and a row opened from Recent", async () => {
+it("counts the name menu's tabs as a person sees them, Models and Files (the explorer), and a row opened from Models", async () => {
   const user = userEvent.setup();
   const reports: { control: string; count: number }[][] = [];
   const view = render(<ControlUsageProvider report={counts => reports.push(counts)}>
     <ViewerNavbar file={MODEL} name="bracket" kind="model" explorer={explorer()} recent={recent()} /></ControlUsageProvider>);
-  await user.click(document.querySelector<HTMLElement>('[data-file-name]')!); // opens on Recent
+  await user.click(document.querySelector<HTMLElement>('[data-file-name]')!); // opens on Models
   await user.click(screen.getByRole('tab', { name: 'Files' }));
-  await user.click(screen.getByRole('tab', { name: 'Recent' }));
-  await user.click((await screen.findByText('a.step', { selector: '[data-recent-row] *' })).closest('button')!);
+  await user.click(screen.getByRole('tab', { name: 'Models' }));
+  await user.click((await screen.findByText('bracket', { selector: '[data-model-row] *' })).closest('button')!);
   view.unmount();
   const said = Object.fromEntries(reports.flat().map(({ control, count }) => [control, count]));
-  expect(said).toEqual({ recent: 2, explorer: 1, recent_open: 1 });
+  expect(said).toEqual({ models: 2, explorer: 1, models_open: 1 });
 });

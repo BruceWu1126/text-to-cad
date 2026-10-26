@@ -90,7 +90,7 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   and Forward, the update button, Full size and Open in browser); it starts with its control
   row, its links the app menu's.
 - **A view browses from its file's folder.** The file name in the navbar opens the name menu:
-  Recent, and Files, the explorer, starting at the file's folder. A pick shows the file in
+  Models, and Files, the explorer, starting at the file's folder. A pick shows the file in
   place. Nothing says where a view may browse: a tab, a card and the web viewer browse the
   same way.
 - **A view keeps its own history.** As a browser keeps a tab's: every file a

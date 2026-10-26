@@ -279,7 +279,7 @@ and native service adapters. Shared renderers own all model interaction. STEP an
 robots open in Select, its selection filter the chevron after its button; the tool in hand's
 controls are one row under the strip. An assembly's Features (Links for a robot), Position
 and an SDF's metadata are the file sidebar's, a tile each at the top-left, whatever the tool. The
-file's name in the navbar opens its name menu: Recent and Files (the explorer).
+file's name in the navbar opens its name menu: Models and Files (the explorer).
 STEP and robot files have tools on a strip at the top centre; GLB, STL and 3MF have none,
 a GLB's clips or not.
 Every 3D file's strip ends in Projection, Display (its settings, a popover that opens down) and
@@ -287,10 +287,10 @@ Preview, with the view cube at the bottom-right and Quick Edit at the top-right.
 2D canvas with pan, zoom, snapshot and Quick Edit, without a 3D toolbar or file sidebar.
 
 The name menu is a popover under the file's name, two tabs over the explorer's own rows:
-**Recent**, the library's eight latest documents, models and files alike, by last activity, each
-its kind's glyph, its name and its age ("2h ago"), the one on screen marked; and **Files**, the
+**Models**, the library's eight latest models (no file), by last activity, each its glyph, its
+name and its age ("2h ago"), the one on screen marked; and **Files**, the
 explorer: the file's folder (a model's, the folder its record registered), one folder at a
-time, with "Filter files..." to find a file anywhere under it. It opens on Recent over a model
+time, with "Filter files..." to find a file anywhere under it. It opens on Models over a model
 and on Files over a file. Below 600px of
 FileViewer width (a phone) the chrome is touch-sized and the file sidebar's tiles lead the tool strip. Preview is the shared shell's button after Display on the strip: it takes the whole page,
 hiding the navbar, the tool strip and Quick Edit, opens still (Orbit, in its settings, is
@@ -442,7 +442,7 @@ and web stay consistent without host-specific copies of those controls.
 The Viewer has the one navbar every app shares (see
 [the host contract](../../packages/ui/docs/viewer-host.md#host-chrome-slots)): at the
 left the logo (the TEXTTOCAD wordmark on the home, the C over a file), which opens the app menu, then the open file's name (no glyph),
-which opens the name menu (Recent and Files), with its ⋯; at the right only the blue update button, while a newer text-to-cad
+which opens the name menu (Models and Files), with its ⋯; at the right only the blue update button, while a newer text-to-cad
 is out. The app menu holds Back to files (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
 GitHub, Discord and, in gray, the version (a link to its release notes) and "Made by @…"
 (X), as in the CAD app, over a file and on the home alike.
@@ -475,7 +475,7 @@ composer has no camera action: its note to the agent is Quick Edit.
 A model's page is `/<id>`, its document's id, which `python SCRIPT.py` prints (`view:`). The
 page reads the document the engine holds, by id (`GET /__cad/catalog?id=`); it never builds or
 imports a script, and no folder lists one. A model has no file of its own: no file menu; its
-name menu opens on Recent, and its Files lists the folder its record registered. It is in the
+name menu opens on Models, and its Files lists the folder its record registered. It is in the
 library by its id (the engine's record), and its picture is taken by
 its id as a file's is: on screen once it settles, once per build, and on the home only while
 the engine holds it. Once its worker retires or

@@ -72,10 +72,10 @@ export default {
   "explorer.noMatches": "没有匹配的文件",
   "explorer.noMatchesYet": "暂无匹配文件。继续输入可缩小搜索范围。",
   "explorer.stoppedEarly": "搜索提前停止。继续输入可缩小范围。",
-  "explorer.recent": "最近",
+  "explorer.models": "模型",
   "explorer.files": "文件",
-  "explorer.noRecent": "尚未打开任何内容",
-  "explorer.recentFailed": "无法读取最近的文件",
+  "explorer.noModels": "还没有模型",
+  "explorer.modelsFailed": "无法读取模型",
 
   "home.recentFiles": "最近",
   "home.searchAria": "搜索模型",

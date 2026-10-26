@@ -2,7 +2,7 @@
 
 `@text-to-cad/ui/file-viewer` exports the complete file view: one file by its
 absolute path, under the navbar (or alone, `chrome: "bare"`), with the name menu its name opens
-(Recent and Files), renderer loading, and the loading and error pages.
+(Models and Files), renderer loading, and the loading and error pages.
 It imports no concrete renderer. Applications compose registrations from the
 separate `@text-to-cad/ui/renderers/*` entry points and their own
 `defineFileRenderer` definitions ([renderers](renderers.md)). A CAD host composes
@@ -111,15 +111,16 @@ actions, and last the host's own (`navbarActions`: the web viewer's Export). A r
 view controls are never here: a 3D view's Projection, Display and Preview end its tool strip,
 and Preview's settings and Exit preview are Preview's bar's.
 
-The name menu is a popover under the file's name, a fixed 18rem wide and never resized. It
+The name menu is a popover under the file's name, a fixed 17.5rem wide and never resized. It
 floats over the view, so opening it resizes nothing, and it is built anew on each opening. Two
-stock shadcn Tabs top it, **Recent** and **Files**, over the explorer's own style; it opens on
-Recent over a model and on Files over a file, and a menu with one of the two has no tabs.
-**Recent** (`navigation/RecentList.jsx`) lists the host's library (`FileViewerProps.recent`, a
-`list()` of `RecentDocument`s), models and files alike, by last activity (the later of each
-row's `opened` and `updated`), eight at most, in the explorer's compact rows: the kind's glyph,
-the name, and its age with no verb at the right; the document on screen is highlighted, a row
-opens its document through `navigation.openFile`, and there is no footer.
+stock shadcn Tabs top it, **Models** and **Files**, each as wide as its label, over the
+explorer's own style; it opens on Models over a model and on Files over a file, and a menu with
+one of the two has no tabs. **Models** (`navigation/ModelList.jsx`) lists the models of the
+host's library (`FileViewerProps.recent`, a `list()` of `RecentDocument`s; a row whose `kind` is
+a model's or a shape's), by last activity (the later of each row's `opened` and `updated`),
+eight at most, in the explorer's compact rows: the model's glyph, the name, and its age with no
+verb at the right; the model on screen is highlighted, a row opens it through
+`navigation.openFile`, and there is no footer.
 **Files** is the explorer (`navigation/FolderExplorer.jsx`). It starts in the open file's
 folder, or a document's `folder` where it has no file of its own (a model's registered folder),
 its filter taking the keyboard (on a phone the menu holds focus itself, so no

@@ -64,8 +64,8 @@ export const CONTROLS = Object.freeze(/** @type {const} */ ([
   'look_at', 'isolate', 'view_cube', 'view_cube_drag', 'fit',
   // Quick Edit's Copy, Queue and Send.
   'quick_edit_copy', 'quick_edit_queue', 'quick_edit_send',
-  // The navbar, its file menu and its name menu's Recent and Files (the explorer), and the app menu.
-  'navbar_back', 'navbar_forward', 'recent', 'recent_open', 'explorer', 'explorer_filter', 'file_copy_path', 'file_reveal', 'home',
+  // The navbar, its file menu and its name menu's Models and Files (the explorer), and the app menu.
+  'navbar_back', 'navbar_forward', 'models', 'models_open', 'explorer', 'explorer_filter', 'file_copy_path', 'file_reveal', 'home',
   'theme_system', 'theme_light', 'theme_dark', 'language', 'feedback',
   // Export, by format.
   'export_step', 'export_stl', 'export_threemf', 'export_glb', 'export_dxf', 'export_xbf', 'export_original',

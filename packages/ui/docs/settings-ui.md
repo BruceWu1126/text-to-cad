@@ -18,7 +18,7 @@ belong to apps through the [host contract](viewer-host.md).
 
 FileViewer owns the navbar — the logo's app menu ([Settings](#settings)) included, built from
 the host's `links` and the `appSettings` `CadViewer` hands it — and the name menu (a popover
-under the file's name: Recent and Files, the file explorer). RendererShell owns the scene's chrome: the tool strip and
+under the file's name: Models and Files, the file explorer). RendererShell owns the scene's chrome: the tool strip and
 the view's controls at its end (Projection, Display, Preview), the sub-toolbar of the tool in hand under
 it, the file sidebar, Quick Edit, the view cube and Preview, with Preview's own bar in the navbar's place. Renderers supply
 their tools, their tools' rows, their sidebar sections and their document state; the shell never
@@ -127,15 +127,16 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   the host can show the view full size, **Full size**; then, while its install is behind, the
   update as a notice — the update card itself, Send to agent or Copy prompt, closable for the
   view — rather than the blue button. In Preview it is gone with the rest of the column.
-- **Name menu** is a popover under the file's name, aligned to the name's left edge, 18rem wide
-  and never resized: two stock shadcn Tabs on top, **Recent** and **Files**, sized to the
-  explorer's type (`text-xs`, a 28px list), and under them the explorer's own style. It opens on
-  Recent over a model and on Files over a file; a host with one of the two has no tabs, and one
-  with neither a plain name. **Recent** (`RecentList.jsx`) is the host's library, models and files
-  alike, by last activity, eight at most, in the explorer's compact rows: the kind's glyph, the
-  name, and at the right its age with no verb ("2h ago"); the document on screen is highlighted,
-  a press opens a document as a pick in the explorer does, Up and Down walk the rows, and there is
-  no footer: the home is one click away. **Files** is the file explorer (`FolderExplorer.jsx`),
+- **Name menu** is a popover under the file's name, aligned to the name's left edge, 17.5rem
+  (280px, the explorer's natural width) wide and never resized: two stock shadcn Tabs on top,
+  **Models** and **Files**, in the explorer's type (`text-xs`, a 28px list) and each as wide as its
+  label (the list `w-fit` at the left, not the menu's width), and under them the explorer's own
+  style. It opens on Models over a model and on Files over a file; a host with one of the two has
+  no tabs, and one with neither a plain name. **Models** (`ModelList.jsx`) is the host's library's
+  models alone (no file: those are Files' and the Home's), by last activity, eight at most, in the
+  explorer's compact rows: the model's glyph, its name, and at the right its age with no verb ("2h
+  ago"); the model on screen is highlighted, a press opens a model as a pick in the explorer does,
+  Up and Down walk the rows, and there is no footer: the home is one click away. **Files** is the file explorer (`FolderExplorer.jsx`),
   below. The menu is as tall as its rows up to 28rem or the room below it: past that its list
   scrolls. It floats over the view and the file sidebar, so opening it resizes and moves
   nothing. The explorer starts in the open file's folder (a model's: the folder its record
@@ -159,7 +160,7 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   is). The folder it is in reads in the foreground color, the others muted; there is no up
   arrow, and the open file is highlighted, the list opening scrolled to centre its row, once (a
   long folder's too). Opened on Files, its filter has the keyboard, so typing
-  finds a file at once; opened on Recent, the menu holds it and Down takes it into the rows; on
+  finds a file at once; opened on Models, the menu holds it and Down takes it into the rows; on
   a phone the menu itself holds focus, keeping the keyboard down. "Filter files..." under the breadcrumb searches
   every file nested under the folder (the server's bounded search, debounced 150ms, each
   keystroke cancelling the search before it); a search that stopped early says "Stopped

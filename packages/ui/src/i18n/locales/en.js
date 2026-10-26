@@ -83,10 +83,10 @@ export default {
   "explorer.noMatches": "No files match",
   "explorer.noMatchesYet": "No files match yet. Keep typing to narrow the search.",
   "explorer.stoppedEarly": "Stopped early. Keep typing to narrow the search.",
-  "explorer.recent": "Recent",
+  "explorer.models": "Models",
   "explorer.files": "Files",
-  "explorer.noRecent": "Nothing opened yet",
-  "explorer.recentFailed": "Couldn't read the recent files",
+  "explorer.noModels": "No models yet",
+  "explorer.modelsFailed": "Couldn't read the models",
 
   // The home: the library of models opened before.
   "home.recentFiles": "Recent",

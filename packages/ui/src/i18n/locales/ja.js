@@ -71,10 +71,10 @@ export default {
   "explorer.noMatches": "一致するファイルはありません",
   "explorer.noMatchesYet": "まだ一致するファイルはありません。入力を続けて検索を絞り込んでください。",
   "explorer.stoppedEarly": "検索を途中で止めました。入力を続けて絞り込んでください。",
-  "explorer.recent": "最近",
+  "explorer.models": "モデル",
   "explorer.files": "ファイル",
-  "explorer.noRecent": "まだ何も開いていません",
-  "explorer.recentFailed": "最近のファイルを読み込めませんでした",
+  "explorer.noModels": "まだモデルはありません",
+  "explorer.modelsFailed": "モデルを読み込めませんでした",
 
   "home.recentFiles": "最近",
   "home.searchAria": "モデルを検索",

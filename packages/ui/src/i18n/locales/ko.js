@@ -71,10 +71,10 @@ export default {
   "explorer.noMatches": "일치하는 파일이 없습니다",
   "explorer.noMatchesYet": "아직 일치하는 파일이 없습니다. 계속 입력해 검색 범위를 좁혀 보세요.",
   "explorer.stoppedEarly": "검색을 일찍 멈췄습니다. 계속 입력해 범위를 좁혀 보세요.",
-  "explorer.recent": "최근",
+  "explorer.models": "모델",
   "explorer.files": "파일",
-  "explorer.noRecent": "아직 연 항목이 없습니다",
-  "explorer.recentFailed": "최근 파일을 읽을 수 없습니다",
+  "explorer.noModels": "아직 모델이 없습니다",
+  "explorer.modelsFailed": "모델을 읽을 수 없습니다",
 
   "home.recentFiles": "최근",
   "home.searchAria": "모델 검색",

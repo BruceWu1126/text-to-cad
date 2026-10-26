@@ -263,7 +263,7 @@ it('has no file menu on a document with no file of its own, which its name names
   expect(labels()).not.toContain('File actions');
   expect(list).not.toHaveBeenCalled();
   cleanup();
-  // Registered from a folder, with the host's library: the name opens Recent first, and Files lists that folder.
+  // Registered from a folder, with the host's library: the name opens Models first, and Files lists that folder.
   const user = userEvent.setup();
   const registered = { ...model, navigation: { openFile: vi.fn() }, files: { ...model.files,
     stat: async (path: string) => ({ path, name: 'bracket', navigationPath: null, folder: '/models/parts', kind: 'file' as const, extension: 'xbf', size: 0 }) } };
@@ -272,7 +272,7 @@ it('has no file menu on a document with no file of its own, which its name names
   await screen.findByText('shown');
   expect(fileName().tagName).toBe('BUTTON');
   await user.click(fileName());
-  expect(screen.getByRole('tab', { name: 'Recent' }).getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByRole('tab', { name: 'Models' }).getAttribute('aria-selected')).toBe('true');
   await user.click(screen.getByRole('tab', { name: 'Files' }));
   await waitFor(() => expect(list).toHaveBeenCalledWith('/models/parts', expect.anything()));
   expect(labels()).not.toContain('File actions');
