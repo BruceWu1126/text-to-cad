@@ -194,6 +194,9 @@ export default {
   "projection.orthographic": "Orthographic",
   "projection.perspective": "Perspective",
 
+  // The view cube's corner button: the fit F makes.
+  "viewCube.fit": "Fit",
+
   // Preview: its tile, its corner controls and its settings panel.
   "preview.label": "Preview",
   "preview.settings": "Preview settings",

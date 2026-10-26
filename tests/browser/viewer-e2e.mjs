@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Real-browser coverage for the bundled Viewer: every load path opens through the
-// real backend and bundle, and the camera holds across modes and across a saved
-// revision. CI runs all of it; there is no local-only set. Fixture and process
-// lifecycle belong to scripts/test/test-viewer-browser.sh.
+// real backend and bundle, the camera holds across modes, and a saved revision re-fits a
+// camera nobody has touched and keeps one the person took. CI runs all of it; there is no
+// local-only set. Fixture and process lifecycle belong to scripts/test/test-viewer-browser.sh.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -583,46 +583,73 @@ async function modeCameraGate() {
     await context.close();
   }
 
-  // A mode switch, a pose or a REVISION must not re-frame. Saving a rebuilt model over
-  // the open one keeps the camera exactly, its pose and its zoom, even though the grown
-  // arm now reaches x = 158 where the first revision stopped at 58: the owner's call is
-  // that keeping the perspective and zoom level makes sense in every case. Only Zoom to
-  // fit frames the new zero pose, at 100% of its ruler. A fresh tab, so the camera held
+  // A REVISION follows the camera's owner (`kit/camera/cameraTouch.js`). While the camera is still
+  // the opening fit, nobody's yet, a rebuild whose box changed is fitted again, as the open
+  // fitted it: the grown arm (x = 158 where the first revision stopped at 58) comes up framed
+  // whole, at 100% of its own ruler, looking the way it did. Once the person has taken the camera,
+  // a rebuild keeps it exactly, its pose and its zoom, even as the model shrinks back; their own
+  // fit hands it back and frames the revision on screen. A fresh tab, so the camera at the start
   // is the open-time fit and not one the tab kept for this file.
   const revision = await newPage();
+  const rebuilt = async (from, reaches) => {
+    fs.copyFileSync(path.join(root, ".revision", from), path.join(root, "hinge.step"));
+    const landed = await revision.page.waitForFunction((grown) => {
+      const x = Number(window.__cadModelBounds?.()?.max?.[0]);
+      return grown ? x > 100 : x > 0 && x < 100;
+    }, reaches === "grown", { timeout: 60_000 }).then(() => true).catch(() => false);
+    if (!landed) failures.push(`step revision: the viewer never picked up the ${reaches} model`);
+    else await settledCameraFrame(revision.page, { stage: `hinge ${reaches}` });
+    return landed;
+  };
+  const sameDirection = (a, b) => {
+    const unit = camera => { const d = camera.position.map((v, i) => v - camera.target[i]); const l = Math.hypot(...d) || 1; return d.map(v => v / l); };
+    return unit(a).every((value, axis) => Math.abs(value - unit(b)[axis]) <= 1e-6);
+  };
   try {
     await openFile(revision.page, "hinge.step");
     await settledCameraFrame(revision.page, { stage: "hinge before its revision" });
     const firstFit = await cameraState(revision.page);
-    fs.copyFileSync(path.join(root, ".revision", "hinge.step"), path.join(root, "hinge.step"));
-    const grown = await revision.page.waitForFunction(() => {
-      const bounds = window.__cadModelBounds?.();
-      return Number(bounds?.max?.[0]) > 100;
-    }, null, { timeout: 60_000 }).then(() => true).catch(() => false);
-    if (!grown) {
-      failures.push("step revision: the viewer never picked up the rebuilt model");
-    } else {
-      // The revision is adopted in the commit that published its bounds; the view then settles.
-      await settledCameraFrame(revision.page, { stage: "hinge revision" });
-      // The zoom ruler is measured against the zero pose, which the revision changed: the pose
-      // is compared without it.
-      const revised = await cameraState(revision.page);
-      const drift = cameraDrift(revised && { ...revised, zoomPercent: firstFit?.zoomPercent }, firstFit);
-      if (!(drift <= CAMERA_EPSILON)) {
-        failures.push(`step revision: the camera moved (${drift.toExponential(2)} relative) — ${describeCamera(revised)}, `
-          + `was ${describeCamera(firstFit)}`);
-      }
-      await resetView(revision.page);
+    if (firstFit?.untouched !== true) failures.push(`step revision: the opening fit does not read as untouched (${firstFit?.untouched})`);
+    if (await rebuilt("hinge.step", "grown")) {
       const refit = await cameraState(revision.page);
       if (!(Number(refit?.halfHeight) > Number(firstFit?.halfHeight))) {
-        failures.push(`step revision: Zoom to fit did not frame the grown model — ${describeCamera(refit)}, `
+        failures.push(`step revision: an untouched camera was not fitted to the grown model — ${describeCamera(refit)}, `
           + `was ${describeCamera(firstFit)}`);
       } else if (Math.abs(Number(refit?.zoomPercent) - 100) > 0.5) {
-        failures.push(`step revision: Zoom to fit does not read as 100% (${refit?.zoomPercent})`);
+        failures.push(`step revision: the untouched re-fit does not read as 100% (${refit?.zoomPercent})`);
+      } else if (!sameDirection(refit, firstFit)) {
+        failures.push(`step revision: the untouched re-fit turned the view — ${describeCamera(refit)}`);
+      }
+
+      // The person takes the camera: a rebuild now keeps it, though the model shrank back.
+      await orbitAndZoom(revision.page);
+      const handFramed = await cameraMoved(revision.page, refit, "orbit and zoom on the grown hinge");
+      if (handFramed?.untouched !== false) failures.push(`step revision: an orbit did not touch the camera (${handFramed?.untouched})`);
+      if (handFramed && await rebuilt("hinge-first.step", "first")) {
+        // The zoom ruler is measured against the zero pose, which the revision changed: the pose
+        // is compared without it.
+        const kept = await cameraState(revision.page);
+        const drift = cameraDrift(kept && { ...kept, zoomPercent: handFramed.zoomPercent }, handFramed);
+        if (!(drift <= CAMERA_EPSILON)) {
+          failures.push(`step revision: a touched camera moved on a rebuild (${drift.toExponential(2)} relative) — `
+            + `${describeCamera(kept)}, was ${describeCamera(handFramed)}`);
+        }
+        // Their fit, the view cube's Fit, frames the revision on screen, about its own centre, at
+        // the angle they left (the ruler's 100% is the default angle's, so it is not read here),
+        // and the camera is untouched again.
+        await revision.page.getByRole("button", { name: "Fit", exact: true }).click();
+        await settledCameraFrame(revision.page, { stage: "the cube's Fit" });
+        const fitted = await cameraState(revision.page);
+        if (!fitted || fitted.target.some((value, axis) => Math.abs(value - firstFit.target[axis]) > 1e-6) || fitted.zoom !== 1) {
+          failures.push(`step revision: the cube's Fit did not frame the first revision — ${describeCamera(fitted)}`);
+        } else if (!sameDirection(fitted, handFramed)) {
+          failures.push(`step revision: the cube's Fit turned the view — ${describeCamera(fitted)}`);
+        }
+        if (fitted?.untouched !== true) failures.push(`step revision: a fit did not hand the camera back (${fitted?.untouched})`);
       }
     }
     if (revision.errors.length) failures.push(`step revision: ${revision.errors.join(" | ")}`);
-    console.log("  step revision: a saved revision keeps the camera, and Zoom to fit frames its own zero pose");
+    console.log("  step revision: an untouched camera fits a rebuilt box, a touched one is kept, and a fit hands it back");
   } finally {
     await revision.context.close();
   }

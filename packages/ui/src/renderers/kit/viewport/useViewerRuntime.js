@@ -10,6 +10,7 @@ import {
   createCadWebGlRenderer
 } from "@text-to-cad/core/common/webglRenderer.js";
 import { fitCameraDepthToBounds } from "@text-to-cad/core/common/renderOptions.js";
+import { CAMERA_TOUCH, touchCamera } from "../camera/cameraTouch.js";
 import { keepOrthographicEyeOutside } from "../camera/orthographicEye.js";
 import {
   screenSpaceLineDeviceResolution
@@ -738,9 +739,7 @@ export function useViewerRuntime({
         // Any drag on the controls — orbit, pan or zoom — means the view is the
         // user's now. A progressive load with no declared box re-frames the camera
         // when the model finishes arriving, and must not do that over someone's shoulder.
-        if (runtimeRef.current) {
-          runtimeRef.current.userMovedCamera = true;
-        }
+        touchCamera(runtimeRef.current, CAMERA_TOUCH.DRAG);
         cancelCameraTransition(runtimeRef.current);
         beginInteraction();
       };
@@ -752,9 +751,7 @@ export function useViewerRuntime({
         scheduleIdleQuality();
       };
       const handleWheel = (event) => {
-        if (runtimeRef.current) {
-          runtimeRef.current.userMovedCamera = true;
-        }
+        touchCamera(runtimeRef.current, CAMERA_TOUCH.WHEEL);
         cancelCameraTransition(runtimeRef.current);
         controls.enableDamping = false;
         // Three input classes, three speeds. OrbitControls (r161+) normalizes the delta
@@ -843,9 +840,7 @@ export function useViewerRuntime({
         keyboardOrbitState.directionCounts[command.direction] += 1;
         keyboardOrbitState.lastFrameTime = 0;
         // Orbiting by the keys makes the view the user's, as a drag does.
-        if (runtimeRef.current) {
-          runtimeRef.current.userMovedCamera = true;
-        }
+        touchCamera(runtimeRef.current, CAMERA_TOUCH.KEYS);
         cancelCameraTransition(runtimeRef.current);
         beginInteraction();
         applyOrbitDelta(
@@ -1037,7 +1032,8 @@ export function useViewerRuntime({
         if (runtime.activeModelKey && runtime.interactiveFraming) previousViewStateRef.current = {
           modelKey: runtime.activeModelKey,
           framing: Object.fromEntries([
-            "zoomBaseDistance", "zoomBaseHalfHeight", "viewportFitScale", "interactiveFraming", "userMovedCamera"
+            "zoomBaseDistance", "zoomBaseHalfHeight", "viewportFitScale", "interactiveFraming", "userMovedCamera", "cameraTouch",
+            "autoFitBounds"
           ].map(key => [key, runtime[key]]))
         };
         if (runtime.interactionState.restoreTimerId) {

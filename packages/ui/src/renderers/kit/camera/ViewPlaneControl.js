@@ -1,11 +1,15 @@
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { VIEW_CUBE_CORNERS, VIEW_CUBE_EDGES } from "./viewportCameraKit.js";
+import { Scan } from "lucide-react";
+import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
+import { useI18n } from "../../../i18n/react.js";
 import { useControlUsage } from "../../../usage/controls.js";
 
 // The view cube. A cube drawn from the camera's orientation: its faces are the six plane
 // views (click TOP, FRONT, RIGHT...) and its corners are the eight isometric views. The
 // face, edge and corner shortcuts preserve the current zoom and target. The
-// X/Y/Z guides follow the cube edges from its negative corner.
+// X/Y/Z guides follow the cube edges from its negative corner. In its top-right corner, the one
+// the guides never reach (they start from the opposite, negative, corner), is Fit: the fit F makes.
 
 const ORIENTATION_FALLBACK = Object.freeze({
   x: [1, 0, 0],
@@ -20,6 +24,12 @@ const HOME_CORNER_ID = "iso+-+";
 // What a hover changes eases in, briefly; what it lights is one plain, lighter shade.
 const HOVER_TRANSITION = Object.freeze({ transition: "fill 120ms ease-out" });
 const HOVER_FILL = "color-mix(in oklch, var(--background) 55%, var(--foreground))";
+// Fit, measured in the cube's own box (so a compact cube's is smaller with it): a fifth of its side,
+// clear of the drawn cube, whose silhouette stays within 36% of the side from its centre. Its glyph
+// is in the ink of the cube's home corner dot.
+const FIT_SIZE = "20%";
+const FIT_ID = "fit";
+const FIT_INK = "color-mix(in oklch, var(--foreground) 55%, var(--background))";
 // SVG units: the cube's half-size on screen, and where its centre sits.
 const SCALE = 21;
 const CENTER = 50;
@@ -154,13 +164,16 @@ function ViewPlaneControl({
   viewPlaneSize,
   viewPlaneHeader = null,
   activateViewPlaneFace,
-  orbitViewCube
+  orbitViewCube,
+  // The fit F makes (`resetZoom`): the cube's Fit, shown with the cube and only when given.
+  fitView = null
 }) {
   // The cube's own subscription to the camera's orientation (`createViewPlaneOrientationStore`):
   // a moving camera re-renders the cube and nothing around it.
   const viewPlaneOrientation = useSyncExternalStore(orientationStore.subscribe, orientationStore.getSnapshot, orientationStore.getSnapshot);
   // A face, an edge or a corner pressed, or the cube turned by a drag (`usage/controls.js`).
   const usage = useControlUsage();
+  const { t } = useI18n();
   const [hoveredId, setHoveredId] = useState("");
   const [dragging, setDragging] = useState(false);
   // A press that moves more than a few pixels is a drag that orbits, not a click on a face.
@@ -371,6 +384,27 @@ function ViewPlaneControl({
             ))}
           </g>
         </svg>
+        {typeof fitView === "function" ? (
+          <TooltipHint content={<span className="flex items-center gap-3">{t("viewCube.fit")}<span className="text-muted-foreground" data-tooltip-shortcut="">F</span></span>}
+            side="top" disabled={disabled}>
+            <button type="button" aria-label={t("viewCube.fit")} aria-keyshortcuts="F" aria-disabled={disabled} tabIndex={disabled ? -1 : 0}
+              data-view-cube-fit=""
+              className={`absolute right-0 top-0 flex items-center justify-center rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 ${disabled ? "cursor-default" : "cursor-pointer"}`}
+              // Hovered, it lights as a face does, its glyph at full strength.
+              style={{ width: FIT_SIZE, height: FIT_SIZE, transition: "background-color 120ms ease-out, color 120ms ease-out",
+                backgroundColor: hoveredId === FIT_ID ? HOVER_FILL : "transparent", color: hoveredId === FIT_ID ? "var(--foreground)" : FIT_INK }}
+              {...hoverProps(FIT_ID)}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (disabled) return;
+                usage.used("fit");
+                fitView();
+              }}>
+              <Scan aria-hidden="true" style={{ width: "70%", height: "70%" }} strokeWidth={2} />
+            </button>
+          </TooltipHint>
+        ) : null}
       </div> : null}
     </div>
   );

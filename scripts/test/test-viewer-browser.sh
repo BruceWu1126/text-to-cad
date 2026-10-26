@@ -123,7 +123,8 @@ HINGE
 # no longer fits the frame the first one was fitted to. It is built into a
 # dot-directory, which the explorer skips, so the model's folder still holds
 # one hinge; the gate copies it over the first to stand in for a rebuild that a
-# source edit saved while the model was open.
+# source edit saved while the model was open, and then the first one (kept there
+# too) back over it, for a rebuild that shrinks the model.
 # Each revision declares its output name, so the two revisions build side by
 # side instead of one overwriting the other. Literal substitutions only: GNU and
 # BSD sed do not spell a word boundary the same way.
@@ -141,7 +142,7 @@ fi
 # enter the catalog as an entry of its own and change what the gates see. A build
 # returns once every file it declares is on disk.
 if ! (cd "$project" && "$PYTHON" assembly_fixture.py && "$PYTHON" hinge.py && "$PYTHON" hinge_grown.py \
-        && mkdir -p .revision && mv hinge_grown.step .revision/hinge.step \
+        && mkdir -p .revision && mv hinge_grown.step .revision/hinge.step && cp hinge.step .revision/hinge-first.step \
         && rm assembly_fixture.py hinge.py hinge_grown.py) >"$log" 2>&1 \
    || [ ! -f "$project/assembly.step" ] || [ ! -f "$project/hinge.step" ]; then
   echo "FAIL: the STEP model fixtures did not build" >&2

@@ -2,6 +2,7 @@ import { useCallback, useRef } from "react";
 import { applyPerspectiveSnapshot, cancelCameraTransition, readScopedPerspectiveSnapshot, recenterRuntimeTarget, setRuntimeZoomPercent, transitionCameraToViewPreset, zoomRuntimeToBounds } from "./runtimeCamera.js";
 import { runtimeModelKeyMatches } from "@text-to-cad/core/lib/viewer/modelRuntime.js";
 import { requestSceneFrame } from "../viewport/sceneFrames.js";
+import { CAMERA_TOUCH, fitCamera, touchCamera } from "./cameraTouch.js";
 import { perspectiveSnapshotEqual, perspectiveSnapshotMatchesScene, resolvePerspectiveSnapshot } from "@text-to-cad/core/lib/perspective.js";
 import { VIEW_CUBE_DRAG_RAD_PER_PX, VIEW_PLANE_FACE_BY_ID, applyOrbitDelta, readViewPlaneOrientation, runtimeFramingBounds } from "./viewportCameraKit.js";
 
@@ -105,9 +106,9 @@ export function useViewportCamera({
       syncViewPlaneOrientation(runtime);
     }
     if (reset) {
-      // Asking for the fit hands the camera back to it: a model still arriving is framed again,
-      // whole, when it has.
-      runtime.userMovedCamera = false;
+      // Asking for the fit hands the camera back to it (`cameraTouch.js`): a model still arriving
+      // is framed again, whole, when it has, and a rebuild whose box changed is fitted again.
+      fitCamera(runtime);
       return true;
     }
     // Fallback for when the refit bails — no usable bounds yet, so there is
@@ -136,7 +137,7 @@ export function useViewportCamera({
     activeViewPlaneFaceRef.current = face.id;
     setActiveViewPlaneFace(face.id);
     const turned = transitionCameraToViewPreset(runtime, face);
-    if (turned) runtime.userMovedCamera = true;
+    if (turned) touchCamera(runtime, CAMERA_TOUCH.VIEW_CUBE);
     return turned;
   }, []);
   // Dragging the view cube orbits the camera, as dragging Fusion's does: the cube turns with
@@ -154,7 +155,7 @@ export function useViewportCamera({
     if (!orbited) {
       return false;
     }
-    runtime.userMovedCamera = true;
+    touchCamera(runtime, CAMERA_TOUCH.VIEW_CUBE_DRAG);
     activeViewPlaneFaceRef.current = "";
     setActiveViewPlaneFace("");
     emitPerspectiveChange(runtime);

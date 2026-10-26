@@ -127,6 +127,7 @@ same lighting, materials and stage settings.
 
 The browser qualification in `scripts/test/test-viewer-browser.sh` opens every
 load path through the real backend and bundle and checks mode framing, that a saved
-revision keeps the camera and that Zoom to fit frames the revision; picking and the
+revision fits an untouched camera, keeps one the person took, and that Zoom to fit frames
+the revision; picking and the
 display presets are the `packages/ui` browser specs'. Both use
 isolated generated fixtures rather than a sweep of saved theme presets.
