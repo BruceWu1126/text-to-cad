@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
-import { Box, ChevronDown, Ellipsis, LayoutGrid, List, Pin, Search } from "lucide-react";
+import { Box, ChevronDown, Ellipsis, FolderOpen, LayoutGrid, List, Pin, Search } from "lucide-react";
 import { Button } from "../primitives/button.jsx";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../primitives/alert-dialog.jsx";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../primitives/dropdown-menu.jsx";
@@ -52,6 +52,11 @@ export interface ModelLibrarySource<Model extends LibraryModel = LibraryModel> {
   /** An image URL for a model's thumbnail, or null. */
   thumbnail(name: string): Promise<string | null>;
   open(model: Model): Promise<void>;
+  /**
+   * Open: choose a file with the desktop's own file chooser, and show it. A host on a computer with
+   * no chooser has none, and the Home no Open.
+   */
+  pick?(): Promise<void>;
 }
 
 /** A card wants a picture: it has none, or it was updated (a file written, a model run) since it was taken. */
@@ -146,14 +151,14 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
  * is over it (its logo's app menu, the host's update and Full size, as over a file); the host's
  * links are that menu's. The page starts with its control row, one line of 24px controls: at the
  * left "Recent", a plain small heading; at the right the type filter ("All ▾": All, Models, Files),
- * there where models and files are both listed, the search and the grid/list switch, both there
- * with no models yet too. Then the documents, pinned first, as cards (a picture over the kind's
+ * there where models and files are both listed, the search, the grid/list switch and, where the host
+ * has a chooser, Open, all there with no models yet too. Then the documents, pinned first, as cards (a picture over the kind's
  * glyph, the name and how long ago it was last opened or updated, with no verb) or as rows, every
  * model a card and a row of its own: its name, its glyph and its age, never where it was built
  * from. Each card has one ⋯ menu: Open, a file's Copy path and Reveal where the host can (a model
  * has neither), Pin or Unpin, then Delete, which asks first (an AlertDialog saying what
  * goes and what stays on disk) and takes the card off the list at once; a pinned card shows its pin. It is the
- * library alone: nothing opens a file from here but its cards. It is drawn on the navbar's colour.
+ * library and Open: nothing else opens a file from here. It is drawn on the navbar's colour.
  *
  * Nothing waits unseen. While the list is read, placeholder cards (or rows) stand where the models
  * will be. A model being opened shows a spinner over its picture, and the library takes no other
@@ -236,6 +241,8 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
     setOpening(item.path);
     void current.current.open(item).catch(fail).finally(() => setOpening(null));
   };
+  // Open, at the control row's right end: the host's chooser, where its computer has one.
+  const pick = library.pick ? () => { usage.used("home_pick"); setError(""); void current.current.pick?.().catch(fail); } : null;
   const change = (action: "pin" | "unpin" | "remove" | "delete", item: Model) => current.current.change(action, item).then(setItems, fail);
   // Delete, once the person says so: a model's (or a shape's) document and its record, that model
   // alone; a file's record alone, the file kept. The card leaves the list at once.
@@ -365,6 +372,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
             <Button variant="ghost" size="icon-xs" aria-label={t("home.grid")} aria-pressed={layout === "grid"} onClick={() => { usage.used("home_layout_grid"); onLayoutChange("grid"); }}><LayoutGrid className="size-3.5" aria-hidden="true" /></Button>
             <Button variant="ghost" size="icon-xs" aria-label={t("home.list")} aria-pressed={layout === "list"} onClick={() => { usage.used("home_layout_list"); onLayoutChange("list"); }}><List className="size-3.5" aria-hidden="true" /></Button>
           </div> : null}
+          {pick ? <Button size="xs" className="text-ui" onClick={pick}><FolderOpen className="size-3.5" aria-hidden="true" />{t("home.open")}</Button> : null}
         </div>
       </div>
       {error ? <div className="cad-library-error" role="alert"><p>{error}</p></div> : null}

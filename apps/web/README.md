@@ -356,8 +356,10 @@ No snapshot is written while drawing or typing, and no image is rendered.
 The bare URL is the home: the library every CAD view shares (`@text-to-cad/ui/library`),
 and nothing else, laid out after Figma's Recents. It starts with one control row of 24px
 controls: "Recent" at the left as a plain small heading, and at the right the type filter, a dropdown
-("All ▾": All, Models, Files) where both kinds are listed, the search and the grid/list
-switch. The grid's tiles are transparent with a 1px border, at least 240px wide (four across
+("All ▾": All, Models, Files) where both kinds are listed, the search, the grid/list
+switch and, where the server's computer has a file chooser (`pick` in its info), **Open**,
+which opens the desktop's own chooser (`POST /__cad/pick`, `cadgen._internal.picker`) and shows
+the file picked. The grid's tiles are transparent with a 1px border, at least 240px wide (four across
 a 1280px window): a picture on the muted fill, then the kind's glyph (a model's cube, a
 file's file glyph, a file outline with its kind inside) beside its name over its last activity with no verb ("now", "5m ago", "2h
 ago", "3d ago", then the short date). The list is a table: Name, Updated and Opened over 40px

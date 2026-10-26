@@ -94,9 +94,12 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   8px apart, the **type filter**, a stock DropdownMenu whose ghost `xs` trigger names what it
   shows ("All ▾") and whose radio items are All, Models and Files, there only where models and
   files are both listed; the **search**, a stock Input 24px tall and 200px wide ("Search"); and
-  the **grid/list switch**, two `icon-xs` buttons, the chosen one on the `muted` fill. Then the
+  the **grid/list switch**, two `icon-xs` buttons, the chosen one on the `muted` fill; and last,
+  where the host's computer has a file chooser (`ModelLibrarySource.pick`), **Open**, a stock
+  `xs` button (24px) with the folder icon and "Open", which opens the desktop's own chooser
+  (`POST /__cad/pick`) and shows the file picked. Then the
   documents opened or built before, pinned first, then by last activity. The home is the
-  library alone: no folder of a launch. It spans the page on the navbar's 16px gutter, the
+  library and Open alone: no folder of a launch. It spans the page on the navbar's 16px gutter, the
   wordmark's left edge its own. In the grid, a **tile** is transparent on the
   page in both themes, a 1px `border`, a 12px radius and no shadow, the same under the pointer;
   columns at least 240px (four across a 1280px window), 24px apart. Its picture sits on the

@@ -24,6 +24,8 @@ export interface Launch {
   platform?: string;
   /** The home's library as it stood, so the home draws its cards without asking first. */
   recents?: Recent[];
+  /** Whether this computer has a file chooser for the home's Open. */
+  pick?: boolean;
   /** Whether a newer text-to-cad is out, as the server last read it: the update button draws with the page. */
   notice?: UpdateNotice | null;
   /**

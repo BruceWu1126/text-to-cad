@@ -82,6 +82,7 @@ export default {
   "home.searchAria": "모델 검색",
   "home.searchPlaceholder": "검색",
   "home.layout": "레이아웃",
+  "home.open": "열기",
   "home.grid": "그리드",
   "home.list": "목록",
   "home.openAria": "{name} 열기",

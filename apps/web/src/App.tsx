@@ -103,13 +103,15 @@ export default function App({ client, server, tabStore, notice = null, language:
     document.title = path ? String(entry?.name || path.split('/').pop()) : 'text-to-cad';
     if (path) void client.changeRecents({ action: 'open', path }).catch(() => {});
   }, [client]);
-  // The home: the library every CAD view shares. A card's picture is the server's, by name.
+  // The home: the library every CAD view shares, and Open with the desktop's chooser where the
+  // server's computer has one. A card's picture is the server's, by name.
   const library = useMemo<ModelLibrarySource>(() => ({
     list: () => client.recents(),
     change: (action, entry) => client.changeRecents({ action, path: entry.path }),
     thumbnail: name => Promise.resolve(cadApiUrl('/__cad/thumbnail', { origin: client.origin, params: { name } })),
     open: async entry => { await show(entry.path); },
-  }), [client, show]);
+    ...(server.pick ? { pick: async () => { const picked = await client.pick(); if (picked) await show(picked); } } : {}),
+  }), [client, server.pick, show]);
   const appearance = useTabAppearance(tabStore);
   const changeColorScheme = useCallback((value: string) => tabStore.settings.update({ appearance: value as Appearance }), [tabStore]);
   // The app menu's Theme row, over every file and on the home.

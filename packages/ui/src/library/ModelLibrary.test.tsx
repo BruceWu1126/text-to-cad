@@ -47,7 +47,23 @@ it('starts with its control row: Recent at the left, the search and the grid/lis
   expect(screen.queryByRole('link')).toBeNull();
 });
 
-it('opens and pins through the host, and with nothing yet says how a file gets here, with no Open of its own', async () => {
+it('ends its control row in Open where the host has a chooser, counted, and none where it has not', async () => {
+  const reports: { control: string; count: number; seconds: number }[][] = [];
+  const pick = vi.fn(async () => {});
+  const view = render(<ControlUsageProvider report={counts => reports.push(counts)}><ModelLibrary library={library([], { pick })} onLayoutChange={() => {}} /></ControlUsageProvider>);
+  await screen.findByText('Open a CAD file to see it here.');
+  const row = screen.getByRole('main', { name: 'CAD models' }).firstElementChild!;
+  // Last of the row, after the grid/list switch: the folder icon, "Open", 24px as its neighbours.
+  expect([...row.querySelectorAll('input, button')].map(node => node.getAttribute('aria-label') ?? node.textContent)).toEqual(['Search models', 'Grid', 'List', 'Open']);
+  const open = screen.getByRole('button', { name: 'Open', exact: true });
+  expect([open.getAttribute('data-size'), Boolean(open.querySelector('svg.lucide-folder-open'))]).toEqual(['xs', true]);
+  await act(async () => { fireEvent.click(open); });
+  expect(pick).toHaveBeenCalledTimes(1);
+  view.unmount();
+  expect(reports.flat()).toEqual([{ control: 'home_pick', count: 1, seconds: 0 }]);
+});
+
+it('opens and pins through the host, and with nothing yet says how a file gets here', async () => {
   render(<ModelLibrary library={library([])} onLayoutChange={() => {}} />);
   // The toolbar keeps its search and layout switch with nothing to list yet.
   expect(await screen.findByText('Open a CAD file to see it here.')).toBeTruthy();

@@ -82,6 +82,7 @@ export default {
   "home.searchAria": "モデルを検索",
   "home.searchPlaceholder": "検索",
   "home.layout": "レイアウト",
+  "home.open": "開く",
   "home.grid": "グリッド",
   "home.list": "リスト",
   "home.openAria": "{name} を開く",

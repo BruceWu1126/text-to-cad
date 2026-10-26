@@ -83,6 +83,7 @@ export default {
   "home.searchAria": "搜尋模型",
   "home.searchPlaceholder": "搜尋",
   "home.layout": "版面配置",
+  "home.open": "開啟",
   "home.grid": "格狀",
   "home.list": "清單",
   "home.openAria": "開啟 {name}",

@@ -271,6 +271,9 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
       if (!response.ok) return null;
       return `data:image/png;base64,${encodeBase64(new Uint8Array(await response.arrayBuffer()))}`;
     },
+    pick() {
+      return request('/__cad/pick', { method: 'POST', headers: { 'x-cadgen-viewer': '1' }, operation: 'pick' }).then((reply) => reply.path ?? null);
+    },
     async reveal(path) {
       const response = await fetchImpl(cadApiUrl('/__cad/reveal', { origin }), { method: 'POST', headers: JSON_POST, body: JSON.stringify({ path }) });
       if (!response.ok) {

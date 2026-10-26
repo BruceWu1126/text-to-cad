@@ -1,4 +1,4 @@
-"""An operating-system helper (a file manager, a clipboard tool, fontconfig) found
+"""An operating-system helper (a file manager, a clipboard tool, a file chooser, fontconfig) found
 by name for a process that runs for others: the engine daemon and its children, which stand in a
 folder the person never chose and keep the PATH of whichever client started them.
 

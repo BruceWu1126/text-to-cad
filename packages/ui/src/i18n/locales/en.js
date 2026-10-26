@@ -95,6 +95,7 @@ export default {
   "home.searchAria": "Search models",
   "home.searchPlaceholder": "Search",
   "home.layout": "Layout",
+  "home.open": "Open",
   "home.grid": "Grid",
   "home.list": "List",
   "home.openAria": "Open {name}",

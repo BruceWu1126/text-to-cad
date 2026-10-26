@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest import mock
 from urllib.parse import quote
 
+from cadgen._internal.picker import FilePicker, PickerFailed
 from cadgen.viewer import handler as handler_module
 from cadgen.viewer.http_app import create_cad_app, host_is_allowed, hostname_only
 
@@ -214,8 +215,9 @@ class ServerInfo(HttpLayerTestCase):
         # No tolerance: the page reads each part's one display mesh by its key.
         # Where the explorer starts with nowhere else to: the person's home folder, spelled with "/".
         self.assertEqual(info["home"], os.path.expanduser("~").replace(os.sep, "/"))
+        self.assertIsInstance(info["pick"], bool)
         self.assertEqual(list(info), ["app", "identityToken", "platform", "user", "home",
-                                      "start", "port", "pid"])
+                                      "start", "pick", "port", "pid"])
         self.assertEqual(headers["cache-control"], "no-store")
 
     def test_json_is_compact_and_not_ascii_escaped(self):
@@ -327,6 +329,45 @@ class ExplorerRoutes(HttpLayerTestCase):
                 self.assertEqual(self.read(route, folder / "arm" / "link.step")[0], 404)
         with mock.patch("cadgen.viewer.folders.list_folder", side_effect=PermissionError("denied")):
             self.assertEqual(self.read("folder", folder)[0], 403)
+
+
+class Pick(HttpLayerTestCase):
+    """The home's Open: the desktop's chooser, held for the page (and never opened by a test)."""
+
+    def pick(self, **behaviour):
+        with mock.patch.object(FilePicker, "choose", **behaviour):
+            status, _, body = self.fixture.request("POST", "/__cad/pick", headers={"x-cadgen-viewer": "1"})
+        return status, json.loads(body)
+
+    def test_a_cad_file_is_its_path_and_anything_else_says_why(self):
+        chosen = os.path.join(self.fixture.root, "part.step")
+        self.assertEqual(self.pick(return_value=chosen), (200, {"path": chosen.replace(os.sep, "/")}))
+        self.assertEqual(self.pick(return_value=None), (200, {"cancelled": True}))
+        status, answer = self.pick(return_value=os.path.join(self.fixture.root, "notes.txt"))
+        self.assertEqual(status, 400)
+        self.assertIn("notes.txt is not one", answer["error"])
+        self.assertEqual(self.pick(side_effect=PickerFailed("no chooser here")), (500, {"error": "no chooser here"}))
+        self.assertEqual(self.fixture.request("POST", "/__cad/pick")[0], 403, "a page from another site cannot open it")
+
+    def test_a_second_open_while_one_is_up_says_so(self):
+        opened, release, answers = threading.Event(), threading.Event(), []
+
+        def run(argv, **_):
+            opened.set()
+            release.wait(10)
+            return subprocess.CompletedProcess(argv, 1, b"", b"")  # the person cancelled
+
+        with mock.patch("cadgen._internal.picker._command", return_value=(["chooser"], {}, False)), \
+                mock.patch("cadgen._internal.picker.subprocess.run", side_effect=run):
+            first = threading.Thread(target=lambda: answers.append(
+                self.fixture.request("POST", "/__cad/pick", headers={"x-cadgen-viewer": "1"})[0]))
+            first.start()
+            self.assertTrue(opened.wait(10))
+            second = self.fixture.request("POST", "/__cad/pick", headers={"x-cadgen-viewer": "1"})
+            release.set()
+            first.join(10)
+        self.assertEqual((second[0], json.loads(second[2])), (500, {"error": "A file chooser is already open."}))
+        self.assertEqual(answers, [200])
 
 
 class StaticDistAndSpa(HttpLayerTestCase):
@@ -545,7 +586,7 @@ class MethodHandling(HttpLayerTestCase):
                 self.assertNotIn("content-type", {k.lower() for k in headers})
 
     def test_a_route_asked_with_its_other_method_answers_405_naming_its_own(self):
-        for method, path, allowed in (("GET", "/__cad/reveal", "POST"),
+        for method, path, allowed in (("GET", "/__cad/pick", "POST"), ("GET", "/__cad/reveal", "POST"),
                                       ("GET", "/__cad/analytics/activity", "POST"), ("POST", "/__cad/server", "GET, HEAD")):
             with self.subTest(method=method, path=path):
                 status, headers, body = self.fixture.request(method, path, headers={"x-cadgen-viewer": "1"})

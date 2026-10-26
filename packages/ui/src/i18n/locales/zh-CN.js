@@ -83,6 +83,7 @@ export default {
   "home.searchAria": "搜索模型",
   "home.searchPlaceholder": "搜索",
   "home.layout": "布局",
+  "home.open": "打开",
   "home.grid": "网格",
   "home.list": "列表",
   "home.openAria": "打开 {name}",
