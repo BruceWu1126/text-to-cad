@@ -249,11 +249,24 @@ class EventTest(unittest.TestCase):
                      "instances": [], "kinematics": {}}
         frames: list[dict] = []
         self.enterContext(mock.patch.object(progress, "INTERVAL", 0))
-        api._summary(structure, Path("/x/kit.xbf"), lambda route: {key: {"volume": 1.0, "box": None} for key in ("a", "b")}, "id", frames.append)
+        read = mock.Mock(return_value={key: {"volume": 1.0, "box": None} for key in ("a", "b")})
+        api._summary(structure, Path("/x/kit.xbf"), read, "id", frames.append)
+        read.assert_called_once_with("/volumes")
         self.assertEqual([(frame["kind"], frame["stage"], frame["job"], frame["detail"], frame["done"], frame["total"])
                           for frame in frames],
                          [("inspect-measure", "measure", "kit", "", 0, 2), ("inspect-measure", "measure", "kit", "box", 1, 2),
                           ("inspect-measure", "measure", "kit", "peg", 2, 2)])
+
+    def test_structure_requests_no_measurements_and_emits_no_measurement_progress(self) -> None:
+        from cadgen.engine import api
+
+        read = mock.Mock(side_effect=AssertionError("structure requested measurements"))
+        frames: list[dict] = []
+        found = api._summary({"name": "kit", "prototypes": [{"key": "a"}]},
+                             Path("/x/kit.xbf"), read, "id", frames.append, measured=False)
+        read.assert_not_called()
+        self.assertEqual(frames, [])
+        self.assertFalse({"bounds", "volume", "mass"} & found.keys())
 
 
 class BarTest(unittest.TestCase):

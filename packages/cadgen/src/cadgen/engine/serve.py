@@ -65,8 +65,8 @@ the parts' shapes are collected (the reader writes its counts to a file the serv
 waits) -- and nothing once the document is in, or what failed.
 
 Meshing runs off the request's thread (``Mesher``): by default on a pool of processes
-started with the first page or view (``warm``) or the first mesh, topology or pose asked, and
-kept warm, each handed one part's shape bytes; or ``inline``
+started as facts need them (including measurements after a build), or all at once with the
+first page or mesh (``warm``), and kept warm, each handed one part's shape bytes; or ``inline``
 (``CADGEN_ENGINE_MESH=inline``, or ``?mode=inline``), one part after another on one thread,
 each spread over the kernel's own threads. A document's parts go to the pool largest
 first, by their shape bytes (of face count, bounding diagonal and bytes, the bytes

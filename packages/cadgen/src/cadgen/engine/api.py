@@ -696,7 +696,10 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None, pr
     ``query="geometry"`` requires a ref, and ``query="closure"`` accepts none.
     ``query="summary"`` (``cadgen inspect DOC`` with no ref) is ``{"summary", "closure"}``:
     what the document holds at a glance (``_summary``), and its closure, as the engine holds it; of
-    a GLB, ``{"mesh"}``: its nodes, meshes and animations, from its JSON alone (``_mesh``). No form meshes anything. A part's volume and box are cached by geometry key and measured in batches. Summary measurement goes,
+    a GLB, ``{"mesh"}``: its nodes, meshes and animations, from its JSON alone (``_mesh``).
+    ``query="structure"`` is the summary without bounds, volume or mass and requests no measurements.
+    No form meshes anything. A part's volume and box are cached by geometry key and measured in
+    batches. Summary measurement goes,
     frame by frame, to ``progress`` (``progress.py``: ``inspect-measure``, ``measure``, counted), as
     ``export`` takes it -- by default a bar on stderr when it is a terminal and nowhere when it is
     not, ``False`` nowhere, a callable each frame."""
@@ -725,8 +728,8 @@ def _inspected(source: Any, ref: str | None, query: str | None, progress: Callab
         raise EngineError("source reference and ref disagree")
     ref = ref if ref is not None else embedded_ref
     query = query or ("geometry" if ref is not None else "closure")
-    if query not in ("closure", "geometry", "build", "summary"):
-        raise EngineError("query is closure, geometry, build or summary")
+    if query not in ("closure", "geometry", "build", "summary", "structure"):
+        raise EngineError("query is closure, geometry, build, summary or structure")
     if (query == "geometry") != (ref is not None):
         raise EngineError("only a geometry query requires a reference")
     mesh = key(os.fspath(source))
@@ -771,8 +774,9 @@ def _inspected(source: Any, ref: str | None, query: str | None, progress: Callab
         raise refs.RefError(said or f"HTTP {read['status']}")
 
     structure = get("")
-    if query == "summary":
-        return {"summary": _summary(structure, path, get, ident, progress), "closure": structure.get("closure")}
+    if query in ("summary", "structure"):
+        return {"summary": _summary(structure, path, get, ident, progress, measured=query == "summary"),
+                "closure": structure.get("closure")}
     if ref is None:
         if not structure.get("closure"):
             raise EngineError(f"{source} holds no build closure")
@@ -808,7 +812,7 @@ def _mesh(path: Path, named: str, query: str) -> Facts:
     build closure: only an .xbf carries one."""
     if not path.is_file():
         raise ValueError(f"no document {named}")
-    if query != "summary" or path.suffix.lower() != ".glb":
+    if query not in ("summary", "structure") or path.suffix.lower() != ".glb":
         said = (f"`cadgen inspect {path.name}` alone tells its nodes, meshes and animations, and "
                 f"`cadgen viewer {path.name}` shows it" if path.suffix.lower() == ".glb" else
                 f"inspect reads nothing more of it: `cadgen viewer {path.name}` shows it, and the document it was "
@@ -887,7 +891,7 @@ def couplings_of(kinematics: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], Any], ident: str,
-             progress: Callable[[dict], None] | None = None) -> dict[str, Any]:
+             progress: Callable[[dict], None] | None = None, *, measured: bool = True) -> dict[str, Any]:
     """What a served document holds, at a glance (``cadgen inspect DOC``): its name and id; its
     state -- a model's (``live``, ``held``, ...: ``ModelDocuments.state``), where the engine holds
     it and whether its cache has it, or ``file`` for a file's document; its parts (occurrences,
@@ -895,7 +899,8 @@ def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], A
     engine's facts of every part, kept by geometry key and measured together) placed where its
     occurrences stand; its materials and their masses, where any part has one; its joints,
     mechanism states, configuration sequences and animations; and a model's declared files.
-    Nothing is built."""
+    Nothing is built. Not ``measured`` (``query="structure"``): no bounds, volume or masses, and
+    nothing measured for them -- the lists alone."""
     from cadgen.engine.refs import placed_facts
 
     model = None
@@ -910,20 +915,22 @@ def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], A
     else:
         state = {"state": "file", "path": str(path) if isinstance(path, Path) else structure.get("path")}
     prototypes, instances = structure.get("prototypes") or [], structure.get("instances") or []
-    from cadgen.engine.progress import Progress
+    each: dict[str, dict[str, Any]] = {}
+    if measured:
+        from cadgen.engine.progress import Progress
 
-    said = Progress(progress or (lambda _frame: None), kind="inspect-measure", job=str(structure.get("name") or ident))
-    said.stage("measure", count=[0, len(prototypes)])
-    each: dict[str, dict[str, Any]] = get("/volumes") if prototypes else {}
-    for index, prototype in enumerate(prototypes, 1):
-        said.counted(index, len(prototypes), detail=str(prototype.get("name") or ""))
-    said.close()
+        said = Progress(progress or (lambda _frame: None), kind="inspect-measure", job=str(structure.get("name") or ident))
+        said.stage("measure", count=[0, len(prototypes)])
+        each = get("/volumes") if prototypes else {}
+        for index, prototype in enumerate(prototypes, 1):
+            said.counted(index, len(prototypes), detail=str(prototype.get("name") or ""))
+        said.close()
     low, high, volume = [math.inf] * 3, [-math.inf] * 3, 0.0
     materials: dict[str, dict[str, Any]] = {}
     unweighed: list[str] = []
     for instance in instances:
         prototype = prototypes[instance["prototype"]]
-        facts = each[prototype["key"]]
+        facts = each[prototype["key"]] if measured else {}
         volume += facts.get("volume") or 0.0
         if facts.get("box"):
             box = placed_facts({"box": facts["box"]}, instance["matrix"])["box"]
@@ -936,7 +943,7 @@ def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], A
         row = materials.setdefault(material["name"], {"name": material["name"], "density": material.get("density"),
                                                       "parts": [], "mass": None})
         row["parts"].append(instance["path"])
-        if material.get("density") is not None:
+        if measured and material.get("density") is not None:
             row["mass"] = (row["mass"] or 0.0) + (facts.get("volume") or 0.0) * 1e-9 * material["density"]
     bounds = None if low[0] == math.inf else {"min": low, "max": high, "size": [b - a for a, b in zip(low, high)]}
     kinematics = structure.get("kinematics") or {}
@@ -945,7 +952,7 @@ def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], A
                "units": pair.get("units"), "asBuilt": built.get(pair.get("label"))}
               for pair in kinematics.get("pairs") or []]
     weighed = [row["mass"] for row in materials.values() if row["mass"] is not None]
-    return {
+    found = {
         "name": structure.get("name"), "id": ident, "state": state,
         "parts": {"occurrences": len(instances), "distinct": len(prototypes), "root": (structure.get("tree") or {}).get("name")},
         "bounds": bounds, "volume": volume,
@@ -959,6 +966,12 @@ def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], A
         "animations": structure.get("animations") or [],
         "files": list((model or {}).get("files") or []),
     }
+    if not measured:
+        # The lists alone: nothing was measured, so there are no bounds, volume or masses (never a zero).
+        for name in ("bounds", "volume", "mass"):
+            del found[name]
+        found["materials"] = [{key: value for key, value in row.items() if key != "mass"} for row in found["materials"]]
+    return found
 
 
 def status() -> dict[str, Any] | None:

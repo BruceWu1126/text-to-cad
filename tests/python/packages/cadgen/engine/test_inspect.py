@@ -1,7 +1,8 @@
 """``cadgen inspect DOC`` without a ref: what the document holds, on one screen, before its build
 closure -- its state, parts, bounds, volume, materials, joints, states, sequences and declared
-files -- read from the document the engine holds, and nothing built; ``--json`` the same as data.
-A document inspected once is measured again after its next build, before it is asked for."""
+files -- read from the document the engine holds, and nothing built; ``--json`` the same as data;
+``--query structure`` the same lists with nothing measured. A document inspected once is measured
+again after its next build, before it is asked for."""
 
 from __future__ import annotations
 
@@ -77,6 +78,26 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(built.returncode, 0, built.stderr)
         ident = next(line.split()[1] for line in built.stdout.splitlines() if line.strip().startswith("id:"))
         (self.folder / "hinge.ran").unlink()
+
+        deadline = time.monotonic() + 120
+        while self.facts() == 0:
+            self.assertLess(time.monotonic(), deadline, "new builds are measured before any inspection")
+
+        # The structure: the summary's lists, nothing measured for them.
+        listed = self.run_("-m", "cadgen.engine", "inspect", ident, "--query", "structure")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        lines = listed.stdout.splitlines()
+        self.assertEqual(lines[2:7], ["parts       2 in hinge", "materials", "  Aluminum 6061-T6: hinge/base",
+                                      "  no material: hinge/arm", "joints"])
+        self.assertIn("closure", lines)
+        data = self.run_("-m", "cadgen.engine", "inspect", ident, "--query", "structure", "--json")
+        self.assertEqual(data.returncode, 0, data.stderr)
+        structure = json.loads(data.stdout)["summary"]
+        self.assertFalse({"bounds", "volume", "mass"} & set(structure), structure)
+        self.assertEqual(structure["materials"], [{"name": "Aluminum 6061-T6", "density": 2700.0, "parts": ["hinge/base"]}])
+        self.assertEqual(structure["states"], [{"name": "open", "values": {"elbow": 90.0}}])
+        # Build-time measurement is independent of the structure query.
+
 
         shown = self.run_("-m", "cadgen.engine", "inspect", ident)
         self.assertEqual(shown.returncode, 0, shown.stderr)
