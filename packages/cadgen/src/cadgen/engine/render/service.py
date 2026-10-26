@@ -81,13 +81,17 @@ def frame_camera(scene: Any, spec: dict[str, Any], projection: str, focal_length
     page fits one with its tight frame on (``fitOrthographicCamera`` then
     ``applyTightOrthographicFrame``, ``fitPerspectiveCamera``): its direction, up and target, then
     the frame on every placed vertex, ``padding`` of the picture each side; ``tight`` off, on the
-    drawn parts' box. (A view's own camera drawn exactly -- ``--camera authored``, a job's view
-    with its tight frame off -- is ``Scene.frame``'s.) Sets ``scene.camera`` as ``Scene.frame``
-    does, for the overlays."""
+    drawn parts' box. Its lengths (``position``, ``target``, ``orthographicHalfHeight``) are in the
+    viewer's scene coordinates, as a Quick Edit packet's view carries them
+    (``camera_in_millimetres``). (A view's own camera drawn exactly -- ``--camera authored``, a
+    job's view with its tight frame off -- is ``Scene.frame``'s.) Sets ``scene.camera`` as
+    ``Scene.frame`` does, for the overlays."""
     from OCP.Graphic3d import Graphic3d_Camera
     from OCP.gp import gp_Dir, gp_Pnt
 
-    from cadgen.engine.render.occt import PRESETS, occt_fov, occt_scale, vertical_fov
+    from cadgen.engine.render.occt import PRESETS, camera_in_millimetres, occt_fov, occt_scale, vertical_fov
+
+    spec = camera_in_millimetres(spec, scene.millimetres_per_scene_unit)
 
     def vector(name: str) -> np.ndarray | None:
         value = spec.get(name)

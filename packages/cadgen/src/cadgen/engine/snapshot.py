@@ -28,7 +28,12 @@ exploded=0.6`` (or ``display.exploded``) moves the parts apart as the viewer's E
 amount (0.5 unless one is given). ``--annotation FILE`` draws the viewer's annotation over the
 model (its ink on the parts it was drawn on, wherever they stand): an annotation file, or the Quick
 Edit packet that carries one (a ``.snapshot.json``). ``--measurements FILE`` draws Measure's
-dimensions. ``--camera authored`` draws the picture from the view the ink was drawn in, exactly
+dimensions. A camera object's lengths (``position``, ``target``, ``orthographicHalfHeight``), a
+measurement's points and the ink are in the viewer's scene coordinates, as a Quick Edit packet
+carries them -- a document's and a GLB's millimetres, a robot's metres, a 3MF's declared unit --
+and a still reads them through the structure's ``millimetresPerSceneUnit`` (``render/occt.py``
+``camera_in_millimetres``); ``clip.at`` alone is in the file's unit, a GLB's metres.
+``--camera authored`` draws the picture from the view the ink was drawn in, exactly
 (no fit): a mark names its view only by label ("view 1"), and the view -- its camera, size and
 projection -- is a job of the packet (``authored``). Nothing is written but OUT.
 
@@ -1039,8 +1044,10 @@ def _arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
                                           "or as {\"appearance\": ...}")
     parser.add_argument("--grid", action="store_true", help="draw the measuring grid")
     parser.add_argument("--camera", help="a preset (iso, front, back, left, right, top, bottom), azimuth:elevation, "
-                                         "a camera JSON object, or authored: the view --annotation's ink was drawn "
-                                         "in, from its Quick Edit packet, exactly")
+                                         "a camera JSON object (its position, target and orthographicHalfHeight in "
+                                         "the viewer's scene coordinates, as a Quick Edit packet carries them: a "
+                                         "document's or a GLB's mm, a robot's m, a 3MF's unit), or authored: the "
+                                         "view --annotation's ink was drawn in, from its Quick Edit packet, exactly")
     parser.add_argument("--preview", action="store_true", help="Preview's photographic look instead of the mode")
     parser.add_argument("--width", type=int)
     parser.add_argument("--height", type=int)
@@ -1053,7 +1060,8 @@ def _arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
                                                               "(.snapshot.json) that carries it: its ink drawn over the "
                                                               "model, on the parts it was drawn on")
     parser.add_argument("--measurements", metavar="FILE", help="Measure's dimensions (a JSON list of {start, end, label, "
-                                                                "color}), drawn over the model")
+                                                                "color}; the points in the viewer's scene coordinates, "
+                                                                "as --camera's lengths), drawn over the model")
     parser.add_argument("--json", action="store_true", help="print what was drawn and its timings as JSON")
     return parser
 

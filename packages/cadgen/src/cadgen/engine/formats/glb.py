@@ -10,7 +10,9 @@ texture drawn on it.
   placement shares (OCCT keeps the file's units in its nodes' locations) is moved into the part's
   points, so its placements are rigid and its points millimetres. A length of the file -- where
   ``display.clip.at`` stands -- is in glTF's metres, as the viewer reads one (``millimetresPerUnit``
-  1000).
+  1000); the viewer's scene draws those metres as millimetres (core's ``lib/render/glbScene.js``), so a
+  Quick Edit packet's camera, Measure's points and the ink are millimetres already
+  (``millimetresPerSceneUnit`` 1).
 - **Parts**: a mesh's triangulations (nodes, triangles, normals, texture coordinates), read from
   OCCT's binary shape format with numpy (``mesh.py``'s way); one face per primitive, with the
   viewer's feature edges (``buffer.py``, three's rounding at 1e-4 of the file's metres).
@@ -436,4 +438,4 @@ def glb_file(path: Path) -> Foreign:
     if not any(part.mesh.triangles for part in parts):
         raise FormatError(f"{path.name} holds no triangles to draw")
     return assemble("glb", path, tree.get("name") or path.stem, parts, placed, tree, files_of([path]),
-                    warnings=warnings, unit=1000.0)  # glTF's metres
+                    warnings=warnings, unit=1000.0, scene_unit=1.0)  # glTF's metres, drawn as millimetres
