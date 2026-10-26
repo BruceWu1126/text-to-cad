@@ -478,7 +478,7 @@ only, and a file's id is derived again from its path after a restart.
 | `door.py` | how a client reaches the daemon on POSIX: the door, a named pipe, and a pair of pipes per connection (**The door**) |
 | `progress.py` | where a build is: the engine's stages heard where they begin, each body a model's body runs by name, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
-| `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads, staleness (`changes`); kept until a person deletes it, with no cap (`Cache`) |
+| `cache.py` | the document cache: each model document's bytes in the cache folder (`documents/<id>/document.xbf`), saved when idle, at its drain and at shutdown, once per revision; the index a restart reads; kept until a person deletes it, with no cap (`Cache`) |
 | `registry.py` | the registry of documents in the user's state folder (`Registry`: `get`, `put`, `list`, `delete`), the user's page token (`token`, `put_token`), each installation's engine record (`engine`, `put_engine`: its rolled port), and the one owner of every write under that folder (`Folder`); where the folder is, the distribution's (`FACTORY`) |
 | `cli.py` | the verbs as commands: `cadgen export`, `snapshot`, `serve`, `inspect`, `status`, `stop`, `delete`, `server` (`parser_for`, `run`; also `python -m cadgen.engine VERB`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
@@ -555,7 +555,7 @@ raises; a successful call resumes the script. A failed run's line says when the 
 good build is still served (`failed parts.py::bad; serving its previous good build`), and, the
 error left uncaught, that the program stopped there: `the run stopped at bad: a model it calls
 after this one is not built`. Nothing builds those models for it: Python decides which calls run
-(law 11), so they say `stale` until the program runs again. A body that fails in a kernel call with an OCCT exception (often bare: `Standard_Failure`,
+(law 11), so each keeps the document of its last run until the program runs again. A body that fails in a kernel call with an OCCT exception (often bare: `Standard_Failure`,
 `Standard_DomainError`, by OCCT build) has that call named on its failure line, as the memo saw it --
 `failed plate.py::plate at Solid.make_box(0, 60, 5): the kernel refused it` -- and in its report
 (`failedAt`; `memo.refused_call`). Put executable model calls under
@@ -948,7 +948,7 @@ it is refused: a body returns its shape.
 distribution names the folder, `cadgen.viewer.recents.state_dir`): it points; a document's bytes
 are the cache's, in the cache folder (**The cache**).
 Every record has one shape, `{schema, id, kind, root, home, entry, revision, built, key?, facts?,
-program?, cache?{revision, bytes, read}, opened?, pinned?, preview?}`, and holds what a restart needs
+program?, cache?{revision, bytes}, opened?, pinned?, preview?}`, and holds what a restart needs
 and no more. `kind` says what it is: `model` (`home` and `entry`, its script and function; the
 command that builds it again is always `cadgen run` of its home), `shape` (a shape handed over:
 `program`, where there was one, names the program that showed it, and nothing builds it again) or
@@ -956,8 +956,7 @@ command that builds it again is always `cadgen run` of its home), `shape` (a sha
 model's and a shape's hold their revision and when they were built, their `key=` and a build's facts
 (what the delta says against); any record its Recents picture (`preview`, UI state: the PNG under
 `recents/thumbnails`), and a model's or a shape's `cache` once the cache holds it (**The cache**).
-What a build read is the cache's (`cache.read`), and its closure is its document's own (**Build
-closure**): neither is copied here. Nothing records which files a model declared or wrote: a
+Its closure is its document's own (**Build closure**): it is not copied here. Nothing records which files a model declared or wrote: a
 declared file is an export, a plain file to every surface. Every path in it is relative to its one `root`, so a record moves by one field. It is written synchronously
 as a build registers, and only when a field differs: an unchanged build rewrites
 nothing; each write is then told to `registry.OBSERVERS`, never waited on. It is read on demand,
@@ -995,7 +994,7 @@ bytecode is under `pycache/`), and lists, counts and removes nothing else there 
 - at shutdown (`cadgen stop`, a terminate), best effort within 10 s (`cache.SHUTDOWN_SECONDS`), for
   the documents built or read in the last idle window.
 
-Once per revision: the record gains `cache: {revision, bytes, read}`, and a document
+Once per revision: the record gains `cache: {revision, bytes}`, and a document
 whose revision is the cache's is never written again. A restart indexes the cache files (a listing
 and a stat, nothing read); a document with one is `held` and answers every verb -- page, export,
 snapshot, inspect, `cad_show` -- by reading its bytes through the documents worker, as a held
@@ -1016,22 +1015,21 @@ all the same, as exports of the document it took (**Exports**): each translated,
 the file, and written only where it differs or is missing, so a declared file someone deleted or
 edited is written again from the document with nothing run. Nothing is recorded of what was
 written, and nothing records which model wrote a file: an exported or declared file on disk is a
-plain file to every surface.
+plain file to every surface. A verb given its path reads the file, in the documents worker, never
+the document of the model whose build wrote it (`Daemon._routed`), and the engine lists a model that
+declares files like any other.
 
-**Staleness.** `read` is what the build read, with digests: the script and each module its model
-reached (each file's bytes, SHA-256, as the build answered) and each file its bodies read (the
-closure's own digests). On a page's open, a verb's read, `status` and `cad_show` of a document,
-whether or not a worker holds it, the engine compares them with the files now (`Models.stale`; a
-file's digest is kept by its size and mtime, so an unchanged file is not read again): unchanged, the page shows the
-current model; changed, it shows the last built state, with a badge -- "The code changed since this
-was built" and the rebuild command -- and `inspect` answers `stale`. Nothing reruns. Every verb
-that reads a document by its id (`export`, `snapshot`, `inspect`, with a ref or without) says once
-on stderr what it reads when that is not what the code makes now (`cli.told_state`, from
-`model_info`): "exporting the build of turbine from before turbine.py changed; run `cadgen run
-…/turbine.py` to update it", or, for a document whose last run failed, "the last run of turbine
-failed; exporting its previous good build; fix it and run `cadgen run …/turbine.py` to update it". It
-goes on: a notice, never a refusal. `cadgen status` ends such a document's line with the word: stale
-and the command, or "serving its previous good build". A font is named by a family, not checked.
+**The last run.** A document is what its model's last run made, and that is all the engine knows
+of the code: it never compares a script, a module or an input file on disk with what a build read,
+and no surface -- the page, `status`, `inspect`, `export`, `snapshot`, `cad_show` -- says whether
+the code has changed since. When to run the code again is the agent's call (`cadgen run`), and
+nothing reruns on its own. What the engine knows from its own last run it says: a document whose
+last run failed is served as its previous good build, and every verb that reads it by its id
+(`export`, `snapshot`, `inspect`, with a ref or without) says so once on stderr (`cli.told_state`,
+from `model_info`) -- "the last run of turbine failed; exporting its previous good build; fix it
+and run `cadgen run …/turbine.py` to update it" -- and goes on: a notice, never a refusal. `cadgen
+status` ends that document's line with "serving its previous good build"; an `unsaved` one's with
+the command that builds it again (**The rebuild command**).
 
 **Kept until deleted.** Nothing removes a cache file on its own: the cache has no size cap, no
 least recently used and no age, and keeps every model document -- a shape handed over's as a

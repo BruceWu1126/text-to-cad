@@ -80,8 +80,9 @@ Laws 1 to 13 and 19 to 22 are the engine's; 14 to 18 hold for the whole package.
    -- and made again by a run of its script (a shape's by the program that handed it over), so a
    restart opens every project at once; and under `pycache/` the bytecode its own processes compile of the libraries they load
    (`PYTHONPYCACHEPREFIX`, a folder per installation), regenerable too, so nothing is written
-   beside a library or a model. The code stays the only source of truth: a document whose code changed since says so,
-   with the command that builds it again, and nothing reruns. It writes no
+   beside a library or a model. The code stays the only source of truth: a document is what its
+   last run made, the engine never checks the code on disk against it, and nothing reruns -- when
+   to run the code again is the agent's call. It writes no
    sidecar, record of a build beside a model, index, memo, mesh or parsed document, and no derived file
    beside an input. A model whose document -- in its warm worker, else the cache -- holds the closure the
    model has now is not run, whatever files it declares: they are exports of the document, written
