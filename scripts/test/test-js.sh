@@ -38,16 +38,21 @@ if [ "$SELECT" = core ] || [ "$SELECT" = all ]; then
   section "@text-to-cad/core tests"
   npm --prefix packages/core test
 fi
+# Each selected workspace is type-checked (tsc) before its suite runs: the apps' Vite builds and
+# the Node test runners check no types, so this is where a type error in them fails.
 if [ "$SELECT" = ui ] || [ "$SELECT" = all ]; then
   section "@text-to-cad/ui tests"
+  npm --prefix packages/ui run typecheck
   npm --prefix packages/ui test
 fi
 if [ "$SELECT" = web ] || [ "$SELECT" = all ]; then
   section "CAD Viewer tests"
+  npm --prefix apps/web run typecheck
   npm --prefix apps/web run test
 fi
 if [ "$SELECT" = mcp ] || [ "$SELECT" = all ]; then
   section "CAD app tests"
+  npm --prefix apps/mcp run typecheck
   npm --prefix apps/mcp run test
   # The build is the other half of the contract: one index.html with nothing outside it.
   npm --prefix apps/mcp run build

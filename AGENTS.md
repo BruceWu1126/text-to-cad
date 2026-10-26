@@ -273,7 +273,8 @@ when touching shared surfaces or before handoff:
 - Packaged runtime builds and is complete: `scripts/bundle/bundle.sh --check`
 - CAD Viewer or shared packages: build exports with `npm run build:packages`,
   then `npm --prefix packages/core test`, `npm --prefix packages/ui test`,
-  `npm --prefix apps/web run test`, `npm --prefix apps/web run build`.
+  `npm --prefix apps/web run typecheck`, `npm --prefix apps/web run test`,
+  `npm --prefix apps/web run build` (`scripts/test/test-js.sh` runs them all).
   The Viewer is two languages and `npm run test` covers only the client — the
   backend's suite is `tests/python/packages/cadgen/viewer`, run by
   `scripts/test/test-python.sh`. Touching `cadgen/viewer/` means running that.

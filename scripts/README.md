@@ -45,9 +45,10 @@ where those files ship, so these scripts are what produces them.
   whole tree on one machine, for a local run; `test.yml` calls the focused
   runners per job instead.
 - `test-js.sh [--select core|ui|web|mcp|all]` — builds the required shared exports,
-  checks dependency boundaries and runs the selected shared JS/UI/web suites.
-  `mcp` runs the CAD app's tests and builds it, since its one-file build is half
-  its contract.
+  checks dependency boundaries, type-checks each selected workspace (`npm run
+  typecheck`: `tsc`, which neither Vite's builds nor the Node test runners do) and
+  runs its suite. `mcp` runs the CAD app's tests and builds it, since its one-file
+  build is half its contract.
 - `test-python.sh [--keep-going] [--select GROUP] [--print-weights] [PATH...]`
   — the cadgen package suite, then every skill's suite. Each test FILE runs in
   its own interpreter with an engine daemon of its own, `CADGEN_TEST_JOBS` at a

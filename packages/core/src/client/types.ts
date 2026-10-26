@@ -30,6 +30,8 @@ export interface CadServerInfo {
   platform?: string;
   /** The person's home folder, `/`-separated: where the explorer starts with nowhere else to. */
   home?: string;
+  /** The engine process answering (`os.getpid()`): another pid after the engine was gone is a new engine, which reloads the page. */
+  pid?: number;
   [key: string]: unknown;
 }
 /** A model in the library every CAD view shares (`GET /__cad/recents`): times in seconds. */

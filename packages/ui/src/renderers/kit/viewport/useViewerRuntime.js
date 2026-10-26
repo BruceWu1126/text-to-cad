@@ -479,14 +479,14 @@ export function useViewerRuntime({
       // draws nothing; a frame asked of it meanwhile is owed, and drawn the moment it is resumed.
       let suspended = false;
       let owedWhileSuspended = false;
+      const frameTime = () => (typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now());
       const requestRender = () => {
         if (released) return;
         if (suspended) { owedWhileSuspended = true; return; }
         if (interactionState.renderQueued) {
-          const now = typeof performance !== "undefined" && typeof performance.now === "function"
-            ? performance.now()
-            : Date.now();
-          if (interactionState.renderQueuedAt && now - interactionState.renderQueuedAt < 120) {
+          if (interactionState.renderQueuedAt && frameTime() - interactionState.renderQueuedAt < 120) {
             return;
           }
           window.cancelAnimationFrame(rafId);
@@ -494,23 +494,27 @@ export function useViewerRuntime({
           interactionState.renderQueuedAt = 0;
         }
         interactionState.renderQueued = true;
-        interactionState.renderQueuedAt = typeof performance !== "undefined" && typeof performance.now === "function"
-          ? performance.now()
-          : Date.now();
+        interactionState.renderQueuedAt = frameTime();
         rafId = window.requestAnimationFrame(renderFrame);
         if (interactionState.renderFallbackTimerId) {
           window.clearTimeout(interactionState.renderFallbackTimerId);
         }
+        // The frame is the browser's: drawn in its next animation frame, however late that comes. A
+        // VISIBLE document whose frame is late is a browser behind on the frames already handed to it
+        // (its GPU still drawing them, a software one by the second), and the frame waits for its turn:
+        // drawn from this timer instead, it would hand the GPU another frame every 120 ms for as long as
+        // frames were asked for, and leave it drawing them -- nothing shown, no pointer heard -- long after
+        // the camera had stopped (a drag in Preview under SwiftShader queued five draws for every frame it
+        // showed). A HIDDEN document (a background tab, an agent app's browser pane) gets no animation
+        // frames at all: its frame is drawn from this timer, and a document that hides while its frame
+        // waits draws it as it hides (`handleVisibilityChange`).
         interactionState.renderFallbackTimerId = window.setTimeout(() => {
-          if (!interactionState.renderQueued) {
+          interactionState.renderFallbackTimerId = 0;
+          if (!interactionState.renderQueued || document.visibilityState === "visible") {
             return;
           }
           window.cancelAnimationFrame(rafId);
-          renderFrame(
-            typeof performance !== "undefined" && typeof performance.now === "function"
-              ? performance.now()
-              : Date.now()
-          );
+          renderFrame(frameTime());
         }, 120);
         if (runtimeRef.current) {
           runtimeRef.current.rafId = rafId;
@@ -526,11 +530,7 @@ export function useViewerRuntime({
         if (interactionState.renderQueued) {
           window.cancelAnimationFrame(rafId);
         }
-        renderFrame(
-          typeof performance !== "undefined" && typeof performance.now === "function"
-            ? performance.now()
-            : Date.now()
-        );
+        renderFrame(frameTime());
       };
 
       function renderFrame(timestamp) {
@@ -890,6 +890,12 @@ export function useViewerRuntime({
       const handleVisibilityChange = () => {
         if (document.visibilityState !== "visible") {
           clearKeyboardOrbit();
+          // A frame still waiting for an animation frame the hidden document will not get: drawn now, as
+          // the timer draws a hidden document's (`requestRender`).
+          if (interactionState.renderQueued) {
+            window.cancelAnimationFrame(rafId);
+            renderFrame(frameTime());
+          }
         }
       };
 

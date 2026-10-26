@@ -232,11 +232,13 @@ this checkout, with `-dirty` when it had uncommitted changes: `v0.7.15-dev.b8084
 ## Testing
 
 ```bash
-npm run test    # client + app tooling (node:test, beside the code)
+npm run typecheck    # tsc over src/: neither the Vite build nor the tests check types
+npm run test         # client + app tooling (node:test, beside the code)
 ```
 
-The backend's suite lives with cadgen and is not collected here; running only
-`npm run test` leaves that half unchecked.
+CI runs both through `scripts/test/test-js.sh --select web`. The backend's suite
+lives with cadgen and is not collected here; running only `npm run test` leaves
+that half unchecked.
 
 The UI's browser specs run in npm's Playwright Chromium: Metal on macOS, SwiftShader
 on Linux and Windows. Compare a baseline and a refactor on the same backend.
