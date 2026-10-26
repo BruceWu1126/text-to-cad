@@ -277,7 +277,7 @@ FEATURES = frozenset({"assembly", "declared_mesh", "kinematics", "animation", "d
 # receiver's ``CONTROLS``): the strip's tools and Preview, each a mode that stays on (Explode and Clip, popovers
 # from their tiles, a use each time one opens), their modes and settings,
 # Display's and Preview's settings, the routines and Position, the sidebar's sections and trees, a part's menu,
-# the view cube, Quick Edit's Copy, Queue and Send, the navbar's (its name menu's Recent and Files) and app menu's
+# the view cube, Quick Edit's Copy, Queue and Send, the navbar's (its name menu's Models and Files) and app menu's
 # items, Export by format, and the home's. A name of this list and nothing else: a value of the page's (a render
 # mode's name) only where it is one.
 CONTROLS = frozenset({
@@ -308,12 +308,13 @@ CONTROLS = frozenset({
     "menu_zoom_selection",
     "look_at", "isolate", "view_cube", "view_cube_drag", "fit",
     "quick_edit_copy", "quick_edit_queue", "quick_edit_send",
-    "navbar_back", "navbar_forward", "recent", "recent_open", "explorer", "explorer_filter", "file_copy_path", "file_reveal",
-    "home",
+    "navbar_back", "navbar_forward", "models", "models_open", "models_filter", "explorer", "explorer_filter",
+    "file_copy_path", "file_reveal", "home",
     "theme_system", "theme_light", "theme_dark", "language", "feedback",
     "export_step", "export_stl", "export_threemf", "export_glb", "export_dxf", "export_xbf", "export_original",
     "home_search", "home_filter_all", "home_filter_models", "home_filter_files", "home_layout_grid", "home_layout_list",
-    "home_open", "home_fold", "home_copy_path", "home_reveal", "home_pin", "home_unpin", "home_delete", "home_delete_cancel",
+    "home_open", "home_pick", "home_copy_path", "home_reveal", "home_pin", "home_unpin", "home_delete",
+    "home_delete_cancel",
 })
 # The most one page's report (``Recorder.controlled``) may say of a control: a page reports at least every minute
 # it is shown, and counts a tool's seconds only while it is.

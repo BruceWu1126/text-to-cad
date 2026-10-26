@@ -198,7 +198,8 @@ def _working_folder() -> str:
 _GET_ONLY_ROUTES = frozenset({"/__cad/server", "/__cad/catalog", "/__cad/folder", "/__cad/search",
                               "/__cad/thumbnail", "/__cad/drawing", "/__cad/robot", "/__cad/xbf", "/__cad/asset",
                               "/__cad/version"})
-_POST_ONLY_ROUTES = frozenset({"/__cad/reveal", "/__cad/clipboard", "/__cad/analytics/activity"})
+_POST_ONLY_ROUTES = frozenset({"/__cad/pick", "/__cad/reveal", "/__cad/clipboard",
+                               "/__cad/analytics/activity"})
 
 
 class CadApp:
@@ -216,6 +217,8 @@ class CadApp:
     """
 
     def __init__(self, *, host: str, port: int, dist_dir: str = "", start: str | None = None, identity: str | None = None, documents=None):
+        from cadgen._internal.picker import available
+
         from .drawings import DrawingRenders
         from .prompt_files import PromptFiles
 
@@ -227,6 +230,8 @@ class CadApp:
         self.prompt_files = PromptFiles()
         self._exports = None
         self.start = to_posix_path(os.path.abspath(start if start is not None else _working_folder()))
+        # Whether this computer has a file chooser for the home's Open (``POST /__cad/pick``).
+        self.pick = available()
         self.host = host
         self.port = port
         # dist_dir is compared as a string prefix, so resolve it ONCE here and
@@ -236,6 +241,7 @@ class CadApp:
         # the identity this instance announces is the identity of the code it is actually running.
         self.identity_token = identity if identity is not None else identity_token(self.dist_dir)
         self._recents = None
+        self._picker = None
         # The files this app knows by id (``remember``); the engine's app keeps them in its server.
         self._files: dict[str, str] = {}
         # The engine shares one recorder across its page and MCP sessions.
@@ -266,8 +272,11 @@ class CadApp:
             "platform": sys.platform if sys.platform in ("darwin", "win32") else "linux",
             # The OS identity of the engine serving this page.
             "user": os_user(),
+            # The person's home folder: where the explorer starts with nowhere else to start.
+            "home": to_posix_path(os.path.expanduser("~")),
             # The folder of the most recent launch, which the home shows. Not a boundary.
             "start": self.start,
+            "pick": self.pick,
             "port": self.port,
             "pid": os.getpid(),
         }
@@ -543,6 +552,8 @@ class CadApp:
                         response.send_empty(413, [("connection", "close")])
                         return
                     response.send_json(200, self._change_recents(json.loads(request.body())))
+                elif pathname == "/__cad/pick":
+                    self._handle_pick(response)
                 elif pathname == "/__cad/reveal":
                     from .reveal import reveal_path
                     if int(request.headers.get("content-length") or 0) > 8192:
@@ -601,6 +612,15 @@ class CadApp:
     @recents.setter
     def recents(self, store) -> None:
         self._recents = store
+
+    @property
+    def picker(self):
+        """The desktop's file chooser (``cadgen._internal.picker``), one for this app."""
+        if self._picker is None:
+            from cadgen._internal.picker import FilePicker
+
+            self._picker = FilePicker()
+        return self._picker
 
     def _recents_payload(self) -> dict:
         # Recents, the registry's view (``recents.py``): the CAD files the viewer opens, and the models.
@@ -685,6 +705,23 @@ class CadApp:
             response.send_json(403, {"error": f"{path} cannot be read"})
             return
         response.send_json(200, answer)
+
+    def _handle_pick(self, response):
+        """The home's Open: the desktop's own chooser, held open for as long as the person takes (one
+        at a time: the picker refuses a second while one is open)."""
+        from cadgen._internal.picker import PickerFailed
+
+        try:
+            chosen = self.picker.choose()
+        except PickerFailed as failure:
+            response.send_json(500, {"error": str(failure)})
+            return
+        if chosen is None:
+            response.send_json(200, {"cancelled": True})
+        elif extension_of(chosen) not in VIEWER_EXTENSIONS:
+            response.send_json(400, {"error": f"CAD opens {_CAD_EXTENSIONS} files; {os.path.basename(chosen)} is not one."})
+        else:
+            response.send_json(200, {"path": to_posix_path(os.path.abspath(chosen))})
 
     # --- usage stats (telemetry) --------------------------------------------
 

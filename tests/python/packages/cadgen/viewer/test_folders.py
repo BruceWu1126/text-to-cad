@@ -77,6 +77,24 @@ class FoldersTest(unittest.TestCase):
         self.assertTrue(stopped["truncated"])
         self.assertLess(len(stopped["results"]), 4)
 
+    def test_an_xbf_is_listed_wherever_it_is_the_engines_cache_included(self) -> None:
+        (self.root / "arm" / "arm.xbf").write_bytes(b"x")
+        self.assertIn({"name": "arm.xbf", "kind": "file"}, list_folder(str(self.root / "arm"))["entries"])
+        # The engine's cache, a hidden folder, is reached from the folders above it, and only it:
+        # each model's document.xbf is under it.
+        home = self.root / "home"
+        document = home / ".cache/cadgen/documents/6f1c2a4e/document.xbf"
+        document.parent.mkdir(parents=True)
+        document.write_bytes(b"x")
+        (home / ".git/objects").mkdir(parents=True)
+        (home / ".git/objects/x.step").write_bytes(b"x")
+        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(home / ".cache/cadgen")}):
+            names = lambda path: [entry["name"] for entry in list_folder(str(path))["entries"]]
+            self.assertEqual(names(home), [".cache"])
+            self.assertEqual(names(home / ".cache"), ["cadgen"])
+            self.assertEqual(names(home / ".cache/cadgen/documents/6f1c2a4e"), ["document.xbf"])
+            self.assertEqual(search_folder(str(home), "document")["results"], [slashed(document)])
+
     @unittest.skipIf(os.name == "nt", "a symlink to a folder needs privileges on Windows")
     def test_a_link_back_into_a_walked_folder_is_not_walked_again(self) -> None:
         (self.root / "arm" / "loop").symlink_to(self.root, target_is_directory=True)

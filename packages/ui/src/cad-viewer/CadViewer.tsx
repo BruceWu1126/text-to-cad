@@ -172,6 +172,19 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   const libraryNow = useRef(library);
   libraryNow.current = library;
   const recent = useMemo(() => (homed ? { list: () => libraryNow.current?.list() ?? Promise.resolve([]) } : undefined), [homed]);
+  // Where a model's Files starts: the folder the explorer was last in this tab, else the person's
+  // home folder (the server's), never the folder of the script that built it.
+  const [homeFolder, setHomeFolder] = useState<string | null>(null);
+  useEffect(() => {
+    if (!homed) return undefined;
+    const controller = new AbortController();
+    void Promise.resolve().then(() => client.serverInfo({ signal: controller.signal })).then(info => { if (typeof info.home === 'string' && info.home) setHomeFolder(info.home); }, () => {});
+    return () => controller.abort();
+  }, [client, homed]);
+  const explorerFolder = settings.explorer.folder ?? homeFolder;
+  const keepExplorerFolder = useCallback((folder: string) => {
+    if (preferences.getSnapshot().explorer.folder !== folder) preferences.update({ explorer: { folder } });
+  }, [preferences]);
   const viewerHost = useMemo<ViewerHost>(() => ({ ...host, navigation: homed ? { openFile, home } : {} }), [host, openFile, home, homed]);
 
   // The home's pictures for cards without a current one, drawn out of sight one at a time and kept as
@@ -222,7 +235,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   return <I18nProvider locale={locale}>
     <ControlUsageProvider report={host.usage?.controls}>
     <ExportControls service={client.exports} downloads={host.downloads} file={shown ?? path}>{({ navbar, overlay }) => <FileViewer navbarActions={fullSize || openInBrowser ? <>{fullSize}{navbar}{openInBrowser}</> : navbar} overlay={overlay} file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
-      colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} history={history} recent={recent} notice={notice} chrome={chrome} onError={onError} presentation={presentation} />}</ExportControls>
+      colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} history={history} recent={recent} explorerFolder={explorerFolder} onExplorerFolderChange={homed ? keepExplorerFolder : undefined} notice={notice} chrome={chrome} onError={onError} presentation={presentation} />}</ExportControls>
     </ControlUsageProvider>
     {drawing && !path ? <OffscreenPicture key={drawing.source.file} source={drawing.source} host={host} preferences={preferences} onDone={drawn} /> : null}
   </I18nProvider>;

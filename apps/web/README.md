@@ -191,8 +191,9 @@ token: the session cookie authenticates it, as it does every request the page ma
 
 Each export has one small single-line toast (Sonner, at the view's top right under the navbar):
 a spinner while it is queued or running, and while a dropped connection is asked again,
-**Preparing part.step…**; then a check once the file is handed to the browser, **Exported part.step**,
-which goes by itself; or the engine's one-line reason, which stays until dismissed. Exports
+**Preparing part.step…**, dismissed the moment the file is handed to the browser's download
+(the toast shows the prepare, never a download; there is no success toast); or the engine's
+one-line reason, which stays until dismissed. Exports
 run independently; choosing a format again starts another.
 
 The queue accepts up to 16 unfinished jobs per viewer session, executes them in order,
@@ -279,7 +280,7 @@ and native service adapters. Shared renderers own all model interaction. STEP an
 robots open in Select, its selection filter the chevron after its button; the tool in hand's
 controls are one row under the strip. An assembly's Features (Links for a robot), Position
 and an SDF's metadata are the file sidebar's, a tile each at the top-left, whatever the tool. The
-file's name in the navbar opens its name menu: Recent and Files (the explorer).
+file's name in the navbar opens its name menu: Models and Files (the explorer).
 STEP and robot files have tools on a strip at the top centre; GLB, STL and 3MF have none,
 a GLB's clips or not.
 Every 3D file's strip ends in Projection, Display (its settings, a popover that opens down) and
@@ -287,10 +288,10 @@ Preview, with the view cube at the bottom-right and Quick Edit at the top-right.
 2D canvas with pan, zoom, snapshot and Quick Edit, without a 3D toolbar or file sidebar.
 
 The name menu is a popover under the file's name, two tabs over the explorer's own rows:
-**Recent**, the library's eight latest documents, models and files alike, by last activity, each
-its kind's glyph, its name and its age ("2h ago"), the one on screen marked; and **Files**, the
+**Models**, the library's eight latest models (no file), by last activity, each its glyph, its
+name and its age ("2h ago"), the one on screen marked, under "Filter models..."; and **Files**, the
 explorer: the file's folder (a model's, the folder its record registered), one folder at a
-time, with "Filter files..." to find a file anywhere under it. It opens on Recent over a model
+time, with "Filter files..." to find a file anywhere under it. It opens on Models over a model
 and on Files over a file. Below 600px of
 FileViewer width (a phone) the chrome is touch-sized and the file sidebar's tiles lead the tool strip. Preview is the shared shell's button after Display on the strip: it takes the whole page,
 hiding the navbar, the tool strip and Quick Edit, opens still (Orbit, in its settings, is
@@ -354,22 +355,23 @@ No snapshot is written while drawing or typing, and no image is rendered.
 
 The bare URL is the home: the library every CAD view shares (`@text-to-cad/ui/library`),
 and nothing else, laid out after Figma's Recents. It starts with one control row of 24px
-controls: "Recent" at the left as a static tab, and at the right the type filter, a dropdown
-("All ▾": All, Models, Files) where both kinds are listed, the search and the grid/list
-switch. The grid's tiles are transparent with a 1px border, at least 240px wide (four across
-a 1280px window): a picture on the muted fill, then the kind's glyph (a model's code glyph, a
-file's type icon) beside its name over its last activity with no verb ("now", "5m ago", "2h
+controls: "Recent" at the left as a plain small heading, and at the right the type filter, a dropdown
+("All ▾": All, Models, Files) where both kinds are listed, the search, the grid/list
+switch and, where the server's computer has a file chooser (`pick` in its info), **Open**,
+which opens the desktop's own chooser (`POST /__cad/pick`, `cadgen._internal.picker`) and shows
+the file picked. The grid's tiles are transparent with a 1px border, at least 240px wide (four across
+a 1280px window): a picture on the muted fill, then the kind's glyph (a model's cube, a
+file's file glyph, a file outline with its kind inside) beside its name over its last activity with no verb ("now", "5m ago", "2h
 ago", "3d ago", then the short date). The list is a table: Name, Updated and Opened over 40px
-rows, each a document's glyph and name and its two ages. A script that declares several
-models is one card, named for its main model, its other models folded under it ("and 27
-more"). The pin and the ⋯ appear on hover (at a tile's picture's corner, at a row's end); a
-pinned one keeps its pin. The ⋯ menu holds Open, Copy path and Reveal (a model's path is its
-script's), Pin or Unpin, and Delete, which asks first: a model's "Delete bracket?" removes the engine's record and its saved build, its
-script and exported files kept; a file's "Delete bracket.step from the viewer?" removes the
-engine's record of the file alone. From a file, Back to files in
+rows, each a document's glyph and name and its two ages. Every model is a tile and a row of
+its own, nothing folded, and none is tied to the script it was built from: a model shows its
+name, its glyph and its age. The pin and the ⋯ appear on hover (at a tile's picture's corner, at a row's end); a
+pinned one keeps its pin. The ⋯ menu holds Open, a file's Copy path and Reveal (a model has
+neither), Pin or Unpin, and Delete, which asks first: a model's "Delete bracket?" removes the engine's record and its saved build, its
+script and exported files kept, and no other model with it; a file's "Delete bracket.step from the viewer?" removes the
+engine's record of the file alone. From a file, Back to home in
 the menu the navbar's C logo opens leads back to it. The home has the same navbar, its logo
-the TEXTTOCAD wordmark rather than the C (the one morphs into the other as a file opens or
-the home comes back), the same menu (without Back to files, and with GitHub, Discord and X as
+the TEXTTOCAD wordmark rather than the C (a plain swap, no animation), the same menu (without Back to home, and with GitHub, Discord and X as
 over a file) at the left and
 the update button at the right while a newer text-to-cad is out. The home is a step of
 the browser's history, as a file is: the browser's Back and Forward walk between them (the
@@ -442,9 +444,9 @@ and web stay consistent without host-specific copies of those controls.
 
 The Viewer has the one navbar every app shares (see
 [the host contract](../../packages/ui/docs/viewer-host.md#host-chrome-slots)): at the
-left the logo (the TEXTTOCAD wordmark on the home, the C over a file), which opens the app menu, then the open file's name after its kind's glyph,
-which opens the name menu (Recent and Files), with its ⋯; at the right only the blue update button, while a newer text-to-cad
-is out. The app menu holds Back to files (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
+left the logo (the TEXTTOCAD wordmark on the home, the C over a file), which opens the app menu, then the open file's name (no glyph),
+which opens the name menu (Models and Files), with its ⋯; at the right only the blue update button, while a newer text-to-cad
+is out. The app menu holds Back to home (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
 GitHub, Discord and, in gray, the version (a link to its release notes) and "Made by @…"
 (X), as in the CAD app, over a file and on the home alike.
 Projection, Display and Preview are the view's, at the tool strip's end, never the navbar's;
@@ -457,7 +459,7 @@ daily version check, read from `/__cad/version` with the server's description as
 starts (`main.tsx`) and again whenever the person comes back to it, and its prompt copied for
 the person to paste into their agent's chat; its full install instructions open in a new tab.
 A Viewer the CAD server opens says what the server's channel allows (a store's copy hears nothing);
-one a skill opens names no channel, a skills-only install, which is told. Browser titles use "CAD | <filename>", or "CAD" when no file is selected.
+one a skill opens names no channel, a skills-only install, which is told. The browser title is the open file's or model's name alone ("bracket.step", "juno"), and "text-to-cad" on the home.
 Appearance (System, Light, Dark) is the app menu's Theme row, the tab's choice (`colorScheme`,
 over a file and on the home); the page has no light/dark button of its own. The original animated mark remains the shared LoadingIcon
 for loading states. The C and CAD marks are the UI package's; the favicons are this
@@ -476,7 +478,9 @@ composer has no camera action: its note to the agent is Quick Edit.
 A model's page is `/<id>`, its document's id, which `python SCRIPT.py` prints (`view:`). The
 page reads the document the engine holds, by id (`GET /__cad/catalog?id=`); it never builds or
 imports a script, and no folder lists one. A model has no file of its own: no file menu; its
-name menu opens on Recent, and its Files lists the folder its record registered. It is in the
+name menu opens on Models, and its Files lists the folder the explorer was last in this tab
+(the tab's settings), else the person's home folder (the server's `home`): never the folder
+of the script that built it. It is in the
 library by its id (the engine's record), and its picture is taken by
 its id as a file's is: on screen once it settles, once per build, and on the home only while
 the engine holds it. Once its worker retires or

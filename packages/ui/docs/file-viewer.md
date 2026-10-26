@@ -2,7 +2,7 @@
 
 `@text-to-cad/ui/file-viewer` exports the complete file view: one file by its
 absolute path, under the navbar (or alone, `chrome: "bare"`), with the name menu its name opens
-(Recent and Files), renderer loading, and the loading and error pages.
+(Models and Files), renderer loading, and the loading and error pages.
 It imports no concrete renderer. Applications compose registrations from the
 separate `@text-to-cad/ui/renderers/*` entry points and their own
 `defineFileRenderer` definitions ([renderers](renderers.md)). A CAD host composes
@@ -76,7 +76,7 @@ cleanup, while it still belongs to the same source.
 ## The navbar and the explorer
 
 The navbar is drawn over every file from the moment one is asked for, and over the
-host's home — only its logo and menu, without Back to files, Back and Forward where the
+host's home — only its logo and menu, without Back to home, Back and Forward where the
 host keeps the view's history, and the host's update and actions, where they stand over
 a file — never for a `compact` view (a
 picture: the home's thumbnails), never where the host asks for the view alone
@@ -86,16 +86,16 @@ Preview is up (`RendererViewProps.onPreviewChange`): the CAD viewer's Preview dr
 bar in its place and gives it back as it closes. Over a file, left to right:
 
 - the text-to-cad "C" logo (named Menu, with no chevron; over the home the TEXTTOCAD wordmark,
-  the same button morphing between the two), which opens the app menu
-  (`navigation/AppMenu.jsx`): Back to files where the host has a home
+  a plain swap of the same button), which opens the app menu
+  (`navigation/AppMenu.jsx`): Back to home where the host has a home
   (`navigation.home`), the person's settings (`appSettings`), Send feedback, GitHub,
   Discord and, in gray, the version and who made it. FileViewer builds it from
   `host.links`, `appSettings` and `environment.platform`. A host with no home has the
-  logo and the menu too, without Back to files;
+  logo and the menu too, without Back to home;
 - Back and Forward, where the host keeps the view's own history (`history`, a
   `ViewerHistory`: the CAD app's views; a browser's page has its own and hands none): two
   arrows, each there always and disabled where it has nowhere to go;
-- the open file's name, after its kind's glyph (a model's code glyph, a file's type icon): a
+- the open file's name, alone (no glyph; its chevron where it opens the name menu): a
   button that opens the name menu where the view can show another document, and plain text
   otherwise;
 - the ⋯ file menu: Copy path, and Reveal in Finder / Show in Explorer / Show in file
@@ -111,17 +111,21 @@ actions, and last the host's own (`navbarActions`: the web viewer's Export). A r
 view controls are never here: a 3D view's Projection, Display and Preview end its tool strip,
 and Preview's settings and Exit preview are Preview's bar's.
 
-The name menu is a popover under the file's name, a fixed 18rem wide and never resized. It
+The name menu is a popover under the file's name, a fixed 17.5rem wide and never resized. It
 floats over the view, so opening it resizes nothing, and it is built anew on each opening. Two
-stock shadcn Tabs top it, **Recent** and **Files**, over the explorer's own style; it opens on
-Recent over a model and on Files over a file, and a menu with one of the two has no tabs.
-**Recent** (`navigation/RecentList.jsx`) lists the host's library (`FileViewerProps.recent`, a
-`list()` of `RecentDocument`s), models and files alike, by last activity (the later of each
-row's `opened` and `updated`), eight at most, in the explorer's compact rows: the kind's glyph,
-the name, and its age with no verb at the right; the document on screen is highlighted, a row
-opens its document through `navigation.openFile`, and there is no footer.
+stock shadcn Tabs top it, **Models** and **Files**, each as wide as its label, over the
+explorer's own style; it opens on Models over a model and on Files over a file, and a menu with
+one of the two has no tabs. **Models** (`navigation/ModelList.jsx`) lists the models of the
+host's library (`FileViewerProps.recent`, a `list()` of `RecentDocument`s; a row whose `kind` is
+a model's or a shape's), by last activity (the later of each row's `opened` and `updated`),
+eight at most, in the explorer's compact rows: the model's glyph, the name, and its age with no
+verb at the right, under "Filter models..." (every word in the name, the filter taking the
+keyboard as the explorer's does); the model on screen is highlighted, a row opens it through
+`navigation.openFile`, and there is no footer.
 **Files** is the explorer (`navigation/FolderExplorer.jsx`). It starts in the open file's
-folder, or a document's `folder` where it has no file of its own (a model's registered folder),
+folder, or `explorerFolder` for a document with no file of its own (a model's: the folder the
+explorer was last in, which `onExplorerFolderChange` hands the host each time it changes, else
+the person's home folder; never the script's),
 its filter taking the keyboard (on a phone the menu holds focus itself, so no
 keyboard comes up). It lists one folder at a time through `source.list`: the folder's
 subfolders, then its CAD files, the open file highlighted, in compact rows (a folder's glyph

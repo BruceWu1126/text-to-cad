@@ -36,7 +36,7 @@ const languageOptions = (language, t, className = undefined) => [
 
 /**
  * The app's menu, from the navbar's logo over every file and over the host's home: what is the
- * person's rather than a file's. First, where the host has a home, Back to files (`onHome`). Then the
+ * person's rather than a file's. First, where the host has a home, Back to home (`onHome`). Then the
  * person's settings, a press keeping the menu open: Language (`language`), one row naming the language in
  * force, whose submenu offers Automatic (the language the context infers, named) and each language under
  * its own name; the host's on/off settings (`appSettings`: Telemetry), a checkbox at the right, filled while on, and
@@ -65,7 +65,7 @@ export function AppMenu({ trigger, onHome, links, appSettings = NONE, colorSchem
     links?.discord ? { id: "discord", label: "Discord", href: links.discord, icon: DiscordMark } : null,
   ].filter(Boolean);
   const groups = [
-    onHome ? [<DropdownMenuItem key="home" onSelect={onHome} data-menu-home=""><ArrowLeft aria-hidden="true" />{t("menu.backToFiles")}</DropdownMenuItem>] : [],
+    onHome ? [<DropdownMenuItem key="home" onSelect={onHome} data-menu-home=""><ArrowLeft aria-hidden="true" />{t("menu.backToHome")}</DropdownMenuItem>] : [],
     // The person's settings, one group of like rows — Language, the host's on/off settings, Theme: a name
     // on the left in the menu's own text and its control on the right — the language in force, a checkbox
     // filled while on, Theme's segmented System, Light and Dark. A press keeps the menu open.

@@ -52,31 +52,23 @@ it('draws the navbar over every file, named by its name, and over the home with 
   await userEvent.setup().click(screen.getByRole('button', { name: 'Back' }));
   expect(back).toHaveBeenCalledOnce();
   await userEvent.setup().click(screen.getByRole('button', { name: 'Menu' }));
-  expect(screen.queryByRole('menuitem', { name: 'Back to files' })).toBeNull();
+  expect(screen.queryByRole('menuitem', { name: 'Back to home' })).toBeNull();
 });
 
-it('heads the home with the TEXTTOCAD wordmark and a document with the C, one menu button morphing between them', async () => {
+it('heads the home with the TEXTTOCAD wordmark and a document with the C, a plain swap of the one menu button\'s mark', async () => {
   const homed = { ...host, links: viewerLinks({ version: '0.7.4' }), navigation: { openFile() {}, home() {} } };
-  const view = (file: string | null, extra: object = {}) => <FileViewer file={file} host={{ ...homed, ...extra } as any} renderers={[renderer]} state={{}} onStateChange={() => {}}
+  const view = (file: string | null) => <FileViewer file={file} host={homed as any} renderers={[renderer]} state={{}} onStateChange={() => {}}
     presentation={{ home: <p>home</p> } as any} />;
   const { rerender } = render(view(null));
   await screen.findByText('home');
-  const logo = screen.getByRole('button', { name: 'Menu' });
-  const images = () => [...logo.querySelectorAll('img')].map(image => image.getAttribute('src'));
-  expect(logo.getAttribute('data-logo')).toBe('wordmark');
-  expect(images()).toEqual([expect.stringMatching(/texttocad/), expect.stringMatching(/C(%20| )logo/)]);
-  // A page: the same button (so the one turns into the other), now the C.
+  const images = () => [...screen.getByRole('button', { name: 'Menu' }).querySelectorAll('img')].map(image => image.getAttribute('src'));
+  expect(images()).toEqual([expect.stringMatching(/texttocad/)]);
   rerender(view(FILE));
   await screen.findByText('shown');
-  expect(screen.getByRole('button', { name: 'Menu' })).toBe(logo);
-  expect(logo.getAttribute('data-logo')).toBe('mark');
+  expect(images()).toEqual([expect.stringMatching(/C(%20| )logo/)]);
   rerender(view(null));
   await screen.findByText('home');
-  expect(logo.getAttribute('data-logo')).toBe('wordmark');
-  // A host that asks for still motion cuts straight, as the platform's setting does in the CSS.
-  expect(logo.getAttribute('data-motion')).toBeNull();
-  rerender(view(null, { environment: { colorScheme: 'light', reducedMotion: true } }));
-  expect(screen.getByRole('button', { name: 'Menu' }).getAttribute('data-motion')).toBe('reduced');
+  expect(images()).toEqual([expect.stringMatching(/texttocad/)]);
 });
 
 it('draws no navbar where the host asks for the view alone (`chrome: "bare"`): over a file or the home, whatever it hands the navbar', async () => {
@@ -140,7 +132,7 @@ it('draws Back and Forward between the logo and the file\'s name where the host 
   expect(left()).toEqual(['Menu', 'name:a.step']);
 });
 
-it('opens the app menu from the logo: Back to files where the host has a home, the person\'s settings and the host\'s links; its ⋯ offers what the host can do with the file', async () => {
+it('opens the app menu from the logo: Back to home where the host has a home, the person\'s settings and the host\'s links; its ⋯ offers what the host can do with the file', async () => {
   const user = userEvent.setup();
   const home = vi.fn();
   const share = vi.fn();
@@ -152,7 +144,7 @@ it('opens the app menu from the logo: Back to files where the host has a home, t
   expect(labels()).toEqual(['Menu', 'File actions']);
   await user.click(screen.getByRole('button', { name: 'Menu' }));
   const menu = document.querySelector('[data-app-menu]')!;
-  expect([...menu.querySelectorAll('[role^="menuitem"]')].map(item => item.textContent)).toEqual(['Back to files', 'Share anonymous usage data', 'Send feedback', 'GitHub', 'Discord']);
+  expect([...menu.querySelectorAll('[role^="menuitem"]')].map(item => item.textContent)).toEqual(['Back to home', 'Share anonymous usage data', 'Send feedback', 'GitHub', 'Discord']);
   expect(menu.querySelector('[data-menu-footer]')?.textContent).toContain('v0.7.4');
   // Send feedback: a new issue on the project's tracker, begun "Feedback: ", for the person to
   // finish, naming the version and the platform; no label: the project has none for feedback.
@@ -160,21 +152,21 @@ it('opens the app menu from the logo: Back to files where the host has a home, t
   expect([`${feedback.origin}${feedback.pathname}`, feedback.searchParams.get('title'), feedback.searchParams.get('labels')])
     .toEqual(['https://github.com/earthtojake/text-to-cad/issues/new', 'Feedback: ', null]);
   expect(feedback.searchParams.get('body')).toMatch(/- CAD: 0\.7\.4\n- Platform: win32$/);
-  // A setting turns without closing the menu; Back to files goes home.
+  // A setting turns without closing the menu; Back to home goes home.
   await user.click(screen.getByRole('menuitemcheckbox', { name: 'Share anonymous usage data' }));
   expect([share.mock.calls, Boolean(document.querySelector('[data-app-menu]'))]).toEqual([[[false]], true]);
-  await user.click(screen.getByRole('menuitem', { name: 'Back to files' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Back to home' }));
   expect(home).toHaveBeenCalledOnce();
   await user.click(screen.getByRole('button', { name: 'File actions' }));
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Copy path', 'Show in Explorer']);
   await user.click(screen.getByRole('menuitem', { name: 'Show in Explorer' }));
   expect(perform.reveal).toHaveBeenCalledWith({ path: FILE, kind: 'file' });
   cleanup();
-  // A host with no home still has the menu, without Back to files; one that can only copy offers only that.
+  // A host with no home still has the menu, without Back to home; one that can only copy offers only that.
   open({ host: { ...host, links, fileActions: { perform: { 'copy-path': perform['copy-path'] } } } });
   await screen.findByText('shown');
   await user.click(screen.getByRole('button', { name: 'Menu' }));
-  expect(screen.queryByRole('menuitem', { name: 'Back to files' })).toBeNull();
+  expect(screen.queryByRole('menuitem', { name: 'Back to home' })).toBeNull();
   await user.keyboard('{Escape}');
   await user.click(screen.getByRole('button', { name: 'File actions' }));
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Copy path']);
@@ -271,18 +263,24 @@ it('has no file menu on a document with no file of its own, which its name names
   expect(labels()).not.toContain('File actions');
   expect(list).not.toHaveBeenCalled();
   cleanup();
-  // Registered from a folder, with the host's library: the name opens Recent first, and Files lists that folder.
+  // With the host's library and where the explorer was last: the name opens Models first, and Files
+  // lists that folder -- never the folder of the script the model was registered from -- and says
+  // each folder it is in, for the host to keep.
   const user = userEvent.setup();
   const registered = { ...model, navigation: { openFile: vi.fn() }, files: { ...model.files,
     stat: async (path: string) => ({ path, name: 'bracket', navigationPath: null, folder: '/models/parts', kind: 'file' as const, extension: 'xbf', size: 0 }) } };
   const rows = [{ path: id, name: 'bracket', kind: 'model', opened: null, updated: Date.now() / 1000 }];
-  render(<FileViewer file={id} host={registered as any} renderers={[renderer]} state={{}} onStateChange={() => {}} recent={{ list: async () => rows }} />);
+  const kept = vi.fn();
+  render(<FileViewer file={id} host={registered as any} renderers={[renderer]} state={{}} onStateChange={() => {}} recent={{ list: async () => rows }}
+    explorerFolder="/home/me/last" onExplorerFolderChange={kept} />);
   await screen.findByText('shown');
   expect(fileName().tagName).toBe('BUTTON');
   await user.click(fileName());
-  expect(screen.getByRole('tab', { name: 'Recent' }).getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByRole('tab', { name: 'Models' }).getAttribute('aria-selected')).toBe('true');
   await user.click(screen.getByRole('tab', { name: 'Files' }));
-  await waitFor(() => expect(list).toHaveBeenCalledWith('/models/parts', expect.anything()));
+  await waitFor(() => expect(list).toHaveBeenCalledWith('/home/me/last', expect.anything()));
+  expect(list).not.toHaveBeenCalledWith('/models/parts', expect.anything());
+  expect(kept).toHaveBeenCalledWith('/home/me/last');
   expect(labels()).not.toContain('File actions');
 });
 

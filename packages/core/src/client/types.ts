@@ -24,8 +24,12 @@ export interface CadServerInfo {
   identityToken?: string;
   /** The folder of the most recent launch (`cadgen viewer`), which a launch's relative files are read from. */
   start?: string;
+  /** Whether this computer has a file chooser for the home's Open. */
+  pick?: boolean;
   /** `darwin`, `win32` or `linux`: which file manager Reveal opens. */
   platform?: string;
+  /** The person's home folder, `/`-separated: where the explorer starts with nowhere else to. */
+  home?: string;
   [key: string]: unknown;
 }
 /** A model in the library every CAD view shares (`GET /__cad/recents`): times in seconds. */
@@ -185,6 +189,8 @@ export interface CadWorkspaceService {
   keepThumbnail(png: Blob, path: string): Promise<CadRecent[]>;
   /** A library picture, by the name the library gives it, as a data URL; null when there is none. */
   thumbnail(name: string, options?: CadRequestOptions): Promise<string | null>;
+  /** Open: the model the person picks with the desktop's chooser, by its absolute path, or null. */
+  pick(): Promise<string | null>;
   /** Show a file, by its absolute path, in the desktop's file manager. */
   reveal(path: string): Promise<void>;
   /** Whether the person's usage stats are sent; with `share`, their answer (the app menu's toggle). */

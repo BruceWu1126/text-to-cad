@@ -1,37 +1,35 @@
-import {
-  Bot,
-  Box,
-  DraftingCompass,
-  FileBox,
-  LoaderCircle,
-  Printer,
-  Triangle
-} from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 
 import { cn } from "@text-to-cad/ui/utils";
 import {
   ENTRY_ICON_KIND,
   entryIconKind
 } from "./entryIconKind.js";
+import { FileDrawingGlyph, FileMechanismGlyph, FileMeshGlyph, FileSceneGlyph, FileSolidGlyph } from "./fileGlyphs.jsx";
 
-// One icon table for every surface that lists files — the sidebar, the
-// explorer, and the home list — so a file cannot read as one thing in
-// one place and something else in another.
+// One icon table for every surface that lists files — the explorer, the
+// Home, the name menu and the navbar — so a file cannot read as one thing in
+// one place and something else in another. Each is the viewer's own file glyph
+// (`fileGlyphs.jsx`): lucide's file outline with what it holds drawn inside, so
+// a file reads as a file at a glance (a model, built from code, is lucide's
+// plain cube: `DocumentGlyph`).
 const ENTRY_ICON_COMPONENTS = {
   [ENTRY_ICON_KIND.LOADING]: LoaderCircle,
-  // A solid cube for the solid-model format; STL gets the triangle it is
-  // actually made of, so mesh and B-rep never read alike.
-  [ENTRY_ICON_KIND.STEP]: Box,
-  [ENTRY_ICON_KIND.STL_MESH]: Triangle,
-  // 3MF is the 3D-print package.
-  [ENTRY_ICON_KIND.THREE_MF_MESH]: Printer,
-  [ENTRY_ICON_KIND.GLB_MESH]: FileBox,
-  [ENTRY_ICON_KIND.DXF]: DraftingCompass,
-  [ENTRY_ICON_KIND.ROBOT]: Bot
+  // STEP and xbf, the B-rep formats: a solid.
+  [ENTRY_ICON_KIND.STEP]: FileSolidGlyph,
+  // STL and 3MF: facets.
+  [ENTRY_ICON_KIND.STL_MESH]: FileMeshGlyph,
+  [ENTRY_ICON_KIND.THREE_MF_MESH]: FileMeshGlyph,
+  // A GLB is a scene: its axes.
+  [ENTRY_ICON_KIND.GLB_MESH]: FileSceneGlyph,
+  // A DXF is a flat drawing.
+  [ENTRY_ICON_KIND.DXF]: FileDrawingGlyph,
+  // A robot description (URDF, SRDF, SDF): joints and a link.
+  [ENTRY_ICON_KIND.ROBOT]: FileMechanismGlyph
 };
 
 export function entryIconComponent(entry, sourceFormat, status) {
-  return ENTRY_ICON_COMPONENTS[entryIconKind(entry, { sourceFormat, status })] || Box;
+  return ENTRY_ICON_COMPONENTS[entryIconKind(entry, { sourceFormat, status })] || FileSolidGlyph;
 }
 
 // A file's icon says what it IS — nothing more. How the file came to exist (a

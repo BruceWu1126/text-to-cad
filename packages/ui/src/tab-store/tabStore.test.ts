@@ -11,7 +11,7 @@ test('the record normalizes: every setting to its bounds, the files to well-keye
   expect(TAB_RECORD_VERSION).toBe(2);
   expect(readTabRecord(undefined)).toEqual(defaultTabRecord());
   expect(defaultTabRecord()).toEqual({ version: 2, settings: {
-    toolStack: { panels: {}, collapsed: {} }, appearance: 'system', library: { layout: 'grid' },
+    toolStack: { panels: {}, collapsed: {} }, appearance: 'system', library: { layout: 'grid' }, explorer: { folder: null },
   }, files: {} });
   // A record of the version before (a file tree's width, views under a root) is the defaults.
   for (const raw of [null, 'x', [], { version: 1, settings: { appearance: 'dark', fileTree: { width: 300 } } }, { version: 3, settings: { appearance: 'dark' } }]) {
@@ -20,12 +20,14 @@ test('the record normalizes: every setting to its bounds, the files to well-keye
   const record = readTabRecord({ version: 2, settings: {
     fileTree: { width: 300 }, quickEdit: false, features: { quickEdit: false },
     toolStack: { panels: { tree: { width: 12 } }, collapsed: { tree: true, 'Not an id': true }, closed: { tree: true, sdf: 'no' } },
-    orbit: { speed: 99 }, playback: { autoplay: true }, appearance: 'cinematic', library: { layout: 'shelf' },
+    orbit: { speed: 99 }, playback: { autoplay: true }, appearance: 'cinematic', library: { layout: 'shelf' }, explorer: { folder: 3 },
   }, files: { [tabFileKey('/models/a.step', 'step')]: view(1), '["root","b.step","step"]': view(2), 'junk': view(3), [tabFileKey('/models/c.step', 'step')]: 'not a view' } });
   expect(record.settings).toEqual({
-    toolStack: { panels: { tree: { width: 164 } }, collapsed: { tree: true } }, appearance: 'system', library: { layout: 'grid' },
+    toolStack: { panels: { tree: { width: 164 } }, collapsed: { tree: true } }, appearance: 'system', library: { layout: 'grid' }, explorer: { folder: null },
   });
   expect(readTabRecord({ version: 2, settings: { library: { layout: 'list' } }, files: {} }).settings.library).toEqual({ layout: 'list' });
+  // The folder the explorer was last in, this tab: where a model's Files starts.
+  expect(readTabRecord({ version: 2, settings: { explorer: { folder: '/home/me/parts' } }, files: {} }).settings.explorer).toEqual({ folder: '/home/me/parts' });
   expect(Object.keys(record.files)).toEqual([tabFileKey('/models/a.step', 'step')]);
 });
 

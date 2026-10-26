@@ -124,7 +124,9 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
     change: (action, entry) => client.changeRecents({ action, path: entry.path }),
     thumbnail: name => client.thumbnail(name),
     open: async entry => { navigate(normalizePath(entry.path)); },
-  } : undefined, [client, homed, navigate]);
+    // Open, with the desktop's chooser where this computer has one: what it picks is shown in place.
+    ...(launch.pick ? { pick: async () => { const picked = await client.pick(); if (picked) navigate(normalizePath(picked)); } } : {}),
+  } : undefined, [client, homed, launch.pick, navigate]);
   // Back and Forward, wherever the view can go elsewhere: not a file handler's, which shows its file alone.
   const viewerHistory = useMemo(() => homed ? {
     canGoBack: history.index > 0, canGoForward: history.index < history.entries.length - 1, back, forward,

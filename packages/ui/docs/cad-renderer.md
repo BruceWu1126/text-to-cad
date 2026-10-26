@@ -1387,7 +1387,7 @@ snapshot job, and a picture of each ([annotations](annotation.md#lifetime-and-ca
 ### File navbar
 
 The file navbar is [FileViewer's](file-viewer.md#the-navbar-and-the-explorer): the logo,
-which opens the app menu (Back to files, the person's settings, feedback, the links, the
+which opens the app menu (Back to home, the person's settings, feedback, the links, the
 version), Back and Forward where the host keeps the view's history, the file's name (which
 opens the explorer) and its ⋯ menu at the left; at the
 right only what a host or a file adds: the update, the renderer's actions and, last, the

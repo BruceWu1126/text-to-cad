@@ -58,7 +58,7 @@ export default function PrivacyPolicyPage() {
                 Select and its filters, Measure, Pencil and Shapes and what they draw with, Explode,
                 Clip, the display modes and Grid, Projection, Preview and its settings, playback, a
                 model’s joints, the sidebar’s sections, a part’s menu, the view cube, Quick Edit’s
-                Copy, Queue and Send, Export, the Recent and Files menu, Theme and Language, and the
+                Copy, Queue and Send, Export, the Models and Files menu, Theme and Language, and the
                 home’s search, filters, layout and card menus), each as a name from a fixed list, with how many times each was used and, for a
                 tool that stays on (the tool in hand, or Preview), how many whole seconds it was on --
                 never what you typed, a value you chose (other than a choice that is itself a name on the

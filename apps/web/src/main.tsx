@@ -46,7 +46,7 @@ const root = createRoot(element, {
 let icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
 if (!icon) { icon = document.createElement('link'); icon.rel = 'icon'; document.head.append(icon); }
 icon.type = 'image/png'; icon.href = faviconUrl;
-document.title = 'CAD';
+document.title = 'text-to-cad';
 const controller = new AbortController();
 function dispose() {
   controller.abort(); root.unmount(); client.dispose(); window.removeEventListener('pagehide', onPageHide);

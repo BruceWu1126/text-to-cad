@@ -189,10 +189,18 @@ export interface FileViewerProps {
   /** The view's own history, where the host keeps one: Back and Forward after the navbar's logo, over a file and on the home. */
   history?: ViewerHistory;
   /**
-   * The host's library (a CAD host's Home), where it has one: the name menu's Recent tab lists it,
-   * models and files alike, by last activity, and a row opens its document through `navigation.openFile`.
+   * The host's library (a CAD host's Home), where it has one: the name menu's Models tab lists its
+   * models, by last activity, and a row opens its model through `navigation.openFile`.
    */
   recent?: { list(): Promise<readonly RecentDocument[]> };
+  /**
+   * Where the name menu's Files starts for a document with no file of its own (a model's): the folder
+   * the explorer was last in, else the person's home folder. Never the script it was built from. A
+   * file's Files starts in its own folder.
+   */
+  explorerFolder?: string | null;
+  /** The folder the explorer is in, each time it changes: the host keeps it for `explorerFolder`. */
+  onExplorerFolderChange?(folder: string): void;
   /** The host's notice, shown at the viewport's top-right once the file is on screen (`RendererViewProps.notice`). */
   notice?: ReactNode;
   /**

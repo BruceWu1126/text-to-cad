@@ -11,8 +11,9 @@ export const PREVIEW_FADE_CLASS = "transition-opacity duration-300 motion-reduce
 
 /**
  * Preview's chrome, its bar at the top and its playbar at the bottom, shown and gone together: up as
- * Preview opens, gone after `PREVIEW_IDLE_MS` with no pointer movement over the view (its root), back
- * on the next movement and on a press (a tap, on a touch screen). It stays while held (its settings
+ * Preview opens, gone after `PREVIEW_IDLE_MS` with no pointer movement over the view (its root), and
+ * at once when the pointer leaves the view or the window (`pointerleave`/`mouseleave` on the root,
+ * `blur` of the window), back on the next movement and on a press (a tap, on a touch screen). It stays while held (its settings
  * open) and while the pointer is on either piece or something in one has the keyboard's focus — a menu of theirs
  * open among them, its portal being theirs in React's tree. `hold(piece)` is the handlers each piece
  * spreads on its own element. Gone, the pieces are transparent and let presses through, but keep their
@@ -25,7 +26,7 @@ export const PREVIEW_FADE_CLASS = "transition-opacity duration-300 motion-reduce
 const keyboardFocus = element => { try { return element.matches(":focus-visible"); } catch { return true; } };
 
 export function createPreviewIdle() {
-  let shown = true, active = false, held = false, root = null, timer;
+  let shown = true, active = false, held = false, root = null, timer, leaving;
   const holders = new Set();
   const listeners = new Set();
   const set = next => { if (next !== shown) { shown = next; for (const listener of [...listeners]) listener(); } };
@@ -35,11 +36,21 @@ export function createPreviewIdle() {
     clearTimeout(timer);
     if (active && !holding()) timer = setTimeout(() => set(false), PREVIEW_IDLE_MS);
   };
+  // The pointer gone from the view or the window: down at once, unless something holds it (its
+  // settings, the keyboard's focus, or the pointer on a menu of theirs, whose portal is outside the
+  // view: the pointer reaches it after leaving, so the check waits for the events of the one move).
+  const leave = () => {
+    clearTimeout(leaving);
+    leaving = setTimeout(() => { if (active && !holding()) { clearTimeout(timer); set(false); } });
+  };
   const listen = (element, on) => {
     if (!element) return;
     const method = on ? "addEventListener" : "removeEventListener";
     element[method]("pointermove", wake);
     element[method]("pointerdown", wake);
+    element[method]("pointerleave", leave);
+    element[method]("mouseleave", leave);
+    if (typeof window !== "undefined") window[method]("blur", leave);
   };
   const hold = (key, on) => {
     if (holders.has(key) === on) return;
@@ -55,7 +66,7 @@ export function createPreviewIdle() {
       listen(root, false);
       active = next; root = next ? element : null; holders.clear();
       listen(root, true);
-      if (active) wake(); else { clearTimeout(timer); set(true); }
+      if (active) wake(); else { clearTimeout(timer); clearTimeout(leaving); set(true); }
     },
     /** Its settings open: held for as long as they are. */
     setHeld(next) { if (next !== held) { held = next; wake(); } },
@@ -119,14 +130,14 @@ export default function PreviewChrome({ active, name = "", controls = null, pane
 }
 
 // The navbar's row (`h-9`, a phone's 48px in `globals.css`) with no surface under it: the only part of
-// the frame that redraws as it comes and goes.
+// the frame that redraws as it comes and goes. The name is muted, as its controls are.
 function PreviewBar({ name, controls, idle }) {
   const shown = usePreviewShown(idle);
   const reach = shown ? "pointer-events-auto" : "pointer-events-none";
   return <div data-preview-bar="" data-hidden={shown ? undefined : ""} {...idle?.hold("bar")}
     className={cn("pointer-events-none absolute inset-x-0 top-0 z-30 flex h-9 items-center justify-between gap-2 px-2", PREVIEW_FADE_CLASS,
       shown ? "opacity-100" : "opacity-0")}>
-    <span data-preview-name="" className={cn("min-w-0 truncate px-1 text-sm text-foreground [text-shadow:0_0_6px_var(--background)]", reach)}>{name}</span>
+    <span data-preview-name="" className={cn("min-w-0 truncate px-1 text-sm text-muted-foreground [text-shadow:0_0_6px_var(--background)]", reach)}>{name}</span>
     {controls ? <div data-preview-controls="" className={cn("flex shrink-0 items-center gap-1", reach)}>{controls}</div> : null}
   </div>;
 }

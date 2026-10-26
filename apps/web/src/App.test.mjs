@@ -36,8 +36,8 @@ after(() => rm(temporary, { recursive: true, force: true }));
 
 // Each file's document id, as the server derives it from the file's canonical path.
 const IDS = { '/m/one.step': '6f1c2a4e-1b2c-5d3e-8f4a-000000000001', '/m/folder/two.step': '6f1c2a4e-1b2c-5d3e-8f4a-000000000002',
-};
-const ONE = IDS['/m/one.step'], TWO = IDS['/m/folder/two.step'];
+  '/m/picked.step': '6f1c2a4e-1b2c-5d3e-8f4a-000000000003' };
+const ONE = IDS['/m/one.step'], TWO = IDS['/m/folder/two.step'], PICKED = IDS['/m/picked.step'];
 /** The catalog's answer for one document, asked by its path or its id. */
 function catalogOf(url) {
   const params = new URL(url, 'http://cad.local').searchParams;
@@ -64,7 +64,7 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     libraryCalls.push([url, init.body ? JSON.parse(init.body) : null]);
     if (url === '/__cad/analytics' && init.body) guards.push(init.headers?.['x-cadgen-viewer']);
     const reply = url.startsWith('/__cad/catalog') ? catalogOf(url) : url === '/__cad/version' ? { notice }
-      : url === '/__cad/recents' ? { recents: [] }
+      : url === '/__cad/recents' ? { recents: [] } : url === '/__cad/pick' ? { path: '/m/picked.step' }
       : url !== '/__cad/analytics' ? { ok: true }
       : init.body ? { sharing: false, reason: 'choice', policy: 'p' } : { sharing: false, reason: 'untold', policy: 'p' };
     return new Response(JSON.stringify(reply), { headers: { 'content-type': 'application/json' } });
@@ -77,7 +77,7 @@ test('the web host keeps the URL, the history, the title and the appearance, and
   try {
     const historyAtStart = window.history.length;
     // The update notice comes with the server's description (`main.tsx`): the button draws with the page.
-    await act(() => root.render(createElement(App, { client, server: { start: '/m', platform: 'darwin' }, tabStore, notice })));
+    await act(() => root.render(createElement(App, { client, server: { start: '/m', pick: true, platform: 'darwin' }, tabStore, notice })));
     // The document the URL names, as it names it; the host's file menu and links; the tab's store
     // for everything the viewer keeps.
     assert.equal(viewer().file, ONE);
@@ -112,7 +112,7 @@ test('the web host keeps the URL, the history, the title and the appearance, and
 
     // Once the catalog has the file, the page is named after it and it joins the library.
     await act(() => viewer().onShown('/m/one.step', ONE));
-    assert.equal(window.document.title, 'CAD | one.step');
+    assert.equal(window.document.title, 'one.step');
     assert.deepEqual(libraryCalls.filter(([url]) => url === '/__cad/recents'), [['/__cad/recents', { action: 'open', path: '/m/one.step' }]]);
     // CAD's telemetry, as the CAD app's: the consent read once, its answer in the app menu. (The
     // model shown is counted, by its format and only with consent, as it joins the library.)
@@ -166,16 +166,18 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     await act(async () => { window.history.replaceState({}, '', '/'); window.dispatchEvent(new window.PopStateEvent('popstate')); await new Promise(resolve => setTimeout(resolve, 10)); });
     assert.equal(viewer().file, '');
     await act(() => viewer().onShown(null));
-    assert.equal(window.document.title, 'CAD');
+    assert.equal(window.document.title, 'text-to-cad');
     assert.deepEqual(await viewer().library.list(), []);
     assert.equal(libraryCalls.at(-1)[0], '/__cad/recents');
     assert.equal(await viewer().library.thumbnail('abc'), '/__cad/thumbnail?name=abc');
-    // A model opened from the home is shown here, a new step; the home has no Open of its own.
+    // A model opened from the home, and one picked with Open, are shown here, each a new step.
     await act(() => viewer().library.open({ path: '/m/folder/two.step' }));
     assert.equal(viewer().file, TWO);
-    assert.equal(new URL(window.location.href).pathname, `/${TWO}`);
-    assert.equal(viewer().library.pick, undefined);
-    // Back to files leads to the bare URL: the home is a step of the browser's history, as a file is,
+    await act(() => viewer().library.pick());
+    assert.ok(libraryCalls.some(([url]) => url === '/__cad/pick'));
+    assert.equal(viewer().file, PICKED);
+    assert.equal(new URL(window.location.href).pathname, `/${PICKED}`);
+    // Back to home leads to the bare URL: the home is a step of the browser's history, as a file is,
     // so the browser's Back and Forward walk between them (the page hands no history of its own).
     const beforeHome = window.history.length;
     await act(async () => { viewer().onShow(''); await new Promise(resolve => setTimeout(resolve, 10)); });

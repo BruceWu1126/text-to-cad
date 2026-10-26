@@ -18,7 +18,7 @@ belong to apps through the [host contract](viewer-host.md).
 
 FileViewer owns the navbar — the logo's app menu ([Settings](#settings)) included, built from
 the host's `links` and the `appSettings` `CadViewer` hands it — and the name menu (a popover
-under the file's name: Recent and Files, the file explorer). RendererShell owns the scene's chrome: the tool strip and
+under the file's name: Models and Files, the file explorer). RendererShell owns the scene's chrome: the tool strip and
 the view's controls at its end (Projection, Display, Preview), the sub-toolbar of the tool in hand under
 it, the file sidebar, Quick Edit, the view cube and Preview, with Preview's own bar in the navbar's place. Renderers supply
 their tools, their tools' rows, their sidebar sections and their document state; the shell never
@@ -26,7 +26,7 @@ inspects a format's parts, joints or topology. No pick or tool opens or closes t
 
 | The host (web, desktop) supplies | The shared UI decides |
 | --- | --- |
-| Where the tab record lives (`TabRecordStorage`: the web's sessionStorage, the CAD app's memory) | The record: its settings (the file sidebar's and tool stack's layout, the appearance, the home's layout) and the view of the file on screen (its camera, Display settings, its playback settings, and renderer slices), what is written when, and what is never stored (`@text-to-cad/ui/tab-store`, `kit/shell/fileView.js`) |
+| Where the tab record lives (`TabRecordStorage`: the web's sessionStorage, the CAD app's memory) | The record: its settings (the file sidebar's and tool stack's layout, the appearance, the home's layout, the folder the explorer was last in) and the view of the file on screen (its camera, Display settings, its playback settings, and renderer slices), what is written when, and what is never stored (`@text-to-cad/ui/tab-store`, `kit/shell/fileView.js`) |
 | `chrome` (the navbar, `"page"`, or the view alone, `"bare"`), `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings), `colorScheme` (the person's theme and how it changes) | The navbar's order and look, over a file and over the home, the app menu (one menu in the viewer and on the home) and what a new issue says |
 | `host.files`, `fileActions`, `navigation`, `clipboard`, `promptContext`, `promptFiles` | When a copy, capture or open happens and what it carries |
 | `host.environment`: color scheme, keyboard `platform`, `reducedMotion` | How the chrome honours them |
@@ -41,15 +41,15 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   own bar in its place, in every host (see [Preview](#camera-animation-and-preview)). Left: the text-to-cad logo,
   named Menu, with no chevron: over the home the TEXTTOCAD
   wordmark, 20px tall (about 117px wide), and over a document the "C", 16px in the row's 24px
-  button. It is one button, so going between the home and a page morphs one into the other in
-  250ms (the box narrowing to the C as the wordmark folds into its left edge and the C fades
-  in, and back), cut straight under `prefers-reduced-motion` or the host's `reducedMotion`. The logo opens the
+  button: a plain swap between the home and a page, with no animation. Its mark's left edge is
+  the page's 16px gutter, the Home grid's left edge, over the home and over a page alike (the
+  row starts 12px in, the button's padding is 4px). The logo opens the
   **app menu** (see [Settings](#settings)) — a host with no home has it too — then, where the
   host keeps the view's own history (`history`: the CAD app's views, which no browser holds),
   **Back** and **Forward**, two arrows walking it as a browser's do, from file to file and to
   and from the home (a step like a file), each there always and disabled where it has
-  nowhere to go; then the open file's name, after its kind's glyph (a model's code glyph, a
-  file's type icon), and its ⋯. Each of these that
+  nowhere to go; then the open file's name, alone (no glyph: the name and, where it opens the
+  name menu, its chevron), and its ⋯. Each of these that
   is a control (`NAV_ITEM_CLASS`) is transparent at rest, takes the same accent background
   while the pointer is on it and while its menu is open, has a pointer cursor and no tooltip:
   it says what it is. The name
@@ -86,29 +86,38 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   buttons, sizes and places as over a file. Under it,
   the page, after Figma's Recents, with no hero (no wordmark, tagline or links: GitHub and
   Discord are the app menu's, X its footer's "Made by"; no light/dark button: Theme is the
-  menu's). It starts with **one control row**, every control 24px tall in `text-tiny`: at the
-  left **Recent**, a static tab (the only list) on the `muted` fill at weight 600; at the right,
+  menu's). The Home is **one type scale**: every text `text-ui` (13px) — the heading, the
+  type filter, the search, the names, the table — but a tile's age, `text-tiny` (11px) and
+  muted; a tile's and a row's glyph is 16px (`src/designSystem.test.js` holds it). It starts
+  with **one control row**, every control 24px tall with 13px text: at the
+  left **Recent**, a plain small heading (`text-ui`, weight 500, no fill or padding box: no tab); at the right,
   8px apart, the **type filter**, a stock DropdownMenu whose ghost `xs` trigger names what it
   shows ("All ▾") and whose radio items are All, Models and Files, there only where models and
   files are both listed; the **search**, a stock Input 24px tall and 200px wide ("Search"); and
-  the **grid/list switch**, two `icon-xs` buttons, the chosen one on the `muted` fill. Then the
+  the **grid/list switch**, two `icon-xs` buttons, the chosen one on the `muted` fill; and last,
+  where the host's computer has a file chooser (`ModelLibrarySource.pick`), **Open**, a stock
+  `xs` button (24px) with the folder icon and "Open", which opens the desktop's own chooser
+  (`POST /__cad/pick`) and shows the file picked. Then the
   documents opened or built before, pinned first, then by last activity. The home is the
-  library alone: no Open, no folder of a launch. In the grid, a **tile** is transparent on the
+  library and Open alone: no folder of a launch. It spans the page on the navbar's 16px gutter, the
+  wordmark's left edge its own. In the grid, a **tile** is transparent on the
   page in both themes, a 1px `border`, a 12px radius and no shadow, the same under the pointer;
   columns at least 240px (four across a 1280px window), 24px apart. Its picture sits on the
-  `muted` fill at 330:185, contained; its caption (12px by 16px) is its kind's glyph in a 24px
+  `muted` fill at 330:185, contained (its placeholder cube 24px); its caption (12px by 16px) is its kind's 16px glyph in a 24px
   column, then its name (`text-ui`, weight 500) over its last activity with no verb ("2h ago",
-  `text-tiny`, muted). In the list, a **table**: a 32px header row of muted `text-tiny` labels
-  (Name, Updated, Opened) over 40px rows, each its glyph and name, then its `updated` and
-  `opened` ages in two 160px columns (Opened dropped under a 560px page), transparent with the
+  `text-tiny`, muted). In the list, a **table**, one type in every cell (`text-ui`, 13px): a
+  32px header row of muted labels (Name, Updated, Opened) over 40px rows, each its glyph and
+  name, then its `updated` and `opened` ages, muted, in two 160px columns (Opened dropped under a 560px page), transparent with the
   hover fill. Each has a **pin** toggle and **one ⋯ menu** (a stock DropdownMenu), shown on hover
   or focus, at a tile's picture's top-right (Figma's star) or a row's end; a pinned one keeps its
-  filled pin at rest. The menu holds Open, Copy path and Reveal where the host can, Pin or
+  filled pin at rest. The menu holds Open, a file's Copy path and Reveal where the host can, Pin or
   Unpin, a rule, then Delete (destructive), which asks first in a stock AlertDialog saying
-  what goes and what stays on disk, Cancel / Delete; the card leaves the list at once. A
-  script that declares several models is one card, named for its main model, its others
-  folded under it ("and 27 more", at the end of a tile's age line or under a row), collapsed
-  until opened in place.
+  what goes and what stays on disk ("Delete wheel?"), Cancel / Delete; the card leaves the
+  list at once. Every model is a tile and a row of its own, nothing folded, opened, pinned and
+  deleted alone, and nothing on the Home or in the menus ties a model to the script it was
+  built from: a model shows its name, its glyph and its age; its menu is Open, Pin or Unpin and
+  Delete, with no Copy path or Reveal (a file's alone); a search matches a model's name (a
+  file's name and path); and the Delete dialog's words name no path.
   The update shows only for a release
   later than the version the page names, whatever the host says. A file that will not open
   shows a page under the navbar: "File does not exist" and the file's path, or "Could not
@@ -124,22 +133,36 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   the host can show the view full size, **Full size**; then, while its install is behind, the
   update as a notice — the update card itself, Send to agent or Copy prompt, closable for the
   view — rather than the blue button. In Preview it is gone with the rest of the column.
-- **Name menu** is a popover under the file's name, aligned to the name's left edge, 18rem wide
-  and never resized: two stock shadcn Tabs on top, **Recent** and **Files**, sized to the
-  explorer's type (`text-xs`, a 28px list), and under them the explorer's own style. It opens on
-  Recent over a model and on Files over a file; a host with one of the two has no tabs, and one
-  with neither a plain name. **Recent** (`RecentList.jsx`) is the host's library, models and files
-  alike, by last activity, eight at most, in the explorer's compact rows: the kind's glyph, the
-  name, and at the right its age with no verb ("2h ago"); the document on screen is highlighted,
-  a press opens a document as a pick in the explorer does, Up and Down walk the rows, and there is
-  no footer: the home is one click away. **Files** is the file explorer (`FolderExplorer.jsx`),
+- **Name menu** is a popover under the file's name, aligned to the name's left edge, 17.5rem
+  (280px, the explorer's natural width) wide and never resized: two stock shadcn Tabs on top,
+  **Models** and **Files**, in the explorer's type (`text-xs`, a 28px list) and each as wide as its
+  label (the list `w-fit` at the left, not the menu's width), and under them the explorer's own
+  style. It opens on Models over a model and on Files over a file; a host with one of the two has
+  no tabs, and one with neither a plain name. **Models** (`ModelList.jsx`) is the host's library's
+  models alone (no file: those are Files' and the Home's), by last activity, eight at most, in the
+  explorer's compact rows: the model's glyph, its name, and at the right its age with no verb ("2h
+  ago"), under its filter, as Files' rows are under theirs ("Filter models...", the explorer's
+  `TreeFilterInput`, matching every word in a model's name, before the eight are taken; "No
+  models match" where none does); the model on screen is highlighted, a press opens a model as a
+  pick in the explorer does, Up and Down walk the filter and the rows, and there is no footer: the
+  home is one click away. **Files** is the file explorer (`FolderExplorer.jsx`),
   below. The menu is as tall as its rows up to 28rem or the room below it: past that its list
   scrolls. It floats over the view and the file sidebar, so opening it resizes and moves
-  nothing. The explorer starts in the open file's folder (a model's: the folder its record
-  registered) and lists one folder at a time — its subfolders, then its CAD files — in compact rows: one 24px
+  nothing. The explorer starts in the open file's folder; a model, which has no file of its
+  own, starts it where the explorer was last in this tab (the tab's `explorer.folder`, kept as
+  it moves), else in the person's home folder (the server's `home`), never in the folder of the
+  script that built it. It lists one folder at a time — its subfolders, then its CAD files,
+  `.xbf` among them, hidden folders left out but the engine's cache (`~/.cache/cadgen` and the
+  folders on the way to it), which holds each model's `documents/<id>/document.xbf` — in compact rows: one 24px
   line of 12px text each, its kind a small light glyph in one column 5px in from the row's
   left end and 4px before the name (a folder its disclosure chevron, with no folder icon; a
-  file its type's icon), as the file sidebar's trees draw theirs. A press on a subfolder opens it
+  file its type's icon), as the file sidebar's trees draw theirs. A CAD file's icon is the
+  viewer's own file glyph (`fileGlyphs.jsx`, through `EntryIcon.jsx`): lucide's file outline on
+  its 24-unit grid and stroke, with what the file holds drawn small inside it, so a file reads
+  as a file at a glance — the same in the explorer, the Home, the name menu and the navbar:
+  STEP and xbf a cube, STL and 3MF a triangle cut into facets, GLB three axes, DXF a flat
+  polyline, a robot description (URDF, SRDF, SDF) two joints and their link. A model, built
+  from code, is lucide's plain cube (`Box`). A press on a subfolder opens it
   inline, under itself, its rows 10px further in and hung from a faint line under its
   chevron, read once when it first opens; another press closes it, and Right and Left do the
   same from the keyboard. A double-click opens it in the explorer's place, as a crumb does —
@@ -149,8 +172,8 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   and only the folder it is in, left alone beside the "…", is cut (its name a hint while it
   is). The folder it is in reads in the foreground color, the others muted; there is no up
   arrow, and the open file is highlighted, the list opening scrolled to centre its row, once (a
-  long folder's too). Opened on Files, its filter has the keyboard, so typing
-  finds a file at once; opened on Recent, the menu holds it and Down takes it into the rows; on
+  long folder's too). Opened on either tab, its filter has the keyboard, so typing
+  finds a file or a model at once, and Down takes it into the rows; on
   a phone the menu itself holds focus, keeping the keyboard down. "Filter files..." under the breadcrumb searches
   every file nested under the folder (the server's bounded search, debounced 150ms, each
   keystroke cancelling the search before it); a search that stopped early says "Stopped
@@ -677,7 +700,7 @@ navbar's logo over every file and over the home (FileViewer builds it from the h
 it failed to as well). Its rows, a rule between each group, are only
 what the host supplies, the person's settings in the order Language, Telemetry, Theme:
 
-- **Back to files**, where the host has a home
+- **Back to home**, where the host has a home
   (`navigation.home`): it shows the home in this view. The home's own menu has none.
 - **Language**, where the host hands the person's language (`language`, both apps): one row,
   its name and then the language in force, whose submenu offers **Automatic (<the inferred
@@ -926,12 +949,13 @@ inert); leaving Preview gives the host's chrome back as it was.
 
 In the navbar's place, over the view's top edge, is **Preview's bar**: the navbar's row (36px, a
 phone's 48px) on no surface, the model showing through, with the file's or model's name at its
-left as plain words (no logo, menu, dropdown or glyph) and at its right **Preview settings** (a
+left as plain words, muted as its controls are (no logo, menu, dropdown or glyph), and at its right **Preview settings** (a
 sliders icon, pressed while its panel is open, a second press closing it) and the way out, an X
 (**Exit preview**), their hints below them; nothing else, in every host (no Full size, no update,
 no Quick Edit). It and the playbar, where the file has routines, come and go together, as a
 video player's controls do (`usePreviewIdle`): up as Preview opens, gone after two seconds with no
-pointer movement over the view, back on the next movement or a tap, and on keyboard focus of
+pointer movement over the view, and at once when the pointer leaves the view or the window
+(`pointerleave`/`mouseleave` on the view, `blur` of the window), back on the next movement or a tap, and on keyboard focus of
 anything in either; they stay while the pointer is on either, while something in one has the
 focus (a menu of theirs open among them) and while the settings are open. Gone, they let presses
 through to the model, and hiding never touches the routine. Under the bar's right end, docked at
@@ -1063,12 +1087,13 @@ mounted once with the export controls), at the view's top right, 16px under the 
 16px from the edge, at every width. It is as small as a menu item: one line of the menu's text
 (`text-tiny`, regular weight), its padding (6px by 10px), a 14px icon, under 32px tall and as
 wide as its line (above a 600px window; under it Sonner spans the screen less its 16px insets),
-set through the Toaster's `toastOptions` and `offset` in `export/ExportControls.tsx`. Its icon
-is Sonner's own state: its spinner while the job is queued or running and while a
-dropped connection is asked again (**Preparing part.step…**), its check once the file is handed
-to the browser (**Exported part.step**, gone after Sonner's default), or its error icon with the
-engine's one-line reason, kept until its dismiss, the one button a toast has. No other action
-earns a toast. Export is an icon button at
+set through the Toaster's `toastOptions` and `offset` in `export/ExportControls.tsx`. It says
+what the page does, which is prepare the file, not download it: Sonner's spinner while the
+job is queued or running and while a dropped connection is asked again (**Preparing
+part.step…**), dismissed the moment the file is handed to the browser's download (whose own
+downloads say the rest), with no success toast of its own; or, where the export fails, its
+error icon with the engine's one-line reason, kept until its dismiss, the one button a toast
+has. No other action earns a toast. Export is an icon button at
 the navbar's right end, named on hover as the view controls are, never in the tool strip.
 It opens a dropdown as the file's ⋯ does, on Display's surface and in its type, as wide as its
 items (shadcn's 8rem least), aligned to the button's end (`export/ExportControls.tsx`): the formats the file's kind writes, plain items, known

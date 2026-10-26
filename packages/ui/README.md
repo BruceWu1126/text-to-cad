@@ -3,7 +3,7 @@
 The shared React interface for text-to-cad. `FileViewer` is the complete file view:
 one file by its absolute path (`/a/b.step`, `C:/a/b.step`, `/`-separated in every
 app), or the host's home with none, under a navbar — the logo that opens the app's
-menu, the file's name and the name menu it opens (Recent and Files), the file menu — with the file's
+menu, the file's name and the name menu it opens (Models and Files), the file menu — with the file's
 content and the loading and error states ([FileViewer](docs/file-viewer.md)).
 `CadViewer` (`@text-to-cad/ui/cad-viewer`) is the CAD viewer every app shows:
 FileViewer over a CAD client, with the five CAD renderers, the home (the model
@@ -60,9 +60,9 @@ file sidebar's trees (Model tree, Links) are 24px lines in its smaller 11px text
 ([the file sidebar](docs/settings-ui.md#the-file-sidebar-and-the-tool-stack)). Both inset
 row backgrounds 4px from their horizontal edges, including selected, hovered and
 filtered rows; nesting adds indentation inside that gutter.
-The name menu is a popover under the navbar's file name: Recent and Files as stock Tabs over
-the explorer's rows (`RecentList.jsx`, `FolderExplorer.jsx`),
-18rem wide, no taller than 28rem or the room below it, with no resize handle. It
+The name menu is a popover under the navbar's file name: Models and Files as stock Tabs over
+the explorer's rows (`ModelList.jsx`, `FolderExplorer.jsx`),
+17.5rem wide, no taller than 28rem or the room below it, with no resize handle. It
 floats over the view and never resizes it or moves its tools. A file's controls are
 the viewer's own: the tool strip at the view's top centre, the tool in hand's sub-toolbar
 under it, and the file sidebar's tiles at its top-left, a section's panel under them bounded by the viewer's height.
@@ -284,19 +284,19 @@ is no Materials editor or persisted material override. See [View styles](docs/re
 [loading](docs/loading.md).
 
 The navbar leads with the logo (the TEXTTOCAD wordmark over the home, the C over a document,
-morphing between them), which opens the app's menu: Back to files where the host
+morphing between them), which opens the app's menu: Back to home where the host
 has a home, the person's settings (Share anonymous usage data), Send feedback
 (a new issue titled "Feedback: " where the host has a tracker), GitHub, Discord and, in
 gray, the version and who made it. Where the host keeps the view's own history (the CAD
 app's views), Back and Forward follow, disabled where they have nowhere to go. It names the
-file after its kind's glyph — the name opens Recent and Files — and offers its ⋯ menu (Copy path, Reveal). They share one look: transparent until the
+file (no glyph) — the name opens Models and Files — and offers its ⋯ menu (Copy path, Reveal). They share one look: transparent until the
 pointer is on them or their menu is open, with no tooltip. At the right is only what a host
 or a file adds: the host's update button, a dismissed alert's icon and, last, the host's
 actions (the web viewer's Export); the view's own controls (a 3D view's Projection, Display and
 Preview) end its tool strip, never the navbar. A host whose own frame is its navigation shows
 the view alone (`chrome: "bare"`, the CAD app's file handler), with no navbar at all. With no
 file a view shows the host's home, the model library, under the same navbar (its logo and menu,
-without Back to files, Back and Forward where the host keeps the view's history, and the host's
+without Back to home, Back and Forward where the host keeps the view's history, and the host's
 update and actions): one control row (Recent; the type filter, the search, grid or list),
 then the library alone: the documents opened or built before, pinned first, as Figma-style
 tiles with their pictures or as a table of rows, each with its pin and a ⋯ menu ending in

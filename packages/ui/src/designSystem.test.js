@@ -48,3 +48,43 @@ test("every scroll region in the viewer's chrome is the ScrollArea primitive, ne
   assert.deepEqual(found, []);
   for (const file of SCROLL_REGIONS) assert.match(readFileSync(join(root, file), "utf8"), /<ScrollArea\b/, `${file} scrolls in a ScrollArea`);
 });
+
+// The Home (`library/`) is one type scale (docs/settings-ui.md): every text text-ui, 13px -- the
+// heading, the type filter, the search, the names, the table, its header included -- but a tile's
+// age, text-tiny and muted; a tile's and a row's glyph 16px.
+test("the Home is one type scale: text-ui throughout but a tile's age, and 16px glyphs", () => {
+  const css = readFileSync(join(root, "styles/globals.css"), "utf8");
+  const sizes = [...css.matchAll(/([^{}]*\.cad-library[^{}]*)\{([^}]*)\}/g)].flatMap(([, selector, body]) => {
+    const size = body.match(/font-size:\s*([^;]+);/)?.[1].trim();
+    return size ? [[selector.trim().replace(/\s+/g, " "), size]] : [];
+  });
+  assert.deepEqual(sizes, [
+    [".cad-library-heading", "var(--text-ui)"],
+    [".cad-library-status", "var(--text-tiny, 0.6875rem)"],
+    [".cad-library-columns", "var(--text-ui)"],
+    [".cad-library-row .cad-library-status", "var(--text-ui)"],
+  ]);
+  assert.match(css, /\.cad-library-glyph \{[^}]*width: 16px; height: 16px;/);
+  const page = readFileSync(join(root, "library/ModelLibrary.tsx"), "utf8");
+  assert.deepEqual([...page.matchAll(/\btext-(micro|tiny|xs)\b/g)].map(([name]) => name), []);
+  assert.match(page, /className="cad-library h-full overflow-y-auto text-ui"/);
+});
+
+// The logo stands on the page's gutter (docs/settings-ui.md): the navbar's 12px start and the logo
+// button's 4px padding put its mark 16px in, the Home grid's left edge, over the home and a page.
+test("the navbar's logo and the Home's grid share the 16px gutter", () => {
+  const css = readFileSync(join(root, "styles/globals.css"), "utf8");
+  assert.match(css, /\.cad-library-content \{[^}]*margin: 0; padding: 16px 16px /);
+  const navbar = readFileSync(join(root, "file-viewer/navigation/ViewerNavbar.jsx"), "utf8");
+  assert.match(navbar, /cn\(NAVBAR_ROW_CLASS, "pl-3 /);
+  assert.match(navbar, /"cad-navbar-logo justify-start px-1"/);
+});
+
+// A size of the scale given to a primitive replaces the primitive's own (a button's text-xs), and
+// survives a colour after it: cn() knows the scale's names as sizes.
+test("cn() merges the scale's sizes as font sizes", async () => {
+  const { cn } = await import("./lib/utils.js");
+  assert.equal(cn("h-6 text-xs", "text-ui"), "h-6 text-ui");
+  assert.equal(cn("text-tiny", "text-muted-foreground"), "text-tiny text-muted-foreground");
+  assert.equal(cn("text-ui", "text-foreground"), "text-ui text-foreground");
+});

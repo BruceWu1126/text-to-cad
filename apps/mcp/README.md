@@ -84,13 +84,13 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   the host restored after an update, a past chat's card) says so: the page
   reads only its own protocol's.
 - **Every view but a file handler's has a home**: the library (the documents opened or built
-  before, in any view or the web viewer). Back to files, first in the menu the navbar's logo
+  before, in any view or the web viewer). Back to home, first in the menu the navbar's logo
   opens, goes to it. The sidebar (`cad_home`) and a tab with nothing to show open on it; a
   model opened from it is shown in place. The home has the same navbar (the logo's menu, Back
   and Forward, the update button, Full size and Open in browser); it starts with its control
   row, its links the app menu's.
 - **A view browses from its file's folder.** The file name in the navbar opens the name menu:
-  Recent, and Files, the explorer, starting at the file's folder. A pick shows the file in
+  Models, and Files, the explorer, starting at the file's folder. A pick shows the file in
   place. Nothing says where a view may browse: a tab, a card and the web viewer browse the
   same way.
 - **A view keeps its own history.** As a browser keeps a tab's: every file a
@@ -412,7 +412,8 @@ built by `scripts/bundle/bundle.sh`.
 A model is shown by its document's id, as the web Viewer shows it: the view reads the document
 the engine holds and never builds or imports a script, and no folder lists one. It is in the
 library by the engine's record, which its run wrote, with its picture; its name menu opens on
-Recent, and its Files lists the folder its record registered. Rebuilding the model updates the
+Models, and its Files lists the folder the explorer was last in this view, else the person's
+home folder: never the script's. Rebuilding the model updates the
 same view through the document version stream.
 
 The stdio peer exits with its host session; it deletes only that MCP session.
