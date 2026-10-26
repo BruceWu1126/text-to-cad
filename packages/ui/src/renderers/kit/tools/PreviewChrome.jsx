@@ -5,8 +5,8 @@ import { VIEWPORT_INSET_PX } from "../shell/viewportLayout.js";
 
 /** How long Preview's bar stays up after the pointer last moved, as a video player's controls do. */
 export const PREVIEW_BAR_IDLE_MS = 2000;
-// The bar is the navbar's row with no surface under it: the same height and side padding.
-const PREVIEW_BAR_HEIGHT_PX = 36;
+// The bar is the navbar's row with no surface under it: the same height (`h-9`, a phone's 48px in
+// `globals.css`) and side padding; Preview's settings dock under it (`top-9`, the same).
 
 /**
  * The viewer's chrome around Preview. `children` — the tool strip and its stack, Quick Edit, the
@@ -65,9 +65,8 @@ function PreviewBar({ name, controls, panel }) {
   const reach = shown ? "pointer-events-auto" : "pointer-events-none";
   return <>
     <div ref={bar} data-preview-bar="" data-hidden={shown ? undefined : ""}
-      className={cn("pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-2 px-2 transition-opacity duration-300 motion-reduce:transition-none",
+      className={cn("pointer-events-none absolute inset-x-0 top-0 z-30 flex h-9 items-center justify-between gap-2 px-2 transition-opacity duration-300 motion-reduce:transition-none",
         shown ? "opacity-100" : "opacity-0")}
-      style={{ height: PREVIEW_BAR_HEIGHT_PX }}
       onPointerOver={() => setOver(true)}
       onPointerOut={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOver(false); }}
       onFocus={() => setFocused(true)}
@@ -76,7 +75,7 @@ function PreviewBar({ name, controls, panel }) {
       {controls ? <div data-preview-controls="" className={cn("flex shrink-0 items-center gap-1", reach)}>{controls}</div> : null}
     </div>
     {/* `panel`, as tall as its content up to the room under the bar. */}
-    {panel ? <div data-preview-panel="" className="pointer-events-none absolute z-30 flex min-h-0 max-w-[calc(100%-1rem)] flex-col items-end"
-      style={{ top: PREVIEW_BAR_HEIGHT_PX, right: VIEWPORT_INSET_PX, bottom: VIEWPORT_INSET_PX }}>{panel}</div> : null}
+    {panel ? <div data-preview-panel="" className="pointer-events-none absolute top-9 z-30 flex min-h-0 max-w-[calc(100%-1rem)] flex-col items-end"
+      style={{ right: VIEWPORT_INSET_PX, bottom: VIEWPORT_INSET_PX }}>{panel}</div> : null}
   </>;
 }

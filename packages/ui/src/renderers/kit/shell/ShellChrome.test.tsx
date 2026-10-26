@@ -499,7 +499,7 @@ it("Preview is in Render: the strip, the view's controls, the stack and the file
   expect(screen.queryByRole('toolbar', { name: 'Animation playback' })).toBeNull();
   // Its bar, along the view's top edge: the file's name, then its settings and the way out, an X.
   expect([previewBar()!.querySelector('[data-preview-name]')!.textContent, cornerButtons()]).toEqual(['panel.harness', ['Preview settings', 'Exit preview']]);
-  expect(previewBar()!.style.height).toBe('36px');
+  expect(previewBar()!.className).toMatch(/\bh-9\b/);
   const corner = previewBar()!;
   expect(within(corner).getByRole('button', { name: 'Exit preview' }).querySelector('svg.lucide-x')).not.toBeNull();
   // Preview draws Render in a view of its own; the editor's viewport is asked for nothing new.
