@@ -25,9 +25,11 @@ const FILE_ACTION_CONTROLS = Object.freeze({ "copy-path": "file_copy_path", reve
 const TAB_CONTROLS = Object.freeze({ recent: "recent", files: "explorer" });
 
 /**
- * The row above a file and above the host's home: ONE navbar, the same in every app, so a person
- * finds each control in the same place whatever is open. Over the home it has only the logo (its
- * menu without Back to files), Back and Forward, the host's update, Full size and its page elsewhere.
+ * The row above a file and above the host's home in a page's chrome (`FileViewer`'s `chrome: "page"`,
+ * the web viewer's): the same row whatever is open, so a person finds each control in the same place.
+ * Over the home it has only the logo (its menu without Back to files), Back and Forward, the host's
+ * update and its actions. A host that shows the view alone (`chrome: "bare"`: the CAD app's cards and
+ * tabs) has no navbar, and Preview hides it in every host, drawing its own bar in its place.
  *
  * Left, in this order: the text-to-cad logo, which opens the app's menu (`AppMenu`: Back to files
  * where the host has a home, then the person's settings, feedback and links); Back and Forward,
@@ -37,11 +39,9 @@ const TAB_CONTROLS = Object.freeze({ recent: "recent", files: "explorer" });
  *
  * Right, only what a host or a file adds: the host's update button while its install is behind
  * (`update`, the blue `UpdateButton` from `@text-to-cad/ui/update`); the file's own actions (the
- * CAD viewer's one: a dismissed alert's icon, which brings its card back); the host's way to show
- * the view full size (`fullSize`), where it shows it small; the host's own actions (`actions`: the
- * web viewer's Export); last, the host's way to open what is shown in a page of its own outside the
- * host (`openInBrowser`). The colour scheme is the app menu's. A view's own controls are never here:
- * Display and Preview end its tool strip, and in Preview the navbar steps aside for Preview's bar.
+ * CAD viewer's one: a dismissed alert's icon, which brings its card back); last, the host's own
+ * actions (`actions`: the web viewer's Export). The colour scheme is the app menu's. A view's own
+ * controls are never here: Display and Preview end its tool strip.
  *
  * Nothing here is drawn for its own sake: a control appears only where it does something.
  */
@@ -194,11 +194,9 @@ function FileName({ path, name: given, kind = "file", explorer, recent }) {
  * @param {import("react").ReactNode} [props.trailing] The file's actions.
  * @param {import("react").ReactNode} [props.actions] Host workflow controls at the right end.
  * @param {import("react").ReactNode} [props.update] The host's update button, first among the controls.
- * @param {import("react").ReactNode} [props.fullSize] The host's Full size button, where it shows the view small.
- * @param {import("react").ReactNode} [props.openInBrowser] The host's way to open what is shown outside it, last in the row.
  * @param {string} [props.className]
  */
-export function ViewerNavbar({ onHome: goHome, menu = null, history = null, file = null, name, kind = "file", explorer = null, recent = null, fileMenu = null, trailing = null, update = null, fullSize = null, openInBrowser = null, actions = null, className }) {
+export function ViewerNavbar({ onHome: goHome, menu = null, history = null, file = null, name, kind = "file", explorer = null, recent = null, fileMenu = null, trailing = null, update = null, actions = null, className }) {
   const { t } = useI18n();
   const usage = useControlUsage();
   const onHome = goHome ? () => { usage.used("home"); goHome(); } : goHome;
@@ -215,9 +213,7 @@ export function ViewerNavbar({ onHome: goHome, menu = null, history = null, file
       <div className={NAVBAR_CONTROLS_CLASS}>
         {update}
         {trailing}
-        {fullSize}
         {actions}
-        {openInBrowser}
       </div>
     </header>
   );

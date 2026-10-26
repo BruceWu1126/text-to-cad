@@ -186,16 +186,6 @@ export interface FileViewerProps {
    * controls, while the host's install is behind; nothing otherwise.
    */
   update?: ReactNode;
-  /**
-   * The host's Full size button, where the host shows the view small (inline in a conversation):
-   * at the navbar's right end, before the renderer's view controls.
-   */
-  fullSize?: ReactNode;
-  /**
-   * The host's way to open what is shown in a page of its own outside the host (the CAD app's Open
-   * in browser), where it has one: last at the navbar's right end, over every file and on the home.
-   */
-  openInBrowser?: ReactNode;
   /** The view's own history, where the host keeps one: Back and Forward after the navbar's logo, over a file and on the home. */
   history?: ViewerHistory;
   /**
@@ -213,7 +203,7 @@ export interface FileViewerProps {
   chrome?: "page" | "bare";
   onError?: (error: Error) => void;
   presentation?: {
-    /** The host's home, shown with no file: a page of its own under the navbar, which has only its logo's menu, Back and Forward, update, Full size and Open in browser there. */
+    /** The host's home, shown with no file: a page of its own under the navbar, which has only its logo's menu, Back and Forward, the update and the host's actions there. */
     home?: ReactNode;
     loading?: ReactNode;
     /**

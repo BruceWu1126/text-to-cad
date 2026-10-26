@@ -186,12 +186,6 @@ _APP_TOKEN_HEADER = "x-cadgen-app"
 # a host is asked to keep app-only tools from the model, and the server does not rely on it.
 _APP_TOKEN_ARGUMENT = "app"
 _APP_TOKEN_SCHEMA = {"type": "string", "description": "The view's capability, from its launch's metadata."}
-# The card's Open in browser: the web viewer's page of what it shows (``_browser_page``), a route of
-# the app's alone -- an agent's or a text client's request never reaches it.
-_BROWSER_ROUTE = "/__cad/browser"
-# The card's Open in browser where the host opens no link: this process opens the page itself
-# (``_open_in_browser``), app-only like the route above.
-_BROWSER_OPEN_ROUTE = "/__cad/browser/open"
 _HTTP_TOOL = {
     "name": "cad_http", "title": "CAD HTTP request", "icons": [ICON],
     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
@@ -807,57 +801,6 @@ class Server:
 
         return (self._viewer_url or viewer_url)(model)
 
-    def _browser_page(self, method: str, url: str) -> dict[str, Any]:
-        """``GET /__cad/browser[?model=<path or id>]``, the card's Open in browser: ``{"url": ...}``,
-        the page a text client's ``cad_show`` links for the document the card shows (the home's
-        with none), or 503 where the engine can give none and the card draws no button."""
-        from cadgen.viewer import url_norm
-        from .browser import ViewerUnavailable
-        from .tunnel import _result
-
-        json_type = {"content-type": "application/json"}
-        if method.upper() != "GET":
-            return _result(405, {"allow": "GET"}, b"")
-        try:
-            link = self._browser_url(url_norm.request_query(url).get("model") or None)
-        except ViewerUnavailable as failure:
-            return _result(503, json_type, json.dumps({"error": str(failure)}).encode("utf-8"))
-        return _result(200, json_type, json.dumps({"url": link}).encode("utf-8"))
-
-    def _open_in_browser(self, method: str, body: bytes) -> dict[str, Any]:
-        """``POST /__cad/browser/open`` with ``{"model": <path or id> | null}``, the card's Open in
-        browser: this process opens the web viewer's page of that document (the home's with none) in
-        the person's browser, through an owner-only redirect file so the page's token is on no
-        command line (``browser_open``). ``{"opened": true}``, or 503 in words where no page or no
-        browser can be opened here (no display, a remote shell), when the card asks its host to
-        open the page instead. The request names a document, never a URL."""
-        from cadgen.viewer import browser_open
-        from .browser import ViewerUnavailable
-        from .tunnel import _result
-
-        json_type = {"content-type": "application/json"}
-
-        def refused(status: int, error: str) -> dict[str, Any]:
-            return _result(status, json_type, json.dumps({"error": error}).encode("utf-8"))
-
-        if method.upper() != "POST":
-            return _result(405, {"allow": "POST"}, b"")
-        try:
-            asked = json.loads(body or b"{}")
-        except ValueError:
-            return refused(400, "the body is not JSON")
-        model = asked.get("model") if isinstance(asked, dict) else None
-        if model is not None and not isinstance(model, str):
-            return refused(400, "model is a path or a document id")
-        cannot = browser_open.display_refusal()  # said before a page is asked of the engine
-        if cannot is not None:
-            return refused(503, cannot)
-        try:
-            self._open_page(self._browser_url(model or None))
-        except (ViewerUnavailable, browser_open.CannotOpen) as failure:
-            return refused(503, str(failure))
-        return _result(200, json_type, b'{"opened":true}')
-
     def _open_page(self, url: str) -> None:
         """Open ``url`` in the person's browser through an owner-only redirect file
         (``browser_open``); ``CannotOpen`` in words where no browser can be opened here."""
@@ -1082,12 +1025,6 @@ class Server:
             # A view opened in an earlier session (the engine restarted under its host) holds that one's.
             raise ToolFailed("This CAD view was opened before CAD restarted: close it and open CAD again.", "bad_request")
         method, url = str(arguments.get("method") or "GET"), str(arguments.get("url") or "")
-        from cadgen.viewer import url_norm
-
-        if app and url_norm.request_pathname(url) == _BROWSER_ROUTE:
-            return _data(self._browser_page(method, url))
-        if app and url_norm.request_pathname(url) == _BROWSER_OPEN_ROUTE:
-            return _data(self._open_in_browser(method, body))
         reply = self.tunnel.serve(method=method, url=url, headers=headers, body=body, agent=not app)
         if app:
             return _data(reply)
