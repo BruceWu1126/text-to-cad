@@ -134,173 +134,9 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
 
 ## Laws
 
-The laws are the package README's (**The design laws**), numbered as this document cites
-them; each is restated here as the engine meets it.
-
-1. **An xbf carries its build closure as pointers and digests** -- script and
-   function, modules, data inputs, versions and the key; never source, never lines on
-   elements, never input contents, and nothing of a version control's (the engine calls
-   no git); names remain the per-element tie to code (**Build closure**).
-2. **Only requested files to disk.** The engine writes the files a model declares -- the xbf
-   and the exports its decorators name, nothing beside them -- and the operating
-   system's coordination for its warm process: its door (a named pipe; on Windows a port file), a
-   lock and the pipes of the connections being opened (**The door**), in a folder only the user
-   can make (`daemon.default_state_dir`): `cadgen-engine` in `$XDG_RUNTIME_DIR`, else in the
-   user's own temporary folder (on macOS the one the system names, `/var/folders/...`, whatever
-   `$TMPDIR` a sandbox sets, so a sandboxed client finds the engine started outside; elsewhere
-   `$TMPDIR`), else `/tmp/cadgen-<uid>`; on Windows in the
-   temporary folder -- and, in the user's state folder its host names,
-   the registry: one record per document it has built, been handed or a page opened, pointing at
-   its script or file (**Document lifetime**), and the installation's engine record, its page
-   token and the port it rolled to while 3245 is another's (**Architecture**); never geometry and never source. In the cache folder its host names (the platform's: `~/.cache/cadgen`) it
-   keeps, under `documents/` alone, each model document's bytes as it last built them (**The
-   cache**): its own file, never a declared or exported xbf (the same bytes), kept until a person
-   deletes it -- nothing evicts it -- and made again by a run of its script (a shape's by the program
-   that handed it over), so a restart opens every project at once; and under `pycache/` the bytecode its own processes
-   compile of the libraries they load (`daemon.bytecode`: `PYTHONPYCACHEPREFIX`, a folder per
-   installation), so nothing is written beside a library or a model; the code stays the only
-   source of truth. It
-   writes no sidecar, record of a build beside a model, index, memo, mesh or parsed document,
-   and no derived file beside an input (a STEP converted to an xbf is an export the author asks
-   for). A model whose document -- in its warm worker, else the cache -- holds the closure the model has
-   now is not run, whatever files it declares, which are exports of it written after (**Build
-   closure**). An explicit viewer export names one output in managed
-   temporary storage for delivery to the browser; it never saves source, a registry,
-   or an intermediate XBF. See **Viewer exports** below.
-3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself:
-   OCP, build123d (and ezdxf, build123d's own DXF library, which the DXF export writes
-   and checks a drawing with), numpy, Pillow (the renderer's rasteriser) and the standard
-   library only. A test holds it.
-4. **XCAF is the document; files are explicit.** A live model holds an XCAF document;
-   `@xbf` or `--xbf` serializes it as native BinXCAF. It holds: units in
-   millimetres, prototypes and instances with placements, a name on every part
-   and instance, colours per part and per painted face, materials per part and
-   per face given one (`XCAFDoc_Material`: name, description, density, and one
-   `TDataStd_NamedData` beside it for the rest; `XCAFDoc_VisMaterial`: PBR), element names
-   on face, edge and vertex sub-shape
-   labels, and an assembly's mechanism (links, pairs, ground, configurations: see
-   Kinematics); its main label names what wrote it (`cadgen.engine xbf/7 (cadgen
-   <release>)`, `document.Loaded.writer`) and holds the model's build records: its build
-   closure (**Build closure**) and its compiled animations (**Animations**). No code location
-   is on an element. STEP, GLB, STL, 3MF and,
-   of a planar document, DXF are translations of it (**Exports**).
-   `cadgen export` writes any of them from the xbf alone.
-5. **The memo is the only build cache, and it lives in the worker.** Every kernel
-   operation a model runs is keyed by its inputs, and so is every question it asks of
-   what they made -- a validity check, a volume, a distance (**Queries**). A hit hands
-   back the objects the first run made, or the answer it gave, and a miss makes
-   everything downstream of it miss. So an edit costs what it changed, and an element
-   keeps the name its feature history gave it across edits. Tessellations live in the serving process's memory,
-   keyed by a part's geometry, under its one memory budget (**Document lifetime**). Across a restart, a model's
-   build is cold but for its document in the cache (**The cache**), every model's alike -- taken whole
-   by its key or not at all (**Build closure**); a declared file, an xbf too, is never a source -- and what a
-   restart shows without a build is the document cache (law 2), the last built state.
-6. **One document per model, with one id.** Every called model makes one document, and every id
-   is one formula, `uuid5(NAMESPACE, canonical(scope) + "::" + name)` (`ids.derived_id`): a
-   model's scope is its script and its name its function's (`ids.model_id`), an opened file's its
-   path with no name (`ids.file_id`, inside the engine only: its public name stays its path), a
-   shape handed over its calling script, or the working folder where there is none, and the name
-   it is given. The same in every process, worked out without asking the engine. `key="..."` on
-   `@model`, a file decorator or `model(shape, ...)` replaces it with `uuid5(NAMESPACE, "key::" +
-   key)` (`ids.key_id`): global and readable, and refused, naming the other, when another
-   declaration claims the key in this process or in the engine's records. A key or a shape's name
-   holding `::`, the formula's separator, is refused at declaration. A function in a file is a
-   model (the registry points at its script), and a shape is handed over (its bytes held and
-   kept, nothing to run again); both are recorded and kept in the document cache alike. A
-   function in no file is refused: hand its shape over. File decorators imply a model and write
-   only their named outputs. No xbf, mesh, memo, provenance or derived file is written for a
-   document beyond what it declares. A document lives until a person deletes it (**Delete**); its
-   worker retiring does not end it, nor does memory, which reads it again from the cache. A
-   document that is not held names the command that builds it again; the engine never runs it
-   (**Document lifetime**).
-7. **Provenance is served live, never written.** What made an element -- the
-   feature, its operation, the function, file and line of its call -- lives in
-   the trace of the worker that built the document, and is asked of it while it
-   lives (`made_by` on the facts endpoints, `cadgen inspect`). A model's document
-   opened with no such worker has none to give, and says so (`made_by: null`); a
-   file -- a model's declared xbf among them -- names no model and answers none.
-8. **Poses and motion definitions, never frames.** The document carries
-   kinematics -- the mechanism, its mechanism states (each a pose: where its parts
-   stand) and its configuration sequences (each a definition: waypoints and an
-   ease) -- and the document holds poses and motion definitions, never baked
-   frames or clips. A GLB export is the one place a sequence is baked, into a clip
-   of the GLB; the engine plays nothing.
-9. **Names are the durable tie to code.** An element's name is spelled from the
-   function that made its feature and the author's name for that feature (the
-   target its result is assigned to, or a label), never from a line or a file:
-   moving code renames nothing, and the file holds no line to go stale. A line
-   is what the worker serves, now.
-10. **A file decorator requires an explicit output path.** `out` is its only
-   argument; omitted paths and `None` are refused. Whenever the model it decorates
-   runs in a build -- the build's target, or a child another model's body calls --
-   or is taken from its key, that file is written, once per build, from the model's own
-   document, exactly as an export of it (`cadgen export`) writes it: translated, compared,
-   and written only where it differs or is missing. A declared file is what the code that
-   last ran makes, whichever model ran it (**Exports**); a
-   GLB's animations are baked from the code when that GLB is written (**Animations**).
-   A model with no file decorator writes nothing.
-11. **Decoration only declares; a model script is Python.** A script runs only when Python
-    runs it; no verb imports or builds a script. Importing cadgen or
-    defining a decorated function never builds a model, writes its outputs, starts a
-    worker, or exits the caller. An explicit call builds the model and writes its
-    declared files, then returns to the caller. Python controls which calls run and
-    in what order, including its `__main__` block and conditions; watchers never
-    change that control flow. cadgen consumes no script arguments. Engine switches
-    are environment variables.
-12. **A model is a Python script.** Decorated functions declare models; explicit calls
-    build them; `python script.py` runs the program. No command builds source text.
-13. **The document's kinematics are AP242's, and cadgen stores no kinematic fact the
-   standard cannot name.** Every entity and attribute of the mechanism subtree is ISO
-   10303-105's as Part 21 writes it (edition 4's domain model's where Part 21 has none);
-   only the root says the schema and the units. What the standard cannot say is not
-   patched with an attribute of cadgen's own: it is dropped, or refused by name at document
-   time (`test_kinematics`' conformance test walks the subtree and holds it).
-
-Laws 14 to 18 hold for the whole package (the package ships alone, no backwards compatibility,
-closed vocabularies, loud failure or correct output, nothing waits on the network) and are the
-package README's alone; so is 23 (push, not pull: a model is what its last run told the
-engine), whose mechanism is **Document lifetime** below.
-
-19. **Connected means warm.** A page watches a document while it has a version wait outstanding
-    or completed a sync within `serve.LIVE` seconds. Heartbeats use the document's id (`ids`): a
-    file's `file_id`, a model's `model_id` or `key_id`; they never turn a model into a file path.
-    A watched model document keeps the worker that built it warm; a watched file -- a model's
-    declared xbf among them -- keeps no worker, whichever model's run wrote it. No timer retires
-    a worker: memory does, and it retires a worker whose document a page watches only when no
-    other is left to retire. The worker-count cap never retires a watched worker; it
-    is exceeded instead. Memory may take a document out of memory, for the cache to give back,
-    only when nothing watches it (**Document lifetime**). Closing a page never stops the engine or its worker.
-
-20. **One HTTP owner per installation.** The daemon serves its one page and document
-    reads on one authenticated listener. Both `serve` and `viewer` start or reuse it;
-    neither command has a standalone serving mode. A launcher exits after handing its client the
-    engine URL; closing a client never stops the engine. Tabs select documents at `/<uuid>`: a
-    model's id, or a file's id after a launcher registers it; Python scripts are never documents.
-    The explorer opens where it was last, else the person's home folder; a launch's folder resolves
-    only the relative files it names, and requests read files by absolute path. No page replaces or
-    re-executes the engine; stopping it is an explicit engine operation.
-
-    **No kernel in request threads.** Reading XBF/STEP, meshing, topology facts and poses
-    run in child processes. The daemon holds structures and buffers, never live kernel objects.
-
-    **MCP state belongs to the engine.** Each HTTP MCP session owns its tools, views
-    and UI resource. Stdio peers hold transport metadata only; deleting a session
-    never stops the engine. Sidebar sharing is in memory and never writes a registry.
-
-    **Host differences stay at the boundary.** The stdio peer translates host capabilities;
-    the app page keeps version reads short enough for the host's tool-call slots. Engine
-    request handlers act on declared capabilities, never on a host's identity.
-
-21. **Python functions own operations; decorators and CLIs expose them.** Every
-    successful server-backed build reports its id and localhost viewer URL,
-    including a build with file outputs. A cold `daemon=False` build has no served URL.
-22. **A verb's option is about the picture or the path, never the model.** `export`
-    takes a document and destinations: what the file holds, its parts and their
-    placement, colours and motion, is what the code built, so no option selects a part
-    or a state. `snapshot`'s options describe the picture (the camera, the display, the
-    size, the state the mechanism is drawn in); `serve`'s and `status`'s the process.
-    Anything that changes what a document is, is a function in the model's code: a
-    part's own model, or a model returning the assembly in a state (`posed`).
+The laws are the package README's (**The design laws**), and this document restates none of them: it
+describes the mechanism they constrain and cites them by that README's numbers -- 1, 2, 3, 6, 7, 9,
+10, 11, 13, 19, 20, 22 and 23.
 
 ## Architecture
 
@@ -308,19 +144,23 @@ One server per installation owns the worker pool, served documents and HTTP list
 `cadgen serve` and `cadgen viewer` launch or reuse that server and return its URL.
 The background process is implemented in `daemon.py`; warm workers remain separate.
 Every successful build registers its document by id and gives it a URL, `/<id>`; registration does not mesh it.
-A model's worker is a separate process, holding its memo and live kernel objects.
+A model's worker is a separate process, holding its memo and live kernel objects; the daemon holds
+structures and buffers, never live kernel objects (law 20).
 The distribution injects its HTTP application through `daemon.HTTP_FACTORY`; this
-standalone engine imports no application module. The application serves the built
+standalone engine imports no application module. Beside OCP, build123d and numpy it imports Pillow
+(the renderer's rasteriser) and ezdxf (build123d's own DXF library, which the DXF export writes and
+checks a drawing with), and a test holds that list (law 3). The application serves the built
 viewer's one page on that listener, every document at `/<id>`. Document routes run in
 process, with no network relay. Kernel reads, topology, poses and meshes run in
 reader/mesh subprocesses; even an inline-mesh request stays outside the daemon.
 
-Every document has one id, a lower-case UUID string ([ids.py](ids.py)), by one formula
+Every document has one id (law 6), a lower-case UUID string ([ids.py](ids.py)), by one formula
 (`derived_id`: uuid5 of a scope's canonical path, `::` and a name): a model's scope is its script
 and its name its function's (`model_id`), worked out in the script's own process (`Model.id`) as in
 the engine; a file's is its canonical path and no name (`file_id`), inside the engine only; a shape
 handed over is its calling script's (or the working folder's) and its name. A `key=` replaces the
-derived id with `key_id`, uuid5 of `key::` and the key. The canonical path (`ids.canonical`) is `realpath` and, on
+derived id with `key_id`, uuid5 of `key::` and the key, global and readable; a key or a shape's name holding `::`, the formula's
+separator, is refused at declaration. The canonical path (`ids.canonical`) is `realpath` and, on
 macOS, the name as the file system spells it, so a symlink and a case variant of one file are one
 document; the viewer's document reads (by id) and its Recents key by the same function, so it
 serves one document and keeps one Recents entry for it too, while a page names a file by the path
@@ -335,8 +175,10 @@ The worker pool alone is keyed otherwise: by the canonical path of the script a 
 process's key, not a document's.
 
 The daemon maps each built document to its worker. HTTP watcher accounting has its
-own lock, independent of document reads and pool admission. Outstanding version
-waits and recent syncs mark its documents watched. To admit a new script at the worker-count cap, the
+own lock, independent of document reads and pool admission. A page watches a document (law 19)
+while it has a version wait outstanding or completed a sync within `serve.LIVE` seconds; its heartbeats
+name the document by its id (`ids`): a file's `file_id`, a model's `model_id` or `key_id`, never turning
+a model into a file path. To admit a new script at the worker-count cap, the
 standby goes first, then the least recently used unwatched idle worker. When every idle worker is
 watched, the new worker starts past the cap instead: a build never waits on an open page, and never
 costs one its warm worker. The workers' memory cap retires a watched worker only when no unwatched one
@@ -472,6 +314,9 @@ seconds) only from the peer's word that it opened. The first word on a page that
 was asked to open settles the ask, so a failed open records nothing and the next `cad_show` opens
 the page again, and a word on any other page, from any client, is ignored. A client that declared
 no such peer is given the URL in words, and nothing opens.
+Host differences stay at the boundary (law 20): the stdio process translates host capabilities, the app
+page keeps its version reads short enough for the host's tool-call slots, and the engine's request
+handlers act on declared capabilities, never on a host's identity.
 Active HTTP calls keep the daemon alive; quiet MCP sessions expire after an hour. The host's
 stdio process holds the engine from its start while the host runs (**The door**), under a name it
 opens its sessions with: it ends them itself at its input's end and on SIGTERM, and when its hold's
@@ -873,7 +718,11 @@ A client reaches the daemon on POSIX through named pipes in the engine's folder,
 (macOS Seatbelt, deny by default, answers `EPERM` to a Unix socket's connect and to a loopback
 port's bind), while they let a command make and open files in its temporary folder, where the
 engine's folder is, FIFOs among them. Windows keeps its loopback port and port file, the token
-shown first (`daemon._admitted`).
+shown first (`daemon._admitted`). The engine's folder (law 2; `daemon.default_state_dir`) is one only the
+user can make: `cadgen-engine` in `$XDG_RUNTIME_DIR`, else in the user's own temporary folder (on macOS
+the one the system names, `/var/folders/...`, whatever `$TMPDIR` a sandbox sets, so a sandboxed client
+finds the engine started outside; elsewhere `$TMPDIR`), else `/tmp/cadgen-<uid>`; on Windows, in the
+temporary folder.
 
 - **The door.** The daemon makes one FIFO beside its lock, `<tag>.door` (`daemon.door_path`), and
   holds it open for reading, and for writing too, so it never reads as closed. A door nobody reads
@@ -1127,7 +976,7 @@ its shape); then documents, least recently used first, in one order: every docum
 from where it is kept, under the same id, on its next access, and reading runs no code -- a file
 from its file, a model's document from the cache, which is handed its bytes as it leaves when it
 does not hold them yet (`Server.leaving`, `Models.leaving`). A document a page watches is never
-evicted, nor its tessellations (connected means warm), nor the document being served as it is put.
+evicted, nor its tessellations (law 19, connected means warm), nor the document being served as it is put.
 The STEP reads held by their bytes go with the first document evicted.
 
 **Pressure.** The daemon's server asks the operating system's memory-pressure signal every two
@@ -1438,7 +1287,7 @@ this interface.
 The enclosing distribution owns the HTTP queue, the browser download and temporary
 artifact lifetime; the standalone engine owns revision validation and
 translation only. One explicit job names one temporary output, with no intermediate
-XBF. Cancellation takes effect between worker operations, discarding an in-flight
+XBF, no source and no registry (law 2). Cancellation takes effect between worker operations, discarding an in-flight
 result without killing a worker shared with another caller.
 
 ### Translation formats
@@ -1597,7 +1446,7 @@ unchanged is kept. A declared file is an export appended to the run: translated 
 every time the model runs or is taken -- an xbf from the document's own bytes, serialised before any
 export meshes its shapes -- compared with the file, and written only where it differs or is missing
 (`atomic_replace.put`, the one writer `cadgen export` writes its files with too), nothing remembered
-of what was written. A child called
+of what was written: a declared file is what the code that last ran makes, whichever model ran it. A child called
 twice is one model, written once; a child that is also a target of the build writes as the
 target; a child run inside a replayed body writes as one its caller ran; one that ran before its
 caller raised writes all the same. A child writes what its decorators declare. A model taken from its key ran nothing,
@@ -1648,13 +1497,13 @@ a mechanism in ISO 10303-105's terms (STEP AP242's kinematics):
   `link_1 · item_1 · M(v) · item_2⁻¹`, `M` a turn about Z, a slide along Z, both
   (cylindrical: angle, then distance) or build123d's intrinsic X-Y-Z rotation (spherical).
   Degrees and millimetres.
-- **Mechanism states**: the as-built values and each named state (`mechanism_state`), as
-  `MECHANISM_STATE_REPRESENTATION`s of pair values (the structure's and the viewer's
+- **Mechanism states**: the as-built values and each named state (`mechanism_state`), each a pose
+  (where its parts stand), as `MECHANISM_STATE_REPRESENTATION`s of pair values (the structure's and the viewer's
   `configurations`).
 - **Couplings**: each `gear_pair`, `rack_and_pinion_pair` or `screw_pair`, a constraint among
   pairs, as the AP242 couplers it is named after (below).
-- **Configuration sequences**: each `configuration_sequence`, as AP242's
-  `INTERPOLATED_CONFIGURATION_SEQUENCE` (the structure's and the viewer's `motions`): its
+- **Configuration sequences**: each `configuration_sequence`, a definition (waypoints and an ease),
+  as AP242's `INTERPOLATED_CONFIGURATION_SEQUENCE` (the structure's and the viewer's `motions`): its
   segments' times (`t_parameter`), interpolation and states (a mechanism state it names, or pair
   values).
 
@@ -1766,7 +1615,8 @@ The xbf holds the mechanism as a subtree under `Main():100`, found by the
 label, `TDataStd_NamedData` for an entity's AP242 name (`entity`) and attributes (named as
 the standard names them), `TDataStd_ReferenceList` for references, `TDataStd_RealArray` and
 `TDataStd_IntegerArray` for a configuration's values, `XCAFDoc_AssemblyItemRef` for an
-occurrence (`mechanism.py` draws the tree). A motion's segments say its ease as AP242's
+occurrence (`mechanism.py` draws the tree); `test_kinematics`' conformance test walks the subtree and holds
+it to law 13. A motion's segments say its ease as AP242's
 `interpolation` (`linear_interpolation_type`, `synchronous_interpolation_type`; the last
 segment's `discontinuous_interpolation_type`), and a coupling is its couplers under
 `:6 "couplings"`, a label per coupling holding them. The structure serves couplings as
@@ -2241,7 +2091,8 @@ by the relief cut). A long derivation folds to its last feature and a digest
 (`f:plate.relief~5d1e0c2f9a3b`); the worker that built it spells it out. Every name is a
 reference the CAD Viewer's ref grammar parses (`cadRefs` in the bundled `@text-to-cad/core` runtime, mirrored as
 `kernel/trace.py`'s `ELEMENT_NAME`): a feature name has at most one dot, every segment
-is an identifier, and an atom ends in a number or a digest.
+is an identifier, and an atom ends in a number or a digest. A name holds no line or file (law 9): a line is
+what the worker serves, now.
 
 A feature is the author's name for its result. A call whose result an assignment
 stores is `<function>.<target>` (`relief = body - hole` in `plate` is `plate.relief`;
@@ -2618,9 +2469,11 @@ The snapshot's part listing (0.7's `--mode list`) is gone by decision: `read_xbf
 
 A model's document is its own cache, as a FreeCAD document is: opened, it is what was last
 computed, and only what changed is computed again. It is kept in the engine's cache (**The
-cache**), and written as the model's xbf where one is declared, the same bytes. Its main label holds the model's build
+cache**), and written as the model's xbf where one is declared, the same bytes. Its main label names what
+wrote it (`cadgen.engine xbf/7 (cadgen <release>)`, `document.Loaded.writer`) and holds the model's build
 closure (`previous.py`, a `TDataStd_AsciiString` beside the writer's, schema `cadgen.engine
-closure/1`), pointers and digests only:
+closure/1`), pointers and digests only (law 1), and nothing of a version control's -- the engine calls
+no git:
 
 ```
 schema   "cadgen.engine closure/1"
