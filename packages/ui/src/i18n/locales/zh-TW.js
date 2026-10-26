@@ -657,7 +657,7 @@ export default {
   "sdf.lights": "光源",
   "sdf.physics": "物理",
   "sdf.nestedModels": "巢狀模型",
-  "sdf.unsupportedGeometry": "不支援的幾何",
+  "sdf.unsupportedGeometry": "不支援幾何",
   "sdf.metadata": "中繼資料",
 
   "cad.unreachable.openModel": "此聊天無法將 CAD 檢視器連線至其引擎。請改為在 CAD 檢視器中開啟該模型。",

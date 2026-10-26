@@ -657,7 +657,7 @@ export default {
   "sdf.lights": "光源",
   "sdf.physics": "物理",
   "sdf.nestedModels": "嵌套模型",
-  "sdf.unsupportedGeometry": "不支持的几何体",
+  "sdf.unsupportedGeometry": "不支持几何",
   "sdf.metadata": "元数据",
 
   "cad.unreachable.openModel": "此聊天无法将 CAD 查看器连接到其引擎。请改为在 CAD 查看器中打开该模型。",
