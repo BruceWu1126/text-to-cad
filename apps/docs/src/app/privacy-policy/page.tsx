@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 
 export default function PrivacyPolicyPage() {
   return (
-    <LegalPage title="Privacy Policy" updated="October 22, 2026">
+    <LegalPage title="Privacy Policy" updated="October 25, 2026">
       <LegalSection>
         <p>
           This policy describes how Thompson Labs LLC (“we”, “us”) handles personal data for
@@ -54,7 +54,15 @@ export default function PrivacyPolicyPage() {
                 failed, and why each failure happened, as one of a fixed set of words cadgen chooses
                 (such as no file at the path the agent gave, no view open, a view that did not answer
                 in time, or a bug in cadgen) -- never the error’s message or the path; how many times
-                you touched a CAD view; how many different files of each format
+                you touched a CAD view; which of a CAD view’s tools and settings you used (such as
+                Select and its filters, Measure, Pencil and Shapes and what they draw with, Explode,
+                Clip, the display modes and Grid, Projection, Preview and its settings, playback, a
+                model’s joints, the sidebar’s sections, a part’s menu, the view cube, Quick Edit’s
+                Copy, Queue and Send, Export, the Recent and Files menu, Theme and Language, and the
+                home’s search, filters, layout and card menus), each as a name from a fixed list, with how many times each was used and, for a
+                tool that stays on (the tool in hand, or Preview), how many whole seconds it was on --
+                never what you typed, a value you chose (other than a choice that is itself a name on the
+                list, such as a display mode or a clip axis), or the name of a file or a part; how many different files of each format
                 (such as STEP or STL) a CAD view showed for the first time that day, told apart on your
                 computer and sent only as a number; how many models were built and files exported, of
                 which format, whether a model script or a <code>cadgen</code> command asked, how they
@@ -130,7 +138,9 @@ export default function PrivacyPolicyPage() {
           <li>
             Telemetry: only to understand, in aggregate, how many people use text-to-cad and how
             often, how many files they work on and in which formats, what they build and how long it
-            takes, where in the world it is used, which features are used, which agent apps and
+            takes, where in the world it is used, which features are used, which of the CAD views’ tools
+            and settings are used and for how long (so we know which to improve and which matter
+            less), which agent apps and
             operating systems to support, and how often tools, builds and snapshots fail; and, from
             crash reports, to find and fix the bugs behind them.
           </li>

@@ -1,5 +1,6 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { fuzzyMatch } from '../../../file-viewer/navigation/fuzzy.js';
+import { useControlUsage } from '../../../usage/controls.js';
 
 /** The scroller a tree sits in (its tool-stack panel's body): a search keeps its place in it. */
 const panelScroller = element => element?.closest('[data-tool-panel-body]') ?? element;
@@ -134,7 +135,10 @@ export function useTreeSearch(roots) {
   const index = useMemo(() => (searching ? buildModelTreeSearchIndex(roots) : null), [searching, roots]);
   const found = useMemo(() => (index ? searchModelTree(index, deferredQuery) : NO_MATCHES), [index, deferredQuery]);
   const listRef = useRef(null), resumeScroll = useRef(0);
+  const controls = useControlUsage();
   const changeQuery = value => {
+    // A search begun is a use (`usage/controls.js`); never what it looks for.
+    if (!searching && value.trim()) controls.used('tree_filter');
     if (!searching && value.trim() && listRef.current) resumeScroll.current = panelScroller(listRef.current).scrollTop;
     setQuery(value); setCursor(null);
   };

@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { useControlUsage } from "../../../usage/controls.js";
 
 const LIMIT = 200;
 
@@ -15,6 +16,7 @@ const LIMIT = 200;
  * @returns {ViewerHistory}
  */
 export function useViewerHistory() {
+  const controls = useControlUsage();
   const stacks = useRef({ past: /** @type {ViewerHistoryStep[]} */ ([]), future: /** @type {ViewerHistoryStep[]} */ ([]) });
   const [sizes, setSizes] = useState({ past: 0, future: 0 });
   const actions = useMemo(() => {
@@ -34,6 +36,7 @@ export function useViewerHistory() {
         if (!step) return false;
         stacks.current = { past: past.slice(0, -1), future: [step, ...future] };
         step.undo();
+        controls.used("undo");
         publish();
         return true;
       },
@@ -43,6 +46,7 @@ export function useViewerHistory() {
         if (!step) return false;
         stacks.current = { past: [...past, step], future: future.slice(1) };
         step.redo();
+        controls.used("redo");
         publish();
         return true;
       },
@@ -52,6 +56,6 @@ export function useViewerHistory() {
         publish();
       },
     };
-  }, []);
+  }, [controls]);
   return useMemo(() => ({ canUndo: sizes.past > 0, canRedo: sizes.future > 0, ...actions }), [sizes, actions]);
 }

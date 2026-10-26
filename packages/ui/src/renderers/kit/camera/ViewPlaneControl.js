@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { VIEW_CUBE_CORNERS, VIEW_CUBE_EDGES } from "./viewportCameraKit.js";
+import { useControlUsage } from "../../../usage/controls.js";
 
 // The view cube. A cube drawn from the camera's orientation: its faces are the six plane
 // views (click TOP, FRONT, RIGHT...) and its corners are the eight isometric views. The
@@ -158,6 +159,8 @@ function ViewPlaneControl({
   // The cube's own subscription to the camera's orientation (`createViewPlaneOrientationStore`):
   // a moving camera re-renders the cube and nothing around it.
   const viewPlaneOrientation = useSyncExternalStore(orientationStore.subscribe, orientationStore.getSnapshot, orientationStore.getSnapshot);
+  // A face, an edge or a corner pressed, or the cube turned by a drag (`usage/controls.js`).
+  const usage = useControlUsage();
   const [hoveredId, setHoveredId] = useState("");
   const [dragging, setDragging] = useState(false);
   // A press that moves more than a few pixels is a drag that orbits, not a click on a face.
@@ -242,6 +245,7 @@ function ViewPlaneControl({
       if (!draggedRef.current) {
         draggedRef.current = true;
         setDragging(true);
+        usage.used("view_cube_drag");
       }
       orbitViewCube(moveEvent.clientX - lastX, moveEvent.clientY - lastY);
       lastX = moveEvent.clientX;
@@ -277,9 +281,10 @@ function ViewPlaneControl({
     onClick: (event) => {
       event.stopPropagation();
       if (disabled || draggedRef.current) return;
+      usage.used("view_cube");
       activate();
     },
-    onKeyDown: (event) => activateOnKey(event, () => { if (!disabled) activate(); }),
+    onKeyDown: (event) => activateOnKey(event, () => { if (!disabled) { usage.used("view_cube"); activate(); } }),
     ...hoverProps(id)
   });
 

@@ -6,6 +6,7 @@ import {
 import { cn } from "@text-to-cad/ui/utils";
 import { FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 import { TOOL_PANEL_BUTTON_CLASS, ToolPanelHeadAction } from "../tools/ToolPanel.jsx";
+import { useControlUsage } from "../../../usage/controls.js";
 
 export const NO_PRESET_VALUE = "__none__";
 export const DEFAULT_POSE_VALUE = "__default__";
@@ -26,7 +27,9 @@ export function positionValuesAreDefault(values, defaults) {
  * is neither to choose. `disabled`: shown, not chosen from (while a motion owns the pose).
  */
 export function KinematicsPoseRow({ poses = [], activeValue, onSelect, onReset, disabled = false }) {
+  const usage = useControlUsage();
   if (!poses.length && !onReset) return null;
+  const reset = () => { usage.used("position_reset"); onReset?.(); };
   const options = [...(onReset ? [{ value: DEFAULT_POSE_VALUE, label: "Default" }] : []), ...poses];
   const active = options.find(pose => pose.value === activeValue);
   const label = active?.label || "Custom";
@@ -43,7 +46,7 @@ export function KinematicsPoseRow({ poses = [], activeValue, onSelect, onReset, 
       <DropdownMenuContent align="end" sideOffset={4} collisionPadding={8} aria-label="Pose"
         className={cn(FLOATING_SURFACE_CLASS, "min-w-(--radix-dropdown-menu-trigger-width) data-[state=closed]:animate-none!")}>
         <DropdownMenuRadioGroup value={active?.value || NO_PRESET_VALUE}
-          onValueChange={value => value === DEFAULT_POSE_VALUE ? onReset?.() : onSelect?.(value)}>
+          onValueChange={value => { if (value === DEFAULT_POSE_VALUE) { reset(); return; } usage.used("position_preset"); onSelect?.(value); }}>
           {options.map(option => <DropdownMenuRadioItem key={option.value} value={option.value}>
             <span className="min-w-0 truncate">{option.label}</span>
           </DropdownMenuRadioItem>)}
@@ -52,7 +55,7 @@ export function KinematicsPoseRow({ poses = [], activeValue, onSelect, onReset, 
     </DropdownMenu>
     {onReset ? <ToolPanelHeadAction>
       <TooltipHint content="Reset position" side="bottom">
-        <button type="button" aria-label="Reset position" data-pose-reset="" disabled={disabled || activeValue === DEFAULT_POSE_VALUE} onClick={onReset}
+        <button type="button" aria-label="Reset position" data-pose-reset="" disabled={disabled || activeValue === DEFAULT_POSE_VALUE} onClick={reset}
           className={cn(TOOL_PANEL_BUTTON_CLASS, "disabled:pointer-events-none disabled:opacity-40")}><RotateCcw className="size-3" aria-hidden="true" /></button>
       </TooltipHint>
     </ToolPanelHeadAction> : null}

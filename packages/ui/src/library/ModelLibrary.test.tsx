@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 // The built module: its Settings is the renderer kit's, whose JSX lives in .js files this runner does not compile.
 import { ModelLibrary, libraryCards, mainModel } from '../../dist/library/ModelLibrary.js';
 import { ageLabel, lastActivity } from '../../dist/lib/age.js';
+import { ControlUsageProvider } from '../../dist/usage/controls.js';
 import type { LibraryModel, ModelLibrarySource } from './ModelLibrary.js';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -355,4 +356,38 @@ it('reads its list again every couple of seconds while the home is up, keeping t
     expect(list).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('button', { name: 'Open plate.step' })).toBe(card);
   } finally { vi.useRealTimers(); }
+});
+
+it("counts what a person does on the home by name: a chip, a fold opened, a search begun, a card opened, a delete cancelled and one confirmed", async () => {
+  const reports: { control: string; count: number; seconds: number }[][] = [];
+  const script = '/work/juno/juno.py';
+  const ids = ['0', '1'].map(digit => `8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f1${digit}`);
+  const source = library([model('juno', { path: ids[0], kind: 'model', script, updated: 10 }),
+    model('wheel', { path: ids[1], kind: 'model', script, updated: 5 }), model('bracket.step')]);
+  const view = render(<ControlUsageProvider report={counts => reports.push(counts)}><ModelLibrary library={source} /></ControlUsageProvider>);
+  await screen.findByRole('button', { name: 'Open juno' });
+  const chips = screen.getByRole('group', { name: 'Show' });
+  fireEvent.click(within(chips).getByRole('button', { name: 'Models' }));
+  fireEvent.click(within(chips).getByRole('button', { name: 'Models' })); // already shown: no use
+  fireEvent.click(within(chips).getByRole('button', { name: 'All' }));
+  const more = screen.getByRole('button', { name: 'and 1 more' });
+  fireEvent.click(more);
+  fireEvent.click(more); // folding it again is no use
+  const search = screen.getByRole('searchbox', { name: 'Search models' });
+  for (const value of ['b', 'br', '']) fireEvent.change(search, { target: { value } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Open bracket.step' })); });
+  await act(async () => { fireEvent.click(within(await menu('bracket.step')).getByRole('menuitem', { name: 'Delete' })); });
+  await act(async () => { fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' })); });
+  view.unmount();
+  const said = Object.fromEntries(reports.flat().map(({ control, count }) => [control, count]));
+  expect(said).toEqual({ home_chip_models: 1, home_chip_all: 1, home_fold: 1, home_search: 1, home_open: 1, home_delete_cancel: 1 });
+  // A delete the person confirms is counted as one.
+  cleanup();
+  reports.length = 0;
+  const again = render(<ControlUsageProvider report={counts => reports.push(counts)}><ModelLibrary library={source} /></ControlUsageProvider>);
+  await screen.findByRole('button', { name: 'Open bracket.step' });
+  await act(async () => { fireEvent.click(within(await menu('bracket.step')).getByRole('menuitem', { name: 'Delete' })); });
+  await act(async () => { fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' })); });
+  again.unmount();
+  expect(reports.flat()).toEqual([{ control: 'home_delete', count: 1, seconds: 0 }]);
 });

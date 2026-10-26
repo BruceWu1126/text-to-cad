@@ -15,6 +15,7 @@ import { useI18n } from '../i18n/index.js';
 import { useViewerMobile } from '../file-viewer/responsive.js';
 import { ExportContext, type ExportView } from './context.js';
 import { exportChoices, type ExportChoice } from './formats.js';
+import { useControlUsage } from '../usage/controls.js';
 
 type Translate = ReturnType<typeof useI18n>['t'];
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -152,8 +153,10 @@ export function ExportControls({ service, downloads, file, children }: {
   const displayed = source?.file === file ? source : null;
   // What the file on screen saves as, known from its kind: the menu has nothing to wait for.
   const choices = displayed ? exportChoices(displayed) : [];
+  const usage = useControlUsage();
   const begin = (choice: ExportChoice) => {
     if (!displayed) return;
+    usage.used(`export_${choice.format}`);
     // The document as its code built it, at the revision on screen: never a selection or a pose.
     const request: ExportRequest = { requestId: crypto.randomUUID(), epoch: '', source: { doc: displayed.doc, revision: displayed.revision }, format: choice.format };
     const stem = (displayed.name.split('::').pop() || 'model').replace(/\.[^.]+$/, '').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').slice(0, 100);

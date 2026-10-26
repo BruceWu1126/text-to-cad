@@ -14,6 +14,7 @@ import { TOOL_PANEL_BUTTON_CLASS } from "../ToolPanel.jsx";
 import { copiedQuickEdit, createQuickEditContext, pastedLines, quickEditSelection } from "./quickEditPrompt.js";
 import { insertAtCaret, markSelectedPills, noteText, pasteNodes, selectPillAt } from "./noteEditor.js";
 import ReferenceChips from "./ReferenceChips.jsx";
+import { useControlUsage } from "../../../../usage/controls.js";
 
 // The sheet's open stop: most of the screen, so the note has room; the box fills it, the note
 // taking what its header and buttons leave. Its handle is the sheet's top 24px.
@@ -87,6 +88,7 @@ export function quickEditReferenceIds(selection) {
 export default function QuickEdit({ resource, references = EMPTY, chips = null, annotation = null, prompt = null, nameReference = null, onCopy, onEscape, onClear, disabled = false,
   hidden = false, docked = false, className, style }) {
   const host = useViewerHost();
+  const controls = useControlUsage();
   const destination = usePromptDestination();
   const [text, setText] = useState("");
   const [pending, setPending] = useState("");
@@ -249,6 +251,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
       const message = failure(result);
       if (message) throw new Error(message);
       try { host.usage?.used("quickEdit"); } catch { /* counting a use never fails it */ }
+      controls.used(`quick_edit_${action}`);
       if (action === "copy") showCopied();
       else clearAll();
     }).catch(caught => setError(caught instanceof Error ? caught.message : String(caught)))

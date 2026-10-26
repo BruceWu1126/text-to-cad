@@ -150,6 +150,18 @@ class ViewerAnalyticsTest(unittest.TestCase):
         self.assertEqual(crashes, [("page", "TypeError"), ("route", "KeyError")])
         self.assertNotIn("secret", json.dumps(self.sent))
 
+    def test_a_page_says_the_controls_a_person_used_and_only_names_on_the_list_count(self) -> None:
+        self.request("POST", "/__cad/analytics", {"share": True})
+        controls = [{"control": "measure", "count": 1, "seconds": 42}, {"control": "export_step", "count": 1, "seconds": 0},
+                    {"control": "/Users/someone/a.stl", "count": 1, "seconds": 0}, "measure"]
+        self.assertEqual(self.request("POST", "/__cad/analytics/activity", {"controls": controls})[0], 204)
+        self.assertTrue(self.app.analytics.flush())
+        [payload] = self.sent
+        self.assertEqual((payload["schema"], payload["process"]), (7, "viewer"))
+        self.assertEqual(payload["events"], [{"name": "control", "control": "export_step", "count": 1, "seconds": 0},
+                                             {"name": "control", "control": "measure", "count": 1, "seconds": 42}])
+        self.assertNotIn("someone", json.dumps(self.sent))
+
     def test_a_page_that_leaves_mid_answer_is_no_crash_and_a_route_that_breaks_still_is(self) -> None:
         self.request("POST", "/__cad/analytics", {"share": True})
         handler_class = handler_module.make_handler_class(self.app)

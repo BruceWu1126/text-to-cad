@@ -33,6 +33,7 @@ import PreviewView from "./PreviewView.jsx";
 import { previewCoverStep } from "./previewCover.js";
 import ViewportContextMenu from "./ViewportContextMenu.jsx";
 import AnnotationSelectionBar from "../tools/annotate/AnnotationSelectionBar.jsx";
+import { useControlUsage } from "../../../usage/controls.js";
 
 // The strip and the panels under it share one column at the top centre, its height the room down
 // to the cube's line, so however many panels are up it never runs past the viewer
@@ -247,6 +248,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   // Speed and Loop, once chosen in the Animation section's Playback settings, are the file's, and what its
   // routines play with, whatever they authored, until they are chosen again. Unset, the routine's own apply.
   const { speed: chosenSpeed, loop: chosenLoop } = shell.playback;
+  const controls = useControlUsage();
   const animationRef = useRef(animation);
   animationRef.current = animation;
   useEffect(() => {
@@ -263,10 +265,14 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     if (previewing && autoplayRef.current && animationControlsHaveContent(runtime) && !runtime.playing) runtime.onPlayToggle();
   }, [previewing, hasAnimation]);
   // What those settings change is the file's, and applied to its routine at once.
+  // The person's presses on them are counted (`usage/controls.js`); the shell's own, above, are not.
   const playbackRuntime = hasAnimation ? {
     ...animation,
-    onSpeedChange: value => { shell.setPlayback({ speed: value }); animation.onSpeedChange(value); },
-    onLoopToggle: value => { shell.setPlayback({ loop: value }); animation.onLoopToggle(value); }
+    onPlayToggle: (...args) => { controls.used("animation_play"); return animation.onPlayToggle?.(...args); },
+    onClipSelect: (...args) => { controls.used("animation_clip"); return animation.onClipSelect?.(...args); },
+    onRelease: (...args) => { controls.used("animation_release"); return animation.onRelease?.(...args); },
+    onSpeedChange: value => { controls.used("animation_speed"); shell.setPlayback({ speed: value }); animation.onSpeedChange(value); },
+    onLoopToggle: value => { controls.used("animation_loop"); shell.setPlayback({ loop: value }); animation.onLoopToggle(value); }
   } : null;
   // Preview opens still: its Orbit tile starts the camera turning, and a second press stops it.
   const orbitPlaying = shell.orbiting;
@@ -571,13 +577,13 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                   so they stand there; a host with no navbar has them in Preview's top-right corner. */}
               {inNavbar && shell.previewable && previewing ? createPortal(<>
                 <NavbarControl label={t("preview.settings")} active={previewPanelOpen} disabled={shell.idle}
-                  onClick={() => setPreviewPanelOpen(open => !open)} data-preview-settings=""><SlidersHorizontal className="size-3.5" aria-hidden="true" /></NavbarControl>
+                  onClick={() => { if (!previewPanelOpen) controls.used("preview_settings"); setPreviewPanelOpen(open => !open); }} data-preview-settings=""><SlidersHorizontal className="size-3.5" aria-hidden="true" /></NavbarControl>
                 <NavbarControl label={t("preview.exit")} onClick={leavePreview}><X className="size-3.5" aria-hidden="true" /></NavbarControl>
               </>, view.navbarSlot) : null}
               <PreviewChrome active={previewing}
                 end={inNavbar ? null : <>
                   <ToolbarButton label={t("preview.settings")} tooltipSide="bottom" active={previewPanelOpen} aria-pressed={previewPanelOpen}
-                    disabled={shell.idle} className={stripButtonClass} onClick={() => setPreviewPanelOpen(open => !open)} data-preview-settings="">
+                    disabled={shell.idle} className={stripButtonClass} onClick={() => { if (!previewPanelOpen) controls.used("preview_settings"); setPreviewPanelOpen(open => !open); }} data-preview-settings="">
                     <SlidersHorizontal aria-hidden="true" />
                   </ToolbarButton>
                   <ViewControl label={t("preview.exit")} tooltipSide="bottom" onClick={leavePreview}><X aria-hidden="true" /></ViewControl>

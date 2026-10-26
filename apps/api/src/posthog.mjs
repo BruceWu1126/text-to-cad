@@ -5,7 +5,7 @@
  * them: never the IP address, nor anything finer. PostHog's own lookup of where an event came from is off
  * for every event (`$geoip_disable`): the receiver posts from the host's servers, so it would place everyone
  * there. An event is a window's counts, so a product reads them by adding up a property (`calls`, `count`,
- * `seconds`), never by counting events.
+ * `seconds`), never by counting events: a `control_used` with a `count` of 0 is a tool that stayed on all window.
  *
  * An opt-out deletes the install's person and every event under its id (`/forget`): PostHog does that in the
  * background, so what "deleted" means is "queued for deletion". Retention is PostHog's: events go after the
@@ -22,7 +22,7 @@ import { FIELDS } from './events.mjs';
 export const EVENTS = {
   tool: 'tool_used', view: 'view_used', files: 'files_shown', build: 'models_built', snapshot: 'snapshots_rendered',
   feature: 'feature_used', health: 'daemon_health', exception: '$exception', tool_failure: 'tool_failed',
-  build_failure: 'build_failed', snapshot_failure: 'snapshot_failed',
+  build_failure: 'build_failed', snapshot_failure: 'snapshot_failed', control: 'control_used',
 };
 // Frames that name no file of ours: never in the app, whatever the code around them.
 const NOT_OURS = new Set(['<user>', '<?>', '<frozen>']);

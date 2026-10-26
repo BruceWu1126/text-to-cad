@@ -123,7 +123,9 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
   const host = useMemo<Omit<ViewerHost, 'navigation'>>(() => ({
     files: source, fileActions, clipboard: frameClipboard, promptContext, promptFiles, links,
     // A Quick Edit copied, queued or sent, counted by the CAD app's server for its telemetry.
-    usage: { used: feature => { if (feature === 'quickEdit') client.reportActivity({ quickEdit: true }); } },
+    usage: { used: feature => { if (feature === 'quickEdit') client.reportActivity({ quickEdit: true }); },
+      // The controls a person used, and how long a tool was up, counted by the shared viewer.
+      controls: counts => client.reportActivity({ controls: counts }) },
     environment: { colorScheme, locale, platform },
   }), [client, source, fileActions, promptContext, promptFiles, links, colorScheme, locale, platform]);
 

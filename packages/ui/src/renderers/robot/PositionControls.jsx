@@ -6,6 +6,7 @@ import {
   FILE_SHEET_PRECISION_SLIDER_CLASSES, FileSheetSliderField, FileSheetStatusText, parseFileSheetNumberInput
 } from "../kit/inspector/FileSheet.js";
 import { KinematicsPoseRow, NO_PRESET_VALUE, DEFAULT_POSE_VALUE, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
+import { useControlUsage } from "../../usage/controls.js";
 
 const CONTROL_SYNC_EPSILON = 0.001;
 const CONTROL_LOCAL_OVERRIDE_MS = 3500;
@@ -164,9 +165,11 @@ const ControlRow = memo(function ControlRow({ control, value, onValueChange }) {
 // id), so a pose step renders the row that moved and nothing else: not the section, not
 // its 26 other rows.
 function PoseControlRow({ pose, control }) {
+  // A joint a person moves, counted once a drag (`usage/controls.js`).
+  const usage = useControlUsage();
   const read = () => pose.getSnapshot().values[control.id] ?? pose.defaults[control.id] ?? 0;
   const value = useSyncExternalStore(pose.subscribe, read, read);
-  return <ControlRow control={control} value={value} onValueChange={pose.write} />;
+  return <ControlRow control={control} value={value} onValueChange={(...args) => { usage.changed("position_joint"); return pose.write(...args); }} />;
 }
 
 /** The Pose row: Default, then the SRDF's named group states, if it declares any. */

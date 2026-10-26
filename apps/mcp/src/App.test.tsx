@@ -344,6 +344,14 @@ it('a Quick Edit that reached its destination is counted by the CAD app\'s serve
   await vi.waitFor(() => expect(server.asked('/__cad/analytics/activity')).toEqual([{ quickEdit: true }]));
 });
 
+it("the controls a person used reach the CAD app's server as the shared viewer counted them, by name and seconds", async () => {
+  const { bridge, server } = host({ displayMode: 'fullscreen' });
+  server.answers['/__cad/analytics/activity'] = () => null;
+  render(<App bridge={bridge as any} server={server as any} presentation="tabs" launch={{ protocol: 7, page: 'viewer', model: '/work/part.stl' }} />);
+  viewer.props!.host.usage.controls([{ control: 'measure', count: 1, seconds: 42 }]);
+  await vi.waitFor(() => expect(server.asked('/__cad/analytics/activity')).toEqual([{ controls: [{ control: 'measure', count: 1, seconds: 42 }] }]));
+});
+
 it('nothing asks about usage stats: the app menu shows the answer, and its toggle changes it', async () => {
   const { bridge, server } = host({ displayMode: 'fullscreen' });
   const { queryByRole } = render(<App bridge={bridge as any} server={server as any} launch={home} />);

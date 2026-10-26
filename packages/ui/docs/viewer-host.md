@@ -18,7 +18,8 @@ The host contains `files`, optional native `fileActions`, `clipboard`,
 `promptContext`, the optional `promptFiles`, `navigation` (the optional `openFile(path)` and
 `home()`), the optional `links` (the app menu's), the optional `usage`
 (`used(feature)`: what the person used, for the host's telemetry to count, never what
-they made; absent, nothing is counted) and `environment`. `environment` carries the resolved `colorScheme`,
+they made; absent, nothing is counted; and `controls(counts)`: which of the view's controls a
+person used, counted once by the shared UI for every host — see below) and `environment`. `environment` carries the resolved `colorScheme`,
 the resolved `locale` (the language the view reads in: the person's choice, else what the
 context infers, as `@text-to-cad/ui/i18n`'s `useLanguage` resolves it; none, or one the viewer
 does not speak, reads English),
@@ -306,6 +307,20 @@ has `send`. The context is built at the press, from what is live then; a changed
 document or revision never retargets it. A Quick Edit that reached its destination
 (copied, queued or sent: no `failed` or `cancelled` receipt) tells the host once,
 `usage.used('quickEdit')`, for its count; a host that throws there changes nothing.
+
+`usage.controls(counts)` is the shared UI's count of what a person did in the view
+([`usage/controls.js`](../src/usage/controls.js)): `CadViewer` counts under a `ControlUsageProvider`
+fed by it, and every renderer, menu and the home count through `useControlUsage()` — `used(name)` for
+a press, `changed(name)` for a setting (a burst of moves is one change), `active(name, on)` for a
+control that stays on (the tool in hand, Preview: a use each time it turns on, and its seconds while
+it is on and the page is shown). A host receives, at most every minute it has something to say, as
+the page is hidden and as the view goes, `[{ control, count, seconds }]`: a name of `CONTROLS`, a
+closed list that cadgen and the receiver hold too (a name not on it is dropped here), and two whole
+numbers. Never a value typed, a setting's value (unless it is itself a name on the list: a render
+mode, an axis), a file's or a part's name. Only a person's act counts: what a renderer, a host command
+or the agent does through the live surface is not, nor anything a picture drawn out of sight does (it
+is outside the provider). Both apps hand it to their server (`reportActivity({ controls })`), which
+sends it with the rest of cadgen's telemetry, only with the person's yes.
 
 `ViewerHost.promptFiles` is a `PromptFiles`: `create({ name, input, views, annotation })`
 answers `{ inline: compactJson }` or `{ snapshot: absolutePath }`, and `read(path)` fetches JSON. `createHttpPromptFiles({ origin, fetch })` from

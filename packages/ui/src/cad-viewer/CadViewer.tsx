@@ -19,6 +19,7 @@ import { useTabViewerState } from '../tab-store/useTabViewerState.js';
 import { normalizePath } from './catalog.js';
 import { isDocumentId } from '@text-to-cad/core/lib/cadRefs.js';
 import { MissingCadFile } from './MissingCadFile.js';
+import { ControlUsageProvider } from '../usage/controls.js';
 
 // A STEP: read by the cadgen engine, at a length its size decides (the home's pictures ask first, as
 // they do for a model's document, by its id).
@@ -216,9 +217,13 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
         description={isDocumentId(path) ? message : undefined} />
       : <EmptyState icon={FileWarning} title={t("file.openFailed")} description={message} tone="warn" action={goHome} />,
   }), [library, layout, changeLayout, path, picture, host.links, host.fileActions, entry, onError, goHome, t]);
+  // What a person does on the screen is counted for the host (`usage/controls.js`); never what a picture drawn
+  // out of sight does, which is outside it.
   return <I18nProvider locale={locale}>
+    <ControlUsageProvider report={host.usage?.controls}>
     <ExportControls service={client.exports} downloads={host.downloads} file={shown ?? path}>{({ navbar, overlay }) => <FileViewer navbarActions={navbar} overlay={overlay} file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
       colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} fullSize={fullSize} openInBrowser={openInBrowser} history={history} recent={recent} notice={notice} onError={onError} presentation={presentation} />}</ExportControls>
+    </ControlUsageProvider>
     {drawing && !path ? <OffscreenPicture key={drawing.source.file} source={drawing.source} host={host} preferences={preferences} onDone={drawn} /> : null}
   </I18nProvider>;
 }

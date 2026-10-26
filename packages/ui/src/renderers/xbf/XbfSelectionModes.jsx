@@ -2,6 +2,7 @@ import { PositionIcon } from '../kit/tools/ChangedDot.jsx';
 import { CONNECTED_SELECTION, SELECT_GEOMETRY, connectedSelectionApplies } from './xbfSelectionFilter.js';
 import { DropdownMenuCheckboxItem } from '@text-to-cad/ui/primitives/dropdown-menu';
 import SelectFilterMenu from "../kit/tools/select/SelectFilterMenu.jsx";
+import { useControlUsage } from "../../usage/controls.js";
 import { ModeGlyph, ToolModeIcon, modeGlyphIcon } from "../kit/tools/select/modeGlyphs.jsx";
 
 // Select's button, Measure's and Select's menu, which read on an engine document as the STEP
@@ -56,9 +57,13 @@ export function xbfSelectModes({ assembly, posable }) {
  */
 export function SelectModeMenu({ value, onChange, assembly, posable, connected, onConnectedChange, disabled = false }) {
   const options = CONNECTED_SELECTION.filter(option => connectedSelectionApplies(option.id, value));
+  const controls = useControlUsage();
   return <SelectFilterMenu value={value} onChange={onChange} modes={xbfSelectModes({ assembly, posable })} disabled={disabled}>
     {options.length ? options.map(option => <DropdownMenuCheckboxItem key={option.id} checked={connected[option.id] === true}
-      onSelect={event => event.preventDefault()} onCheckedChange={checked => onConnectedChange(option.id, checked === true)}>
+      onSelect={event => event.preventDefault()} onCheckedChange={checked => {
+        controls.used(option.id === 'tangentFaces' ? 'select_group_faces' : 'select_group_edges');
+        onConnectedChange(option.id, checked === true);
+      }}>
       {glyphIcon(GROUP_GLYPHS[option.id])}{option.label}
     </DropdownMenuCheckboxItem>) : null}
   </SelectFilterMenu>;

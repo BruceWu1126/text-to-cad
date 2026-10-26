@@ -2,6 +2,7 @@ import { RotateCcw } from "lucide-react";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
 import SubToolbar, { SLIDER_SUB_TOOLBAR_CLASS, SUB_TOOLBAR_SLIDER_CLASS, SubToolbarValue } from "../SubToolbar.jsx";
 import { CrossSectionControls, ExplodeControls, clipSummary } from "./ModelViewControls.js";
+import { useControlUsage } from "../../../../usage/controls.js";
 
 /** Separated assembly layers, distinct from an expand affordance. */
 function ExplodeIcon(props) {
@@ -29,6 +30,7 @@ function ClipIcon(props) {
  * files have them, and lists Explode only where there are parts to separate.
  */
 export function useModelTools({ view, features, store, mesh, disabled, selectedTool, onSelect }) {
+  const controls = useControlUsage();
   const applied = [
     ...(view.exploded.enabled && view.exploded.amount > 0 ? ["exploded"] : []),
     ...(view.clip.enabled ? ["clip"] : []),
@@ -71,7 +73,7 @@ export function useModelTools({ view, features, store, mesh, disabled, selectedT
       {tool.controls}
       <SubToolbarValue data-model-tool-amount="">{tool.summary}</SubToolbarValue>
       {tool.actions || null}
-      <ToolbarButton label={`Reset ${tool.label.toLowerCase()}`} disabled={!applied.includes(tool.id)} onClick={() => store.patch(neutral(tool.id))}>
+      <ToolbarButton label={`Reset ${tool.label.toLowerCase()}`} disabled={!applied.includes(tool.id)} onClick={() => { controls.used(tool.id === "exploded" ? "explode_reset" : "clip_reset"); store.patch(neutral(tool.id)); }}>
         <RotateCcw className="size-3" strokeWidth={2} aria-hidden="true" />
       </ToolbarButton>
     </SubToolbar> : null

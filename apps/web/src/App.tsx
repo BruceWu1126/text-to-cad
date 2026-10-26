@@ -144,7 +144,9 @@ export default function App({ client, server, tabStore, notice = null, language:
   const host = useMemo<Omit<ViewerHost, 'navigation'>>(() => ({
     downloads, files: source, fileActions, clipboard: browserClipboard, promptContext, promptFiles, links,
     // A Quick Edit copied, counted by this Viewer's server for its telemetry, as a touch is.
-    usage: { used: feature => { if (feature === 'quickEdit') client.reportActivity({ quickEdit: true }); } },
+    usage: { used: feature => { if (feature === 'quickEdit') client.reportActivity({ quickEdit: true }); },
+      // The controls a person used, and how long a tool was up, counted by the shared viewer.
+      controls: counts => client.reportActivity({ controls: counts }) },
     environment: { colorScheme: appearance.colorScheme, locale, platform: keyboardPlatform() },
   }), [downloads, client, source, fileActions, promptContext, promptFiles, links, appearance.colorScheme, locale]);
   // The engine gone under the page: said over it, which stays as it was for the engine's return.
