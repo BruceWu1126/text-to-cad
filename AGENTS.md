@@ -4,7 +4,9 @@ Installing text-to-cad rather than developing it? Follow the Install section of
 [README.md](README.md).
 
 This repo is a workbench for CAD-related agent skills. Treat `skills/` as the
-product and `models/` as the shared fixture/artifact area.
+product and `models/` as the shared fixture/artifact area. Read this file, then
+[CONTRIBUTING.md](CONTRIBUTING.md) for the workflows it points at; every other
+document is one link from the README of the tree it belongs to (Repo Map).
 
 ## Branch First
 
@@ -35,60 +37,31 @@ exact version, ask which one. A release pull request comes one of two ways:
   `main`'s and stamps the derived metadata and every `cadgen==` pin with it.
 
 Merge a release pull request only on the user's explicit word, once its checks
-pass: the merge is the release.
-
-- `Test` runs every job for a `VERSION` change, so a release is tested whole.
-  Its Version Check vets the bump: a branch of this repository only (a fork
-  cannot release), a version past `main`'s and the latest tag, every stamp in
-  step.
-- `Publish Release` (`release-publish.yml`) runs on the merge. It finds the
-  `Test` run that recorded the merged tree as tested in full (else it runs every
-  `Test` job on it first), builds the plugin ZIP, the bundle and the `cadgen`
-  wheel and sdist, installs and exercises the wheel, uploads the pages' source
-  maps to PostHog and the wheel to PyPI, and
-  waits until PyPI's index lists it. Only then does it commit the plugin alone
-  onto the branches installers follow (`scripts/release/plugin_branch.py`):
-  `latest`, which every install command names, and `claude-plugin`, which
-  claude.ai's directory tracks. After them it deploys the docs site and tags
-  (`v<VERSION>`; releases before 0.5.0 are bare
-  `0.4.x` tags) and GitHub-Releases the release commit, with the wheel and sdist
-  that went to PyPI attached as release assets, plus the plugin ZIP that a
-  person uploads to OpenAI's plugin portal, which has no API.
-
-To finish a run that stopped partway, dispatch `Publish Release` on `main`
-(`publish=false` leaves the GitHub Release as a draft): it publishes the commit
-that last moved `VERSION`, if that version has no tag yet. `build-test` is the
-rehearsal branch — `Prepare Release` with `-f target=build-test` opens a bump
-against it, whose merge is built and installed with no PyPI, branches, docs or
-tag — and is never a release; use it only when the user explicitly asks to test
-the pipeline.
-
-The standalone `Deploy Docs` workflow redeploys the docs site from a ref
-(default `main`, or a release tag) without running a release.
+pass: the merge is the release. `Test` runs every job for a `VERSION` change, and
+its Version Check vets the bump (a branch of this repository only, a version past
+`main`'s and the latest tag, every stamp in step). `Publish Release`
+(`release-publish.yml`) runs on the merge: it builds the plugin ZIP, the bundle
+and the `cadgen` wheel, uploads the wheel to PyPI and waits until PyPI lists it,
+and only then writes the install branches (`latest`, `claude-plugin`), deploys
+the docs site, tags `v<VERSION>` and publishes the GitHub Release. A run that
+stopped partway is finished by dispatching `Publish Release` on `main`;
+`build-test` is the rehearsal branch, used only when the user asks to test the
+pipeline; the standalone `Deploy Docs` workflow redeploys the docs site from a
+ref without a release. The full flow, the resume path, the rehearsal and the
+local fallbacks are [CONTRIBUTING.md's Releases](CONTRIBUTING.md#releases).
 
 cadgen installs as ONE uvx command, `uvx --no-config --managed-python --python
-3.13 --from cadgen==<VERSION> <tool>` (`cadgen._internal.launch`): the plugin
-server configs run it, outside any sandbox. That installation registers itself
-(`installations/<VERSION>.json` in cadgen's state folder) and writes the proxy,
-`~/.local/bin/cadgen` (`cadgen._internal.installations`), and every cadgen
-skill's SKILL.md runs `cadgen +<VERSION>` (and `cadgen +<VERSION> run model.py`)
-through it, which runs that version's installation (`cadgen._internal.proxy`;
-uvx cannot start in an agent's sandbox, the proxy can), naming the uvx command
-once, as the `cadgen doctor` that installs, registers, writes the proxy and
-starts the engine. The release stamps every pin and `+<VERSION>`
-(`sync-version.mjs`), and `scripts/release/check-version.sh` and the tests
-assert they all equal `VERSION`. uv keeps one installation per requirement and
-cadgen names its warm daemon after that installation: one installation, one
-engine, so the server, every thread and every skill command share one daemon. In a checkout, install `requirements-dev.txt` (the
-editable cadgen) and test in agent apps with `scripts/install/dev_install.py`,
-which points both at the checkout.
-`models/` stays on `main` as plain files; nothing installs it.
-`scripts/github-workflows/check-builds.sh` enforces the shipping contract on
-every push: no tracked symlink, no `.gitattributes` rule that rewrites files at
-checkout or changes the archive (so no Git LFS; claude.ai's plugin directory
-refuses them), every tracked file under 5 MiB, no skill reaching into a repo root.
-See the Releases section in `CONTRIBUTING.md` for the full flow, the resume
-path, the rehearsal, and local/manual fallbacks.
+3.13 --from cadgen==<VERSION> <tool>` (`cadgen._internal.launch`), which the
+plugin server configs run. That installation registers itself and writes the
+`cadgen` command, `~/.local/bin/cadgen`; every cadgen skill's SKILL.md runs
+`cadgen +<VERSION>` through it (uvx cannot start in an agent's sandbox, the
+command can). The release stamps every pin and `+<VERSION>` (`sync-version.mjs`),
+and `scripts/release/check-version.sh` and the tests assert they all equal
+`VERSION`. One installation is one engine: the server, every thread and every
+skill command share one daemon ([CONTRIBUTING.md, "Development
+dependencies"](CONTRIBUTING.md#development-dependencies)). In a checkout, install
+`requirements-dev.txt` (the editable cadgen) and test in agent apps with
+`scripts/install/dev_install.py`, which points both at the checkout.
 
 ## Repo Map
 
@@ -98,39 +71,54 @@ path, the rehearsal, and local/manual fallbacks.
   agent plugin manifests. The repository root is the plugin package; its skills are
   `skills/` directly. Installers take it from the `latest` branch, which
   `scripts/release/plugin_branch.py` builds from this tree at each release.
-- `models/`: the corpus of engine models, plain files, each built with `python model.py`; nothing installs it.
-- `apps/web/`: the CAD Viewer's React client (the engine hosts `cadgen.viewer`'s HTTP app).
-- `apps/mcp/`: the CAD app agent hosts render: tabs in Codex, cards in Claude Desktop (its server is `cadgen mcp`).
-- `packages/core`: `@text-to-cad/core`, shared CAD/runtime/client code without React.
-- `packages/ui`: `@text-to-cad/ui`, the shared FileViewer, renderers, controls and styles.
-- `packages/cadgen`: the published distribution — the engine (models built into
-  documents it holds, and the XBF, STEP, GLB, STL, 3MF and DXF files written from them), the skill
-  CLI parsers, the CAD Viewer backend + client, and the CAD app page it serves.
-- `apps/docs/`: documentation site.
-- `apps/api/`: `api.texttocad.dev`, its own Vercel project: cadgen's version feed (read from PyPI) and the CAD app's consented analytics.
+- `models/` ([README](models/README.md)): the corpus of engine models, plain files, each
+  built with `python model.py`; nothing installs it.
+- `docs/migrations/`: the hand-migration guides between releases
+  ([0.7 to 0.8](docs/migrations/migrating-0.7-to-0.8.md), 0.4 to 0.5).
+- `apps/web/` ([README](apps/web/README.md)): the CAD Viewer's React client (the engine
+  hosts `cadgen.viewer`'s HTTP app).
+- `apps/mcp/` ([README](apps/mcp/README.md)): the CAD app agent hosts render: tabs in
+  Codex, cards in Claude Desktop (its server is `cadgen mcp`).
+- `packages/` ([README](packages/README.md)): the three shared packages.
+  `packages/cadgen` ([README](packages/cadgen/README.md)) is the published distribution,
+  not just the Python: the engine (`cadgen/engine`: models built into documents it holds,
+  and the XBF, STEP, GLB, STL, 3MF and DXF files written from them; the daemon and its
+  workers; exports; the OCCT stills; the verbs the cadgen skills' commands run), the
+  `cadgen` command line (`cadgen/cli`), the CAD Viewer server (`cadgen/viewer`), the CAD
+  app server (`cadgen/mcp`), and the JS assets they serve (`cadgen/_runtime`, built by
+  `scripts/bundle/cadgen-runtime.sh`); skills consume it as an installed distribution.
+  `packages/core` ([README](packages/core/README.md)) is `@text-to-cad/core`, shared
+  CAD/runtime/client code without React; `packages/ui` ([README](packages/ui/README.md))
+  is `@text-to-cad/ui`, the shared FileViewer, renderers, controls and styles.
+- `apps/docs/` ([README](apps/docs/README.md)): documentation site.
+- `apps/api/` ([README](apps/api/README.md)): `api.texttocad.dev`, its own Vercel project:
+  cadgen's version feed (read from PyPI) and the CAD app's consented analytics.
 - `tests/`: root-owned test suites for skills, packages, viewer services, and
   repo-wide policy.
-- `scripts/`: durable repo commands grouped by purpose.
+- `scripts/` ([README](scripts/README.md)): durable repo commands grouped by purpose.
+- [SECURITY.md](SECURITY.md): the trust boundary (the engine's door, the page's
+  credentials) and how a vulnerability is reported.
 
 ## Repo Rules
 
 - Boundaries and design laws live in each package's README: read
-  `packages/cadgen/README.md` (the laws), `packages/core/README.md`, `packages/ui/README.md`,
-  `apps/web/README.md`, `apps/docs/README.md` and `apps/api/README.md` before changing
-  generation, rendering, storage, layout, or public interfaces.
+  [`packages/cadgen/README.md`](packages/cadgen/README.md) (the laws),
+  [`packages/core/README.md`](packages/core/README.md),
+  [`packages/ui/README.md`](packages/ui/README.md),
+  [`apps/web/README.md`](apps/web/README.md), [`apps/docs/README.md`](apps/docs/README.md)
+  and [`apps/api/README.md`](apps/api/README.md) before changing generation, rendering,
+  storage, layout, or public interfaces.
 - A README holds the laws; the mechanism each law constrains lives one link
   away, and the README names the link. Read the README, then follow the one
-  link — not the tree. What exists:
-  - `packages/cadgen/src/cadgen/engine/`: `README.md` (the engine's mechanisms:
-    models, the daemon, exports, the mesh, references, the build closure).
-  - `packages/core/docs/`: `render-pipeline.md`, `resource-ownership.md`.
-  - `packages/ui/docs/`: `settings-ui.md` (BINDING for any settings control),
-    `render-types.md`, `render-mode.md`, `loading.md`, `viewer-host.md`.
+  link — not the tree. Where the mechanisms are: the engine's README
+  (`packages/cadgen/src/cadgen/engine/README.md`: models, the daemon and its workers,
+  documents, exports, the mesh, references, the build closure), `packages/core/docs/`,
+  `packages/ui/docs/` (`settings-ui.md` is BINDING for any settings control) and
+  `apps/web/docs/`; each README's table says what every document there is for.
 - Ships-alone law: `packages/cadgen` (the built PyPI wheel) works in isolation
   outside this repo, so its markdown must not refer to anything outside the
   package — enforced by `tests/python/global/test_package_boundaries.py`.
   Repo-development guidance for it goes in `CONTRIBUTING.md`.
-
 - The README and the docs site's homepage (its copy: `apps/docs/src/lib/content.ts`)
   share their structure, install message and commands: change them together.
   The README says more: the steps to install it yourself, and fuller notes under each install
@@ -183,25 +171,22 @@ path, the rehearsal, and local/manual fallbacks.
 - Reserve `scripts/` for durable repo commands. Do not write temporary,
   one-off, or local-only helper scripts there; use `tmp/` or `/tmp` instead.
 - cadgen's packaged runtime (`_runtime/viewer` and `_runtime/mcp`) is BUILT,
-  never committed:
-  the whole directory is gitignored and ships only inside the wheel. Build it with the one bundle
-  entry point, `scripts/bundle/bundle.sh`; `bundle.sh --check` builds it and
-  asserts every required output. Call `scripts/bundle/cadgen-runtime.sh`
-  directly only when debugging one stage.
+  never committed: the whole directory is gitignored and ships only inside the
+  wheel. Build it with the one bundle entry point, `scripts/bundle/bundle.sh`;
+  `bundle.sh --check` builds it and asserts every required output. Call
+  `scripts/bundle/cadgen-runtime.sh` directly only when debugging one stage.
 - Installs always work from `main`. A command that names no branch installs `main`
   as it is, so every manifest, MCP config and the marketplace catalog stay at its
   root, the catalog lists the plugin at `./`, and nothing on `main` points an
   installer at another branch. The documented commands name `latest` instead: the
-  plugin alone, one commit per release, which `Publish Release` writes once the
-  release is on PyPI, so it installs lean (no monorepo, no npm install of the
-  workspace) and is never ahead of PyPI. `latest` is a channel, so a slower
-  `stable` can join it later. `tests/python/global/test_plugin_manifests.py`
-  holds both halves.
+  plugin alone, one commit per release, never ahead of PyPI
+  ([CONTRIBUTING.md, "The install branches"](CONTRIBUTING.md#the-install-branches)).
+  `tests/python/global/test_plugin_manifests.py` holds both halves.
 - Never let a symlink reach the published tree. Agent installers disagree about
   symlinks and one loses data silently: the Skills CLI dereferences them, Claude
   Code preserves them, and Codex `plugin add` drops them with no error, shipping
-  a skill with missing files. `scripts/github-workflows/check-builds.sh` enforces
-  this; do not relax it.
+  a skill with missing files. The shipping contract (Git, below) enforces this;
+  do not relax it.
 - The CAD Viewer is `cadgen viewer`: the engine hosts `cadgen.viewer` (Python, in
   `packages/cadgen`), the React client's source is `apps/web/` and its build
   ships in the wheel at `cadgen/_runtime/viewer` (built, never committed; a
@@ -218,13 +203,6 @@ path, the rehearsal, and local/manual fallbacks.
 - Shared UI must stay platform-agnostic. Apps implement environmental effects;
   shared features use injected capabilities and named extension slots. Before
   extending these interfaces, read [the viewer host contract](packages/ui/docs/viewer-host.md).
-- `packages/cadgen` is the whole distribution, not just the Python: the engine
-  (`cadgen/engine`: the decorators, the daemon and its workers, exports, the OCCT
-  stills, and the verbs the cadgen skills' commands run), the `cadgen` command line and
-  its other verbs (`cadgen/cli`), the CAD Viewer server (`cadgen/viewer`), the CAD app
-  server (`cadgen/mcp`), and the JS assets they serve
-  (`cadgen/_runtime`, built by `scripts/bundle/cadgen-runtime.sh`). Skills consume
-  it as an installed distribution.
 - Create lightweight shared Python packages under `packages/` when a helper
   should not inherit heavier package dependencies.
 - Use path-targeted search, validation, and `git status`; avoid broad scans over
@@ -244,9 +222,9 @@ path, the rehearsal, and local/manual fallbacks.
   under the current worktree's `skills/` directory over globally installed
   skills or plugins from another checkout.
 - Test skills and the plugin in an agent app with
-  `scripts/install/dev_install.py <host>` (`CONTRIBUTING.md`, "Test In Agent
-  Apps"). One copy of the plugin per app: never the development install beside
-  the published plugin, or beside the skills installed loose.
+  `scripts/install/dev_install.py <host>` ([CONTRIBUTING.md, "Test In Agent
+  Apps"](CONTRIBUTING.md#test-in-agent-apps)). One copy of the plugin per app: never the
+  development install beside the published plugin, or beside the skills installed loose.
 - Install dependencies only for the workflow being changed.
 - Do not commit `.venv/`, `node_modules/`, caches, `tmp/`, local credentials, or
   printer config.
@@ -261,12 +239,12 @@ when touching shared surfaces or before handoff:
   `scripts/test/test-python.sh`, `scripts/test/test-global.sh`.
   `test-python.sh` takes `--select cadgen|viewer|skills|all` and
   `--print-weights`; `test-js.sh` takes `--select core|ui|web|mcp|all`. See
-  `scripts/README.md`.
+  [`scripts/README.md`](scripts/README.md).
 - In GitHub Actions, `test.yml` runs one job per concern, each only when the
   change reaches it: `scripts/github-workflows/select_checks.py` maps every
   changed path to the tests that read it, and the Python jobs run just those
   files. A test that reads a new kind of path gets a rule there
-  (`CONTRIBUTING.md#ci`); an unknown path, `VERSION`, `packages/core`, the
+  ([CONTRIBUTING.md#ci](CONTRIBUTING.md#ci)); an unknown path, `VERSION`, `packages/core`, the
   lockfiles and the test machinery run everything, as does a manual dispatch.
   Required check names stay stable.
 - Canonical release version: `scripts/release/check-version.sh`
@@ -291,17 +269,20 @@ what a user gets is the wheel the release builds from it.
 
 ## CAD Viewer
 
-The app-facing playbook lives in `apps/web/README.md`: launcher contract
+The app-facing playbook lives in [`apps/web/README.md`](apps/web/README.md): launcher contract
 (reuse, ports, `/<id>` pages), dev vs prod, and the catalog/link-verification
 gotchas. The repo-side half — the lightweight-worktree recipe and
-root workspace dependencies — lives in `CONTRIBUTING.md` under "Viewer Development
-In This Repo". Read them before starting, stopping, or debugging a Viewer.
-Never stop an instance you did not start; packaged-runtime checks go
-through `scripts/bundle/bundle.sh`.
+root workspace dependencies — lives in [CONTRIBUTING.md under "Viewer Development
+In This Repo"](CONTRIBUTING.md#viewer-development-in-this-repo). Read them before starting,
+stopping, or debugging a Viewer. Never stop an instance you did not start;
+packaged-runtime checks go through `scripts/bundle/bundle.sh`.
 
 ## Git
 
-No Git LFS, and every file under 5 MiB: the repository root is the plugin, and
-claude.ai's plugin directory refuses files a filter rewrites at checkout, so
-heavyweight media stays out of the tree. Local hooks live in `.githooks` and
-delegate build checks through `scripts/git-hooks/pre-commit`.
+The shipping contract, `scripts/github-workflows/check-builds.sh` on every push:
+no tracked symlink, no `.gitattributes` rule that rewrites files at checkout or
+changes the archive (so no Git LFS; the repository root is the plugin, and
+claude.ai's plugin directory refuses files a filter rewrites), every tracked file
+under 5 MiB, no skill reaching into a repo root. Heavyweight media stays out of
+the tree. Local hooks live in `.githooks` and delegate build checks through
+`scripts/git-hooks/pre-commit`.
