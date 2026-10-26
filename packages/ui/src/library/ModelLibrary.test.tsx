@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 // The built module: its Settings is the renderer kit's, whose JSX lives in .js files this runner does not compile.
-import { ModelLibrary, libraryCards, mainModel } from '../../dist/library/ModelLibrary.js';
+import { ModelLibrary } from '../../dist/library/ModelLibrary.js';
 import { ageLabel, lastActivity } from '../../dist/lib/age.js';
 import { ControlUsageProvider } from '../../dist/usage/controls.js';
 import type { LibraryModel, ModelLibrarySource } from './ModelLibrary.js';
@@ -222,43 +222,29 @@ it('marks each card with its kind\'s glyph, and the type filter ("All ▾") show
   expect(screen.queryByRole('button', { name: /^Show / })).toBeNull();
 });
 
-it('folds a script\'s models under one card named for its main model, collapsed until opened in place', async () => {
+it('gives every model of a script its own card and row, each opening itself, with nothing folded', async () => {
   const ids = ['0', '1', '2'].map(digit => `8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f1${digit}`);
   const script = '/work/juno/juno.py';
-  const source = library([
+  const models = [
     model('wheel', { path: ids[0], kind: 'model', script, updated: 30 }),
     model('juno', { path: ids[1], kind: 'model', script, updated: 10 }),
     model('axle', { path: ids[2], kind: 'model', script, updated: 20 }),
     model('bracket.step'),
-  ]);
-  render(<ModelLibrary library={source} />);
-  const juno = await screen.findByRole('button', { name: 'Open juno' });
-  const cards = within(screen.getByRole('list', { name: 'Files' })).getAllByRole('listitem');
-  expect(cards.filter(card => card.classList.contains('cad-library-card')).length).toBe(2);
-  const more = screen.getByRole('button', { name: 'and 2 more' });
-  expect(more.getAttribute('aria-expanded')).toBe('false');
-  expect(screen.queryByRole('button', { name: 'Open wheel' })).toBeNull();
-  fireEvent.click(more);
-  expect(more.getAttribute('aria-expanded')).toBe('true');
-  const folded = screen.getByRole('list', { name: 'The other models of juno' });
-  expect(within(folded).getAllByRole('button').map(row => row.getAttribute('aria-label'))).toEqual(['Open wheel', 'Open axle']);
-  // The card opens its main model; a folded one opens itself.
-  await act(async () => { fireEvent.click(juno); });
-  expect(source.open).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'juno' }));
-  await act(async () => { fireEvent.click(within(folded).getByRole('button', { name: 'Open axle' })); });
-  expect(source.open).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'axle' }));
-  // A search for a folded model keeps its card.
-  fireEvent.change(screen.getByRole('searchbox', { name: 'Search models' }), { target: { value: 'axle' } });
-  expect(screen.getByRole('button', { name: 'Open juno' })).toBeTruthy();
-  expect(screen.queryByRole('button', { name: 'Open bracket.step' })).toBeNull();
-});
-
-it('names a script\'s card for the model named as its script is, else the one built last', () => {
-  const at = (name: string, updated: number) => model(name, { kind: 'model', script: '/w/parts.py', updated });
-  expect(mainModel([at('a', 1), at('parts', 0), at('b', 2)]).name).toBe('parts');
-  expect(mainModel([at('a', 1), at('b', 3), at('c', 2)]).name).toBe('b');
-  const cards = libraryCards([at('a', 1), model('x.step'), at('b', 3)]);
-  expect(cards.map(card => [card.item.name, card.folded.map(item => item.name)])).toEqual([['b', ['a']], ['x.step', []]]);
+  ];
+  const names = () => within(screen.getByRole('list', { name: 'Files' })).getAllByRole('listitem').map(item => within(item).getAllByRole('button')[0].getAttribute('aria-label'));
+  for (const layout of ['grid', 'list'] as const) {
+    const source = library(models);
+    render(<ModelLibrary library={source} layout={layout} />);
+    await screen.findByRole('button', { name: 'Open juno' });
+    expect(names()).toEqual(['Open wheel', 'Open juno', 'Open axle', 'Open bracket.step']);
+    expect(screen.queryByRole('button', { name: /more$/ })).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Open axle' })); });
+    expect(source.open).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'axle' }));
+    // A search finds the model it names, alone.
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search models' }), { target: { value: 'axle' } });
+    expect(names()).toEqual(['Open axle']);
+    cleanup();
+  }
 });
 
 it('asks before Delete, in words that say what stays on disk, and the card leaves at once', async () => {
@@ -292,7 +278,7 @@ it('asks before Delete, in words that say what stays on disk, and the card leave
   expect(screen.getByRole('button', { name: 'Open bracket.step' })).toBeTruthy();
 });
 
-it('asks to delete a file from the viewer alone, and a script\'s card with all its models', async () => {
+it('asks to delete a file from the viewer alone, and one model of a script alone', async () => {
   const file = library([model('bracket.step')]);
   render(<ModelLibrary library={file} />);
   await screen.findByRole('button', { name: 'Open bracket.step' });
@@ -305,16 +291,20 @@ it('asks to delete a file from the viewer alone, and a script\'s card with all i
   cleanup();
   const script = '/work/juno/juno.py';
   const ids = ['0', '1', '2'].map(digit => `8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f1${digit}`);
-  const juno = library([model('juno', { path: ids[0], kind: 'model', script }), model('wheel', { path: ids[1], kind: 'model', script }),
-    model('axle', { path: ids[2], kind: 'model', script })], { change: vi.fn(async () => []) });
+  const models = [model('juno', { path: ids[0], kind: 'model', script }), model('wheel', { path: ids[1], kind: 'model', script }),
+    model('axle', { path: ids[2], kind: 'model', script })];
+  const juno = library(models, { change: vi.fn(async (_action, item) => models.filter(entry => entry.path !== item.path)) });
   render(<ModelLibrary library={juno} />);
-  await screen.findByRole('button', { name: 'Open juno' });
-  await act(async () => { fireEvent.click(within(await menu('juno')).getByRole('menuitem', { name: 'Delete' })); });
+  await screen.findByRole('button', { name: 'Open wheel' });
+  await act(async () => { fireEvent.click(within(await menu('wheel')).getByRole('menuitem', { name: 'Delete' })); });
   dialog = await screen.findByRole('alertdialog');
-  expect(within(dialog).getByRole('heading').textContent).toBe('Delete juno and its 3 models?');
+  expect(within(dialog).getByRole('heading').textContent).toBe('Delete wheel?');
   await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' })); });
-  await waitFor(() => expect(juno.change).toHaveBeenCalledTimes(3));
-  expect((juno.change as ReturnType<typeof vi.fn>).mock.calls.map(([action, item]) => [action, item.name])).toEqual([['delete', 'juno'], ['delete', 'wheel'], ['delete', 'axle']]);
+  await waitFor(() => expect(juno.change).toHaveBeenCalledTimes(1));
+  expect((juno.change as ReturnType<typeof vi.fn>).mock.calls.map(([action, item]) => [action, item.name])).toEqual([['delete', 'wheel']]);
+  // The script's other models stay.
+  expect(screen.getByRole('button', { name: 'Open juno' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Open wheel' })).toBeNull();
 });
 
 it('says how long ago with no verb, in the largest unit that is at least one, then the short date', () => {
@@ -403,7 +393,7 @@ it('reads its list again every couple of seconds while the home is up, keeping t
   } finally { vi.useRealTimers(); }
 });
 
-it("counts what a person does on the home by name: a type chosen, a fold opened, a search begun, a card opened, a delete cancelled and one confirmed", async () => {
+it("counts what a person does on the home by name: a type chosen, a search begun, a card opened, a delete cancelled and one confirmed", async () => {
   const reports: { control: string; count: number; seconds: number }[][] = [];
   const script = '/work/juno/juno.py';
   const ids = ['0', '1'].map(digit => `8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f1${digit}`);
@@ -424,9 +414,6 @@ it("counts what a person does on the home by name: a type chosen, a fold opened,
   reports.length = 0;
   const view = render(<ControlUsageProvider report={counts => reports.push(counts)}><ModelLibrary library={source} /></ControlUsageProvider>);
   await screen.findByRole('button', { name: 'Open juno' });
-  const more = screen.getByRole('button', { name: 'and 1 more' });
-  fireEvent.click(more);
-  fireEvent.click(more); // folding it again is no use
   const search = screen.getByRole('searchbox', { name: 'Search models' });
   for (const value of ['b', 'br', '']) fireEvent.change(search, { target: { value } });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Open bracket.step' })); });
@@ -434,7 +421,7 @@ it("counts what a person does on the home by name: a type chosen, a fold opened,
   await act(async () => { fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' })); });
   view.unmount();
   const said = Object.fromEntries(reports.flat().map(({ control, count }) => [control, count]));
-  expect(said).toEqual({ home_fold: 1, home_search: 1, home_open: 1, home_delete_cancel: 1 });
+  expect(said).toEqual({ home_search: 1, home_open: 1, home_delete_cancel: 1 });
   // A delete the person confirms is counted as one.
   cleanup();
   reports.length = 0;

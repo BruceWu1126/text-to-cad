@@ -360,12 +360,11 @@ switch. The grid's tiles are transparent with a 1px border, at least 240px wide 
 a 1280px window): a picture on the muted fill, then the kind's glyph (a model's code glyph, a
 file's type icon) beside its name over its last activity with no verb ("now", "5m ago", "2h
 ago", "3d ago", then the short date). The list is a table: Name, Updated and Opened over 40px
-rows, each a document's glyph and name and its two ages. A script that declares several
-models is one card, named for its main model, its other models folded under it ("and 27
-more"). The pin and the ⋯ appear on hover (at a tile's picture's corner, at a row's end); a
+rows, each a document's glyph and name and its two ages. Every model is a tile and a row of
+its own: a script that declares several models is that many, nothing folded. The pin and the ⋯ appear on hover (at a tile's picture's corner, at a row's end); a
 pinned one keeps its pin. The ⋯ menu holds Open, Copy path and Reveal (a model's path is its
 script's), Pin or Unpin, and Delete, which asks first: a model's "Delete bracket?" removes the engine's record and its saved build, its
-script and exported files kept; a file's "Delete bracket.step from the viewer?" removes the
+script and exported files kept, and a script's other models listed still; a file's "Delete bracket.step from the viewer?" removes the
 engine's record of the file alone. From a file, Back to files in
 the menu the navbar's C logo opens leads back to it. The home has the same navbar, its logo
 the TEXTTOCAD wordmark rather than the C (the one morphs into the other as a file opens or

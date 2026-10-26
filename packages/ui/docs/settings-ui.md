@@ -105,10 +105,10 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   or focus, at a tile's picture's top-right (Figma's star) or a row's end; a pinned one keeps its
   filled pin at rest. The menu holds Open, Copy path and Reveal where the host can, Pin or
   Unpin, a rule, then Delete (destructive), which asks first in a stock AlertDialog saying
-  what goes and what stays on disk, Cancel / Delete; the card leaves the list at once. A
-  script that declares several models is one card, named for its main model, its others
-  folded under it ("and 27 more", at the end of a tile's age line or under a row), collapsed
-  until opened in place.
+  what goes and what stays on disk ("Delete wheel?"), Cancel / Delete; the card leaves the
+  list at once. Every model is a tile and a row of its own, nothing folded: a script that
+  declares several models is that many, each opened, pinned and deleted alone, and each
+  one's Copy path and Reveal are its script's.
   The update shows only for a release
   later than the version the page names, whatever the host says. A file that will not open
   shows a page under the navbar: "File does not exist" and the file's path, or "Could not

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
-import { Box, ChevronDown, ChevronRight, Ellipsis, LayoutGrid, List, Pin, Search } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { Box, ChevronDown, Ellipsis, LayoutGrid, List, Pin, Search } from "lucide-react";
 import { Button } from "../primitives/button.jsx";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../primitives/alert-dialog.jsx";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../primitives/dropdown-menu.jsx";
@@ -38,7 +38,7 @@ export interface LibraryModel {
    * not say), which a row removes from the list, the file untouched.
    */
   kind?: "file" | "model" | "shape";
-  /** A model's or a shape's: the script its run registered (a shape's home), its card's Copy path and Reveal. */
+  /** A model's or a shape's: the script its run registered (a shape's home), its card's Copy path and Reveal. A script that declares several models is that many cards, each its own. */
   script?: string | null;
 }
 
@@ -76,54 +76,10 @@ export function filterModels<Model extends LibraryModel>(items: readonly Model[]
 export type LibraryKind = "all" | "models" | "files";
 const ofKind = (item: LibraryModel, kind: LibraryKind) => kind === "all" || (kind === "models") === deletes(item);
 
-/** One card of the Home: a document, and the other models of its script folded under it. */
-export interface LibraryCard<Model extends LibraryModel = LibraryModel> {
-  item: Model;
-  folded: readonly Model[];
-}
-
-const stem = (path: string) => (path.split(/[\\/]/).pop() ?? "").replace(/\.[^.]*$/, "");
-
-/**
- * The model a script's card is named for: the one named as its script is (juno.py's juno), else
- * the one its runs built last (an assembly finishes after the parts it calls), else the first.
- * Read from the records alone, never the script.
- */
-export function mainModel<Model extends LibraryModel>(models: readonly Model[]): Model {
-  const named = models.find(model => model.script && model.name === stem(model.script));
-  return named ?? models.reduce((best, model) => ((model.updated ?? 0) > (best.updated ?? 0) ? model : best), models[0]);
-}
-
-/**
- * The library as cards, in its order: a script that declares several models is one card, at the
- * place of the first of them, named for its main model (`mainModel`) with the others folded under
- * it; every other document is a card of its own.
- */
-export function libraryCards<Model extends LibraryModel>(items: readonly Model[]): LibraryCard<Model>[] {
-  const scripts = new Map<string, Model[]>();
-  for (const item of items) {
-    if (item.kind !== "model" || !item.script) continue;
-    const group = scripts.get(item.script) ?? [];
-    group.push(item);
-    scripts.set(item.script, group);
-  }
-  const placed = new Set<string>();
-  const cards: LibraryCard<Model>[] = [];
-  for (const item of items) {
-    const group = item.kind === "model" && item.script ? scripts.get(item.script) : undefined;
-    if (!group) { cards.push({ item, folded: [] }); continue; }
-    if (placed.has(item.script!)) continue;
-    placed.add(item.script!);
-    const main = mainModel(group);
-    cards.push({ item: main, folded: group.filter(model => model !== main) });
-  }
-  return cards;
-}
-
-/** The cards a search and the type filter leave: a card stays when its model or one folded under it matches. */
-export function shownCards<Model extends LibraryModel>(cards: readonly LibraryCard<Model>[], query: string, kind: LibraryKind = "all"): LibraryCard<Model>[] {
+/** The documents a search and the type filter leave, in the library's order: every model is a card of its own. */
+export function shownModels<Model extends LibraryModel>(items: readonly Model[], query: string, kind: LibraryKind = "all"): Model[] {
   const words = wordsOf(query);
-  return cards.filter(card => ofKind(card.item, kind) && [card.item, ...card.folded].some(item => matches(item, words)));
+  return items.filter(item => ofKind(item, kind) && matches(item, words));
 }
 
 const message = (failure: unknown) => failure instanceof Error ? failure.message : String(failure);
@@ -194,8 +150,8 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
  * left "Recent", in the small-tab style; at the right the type filter ("All ▾": All, Models, Files),
  * there where models and files are both listed, the search and the grid/list switch, both there
  * with no models yet too. Then the documents, pinned first, as cards (a picture over the kind's
- * glyph, the name and how long ago it was last opened or updated, with no verb) or as rows. A script that declares several models is one card, named for its main model, the others
- * folded under it ("and 27 more"), opened in place. Each card has one ⋯ menu: Open, Copy path and
+ * glyph, the name and how long ago it was last opened or updated, with no verb) or as rows, every
+ * model a card and a row of its own (a script that declares several is that many). Each card has one ⋯ menu: Open, Copy path and
  * Reveal where the host can, Pin or Unpin, then Delete, which asks first (an AlertDialog saying what
  * goes and what stays on disk) and takes the card off the list at once; a pinned card shows its pin. It is the
  * library alone: nothing opens a file from here but its cards. It is drawn on the navbar's colour.
@@ -282,31 +238,19 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
     void current.current.open(item).catch(fail).finally(() => setOpening(null));
   };
   const change = (action: "pin" | "unpin" | "remove" | "delete", item: Model) => current.current.change(action, item).then(setItems, fail);
-  // Delete, once the person says so: a model's (or a shape's) document and its record, every model
-  // of a script's card; a file's record alone, the file kept. The card leaves the list at once.
-  const [confirming, setConfirming] = useState<LibraryCard<Model> | null>(null);
+  // Delete, once the person says so: a model's (or a shape's) document and its record, that model
+  // alone; a file's record alone, the file kept. The card leaves the list at once.
+  const [confirming, setConfirming] = useState<Model | null>(null);
   const [gone, setGone] = useState<ReadonlySet<string>>(() => new Set());
-  const remove = (card: LibraryCard<Model>) => {
-    const doomed = [card.item, ...card.folded];
-    setGone(previous => new Set([...previous, ...doomed.map(item => item.path)]));
-    void doomed.reduce<Promise<unknown>>((before, item) => before.then(() => change(deletes(item) ? "delete" : "remove", item)), Promise.resolve())
-      .finally(() => setGone(previous => { const next = new Set(previous); for (const item of doomed) next.delete(item.path); return next; }));
+  const remove = (item: Model) => {
+    setGone(previous => new Set([...previous, item.path]));
+    void change(deletes(item) ? "delete" : "remove", item)
+      .finally(() => setGone(previous => { const next = new Set(previous); next.delete(item.path); return next; }));
   };
   const all = (items ?? []).filter(item => !gone.has(item.path));
   const [kind, setKind] = useState<LibraryKind>("all");
-  // The scripts whose folded models are shown, by script: collapsed until a press opens one.
-  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
-  const unfold = (script: string) => {
-    if (!unfolded.has(script)) usage.used("home_fold");
-    setUnfolded(previous => {
-      const next = new Set(previous);
-      if (!next.delete(script)) next.add(script);
-      return next;
-    });
-  };
   // The host lists pinned models first; a search and the type filter keep that order.
-  const cards = libraryCards(all);
-  const shown = shownCards(cards, query, kind);
+  const shown = shownModels(all, query, kind);
   // The type filter is there only where there is something to tell apart: models and files both listed.
   const kinds = all.some(deletes) && all.some(item => !deletes(item));
   const now = Date.now();
@@ -323,7 +267,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
   // card shows it, filled, whatever the pointer does.
   // Pin or Unpin, from the card's pin or its menu: counted alike.
   const pin = (item: Model) => { usage.used(item.pinned ? "home_unpin" : "home_pin"); void change(item.pinned ? "unpin" : "pin", item); };
-  const actions = (card: LibraryCard<Model>) => { const item = card.item; return <div className="cad-library-actions" data-pinned={item.pinned || undefined}>
+  const actions = (item: Model) => <div className="cad-library-actions" data-pinned={item.pinned || undefined}>
     <Button variant="ghost" size="icon-xs" className="cad-library-pin" aria-label={t(item.pinned ? "home.unpin" : "home.pin")} aria-pressed={item.pinned}
       onClick={() => pin(item)}><Pin aria-hidden="true" fill={item.pinned ? "currentColor" : "none"} /></Button>
     <DropdownMenu modal={false}>
@@ -335,18 +279,17 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
         {(deletes(item) ? item.script : item.path) ? fileItems.map(entry => <DropdownMenuItem key={entry.action} onSelect={() => perform(entry.action, item)}>{entry.label}</DropdownMenuItem>) : null}
         <DropdownMenuItem onSelect={() => pin(item)}>{t(item.pinned ? "home.unpin" : "home.pin")}</DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(card)}>{t("home.delete")}</DropdownMenuItem>
+        <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(item)}>{t("home.delete")}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  </div>; };
+  </div>;
   // What Delete asks first: what goes, and what stays on disk; its words stay while the dialog leaves.
-  const lastAsked = useRef<LibraryCard<Model> | null>(null);
+  const lastAsked = useRef<Model | null>(null);
   if (confirming) lastAsked.current = confirming;
   const asking = lastAsked.current;
-  const question = asking ? deletes(asking.item) ? {
-    title: asking.folded.length ? t("home.deleteScriptTitle", { name: asking.item.name, n: asking.folded.length + 1 }) : t("home.deleteModelTitle", { name: asking.item.name }),
-    body: t("home.deleteModelBody"),
-  } : { title: t("home.deleteFileTitle", { name: asking.item.name }), body: t("home.deleteFileBody") } : null;
+  const question = asking ? deletes(asking)
+    ? { title: t("home.deleteModelTitle", { name: asking.name }), body: t("home.deleteModelBody") }
+    : { title: t("home.deleteFileTitle", { name: asking.name }), body: t("home.deleteFileBody") } : null;
   const confirm = <AlertDialog open={Boolean(confirming)} onOpenChange={next => { if (!next) setConfirming(null); }}>
     <AlertDialogContent>
       <AlertDialogHeader>
@@ -372,36 +315,17 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
     <span className="cad-library-status" data-column="updated">{item.missing ? t("home.fileUnavailable") : age(item.updated)}</span>
     <span className="cad-library-status" data-column="opened">{age(item.opened)}</span>
   </>;
-  // A script's other models, under its card: "and 27 more", opened in place, each a row that opens it.
-  const folded = (card: LibraryCard<Model>): ReactNode => {
-    const script = card.item.script;
-    if (!card.folded.length || !script) return null;
-    const expanded = unfolded.has(script);
-    return <div className="cad-library-folded" data-expanded={expanded || undefined}>
-      <button type="button" className="cad-library-more" aria-expanded={expanded} onClick={() => unfold(script)}>
-        <ChevronRight className="cad-library-chevron" aria-hidden="true" />{t("home.andMore", { n: card.folded.length })}
-      </button>
-      {expanded ? <ul className="cad-library-children" aria-label={t("home.foldedAria", { name: card.item.name })}>
-        {card.folded.map(item => <li key={item.path}>
-          <button type="button" className="cad-library-child" disabled={item.missing} aria-label={t("home.openAria", { name: item.name })} onClick={() => open(item)}>
-            {name(item)}{layout === "list" ? dates(item) : <span className="cad-library-status">{status(item)}</span>}
-          </button>
-        </li>)}
-      </ul> : null}
-    </div>;
-  };
   const models = layout === "list"
-    ? <div className="cad-library-table"><Columns /><ul className="cad-library-list" aria-label={t("home.filesAria")}>{shown.map(card => { const item = card.item; return <li key={item.path} className="cad-library-row" data-missing={item.missing || undefined} data-opening={opening === item.path || undefined}>
+    ? <div className="cad-library-table"><Columns /><ul className="cad-library-list" aria-label={t("home.filesAria")}>{shown.map(item => <li key={item.path} className="cad-library-row" data-missing={item.missing || undefined} data-opening={opening === item.path || undefined}>
       <div className="cad-library-main">
         <button type="button" className="cad-library-open" disabled={item.missing} aria-label={t("home.openAria", { name: item.name })} aria-busy={opening === item.path || undefined} onClick={() => open(item)}>
           {name(item, opening === item.path)}
           {dates(item)}
         </button>
-        {actions(card)}
+        {actions(item)}
       </div>
-      {folded(card)}
-    </li>; })}</ul></div>
-    : <ul className="cad-library-grid" aria-label={t("home.filesAria")}>{shown.map(card => { const item = card.item; return <li key={item.path} className="cad-library-card" data-missing={item.missing || undefined} data-opening={opening === item.path || undefined}>
+    </li>)}</ul></div>
+    : <ul className="cad-library-grid" aria-label={t("home.filesAria")}>{shown.map(item => <li key={item.path} className="cad-library-card" data-missing={item.missing || undefined} data-opening={opening === item.path || undefined}>
       <div className="cad-library-main">
         <button type="button" className="cad-library-open" disabled={item.missing} aria-label={t("home.openAria", { name: item.name })} aria-busy={opening === item.path || undefined} onClick={() => open(item)}>
           <Thumbnail item={item} load={load} seen={seen} opening={opening === item.path} />
@@ -414,10 +338,9 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
             </span>
           </span>
         </button>
-        {actions(card)}
+        {actions(item)}
       </div>
-      {folded(card)}
-    </li>; })}</ul>;
+    </li>)}</ul>;
   // A page: it scrolls, with the platform's own scrollbar, only when there is more of it than fits.
   return <div className="cad-library h-full overflow-y-auto text-ui" data-library-layout={layout}>
     <main className="cad-library-content" aria-label={t("home.modelsAria")}>

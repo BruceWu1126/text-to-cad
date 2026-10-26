@@ -313,7 +313,7 @@ CONTROLS = frozenset({
     "theme_system", "theme_light", "theme_dark", "language", "feedback",
     "export_step", "export_stl", "export_threemf", "export_glb", "export_dxf", "export_xbf", "export_original",
     "home_search", "home_filter_all", "home_filter_models", "home_filter_files", "home_layout_grid", "home_layout_list",
-    "home_open", "home_fold", "home_copy_path", "home_reveal", "home_pin", "home_unpin", "home_delete", "home_delete_cancel",
+    "home_open", "home_copy_path", "home_reveal", "home_pin", "home_unpin", "home_delete", "home_delete_cancel",
 })
 # The most one page's report (``Recorder.controlled``) may say of a control: a page reports at least every minute
 # it is shown, and counts a tool's seconds only while it is.
