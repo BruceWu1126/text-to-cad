@@ -1089,8 +1089,17 @@ the version alone. `building` is the last frame of the build of the model's docu
 none is; `failed` is the last build of it that failed, `{"model", "error", "progress"}` -- its
 error, and its last frame -- null once another begins or one succeeds; `progress` is a count that
 moves whenever either does. A page sends back the last answer's `progress`, so each frame and the
-build's end wake it, and nothing polls. A file's `building` and `failed` are null and its `progress`
-stays: a file names no model. A file's version is its modification time and size: the server
+build's end wake it, and nothing polls. A file names no model, so a run sends its page nothing;
+what a file's `building` says is its own **import**: a STEP a page first opens is read in a reader
+process (**The server**), and while that runs the server says where it is on the same channel
+(`Server.importing`): frames of `phase: "import"`, `"Importing model"`, their `detail`
+`reading <name> (<size>)` while the reader parses the file, then `collecting parts` with `done` of
+`total` as the parts' shapes are collected (the reader writes its counts to a file the server
+reads every quarter second while it waits), `building` null once the document is in, or `failed`
+with the reader's error. The viewer's `GET /__cad/xbf` answers `202 {"state": "reading",
+"building"}` with the last frame while the import runs, held up to two seconds or until the
+frame moves, so the page's loading line says each stage as it comes ("Importing model 120/628").
+A file's version is its modification time and size: the server
 looks at them each time the file is asked for and at least twice a second while a page waits on
 it, and reads the file again when they changed -- whatever program wrote it, a model's run writing
 the xbf it declares among them: no run sends a file's page anything (**Document lifetime**).

@@ -217,7 +217,8 @@ export interface CadWorkspaceService {
    * through this server (`lib/xbf/xbfDocument.js`), once the engine holds it. A host without an
    * engine leaves it out, and the xbf renderer says it cannot open the file.
    */
-  engineDocument?(file: string, options?: CadRequestOptions): Promise<CadEngineDocument>;
+  /** `onProgress` hears each frame of the engine's import of the file while it reads it (a STEP's), as the build frames are shaped. */
+  engineDocument?(file: string, options?: CadRequestOptions & { onProgress?(frame: Record<string, unknown>): void }): Promise<CadEngineDocument>;
   /** Whether the engine holds a read of the document now (`GET /__cad/xbf?held=1`), asked without starting one. */
   engineHolds?(file: string, options?: CadRequestOptions): Promise<boolean>;
   readonly resources: CadResourceProvider;

@@ -323,18 +323,21 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
       if (!file) return Promise.reject(new Error('Missing file'));
       return request('/__cad/robot', { file, signal, timeoutMs: 10_000, operation: 'robot' });
     },
-    async engineDocument(file, { signal } = {}) {
+    async engineDocument(file, { signal, onProgress } = {}) {
       // A document the cadgen ENGINE reads -- an `.xbf`, or a STEP -- is served by the engine: the
       // viewer asks it to serve the file (`cadgen.viewer.xbf`) and answers where the page reads it,
       // through this server (`/__cad/api/doc/<id>`), so the reads travel as every request does
       // (over the CAD app's tunnel too). Answered with the fetch they are made with. The engine's
       // first read of a large STEP takes a while: the server answers 202 { state: 'reading',
-      // retryMs } until the engine holds it, and the client asks again after `retryMs`; each
-      // request's 10 s is the time the server may stay silent.
+      // retryMs, building } until the engine holds it -- `building` the last frame of its import,
+      // where the engine says one (its reader parsing the file, then collecting its parts, counted),
+      // handed to `onProgress` -- and the client asks again after `retryMs`; each request's 10 s is
+      // the time the server may stay silent.
       if (!file) throw new Error('Missing file');
       for (;;) {
         const reply = await request('/__cad/xbf', { file, signal, timeoutMs: 10_000, operation: 'engine-document' });
         if (reply?.state !== 'reading') return { ...reply, url: viewerOriginUrl(origin, reply.url), fetch: fetchImpl };
+        if (reply.building && typeof reply.building === 'object' && typeof onProgress === 'function') onProgress(reply.building);
         await pause(Math.min(Math.max(Number(reply.retryMs) || 0, 0), ENGINE_RETRY_MAX_MS), signal);
         if (disposed) throw abortError();
       }

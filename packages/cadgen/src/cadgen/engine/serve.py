@@ -54,7 +54,12 @@ back -- are not parsed again while the server lives, and their parts' keys (and 
 meshes) are the same. A STEP is read outside the server's lock, so every other document is
 served meanwhile; one rewritten while it is served is read again in the background, and the
 page keeps the old version until the new one is in. Its structure says how long the parse
-took and which process made it (``read``).
+took and which process made it (``read``). While a page's first open of a STEP runs, its import
+says where it is on the build's own channel (``importing``, read by ``build_of`` and the
+version route): a frame of ``phase: "import"`` -- ``reading <name> (<size>)`` while the reader
+parses the file, then ``collecting parts`` with ``done`` of ``total`` as the parts' shapes are
+collected (the reader writes its counts to a file the server reads while it waits) -- and
+nothing once the document is in, or what failed.
 
 Meshing runs off the request's thread (``Mesher``): by default on a pool of processes
 started with the first page or view (``warm``) or the first mesh, topology or pose asked, and
@@ -78,6 +83,7 @@ import math
 import mimetypes
 import os
 import sys
+import tempfile
 import threading
 import time
 from collections import OrderedDict
@@ -88,6 +94,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlparse
 
 from cadgen.engine.access import allow_origin
+from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.render.look import LOOK
 
 __all__ = ["MeshCache", "NotHeld", "PARALLEL_BYTES", "Pressure", "Served", "Server", "find_three", "memory_budget"]
@@ -524,11 +531,57 @@ def _reader_ready() -> None:
     import cadgen.engine.mesh  # noqa: F401
 
 
-def _read_foreign(path: str, digest: str) -> dict[str, Any]:
+# How often a reader says how many parts it has collected, and how often the server looks.
+IMPORT_PROGRESS_INTERVAL = 0.2
+IMPORT_POLL_SECONDS = 0.25
+
+
+class _ImportProgress:
+    """A reader process's word on its read: ``{"done", "total"}`` written whole (by rename) to
+    ``path`` as the parts are collected, at most every ``IMPORT_PROGRESS_INTERVAL`` seconds and
+    always the first and the last; nothing without a path. The server reads it while it waits
+    (``Server._await_import``)."""
+
+    def __init__(self, path: str | None) -> None:
+        self.path = path
+        self.last = 0.0
+
+    def say(self, done: int, total: int, *, final: bool = False) -> None:
+        if not self.path:
+            return
+        now = time.monotonic()
+        if done and not final and now - self.last < IMPORT_PROGRESS_INTERVAL:
+            return
+        self.last = now
+        temporary = f"{self.path}.tmp"
+        try:
+            with open(temporary, "w", encoding="utf-8") as handle:
+                json.dump({"done": done, "total": total}, handle)
+            replace_atomic(temporary, self.path)
+        except OSError:
+            pass  # a count the reader could not say is said by the next
+
+
+def _import_counts(path: str | None) -> dict[str, int] | None:
+    """The counts a reader last said (``_ImportProgress``), or None: not yet, or not whole."""
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            said = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(said, dict) or not all(isinstance(said.get(key), int) for key in ("done", "total")):
+        return None
+    return {"done": said["done"], "total": said["total"]}
+
+
+def _read_foreign(path: str, digest: str, progress: str | None = None) -> dict[str, Any]:
     """A STEP read into a document in a reader process (the module docstring): its structure,
     each part's shape bytes by a key made from the file's bytes (``digest``) and the part's label,
     whether the document is named by the file's stem (several free shapes), the seconds the read
-    took and the process that made it. A reader process's job."""
+    took and the process that made it. A reader process's job. ``progress``: where it says how
+    many parts it has collected (``_ImportProgress``)."""
     from OCP.TDF import TDF_LabelSequence
     from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
@@ -536,14 +589,25 @@ def _read_foreign(path: str, digest: str) -> dict[str, Any]:
 
     started = time.perf_counter()
     loaded = Loaded(Path(path))
-    keys = {p.key: f"step-{digest[:20]}-{p.entry}" for p in loaded.prototypes}
+    report = _ImportProgress(progress)
+    prototypes = loaded.prototypes
+    report.say(0, len(prototypes))
+    keys = {p.key: f"step-{digest[:20]}-{p.entry}" for p in prototypes}
     structure = loaded.structure()
     structure["prototypes"] = [{**prototype, "key": keys[prototype["key"]]} for prototype in structure["prototypes"]]
-    shapes = {keys[p.key]: shape_bytes(p.shape, read=True) for p in loaded.prototypes}
+    shapes: dict[str, bytes] = {}
+    for index, p in enumerate(prototypes, 1):
+        shapes[keys[p.key]] = shape_bytes(p.shape, read=True)
+        report.say(index, len(prototypes), final=index == len(prototypes))
     free = TDF_LabelSequence()
     XCAFDoc_DocumentTool.ShapeTool_s(loaded.doc.Main()).GetFreeShapes(free)
     return {"structure": structure, "shapes": shapes, "stem": free.Length() != 1,
             "seconds": round(time.perf_counter() - started, 4), "process": os.getpid()}
+
+
+def _megabytes(size: int) -> str:
+    """A file's size as a person reads it: "48.2 MB", "325 KB"."""
+    return f"{size / 1e6:.1f} MB" if size >= 1e6 else f"{max(1, round(size / 1e3))} KB"
 
 
 def _digest(path: Path) -> str:
@@ -1002,7 +1066,7 @@ class Server:
 
     def _read_step(self, ident: str, path: Path) -> Served:
         """A STEP served: its read (``_foreign``), named and versioned as this file."""
-        read, stat = self._foreign(path)
+        read, stat = self._foreign(path, ident)
         structure = {**read["structure"], "path": str(path), "version": f"{stat[0]}-{stat[1]}",
                      "read": {"seconds": read["seconds"], "process": read["process"]}}
         if read["stem"]:  # several free shapes: the document is named by its file
@@ -1025,9 +1089,10 @@ class Server:
                     1, mp_context=multiprocessing.get_context("spawn"), initializer=_reader_ready, max_tasks_per_child=1)
             return self.reader
 
-    def _foreign(self, path: Path) -> tuple[dict[str, Any], tuple]:
+    def _foreign(self, path: Path, ident: str | None = None) -> tuple[dict[str, Any], tuple]:
         """The read of the STEP at ``path`` and the file state it is of: held by the file's
-        bytes, else read by a reader process -- once, however many ask for it meanwhile."""
+        bytes, else read by a reader process -- once, however many ask for it meanwhile. With
+        ``ident``, the document the read is for hears the import's stages (``importing``)."""
         stat = _stat(path)
         if stat is None:
             raise FileNotFoundError(f"no document {path}")
@@ -1043,9 +1108,16 @@ class Server:
                 reading = self.foreign_reads[digest] = concurrent.futures.Future()
         if not owner:
             return reading.result(), stat
+        started = time.monotonic()
+        last: dict[str, Any] | None = None
+        counts = os.path.join(tempfile.gettempdir(), f"cadgen-import-{digest[:16]}-{os.getpid()}.json") if ident else None
+        if ident is not None:
+            last = self._import_frame(path, started, f"reading {path.name} ({_megabytes(stat[1])})")
+            self.importing(ident, last)
         try:
             try:
-                read = self._readers().submit(_read_foreign, str(path), digest).result()
+                future = self._readers().submit(_read_foreign, str(path), digest, counts)
+                read, last = self._await_import(future, ident, path, started, counts, last)
             except concurrent.futures.BrokenExecutor:  # the reader died mid-read
                 with self.foreign_lock:
                     self.reader = None  # the next read starts a reader afresh
@@ -1054,7 +1126,15 @@ class Server:
             with self.foreign_lock:
                 self.foreign_reads.pop(digest, None)
             reading.set_exception(error)
+            if ident is not None:
+                self.importing(ident, None, failed={"model": path.name, "error": str(error), "progress": last})
             raise
+        finally:
+            for name in (counts, f"{counts}.tmp") if counts else ():
+                try:
+                    os.remove(name)
+                except OSError:
+                    pass
         with self.foreign_lock:
             self.foreign_reads.pop(digest, None)
             if _stat(path) == stat:  # held only when the bytes read are the bytes digested
@@ -1062,7 +1142,44 @@ class Server:
                 while len(self.foreign) > FOREIGN_HELD:
                     self.foreign.popitem(last=False)
         reading.set_result(read)
+        if ident is not None:
+            self.importing(ident, None)
         return read, stat
+
+    def _await_import(self, future: "concurrent.futures.Future[dict[str, Any]]", ident: str | None, path: Path,
+                      started: float, counts: str | None, last: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """The reader's result, and the last frame said meanwhile: every ``IMPORT_POLL_SECONDS``
+        the counts the reader wrote (``_import_counts``) become a frame, ``collecting parts``,
+        ``done`` of ``total``, when they moved."""
+        said: dict[str, int] | None = None
+        while True:
+            try:
+                return future.result(timeout=IMPORT_POLL_SECONDS), last
+            except concurrent.futures.TimeoutError:
+                if ident is None:
+                    continue
+                now = _import_counts(counts)
+                if now is not None and now != said:
+                    said = now
+                    last = self._import_frame(path, started, "collecting parts", said["done"], said["total"])
+                    self.importing(ident, last)
+
+    @staticmethod
+    def _import_frame(path: Path, started: float, detail: str, done: int = 0, total: int | None = None) -> dict[str, Any]:
+        """A frame of a STEP's import, shaped as a build's (``progress.py``): ``phase`` ``import``,
+        "Importing model", its ``detail`` the stage, counted where the parts are."""
+        return {"model": path.name, "outputs": [], "phase": "import", "label": "Importing model", "detail": detail,
+                "done": done, "total": total, "determinate": total is not None,
+                "elapsedMs": int((time.monotonic() - started) * 1000)}
+
+    def importing(self, ident: str, frame: dict[str, Any] | None, failed: dict[str, Any] | None = None) -> None:
+        """A STEP's import, as the document's page hears it on the build's channel (``build_of``):
+        its last frame while it runs, None once the document is in, or ``failed`` (``{"model",
+        "error", "progress"}``) when the reader could not read it. Its pages are woken."""
+        with self.load_lock:
+            state = self.builds.setdefault(ident, {"building": None, "failed": None, "progress": 0})
+            state.update(building=frame, failed=failed, progress=state["progress"] + 1)
+        self._changed()
 
     def document(self, ident: str) -> Served:
         """The document as the server holds it, read from its file again only when some
