@@ -326,6 +326,22 @@ class ChangesRunWhatCanBreak(unittest.TestCase):
         self.assertEqual(tests_for("scripts/test/test-global.sh")["skills_policy"],
                          [f"{POLICY}/{name}" for name in sorted(selector.HEAVY_POLICY)])
 
+    def test_the_ui_strings_guard_runs_for_each_tree_it_reads(self):
+        # test-js.sh runs the guard in its ui, web and mcp groups (never core, whose job installs
+        # packages/core alone and has no Babel): each tree it reads reaches one of those steps, and
+        # so do its own files.
+        steps = {"ui": "web_ui", "web": "web_client", "mcp": "mcp"}
+        for path in ("packages/ui/src/i18n/locales/ja.js", "apps/web/src/App.tsx", "apps/mcp/src/Notice.tsx",
+                     "scripts/test/check-ui-strings.mjs", "scripts/test/check-ui-strings.test.mjs"):
+            with self.subTest(path=path):
+                selected = route(path)
+                self.assertTrue(any(selected[flag] == "true" for flag in steps.values()), path)
+        self.assertEqual(route("apps/mcp/src/Notice.tsx")["mcp"], "true")
+        self.assertEqual(route("apps/web/src/App.tsx")["web_client"], "true")
+        lines = (REPO_ROOT / "scripts/test/test-js.sh").read_text(encoding="utf-8").splitlines()
+        first = next(index for index, line in enumerate(lines) if "check-ui-strings" in line)
+        self.assertEqual(lines[first - 1].strip(), 'if [ "$SELECT" != core ]; then')
+
     def test_a_deleted_test_file_has_nothing_left_to_run(self):
         self.assertEqual(jobs_for(f"{CADGEN}/test_gone_for_good.py"), {"skills"})
 
