@@ -211,14 +211,12 @@ _HTTP_TOOL = {
 
 def _stamped(launch: dict[str, Any]) -> dict[str, Any]:
     """A launch with what the page needs to start on it alone: this server's version and platform,
-    whether this computer has a file chooser for the home's Open, and the update notice as the
-    server last read it (``cadgen/updates.py``; a launch never waits on the feed)."""
+    and the update notice as the server last read it (``cadgen/updates.py``; a launch never waits on
+    the feed)."""
     from cadgen import __version__, updates
-    from cadgen._internal.picker import available
 
     launch["version"] = __version__
     launch["platform"] = sys.platform if sys.platform in ("darwin", "win32") else "linux"
-    launch["pick"] = available()
     launch["notice"] = updates.notice()
     updates.refresh()  # a server can run for days: a feed that is due is read in the background, for the next launch
     return launch
@@ -577,7 +575,7 @@ class Server:
 
     def _home(self, *, surface: str | None = None) -> dict[str, Any]:
         """The launch that shows the home: the models opened before, which come with it so its cards
-        draw at once, and Open with the desktop's chooser."""
+        draw at once."""
         try:
             recents = [entry.public() for entry in self.recents.list()
                        if entry.kind != "file" or os.path.splitext(entry.path)[1].lower() in VIEWER_EXTENSIONS]

@@ -35,28 +35,18 @@ it('heads the home with the TEXTTOCAD wordmark over GitHub, Discord and X and no
   expect(nav.nextElementSibling?.querySelector('h1')?.textContent).toBe('Recent');
 });
 
-it('offers Open only where the host has a chooser, and opens and pins through the host', async () => {
-  const pick = vi.fn(async () => {});
-  render(<ModelLibrary library={library([], { pick })} onLayoutChange={() => {}} />);
-  await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Open', exact: true })); });
+it('opens and pins through the host, and with nothing yet says how a file gets here, with no Open of its own', async () => {
+  render(<ModelLibrary library={library([])} onLayoutChange={() => {}} />);
   // The toolbar keeps its search and layout switch with nothing to list yet.
+  expect(await screen.findByText('Open a CAD file to see it here.')).toBeTruthy();
   expect(screen.getByRole('searchbox', { name: 'Search models' })).toBeTruthy();
   expect(screen.getByRole('group', { name: 'Layout' })).toBeTruthy();
-  expect(pick).toHaveBeenCalledTimes(1);
-  // Empty, the library is one card that opens the chooser.
-  const card = await screen.findByRole('button', { name: 'Open File' });
-  await act(async () => { fireEvent.click(card); });
-  expect(pick).toHaveBeenCalledTimes(2);
-  cleanup();
-  // With no chooser, it says how a file gets here.
-  render(<ModelLibrary library={library([])} />);
-  expect(await screen.findByText('Open a CAD file to see it here.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Open', exact: true })).toBeNull();
   cleanup();
 
   const inPlace = library([model('a.step'), model('b.stl', { missing: true })]);
   render(<ModelLibrary library={inPlace} />);
   const open = await screen.findByRole('button', { name: 'Open a.step' });
-  expect(screen.queryByRole('button', { name: 'Open', exact: true })).toBeNull();
   expect((screen.getByRole('button', { name: 'Open b.stl' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByRole('button', { name: 'Open b.stl' }).textContent).toContain('File unavailable');
   await act(async () => { fireEvent.click(open); });

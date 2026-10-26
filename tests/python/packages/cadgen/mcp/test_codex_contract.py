@@ -74,7 +74,7 @@ def converse(tmp: Path) -> dict:
             result["_meta"]["dev.texttocad/httpToken"] = "<app-token>"
         launch = (result.get("structuredContent") or {}).get("launch")
         if isinstance(launch, dict):  # this run's install and machine, not the contract
-            launch.update({key: f"<{key}>" for key in ("version", "platform", "pick", "notice") if key in launch})
+            launch.update({key: f"<{key}>" for key in ("version", "platform", "notice") if key in launch})
     text = json.dumps(record, indent=1, sort_keys=True).replace(str(tmp), "<tmp>")
     return json.loads(re.sub(r"ui://cad/[0-9a-f]{16}/", "ui://cad/<build>/", text))
 

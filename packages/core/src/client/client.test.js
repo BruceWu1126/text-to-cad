@@ -287,7 +287,7 @@ test('a drawing refused by the server raises the classified failure an alert is 
   client.dispose();
 });
 
-test('the library, Open, Reveal and the person\'s settings are guarded requests to the viewer\'s routes, as any host reaches them', async (t) => {
+test('the library, Reveal and the person\'s settings are guarded requests to the viewer\'s routes, as any host reaches them', async (t) => {
   const calls = [];
   const thumbnail = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
   const client = createCadClient({ origin: 'http://one.test', pollIntervalMs: 0, fetch: async (url, options = {}) => {
@@ -295,7 +295,6 @@ test('the library, Open, Reveal and the person\'s settings are guarded requests 
     calls.push([path, options.method || 'GET', options.headers?.['x-cadgen-viewer'] ?? null, options.body ? JSON.parse(options.body) : null]);
     if (path === '/__cad/thumbnail') return new Response(new URL(url).searchParams.get('name') === 'a.png' ? thumbnail : null, { status: new URL(url).searchParams.get('name') === 'a.png' ? 200 : 404 });
     if (path === '/__cad/reveal') return options.body.includes('gone') ? Response.json({ error: 'That file is no longer there.' }, { status: 404 }) : new Response(null, { status: 204 });
-    if (path === '/__cad/pick') return Response.json({ path: '/models/picked.step' });
     if (path === '/__cad/recents') return Response.json({ recents: [{ path: '/models/a.step' }] });
     return Response.json({ path });
   } });
@@ -305,7 +304,6 @@ test('the library, Open, Reveal and the person\'s settings are guarded requests 
   await client.keepThumbnail(new Blob([thumbnail], { type: 'image/png' }), '/models/a.step');
   assert.equal(await client.thumbnail('a.png'), 'data:image/png;base64,iVBORw==');
   assert.equal(await client.thumbnail('none.png'), null);
-  assert.equal(await client.pick(), '/models/picked.step');
   await client.reveal('/models/a.step');
   await assert.rejects(client.reveal('/models/gone.step'), /no longer there/);
   await client.consent();
@@ -324,7 +322,6 @@ test('the library, Open, Reveal and the person\'s settings are guarded requests 
     ['/__cad/recents', 'POST', '1', { action: 'open', path: '/models/a.step' }],
     ['/__cad/recents', 'POST', '1', { action: 'thumbnail', path: '/models/a.step', png: 'iVBORw==' }],
     ['/__cad/thumbnail', 'GET', null, null], ['/__cad/thumbnail', 'GET', null, null],
-    ['/__cad/pick', 'POST', '1', null],
     ['/__cad/reveal', 'POST', '1', { path: '/models/a.step' }], ['/__cad/reveal', 'POST', '1', { path: '/models/gone.step' }],
     ['/__cad/analytics', 'GET', null, null],
     ['/__cad/analytics', 'POST', '1', { share: true }], ['/__cad/analytics', 'POST', '1', { share: false }],

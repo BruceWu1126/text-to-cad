@@ -102,8 +102,8 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
   }), [sync, client]);
   useEffect(() => { reporter.showing(file || null); }, [reporter, file]);
 
-  // Every other view has the home: the models opened before, from every view and the web viewer,
-  // and Open with the desktop's chooser where there is one. What it opens is shown in place.
+  // Every other view has the home: the models opened before, from every view and the web viewer.
+  // What it opens is shown in place.
   // The home's first list came with its launch: the cards draw at once, and later reads ask.
   const seeded = useRef(launch.recents ?? null);
   const library = useMemo<ModelLibrarySource | undefined>(() => homed ? {
@@ -115,8 +115,7 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
     change: (action, entry) => client.changeRecents({ action, path: entry.path }),
     thumbnail: name => client.thumbnail(name),
     open: async entry => { navigate(normalizePath(entry.path)); },
-    ...(launch.pick ? { pick: async () => { const picked = await client.pick(); if (picked) navigate(normalizePath(picked)); } } : {}),
-  } : undefined, [client, homed, launch.pick, navigate]);
+  } : undefined, [client, homed, navigate]);
   // Back and Forward, wherever the view can go elsewhere: not a file handler's, which shows its file alone.
   const viewerHistory = useMemo(() => homed ? {
     canGoBack: history.index > 0, canGoForward: history.index < history.entries.length - 1, back, forward,

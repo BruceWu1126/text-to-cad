@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
-import { Box, FolderOpen, LayoutGrid, List, Pin, Search, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { Box, LayoutGrid, List, Pin, Search, Trash2, X } from "lucide-react";
 import { Button } from "../primitives/button.jsx";
 import { Input } from "../primitives/input.jsx";
 import { Spinner } from "../primitives/spinner.jsx";
@@ -47,11 +47,6 @@ export interface ModelLibrarySource<Model extends LibraryModel = LibraryModel> {
   /** An image URL for a model's thumbnail, or null. */
   thumbnail(name: string): Promise<string | null>;
   open(model: Model): Promise<void>;
-  /**
-   * Choose a model with the desktop's own file chooser: Open. A host on a computer with no chooser
-   * has none.
-   */
-  pick?(): Promise<void>;
 }
 
 /** A card wants a picture: it has none, or its file changed since it was taken. */
@@ -138,11 +133,11 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
  * The host's home: the models opened before, from every view, to open again. The viewer's navbar
  * is over it (its logo's app menu, the host's update and Full size, as over a file). The TEXTTOCAD
  * wordmark is centred at its top over its byline, then the host's links — GitHub, Discord and X,
- * as icon links, which the app menu also holds — then "Recent" with its search, its grid/list switch and, where
- * the host has a chooser, Open, all three there with no models yet too; then the models, pinned first, as solid cards (a picture over the
- * name and when the file was edited) or as rows. A card can be pinned (its pin filled); a row can
- * also be removed. With none yet, one empty card opens the host's chooser. It is drawn on the
- * navbar's colour.
+ * as icon links, which the app menu also holds — then "Recent" with its search and its grid/list
+ * switch, both there with no models yet too; then the models, pinned first, as solid cards (a
+ * picture over the name and when the file was edited) or as rows. A card can be pinned (its pin
+ * filled); a row can also be removed. It is the library alone: nothing opens a file from here but
+ * its cards. It is drawn on the navbar's colour.
  *
  * Nothing waits unseen. While the list is read, placeholder cards (or rows) stand where the models
  * will be. A model being opened shows a spinner over its picture, and the library takes no other
@@ -150,10 +145,7 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
  * (`wantsPicture`) is handed to `picture`, where the viewer draws one out of sight — one card at a
  * time, each once while the page is up — and the list is read again once one is kept.
  */
-export function ModelLibrary<Model extends LibraryModel>({ library, layout = "grid", onLayoutChange, picture, links, onError, sections, after }: {
-  sections?: ReactNode;
-  /** What the host shows under the recent files (the folder of the most recent launch). */
-  after?: ReactNode;
+export function ModelLibrary<Model extends LibraryModel>({ library, layout = "grid", onLayoutChange, picture, links, onError }: {
   library: ModelLibrarySource<Model>;
   /** Grid or list; the host keeps the choice (the tab's settings). */
   layout?: LibraryLayout;
@@ -225,7 +217,6 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
     setOpening(item.path);
     void current.current.open(item).catch(fail).finally(() => setOpening(null));
   };
-  const pick = library.pick ? () => { setError(""); void current.current.pick?.().catch(fail); } : null;
   const change = (action: "pin" | "unpin" | "remove" | "delete", item: Model) => { void current.current.change(action, item).then(setItems, fail); };
   const all = items ?? [];
   // The host lists pinned models first; a search keeps that order.
@@ -267,7 +258,6 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
       {links ? <nav className="cad-library-links" aria-label={t("home.linksAria")}>
         <HomeLinks links={links} onError={onError} />
       </nav> : null}
-      {sections}
       <div className="cad-library-toolbar">
         <h1 className="cad-library-heading">{t("home.recentFiles")}</h1>
         <div className="cad-library-controls">
@@ -280,22 +270,13 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
             <Button variant="ghost" size="icon-sm" aria-label={t("home.grid")} aria-pressed={layout === "grid"} onClick={() => onLayoutChange("grid")}><LayoutGrid aria-hidden="true" /></Button>
             <Button variant="ghost" size="icon-sm" aria-label={t("home.list")} aria-pressed={layout === "list"} onClick={() => onLayoutChange("list")}><List aria-hidden="true" /></Button>
           </div> : null}
-          {pick ? <Button size="sm" onClick={pick}><FolderOpen aria-hidden="true" />{t("home.open")}</Button> : null}
         </div>
       </div>
       {error ? <div className="cad-library-error" role="alert"><p>{error}</p></div> : null}
       {items === null ? <Placeholders layout={layout} />
         : searchQuery && !shown.length ? <p className="cad-library-empty" role="status">{t("home.noMatchingModels")}</p>
-          : !all.length ? (pick
-            ? <ul className="cad-library-grid" aria-label={t("home.filesAria")}><li className="cad-library-card" data-empty="">
-              <button type="button" className="cad-library-open" onClick={pick}>
-                <span className="cad-library-thumbnail"><Box strokeWidth={1} aria-hidden="true" /></span>
-                <span className="cad-library-body"><span className="cad-library-name">{t("home.openFile")}</span></span>
-              </button>
-            </li></ul>
-            : <p className="cad-library-empty">{t("home.emptyNoPicker")}</p>)
+          : !all.length ? <p className="cad-library-empty">{t("home.empty")}</p>
             : models}
-      {after}
     </main>
   </div>;
 }

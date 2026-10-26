@@ -18,7 +18,6 @@ import type { TabStore } from '../tab-store/tabStore.js';
 import { useTabViewerState } from '../tab-store/useTabViewerState.js';
 import { normalizePath } from './catalog.js';
 import { isDocumentId } from '@text-to-cad/core/lib/cadRefs.js';
-import { LaunchFolder } from './LaunchFolder.js';
 import { MissingCadFile } from './MissingCadFile.js';
 
 // A STEP: read by the cadgen engine, at a length its size decides (the home's pictures ask first, as
@@ -51,10 +50,8 @@ export interface CadViewerProps<Model extends LibraryModel = LibraryModel> {
    * missing), and its document's id: what the host names it by (`/<id>`).
    */
   onShown?(file: string | null, id: string | null): void;
-  /** The folder the home shows under the recent files: the most recent launch's. */
-  start?: string;
   /**
-   * The home's library: the models opened before, to open again, and Open. A host with one shows it
+   * The home's library: the models opened before, to open again. A host with one shows it
    * wherever no file is open, and the navbar's logo leads to it from a file. Without one (a host
    * whose own navigation shows one file, as a file handler does) a view has a file and nothing else:
    * no home, no explorer, and no link to another file.
@@ -108,7 +105,7 @@ const reportError = (error: Error) => console.error(error);
  * time, and only a model whose display is already built — the home never starts a build. It never
  * navigates: showing a file, or the home, is the host's `onShow`.
  */
-export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, host, tabStore, live, file, onShow, onShown, start,
+export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, host, tabStore, live, file, onShow, onShown,
   library, onThumbnail, colorScheme, language, appSettings, notice, update, fullSize, openInBrowser, history, onError = reportError }: CadViewerProps<Model>) {
   // The language the host names: the pages drawn here (the home, a file that will not open) read in it.
   const locale = host.environment.locale;
@@ -204,8 +201,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   const goHome = useMemo(() => homed ? <Button size="sm" variant="outline" onClick={home}>{t("file.goHome")}</Button> : null, [homed, home, t]);
   const presentation = useMemo(() => ({
     home: library ? <ModelLibrary library={library} layout={layout} onLayoutChange={changeLayout} picture={picture}
-      links={host.links} onError={onError}
-      after={start && host.files.list ? <LaunchFolder source={host.files} folder={start} onOpen={openFile} /> : null} /> : undefined,
+      links={host.links} onError={onError} /> : undefined,
     loading: <div className="relative h-full"><ViewerLoadingOverlay viewerLoading /></div>,
     // A document named by its id that the engine does not hold says why, and the command that
     // builds it again (the engine's words), under a title of the state the engine names; a file
@@ -215,7 +211,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
         title={isDocumentId(path) ? t(NOT_HELD_TITLES[String((error as { state?: unknown } | null)?.state)] ?? "file.notHeld") : t("file.missing")}
         description={isDocumentId(path) ? message : undefined} />
       : <EmptyState icon={FileWarning} title={t("file.openFailed")} description={message} tone="warn" action={goHome} />,
-  }), [library, layout, changeLayout, path, picture, host.links, host.files, openFile, entry, onError, goHome, t, start]);
+  }), [library, layout, changeLayout, path, picture, host.links, entry, onError, goHome, t]);
   return <I18nProvider locale={locale}>
     <ExportControls service={client.exports} downloads={host.downloads} file={shown ?? path}>{({ navbar, overlay }) => <FileViewer navbarActions={navbar} overlay={overlay} file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
       colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} fullSize={fullSize} openInBrowser={openInBrowser} history={history} notice={notice} onError={onError} presentation={presentation} />}</ExportControls>
