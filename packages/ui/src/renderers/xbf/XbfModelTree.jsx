@@ -11,6 +11,7 @@ import ToolPanel from '../kit/tools/ToolPanel.jsx';
 import { modelTreeSearchChain, useTreeSearch } from '../kit/inspector/modelTreeSearch.js';
 import VirtualRows, { revealRow } from '../kit/inspector/VirtualRows.jsx';
 import { implicitXbfRoots, xbfSelectionPaths } from './xbfTree.js';
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 // An engine document's Model tree, as the STEP renderer's was, over the engine's tree as
 // `xbfTree.js` presents it. An engine document's faces and edges are always to hand, so no row asks
@@ -139,6 +140,7 @@ const MemoModelingSearchRow = memo(ModelingSearchRow);
  *   `selectedIds`: the parts and assemblies selected, and the faces and edges (revealed at their part).
  */
 function XbfModelTree({ tree: presented, active, disabled, mode='all', selectedIds=EMPTY, onClearSelection, partControls=NO_CONTROLS }) {
+  const { t } = useI18n();
   const [localExpanded,setLocalExpanded]=useState(()=>new Set());
   const rowHeight=useTreeRowHeight();
   const tree=presented.roots;
@@ -272,7 +274,7 @@ function XbfModelTree({ tree: presented, active, disabled, mode='all', selectedI
   return <ToolPanel id="tree" label="Model tree" fit="tree" resizable collapsible={false} hidden={!active}
     header={<TreeFilterInput label="Filter model" placeholder="Filter…" value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} dense
       className="px-0 shadow-none" trailing={<>
-        {partControls.hiddenPartIds?.length > 0 && <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-5 shrink-0 px-1.5 text-tiny text-muted-foreground" onClick={partControls.showAllHiddenParts}>Show all</Button>}
+        {partControls.hiddenPartIds?.length > 0 && <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-5 shrink-0 px-1.5 text-tiny text-muted-foreground" onClick={partControls.showAllHiddenParts}>{t("tree.showAll")}</Button>}
       </>}/>}>
     <div className="flex flex-col text-tiny" aria-label="Modeling tree">
       <div ref={listRef} className="px-1 py-1" aria-label="Model tree area"
@@ -280,7 +282,7 @@ function XbfModelTree({ tree: presented, active, disabled, mode='all', selectedI
         {isolatedLabels.length > 0 && <div role="status" aria-label="Isolation" className="mb-1 flex min-h-7 items-center gap-2 rounded-md bg-accent/60 px-2 text-tiny">
           <Focus className="size-3 shrink-0 text-foreground" aria-hidden="true"/>
           <TooltipHint content={isolatedLabels.join(', ')} overflowOnly><span className="min-w-0 flex-1 truncate">Isolated: {isolatedLabels.join(', ')}</span></TooltipHint>
-          <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-tiny" onClick={partControls.onExitAllIsolate}>Exit</Button>
+          <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-tiny" onClick={partControls.onExitAllIsolate}>{t("tree.exitIsolation")}</Button>
         </div>}
         {searching && <p role="status" className="px-2 py-1 text-micro text-muted-foreground">{found.total > found.matches.length ? `First ${found.matches.length} of ${found.total.toLocaleString()} matches` : `${found.total} ${found.total === 1 ? 'match' : 'matches'}`}</p>}
         {searching ? found.matches.length

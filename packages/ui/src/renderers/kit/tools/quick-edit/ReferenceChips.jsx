@@ -9,6 +9,7 @@ import { FLOATING_SURFACE_CLASS } from "../../../../lib/floatingSurface.js";
 import { useCopyFlash } from "../../inspector/copyFlash.js";
 import { InfoRow } from "../../inspector/referenceRows.jsx";
 import { PickGlyph, compactSuffix, hasPickGlyph } from "../../inspector/pickGlyph.jsx";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 /**
  * One chip: what a renderer says a piece of its selection is. Several picks of one kind on one part
@@ -115,6 +116,7 @@ function ChipText({ chip }) {
 const copyChip = (flash, chip) => flash.copy(typeof chip.copy === "function" ? chip.copy() : chip.copy);
 
 function useChip(chip) {
+  const { t } = useI18n();
   const card = Boolean(chip.card || chip.id);
   const hover = useHoverOpen(card);
   const flash = useCopyFlash();
@@ -145,7 +147,7 @@ function useChip(chip) {
         if (pointer.current !== "mouse" && card) hover.setOpen(open => !open);
         pointer.current = "";
       },
-      children: copied ? <span className="inline-flex items-center gap-1"><Check className="size-2.5" aria-hidden="true" />Copied</span> : <ChipText chip={chip} />,
+      children: copied ? <span className="inline-flex items-center gap-1"><Check className="size-2.5" aria-hidden="true" />{t("chip.copied")}</span> : <ChipText chip={chip} />,
     },
   };
 }

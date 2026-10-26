@@ -8,6 +8,7 @@ import { useStripButtonClass } from "../stripTouch.js";
 import SubToolbar, { SLIDER_SUB_TOOLBAR_CLASS, SUB_TOOLBAR_SLIDER_CLASS, SubToolbarValue } from "../SubToolbar.jsx";
 import { CrossSectionControls, ExplodeControls, clipSummary } from "./ModelViewControls.js";
 import { useControlUsage } from "../../../../usage/controls.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 /** Separated assembly layers, distinct from an expand affordance. */
 function ExplodeIcon(props) {
@@ -67,6 +68,7 @@ function EffectPopover({ label, icon, changed = false, disabled = false, row, on
  * files have them, and lists Explode only where there are parts to separate.
  */
 export function useModelTools({ view, features, store, mesh, disabled }) {
+  const { t } = useI18n();
   const controls = useControlUsage();
   const applied = [
     ...(view.exploded.enabled && view.exploded.amount > 0 ? ["exploded"] : []),
@@ -79,7 +81,7 @@ export function useModelTools({ view, features, store, mesh, disabled }) {
   const definitions = [
     { id: "exploded", label: "Explode", Icon: ExplodeIcon,
       // Named, as Clip's axis and Animation's Play lead theirs: a bare slider says nothing of what it moves.
-      lead: <span className="shrink-0 pl-1.5 pr-1 text-tiny text-foreground">Explode</span>,
+      lead: <span className="shrink-0 pl-1.5 pr-1 text-tiny text-foreground">{t("explode.label")}</span>,
       summary: `${Math.round((view.exploded.enabled ? view.exploded.amount : 0) * 100)}%`,
       controls: <ExplodeControls viewSettings={view} onViewSettingsPatch={store.patch} className={SUB_TOOLBAR_SLIDER_CLASS} /> },
     { id: "clip", label: "Clip", Icon: ClipIcon, summary: clipSummary(view, clipBounds),
