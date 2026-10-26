@@ -45,7 +45,9 @@ export function xbfDocumentSource(value) {
 async function failure(response, what) {
   let detail = "";
   try { detail = (await response.json())?.error || ""; } catch { /* not JSON */ }
-  return new Error(`${what}: the engine answered ${response.status}${detail ? ` (${detail})` : ""}`);
+  // The engine's status rides on the error (`status`): a 404 is a document the engine no longer holds.
+  return Object.assign(new Error(`${what}: the engine answered ${response.status}${detail ? ` (${detail})` : ""}`),
+    { status: response.status });
 }
 
 async function getJson(fetchImpl, url, what, signal) {

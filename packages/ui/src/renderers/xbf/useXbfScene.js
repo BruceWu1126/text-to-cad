@@ -39,6 +39,13 @@ const pause = (ms, signal) => new Promise((resolve, reject) => {
  *   milliseconds from the engine's answer to its scene. `building`: the progress frame of the build
  *   writing the document now; `failed`: the last build of it that failed.
  */
+/**
+ * Whether a document's read failed because the engine no longer holds it (`cadgen delete` while it is
+ * open, among others): the file viewer then opens the file again, which says so in the document's
+ * own words ("This model is not saved"), not as a load that failed.
+ */
+export const goneFromEngine = error => Number(error?.status) === 404;
+
 export function useXbfScene({ client, file }) {
   const [state, setState] = useState({ scene: null, document: null, revision: "", busy: true, progress: SERVING, error: null, empty: false, update: null,
     building: null, failed: null });

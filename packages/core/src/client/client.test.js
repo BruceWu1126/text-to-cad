@@ -378,3 +378,18 @@ test('an id the engine does not hold carries the state the engine names for it',
   assert.deepEqual([isMissingFileError(failure), failure.state], [true, 'detached']);
   client.dispose();
 });
+
+test('an id deleted while it is on screen leaves the catalog: asked again, it is missing', async () => {
+  const id = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab';
+  let held = true;
+  const client = createCadClient({ origin: 'http://one.test', pollIntervalMs: 0, fetch: async () => json(held
+    ? { entries: [{ id, file: id, name: 'cube', sourcePath: null }] }
+    : { entries: [], missing: `no document ${id} is held`, missingState: 'unsaved' }) });
+  assert.equal((await client.resolveEntry(id)).id, id);
+  held = false;  // `cadgen delete`
+  await client.refresh({ file: id });
+  assert.equal(client.entryOf(id), null, 'its row is gone');
+  const failure = await client.resolveEntry(id).catch((error) => error);
+  assert.deepEqual([isMissingFileError(failure), failure.state], [true, 'unsaved']);
+  client.dispose();
+});
