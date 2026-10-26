@@ -79,13 +79,8 @@ are gone.
    If `cadgen` is not on your PATH, or says 0.8.0 is not installed, run
    `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen doctor` once.
 
-3. **Make `PYTHONPATH` absolute.** The engine builds each model script with that script's
-   folder as its working folder, so a relative entry resolves from there:
-   `PYTHONPATH=src cadgen run src/camera/payload.py` looks in `src/camera/src` and fails
-   with `ModuleNotFoundError` for the project's own packages (a script directly in `src/`
-   still works, its folder being first on the path). Write `export PYTHONPATH="$PWD/src"`.
-   A run with another `PYTHONPATH` starts a fresh worker for its script, and the warm memo
-   goes with the old one, so set it once.
+3. **Set `PYTHONPATH` where the project's import root needs it**, as for `python SCRIPT`:
+   `PYTHONPATH=src cadgen run src/camera/payload.py`.
 
 4. **Confirm what you have.**
 
@@ -829,11 +824,11 @@ the body `{"share":false}`); only you can opt in.
 
 - **A run prints nothing and exits 0.** The script's `__main__` calls no model, or the
   model is still undecorated. Decoration only declares; add the calls. (A script that only
-  calls `export()` prints nothing by design.)
+  calls `export()` prints a line per file it wrote.)
 - **The project still writes STEP files and sidecars.** Its commands still run 0.7
   (`uvx ... cadgen==0.7.x`): Prerequisites, step 2.
-- **`ModuleNotFoundError` for one of the project's own packages**, for scripts in a
-  subfolder only. A relative `PYTHONPATH`: make it absolute (Prerequisites, step 3).
+- **`ModuleNotFoundError` for one of the project's own packages.** `PYTHONPATH` does not
+  name the import root (Prerequisites, step 3).
 - **`TypeError` naming `kinematics`, `materials` or `animation`.** A decorator still
   carries a 0.7 argument. Move it into the body (steps 4 to 6).
 - **`ImportError: cannot import name 'build123d' from 'cadgen'`.** Step 1:
@@ -901,7 +896,7 @@ Projects written against a 0.8 pre-release may use names the release renamed or 
       and each variant a named model; cached stages are `@memo`.
 - [ ] `import build123d as bd` everywhere; no `from cadgen import build123d`, no private
       cadgen module.
-- [ ] The project's own docs run `cadgen run` and `cadgen`, with an absolute `PYTHONPATH`.
+- [ ] The project's own docs run `cadgen run` and `cadgen`, with `PYTHONPATH` where it needs one.
 - [ ] No `kinematics=`, `materials=` or `animation=` anywhere; mechanisms use build123d
       joints and `cadgen.ap242`, showcases `cadgen.gltf`.
 - [ ] Every colour is hex or 0-255 integers.
