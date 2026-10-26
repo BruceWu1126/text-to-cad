@@ -353,6 +353,7 @@ Each model's report says how it built, then its children:
 
 ```text
 built src/assembly.py::assembly warm in 0.03s: bodies 2 run, 1 replayed; 3 misses, 2 hits; body 0.00s, ...
+  parts 3 · bounds 60 × 40 × 16 mm · joints 0 · sequences 0
   src/plate.py::plate, a child
   src/standoff.py::standoff_m3, a child
   id: 7a9724e8-f676-5676-acaa-160d7c6cc5fa
@@ -367,7 +368,7 @@ those run or replayed, and `misses` and `hits` the kernel's memo. `assembly.buil
 returns the same report as data, a dict per model in `.models`: `id`, `memo`, `bodies`
 (each `run` or `replayed`), `retention` (each body's
 `fallbacks`, the reasons it runs on every run, and the files it `reads`), `timings` and
-`child_models`:
+`children`:
 
 ```bash
 python -c "import bracket; print(bracket.bracket.build().models[0]['retention'])"

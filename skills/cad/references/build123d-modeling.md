@@ -74,10 +74,10 @@ paint(body, body.faces().filter_by(bd.Axis.Z)[-1:], materials.aluminium_6061.but
 
 - **The catalogue** is the `materials` module: `materials.aluminium_6061`, or
   `materials("6061")` by name or alias (`"6061-T6"`, `"steel"`, `"delrin"`; a miss
-  names the three nearest). `materials.names()` lists its 44 entries by family:
-  aluminium, steel, stainless, brass, copper, titanium, the printing plastics (PLA,
-  PETG, ABS, ASA, nylons, TPU, resin), engineering plastics, FR4, carbon fibre,
-  plywood, MDF, rubbers and glass.
+  names the three nearest). `materials.names()` lists its 44 entries by family (`metal`,
+  `plastic`, `elastomer`, `composite`, `wood`, `glass`): aluminium, steel, stainless,
+  brass, copper, titanium, the printing plastics (PLA, PETG, ABS, ASA, nylons, TPU,
+  resin), engineering plastics, FR4, carbon fibre, plywood, MDF, rubbers and glass.
 - **A project's own material** is a `Material(...)` constant in its own module, and
   `materials.steel_1018.but(roughness=0.2)` a variant. A field it does not know is
   `None`, never a guess; density is kg/m³.

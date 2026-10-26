@@ -40,7 +40,7 @@ it has no B-rep, so model it in build123d, with `read_mesh` for its numbers
 ([inputs](model-contract.md#inputs)). Each file is written beside its target and
 moved over it, so a failed export leaves the old file whole. `--json` prints what was
 written as one object (`{"ok": true, "source", "files": [{"path", "kind", "bytes",
-"seconds"}]}`), and a failure as `{"ok": false, "error": ...}` with exit status 1.
+"seconds", "written"}]}`), and a failure as `{"ok": false, "error": ...}` with exit status 1.
 
 An export takes a document and its destinations, and nothing else. What a file shows is
 the model's business: a different file is a different model.
