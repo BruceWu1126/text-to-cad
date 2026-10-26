@@ -7,7 +7,7 @@ import { ToolbarButton, TOOLBAR_ICON_BUTTON_CLASS } from "@text-to-cad/ui/primit
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { cn } from "@text-to-cad/ui/utils";
 import { FLOATING_SURFACE_CLASS } from "../../../../lib/floatingSurface.js";
-import { PREVIEW_FADE_CLASS } from "../PreviewChrome.jsx";
+import { PREVIEW_FADE_CLASS, usePreviewShown } from "../PreviewChrome.jsx";
 import PlaybackMenu from "../PlaybackMenu.jsx";
 import { AnimationTimeControl, animationControlsHaveContent, formatSeconds } from "./AnimationTimeControl.js";
 
@@ -44,16 +44,17 @@ function RoutineMenu({ runtime, disabled }) {
  * Play or Pause, the scrubber, and the Playback settings (Speed, Loop, Autoplay) at its right end,
  * their menus opening up. Its buttons sit 4px apart, the scrubber as far from the button either
  * side of it. It plays Preview's own routine (`runtime`), never the tools view's. It comes and goes
- * with Preview's bar (`shown`, `usePreviewIdle`: `hold` its handlers), its playing untouched by either.
+ * with Preview's bar (`idle`, `createPreviewIdle`), its playing untouched by either.
  *
  * @param {{ runtime: object, autoplay: boolean, onAutoplayChange(value: boolean): void, disabled?: boolean,
- *   shown?: boolean, hold?: object }} props
+ *   idle?: ReturnType<typeof import("../PreviewChrome.jsx").createPreviewIdle> | null }} props
  */
-export default function PreviewPlaybar({ runtime, autoplay, onAutoplayChange, disabled = false, shown = true, hold = null }) {
+export default function PreviewPlaybar({ runtime, autoplay, onAutoplayChange, disabled = false, idle = null }) {
+  const shown = usePreviewShown(idle);
   if (!animationControlsHaveContent(runtime)) return null;
   const playing = runtime.playing === true;
   const noun = runtime.noun || "Animation";
-  return <div role="toolbar" aria-label={`${noun} playback`} data-preview-playbar="" data-hidden={shown ? undefined : ""} {...hold}
+  return <div role="toolbar" aria-label={`${noun} playback`} data-preview-playbar="" data-hidden={shown ? undefined : ""} {...idle?.hold("playbar")}
     className={cn("absolute bottom-4 left-1/2 z-30 flex w-96 max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-1 px-2 py-1", PREVIEW_FADE_CLASS,
       shown ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0")}>
     <RoutineMenu runtime={runtime} disabled={disabled} />

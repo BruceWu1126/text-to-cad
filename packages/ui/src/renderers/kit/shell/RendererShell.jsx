@@ -641,7 +641,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
 
               {/* Preview's playbar, for a file with routines: its own routine, under the model. */}
               {previewing && hasAnimation ? <PreviewPlaybar key={frame.modelKey} runtime={playbackRuntime} disabled={viewerLoading || !scene}
-                autoplay={shell.autoplay} onAutoplayChange={shell.setAutoplay} shown={previewIdle.shown} hold={previewIdle.hold("playbar")} /> : null}
+                autoplay={shell.autoplay} onAutoplayChange={shell.setAutoplay} idle={previewIdle} /> : null}
 
               {/* Preview coming together underneath: the view as it was, held, until the picture is ready. */}
               <div aria-hidden={!previewCovered} data-preview-cover={previewCovered ? "" : undefined}
