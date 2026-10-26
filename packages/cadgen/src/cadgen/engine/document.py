@@ -1285,6 +1285,9 @@ class Loaded:
         # placement by those, and its label entries (``/``-joined) to them.
         self.instance_paths: list[tuple[int, ...]] = []
         self.worlds: dict[tuple[int, ...], Any] = {}
+        # And each occurrence's placement in its assembly's frame: its component's, a part's own
+        # placement after it.
+        self.locals: dict[tuple[int, ...], Any] = {}
         self.occurrences: dict[str, tuple[int, ...]] = {}
         self.step = self.path.suffix.lower() in (".step", ".stp")
         self._walk()
@@ -1337,7 +1340,9 @@ class Loaded:
                     component = components.Value(at)
                     referred = TDF_Label()
                     XCAFDoc_ShapeTool.GetReferredShape_s(component, referred)
-                    placed = location.Multiplied(XCAFDoc_ShapeTool.GetLocation_s(component))
+                    own = XCAFDoc_ShapeTool.GetLocation_s(component)
+                    self.locals[occurrence + (at - 1,)] = own
+                    placed = location.Multiplied(own)
                     child_name = named(component) or named(referred) or f"{name}.{at}"
                     child_color = _label_color(component) or color
                     node["children"].append(visit(referred, placed, path + [child_name], child_color, child_name,
@@ -1353,6 +1358,8 @@ class Loaded:
                 if claim is not None:
                     claims[index] = claim
             placed = location.Multiplied(shape.Location())
+            if occurrence in self.locals:
+                self.locals[occurrence] = self.locals[occurrence].Multiplied(shape.Location())
             prototype = self.prototypes[index]
             self.instances.append(Instance(index, path, _matrix(placed),
                                            color if color != prototype.color else None))

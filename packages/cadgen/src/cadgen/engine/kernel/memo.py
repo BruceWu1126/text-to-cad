@@ -92,7 +92,9 @@ every transform -- is this layer's (``_sharing``): new objects of the same class
 new handle on the SAME TShape, never ``BRepBuilderAPI_Copy``. So a placement registers
 nothing of its own, its key is its source's with its location, and a part placed ten times
 is one B-rep. A maker that changes what it is given in place (``_IN_PLACE``) is handed a
-copy of a placed shape (``_unshared``, ``copied_on_write``). A file read again in one build
+copy of a placed shape (``_unshared``, ``copied_on_write``); a unify that fails on a shape holding
+one TShape at two places is made again on a copy, each place its own (``_one_place``,
+``copied_apart``). A file read again in one build
 from the same site shares the first read's decode (``_read_again``, ``shared_reads``).
 
 **Registration.** A result's shapes are registered under the entry that made them, and
@@ -216,7 +218,7 @@ _MAPS: "OrderedDict[tuple[int, int], tuple[Any, Any]]" = OrderedDict()
 # model keeps casting shapes out of.
 _ORDINALS: "OrderedDict[tuple[Any, int], dict]" = OrderedDict()
 _STATS = {"hits": 0, "misses": 0, "unkeyable": 0, "unreplayable": 0, "errors": 0, "tainted": 0,
-          "bodies_run": 0, "bodies_skipped": 0, "copied_on_write": 0, "shared_reads": 0, "queries_answered": 0,
+          "bodies_run": 0, "bodies_skipped": 0, "copied_on_write": 0, "copied_apart": 0, "shared_reads": 0, "queries_answered": 0,
           "queries_run": 0}
 _RUN_IDS = itertools.count(1)
 _EFFECT_IDS = itertools.count(1)
@@ -422,13 +424,21 @@ def install() -> bool:
             elif not getattr(static, "__kernel_memo__", False):
                 setattr(cls, attr, _query(f"{cls_name}.{attr}", static))
         kernel_history.install()
+        # build123d's booleans and ``clean`` unify through the class its topology module imported:
+        # the one-place class (``_one_place``), as a model's own unify is.
+        from build123d.topology import shape_core
+
+        unify = shape_core.ShapeUpgrade_UnifySameDomain
+        if not getattr(unify, "__kernel_one_place__", False):
+            shape_core.ShapeUpgrade_UnifySameDomain = _one_place(unify)
         # After the history's patches, which read these modules' classes: build123d keeps
         # the classes it imported, and a model importing one now is handed its subclass.
         for module_name, class_name, perform, idle, builds, setters in _MAKER_TARGETS:
             module = importlib.import_module(module_name)
             original = getattr(module, class_name)
             if not getattr(original, "__kernel_memo__", False):
-                setattr(module, class_name, _maker_class(original, perform, idle, builds, setters))
+                made = _one_place(original) if class_name == "ShapeUpgrade_UnifySameDomain" else original
+                setattr(module, class_name, _maker_class(made, perform, idle, builds, setters))
         for spec in _ANALYSES:
             module = importlib.import_module(spec.module)
             if not getattr(getattr(module, spec.name), "__kernel_memo__", False):
@@ -751,7 +761,8 @@ def uninstall() -> bool:
             module = importlib.import_module(module_name)
             maker = getattr(module, class_name)
             if getattr(maker, "__kernel_memo__", False):
-                setattr(module, class_name, maker.__kernel_memo_class__)
+                made = maker.__kernel_memo_class__
+                setattr(module, class_name, made.__mro__[1] if getattr(made, "__kernel_one_place__", False) else made)
         for spec in _ANALYSES:
             module = importlib.import_module(spec.module)
             analysis = getattr(module, spec.name)
@@ -771,6 +782,11 @@ def uninstall() -> bool:
                     setattr(cls, attr, property(static.fget.__wrapped__, static.fset, static.fdel))
             elif getattr(static, "__kernel_memo__", False):
                 setattr(cls, attr, static.__wrapped__)
+        from build123d.topology import shape_core
+
+        unify = shape_core.ShapeUpgrade_UnifySameDomain
+        if getattr(unify, "__kernel_one_place__", False):
+            shape_core.ShapeUpgrade_UnifySameDomain = unify.__mro__[1]
         kernel_history.uninstall()
         _installed = False
         return True
@@ -2993,6 +3009,90 @@ def wrap_function(label: str, function: Callable[..., Any]) -> Callable[..., Any
 # changes the shape's other placements. The others build what they make anew: a transform,
 # a copy, a fillet, and a unify in its safe input mode, on unless a model turns it off.
 _IN_PLACE = frozenset({"ShapeFix_Shape"})
+# OCCT's unify (``ShapeUpgrade_UnifySameDomain``: build123d runs it on every boolean's result and
+# in ``clean``, and a model may run its own) chains the edges it merges by their vertices' TShapes,
+# whatever place each stands at. A shape can hold one TShape at two places -- a prism's two caps,
+# which OCCT makes of one face's edges and vertices placed twice, so each lateral edge ends on one
+# vertex at both its ends; a piece fused beside a moved piece of the same shape -- and on such a
+# shape the unify can chain an edge at one place with an edge at the other and fail ("Courbes non
+# jointives"). A unify that fails on such a shape is made again on a copy whose every sub-shape
+# stands at one place (``_one_place``, ``_apart``): the same geometry, as cadgen 0.7 handed every
+# child's result over. A unify that succeeds is the kernel's, untouched.
+
+
+def _placed_twice(handle: Any) -> bool:
+    """Whether ``handle`` holds one edge's or one vertex's TShape at two places or more."""
+    for kind in (TopAbs_EDGE, TopAbs_VERTEX):
+        found = TopTools_IndexedMapOfShape()  # by TShape and place: an edge two faces share is one
+        TopExp.MapShapes_s(handle, kind, found)
+        count = found.Extent()
+        if count > 1 and len({found.FindKey(ordinal).TShape() for ordinal in range(1, count + 1)}) < count:
+            return True
+    return False
+
+
+def _one_place(cls: type) -> type:
+    """``ShapeUpgrade_UnifySameDomain`` whose ``Build``, failing on a shape holding one TShape at
+    two places, is made again on a copy of it whose every sub-shape stands at one place
+    (``_apart``), with the same settings: a subclass, so every other method is the class's own.
+    What build123d's booleans and ``clean`` run, and what a model's own unify is made of."""
+    class UnifySameDomain(cls):
+        def __init__(self, *args: Any) -> None:
+            super().__init__(*args)
+            self.__dict__["_kernel_given"] = args
+            self.__dict__["_kernel_settings"] = []
+
+        def Initialize(self, *args: Any) -> Any:  # noqa: N802 - OCCT's name
+            self.__dict__["_kernel_given"] = args
+            return super().Initialize(*args)
+
+        def Build(self, *args: Any) -> Any:  # noqa: N802 - OCCT's name
+            try:
+                return super().Build(*args)
+            except Exception:
+                given = self.__dict__.get("_kernel_given") or ()
+                settings = self.__dict__.get("_kernel_settings") or []
+                # Shapes it was told to keep are the given shape's own: a copy holds none of them.
+                apart = _apart(given[0]) if given and not any(name.startswith("Keep") for name, _ in settings) else None
+                if apart is None or apart is given[0]:
+                    raise
+                flags = tuple(given[1:4]) + (True, True, False)[len(given[1:4]):]  # OCCT's defaults
+                super().Initialize(apart, *flags)
+                for name, values in settings:
+                    getattr(super(), name)(*values)
+                return super().Build(*args)
+
+    def setting(name: str) -> Any:
+        def set_(self: Any, *values: Any) -> Any:
+            self.__dict__.setdefault("_kernel_settings", []).append((name, values))
+            return getattr(cls, name)(self, *values)
+
+        set_.__name__ = name
+        return set_
+
+    for name in ("SetLinearTolerance", "SetAngularTolerance", "AllowInternalEdges", "SetSafeInputMode",
+                 "KeepShape", "KeepShapes"):
+        if hasattr(cls, name):
+            setattr(UnifySameDomain, name, setting(name))
+
+    UnifySameDomain.__name__ = UnifySameDomain.__qualname__ = cls.__name__
+    UnifySameDomain.__module__ = cls.__module__
+    UnifySameDomain.__kernel_one_place__ = True
+    return UnifySameDomain
+
+
+def _apart(handle: Any) -> Any:
+    """``handle``, or, when it holds one TShape at two places (``_placed_twice``), a copy of it --
+    ``BRepBuilderAPI_Copy``, which gives each place a sub-shape of its own: the same geometry,
+    every sub-shape at one place. Counted (``copied_apart``)."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
+    from OCP.TopoDS import TopoDS_Shape
+
+    if not isinstance(handle, TopoDS_Shape) or handle.IsNull() or not _placed_twice(handle):
+        return handle
+    _STATS["copied_apart"] += 1
+    copy = getattr(BRepBuilderAPI_Copy, "__kernel_memo_class__", BRepBuilderAPI_Copy)  # the kernel's own
+    return copy(handle).Shape()
 
 
 def _unshared(args: tuple) -> tuple:

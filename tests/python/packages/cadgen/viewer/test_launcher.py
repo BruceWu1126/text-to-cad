@@ -1,5 +1,5 @@
 """The viewer is a short-lived launcher; one engine owns its one page, which addresses documents by
-path (``/<id>``) and whose home shows the folder of the most recent launch."""
+path (``/<id>``); the most recent launch's folder is the one its relative files are read from."""
 from __future__ import annotations
 
 import http.client
@@ -68,7 +68,7 @@ class LauncherTest(unittest.TestCase):
                                                 r'HttpOnly; SameSite=Strict$')
         return {'Cookie': headers['set-cookie'].split(';')[0]}
 
-    def test_launches_reuse_one_engine_and_the_home_shows_the_latest_folder(self):
+    def test_launches_reuse_one_engine_which_keeps_the_latest_launch_s_folder(self):
         b, c = self.root / 'b', self.root / 'c'
         b.mkdir()
         c.mkdir()
@@ -78,7 +78,7 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual({r['pid'] for r in (first, again, latest)}, {first['pid']})
         self.assertEqual({r['port'] for r in (first, again, latest)}, {first['port']})
         self.assertEqual([urlsplit(r['url']).path for r in (first, latest)], ['/', '/'])
-        # One page: the home shows the folder of the most recent launch, c, replacing b.
+        # One page: the most recent launch's folder, c, replacing b, which its relative files are read from.
         status, _, data = self.get(first, '/__cad/server')
         self.assertEqual(status, 200)
         self.assertEqual(os.path.realpath(json.loads(data)['start']), os.path.realpath(c))

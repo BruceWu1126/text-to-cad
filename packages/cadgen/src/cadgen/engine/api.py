@@ -187,7 +187,8 @@ class Document:
         for key, size in done["shapes"]:
             shapes[key] = payload[at:at + size]
             at += size
-        return Source(done["structure"], shapes, live=False)
+        placements = {tuple(path): matrix for path, matrix in done.get("placements") or ()}
+        return Source(done["structure"], shapes, live=False, local_placements=placements)
 
     def _outside(self, verb: str) -> None:
         if self._inside:
@@ -197,7 +198,7 @@ class Document:
     def export(self, *destinations: Any) -> list[Written]:
         """``export(handle, *destinations)``: the document written to each destination."""
         self._outside("export")
-        return export(self, *destinations)
+        return _said(_exporting(self, destinations), destinations)
 
     def snapshot(self, out: Any, *, display: Any = None, camera: Any = None, grid: bool = False,
                  preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
@@ -290,9 +291,9 @@ def hand_over(shape: Any, name: Any, *, key: str | None = None, animations: Any 
 
 def _ask(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] | None = None,
          on_progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
-    from cadgen.engine.client import request
+    from cadgen.engine.client import environment, request
 
-    answer = request({**message, "env": dict(os.environ)}, on_log or (lambda _message: None), on_progress=on_progress)
+    answer = request({**message, "env": environment()}, on_log or (lambda _message: None), on_progress=on_progress)
     if answer is None:
         raise EngineError("no engine daemon")
     _heard("worker", answer.get("worker"))
@@ -453,7 +454,27 @@ def export(source: Any, *destinations: Any,
     with no CAD kernel loaded (a mesh has no B-rep: no xbf, STEP or DXF is made from one). Several
     destinations read the document once. The file holds what the code built: no option selects a part or a state
     (``README``, the law of options). ``daemon=False`` does it in this process, cold. A GLB
-    carries every configuration sequence the document defines, as a clip."""
+    carries every configuration sequence the document defines, as a clip. A call the program's own
+    code makes (``python exports.py``) says each file, as ``cadgen export`` does."""
+    return _said(_exporting(source, destinations, log, daemon, progress), destinations)
+
+
+def _said(written: list[Written], destinations: tuple) -> list[Written]:
+    """``written``, a line said of each file when the call is the program's own (the first frame
+    outside this module, past the verb's observer, is ``__main__``'s), as a model call's report is
+    said (``Model.__call__``)."""
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_globals.get("__name__") == __name__:
+        frame = frame.f_back
+    if frame is not None and frame.f_globals.get("__name__") == "__main__":
+        from cadgen.engine.cli import said_written
+
+        said_written(written, destinations)
+    return written
+
+
+def _exporting(source: Any, destinations: tuple, log: Callable[[str], None] | None = None, daemon: bool = True,
+               progress: Callable[[dict], None] | None = None) -> list[Written]:
     from cadgen.engine.export import ExportRefused, kind_of
 
     if not destinations:

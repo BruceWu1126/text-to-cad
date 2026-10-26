@@ -67,14 +67,13 @@ and assets, so the app does not scan another package's source.
 ## Launching
 
 Dev serves the client from source with HMR. Build the shared packages from the
-repository root first, then invoke npm from the folder the home should show (outside
-`apps/web`):
+repository root first, then invoke npm from a folder of models (outside `apps/web`):
 
 ```bash
 cd <a folder of models>
 VIEWER_PYTHON=<checkout>/.venv/bin/python \
   npm --prefix <checkout>/apps/web run dev -- --host 127.0.0.1
-# open http://127.0.0.1:5173/: the home shows that folder; a file opened there is /<its id>
+# open http://127.0.0.1:5173/: a file opened there is /<its id>
 ```
 
 For the spawned backend, `scripts/directoryRoot.mjs` uses `INIT_CWD`, then the

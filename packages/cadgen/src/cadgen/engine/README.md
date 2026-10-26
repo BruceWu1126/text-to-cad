@@ -26,11 +26,14 @@ A call returns the document's handle, never a bare shape: `arm()` builds it thro
 returns a `Document` (`api.Document`) -- `.id`, `.url` (its page), `.name`, `.shape` (the built
 result, transferred into the caller and the kernel loaded on first access, never before),
 `.export(*paths)` and `.snapshot(out, **picture_options)`, which are `export(handle, ...)` and
-`snapshot(handle, ...)`. The decorated function stays the function and its id (`arm.id`);
+`snapshot(handle, ...)`; an export the program's own code makes says each file it wrote, a line each,
+as `cadgen export` does. The decorated function stays the function and its id (`arm.id`);
 `arm.build(verify=, profile=)` is the debug seam, a `Report`. Inside another model's body a call
 builds the child document as before and returns its handle too, whose `.shape` is the result in
 that process: a body composes `peg().shape`, and a child called for its files alone stays a bare
-`peg()`.
+`peg()`. Read on either side, `.shape` is one tree: every sub-assembly at the placement its parent
+gives it and every part at its own in its assembly, as the body built them -- transferred, each
+node's placement in its parent (`export.Source.locals`), never pushed down into the leaves.
 
 ```python
 @model
@@ -265,9 +268,9 @@ answers the tree `.shape` would, at that pose. Given such a `.shape`, it says to
     neither command has a standalone serving mode. A launcher exits after handing its client the
     engine URL; closing a client never stops the engine. Tabs select documents at `/<uuid>`: a
     model's id, or a file's id after a launcher registers it; Python scripts are never documents.
-    The home shows the folder of the most recent launch, which each launch replaces; requests read
-    files by absolute path. No page replaces or re-executes the engine; stopping it is an explicit
-    engine operation.
+    The explorer opens where it was last, else the person's home folder; a launch's folder resolves
+    only the relative files it names, and requests read files by absolute path. No page replaces or
+    re-executes the engine; stopping it is an explicit engine operation.
 16. **No kernel in request threads.** Reading XBF/STEP, meshing, topology facts and poses
     run in child processes. The daemon holds structures and buffers, never live kernel objects.
 
@@ -452,10 +455,10 @@ opened under that name, or once its running operations finish (`Sessions.release
 A card's `cad_sync` renews its served document's warm-worker lease.
 
 The viewer launcher owns no server, reload watcher or process-reuse probe. It
-asks the existing engine for its page: the launch's folder becomes the one the home shows, and
-each file it names is registered by its id (the id of its canonical path) and printed as its
-page, `/<id>`. Development client reload remains a browser concern; Python changes take effect
-when that installation's engine is explicitly restarted. What the page knows by id is memory
+asks the existing engine for its page: each file it names, a relative one read from the launch's
+folder, is registered by its id (the id of its canonical path) and printed as its page, `/<id>`.
+Development client reload remains a browser concern; Python changes take effect when that
+installation's engine is explicitly restarted. What the page knows by id is memory
 only, and a file's id is derived again from its path after a restart.
 
 
@@ -786,8 +789,11 @@ started them, however it ends.
 A worker is an interpreter; a run is the script in its caller's environment. A build goes to its
 script's live worker whatever the caller's environment but for what shapes the interpreter's
 import system (`daemon.RESTARTS`): `PYTHONPATH`, `PYTHONHOME`, `PYTHONSAFEPATH`,
-`PYTHONNOUSERSITE`, `PYTHONUSERBASE` and `PYTHONPLATLIBDIR`. A build with another value of any of
-them replaces the worker (retired `environment`), and its memo goes with it. Everything else the
+`PYTHONNOUSERSITE`, `PYTHONUSERBASE` and `PYTHONPLATLIBDIR`. A relative `PYTHONPATH` entry is the
+caller's, as Python reads it for `python SCRIPT`: made absolute against the caller's working folder
+before the engine is handed it (`client.environment`), since a worker stands in the script's folder.
+A build with another value of any of them replaces the worker (retired `environment`), and its
+memo goes with it. Everything else the
 run adopts (`worker.adopt`): before the body runs, the caller's environment replaces the worker's
 `os.environ`, keeping only those variables and what the worker set for itself
 (`CADGEN_ENGINE_WORKER`, and the daemon's bytecode setting, `daemon.BYTECODE`). `PATH` and `VIRTUAL_ENV` are adopted, not
@@ -2038,6 +2044,20 @@ objects of the same classes, each with its own label, colour, material, paints, 
 children, and each a new handle on the SAME `TShape` (`kernel/memo.py`, `_sharing`); so
 does `copy.deepcopy(shape)` in a model. A model that wants a B-rep of its own copies it
 with `BRepBuilderAPI_Copy`.
+
+A shape can hold one sub-shape's TShape at two places: OCCT makes a prism's two caps of one
+face's edges and vertices placed twice (each lateral edge ends on one vertex TShape at both its
+ends), and a piece fused beside a moved piece of the same shape keeps the edges both had. OCCT's
+unify (`ShapeUpgrade_UnifySameDomain`, which build123d runs on every boolean's result and in
+`clean`) chains the edges it merges by their vertices' TShapes, whatever their places: on such a
+shape it can chain an edge at one place with one at the other and fail ("Courbes non jointives",
+tom2's shortened yoke; build123d then warns "Boolean operation unable to clean" and keeps the faces
+unmerged). So a unify -- build123d's or a model's own -- that fails on a shape holding a TShape at
+two places is made again, with its settings, on a copy whose every sub-shape stands at one place
+(`BRepBuilderAPI_Copy`: the same geometry; `kernel/memo.py`, `_one_place`, counted: the memo's
+`copied_apart`); one that succeeds is the kernel's, untouched, so no name or face moves where
+nothing failed. cadgen 0.7 handed every child model's result over re-made, each sub-shape at one
+place; 0.8 hands a child's or a `@memo` stage's result on live, so the remaking is the unify's.
 
 build123d's own operations never change a shape they are given in place. `ShapeFix_Shape`
 does (it fixes the sub-shapes it is handed): run by a model on a shape a placement shares,

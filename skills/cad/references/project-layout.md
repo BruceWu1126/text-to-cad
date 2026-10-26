@@ -127,7 +127,8 @@ cd src && python -m chassis.frame
 ```
 
 Without packages, `PYTHONPATH` names the import root (`PYTHONPATH=src python
-src/chassis/frame.py`); cadgen adds no paths of its own. A module and a same-named
+src/chassis/frame.py`), a relative entry read from the folder the command runs in, as
+Python reads it; cadgen adds no paths of its own. A module and a same-named
 model function shadow each other on import; an alias separates them.
 
 What a run re-runs follows what the code reaches: an edit to a `lib/` helper re-runs the

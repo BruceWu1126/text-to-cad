@@ -123,8 +123,15 @@ class Source:
     def __init__(self, structure: dict[str, Any], shapes: dict[str, Any], *, live: bool, xcaf: Any = None,
                  world: Callable[[tuple[int, ...]], Any] | None = None, mechanism: Any = None,
                  foreign: bool = False, path: Path | None = None, animations: Any = None,
-                 meshes: dict[str, Any] | None = None, mesh: str | None = None) -> None:
+                 meshes: dict[str, Any] | None = None, mesh: str | None = None,
+                 local: Callable[[tuple[int, ...]], Any] | None = None,
+                 local_placements: dict[tuple[int, ...], Any] | None = None) -> None:
         self.structure = structure
+        # Each occurrence's placement in its assembly's frame (``local``), and the same as a table of
+        # column-major 4x4s where the document is not in this process to ask (``local_placements``,
+        # what a document's ``result`` carries): what ``shape`` places each node of the tree by.
+        self._local = local
+        self.local_placements = local_placements
         self.shapes = shapes
         self.live = live
         self.xcaf = xcaf
@@ -167,7 +174,8 @@ class Source:
             raise ExportRefused(f"no document {path}")
         loaded = document.load(path)
         return cls(loaded.structure(), {p.key: p.shape for p in loaded.prototypes}, live=False, xcaf=loaded.doc,
-                   world=lambda occurrence: loaded.worlds.get(occurrence), mechanism=loaded.mechanism,
+                   world=lambda occurrence: loaded.worlds.get(occurrence),
+                   local=lambda occurrence: loaded.locals.get(occurrence), mechanism=loaded.mechanism,
                    foreign=loaded.writer is None, path=loaded.path, animations=loaded.animations)
 
     @classmethod
@@ -182,6 +190,7 @@ class Source:
             shapes.setdefault(part.key, part.shape)
         return cls(structure, shapes, live=True, xcaf=doc,
                    world=lambda occurrence: kinematics._occurrence(tree, occurrence)[0],
+                   local=lambda occurrence: kinematics._local(tree, occurrence),
                    mechanism=tree.mechanism, path=None if path is None else Path(path),
                    animations=getattr(tree, "animations", None))
 
@@ -212,10 +221,34 @@ class Source:
     def view(self) -> "View":
         return View.of(self)
 
+    def locals(self) -> dict[tuple[int, ...], list[float]]:
+        """Each occurrence's placement in its assembly's frame, by its path of component indices,
+        a column-major 4x4 as an instance's ``matrix`` is: what ``shape`` places each node by, and
+        what a document's ``result`` hands the process it is transferred into (``local_placements``)."""
+        if self.local_placements is not None:
+            return self.local_placements
+        found: dict[tuple[int, ...], list[float]] = {}
+        if self._local is None:
+            return found
+        from cadgen.engine.mechanism import _numpy
+
+        def visit(tree: dict[str, Any], path: tuple[int, ...]) -> None:
+            if path:
+                placed = self._local(path)
+                if placed is not None:
+                    found[path] = [float(value) for value in _numpy(placed).T.reshape(-1)]
+            for at, child in enumerate(tree.get("children") or ()):
+                visit(child, path + (at,))
+
+        visit(self.structure["tree"], ())
+        return found
+
     def shape(self) -> Any:
-        """The document as a build123d compound tree: an assembly node a ``Compound`` of its
-        components, a part a shape of its own on the prototype's geometry, placed where the
-        document places it, labelled, coloured and given its material."""
+        """The document as a build123d compound tree, the tree its model's body returned: an
+        assembly node a ``Compound`` of its components, placed in its parent's frame where the
+        document places it, and a part a shape of its own on the prototype's geometry, placed in
+        its assembly's frame, labelled, coloured and given its material. So every node stands where
+        it stood in the body: a sub-assembly keeps its own placement, never pushed into its leaves."""
         import numpy as np
         from build123d import Compound, Location
         from build123d.importers import topods_lut
@@ -228,10 +261,26 @@ class Source:
         from cadgen.engine.mesh import read_shape
 
         instances = self.structure["instances"]
+        placements = self.locals()
 
-        def node(tree: dict[str, Any]) -> Any:
+        def matrix_of(column_major: Any) -> Any:
+            return np.array(column_major, dtype=float).reshape(4, 4).T
+
+        def located(made: Any, matrix: Any) -> Any:
+            if not np.allclose(matrix, np.eye(4), rtol=0.0, atol=0.0):
+                trsf = gp_Trsf()
+                trsf.SetValues(*(float(matrix[row, column]) for row in range(3) for column in range(4)))
+                made.move(Location(TopLoc_Location(trsf)))
+            return made
+
+        def node(tree: dict[str, Any], path: tuple[int, ...], parent: Any) -> Any:
+            given = placements.get(path)
+            local = np.eye(4) if given is None else matrix_of(given)
             if "children" in tree:
-                return Compound(children=[node(child) for child in tree["children"]], label=tree["name"])
+                world = parent @ local
+                made = Compound(children=[node(child, path + (at,), world) for at, child in enumerate(tree["children"])],
+                                label=tree["name"])
+                return located(made, local)
             prototype = self.structure["prototypes"][tree["prototype"]]
             instance = instances[tree["instance"]]
             shape = self.shapes[prototype["key"]]
@@ -243,13 +292,14 @@ class Source:
             material = _material(prototype.get("material"))
             if material is not None:
                 made.material = material
-            matrix = np.array(instance["matrix"], dtype=float).reshape(4, 4).T
-            trsf = gp_Trsf()
-            trsf.SetValues(*(float(matrix[row, column]) for row in range(3) for column in range(4)))
-            made.move(Location(TopLoc_Location(trsf)))
-            return made
+            # A part stands where its instance does: at its own placement in its assembly, unless the
+            # document places it elsewhere (a posed structure), where it stands in its assembly's frame.
+            world = matrix_of(instance["matrix"])
+            if given is None or not np.allclose(parent @ local, world, rtol=0.0, atol=1e-9):
+                local = np.linalg.inv(parent) @ world
+            return located(made, local)
 
-        return node(self.structure["tree"])
+        return node(self.structure["tree"], (), np.eye(4))
 
 
 _STRUCTURES: dict[int, tuple[Any, Any, dict[str, Any]]] = {}

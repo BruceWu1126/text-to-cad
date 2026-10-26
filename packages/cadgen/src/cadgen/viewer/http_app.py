@@ -212,8 +212,8 @@ class CadApp:
     One app serves every file on this machine, by absolute path (``backend``). The page names
     each document it shows by id, ``/<id>`` (``cadgen.engine.ids``): a model's, or a file's once it
     is registered here (``remember``: by the launcher, or by the catalog's answer for its path).
-    ``start`` is the folder of the most recent launch (the working folder by default): the home
-    shows it, and it bounds nothing.
+    ``start`` is the folder of the most recent launch (the working folder by default): what its
+    relative files were read from; the explorer never opens there, and it bounds nothing.
     """
 
     def __init__(self, *, host: str, port: int, dist_dir: str = "", start: str | None = None, identity: str | None = None, documents=None):
@@ -274,7 +274,7 @@ class CadApp:
             "user": os_user(),
             # The person's home folder: where the explorer starts with nowhere else to start.
             "home": to_posix_path(os.path.expanduser("~")),
-            # The folder of the most recent launch, which the home shows. Not a boundary.
+            # The folder of the most recent launch, its relative files' folder. Not a boundary.
             "start": self.start,
             "pick": self.pick,
             "port": self.port,

@@ -886,6 +886,7 @@ def _read_held(payload: bytes, name: str) -> Any:
     structure = {**loaded.structure(), "path": ""}
     return export.Source(structure, {p.key: p.shape for p in loaded.prototypes}, live=False,
                          xcaf=loaded.doc, world=lambda occurrence: loaded.worlds.get(occurrence),
+                         local=lambda occurrence: loaded.locals.get(occurrence),
                          mechanism=loaded.mechanism, foreign=False, path=None, animations=loaded.animations)
 
 

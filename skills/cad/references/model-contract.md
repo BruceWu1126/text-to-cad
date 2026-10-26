@@ -75,7 +75,10 @@ if __name__ == "__main__":
 - **Called from a plain script** (a check, a drawing), a model is built in the engine
   and its call's `.shape` is the result as a build123d tree: every assembly a `Compound`,
   every part placed, named, coloured and given its material (its joints stay in the
-  document: measure a pose by `posed(handle, state)`, which poses the document).
+  document: measure a pose by `posed(handle, state)`, which poses the document). It is the
+  tree a body that calls the model reads: each sub-assembly at the placement its parent
+  gives it, each part at its own, so `.moved()` on a node moves it in the same frame on
+  either side.
 
 ## Parameters and configurations
 
