@@ -287,7 +287,8 @@ as every build does: the runner gives each test file an engine directory of its
 own (`CADGEN_ENGINE_DIR`), so a build the file asks for runs on a daemon of that
 file's alone, and stops the daemon the file left there when it ends; a test that
 needs a daemon to itself -- a cold start, its workers -- names a directory of its
-own. A worker's first build pays ~2.6 s importing the CAD kernel, and every
+own (the run's files share one bytecode folder, so the kernel's libraries compile once a run).
+A worker's first build pays ~2.6 s importing the CAD kernel, and every
 subprocess a test starts pays an interpreter's start: build a fixture the tests
 only READ once for the class and copy it in, build in-process (`daemon=False`)
 where the subject is not the daemon, and add a subprocess only where the subject
