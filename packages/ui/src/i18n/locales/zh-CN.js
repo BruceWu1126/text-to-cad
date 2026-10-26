@@ -665,7 +665,7 @@ export default {
   "cad.unreachable.askModel": "此聊天无法将 CAD 查看器连接到其引擎。请让你的智能体改为在 CAD 查看器中打开该模型。",
   "cad.unreachable.askViewer": "此聊天无法将 CAD 查看器连接到其引擎。请让你的智能体改为打开 CAD 查看器。",
   "cad.openInViewer": "在 CAD 查看器中打开",
-  "cad.lost.tabs": "CAD 插件在此会话中停止响应。请退出并重新打开 Codex 以重启它。",
+  "cad.lost.tabs": "CAD 插件在此会话中停止响应。请退出并重新打开此应用以重启它。",
   "cad.lost.inline": "CAD 插件已停止响应。请退出并重新打开此应用以重启它，然后让你的智能体再次显示该模型。",
   "cad.superseded": "下方有更新的视图",
   "cad.stopped.title": "CAD 已停止",

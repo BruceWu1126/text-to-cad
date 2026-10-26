@@ -664,7 +664,7 @@ export default {
   "cad.unreachable.askModel": "이 채팅에서는 CAD 뷰어를 엔진에 연결할 수 없습니다. 대신 CAD 뷰어에서 모델을 열도록 에이전트에게 요청하세요.",
   "cad.unreachable.askViewer": "이 채팅에서는 CAD 뷰어를 엔진에 연결할 수 없습니다. 대신 CAD 뷰어를 열도록 에이전트에게 요청하세요.",
   "cad.openInViewer": "CAD 뷰어에서 열기",
-  "cad.lost.tabs": "이 스레드에서 CAD 플러그인이 응답하지 않습니다. Codex를 종료했다가 다시 열어 다시 시작하세요.",
+  "cad.lost.tabs": "이 스레드에서 CAD 플러그인이 응답하지 않습니다. 이 앱을 종료했다가 다시 열어 다시 시작하세요.",
   "cad.lost.inline": "CAD 플러그인이 응답하지 않습니다. 이 앱을 종료했다가 다시 열어 다시 시작한 다음, 에이전트에게 모델을 다시 표시하도록 요청하세요.",
   "cad.superseded": "아래에 최신 뷰가 있습니다",
   "cad.stopped.title": "CAD가 중지되었습니다",

@@ -692,7 +692,7 @@ export default {
   "cad.unreachable.askModel": "This chat can't connect the CAD viewer to its engine. Ask your agent to open the model in the CAD Viewer instead.",
   "cad.unreachable.askViewer": "This chat can't connect the CAD viewer to its engine. Ask your agent to open the CAD Viewer instead.",
   "cad.openInViewer": "Open in CAD Viewer",
-  "cad.lost.tabs": "The CAD plugin stopped responding in this thread. Quit and reopen Codex to restart it.",
+  "cad.lost.tabs": "The CAD plugin stopped responding in this thread. Quit and reopen this app to restart it.",
   "cad.lost.inline": "The CAD plugin stopped responding. Quit and reopen this app to restart it, then ask your agent to show the model again.",
   "cad.superseded": "A newer view is below",
   "cad.stopped.title": "CAD stopped",

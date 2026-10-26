@@ -664,7 +664,7 @@ export default {
   "cad.unreachable.askModel": "このチャットでは CAD ビューアーをエンジンに接続できません。代わりに CAD ビューアーでモデルを開くようエージェントに依頼してください。",
   "cad.unreachable.askViewer": "このチャットでは CAD ビューアーをエンジンに接続できません。代わりに CAD ビューアーを開くようエージェントに依頼してください。",
   "cad.openInViewer": "CAD ビューアーで開く",
-  "cad.lost.tabs": "このスレッドで CAD プラグインが応答しなくなりました。Codex を終了して開き直すと再起動します。",
+  "cad.lost.tabs": "このスレッドで CAD プラグインが応答しなくなりました。このアプリを終了して開き直すと再起動します。",
   "cad.lost.inline": "CAD プラグインが応答しなくなりました。このアプリを終了して開き直すと再起動します。その後、もう一度モデルを表示するようエージェントに依頼してください。",
   "cad.superseded": "新しいビューは下にあります",
   "cad.stopped.title": "CAD が停止しました",

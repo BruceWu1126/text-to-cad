@@ -665,7 +665,7 @@ export default {
   "cad.unreachable.askModel": "此聊天無法將 CAD 檢視器連線至其引擎。請讓你的 AI 代理改為在 CAD 檢視器中開啟該模型。",
   "cad.unreachable.askViewer": "此聊天無法將 CAD 檢視器連線至其引擎。請讓你的 AI 代理改為開啟 CAD 檢視器。",
   "cad.openInViewer": "在 CAD 檢視器中開啟",
-  "cad.lost.tabs": "CAD 外掛程式在此對話串中停止回應。請結束並重新開啟 Codex 以重新啟動它。",
+  "cad.lost.tabs": "CAD 外掛程式在此對話串中停止回應。請結束並重新開啟此應用程式以重新啟動它。",
   "cad.lost.inline": "CAD 外掛程式已停止回應。請結束並重新開啟此應用程式以重新啟動它，然後請你的 AI 代理再次顯示該模型。",
   "cad.superseded": "下方有較新的檢視",
   "cad.stopped.title": "CAD 已停止",
