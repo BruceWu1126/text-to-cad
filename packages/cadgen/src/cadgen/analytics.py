@@ -25,7 +25,8 @@ exits, each batch under an id of its own and stamped with the time it was made:
 - ``view`` (the apps): how many times a CAD view was touched by a person or switched models --
   time spent looking at a model calls no tool, and is use all the same;
 - ``files`` (the apps): how many distinct files of each format (``step``, ``stl``, ...) a CAD view
-  showed for the first time that day -- told apart here, by path, and sent as a number;
+  showed for the first time that day -- a model's page among them, its document an ``xbf`` -- told apart
+  here, by path (a document by its id), and sent as a number;
 - ``build`` (the engine's verbs): for each format and who asked (``VIAS``), how many builds and exports,
   how each ended (``OUTCOMES``: failed, lost its worker, or stopped by whoever asked), how many took their
   xbf whole without building, and how long they took;
@@ -1396,7 +1397,8 @@ class Recorder:
         # yet fail with nothing left to keep it. Sent again when it was taken after all, its ids make it one.
         self._sending: tuple[dict[str, Any], Any] | None = None
         self._day = ""
-        self._shown: set[str] = set()  # the files a view showed today, by absolute path: never leaves this process
+        # The files a view showed today, by absolute path, and the documents, by id: never leaves this process.
+        self._shown: set[str] = set()
         self._basis: Any = _UNREAD  # the answer in force when what is noted now began to be noted
         self._choices = 0  # the choices made here: a batch that failed is kept only if none came since
         self._off = False  # a no this process could not keep: nothing more is sent from it
@@ -1521,17 +1523,28 @@ class Recorder:
         if not isinstance(path, str) or not path:
             return
         kind = FILE_KINDS.get(os.path.splitext(path)[1].lower())
-        if kind is None:
-            return
-        path, day = os.path.abspath(path), _day()  # one file, however a view spelled it
+        if kind is not None:
+            self._shown_once(os.path.abspath(path), kind)  # one file, however a view spelled it
+
+    @_guarded(lambda: None)
+    def opened_document(self, ident: Any) -> None:
+        """A model's page has its document on screen (``/<id>``): a look at a file like any other, the engine's
+        document (``xbf``), counted the first time today and told apart by its id here, never sent. Nothing is
+        built for it, nor counted as a build."""
+        if isinstance(ident, str) and ident:
+            self._shown_once(f"document:{ident}", "xbf")  # never an absolute path, which a file's key is
+
+    def _shown_once(self, key: str, kind: str) -> None:
+        """A file or a document, by ``key``, counted under ``kind`` the first time today it is shown."""
+        day = _day()
         answer = self._first_use()
         with self._lock:
             self._begin(answer)
             if day != self._day:
                 self._day, self._shown = day, set()
-            if path in self._shown or len(self._shown) >= FILES_PER_DAY:
+            if key in self._shown or len(self._shown) >= FILES_PER_DAY:
                 return
-            self._shown.add(path)
+            self._shown.add(key)
             self._tally.note("files", (kind,), {"count": 1})
 
     @_guarded(lambda: None)

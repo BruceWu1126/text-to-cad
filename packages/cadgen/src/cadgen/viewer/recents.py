@@ -175,15 +175,15 @@ class RecentStore:
 
     # -- writes ----------------------------------------------------------------
 
-    def opened(self, path: str) -> None:
+    def opened(self, path: str) -> dict | None:
         """A CAD file opened on a page: its record, opened now. A model's id: its record (the
-        engine's, written by its run) says when a page opened it, and nothing else of it changes."""
+        engine's, written by its run) says when a page opened it, and nothing else of it changes.
+        The record as it is now: None for an id no document has."""
         from cadgen.engine.ids import canonical, file_id, is_id
 
         now = time.time()
         if is_id(path):
-            self._change(path, lambda record: {**record, "opened": now})
-            return
+            return self._change(path, lambda record: {**record, "opened": now})
         found = canonical(path)
 
         def change(record):
@@ -191,7 +191,7 @@ class RecentStore:
             record.update(root=os.path.dirname(found), home=os.path.basename(found), opened=now)
             return record
 
-        self.registry.update(file_id(found), change)
+        return self.registry.update(file_id(found), change)
 
     def pin(self, path: str, pinned: bool) -> None:
         self._change(path, lambda record: {**record, "pinned": bool(pinned)})
@@ -219,9 +219,9 @@ class RecentStore:
 
         return path if is_id(path) else file_id(path)
 
-    def _change(self, path: str, change) -> None:
-        """A change to an entry's record, when it has one (a file not opened has none)."""
-        self.registry.update(self._ident(path), lambda record: change(record) if record is not None else None)
+    def _change(self, path: str, change) -> dict | None:
+        """A change to an entry's record, when it has one (a file not opened has none): the record as it is now."""
+        return self.registry.update(self._ident(path), lambda record: change(record) if record is not None else None)
 
     # -- reads -----------------------------------------------------------------
 

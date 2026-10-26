@@ -125,6 +125,27 @@ class ViewerAnalyticsTest(unittest.TestCase):
         self.assertEqual(self.sent[-1]["events"], [{"name": "files", "kind": "stl", "count": 1}])
         self.assertNotIn(".stl", json.dumps(self.sent))
 
+    def test_a_models_page_is_a_file_shown_its_document_an_xbf_once_a_day(self) -> None:
+        # The page a model's run names (`/<id>`) shows its document: a look at a file like any other, counted by its
+        # format once that day however often it is opened again, and never a build.
+        from cadgen.engine.ids import model_id
+        from cadgen.engine.registry import Registry
+
+        script = self.root / "parts.py"
+        script.write_text("", encoding="utf-8")
+        ident = model_id(script, "cube")
+        Registry(self.tmp / "state").put({"id": ident, "kind": "model", "root": str(self.root), "home": "parts.py",
+                                          "entry": "cube", "revision": "r1", "built": 1.0})
+        self.request("POST", "/__cad/analytics", {"share": True})
+        for _ in range(2):  # shown, then again: a reload, the home's card
+            self.assertEqual(self.request("POST", "/__cad/recents", {"action": "open", "path": ident})[0], 200)
+        # An id no document has is no page shown.
+        self.assertEqual(self.request("POST", "/__cad/recents", {"action": "open", "path": model_id(script, "gone")})[0], 200)
+        self.assertTrue(self.app.analytics.flush())
+        [payload] = self.sent
+        self.assertEqual(payload["events"], [{"name": "files", "kind": "xbf", "count": 1}])
+        self.assertNotIn(ident, json.dumps(payload))
+
     def test_a_page_says_its_quick_edits_and_its_crashes_and_a_route_that_breaks_is_one(self) -> None:
         self.request("POST", "/__cad/analytics", {"share": True})
         crash = {"where": "page", "type": "TypeError", "handled": False,
