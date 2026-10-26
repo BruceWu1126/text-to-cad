@@ -11,6 +11,7 @@ it is the only way to catch a stream that drifts through a library three layers 
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import subprocess
@@ -19,6 +20,7 @@ import sys
 import unittest
 from pathlib import Path
 
+from tests.python.support import engine_daemon
 from tests.python.support.paths import repo_path
 
 REPO = Path(repo_path("."))
@@ -55,6 +57,7 @@ _PROJECT: tempfile.TemporaryDirectory | None = None
 PART = ""
 DRAWING = ""
 ENGINE = ""
+WATCHED: dict[str, str] = {}  # the journal every process of the module's engine records itself in
 
 
 def setUpModule() -> None:
@@ -68,12 +71,14 @@ def setUpModule() -> None:
     DRAWING = str(root / "src" / "plate.py")
     # The builds below run on an engine daemon of this module's own, never the developer's.
     ENGINE = str(root / "engine")
+    WATCHED.update(engine_daemon.watched({}, unittest.addModuleCleanup))
 
 
 def tearDownModule() -> None:
     if ENGINE:
         subprocess.run([sys.executable, "-P", "-c", "from cadgen.engine import api; api.stop()"],
                        env=_env(), capture_output=True, check=False, timeout=120)
+        engine_daemon.survivors(_env())  # its workers gone too, before their folder is
     if _PROJECT is not None:
         _PROJECT.cleanup()
 
@@ -84,7 +89,8 @@ def _env() -> dict[str, str]:
     # worktree, that is another branch's).
     env = dict(os.environ)
     own_cadgen = str(REPO / "packages" / "cadgen" / "src")
-    env["PYTHONPATH"] = os.pathsep.join([own_cadgen, *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])])
+    env["PYTHONPATH"] = os.pathsep.join([own_cadgen, *filter(None, [WATCHED.get("PYTHONPATH"), env.get("PYTHONPATH")])])
+    env[engine_daemon.JOURNAL] = WATCHED.get(engine_daemon.JOURNAL, "")
     env["CADGEN_ENGINE_DIR"] = ENGINE
     # Its registry of documents and its cache too: what the builds record never reaches the developer's.
     env["CADGEN_STATE_DIR"] = str(Path(ENGINE).parent / "state")
@@ -113,11 +119,14 @@ def run(*args: str) -> subprocess.CompletedProcess:
                           check=False, env=_env())
 
 
+@functools.cache
 def run_script(script: str) -> subprocess.CompletedProcess:
     # The model script IS the entrypoint, with no options (it is Python); same stream contract.
+    # Each script runs once for the module: every test reads that run's two streams.
     return subprocess.run([sys.executable, script], cwd=REPO, capture_output=True, text=True, check=False, env=_env())
 
 
+@functools.cache
 def run_export_json() -> subprocess.CompletedProcess:
     # A command answering as JSON: the part's STEP, which its script writes, exported to a GLB.
     built = run_script(PART)

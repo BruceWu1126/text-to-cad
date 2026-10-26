@@ -10,7 +10,7 @@ const lazy = start => {
 
 /**
  * A paste into the note, line by line: each line that is a reference and nothing else — a file's
- * absolute path and the ids in it, `/models/base.step#o1.f2`, as Copy References and a chip's click
+ * absolute path and the ids in it, `/models/base.step#f:base.make_box1.2`, as Copy References and a chip's click
  * write one — is that reference (into any file); a paste that is the annotation as its chip copies
  * it (its annotation JSON, whole) is `[{ annotation }]`; every other line stays text. A reference
  * within a sentence is the sentence's. A line that is what one of the box's chips copied (`copied`:

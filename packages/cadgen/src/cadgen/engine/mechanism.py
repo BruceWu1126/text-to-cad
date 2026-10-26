@@ -433,7 +433,7 @@ def screw_pair(assembly: Any, name: str, **joints: Any) -> Any:
 
 
 def configuration_sequence(assembly: Any, name: str, waypoints_or_fn: Any = None, *, sweep: Any = None,
-                           duration: Any = None, ease: str = "cubic", **removed: Any) -> Any:
+                           duration: Any = None, ease: str = "cubic") -> Any:
     """A named configuration sequence of ``assembly``'s mechanism, AP242's
     ``interpolated_configuration_sequence``, one of:
 
@@ -458,13 +458,6 @@ def configuration_sequence(assembly: Any, name: str, waypoints_or_fn: Any = None
     if not isinstance(name, str) or not name.strip():
         raise ValueError("a configuration sequence's name is a non-empty string")
     where = f"configuration sequence {name!r}"
-    if "loop" in removed:
-        raise TypeError(f"{where}: loop= is gone: a configuration sequence is a finite clip, and a player repeats it")
-    if removed:
-        raise TypeError(f"configuration_sequence() takes no {', '.join(sorted(removed))}")
-    if ease == "spline":
-        raise ValueError(f"{where}: ease 'spline' is gone: AP242 interpolates a configuration sequence linearly "
-                         "or synchronously, ease 'linear' or 'cubic'")
     if ease not in EASES:
         raise ValueError(f"{where}: ease is one of {', '.join(EASES)}, not {ease!r}")
     if (waypoints_or_fn is None) == (sweep is None):

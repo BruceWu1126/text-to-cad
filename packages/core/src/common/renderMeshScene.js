@@ -17,16 +17,9 @@ import {
   applyDisplayRecordTransform
 } from "./displayRecordTransform.js";
 import {
-  resolveTopologyDisplayEdgeRuntimes,
-  shouldRenderTopologyDisplayEdges
-} from "./topologyDisplayEdgeRuntime.js";
-import {
   screenSpaceLineDeviceResolution,
   syncScreenSpaceLineMaterialResolution
 } from "./renderEdges.js";
-import {
-  syncTopologyDisplayEdgeLine
-} from "../lib/viewer/topologyDisplayEdgeLine.js";
 import { syncRuntimeStepClipPlane } from "../lib/viewer/modelRuntime.js";
 import { createSceneClip } from "../lib/viewer/sceneClip.js";
 import { disposeSectionCaps } from "../lib/viewer/sectionCaps.js";
@@ -472,14 +465,6 @@ export function renderJobContext(meshData, job = {}) {
   };
   const wireframeMode = displayModeIsWireframe(displayMode);
   const edgesVisible = sceneSettings.view.edges.enabled;
-  const selectorRuntime = job.selectorRuntime || null;
-  const topologyDisplayEdgesVisible = shouldRenderTopologyDisplayEdges({
-    edgesVisible,
-    wireframeMode,
-    cadEdgeSource: stepDisplayEnabled,
-    selectorRuntime,
-    edgeSettings
-  });
   return {
     mode,
     theme,
@@ -498,9 +483,7 @@ export function renderJobContext(meshData, job = {}) {
     outputs,
     warnings,
     sharedRenderOptions,
-    edgeSettings,
-    selectorRuntime,
-    topologyDisplayEdgesVisible
+    edgeSettings
   };
 }
 
@@ -529,11 +512,7 @@ export function modelOptionsForRenderJob(context, job = {}) {
         )
       : undefined,
     appearance: context.sceneSettings.appearance,
-    edgeSettings: context.topologyDisplayEdgesVisible
-      ? { ...context.edgeSettings, enabled: false }
-      : context.edgesVisible
-        ? context.edgeSettings
-        : { ...context.edgeSettings, enabled: false },
+    edgeSettings: context.edgesVisible ? context.edgeSettings : { ...context.edgeSettings, enabled: false },
     materialOverrides: context.sceneSettings.materialOverrides,
     receiveShadows: renderEnabled,
     displayMode: context.displayMode,
@@ -541,7 +520,7 @@ export function modelOptionsForRenderJob(context, job = {}) {
     applyDisplayModeEdgePolicy: false,
     scale: context.sceneScale,
     clip: context.sharedRenderOptions.clip,
-    silhouette: context.topologyDisplayEdgesVisible && context.edgeSettings.silhouette === true,
+    silhouette: false,
     renderPartsIndividually: true,
     selection: {
       ...selection,
@@ -743,20 +722,11 @@ function viewportClipRuntime(viewport) {
     cadScene: model,
     modelGroup: model.runtime.modelGroup,
     get displayRecords() { return model.displayRecords; },
-    get topologyDisplayEdgeLine() { return model.runtime.topologyDisplayEdgeLine; },
     get zeroPoseBounds() { return model.restBounds; },
     get modelRadius() { return model.runtime.modelRadius; },
     modelBounds: null
   };
   return viewport.clipRuntime;
-}
-
-function displayRecordPartIds(displayRecords = []) {
-  return Array.from(new Set(
-    toArray(displayRecords)
-      .map((record) => String(record?.partId || "").trim())
-      .filter((partId) => partId && partId !== "__model__")
-  ));
 }
 
 // `layoutBounds` is what the layout radiates from: the model's REST placement, as the viewer's
@@ -791,31 +761,6 @@ function applyViewportExplodedView(viewport, bounds, layoutBounds = bounds) {
   model.root?.updateMatrixWorld?.(true);
   return explodedViewBounds(layout, bounds, amount);
 }
-
-function syncViewportTopologyDisplayEdges(viewport) {
-  const { context, model } = viewport;
-  const renderedPartIds = displayRecordPartIds(model.displayRecords);
-  const edgeRuntimes = resolveTopologyDisplayEdgeRuntimes({
-    selectorRuntime: context.selectorRuntime,
-    displayRecords: model.displayRecords
-  });
-  syncTopologyDisplayEdgeLine(
-    model.runtime,
-    edgeRuntimes.selectorRuntime,
-    {
-      visible: context.topologyDisplayEdgesVisible,
-      edgeSettings: renderedPartIds.length
-        ? {
-            ...context.edgeSettings,
-            includePartIds: renderedPartIds
-          }
-        : context.edgeSettings,
-      viewerTheme: model.runtime?.baseTheme,
-      displayRecords: model.displayRecords
-    }
-  );
-}
-
 
 // The job's annotation (`job.annotation`, the ink a person drew with the viewer's Annotate tool), drawn over this
 // output with the viewer's own code (`annotation.js`): each mark where it was drawn, in model
@@ -896,7 +841,7 @@ export async function captureModel(viewport, captureOptions = {}) {
     // ground from and radiates an exploded view from, whatever the pose.
     const restBounds = viewport.model.restBounds || null;
     let outputBounds = baseOutputBounds;
-    // The exploded view, topology edges and their screen-space line widths are a CAD
+    // The exploded view and the edges' screen-space line widths are a CAD
     // model's (`buildModel`'s runtime). A family's scene has no edges; it explodes and is cut
     // through the scene contract, as the viewer's viewport explodes and cuts it
     // (`sceneExplode.js`, `sceneClip.js`), under the features the job was resolved with.
@@ -911,9 +856,7 @@ export async function captureModel(viewport, captureOptions = {}) {
       viewport.sceneClip.sync(familyScene, context.displaySettings.clip);
     } else {
       outputBounds = applyViewportExplodedView(viewport, baseOutputBounds, restBounds || baseOutputBounds);
-      syncViewportTopologyDisplayEdges(viewport);
-      // The Clip tool cuts and caps the model as the viewer's does, on every material, edge set and
-      // the topology edges drawn just above.
+      // The Clip tool cuts and caps the model as the viewer's does, on every material and edge set.
       const clipRuntime = viewportClipRuntime(viewport);
       clipRuntime.modelBounds = outputBounds;
       syncRuntimeStepClipPlane(clipRuntime, context.displaySettings.clip);

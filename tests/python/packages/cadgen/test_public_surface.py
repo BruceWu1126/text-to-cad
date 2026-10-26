@@ -257,16 +257,21 @@ class ImportBudget(unittest.TestCase):
         self.assertIn("HEAVY:\n", proc.stdout)
 
     def test_a_commands_help_does_not_wake_the_cad_stack(self):
-        for command in (*MIRRORS, *ADAPTERS):
-            with self.subTest(command=command):
-                module_name, _ = cli._COMMANDS[command]
-                code = (
-                    f"import sys; import {module_name} as m; m.build_parser().format_help();"
-                    f"print('HEAVY:' + ','.join(x for x in {HEAVY!r} if x in sys.modules))"
-                )
-                proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
-                self.assertEqual(proc.returncode, 0, proc.stderr)
-                self.assertIn("HEAVY:\n", proc.stdout)
+        # Every command's help in one interpreter, in turn: the first that loads the stack is named
+        # (the ones after it cannot be told apart, and the run fails on the first).
+        modules = [cli._COMMANDS[command][0] for command in (*MIRRORS, *ADAPTERS)]
+        code = (
+            "import importlib, sys\n"
+            f"for name in {modules!r}:\n"
+            "    importlib.import_module(name).build_parser().format_help()\n"
+            f"    woke = [x for x in {HEAVY!r} if x in sys.modules]\n"
+            "    if woke:\n"
+            "        print(f'WOKE {name}: {woke}')\n"
+            "        break\n"
+        )
+        proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout, "", "a command's help loaded the CAD stack")
 
 
 if __name__ == "__main__":

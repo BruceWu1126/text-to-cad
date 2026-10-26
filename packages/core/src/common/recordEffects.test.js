@@ -16,11 +16,8 @@ test("composed packages (partTransformsBaked: false) always place parts by trans
   assert.equal(displayTransformForPart(meshData, {}), null);
 });
 
-test("baked meshDatas never re-apply part transforms", () => {
-  const part = { transform: TRANSFORM };
-  assert.equal(displayTransformForPart({ partTransformsBaked: true }, part), null);
-  // World-baked vertices need no per-part transform, flag stated or not.
-  assert.equal(displayTransformForPart({}, part), null);
+test("any other meshData's world-space vertices take no part transform", () => {
+  assert.equal(displayTransformForPart({}, { transform: TRANSFORM }), null);
 });
 
 test("a pass reports whether anything but a transform changed, so a moving frame can skip the appearance work", () => {

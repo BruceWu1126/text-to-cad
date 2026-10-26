@@ -292,23 +292,6 @@ class UrdfSourceTests(unittest.TestCase):
 
         self.assertEqual(("base_link",), source.links)
 
-    def test_rejects_nonpositive_inertial_mass(self) -> None:
-        source_path = self._write_urdf(
-            "robot",
-            """
-            <robot name="sample-robot">
-              <link name="base_link">
-                <inertial>
-                  <mass value="0" />
-                  <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1" />
-                </inertial>
-              </link>
-            </robot>
-            """,
-        )
-
-        self.assertRefused(source_path, "mass must be positive")
-
     def test_warns_on_invalid_inertia_triangle(self) -> None:
         source_path = self._write_urdf(
             "robot",
@@ -396,150 +379,6 @@ class UrdfSourceTests(unittest.TestCase):
         _, warnings = self.validated(source_path)
         self.assertFalse(any("more than 10x off" in message for message in warnings))
 
-    def test_rejects_invalid_origin_vector(self) -> None:
-        source_path = self._write_urdf(
-            "robot",
-            """
-            <robot name="sample-robot">
-              <link name="base_link" />
-              <link name="arm_link" />
-              <joint name="base_to_arm" type="fixed">
-                <origin xyz="0 0" />
-                <parent link="base_link" />
-                <child link="arm_link" />
-              </joint>
-            </robot>
-            """,
-        )
-
-        self.assertRefused(source_path, "origin xyz must have 3 values")
-
-    def test_rejects_zero_joint_axis(self) -> None:
-        source_path = self._write_urdf(
-            "robot",
-            """
-            <robot name="sample-robot">
-              <link name="base_link" />
-              <link name="arm_link" />
-              <joint name="base_to_arm" type="revolute">
-                <parent link="base_link" />
-                <child link="arm_link" />
-                <axis xyz="0 0 0" />
-                <limit lower="-1" upper="1" />
-              </joint>
-            </robot>
-            """,
-        )
-
-        self.assertRefused(source_path, "axis must be nonzero")
-
-    def test_rejects_invalid_mesh_scale(self) -> None:
-        mesh_path = self._write_mesh("base.obj")
-        source_path = self._write_urdf(
-            "robot",
-            f"""
-            <robot name="sample-robot">
-              <link name="base_link">
-                <visual>
-                  <geometry>
-                    <mesh filename="{mesh_path.name}" scale="1 0 1" />
-                  </geometry>
-                </visual>
-              </link>
-            </robot>
-            """,
-        )
-
-        self.assertRefused(source_path, "scale values must be nonzero")
-
-    def test_rejects_invalid_primitive_dimensions(self) -> None:
-        source_path = self._write_urdf(
-            "robot",
-            """
-            <robot name="sample-robot">
-              <link name="base_link">
-                <collision>
-                  <geometry>
-                    <sphere radius="0" />
-                  </geometry>
-                </collision>
-              </link>
-            </robot>
-            """,
-        )
-
-        self.assertRefused(source_path, "sphere radius must be positive")
-
-    def test_rejects_missing_geometry_element(self) -> None:
-        source_path = self._write_urdf(
-            "robot",
-            """
-            <robot name="sample-robot">
-              <link name="base_link">
-                <visual />
-              </link>
-            </robot>
-            """,
-        )
-
-        self.assertRefused(source_path, "visual requires <geometry>")
-
-    def test_rejects_duplicate_links(self) -> None:
-        mesh_path = self._write_mesh("base")
-        source_path = self._write_urdf(
-            "robot",
-            f"""
-            <robot name="sample-robot">
-              <link name="base_link">
-                <visual>
-                  <geometry>
-                    <mesh filename="{mesh_path.name}" />
-                  </geometry>
-                </visual>
-              </link>
-              <link name="base_link" />
-            </robot>
-            """,
-        )
-
-        self.assertRefused(source_path, "duplicates")
-
-    def test_rejects_missing_mesh(self) -> None:
-        source_path = self._write_urdf(
-            "robot",
-            """
-            <robot name="sample-robot">
-              <link name="base_link">
-                <visual>
-                  <geometry>
-                    <mesh filename="does-not-exist.stl" />
-                  </geometry>
-                </visual>
-              </link>
-            </robot>
-            """,
-        )
-
-        self.assertRefused(source_path, "missing mesh file")
-
-    def test_rejects_missing_collision_mesh(self) -> None:
-        source_path = self._write_urdf(
-            "robot",
-            """
-            <robot name="sample-robot">
-              <link name="base_link">
-                <collision>
-                  <geometry>
-                    <mesh filename="does-not-exist.stl" />
-                  </geometry>
-                </collision>
-              </link>
-            </robot>
-            """,
-        )
-
-        self.assertRefused(source_path, "missing mesh file")
-
     def test_accepts_prismatic_joint_with_limits(self) -> None:
         mesh_path = self._write_mesh("base")
         source_path = self._write_urdf(
@@ -569,47 +408,18 @@ class UrdfSourceTests(unittest.TestCase):
         self.assertEqual(0.0, source.joints[0].lower)
         self.assertEqual(0.05, source.joints[0].upper)
 
-    def test_rejects_reversed_joint_limits(self) -> None:
-        source_path = self._write_urdf(
-            "robot",
-            """
-            <robot name="sample-robot">
-              <link name="base_link" />
-              <link name="arm_link" />
-              <joint name="base_to_arm" type="prismatic">
-                <parent link="base_link" />
-                <child link="arm_link" />
-                <limit lower="1" upper="0" />
-              </joint>
-            </robot>
-            """,
-        )
-
-        self.assertRefused(source_path, "lower limit exceeds upper limit")
-
-    def test_rejects_unsupported_joint_type(self) -> None:
-        mesh_path = self._write_mesh("base")
-        source_path = self._write_urdf(
-            "robot",
-            f"""
-            <robot name="sample-robot">
-              <link name="base_link">
-                <visual>
-                  <geometry>
-                    <mesh filename="{mesh_path.name}" />
-                  </geometry>
-                </visual>
-              </link>
-              <link name="arm_link" />
-              <joint name="base_to_arm" type="planar">
-                <parent link="base_link" />
-                <child link="arm_link" />
-              </joint>
-            </robot>
-            """,
-        )
-
-        self.assertRefused(source_path, "unsupported type")
+    def test_a_file_is_refused_with_what_is_wrong_and_a_mesh_is_looked_for_beside_it(self) -> None:
+        # Every finding's code is test_urdf_findings.py's table; here, a file's refusal says it in words,
+        # and a visual's or a collision's mesh is resolved against the file's folder.
+        joint = '<link name="arm_link" /><joint name="base_to_arm" type="prismatic"><parent link="base_link" />' \
+                '<child link="arm_link" /><limit lower="1" upper="0" /></joint>'
+        for message, body in (
+            ("missing mesh file", '<link name="base_link"><visual><geometry><mesh filename="does-not-exist.stl" /></geometry></visual></link>'),
+            ("missing mesh file", '<link name="base_link"><collision><geometry><mesh filename="does-not-exist.stl" /></geometry></collision></link>'),
+            ("lower limit exceeds upper limit", f'<link name="base_link" />{joint}'),
+        ):
+            with self.subTest(message=message, body=body):
+                self.assertRefused(self._write_urdf("robot", f'<robot name="sample-robot">{body}</robot>'), message)
 
     def test_file_ref_ignores_neighbor_step_toml(self) -> None:
         source_path = self._write_urdf(

@@ -130,7 +130,7 @@ class _Session(unittest.TestCase):
     def poll_as(self, view: str, surface: str, answers: int, model: str | None = None, png: str = "iVBORw0KGgo=") -> threading.Thread:
         """A view syncing as the page does (every few milliseconds here): its first sync registers it
         and says what it shows; it answers ``answers`` captures with ``png``."""
-        state = {"model": model, "selection": [f"{model}#o1.f1"]}
+        state = {"model": model, "selection": [f"{model}#f:bracket.make_box1.1"]}
         first = self.call("cad_sync", {"view": view, "surface": surface, "model": model, "state": state})["structuredContent"]["events"]
 
         def page() -> None:
@@ -150,29 +150,50 @@ class _Session(unittest.TestCase):
         return viewer
 
 
-    def opens_later(self, view: str, surface: str, model: str, *, after: float = 0.3) -> threading.Thread:
-        """A view the host is still loading: it syncs for the first time ``after`` seconds from now, then
+    def waited(self) -> threading.Event:
+        """Set once a call is waiting for a view to sync into being (``ViewRegistry.wait`` found none yet)."""
+        waiting = threading.Event()
+        real = self.server.views.wait
+
+        def wait(found, *, timeout):
+            def looked():
+                result = found()
+                if result is None:
+                    waiting.set()
+                return result
+
+            return real(looked, timeout=timeout)
+
+        patched = mock.patch.object(self.server.views, "wait", wait)
+        patched.start()
+        self.addCleanup(patched.stop)
+        return waiting
+
+    def opens_later(self, view: str, surface: str, model: str) -> threading.Thread:
+        """A view the host is still loading: it syncs for the first time once a call waits for it, then
         answers one capture."""
+        waiting = self.waited()
 
         def load() -> None:
-            time.sleep(after)
-            self.poll_as(view, surface, 1, model).join(10)
+            if waiting.wait(10):
+                self.poll_as(view, surface, 1, model).join(10)
 
         loading = threading.Thread(target=load, daemon=True)
         loading.start()
+        self.addCleanup(loading.join, 10)
         return loading
 
-
-    def syncs_later(self, view: str, surface: str, model: str, *, after: float = 0.2) -> threading.Thread:
-        """A tab the host is still loading: its first sync comes ``after`` seconds from now."""
+    def syncs_later(self, view: str, surface: str, model: str) -> threading.Thread:
+        """A tab the host is still loading: its first sync comes once a call waits for it."""
+        waiting = self.waited()
 
         def load() -> None:
-            time.sleep(after)
-            self.call("cad_sync", {"view": view, "surface": surface, "model": model})
+            if waiting.wait(10):
+                self.call("cad_sync", {"view": view, "surface": surface, "model": model})
 
         loading = threading.Thread(target=load, daemon=True)
         loading.start()
-        self.addCleanup(loading.join, 5)
+        self.addCleanup(loading.join, 10)
         return loading
 
 
@@ -339,7 +360,7 @@ class TabServerTest(_Session):
     def test_the_agent_reads_and_captures_what_the_open_view_shows(self) -> None:
         self.assertTrue(self.call("cad_screenshot")["isError"])
         model = self.bracket
-        state = {"model": model, "selection": [f"{model}#o1.f1"]}
+        state = {"model": model, "selection": [f"{model}#f:bracket.make_box1.1"]}
         viewer = self.poll_as("v1", "tab", 1, model)
         # What the view said it shows on its sync, answered at once: nothing asks the view.
         self.assertEqual(self.call("cad_view")["structuredContent"], {"views": [{"view": "v1", "surface": "tab", **state}]})
@@ -480,7 +501,7 @@ class SidebarAcrossThreadsTest(_Session):
         return self.on_sidebar("cad_sync", {"view": "s1", "surface": "sidebar", "model": self.model, **extra})
 
     def test_an_agent_with_no_tab_opens_one_and_reads_and_captures_the_sidebar(self) -> None:
-        self.sync_sidebar(state={"model": self.model, "selection": [f"{self.model}#o1.f1"]}, focused=True)
+        self.sync_sidebar(state={"model": self.model, "selection": [f"{self.model}#f:bracket.make_box1.1"]}, focused=True)
         # No tab in this thread: the agent is told to open one, and the sidebar is sent nothing.
         shown = self.call("cad_show", {"source": self.loose})
         self.assertEqual(shown["structuredContent"], {"delivered": 0})
@@ -488,7 +509,7 @@ class SidebarAcrossThreadsTest(_Session):
         self.assertEqual(self.sync_sidebar()["events"], [])
         # What the sidebar reported, read at once.
         (view,) = self.call("cad_view")["structuredContent"]["views"]
-        self.assertEqual((view["view"], view["surface"], view["selection"]), ("s1", "sidebar", [f"{self.model}#o1.f1"]))
+        self.assertEqual((view["view"], view["surface"], view["selection"]), ("s1", "sidebar", [f"{self.model}#f:bracket.make_box1.1"]))
         # Named, the sidebar takes another model on its next sync.
         self.assertEqual(self.call("cad_show", {"source": self.loose, "view": "s1"})["structuredContent"],
                          {"delivered": 1, "view": "s1", "sidebar": True})
@@ -511,8 +532,8 @@ class SidebarAcrossThreadsTest(_Session):
         self.assertEqual(shot["content"][0], {"type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png"})
 
     def test_a_show_goes_to_the_threads_tab_whatever_was_touched_last(self) -> None:
-        self.call("cad_sync", {"view": "t1", "surface": "agent", "model": self.model})
-        time.sleep(0.02)
+        with mock.patch.object(self.server.views, "_clock", lambda: time.monotonic() - 1):  # touched a second ago
+            self.call("cad_sync", {"view": "t1", "surface": "agent", "model": self.model})
         self.sync_sidebar(focused=True)
         # The sidebar was touched last, so it is what the agent reads; a model it shows goes to its tab.
         self.assertEqual(self.call("cad_view")["structuredContent"]["views"][0]["view"], "s1")
@@ -713,7 +734,7 @@ class InlineServerTest(_Session):
         # Another chat's view, served by the same process and touched since, is never the one read.
         self.call("cad_sync", {"view": "cad-other", "surface": "inline", "model": model, "focused": True})
         described = self.call("cad_view", {"view": view})["structuredContent"]["views"]
-        self.assertEqual(described, [{"view": view, "surface": "inline", "model": model, "selection": [f"{model}#o1.f1"]}])
+        self.assertEqual(described, [{"view": view, "surface": "inline", "model": model, "selection": [f"{model}#f:bracket.make_box1.1"]}])
         self.assertEqual(self.call("cad_screenshot", {"view": view})["content"][0]["data"], "iVBORw0KGgo=")
         viewer.join(10)
         # A view a newer one replaced closes itself, and is no longer there to read.
@@ -732,9 +753,8 @@ class InlineServerTest(_Session):
         self.assertTrue(shot["isError"])
         self.assertIn("has not opened yet", shot["content"][0]["text"])
         # A token no cad_show of this server named is not waited for.
-        started = time.monotonic()
-        self.assertIn("not open", self.call("cad_screenshot", {"view": "cad-9-unknown"})["content"][0]["text"])
-        self.assertLess(time.monotonic() - started, 1.0)
+        with mock.patch.object(self.server.views, "wait", side_effect=AssertionError("waited for an unknown view")):
+            self.assertIn("not open", self.call("cad_screenshot", {"view": "cad-9-unknown"})["content"][0]["text"])
 
 
     def test_the_app_capability_is_unguessable_ui_only_and_scoped_to_its_session(self) -> None:

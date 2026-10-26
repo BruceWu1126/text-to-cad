@@ -1,11 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
-import { build } from 'esbuild';
+import { harnessBundle } from './bundle.mjs';
 import { chromium } from 'playwright';
 
 // An engine document the harness can open: core's bracket (`lib/xbf/__fixtures__/bracket`, a
@@ -29,21 +27,6 @@ const DOC = '/__cad/xbf/api/doc/bracket';
  */
 export const VIEWPORT = Object.freeze({ width: 800, height: 600 });
 
-// The harness bundle, built once per process.
-let bundled;
-function harnessBundle() {
-  bundled ??= (async () => {
-    const temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-xbf-browser-'));
-    try {
-      await build({ entryPoints: [fileURLToPath(new URL('./index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.woff2': 'dataurl', '.svg': 'dataurl' } });
-      return { bundle: await readFile(join(temporary, 'harness.js')), bundledCss: await readFile(join(temporary, 'harness.css')).catch(() => '') };
-    } finally {
-      await rm(temporary, { recursive: true, force: true });
-    }
-  })();
-  return bundled;
-}
-
 /**
  * Serve the harness over the bracket and hand back an `open`.
  *
@@ -56,7 +39,7 @@ export async function serveXbfHarness(t) {
     await browser?.close();
     if (server) await new Promise(resolve => server.close(resolve));
   });
-  const { bundle, bundledCss } = await harnessBundle();
+  const { bundle, css: bundledCss } = await harnessBundle();
   // The document as it is served now: its version moves with each `update` of an open page.
   let served = { version: VERSION, structure: STRUCTURE };
   let updates = 0;

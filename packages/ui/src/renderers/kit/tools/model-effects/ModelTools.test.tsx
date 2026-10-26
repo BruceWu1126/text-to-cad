@@ -20,7 +20,7 @@ function Strip({ store, settings = ['exploded', 'clip'] }: { store: ReturnType<t
 }
 
 it('Explode and Clip are popovers from their tiles: a press opens the row under its button, a press away or Escape closes it, and the button is never pressed', async () => {
-  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const user = userEvent.setup({ pointerEventsCheck: 0, skipHover: true });
   const store = createViewSettingsStore();
   render(<Strip store={store} />);
   const explode = screen.getByRole('button', { name: 'Explode', exact: true });
@@ -48,7 +48,7 @@ it('Explode and Clip are popovers from their tiles: a press opens the row under 
 });
 
 it('what an effect sets stays on the model once its popover closes, its dot on the tile, until its Reset', async () => {
-  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const user = userEvent.setup({ pointerEventsCheck: 0, skipHover: true });
   const store = createViewSettingsStore();
   render(<Strip store={store} />);
   const explode = () => screen.getByRole('button', { name: 'Explode', exact: true });
@@ -68,7 +68,7 @@ it('what an effect sets stays on the model once its popover closes, its dot on t
 });
 
 it('each popover opened is one use of its effect, with no seconds (it is no tool in hand), and its Reset one of its reset', async () => {
-  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const user = userEvent.setup({ pointerEventsCheck: 0, skipHover: true });
   const store = createViewSettingsStore();
   const reports: { control: string; count: number; seconds: number }[][] = [];
   const view = render(<ControlUsageProvider report={counts => reports.push(counts)}><Strip store={store} /></ControlUsageProvider>);
@@ -99,7 +99,7 @@ it('offers Explode and Clip on every STEP, a single part too, and idles them whi
 });
 
 it('Clip\'s axis dropdown holds its settings: the axes as one row of radio items, a rule, then Part colors and Reverse; all kept as its popover closes and by Reset, which only takes the cut away; both persist in the display', async () => {
-  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const user = userEvent.setup({ pointerEventsCheck: 0, skipHover: true });
   const store = createViewSettingsStore();
   function Harness() {
     const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);

@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
-import { build } from 'esbuild';
+import { harnessBundle } from '../../harness/bundle.mjs';
 import { chromium } from 'playwright';
 
 // A viewer whose box changes size in ONE layout step (the tool stack widened, a window
@@ -34,11 +32,9 @@ const FILES = { 'part.stl': Buffer.from(stlBox([20, 12, 30])) };
 const HARNESS_SIZE = '<style>#root > div { width: var(--harness-width, 800px) !important; height: var(--harness-height, 500px) !important; }</style>';
 
 async function serveHarness(t) {
-  const temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-resize-browser-'));
   let server, browser;
-  t.after(async () => { await browser?.close(); if (server) await new Promise(resolve => server.close(resolve)); await rm(temporary, { recursive: true, force: true }); });
-  await build({ entryPoints: [fileURLToPath(new URL('../../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.svg': 'dataurl' } });
-  const bundle = await readFile(join(temporary, 'harness.js'));
+  t.after(async () => { await browser?.close(); if (server) await new Promise(resolve => server.close(resolve)); });
+  const { bundle } = await harnessBundle();
   const css = await readFile(new URL('../../../../dist/styles.css', import.meta.url));
   server = createServer((request, response) => {
     const url = new URL(request.url, 'http://test');
@@ -214,17 +210,7 @@ test('a viewer resized in one step paints the model at its new size in that same
   const [widened] = await page.evaluate(() => window.__resizeProbe.records);
   assertPaintedAtNewSize(widened, ratio, await settledSignature(page), 'one-step widening');
 
-  // 3. The file explorer, which the file's name opens, floats OVER the viewer: its box keeps its
-  //    size, so nothing is resized.
-  await page.evaluate(() => window.__resizeProbe.mark());
-  await pane.locator('[data-file-name]').click();
-  await page.locator('[data-file-explorer]').waitFor();
-  await frames(page, 2);
-  assert.deepEqual(await page.evaluate(() => window.__resizeProbe.records), [], 'opening the explorer resized nothing');
-  await page.keyboard.press('Escape');
-  await page.locator('[data-file-explorer]').waitFor({ state: 'detached' });
-
-  // 4. A drag resizes once per frame; every frame is painted at its own size, and the
+  // 3. A drag resizes once per frame (the explorer floating over the view resizes nothing: `FileViewer.browser.test.mjs`); every frame is painted at its own size, and the
   //    viewport draws no more than one picture per frame to do it.
   await page.evaluate(() => window.__resizeProbe.mark());
   const drawsPerFrame = await page.evaluate(() => new Promise(resolve => {
@@ -252,7 +238,7 @@ test('a viewer resized in one step paints the model at its new size in that same
   assert.ok(Math.max(...drawsPerFrame) <= drawsPerPicture,
     `a drag draws at most one picture a frame (draw calls per frame ${drawsPerFrame.join(',')}, one picture is ${drawsPerPicture})`);
 
-  // 5. At rest again, nothing is drawn: render on demand holds.
+  // 4. At rest again, nothing is drawn: render on demand holds.
   await frames(page, 4);
   const idleBefore = await page.evaluate(() => window.__glDraws || 0);
   await frames(page, 10);

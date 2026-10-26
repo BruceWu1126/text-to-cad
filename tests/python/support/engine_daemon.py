@@ -35,21 +35,39 @@ STACK_LINES = 30  # a thread's innermost frames: where it waits
 
 
 def isolate(cleanup: Callable[..., Any]) -> dict[str, str]:
-    """A state and a cache folder of the caller's own (``CADGEN_STATE_DIR``, ``CADGEN_CACHE_DIR``)
-    in ``os.environ`` until ``cleanup`` (a module's ``unittest.addModuleCleanup``, a test's
-    ``addCleanup``) puts it back and removes them: so an engine a test starts, and every
-    environment built from ``os.environ`` after, records and caches its documents there, never in
-    the developer's. The runner gives each file its own (``scripts/test/unittest_files.py``); this
-    is the same for a file run directly. The variables set."""
+    """An engine, a state and a cache folder of the caller's own (``CADGEN_ENGINE_DIR``,
+    ``CADGEN_STATE_DIR``, ``CADGEN_CACHE_DIR``) in ``os.environ`` until ``cleanup`` (a module's
+    ``unittest.addModuleCleanup``, a test's ``addCleanup``) stops an engine started there, puts the
+    environment back and removes them: so an engine a test starts, and every environment built from
+    ``os.environ`` after, runs, records and caches its documents there, never in the developer's.
+    The runner gives each file its own (``scripts/test/unittest_files.py``); this is the same for a
+    file run directly. The variables set."""
     from unittest import mock
 
     folder = tempfile.mkdtemp(prefix="cadgen-test-")
-    given = {"CADGEN_STATE_DIR": os.path.join(folder, "state"), "CADGEN_CACHE_DIR": os.path.join(folder, "cache")}
+    # A short folder of its own for the engine's door: a socket's path has a length limit on POSIX.
+    engine = tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)
+    given = {"CADGEN_ENGINE_DIR": engine, "CADGEN_STATE_DIR": os.path.join(folder, "state"),
+             "CADGEN_CACHE_DIR": os.path.join(folder, "cache")}
     patch = mock.patch.dict(os.environ, given)
     patch.start()
     cleanup(shutil.rmtree, folder, True)
+    cleanup(shutil.rmtree, engine, True)
     cleanup(patch.stop)
+    cleanup(_stop_engine, engine)
     return given
+
+
+def _stop_engine(engine: str) -> None:
+    """The engine in folder ``engine`` stopped, when one runs there."""
+    if not any(name.endswith((".door", ".port")) for name in os.listdir(engine)):
+        return
+    from unittest import mock
+
+    from cadgen.engine import api
+
+    with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": engine}):
+        api.stop()
 
 
 def unwritable(folder: Path | str) -> str:

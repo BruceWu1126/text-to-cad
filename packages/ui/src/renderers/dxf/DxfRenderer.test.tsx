@@ -57,7 +57,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 /** One pane of the harness: a host, a workspace, host commands and a live binding, and the tab. */
-async function openDrawing(destinationKind = 'composer', notice: ReactNode = null, promptFiles?: any) {
+async function openDrawing(destinationKind = 'composer', notice: ReactNode = null, promptFiles?: any, { drawn = true } = {}) {
   const fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
     if (url.pathname.endsWith('/__cad/catalog')) {
@@ -116,6 +116,7 @@ async function openDrawing(destinationKind = 'composer', notice: ReactNode = nul
   }
   render(<Pane />);
   const pane = screen.getByTestId('one');
+  if (!drawn) return { pane, dispose: () => client.dispose() };
   const canvas = await waitFor(() => {
     const element = pane.querySelector<HTMLCanvasElement>('[data-drawing-surface] canvas');
     expect(element).not.toBeNull();
@@ -282,13 +283,31 @@ it('a drawing with layers and blocks has a Layers section: a layer hidden is not
 
 it('a select-reference request is consumed without a notification', async () => {
   const { pane, commands, request, dispose } = await openDrawing();
-  await request({ selectReference: { selector: 'o1.f1', key: 7 } });
+  await request({ selectReference: { selector: 'f:plate.make_box1.1', key: 7 } });
   await waitFor(() => expect(commands.getSnapshot().selectReference ?? null).toBeNull());
   expect(commands.acknowledge).toHaveBeenCalledWith('selectReference', 7);
   // Declined silently: no alert, no status, and the drawing is still the drawing.
   expect(within(pane).queryByRole('alert')).toBeNull();
   expect(pane.querySelector('[data-drawing-surface] canvas')).not.toBeNull();
   dispose();
+});
+
+it('an unreadable drawing shows the server\'s own sentence, and an empty one says it is empty', async () => {
+  readDrawing = () => new Response(JSON.stringify({ error: 'broken.dxf is not a readable DXF document' }),
+    { status: 400, headers: { 'content-type': 'application/json' } });
+  const broken = await openDrawing('composer', null, undefined, { drawn: false });
+  const text = (await within(broken.pane).findByRole('alert')).textContent;
+  for (const said of [/The viewer couldn’t complete the request/, /HTTP 400/, /not a readable DXF document/, /Retry/]) expect(text).toMatch(said);
+  expect(broken.pane.querySelector('[data-viewer-loading]')).toBeNull();
+  broken.dispose();
+  cleanup();
+
+  readDrawing = () => json({ schemaVersion: SAMPLE.schemaVersion, units: SAMPLE.units, bounds: null, layers: [], entities: [], fonts: [], primitives: [] });
+  const empty = await openDrawing('composer', null, undefined, { drawn: false });
+  const said = await waitFor(() => { const found = empty.pane.querySelector('[data-drawing-empty]'); expect(found).not.toBeNull(); return found!; });
+  expect(said.textContent).toMatch(/no geometry in its modelspace/);
+  expect(within(empty.pane).queryByRole('alert')).toBeNull();
+  empty.dispose();
 });
 
 it('a rewritten drawing stays on screen while its next revision is read, and after one that will not read', async () => {

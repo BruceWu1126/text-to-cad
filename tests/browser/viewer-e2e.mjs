@@ -207,8 +207,7 @@ async function openFile(page, file) {
   await page.locator('[data-slot="cad-file-view"] [aria-busy="false"]').first().waitFor({ timeout: 120_000 });
   // Then settle on the seam that says the model reached the RENDERER, not on a second of wall
   // clock: every 3D renderer's viewport publishes the bounds it staged (`modelBounds`); a 2D
-  // drawing has none, and its viewport's `aria-busy` is the whole of it. The short pause after it
-  // is for the frame to be painted, which has no seam of its own.
+  // drawing has none, and its viewport's `aria-busy` is the whole of it. Then a frame is painted.
   if (!/\.dxf$/i.test(file)) {
     await page.waitForFunction(() => {
       const bounds = window.__cadModelBounds?.();
@@ -216,8 +215,13 @@ async function openFile(page, file) {
         && bounds.min.some((value, axis) => Number(bounds.max[axis]) - Number(value) > 0);
     }, null, { timeout: 120_000 });
   }
-  await page.waitForTimeout(250);
+  await painted(page);
   return canvas;
+}
+
+/** Once the page has painted a frame after this: the second animation frame from now runs after the first one's paint. */
+function painted(page) {
+  return page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
 /** The staged model's bounds, from the stage its renderer publishes (`__cadStage`). */
@@ -252,7 +256,7 @@ async function canvasMenuItems(page, canvas) {
   const box = await canvas.boundingBox();
   const point = { x: box.x + box.width * 0.12, y: box.y + box.height * 0.86 };
   await page.mouse.click(point.x, point.y, { button: "right" });
-  await page.waitForTimeout(300);
+  await painted(page);  // a menu the press opened is drawn by then
   const menu = page.locator('[role="menu"]').first();
   const items = await menu.count() ? (await menu.locator('[role="menuitem"]').allTextContents()).map((x) => x.trim()) : [];
   await page.keyboard.press("Escape");
@@ -323,7 +327,16 @@ async function formatGate() {
 async function selectViewingMode(page, current, next) {
   const [press, arrive] = next === "Render" ? ["Preview", "Exit preview"] : ["Exit preview", "Preview"];
   if (!(await page.getByRole("button", { name: press, exact: true }).count())) fail(`viewing mode: expected ${current} before switching to ${next}`);
-  await page.getByRole("button", { name: press, exact: true }).click();
+  const button = page.getByRole("button", { name: press, exact: true });
+  if (next !== "Render") {
+    // Preview's bar hides two seconds after the pointer last moved over the view, and a person's pointer, moving to
+    // Exit preview, brings it back: this pointer does the same (Playwright checks what is under the point first).
+    const box = await page.locator("[data-preview-view]").first().boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForFunction(() => !document.querySelector("[data-preview-bar]")?.hasAttribute("data-hidden"));
+    await button.hover();  // resting on the bar holds it
+  }
+  await button.click();
   await page.getByRole("button", { name: arrive, exact: true }).waitFor();
   await page.waitForFunction(() => !document.querySelector("[data-preview-cover]"));
 }

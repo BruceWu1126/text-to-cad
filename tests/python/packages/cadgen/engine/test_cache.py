@@ -123,25 +123,59 @@ def get(url: str, token: str) -> tuple[int, dict]:
 
 
 class CacheTest(unittest.TestCase):
-    """Through a real daemon, in an engine, a state and a cache folder of the test's own."""
+    """Through a real daemon. The class shares one engine, with a state and a cache folder of its
+    own (so its workers' bytecode is compiled once), and each test starts with nothing recorded in
+    it; a test whose engine needs another environment, or folders of its own, starts that engine
+    (``use``), which reads the class's bytecode."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from cadgen.engine import daemon
+
+        cls.root = Path(os.path.realpath(tempfile.mkdtemp(prefix="engine-cache-")))
+        cls.addClassCleanup(shutil.rmtree, cls.root, True)
+        cls.shared = cls.root / "state", cls.root / "cache"
+        cls.bytecode = str(cls.shared[1] / daemon.PYCACHE / daemon._tag())  # the class engine's own
+        cls.engine_env = cls.environment(*cls.shared, cls.addClassCleanup)
+
+    @classmethod
+    def environment(cls, state: Path, cache: Path, cleanup, **extra: str) -> dict:
+        """An engine's environment: a folder of its own, ``state`` and ``cache``; stopped at ``cleanup``."""
+        engine = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
+        cleanup(shutil.rmtree, engine, True)
+        # The class engine keeps its bytecode where the engine does (the first test reads it there),
+        # whatever folder a test run shares.
+        given = {name: value for name, value in os.environ.items() if name != "PYTHONPYCACHEPREFIX"}
+        env = engine_daemon.watched({**given, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(engine),
+                                     "CADGEN_STATE_DIR": str(state), "CADGEN_CACHE_DIR": str(cache),
+                                     "CADGEN_ENGINE_MESH": "inline", "CADGEN_ENGINE_CACHE_IDLE": str(IDLE),
+                                     **extra}, cleanup)
+        cleanup(lambda: engine_daemon.run([sys.executable, "-m", "cadgen.engine", "stop"], env=dict(env)))
+        return env
 
     def setUp(self) -> None:
-        self.folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="engine-cache-")))
-        self.addCleanup(shutil.rmtree, self.folder, True)
+        self.folder = Path(tempfile.mkdtemp(prefix="test-", dir=self.root))
         self.project = self.folder / "project"
         self.project.mkdir()
-        self.use(self.folder / "state", self.folder / "cache")
+        (self.state, self.cache), self.env = self.shared, self.engine_env
+        self.engine = Path(self.env["CADGEN_ENGINE_DIR"])
+        self.reset()
+
+    def reset(self) -> None:
+        """Nothing recorded in the class's engine: every document an earlier test left, deleted."""
+        from cadgen.engine import api
+
+        with mock.patch.dict(os.environ, {name: self.env[name] for name in
+                                          ("CADGEN_ENGINE_DIR", "CADGEN_STATE_DIR", "CADGEN_CACHE_DIR")}):
+            left = [row["id"] for row in Registry(self.state).list()]
+            if left:
+                api.delete(left)
 
     def use(self, state: Path, cache: Path, **extra: str) -> None:
-        """The engine the test talks to from now on: a folder of its own, and ``state`` and ``cache``."""
+        """The engine the test talks to from now on: one of its own, on ``state`` and ``cache``."""
         self.state, self.cache = state, cache
-        self.engine = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
-        self.addCleanup(shutil.rmtree, self.engine, True)
-        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.engine),
-                                          "CADGEN_STATE_DIR": str(state), "CADGEN_CACHE_DIR": str(cache),
-                                          "CADGEN_ENGINE_MESH": "inline",
-                                          "CADGEN_ENGINE_CACHE_IDLE": str(IDLE), **extra}, self.addCleanup)
-        self.addCleanup(self.cli, "stop", env=dict(self.env))
+        self.env = self.environment(state, cache, self.addCleanup, PYTHONPYCACHEPREFIX=self.bytecode, **extra)
+        self.engine = Path(self.env["CADGEN_ENGINE_DIR"])
 
     def cli(self, *args: str, env: dict | None = None):
         return engine_daemon.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.project, env=env or self.env)
@@ -185,8 +219,9 @@ class CacheTest(unittest.TestCase):
 
     # --- the tests ----------------------------------------------------------------------
 
-    def test_an_idle_build_is_saved_once_and_an_unchanged_run_rewrites_nothing(self) -> None:
+    def test_an_idle_build_is_saved_in_the_cache_folder_with_its_record_saying_so(self) -> None:
         ident = self.write("cube")
+        written = (self.ask({"op": "status"}).get("cache") or {}).get("written", 0)
         self.run_script("cube")
         meta = self.cached(ident)
         record = self.record(ident)
@@ -199,13 +234,7 @@ class CacheTest(unittest.TestCase):
         compiled = list((self.cache / "pycache").glob("*/**/build123d/__init__.*.pyc"))  # the prefix mirrors its path
         self.assertEqual(len(compiled), 1, "the worker's libraries' bytecode, in the engine's folder")
         self.assertEqual(list(self.project.rglob("*.pyc")), [], "none beside the model")
-        stamps = (self.file(ident).stat().st_mtime_ns, (self.state / "documents" / ident / "document.json").stat().st_mtime_ns)
-        self.run_script("cube")
-        time.sleep(IDLE * 4)  # its idle window passed again
-        self.assertEqual((self.file(ident).stat().st_mtime_ns,
-                          (self.state / "documents" / ident / "document.json").stat().st_mtime_ns), stamps,
-                         "an unchanged document is never rewritten")
-        self.assertEqual(self.ask({"op": "status"})["cache"]["written"], 1)
+        self.assertEqual(self.ask({"op": "status"})["cache"]["written"], written + 1)
 
     def home(self, action: str, path: str) -> tuple[int, dict]:
         """A change to the home's library, as the engine's page posts it (``/__cad/recents``)."""
@@ -323,35 +352,6 @@ class CacheTest(unittest.TestCase):
         self.assertIn("the engine's cache holds the model's key, 1 bodies loaded, nothing ran", done.stdout)
         self.assertNotIn("the body ran", done.stderr)
 
-    def test_an_unchanged_warm_run_is_taken_from_memory_and_an_edit_rebuilds(self) -> None:
-        self.said()
-        self.assertIn("the body ran", self.run_script("cube").stderr)
-        warm = self.run_script("cube")
-        self.assertNotIn("the body ran", warm.stderr)
-        lines = warm.stdout.splitlines()
-        self.assertRegex(lines[0], r"^took cube\.py::cube warm in \d+\.\d\ds: its document in memory holds the "
-                                   r"model's key, 1 bodies loaded, nothing ran$")
-        self.assertEqual(lines[1].replace("×", "x").replace("·", "|"),
-                         "  parts 1 | bounds 3 x 2 x 1 mm | joints 0 | sequences 0", "the delta: nothing changed")
-        self.said(width=5.0)
-        rebuilt = self.run_script("cube")
-        self.assertIn("the body ran", rebuilt.stderr)
-        self.assertIn("rebuilt: cube.py: WIDTH changed", rebuilt.stdout)
-        self.assertIn("bounds 5 x 2 x 1 mm (was 3 x 2 x 1)", rebuilt.stdout.replace("×", "x"))
-
-    def test_after_a_restart_an_unchanged_run_is_taken_from_the_cache_and_an_edit_rebuilds(self) -> None:
-        ident = self.said()
-        self.assertIn("the body ran", self.run_script("cube").stderr)
-        self.cached(ident)
-        self.assertEqual(self.cli("stop").returncode, 0)
-        self.assert_taken()
-        exported = self.cli("export", ident, str(self.folder / "taken.step"))
-        self.assertEqual(exported.returncode, 0, exported.stderr)
-        self.said(width=5.0)
-        rebuilt = self.run_script("cube")
-        self.assertIn("built cube.py::cube warm", rebuilt.stdout)
-        self.assertIn("the body ran", rebuilt.stderr)
-
     def corrupt(self, ident: str) -> None:
         """The document's cache file broken where its bytes are read, its size and its head (the writer
         and the closure a build compares) as they were: what an earlier test of this left behind."""
@@ -394,7 +394,7 @@ class CacheTest(unittest.TestCase):
         self.assertGreater(out.stat().st_size, 0)
 
     def test_failed_revisions_before_a_restart_leave_the_cache_to_take(self) -> None:
-        self.use(self.state, self.cache, CADGEN_ENGINE_CACHE_IDLE="600")  # saved at the stop, as a person's is
+        self.use(self.folder / "state", self.folder / "cache", CADGEN_ENGINE_CACHE_IDLE="600")  # saved at the stop, as a person's is
         self.said()
         self.run_script("cube")
         self.run_script("cube")
@@ -426,7 +426,7 @@ class CacheTest(unittest.TestCase):
         ident = self.write("cube")
         script = str(self.project / "cube.py")
         saved: list[tuple[dict, bytes]] = []
-        worker = daemon.Worker(script, {**os.environ, "PYTHONPATH": str(SRC)},
+        worker = daemon.Worker(script, {**os.environ, "PYTHONPATH": str(SRC), "PYTHONPYCACHEPREFIX": self.bytecode},
                                on_saved=lambda _worker, header, payload: saved.append((header, payload)))
         self.addCleanup(worker.stop)
         order = {"id": 1, "op": "build", "script": script, "functions": None, "cwd": str(self.project)}
@@ -439,7 +439,7 @@ class CacheTest(unittest.TestCase):
         self.assertTrue(document.read_bytes(payload), "the whole document's bytes")
 
     def test_a_stop_saves_a_document_built_in_its_last_idle_window(self) -> None:
-        self.use(self.state, self.cache, CADGEN_ENGINE_CACHE_IDLE="600")
+        self.use(self.folder / "state", self.folder / "cache", CADGEN_ENGINE_CACHE_IDLE="600")
         ident = self.write("cube")
         self.run_script("cube")
         self.assertFalse(self.file(ident).exists(), "not idle yet")
@@ -453,21 +453,24 @@ class CacheTest(unittest.TestCase):
         self.assertEqual([row["id"] for row in json.loads(launched.stdout)["documents"]], [ident])
 
     def test_every_document_stays_until_deleted_and_nothing_else_in_the_folder_is_touched(self) -> None:
+        # Its workers go after each build, over a memory cap of 1 MB, and its memory budget is past at
+        # once: every document leaves memory, and the cache keeps them all.
+        self.use(self.folder / "state", self.folder / "cache", CADGEN_ENGINE_WORKER_RSS_MB="1",
+                 CADGEN_ENGINE_MEMORY_MB="0.001")
         foreign = self.cache / "objects" / "ab" / "0.7-object"
         foreign.parent.mkdir(parents=True)
         foreign.write_bytes(b"a 0.7 store object")
         beside = self.cache / "index.db"
         beside.write_bytes(b"0.7")
         stamps = {path: path.stat().st_mtime_ns for path in (foreign, beside)}
-        # Its workers go after each build, over a memory cap of 1 MB, and its memory budget is past at
-        # once: every document leaves memory, and the cache keeps them all.
-        self.use(self.state, self.cache, CADGEN_ENGINE_WORKER_RSS_MB="1", CADGEN_ENGINE_MEMORY_MB="0.001")
         idents = [self.write(name) for name in ("first", "second", "third")]
         for name, ident in zip(("first", "second", "third"), idents):
             self.run_script(name)
             self.cached(ident)
-        await_(lambda: self.ask({"op": "status"})["workers"] == [], "the workers to retire")
-        time.sleep(IDLE * 4)  # idle windows past: nothing more happens to the files
+        # Out of memory, each read again from the cache: its worker gone and the server's copy trimmed.
+        held = lambda: [(row["state"], row.get("held")) for row in self.ask({"op": "status"})["models"]]  # noqa: E731
+        await_(lambda: self.ask({"op": "status"})["workers"] == [] and held() == [("held", "disk")] * 3,
+               "every document out of memory and held on disk alone")
         self.assertTrue(all(self.file(ident).is_file() for ident in idents), "nothing evicts a document")
         cache = self.ask({"op": "status"})["cache"]
         self.assertEqual(sorted(cache), ["bytes", "documents", "enabled", "failures", "idleSeconds", "root", "written"],
@@ -477,8 +480,6 @@ class CacheTest(unittest.TestCase):
         from cadgen.engine.cli import _bytes
 
         self.assertIn(f"cache {self.cache}: 3 documents · {_bytes(total)}, kept until deleted\n", self.cli("status").stdout)
-        self.assertEqual([(row["state"], row.get("held")) for row in self.ask({"op": "status"})["models"]],
-                         [("held", "disk")] * 3, "out of memory, each read again from the cache")
         exported = self.cli("export", idents[0], str(self.folder / "first.step"))
         self.assertEqual(exported.returncode, 0, exported.stderr)
         self.assertEqual({path: path.stat().st_mtime_ns for path in stamps}, stamps, "the rest of the folder is not ours")
@@ -494,7 +495,6 @@ class CacheTest(unittest.TestCase):
         self.assertNotIn(str(declared), json.dumps(self.record(ident)), "the cache never points at the author's file")
         served = self.ask({"op": "serve", "path": str(declared)})
         self.assertEqual(served.get("doc"), file_id(declared))
-        time.sleep(IDLE * 4)
         self.assertEqual((declared.read_bytes(), declared.stat().st_mtime_ns), written, "the declared file is the author's")
         self.assertEqual(sorted(os.listdir(self.cache / "documents")), [ident], "a file's document is its own file")
         self.assertEqual(meta["bytes"], self.file(ident).stat().st_size)
@@ -549,7 +549,7 @@ class CacheTest(unittest.TestCase):
                 self.use(self.folder / f"state-{tag}", Path(engine_daemon.unwritable(self.folder / tag)), **extra)
             ident = self.write("cube")
             seen: dict = {"build": [line for line in self.run_script("cube").stdout.splitlines() if "id:" in line]}
-            time.sleep(IDLE * 4)  # idle: a save is tried
+            await_(lambda: self.ask({"op": "status"})["cache"]["failures"], "the idle save tried and failed")
             status, structure = self.page(ident)
             seen["page"] = (status, sorted(structure))
             seen["state"] = self.ask({"op": "state", "id": ident})
@@ -614,6 +614,34 @@ class KeptTest(unittest.TestCase):
         self.assertEqual((status["documents"], status["bytes"]), (4, 4000))
         self.assertNotIn("capBytes", status)
         self.assertNotIn("evictions", status)
+
+    def test_a_document_at_the_cache_s_revision_is_never_written_again(self) -> None:
+        from cadgen.engine import cache as engine_cache
+
+        folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="engine-once-")))
+        self.addCleanup(shutil.rmtree, folder, True)
+        held = Registry(folder / "state", folder / "cache")
+        ident = model_id(folder / "cube.py", "cube")
+        held.put({"id": ident, "kind": "model", "root": str(folder), "home": "cube.py", "entry": "cube", "revision": "r1"})
+
+        class Models:
+            def registry(self) -> Registry:
+                return held
+
+            def row(self, _ident: str) -> dict:
+                return {"revision": "r1", "worker": None, "version": "g2"}
+
+            def held_bytes(self, _ident: str, _version: str) -> bytes:
+                raise AssertionError("an unchanged document's bytes are never taken")
+
+        kept = engine_cache.Cache(Models())
+        kept._write(ident, "r1", b"x" * 1000)
+        path = folder / "cache" / "documents" / ident / "document.xbf"
+        stamps = (path.stat().st_mtime_ns, held.get(ident))
+        kept._due(ident)  # idle again, unchanged
+        kept.keep(ident, "r1", b"y" * 10)  # the drain's bytes, unchanged
+        self.assertEqual((list(kept.writes), kept.written), ([], 1))
+        self.assertEqual((path.stat().st_mtime_ns, held.get(ident)), stamps, "the file and its record as they were")
 
     def test_a_shape_taken_up_after_a_restart_and_unsaved_names_the_program_that_handed_it_over(self) -> None:
         from cadgen.engine import registry as registering

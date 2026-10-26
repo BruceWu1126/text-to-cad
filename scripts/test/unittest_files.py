@@ -22,7 +22,8 @@ directory of its own (``CADGEN_ENGINE_DIR``): a build it asks for without naming
 an engine daemon of that file's alone, never on a developer's own, and a daemon the file left
 running there is stopped once it ends (``stop_engine``). Its ``CADGEN_CACHE_DIR`` is a folder
 of its own that does not exist, so nothing a test starts reaches a developer's cadgen 0.7
-store. The per-module output is printed as
+store; the run's files share one bytecode folder (``PYTHONPYCACHEPREFIX``), so the CAD kernel's
+libraries are compiled once a run, not once a file. The per-module output is printed as
 each finishes and the final ``Ran N tests`` / ``OK`` / ``FAILED`` summary aggregates every
 module. The loaded test set is identical to `python -m unittest <files>` run from --top. A
 file still running ``FILE_HANG_SECONDS`` after it started is hung: its interpreter prints
@@ -212,13 +213,18 @@ def run_files(files: list[str], top: str, jobs: int, verbose: bool, print_weight
     unparsed: list[str] = []
     # Each file's engine folder is in here, its door beside its lock.
     engines = tempfile.mkdtemp(prefix="cgt-")
+    # One bytecode folder for the run (``PYTHONPYCACHEPREFIX``, which the engine honours): the
+    # first file's worker compiles the CAD kernel's libraries, and every later engine reads them,
+    # where each file's own cache folder would compile them again (seconds a file). A test whose
+    # subject is where the engine keeps its bytecode starts that engine without it.
+    shared = {} if os.environ.get("PYTHONPYCACHEPREFIX") else {"PYTHONPYCACHEPREFIX": os.path.join(engines, "pycache")}
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
             futures = []
             for index, path in enumerate(files):
                 # A state folder of its own too: the engine's registry of documents (and Recents)
                 # never reaches the person's.
-                env = {**os.environ, "CADGEN_ENGINE_DIR": os.path.join(engines, f"e{index}"),
+                env = {**os.environ, **shared, "CADGEN_ENGINE_DIR": os.path.join(engines, f"e{index}"),
                        "CADGEN_STATE_DIR": os.path.join(engines, f"s{index}"),
                        "CADGEN_CACHE_DIR": os.path.join(engines, f"c{index}")}
                 futures.append(pool.submit(_run_one_file, path, top, verbose, env))

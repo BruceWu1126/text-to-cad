@@ -14,16 +14,6 @@ const composedMeshData = {
   ]
 };
 
-// A legacy package bakes placement into its vertices, so the merged whole-mesh really is
-// world-space and the fallback is valid.
-const bakedMeshData = {
-  partTransformsBaked: true,
-  parts: [
-    { id: "o1.1", vertexCount: 300, triangleCount: 100 },
-    { id: "o1.2", vertexCount: 300, triangleCount: 100 }
-  ]
-};
-
 const plainTheme = { materials: {} };
 
 test("composed packages keep per-part rendering when parts are not rendered individually", () => {
@@ -44,20 +34,6 @@ test("composed packages keep per-part rendering with no pickable parts and no co
   assert.equal(parts.length, 2);
 });
 
-test("baked packages may still fall back to the merged whole mesh", () => {
-  const parts = resolvePartsToRender(bakedMeshData, plainTheme, {
-    renderPartsIndividually: false
-  });
-  assert.equal(parts.length, 0, "baked geometry is world-space, so the fallback is valid");
-});
-
-test("individual rendering is unchanged for both package kinds", () => {
-  assert.equal(
-    resolvePartsToRender(composedMeshData, plainTheme, { renderPartsIndividually: true }).length,
-    2
-  );
-  assert.equal(
-    resolvePartsToRender(bakedMeshData, plainTheme, { renderPartsIndividually: true }).length,
-    2
-  );
+test("individual rendering draws every occurrence", () => {
+  assert.equal(resolvePartsToRender(composedMeshData, plainTheme, { renderPartsIndividually: true }).length, 2);
 });

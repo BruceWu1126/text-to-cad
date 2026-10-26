@@ -109,13 +109,6 @@ class AuthoringTest(unittest.TestCase):
                 (lambda: configuration_sequence(box, "m", lambda t: {}, duration=0), "duration is a number of seconds above 0"),
                 (lambda: configuration_sequence(box, "m", lambda t: {}), "a function of time takes duration="),
                 (lambda: configuration_sequence(box, "m", sweep={"j": (0, 1)}, duration=1, ease="bounce"), "ease is one of"),
-                (lambda: configuration_sequence(box, "m", sweep={"j": (0, 1)}, duration=1, loop="loop"),
-                 "configuration sequence 'm': loop= is gone: a configuration sequence is a finite clip, and a player "
-                 "repeats it"),
-                (lambda: configuration_sequence(box, "m", sweep={"j": (0, 1)}, duration=1, ease="spline"),
-                 "configuration sequence 'm': ease 'spline' is gone: AP242 interpolates a configuration sequence linearly "
-                 "or synchronously"),
-                (lambda: configuration_sequence(box, "m", sweep={"j": (0, 1)}, duration=1, speed=2), "configuration_sequence\\(\\) takes no speed"),
                 (lambda: configuration_sequence("arm", "m", sweep={"j": (0, 1)}, duration=1), "takes the assembly")):
             with self.assertRaisesRegex((TypeError, ValueError), error):
                 call()

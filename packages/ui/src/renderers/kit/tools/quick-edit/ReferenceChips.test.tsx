@@ -12,7 +12,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 // A hint measures its trigger.
 const measured = () => vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 
-const chip = (n: number, extra = {}) => ({ key: `run:${n}`, label: `base · face ${n}`, id: `o1.f${n}`, copy: `/models/base.step#o1.f${n}`,
+const chip = (n: number, extra = {}) => ({ key: `run:${n}`, label: `base · face ${n}`, id: `f:base.make_box1.${n}`, copy: `/models/base.step#f:base.make_box1.${n}`,
   card: <InfoRow label="Area" title="Face area">{`${n * 10} mm²`}</InfoRow>, ...extra });
 function mount(chips: any[], mobile = false) {
   const copied: string[] = [];
@@ -30,7 +30,7 @@ it('a click on a chip copies its reference and says so in its place; a touch ope
   fireEvent.pointerDown(label, { pointerType: 'mouse' });
   fireEvent.click(label);
   await settle();
-  expect(copied).toEqual(['/models/base.step#o1.f3']);
+  expect(copied).toEqual(['/models/base.step#f:base.make_box1.3']);
   expect(label.textContent).toBe('Copied');
   expect(document.querySelector('[data-quick-edit-ref-card]')).toBeNull();
   // A touch's press opens the card too: its name, its id, then the renderer's rows.
@@ -38,7 +38,7 @@ it('a click on a chip copies its reference and says so in its place; a touch ope
   fireEvent.click(label);
   await settle();
   const card = document.querySelector<HTMLElement>('[data-quick-edit-ref-card="run:3"]')!;
-  expect([...card.querySelectorAll('[data-info-row]')].map(row => row.textContent)).toEqual(['IDo1.f3', 'Area30 mm²']);
+  expect([...card.querySelectorAll('[data-info-row]')].map(row => row.textContent)).toEqual(['IDf:base.make_box1.3', 'Area30 mm²']);
   const value = card.querySelectorAll<HTMLElement>('[data-info-row] > div')[1];
   expect(value.className).toContain('cursor-pointer');
   fireEvent.click(value);
@@ -53,7 +53,7 @@ it('a click on a chip copies its reference and says so in its place; a touch ope
   const title = within(card).getByRole('button', { name: 'Copy reference base · face 3' });
   fireEvent.click(title);
   await settle();
-  expect(copied.at(-1)).toBe('/models/base.step#o1.f3');
+  expect(copied.at(-1)).toBe('/models/base.step#f:base.make_box1.3');
   expect(title.hasAttribute('data-copied')).toBe(true);
   expect(title.querySelector('svg.lucide-check')).not.toBeNull();
 });
@@ -72,7 +72,7 @@ it('past the first few, the rest are one "+N more" chip: a narrow list whose row
   fireEvent.pointerDown(row, { pointerType: 'mouse' });
   fireEvent.click(row);
   await settle();
-  expect(copied).toEqual(['/models/base.step#o1.f6']);
+  expect(copied).toEqual(['/models/base.step#f:base.make_box1.6']);
   fireEvent.click(list.getByRole('button', { name: 'Remove base · face 6' }));
   expect(onRemove).toHaveBeenCalledOnce();
 });
@@ -123,7 +123,7 @@ it("a card's ID is one monospace line, its middle cut where it is long, the whol
   fireEvent.pointerDown(screen.getByRole('button', { name: 'base · face 2' }), { pointerType: 'touch' });
   fireEvent.click(screen.getByRole('button', { name: 'base · face 2' }));
   await settle();
-  expect(document.querySelector('[data-chip-id]')!.textContent).toBe('o1.f2');
+  expect(document.querySelector('[data-chip-id]')!.textContent).toBe('f:base.make_box1.2');
 });
 
 it("a chip's part name is cut at sixteen characters, the number after it whole; a document of one part shows the kind and number alone", async () => {

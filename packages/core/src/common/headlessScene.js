@@ -236,15 +236,3 @@ export function headlessSceneModel(THREE, scene, { look = null, receiveShadows =
   };
   return model;
 }
-
-// Explode is asked of a scene that has parts to move apart (a GLB of several); any other
-// file was refused it before the job got here (`validate_display_for_kind`), but how many parts a
-// GLB has is known only once it is read. Refused, never drawn as though it had not been asked.
-export function refuseUnexplodable(scene, job) {
-  const exploded = job?.display?.exploded;
-  if (!exploded || typeof exploded !== "object" || exploded.enabled === false || Number(exploded.amount ?? 0.5) <= 0) return;
-  if (!scene.explodeParts) {
-    throw new Error(`display.exploded moves a model's parts apart; ${String(job?.resolved?.inputPath || "this GLB").split("/").pop()} has `
-      + "fewer than two rigid nodes that draw, so there is nothing to explode. Remove display.exploded.");
-  }
-}

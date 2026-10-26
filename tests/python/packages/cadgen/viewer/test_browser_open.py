@@ -30,26 +30,32 @@ class BrowserOpenTest(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def await_gone(self, path, within=5.0):
-        deadline = time.monotonic() + within
-        while path.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        return not path.exists()
-
     def test_the_opener_gets_an_owner_only_file_that_holds_the_url_and_is_removed_after(self):
-        given = []
-        with mock.patch.object(browser_open, 'KEEP_SECONDS', 0.2):
+        given, later = [], []
+
+        class Thread:  # the remover the open starts, run here once the file is read
+            def __init__(self, target, **_options):
+                later.append(target)
+
+            def start(self):
+                pass
+
+        with mock.patch.object(browser_open.threading, 'Thread', Thread):
             path = browser_open.open_page(URL, opener=lambda target: given.append(target) or True)
-            self.assertEqual(len(given), 1)
-            self.assertNotIn('secret-token', given[0])
-            self.assertEqual(Path(url2pathname(urlsplit(given[0]).path)), path)  # /C:/... on Windows
-            self.assertEqual(path.parent, self.engine)
-            if os.name != 'nt':
-                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
-            page = path.read_text(encoding='utf-8')
-            self.assertIn('url=http://127.0.0.1:4321/abc?token=secret-token', page)
-            self.assertIn('location.replace("http://127.0.0.1:4321/abc?token=secret-token")', page)
-            self.assertTrue(self.await_gone(path), 'the redirect file was removed')
+        self.assertEqual(len(given), 1)
+        self.assertNotIn('secret-token', given[0])
+        self.assertEqual(Path(url2pathname(urlsplit(given[0]).path)), path)  # /C:/... on Windows
+        self.assertEqual(path.parent, self.engine)
+        if os.name != 'nt':
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        page = path.read_text(encoding='utf-8')
+        self.assertIn('url=http://127.0.0.1:4321/abc?token=secret-token', page)
+        self.assertIn('location.replace("http://127.0.0.1:4321/abc?token=secret-token")', page)
+        (remove,) = later
+        with mock.patch.object(browser_open.time, 'sleep') as slept:
+            remove()
+        slept.assert_called_once_with(browser_open.KEEP_SECONDS)
+        self.assertFalse(path.exists(), 'the redirect file was removed')
 
     def test_a_file_an_exited_process_left_is_removed_by_the_next_open(self):
         left = self.engine / 'open-0000000000000000.html'

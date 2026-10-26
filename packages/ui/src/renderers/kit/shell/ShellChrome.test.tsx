@@ -459,7 +459,7 @@ async function enterPreview(user: ReturnType<typeof userEvent.setup>) {
 const previewSettings = () => screen.queryByRole('region', { name: 'Preview settings' });
 
 it("three surfaces: the strip, the sidebar's tiles and the stack share the light chrome surface; the sidebar's panel and Preview's settings, read while they are up, are between; Display's dropdown is the most opaque", async () => {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ skipHover: true });
   frame();
   expect(new Set([FLOATING_CHROME_SURFACE_CLASS, FILE_SIDEBAR_SURFACE_CLASS, FLOATING_SURFACE_CLASS]).size).toBe(3);
   const classes = (element: Element) => element.className.split(/\s+/);
@@ -481,7 +481,7 @@ it("three surfaces: the strip, the sidebar's tiles and the stack share the light
 });
 
 it("Preview is in Render: the strip, the view's controls, the stack and the file sidebar step aside; its bar holds the file's name, its settings (Orbit and Render's) and the way out, which brings back the tool in hand and the file's own mode", async () => {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ skipHover: true });
   frame();
   await user.click(tool('Pose'));
   expect(tileNames()).toEqual(['Harness tree', 'Reference', 'Position']);
@@ -640,7 +640,7 @@ it("Preview's bar is its name and its two controls alone; it and the playbar go 
 });
 
 it("Preview settings is pressed while its panel is open and a second press closes it; the panel slides in and out from the view's right edge as the file sidebar's does", async () => {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ skipHover: true });
   frame();
   await enterPreview(user);
   const button = () => within(previewBar()!).getByRole('button', { name: 'Preview settings' });
@@ -667,7 +667,7 @@ it("Preview settings is pressed while its panel is open and a second press close
 });
 
 it("under a FileViewer the navbar steps aside for Preview's bar, and is back as Preview closes", async () => {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ skipHover: true });
   const host = testHost({ links: viewerLinks({ version: '0.7.5' }), environment: { colorScheme: 'light', platform: 'darwin' },
     files: { id: 'one', stat: async (path: string) => ({ path, name: path.split('/').pop()!, kind: 'file', extension: 'harness', size: 1 }) } });
   render(<FileViewer file="/models/one.harness" host={host as any} renderers={[createHarnessRenderer({ preferences: tabSettings() })]}
@@ -697,7 +697,7 @@ function previewOrbit(user: ReturnType<typeof userEvent.setup>) {
 }
 
 it("Preview opens still: Orbit, in its settings, turns the camera, and a speed chosen is the file's view's, never Orbit on or off, kept between visits", async () => {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ skipHover: true });
   const { orbit, enter, speedOnceOn, choose } = previewOrbit(user);
   const states: any[] = [];
   const view = frame({ onStateChange: state => states.push(state) });
@@ -719,14 +719,14 @@ it("Preview opens still: Orbit, in its settings, turns the camera, and a speed c
 });
 
 it("Orbit's speed comes back with the file's view", async () => {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ skipHover: true });
   frame({ state: writeFileView({ playback: { orbitSpeed: 2 } }) });
   await enterPreview(user);
   expect([previewProps.current.orbit, previewProps.current.orbitSpeed]).toEqual([false, 2]);
 });
 
 it('Escape puts the tool in hand down and takes Select up, what it set kept', async () => {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ skipHover: true });
   frame({ viewer: true });
   await user.click(tool('Pencil'));
   expect(tool('Pencil').getAttribute('aria-pressed')).toBe('true');
@@ -749,7 +749,7 @@ it("what a person uses is counted for the host by name: a tool taken up and how 
   let now = 5_000_000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   const reports: { control: string; count: number; seconds: number }[][] = [];
-  const user = userEvent.setup();
+  const user = userEvent.setup({ skipHover: true });
   const view = frame({ usage: counts => reports.push(counts) });
   fireEvent.click(tool('Pencil'));
   now += 5_000;

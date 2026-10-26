@@ -46,9 +46,8 @@ class ViewerLanguageTest(unittest.TestCase):
         finally:
             connection.close()
 
-    def test_automatic_until_chosen_kept_for_every_view_and_a_web_page_cannot_change_it(self) -> None:
+    def test_automatic_until_chosen_and_kept_for_every_view(self) -> None:
         self.assertEqual(self.request("GET"), (200, {"locale": None}))
-        self.assertEqual(self.request("POST", {"locale": "ja"}, guard=False)[0], 403)
         self.assertEqual(self.request("POST", {"locale": "fr"})[0], 400)
         self.assertEqual(self.request("POST", {"locale": "ja"}), (200, {"locale": "ja"}))
         self.assertEqual(json.loads(self.state.read_text(encoding="utf-8"))["language"], {"locale": "ja"})

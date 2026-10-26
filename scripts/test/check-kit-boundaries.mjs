@@ -272,6 +272,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const host = checkFileViewerBoundary(repo);
   const shared = checkSharedSceneBuilders(repo);
   const errors = [...kit.errors, ...slices.errors, ...host.errors, ...shared.errors];
-  if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; }
+  if (errors.length) {
+    console.error(errors.join('\n'));
+    // Rule 2 reads every line, a comment's as much as code's: a comment naming a format fails it too.
+    if (kit.errors.some(error => / names /.test(error))) {
+      console.error('The kit names no format, STEP concept, file-kind switch, topology or selector, in code or in a comment: reword the line '
+        + '(a comment counts too) or move what needs the word into a renderer.');
+    }
+    process.exitCode = 1;
+  }
   else console.log(`Kit boundaries passed (${kit.sourceCount} format-blind sources); renderer slices passed (${RENDERER_SLICES.join(', ')}: ${slices.sourceCount} sources); the file viewer imports no slice (${host.sourceCount} sources); the viewer and the snapshot CLI share ${shared.pieceCount} scene pieces.`);
 }
