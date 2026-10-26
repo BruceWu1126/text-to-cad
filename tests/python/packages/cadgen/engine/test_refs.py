@@ -191,3 +191,14 @@ def setUpModule() -> None:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NearestTest(unittest.TestCase):
+    def test_an_unknown_owner_is_answered_with_each_near_occurrence_once_in_the_tree_s_order(self) -> None:
+        from cadgen.engine import refs
+
+        children = [{"name": "plate", "prototype": 0}] + [{"name": f"standoff_{i}", "prototype": 1} for i in range(4)]
+        root = refs.structure_tree({"tree": {"name": "kit", "children": children}})
+        # Not `standoff_3, standoff_2, standoff_1, standoff_0, kit/standoff_3`: one part, one name.
+        self.assertEqual(refs._nearest(root, "standoff"), "standoff_0, standoff_1, standoff_2, standoff_3")
+        self.assertEqual(refs._nearest(root, "kit/plat").split(", ")[0], "plate", "matched by its path, named as its owner")
