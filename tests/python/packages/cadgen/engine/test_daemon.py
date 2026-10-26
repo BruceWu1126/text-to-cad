@@ -1148,7 +1148,9 @@ class DaemonTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-daemon-")).resolve()
-        self.addCleanup(shutil.rmtree, self.folder, True)
+        # These are independent fixtures, not moved scripts: keep each original present while
+        # the class's shared registry can match another fixture to it.
+        self.addClassCleanup(shutil.rmtree, self.folder, True)
         self.state, self.env = self.shared
         self.script = self.folder / "block.py"
 

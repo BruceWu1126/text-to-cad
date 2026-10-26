@@ -358,6 +358,9 @@ class DaemonProgressTest(unittest.TestCase):
         self.folder = Path(tempfile.mkdtemp(prefix="engine-progress-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
+                                          "CADGEN_STATE_DIR": str(self.state / "state"),
+                                          "CADGEN_CACHE_DIR": str(self.state / "cache"),
+                                          "CADGEN_LAUNCHER_DIR": str(self.state / "bin"),
                                           "CADGEN_ENGINE_MESH": "inline"}, self.addCleanup)
         # This process asks the test's daemon what it holds (``busy``), never starting one.
         self.enterContext(mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)}))
