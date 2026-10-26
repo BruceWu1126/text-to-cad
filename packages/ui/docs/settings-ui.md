@@ -19,23 +19,26 @@ belong to apps through the [host contract](viewer-host.md).
 FileViewer owns the navbar — the logo's app menu ([Settings](#settings)) included, built from
 the host's `links` and the `appSettings` `CadViewer` hands it — and the name menu (a popover
 under the file's name: Recent and Files, the file explorer). RendererShell owns the scene's chrome: the tool strip and
-the view's controls at its end (Display, Preview), the sub-toolbar of the tool in hand under
-it, the file sidebar, Quick Edit, the view cube and Preview. Renderers supply
+the view's controls at its end (Projection, Display, Preview), the sub-toolbar of the tool in hand under
+it, the file sidebar, Quick Edit, the view cube and Preview, with Preview's own bar in the navbar's place. Renderers supply
 their tools, their tools' rows, their sidebar sections and their document state; the shell never
 inspects a format's parts, joints or topology. No pick or tool opens or closes the explorer.
 
 | The host (web, desktop) supplies | The shared UI decides |
 | --- | --- |
 | Where the tab record lives (`TabRecordStorage`: the web's sessionStorage, the CAD app's memory) | The record: its settings (the file sidebar's and tool stack's layout, the appearance, the home's layout) and the view of the file on screen (its camera, Display settings, its playback settings, and renderer slices), what is written when, and what is never stored (`@text-to-cad/ui/tab-store`, `kit/shell/fileView.js`) |
-| `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings), `colorScheme` (the person's theme and how it changes) | The navbar's order and look, over a file and over the home, the app menu (one menu in the viewer and on the home) and what a new issue says |
+| `chrome` (the navbar, `"page"`, or the view alone, `"bare"`), `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings), `colorScheme` (the person's theme and how it changes) | The navbar's order and look, over a file and over the home, the app menu (one menu in the viewer and on the home) and what a new issue says |
 | `host.files`, `fileActions`, `navigation`, `clipboard`, `promptContext`, `promptFiles` | When a copy, capture or open happens and what it carries |
 | `host.environment`: color scheme, keyboard `platform`, `reducedMotion` | How the chrome honours them |
 | `onError`, for errors the viewer hands up | Preview, tooltips, keyboard scope, the tool strip and sidebar, the camera |
 
-Hosts pass no Preview, chrome-visibility or notification props; there are
-none.
+Hosts pass no Preview or notification props; there are none. A host's one say over the chrome
+is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
 
-- **Navbar.** One row, the same in every app, over every file and over the home. Left: the text-to-cad "C"
+- **Navbar.** One row, the same wherever it is drawn, over every file and over the home: in a page's
+  chrome (`chrome: "page"`, the web viewer's), never in a host that shows the view alone
+  (`chrome: "bare"`, the CAD app's cards and tabs: below), and never in Preview, which draws its
+  own bar in its place, in every host (see [Preview](#camera-animation-and-preview)). Left: the text-to-cad "C"
   logo, named Menu, the size of the row's icon buttons, with no chevron, which opens the
   **app menu** (see [Settings](#settings)) — a host with no home has it too — then, where the
   host keeps the view's own history (`history`: the CAD app's views, which no browser holds),
@@ -58,25 +61,22 @@ none.
   is new. Then, while a person has put an alert card away: the card's own icon (a circle
   with an exclamation mark, red for an error and amber for a warning, named and hinted by
   the alert's title), which brings the card back and goes with it — the renderer's one
-  navbar action. Then, where the host shows the view small (inline in a conversation,
-  where the view is the whole viewer), its **Full size**, corner brackets. A CAD file publishes no navbar action but that
-  icon. The person's own settings, the theme among them, are never here: they are the app
+  navbar action. Then the host's own actions (the web viewer's **Export**). A CAD file publishes no
+  navbar action but that icon. The person's own settings, the theme among them, are never here: they are the app
   menu's.
 
-  *Design note: the strip is for tools; the view's controls are the navbar's.* What a host or
-  the file adds (the update, an alert's icon, Full size) is the navbar's right end, after
-  them the view's own controls, **Display** and **Preview** (`navbarSlot`), and last the
-  host's **Open in browser**, where it has one (the CAD app's). The view's controls act on
-  the whole view, whatever tool is in hand, so they are no tools. In Preview the same place
-  holds its own controls, **Preview settings** and **Exit preview**. A host with no navbar has
-  them over the view instead: Display and Preview ending the strip after a thin rule, the
-  Preview's pair in the view's top-right corner. A new per-file button that is no tool goes
-  with them.
+  *Design note: the navbar carries nothing the view needs.* What a host or the file adds (the
+  update, an alert's icon, the host's actions) is the navbar's right end. The view's own
+  controls are the strip's, in every host, with or without a navbar: **Projection**, **Display**
+  and **Preview** end it; they act on the whole view, whatever tool is in hand, so they are no
+  tools, and a new per-file button that is no tool goes with them. In Preview, Preview's own
+  controls, **Preview settings** and **Exit preview**, are its bar's. So a host may leave the
+  navbar out (`chrome: "bare"`), and Preview hides it.
 
   A host's home has the same navbar, with only the logo and its app menu (without Back to
   files) and, where the host keeps the view's history, **Back** and **Forward** at the left
-  and, at the right end, the host's update, when there is one, and **Full size**, where the
-  host shows the view small — the same buttons, sizes and places as over a file. Under it,
+  and, at the right end, the host's update, when there is one, and its actions — the same
+  buttons, sizes and places as over a file. Under it,
   the page: the TEXTTOCAD wordmark and byline, then GitHub (its mark, a link to the project:
   it is open source), Discord and X, as icon links (GitHub and Discord are the app menu's
   too, X its footer's "Made by"; no light/dark button: Theme is the menu's), then Recent with its
@@ -96,6 +96,16 @@ none.
   open that file" and the reason, each with **Go home** where the host has a home. A view
   drawn as a picture (`compact`, the home's thumbnails) has no navbar either, and draws the
   model alone: no tools, view actions, cube or Quick Edit.
+
+  A host that shows the view alone (`chrome: "bare"`: the CAD app, in Codex's tabs and Claude
+  Desktop's cards) draws no navbar over a file, over its home or over a page that will not open:
+  no logo or app menu, no Back and Forward, no name or name menu, no ⋯, no Export and no Open in
+  browser. What it still adds is its corner at the viewport's top-right, first in the column of
+  the host's notice and Quick Edit (`ViewportTopRight`): inline, where the host can show the view
+  full size, **Full size**, two diagonal arrows, a ghost icon button; then, while its install is
+  behind, the update as a notice — the update card itself, Send to agent or Copy prompt, closable
+  for the view — rather than the blue button. Over its home, which has no viewport, the same
+  corner stands at the page's top-right. In Preview it is gone with the rest of the column.
 - **Name menu** is a popover under the file's name, aligned to the name's left edge, 18rem wide
   and never resized: two stock shadcn Tabs on top, **Recent** and **Files**, sized to the
   explorer's type (`text-xs`, a 28px list), and under them the explorer's own style. It opens on
@@ -132,10 +142,10 @@ none.
 - **Tool strip** at the top centre, 8px down, never wider than the view less 8px at each
   side (it wraps before it would be): the tools, left to right, in **two sections** parted by one
   thin rule (a tool's `group`: the tools that pick, Select, Pencil, Shapes and Measure; then the
-  model's effects, Explode and Clip), and, where there is no navbar, the view's controls,
-  **Display** and **Preview**, directly after the last tool, in the same second section with no rule
+  model's effects, Explode and Clip), and the view's controls, **Projection**, **Display** and
+  **Preview**, directly after the last tool, in the same second section with no rule
   between (a file with only tools that pick has its view's controls after a rule, as their own second
-  section). Where a navbar holds the view's controls the strip is the tools alone: below. 24px tiles with 14px icons,
+  section), in every host, with a navbar or without. 24px tiles with 14px icons,
   an even 4px apart, a tool's chevron touching its button, in a 34px row (`FloatingToolBar`,
   `data-cad-toolbar`). A file with no tools has no strip. On a phone
   ([mobile](#the-file-sidebar-and-the-tool-stack)) the tiles are 36px with 18px icons, a chevron
@@ -161,7 +171,8 @@ none.
   [The file sidebar and the tool stack](#the-file-sidebar-and-the-tool-stack)).
 - **Quick Edit** at top-right, 8px in, a STEP's or a robot's: the box of the note a
   person writes to their agent, there only while something is picked, drawn or measured
-  (see [Quick Edit](#quick-edit)). The rest of the right side of the view is clear.
+  (see [Quick Edit](#quick-edit)), under the host's notice where there is one (the CAD app's
+  corner: Full size and its update). The rest of the right side of the view is clear.
 - **View cube** at bottom-right, 2px from the right and 8px off the bottom so the axes
   drawn in its lower corner never touch the edge (`VIEWPORT_CUBE_BOTTOM`), in a 6rem area:
   enlarged face/edge/corner hit areas and neutral hover and XYZ guides. A host whose own
@@ -170,17 +181,16 @@ none.
   with `--cad-viewport-corner-left: 2px` and `--cad-viewport-corner-right: auto`.
   Codex's tab presentation uses this for all its views to avoid the floating composer.
   Preview omits it, and so does a phone.
-- **Display and Preview** end the navbar, for a 3D file (`data-view-controls`, the box
-  FileViewer hands the renderer as `navbarSlot`): **Display** (the active mode's sphere: see
+- **Projection, Display and Preview** end the tool strip, for a 3D file (`data-view-controls`,
+  `FloatingToolBar`'s `views`), in every host, with a navbar or without: **Projection** (the
+  projection on screen), **Display** (the active mode's sphere: see
   [Display settings](#display-settings-and-section-primitives)) and **Preview** (a play
-  triangle, the way into Preview), the navbar's icon buttons, hinted below them. They are no
+  triangle, the way into Preview), the strip's tiles, hinted above them. They are no
   tools: pressing one leaves the tool in hand as it is. Display's dropdown opens down from its
-  button, aligned to its end, never taller than the viewer below it. A view that is not 3D has
+  button, never taller than the viewer below it. A view that is not 3D has
   none of them, and neither does a view drawn as a picture or one that is loading or failed to
-  load; in Preview the same place holds its own controls (see
-  [Preview](#camera-animation-and-preview)). With no navbar (a host showing the view
-  alone) they end the tool strip after its rule, and Preview's stand in the view's top-right
-  corner.
+  load. In Preview the strip is gone and Preview's own controls are its bar's (see
+  [Preview](#camera-animation-and-preview)).
 - **Nothing sits at the bottom centre**, in the tools view or Preview: a file's routines
   play from the file sidebar's Animation section (see [Preview](#camera-animation-and-preview)).
 - **Model update status** sits under the strip and its sub-toolbar, centred, and where
@@ -560,7 +570,7 @@ and worked with a finger, so its chrome is one step up the scale, after the plat
 guidance (Apple's 44pt and Material's 48dp touch targets, an 11pt type floor and 15-17pt body
 text, and iOS Safari zooming into any field under 16px): type 12, 13, 14 and 15px for `text-micro`,
 `text-tiny`, `text-xs` and `text-ui`; text entry 16px; menu, select and tree rows 36-40px; the
-navbar a 48px row of 36px controls; the strip and the sub-toolbars 36px tiles (the strip one row,
+navbar, and Preview's bar in its place, a 48px row of 36px controls; the strip and the sub-toolbars 36px tiles (the strip one row,
 **More tools** holding what does not fit; the drawing tools' row the same single row, wrapping where it must).
 The scale is set once, in `globals.css`, for the whole page while a phone's view is on it, so a
 portalled menu, select or hint is the same size as the chrome it opened from. There is no view
@@ -881,9 +891,8 @@ STEP context-menu items; the live `resetCamera` command takes the same fit path.
 or not, and for nothing else: a renderer declares it (`useRendererShell`'s `previewable`: STEP,
 GLB, STL/3MF, URDF/SRDF/SDF), and a view whose renderer does not (a DXF, 2D) has no Preview
 button, not a disabled one, and never enters it, whatever asks. It is the shell's own state;
-hosts neither start nor observe it. Its button is a play triangle ("Preview"), at the navbar's
-right end after Display (the renderer's `navbarSlot`; a host with no navbar has both end the
-strip). A press covers the view at once
+hosts neither start nor observe it. Its button is a play triangle ("Preview"), the strip's last
+tile after Display, in every host. A press covers the view at once
 ("Preparing preview…", in the scene's backdrop colour) and enters Preview under the cover,
 which lifts once Preview's view has presented its first frame, its published mesh is complete
 and the studio frame's picture has converged
@@ -891,16 +900,26 @@ and the studio frame's picture has converged
 waiting for more components and lifts on the picture converged, a second later at the latest — fading from
 the finished picture (`kit/shell/previewCover.js`). A view the shell set moving, Orbit
 on or a routine playing, has nothing to wait for; a published component that lands starts the
-picture again and is waited for, never read as motion. The navbar stays, so its menu and the explorer
-still lead to other files; the tool strip, its sub-toolbar, the tool stack and their resize grips, Quick
-Edit, joint handles, cube and context menu are gone (`PreviewChrome`, hidden and inert).
+picture again and is waited for, never read as motion. The navbar is gone too, in every host
+(the renderer says Preview is up, `onPreviewChange`, and FileViewer hides it until it closes), as are
+the tool strip, its sub-toolbar, the tool stack and their resize grips, Quick
+Edit, the host's notice and corner, joint handles, cube and context menu (`PreviewChrome`, hidden and
+inert); leaving Preview gives the host's chrome back as it was.
 
-Its controls are always there. At the navbar's right end, in Display's and Preview's place:
-**Preview settings** (a sliders icon, pressed while its panel is open) and the way out, an X
-(**Exit preview**), their hints below them (a host with no navbar has them at the view's
-top-right, `PreviewChrome`'s `end`, tiles with no surface under them). Under them, docked at the view's right edge, the settings panel
-(`kit/shell/PreviewSettings.jsx`), closed each time Preview opens and put away by its button
-or its own X: **Orbit** — its heading's checkbox turns the camera about the model, off every
+In the navbar's place, over the view's top edge, is **Preview's bar**: the navbar's row (36px, a
+phone's 48px) on no surface, the model showing through, with the file's or model's name at its
+left as plain words (no logo, menu, dropdown or glyph) and at its right **Preview settings** (a
+sliders icon, pressed while its panel is open, a second press closing it) and the way out, an X
+(**Exit preview**), their hints below them; nothing else, in every host (no Full size, no update,
+no Quick Edit). It and the playbar, where the file has routines, come and go together, as a
+video player's controls do (`usePreviewIdle`): up as Preview opens, gone after two seconds with no
+pointer movement over the view, back on the next movement or a tap, and on keyboard focus of
+anything in either; they stay while the pointer is on either, while something in one has the
+focus (a menu of theirs open among them) and while the settings are open. Gone, they let presses
+through to the model, and hiding never touches the routine. Under the bar's right end, docked at
+the view's right edge, the settings panel (`kit/shell/PreviewSettings.jsx`), which slides in and out
+from that edge with the file sidebar's own motion (`SIDEBAR_SLIDE_CLASS`), closed each time Preview
+opens and put away by its button or its own X: **Orbit** — its heading's checkbox turns the camera about the model, off every
 time Preview opens, and its **Speed** is a dropdown of speeds — then Render's own settings
 page (see [Display settings](#display-settings-and-section-primitives)). At the top-left, the
 file sidebar offers its **Position** and **Animation** alone, their tiles bare: Preview's own
@@ -1009,7 +1028,8 @@ delay. No native `title` anywhere in chrome. Prefer one or two words; show a
 full technical name only when it is truncated (`overflowOnly`). Quick Edit's buttons, the
 strip's buttons (Display and Preview among them; a tool with a key shows it after its name,
 muted), the drawing row's tools (each with its key), the navbar's right-hand controls (the
-update, an alert's icon, Full size), Preview's corner (Preview settings, Exit preview) and the
+update, an alert's icon, the host's actions), the CAD app's Full size, Preview's bar (Preview
+settings, Exit preview) and the
 Animation section's Reset are hinted by name — the strip's hints above their
 buttons, the others' below; there is no hint on the navbar's left (the logo,
 the file's name and the ⋯ say what they are), on Display's settings button, Playback settings, an X,

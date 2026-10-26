@@ -1,8 +1,8 @@
 # FileViewer
 
 `@text-to-cad/ui/file-viewer` exports the complete file view: one file by its
-absolute path, under the navbar, with the name menu its name opens (Recent and Files), renderer loading,
-and the loading and error pages.
+absolute path, under the navbar (or alone, `chrome: "bare"`), with the name menu its name opens
+(Recent and Files), renderer loading, and the loading and error pages.
 It imports no concrete renderer. Applications compose registrations from the
 separate `@text-to-cad/ui/renderers/*` entry points and their own
 `defineFileRenderer` definitions ([renderers](renderers.md)). A CAD host composes
@@ -55,7 +55,8 @@ itself (every CAD renderer loads the next revision behind what is on screen). A 
 file's controls are its own, over the viewport: its tool strip, the tool in hand's
 sub-toolbar, and its file sidebar
 ([the design system](settings-ui.md#the-file-sidebar-and-the-tool-stack)); the view's
-controls (Display, Preview) are the navbar's, last at its right end.
+controls (Projection, Display, Preview) end its strip, and in Preview its own bar holds
+Preview's, the navbar hidden: nothing of the view is the navbar's.
 
 Below 600px of its own width FileViewer is mobile (`useViewerMobile`). The width is a
 breakpoint boolean, never a pixel value, so a resize within one layout does not
@@ -76,9 +77,13 @@ cleanup, while it still belongs to the same source.
 
 The navbar is drawn over every file from the moment one is asked for, and over the
 host's home — only its logo and menu, without Back to files, Back and Forward where the
-host keeps the view's history, and the host's update and Full size, where they stand over
+host keeps the view's history, and the host's update and actions, where they stand over
 a file — never for a `compact` view (a
-picture: the home's thumbnails); the CAD viewer's Preview keeps it. Over a file, left to right:
+picture: the home's thumbnails), never where the host asks for the view alone
+(`chrome: "bare"`, `FileViewerProps.chrome`; the default is `"page"`: the CAD app hands
+`"bare"`, its card and tab frames being their navigation), and not while a renderer says its
+Preview is up (`RendererViewProps.onPreviewChange`): the CAD viewer's Preview draws its own
+bar in its place and gives it back as it closes. Over a file, left to right:
 
 - the text-to-cad "C" logo (named Menu, with no chevron), which opens the app menu
   (`navigation/AppMenu.jsx`): Back to files where the host has a home
@@ -101,10 +106,9 @@ at rest, the same accent background while the pointer is on it and while its men
 pointer cursor, and no tooltip.
 
 At the right, only what a host or a file adds: the host's update button, a renderer's
-actions and the host's Full size, where the host shows the view small. A renderer's
-own view controls (a 3D view's Display and Preview, or Preview's settings and Exit preview)
-follow, in the box FileViewer hands it (`navbarSlot`, `data-view-controls`), and last the
-host's Open in browser (`openInBrowser`), where the host has one.
+actions, and last the host's own (`navbarActions`: the web viewer's Export). A renderer's own
+view controls are never here: a 3D view's Projection, Display and Preview end its tool strip,
+and Preview's settings and Exit preview are Preview's bar's.
 
 The name menu is a popover under the file's name, a fixed 18rem wide and never resized. It
 floats over the view, so opening it resizes nothing, and it is built anew on each opening. Two
