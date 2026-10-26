@@ -1,6 +1,8 @@
 import { createCadClient, encodeBase64 } from '@text-to-cad/core/client';
 import type { CadClientOptions } from '@text-to-cad/core/client';
-import type { HttpReply, Server } from './server';
+import { HostError } from './bridge';
+import { isHostRefusal } from './channel';
+import { ServerError, type HttpReply, type Server } from './server';
 
 /**
  * The origin the CAD client builds its URLs against. The page's own address is the host's
@@ -90,6 +92,18 @@ function wholeOfParts(first: TunnelReply, ask: (range: string, etag: string) => 
 }
 
 /**
+ * Why a `cad_http` call got no reply, in words a person can act on, as the view shows a request's
+ * failure: the engine's own reason where it gave one (an answer that was an error), never the
+ * host's or the transport's own text (`host/channel.ts`).
+ */
+export function tunnelFailure(error: unknown): string {
+  if (isHostRefusal(error)) return 'This chat cannot connect the CAD viewer to its engine.';
+  if (error instanceof HostError && error.kind === 'timeout') return 'The CAD plugin did not answer in time.';
+  if (error instanceof ServerError) return error.message;
+  return 'The CAD plugin could not be reached.';
+}
+
+/**
  * A `fetch` over `cad_http`. It is a distinct function (never a patched
  * `window.fetch`), so the CAD client hands workers bytes rather than URLs they could not reach.
  * A GET asks for its first `TUNNEL_REPLY_MAX_BYTES` and gets the rest in parts (`wholeOfParts`).
@@ -110,8 +124,8 @@ export function createTunnelFetch(server: Pick<Server, 'http'>): typeof fetch {
         return await server.http({ method, url: target.href, headers: asked, body }, { signal: request.signal });
       } catch (error) {
         if (request.signal.aborted) throw request.signal.reason ?? error;
-        // What fetch itself throws for a request that never got a response.
-        throw new TypeError(error instanceof Error ? error.message : String(error));
+        // What fetch itself throws for a request that never got a response, in words of ours.
+        throw new TypeError(tunnelFailure(error));
       }
     };
     const reply = await send(method === 'GET' ? `bytes=0-${TUNNEL_REPLY_MAX_BYTES - 1}` : undefined);

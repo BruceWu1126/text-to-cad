@@ -43,8 +43,15 @@ export interface Bridge {
   onTeardown(listener: () => void): () => void;
 }
 
+/**
+ * How a request to the host failed: `refused`, the host answered it with an error of its own (it
+ * would not or could not carry it: the Claude app's Code tab answers every `tools/call` so); a
+ * `timeout`, no answer in time; `closed`, the page went first.
+ */
+export type HostFailure = 'refused' | 'timeout' | 'closed';
+
 export class HostError extends Error {
-  constructor(message: string, readonly code?: number) { super(message); this.name = 'HostError'; }
+  constructor(message: string, readonly code?: number, readonly kind: HostFailure = 'refused') { super(message); this.name = 'HostError'; }
 }
 
 interface Message { jsonrpc?: string; id?: string | number; method?: string; params?: any; result?: any; error?: { code?: number; message?: string } }
@@ -79,7 +86,7 @@ export function createBridge(host: Pick<Window, 'postMessage'>, self: Pick<Windo
     if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
     const id = nextId++;
     return new Promise<T>((resolve, reject) => {
-      const timer = timeoutMs ? setTimeout(() => fail(new HostError(`${method} timed out`)), timeoutMs) : undefined;
+      const timer = timeoutMs ? setTimeout(() => fail(new HostError(`${method} timed out`, undefined, 'timeout')), timeoutMs) : undefined;
       const abort = () => { notify('notifications/cancelled', { requestId: id }); fail(signal?.reason ?? new DOMException('Aborted', 'AbortError')); };
       const cleanup = () => { pending.delete(id); if (timer) clearTimeout(timer); signal?.removeEventListener('abort', abort); };
       const fail = (error: Error) => { cleanup(); reject(error); };
@@ -149,7 +156,7 @@ export function createBridge(host: Pick<Window, 'postMessage'>, self: Pick<Windo
     },
     dispose() {
       self.removeEventListener('message', receive as EventListener);
-      for (const waiting of [...pending.values()]) waiting.reject(new HostError('The page closed.'));
+      for (const waiting of [...pending.values()]) waiting.reject(new HostError('The page closed.', undefined, 'closed'));
     },
   };
 }

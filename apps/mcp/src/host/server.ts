@@ -1,6 +1,7 @@
 import type { LibraryModel } from '@text-to-cad/ui/library';
 import type { UpdateNotice } from '@text-to-cad/ui/update';
 import type { Bridge, CallOptions, ToolResult } from './bridge';
+import { isHostRefusal, type Channel } from './channel';
 
 /**
  * The launch/view protocol this page speaks with `cadgen mcp` (its `PROTOCOL`): a launch names a
@@ -25,6 +26,14 @@ export interface Launch {
   recents?: Recent[];
   /** Whether a newer text-to-cad is out, as the server last read it: the update button draws with the page. */
   notice?: UpdateNotice | null;
+  /**
+   * The ways to the engine that need no call, where it gives a page (`cadgen/mcp/server.py`'s
+   * `_reach`): `browser`, the CAD Viewer's page of what the launch shows, with its day link
+   * (`?token=`), and `engine`, that page's origin. A card whose host carries no `tools/call` links
+   * the page (`Connection.tsx`).
+   */
+  browser?: string;
+  engine?: string;
   /** A view mounted inline: its token (the agent names it by that) and its place among the chat's views. */
   view?: string;
   order?: { createdAt: number; seq: number };
@@ -60,10 +69,20 @@ export function readLaunch(result: ToolResult | undefined): Launch | null {
   return launch && typeof launch === 'object' && (launch.page === 'home' || launch.page === 'viewer') ? launch : null;
 }
 
-/** CAD's server, as this page calls it through the host. */
-export function createServer(bridge: Pick<Bridge, 'callTool'>, appToken: string) {
+/**
+ * CAD's server, as this page calls it through the host. Each call tells `channel` how it went: it came
+ * back (the host carries calls), or the host refused it itself (`host/channel.ts`).
+ */
+export function createServer(bridge: Pick<Bridge, 'callTool'>, appToken: string, channel?: Pick<Channel, 'answered' | 'refused'>) {
   async function call<T>(name: string, args: Record<string, unknown> = {}, options?: CallOptions): Promise<T> {
-    const result = await bridge.callTool(name, args, options);
+    let result: ToolResult;
+    try {
+      result = await bridge.callTool(name, args, options);
+    } catch (error) {
+      if (isHostRefusal(error)) channel?.refused();
+      throw error;
+    }
+    channel?.answered();
     if (result.isError) throw new ServerError(toolText(result));
     return (result.structuredContent || {}) as T;
   }

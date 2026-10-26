@@ -35,10 +35,12 @@ export function useHostContext(bridge: Pick<Bridge, 'hostContext' | 'onHostConte
   return useSyncExternalStore(listener => bridge.onHostContext(listener), () => bridge.hostContext, () => bridge.hostContext);
 }
 
-// What to do once this view's server has gone: the host started it, and only the host starts it again.
-const LOST: Record<Presentation, string> = {
-  tabs: 'The CAD plugin stopped responding in this thread. Restart Codex to reconnect it.',
-  inline: 'The CAD plugin stopped responding. Restart the app to reconnect it.',
+// What to do once this view's server has gone -- it answered before, and stopped: the host started
+// it, and only the host starts it again. (A chat that never carried a call is another state, with its
+// own words: `Unreachable`, `Connection.tsx`.)
+export const LOST: Record<Presentation, string> = {
+  tabs: 'The CAD plugin stopped responding in this thread. Quit and reopen Codex to restart it.',
+  inline: 'The CAD plugin stopped responding. Quit and reopen this app to restart it, then ask your agent to show the model again.',
 };
 
 // Inline, a view is a card in the chat: as tall as its width suits, within what the host allows.
