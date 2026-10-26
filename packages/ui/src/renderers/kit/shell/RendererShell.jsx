@@ -1,6 +1,5 @@
 import { VIEWPORT_INSET_PX, VIEWPORT_STACK_BOTTOM, VIEWPORT_TOP_BAR_PX } from "./viewportLayout.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { LoaderCircle, Play, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
@@ -66,9 +65,8 @@ const SIDEBAR_POSITION = Object.freeze({ top: INSET, left: INSET, bottom: INSET 
 // peek (`--cad-quick-edit-peek`, which the sheet publishes while it peeks).
 const SIDEBAR_POSITION_PHONE = Object.freeze({ top: INSET, left: INSET, bottom: `calc(var(--cad-quick-edit-peek, 0px) + ${INSET})` });
 
-/** One of the view's controls: a tile of the strip, or of Preview's corner, named on hover. */
-/** One of the view's controls in the navbar: its icon button, named on hover, below it. */
-function NavbarControl({ label, active = undefined, disabled = false, onClick, children, ...props }) {
+/** One of Preview's bar's controls: the navbar's icon button, named on hover, below it. */
+function BarControl({ label, active = undefined, disabled = false, onClick, children, ...props }) {
   return <TooltipHint content={label} side="bottom" disabled={active === true}>
     <Button type="button" variant="ghost" size="icon-xs" aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick}
       className={NAVBAR_CONTROL_CLASS} {...props}>{children}</Button>
@@ -187,7 +185,6 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   // A phone's open section is a sheet up from the bottom, where Quick Edit's peek is: it steps aside.
   // Preview's settings panel: closed as Preview opens, until its button brings it out.
   const [previewPanelOpen, setPreviewPanelOpen] = useState(false);
-  const stripButtonClass = useStripButtonClass();
   // Preview is a view of its own, mounted over the editor's as it opens (`PreviewView.jsx`), and
   // its first picture takes a moment on a large model — its scene built from the published mesh
   // and remaining components arriving — so it is covered ("Preparing preview…") until
@@ -328,8 +325,16 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     setTimeout(enter, 100);
   };
   const leavePreview = () => setPreviewing(false);
-  // The view's controls (Display and Preview, or Preview's own) are the navbar's where there is one.
-  const inNavbar = Boolean(view.navbarSlot);
+  // Preview's bar names what it shows: the file's name, or its path's last part.
+  const previewName = view.file?.name || String(view.file?.path ?? "").split("/").pop() || "";
+  // While Preview is up the host's chrome steps aside (FileViewer's navbar): said as it opens, and as
+  // it closes or the view goes.
+  const onPreviewChange = view.onPreviewChange;
+  useEffect(() => {
+    if (!previewing || !onPreviewChange) return undefined;
+    onPreviewChange(true);
+    return () => onPreviewChange(false);
+  }, [previewing, onPreviewChange]);
   // The drawing tools' sub-toolbar, one row under the strip while Pencil or Shapes is the tool: what it draws with, what the next mark
   // looks like, and Undo, Redo and Clear (`annotation/toolbar.jsx`). The annotation itself has no
   // panel: it is Quick Edit's chip (its X clears it, a click copies it).
@@ -567,26 +572,18 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                   orbit={orbitPlaying} orbitSpeed={frame.previewOrbitSpeed ?? 1} />
               </div> : null}
 
-              {/* Preview: the tools put away and the navbar kept (the way to other files), the model in
-                  Render — the tools view never is — and still until Orbit is turned on. Its controls
-                  are the navbar's (below): its settings, a panel docked at the view's top-right (Orbit,
-                  Render's own), closed as it opens, and the way out. A file with routines has its
-                  playbar under the model; there is no sidebar. */}
-              {/* Preview's own controls at the navbar's right end (`view.navbarSlot`): its settings (a toggle,
-                  the panel docked at the view's top-right) and the way out. The strip is hidden in Preview,
-                  so they stand there; a host with no navbar has them in Preview's top-right corner. */}
-              {inNavbar && shell.previewable && previewing ? createPortal(<>
-                <NavbarControl label={t("preview.settings")} active={previewPanelOpen} disabled={shell.idle}
-                  onClick={() => { if (!previewPanelOpen) controls.used("preview_settings"); setPreviewPanelOpen(open => !open); }} data-preview-settings=""><SlidersHorizontal className="size-3.5" aria-hidden="true" /></NavbarControl>
-                <NavbarControl label={t("preview.exit")} onClick={leavePreview}><X className="size-3.5" aria-hidden="true" /></NavbarControl>
-              </>, view.navbarSlot) : null}
-              <PreviewChrome active={previewing}
-                end={inNavbar ? null : <>
-                  <ToolbarButton label={t("preview.settings")} tooltipSide="bottom" active={previewPanelOpen} aria-pressed={previewPanelOpen}
-                    disabled={shell.idle} className={stripButtonClass} onClick={() => { if (!previewPanelOpen) controls.used("preview_settings"); setPreviewPanelOpen(open => !open); }} data-preview-settings="">
-                    <SlidersHorizontal aria-hidden="true" />
-                  </ToolbarButton>
-                  <ViewControl label={t("preview.exit")} tooltipSide="bottom" onClick={leavePreview}><X aria-hidden="true" /></ViewControl>
+              {/* Preview: the tools put away and the host's navbar too (FileViewer hides it while
+                  `view.onPreviewChange` says Preview is up), the model in Render — the tools view never
+                  is — and still until Orbit is turned on. In the navbar's place, Preview's own bar over
+                  the view's top edge, on no surface, gone while the pointer rests (`PreviewChrome`): the
+                  file's name, and at its right its settings (a toggle, the panel docked under it at the
+                  view's right edge: Orbit, Render's own), closed as it opens, and the way out. The same in
+                  every host. A file with routines has its playbar under the model; there is no sidebar. */}
+              <PreviewChrome active={previewing} name={previewName}
+                controls={<>
+                  <BarControl label={t("preview.settings")} active={previewPanelOpen} disabled={shell.idle}
+                    onClick={() => { if (!previewPanelOpen) controls.used("preview_settings"); setPreviewPanelOpen(open => !open); }} data-preview-settings=""><SlidersHorizontal className="size-3.5" aria-hidden="true" /></BarControl>
+                  <BarControl label={t("preview.exit")} onClick={leavePreview}><X className="size-3.5" aria-hidden="true" /></BarControl>
                 </>}
                 panel={previewPanelOpen ? <PreviewSettings orbit={orbitPlaying} onOrbitChange={shell.setOrbiting}
                   speed={frame.previewOrbitSpeed || 1} onSpeedChange={frame.setPreviewOrbitSpeed}

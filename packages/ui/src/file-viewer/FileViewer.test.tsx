@@ -1,4 +1,3 @@
-import { createPortal } from 'react-dom';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -76,30 +75,26 @@ it('draws no navbar where the host asks for the view alone (`chrome: "bare"`): o
   expect(labels()).toEqual(['Menu', 'Back', 'Forward', 'Update to 0.7.5', 'Full size', 'Export']);
 });
 
-it('keeps the right of the navbar for the host\'s update button and Full size, then hands the renderer a box for its own view controls, then the host\'s Open in browser, last; a view shown small has no navbar and no box', async () => {
-  // A renderer that draws its view controls into the box it is handed (the CAD viewer's Display
-  // and Preview), and over its view where it is handed none.
-  const handed: (HTMLElement | null)[] = [];
-  const slotted = defineFileRenderer({
-    id: 'slotted', priority: 2, matches: () => true, prepare: async () => ({ data: null }),
+it('keeps the right of the navbar for the host\'s update button, Full size and Open in browser, and hides the navbar while the renderer says its Preview is up', async () => {
+  // A renderer whose Preview a test opens and closes, as the CAD shell reports it.
+  let report: ((previewing: boolean) => void) | undefined;
+  const previewed = defineFileRenderer({
+    id: 'previewed', priority: 2, matches: () => true, prepare: async () => ({ data: null }),
     load: async () => ({ default: (props: any) => {
-      handed.push(props.navbarSlot ?? null);
-      expect('onFullscreenChange' in props).toBe(false);
-      const control = <button type="button" aria-label="Preview" />;
-      return props.navbarSlot ? createPortal(control, props.navbarSlot) : control;
+      report = props.onPreviewChange;
+      expect(['navbarSlot' in props, 'onFullscreenChange' in props]).toEqual([false, false]);
+      return <p>shown</p>;
     } }),
   });
-  const view = (extra: object = {}) => render(<FileViewer file={FILE} host={{ ...host, ...extra } as any} renderers={[slotted]} state={{}} onStateChange={() => {}}
+  render(<FileViewer file={FILE} host={host as any} renderers={[previewed]} state={{}} onStateChange={() => {}}
     update={<button type="button" aria-label="Update to 0.7.5" />} fullSize={<button type="button" aria-label="Full size" />}
     openInBrowser={<button type="button" aria-label="Open in browser" />} />);
-  view();
-  await screen.findByRole('button', { name: 'Preview' });
-  expect([labels(), screen.getByRole('button', { name: 'Preview' }).parentElement!.hasAttribute('data-view-controls')]).toEqual([['Update to 0.7.5', 'Full size', 'Preview', 'Open in browser'], true]);
-  cleanup();
-  handed.length = 0;
-  view({ environment: { colorScheme: 'light', compact: true } });
-  await screen.findByRole('button', { name: 'Preview' });
-  expect([navbar(), handed.at(-1)]).toEqual([null, null]);
+  await screen.findByText('shown');
+  expect([labels(), document.querySelector('[data-view-controls]')]).toEqual([['Update to 0.7.5', 'Full size', 'Open in browser'], null]);
+  act(() => report!(true));
+  expect([navbar(), screen.getByText('shown')]).toEqual([null, expect.anything()]);
+  act(() => report!(false));
+  expect(navbar()).not.toBeNull();
 });
 
 it('draws Back and Forward between the logo and the file\'s name where the host keeps the view\'s own history, each disabled where it has nowhere to go', async () => {

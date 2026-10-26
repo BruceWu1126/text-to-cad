@@ -38,10 +38,10 @@ const TAB_CONTROLS = Object.freeze({ recent: "recent", files: "explorer" });
  * Right, only what a host or a file adds: the host's update button while its install is behind
  * (`update`, the blue `UpdateButton` from `@text-to-cad/ui/update`); the file's own actions (the
  * CAD viewer's one: a dismissed alert's icon, which brings its card back); the host's way to show
- * the view full size (`fullSize`), where it shows it small; the renderer's own view controls,
- * drawn into the box it is handed (`controlsRef`: a 3D view's Display and Preview, or in Preview
- * its settings and the way out); last, the host's way to open what is shown in a page of its own
- * outside the host (`openInBrowser`: the CAD app's Open in browser). The colour scheme is the app menu's.
+ * the view full size (`fullSize`), where it shows it small; the host's own actions (`actions`: the
+ * web viewer's Export); last, the host's way to open what is shown in a page of its own outside the
+ * host (`openInBrowser`). The colour scheme is the app menu's. A view's own controls are never here:
+ * Display and Preview end its tool strip, and in Preview the navbar steps aside for Preview's bar.
  *
  * Nothing here is drawn for its own sake: a control appears only where it does something.
  */
@@ -196,10 +196,9 @@ function FileName({ path, name: given, kind = "file", explorer, recent }) {
  * @param {import("react").ReactNode} [props.update] The host's update button, first among the controls.
  * @param {import("react").ReactNode} [props.fullSize] The host's Full size button, where it shows the view small.
  * @param {import("react").ReactNode} [props.openInBrowser] The host's way to open what is shown outside it, last in the row.
- * @param {(element: HTMLDivElement | null) => void} [props.controlsRef] The box the renderer draws its view controls into.
  * @param {string} [props.className]
  */
-export function ViewerNavbar({ onHome: goHome, menu = null, history = null, file = null, name, kind = "file", explorer = null, recent = null, fileMenu = null, trailing = null, update = null, fullSize = null, openInBrowser = null, controlsRef, actions = null, className }) {
+export function ViewerNavbar({ onHome: goHome, menu = null, history = null, file = null, name, kind = "file", explorer = null, recent = null, fileMenu = null, trailing = null, update = null, fullSize = null, openInBrowser = null, actions = null, className }) {
   const { t } = useI18n();
   const usage = useControlUsage();
   const onHome = goHome ? () => { usage.used("home"); goHome(); } : goHome;
@@ -217,7 +216,6 @@ export function ViewerNavbar({ onHome: goHome, menu = null, history = null, file
         {update}
         {trailing}
         {fullSize}
-        {controlsRef ? <div ref={controlsRef} className="contents" data-view-controls="" /> : null}
         {actions}
         {openInBrowser}
       </div>

@@ -125,11 +125,10 @@ export interface RendererViewProps {
   file: FileMetadata;
   source: FileSource;
   /**
-   * The navbar's box for the renderer's own view controls, last at its right end (the CAD
-   * viewer's Display and Preview, for a 3D view); null where no navbar is drawn (a compact view),
-   * when the renderer draws them over its view instead.
+   * The renderer's Preview is up (`true`) or has closed (`false`): FileViewer hides its navbar while
+   * it is, Preview drawing its own bar in its place.
    */
-  navbarSlot?: HTMLElement | null;
+  onPreviewChange?: (previewing: boolean) => void;
   onReady: (ready: boolean) => void;
   /**
    * Show another file, by its absolute path, in this view (a robot's mesh). Absent where the view

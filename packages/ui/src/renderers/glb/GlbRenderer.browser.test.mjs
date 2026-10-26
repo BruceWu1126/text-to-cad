@@ -183,7 +183,7 @@ const differingPixels = (left, right) => {
   return count;
 };
 const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-// Render is Preview's: in by Preview at the strip's end and out by Exit preview in the navbar, each once the view has
+// Render is Preview's: in by Preview at the strip's end and out by Exit preview in Preview's bar, each once the view has
 // come together under its cover.
 async function togglePreview(page, pane, enter) {
   await pane.getByRole('button', { name: enter ? 'Preview' : 'Exit preview', exact: true }).click();
