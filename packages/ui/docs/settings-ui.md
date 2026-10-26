@@ -217,7 +217,12 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   file handler's corner: Full size and its update). The rest of the right side of the view is clear.
 - **View cube** at bottom-right, 2px from the right and 8px off the bottom so the axes
   drawn in its lower corner never touch the edge (`VIEWPORT_CUBE_BOTTOM`), in a 6rem area:
-  enlarged face/edge/corner hit areas and neutral hover and XYZ guides. A host whose own
+  enlarged face/edge/corner hit areas and neutral hover and XYZ guides. In the area's top-right
+  corner, which the guides (drawn from the cube's negative corner) never reach, is **Fit**
+  (lucide `Scan`, hinted "Fit F" above it): the fit F makes, counted as F's (`fit`). It is
+  measured in the cube's own box, a fifth of its side (19px at 6rem), its glyph 70% of that, in
+  the ink of the cube's home corner dot, lighting as a face does when hovered; it comes and goes
+  with the cube. A host whose own
   control floats over that corner lifts it clear with `--cad-viewport-corner-bottom`, the
   room that control takes from the bottom edge. A host can instead anchor it at bottom-left
   with `--cad-viewport-corner-left: 2px` and `--cad-viewport-corner-right: auto`.
@@ -1078,7 +1083,7 @@ chat's frame), so its tool keys work with no press in it first (`file-viewer/tak
   field or Preview, take a tool up as a design or CAD tool's do: **V** Select, **M** Measure;
   **P** the Pen, **⇧P** the Highlighter, **E** the Eraser; **R** the Rectangle, **L** the Line,
   **⇧L** the Arrow, **O** the Ellipse, **T** Text (each taking up Pencil or Shapes with that
-  tool in hand); and **F** frames the model (Zoom to fit). A tool already in hand stays so.
+  tool in hand); and **F** frames the model (Zoom to fit, the view cube's Fit). A tool already in hand stays so.
   Each key shows after its name in its button's tooltip ("Measure M", muted), and Pencil's and
   Shapes' tooltips name what they draw with now ("Rectangle R").
 
@@ -1091,8 +1096,8 @@ strip's buttons (Display and Preview among them; a tool with a key shows it afte
 muted), the drawing row's tools (each with its key), the navbar's right-hand controls (the
 update, an alert's icon, the host's actions: the CAD app's Full size and Open in browser among them), Preview's bar (Preview
 settings, Exit preview) and the
-Animation section's Reset are hinted by name — the strip's hints above their
-buttons, the others' below; there is no hint on the navbar's left (the logo,
+Animation section's Reset and the view cube's Fit ("Fit F") are hinted by name — the strip's and
+Fit's hints above their buttons, the others' below; there is no hint on the navbar's left (the logo,
 the file's name and the ⋯ say what they are), on Display's settings button, Playback settings, an X,
 the transport (play, pause, the scrubber), the drawing row's settings or labelled text
 buttons (Quick Edit's alone say what they do). A disabled, selected or expanded control has none; pressing or leaving cancels a

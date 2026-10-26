@@ -692,11 +692,20 @@ test('Preview draws the robot as it opens, and leaving it finds the tools view a
   assert.equal(await pane.locator('[data-file-sidebar-room]').isHidden(), true, 'no file sidebar in Preview');
   assert.equal(await pane.locator('[data-preview-playbar]').count(), 0, 'no playbar for a file with no routine');
   assert.equal(await pane.locator('[data-viewer-navbar]').count(), 0, 'no navbar in Preview');
+  // The tools view's cube stays under Preview's view, which covers it, its Fit with it: what is on
+  // top where Fit sits is Preview's picture.
+  const fitReached = () => page.evaluate(() => {
+    const fit = document.querySelector('[data-view-cube-fit]');
+    const box = fit?.getBoundingClientRect();
+    return Boolean(box && fit.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)));
+  });
+  assert.equal(await fitReached(), false, 'no view cube, and so no Fit, in Preview');
   assert.deepEqual(await pane.locator('[data-preview-bar] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
     ['Preview settings', 'Exit preview']);
 
   // Leaving finds the tools view's work as it was left.
   await exitPreview();
+  assert.equal(await fitReached(), true, 'the cube\'s Fit is back with it');
   assert.deepEqual(await robot.links(), posed, 'the pose comes back');
   await robot.pressed(['Select upper_arm'], 'the selection comes back');
   assert.equal(await pane.getByRole('button', { name: 'Reveal base', exact: true }).count(), 1, 'the base is still hidden');

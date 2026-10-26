@@ -634,15 +634,16 @@ async function modeCameraGate() {
           failures.push(`step revision: a touched camera moved on a rebuild (${drift.toExponential(2)} relative) — `
             + `${describeCamera(kept)}, was ${describeCamera(handFramed)}`);
         }
-        // Their fit frames the revision on screen, about its own centre, at the angle they left
-        // (the ruler's 100% is the default angle's, so it is not read here), and the camera is
-        // untouched again.
-        await resetView(revision.page);
+        // Their fit, the view cube's Fit, frames the revision on screen, about its own centre, at
+        // the angle they left (the ruler's 100% is the default angle's, so it is not read here),
+        // and the camera is untouched again.
+        await revision.page.getByRole("button", { name: "Fit", exact: true }).click();
+        await settledCameraFrame(revision.page, { stage: "the cube's Fit" });
         const fitted = await cameraState(revision.page);
         if (!fitted || fitted.target.some((value, axis) => Math.abs(value - firstFit.target[axis]) > 1e-6) || fitted.zoom !== 1) {
-          failures.push(`step revision: Zoom to fit did not frame the first revision — ${describeCamera(fitted)}`);
+          failures.push(`step revision: the cube's Fit did not frame the first revision — ${describeCamera(fitted)}`);
         } else if (!sameDirection(fitted, handFramed)) {
-          failures.push(`step revision: Zoom to fit turned the view — ${describeCamera(fitted)}`);
+          failures.push(`step revision: the cube's Fit turned the view — ${describeCamera(fitted)}`);
         }
         if (fitted?.untouched !== true) failures.push(`step revision: a fit did not hand the camera back (${fitted?.untouched})`);
       }
