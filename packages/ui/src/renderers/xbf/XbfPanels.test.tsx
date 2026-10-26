@@ -13,6 +13,9 @@ import { xbfModelMenu, xbfPartMenu } from '../../../dist/renderers/xbf/xbfMenus.
 import { assemblyPartMenuEntries } from '../../../dist/renderers/xbf/xbfMenuItems.js';
 import { selectRenderer } from '../../../dist/file-viewer/registry.js';
 import { createXbfRenderer } from '../../../dist/renderers/xbf/index.js';
+import QuickEdit from '../../../dist/renderers/kit/tools/quick-edit/QuickEdit.js';
+import { ViewerHostContext } from '../../../dist/host/context.js';
+import { testHost } from '../../../dist/host/testing/host.js';
 
 // An engine document's panels are the ones a STEP's renderer had: the same Model tree over the same
 // assembly, the same selection filter, the same Position section, the same chips. While that
@@ -350,6 +353,46 @@ it("Quick Edit's chips name a selection as a STEP's do: a part or subassembly it
     'arm_1 · 2 faces|face|{"name":"arm_1","kind":"face","count":2}',
     'pin · edge 2|edge|{"name":"pin","kind":"edge","number":"2"}',
   ]);
+});
+
+// A STEP of one part whose label holds spaces, as the engine serves it: a face it names, the rest by number.
+const BRACKET = 'L bracket 80 x 60 x 6 mm';
+const bracket = {
+  name: BRACKET, version: '1-1', units: 'mm',
+  prototypes: [{ index: 0, key: 'k-bracket', name: BRACKET, color: null, faceNames: { 7: 'f:bracket_body.body_bcndnk~ba6e1714f88b' }, edgeNames: {}, faceColors: {} }],
+  instances: [{ prototype: 0, path: `${BRACKET}/${BRACKET}`, matrix: [], color: null }],
+  tree: { name: BRACKET, children: [{ name: BRACKET, prototype: 0, instance: 0 }] },
+};
+
+function StepQuickEdit({ ids }: { ids: string[] }) {
+  const tree = presentXbfTree(bracket);
+  const scene = {
+    structure: bracket,
+    describePart: (id: string) => ({ name: id }),
+    describeElement: (id: string) => {
+      const [, kind, ordinal] = /^i0\/(face|edge)\/(\d+)$/.exec(id) || [];
+      return kind ? { id, kind, ordinal: Number(ordinal), instance: 0, key: 'k-bracket', path: `${BRACKET}/${BRACKET}`,
+        name: (bracket.prototypes[0] as any)[`${kind}Names`][ordinal] || '' } : null;
+    },
+    measureParts: () => null,
+  };
+  const resource = { kind: 'workspace-file', path: '/models/STEP/bracket.step' };
+  const { references, chips } = useXbfSelectionChips({ scene, tree, resource, selectedIds: ids, facts: new Map(), onRemove: () => {}, onHover: () => {} });
+  return <ViewerHostContext.Provider value={testHost()}><div data-slot="cad-file-view">
+    <QuickEdit resource={resource} references={references} chips={chips} />
+  </div></ViewerHostContext.Provider>;
+}
+
+it("a face picked on a STEP's page opens Quick Edit with its reference, named or not, as on an .xbf's", () => {
+  const box = () => screen.queryByRole('region', { name: 'Quick Edit' });
+  const { rerender } = render(<StepQuickEdit ids={[]} />);
+  expect(box()).toBeNull();
+  // A named face, a face by its number, the part: each is a reference, which opens the box with its chip.
+  for (const id of ['i0/face/7', 'i0/face/3', 'i0']) {
+    rerender(<StepQuickEdit ids={[id]} />);
+    expect(box(), id).not.toBeNull();
+    expect(box()!.textContent, id).toContain(BRACKET);
+  }
 });
 
 function Card({ id, measured }: { id: string, measured: object }) {

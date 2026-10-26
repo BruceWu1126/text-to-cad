@@ -144,8 +144,9 @@ src/
                    #   drawing2d/ (a cadgen drawing payload, a DXF's ->
                    #   Canvas 2D, text by fillText:
                    #   fit/pan/zoom maths, batched Path2D, screen-width strokes),
-                   #   cadRefs (the ref grammars: an .xbf's, parity-tested
-                   #   against engine/refs.py; a STEP's, by its own cases)
+                   #   cadRefs (the ref grammars: the engine's, for an .xbf
+                   #   and a STEP, parity-tested against engine/refs.py;
+                   #   a label, for any other file)
 scripts/           # chunk-ids.mjs (the pages' builds: a chunk's debug id) and
                    #   source-maps.mjs (the pages' builds: maps into the packages'
                    #   src/), beside the package's own build and test runners
@@ -153,9 +154,9 @@ docs/              # subsystem docs (the map below)
 ```
 
 Contract mirrors that must stay in lockstep (each has a sync test):
-`lib/cadRefs.js` ↔ `cadgen/engine/refs.py` (an `.xbf`'s refs: their parse and their
-canonical spelling), one fixture, `lib/cadRefs.parity.json`, which also holds a
-STEP's grammar's cases.
+`lib/cadRefs.js` ↔ `cadgen/engine/refs.py` (an engine document's refs, an `.xbf`'s and
+a STEP's: their parse and their canonical spelling), one fixture, `lib/cadRefs.parity.json`,
+which also holds the element names `cadgen/engine/naming.py` reads.
 
 Where the mechanism is written:
 

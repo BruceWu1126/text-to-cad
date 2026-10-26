@@ -1,4 +1,4 @@
-import { buildCadRefToken, isDocumentId, isEngineRefFile, isEngineSelector, parseCadRefSelector, parseCadRefToken } from '../lib/cadRefs.js';
+import { buildCadRefToken, isDocumentId, isEngineRefFile, isEngineSelector, isLabelSelector, parseCadRefToken } from '../lib/cadRefs.js';
 
 let operationSequence = 0;
 const operationNamespace = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
@@ -29,13 +29,11 @@ export function validatePromptReference(reference) {
     requireValue(target.end.line > target.start.line || (target.end.line === target.start.line && target.end.character >= target.start.character), 'range end precedes its start');
   } else if (target.kind === 'cad-selector') {
     requireValue(resource.kind === 'workspace-file' || resource.kind === 'cad-model', 'CAD selectors require a file or a model');
-    // An .xbf's and a model's selectors are the engine's grammar; any other file's are a STEP's (cadRefs.js).
-    const engine = isEngineRefFile(resource.path);
-    requireValue(Array.isArray(target.selectors) && target.selectors.length > 0 && target.selectors.every(selector => {
-      if (engine) return isEngineSelector(selector);
-      const parsed = typeof selector === 'string' && selector === selector.trim() ? parseCadRefSelector(selector) : null;
-      return parsed && parsed.selectorType !== 'opaque';
-    }), 'invalid CAD selector');
+    // A document the engine draws (an .xbf, a STEP, a model) is named in the engine's grammar; any
+    // other file by its renderer's labels (cadRefs.js).
+    const valid = isEngineRefFile(resource.path) ? isEngineSelector : isLabelSelector;
+    requireValue(Array.isArray(target.selectors) && target.selectors.length > 0 && target.selectors.every(selector => valid(selector)),
+      'invalid CAD selector');
   } else requireValue(target.kind === 'whole-resource', 'unknown reference target');
   return reference;
 }
@@ -101,7 +99,7 @@ export function promptReferenceIds(reference) {
 
 /**
  * A line that is one reference and nothing else — a file's absolute path and the ids in it, as a
- * copied reference is written (`/models/base.step#o1.f2`) — as that reference; null for any other.
+ * copied reference is written (`/models/base.step#base/face 3`) — as that reference; null for any other.
  */
 export function parsePromptReference(text) {
   const line = String(text || '').trim();

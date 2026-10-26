@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPromptContext, createPromptDeliveryLedger, referencePart, textPart, validatePromptContext, formatPromptContextText, formatPromptMessage, formatPromptReference, parsePromptReference, validatePromptReference, promptReferenceIds, resolveAttachmentPaths } from './index.js';
 
-// A ref is `<occurrence token>/<element name>`, as cadgen and the viewer compose it.
-const FACE = 'o:3f2a9c1d7e5b/f:bracket.extrude1.3';
-const EDGE = 'o:3f2a9c1d7e5b/e:bracket.fillet1.2';
+// A STEP's ref is the engine's: its part's label, then its element's name, as `cadgen inspect` writes it.
+const FACE = 'bracket/f:bracket.extrude1.3';
+const EDGE = 'bracket/e:bracket.fillet1.2';
 const reference = { resource: { kind: 'workspace-file', path: '/work/STEP/my part.step', revision: 'v1' }, target: { kind: 'cad-selector', selectors: [FACE] } };
 test('one context retains image/reference relationships and formats canonical references', () => {
   const capture = Promise.resolve(new Blob(['png'], { type: 'image/png' }));
@@ -19,7 +19,7 @@ test('a message says what the person wrote, then the file, its references and a 
   const annotation = { id: 'annotation', kind: 'attachment', name: 'part-annotation.png', mimeType: 'image/png', content: new Blob(), about: ['file'], label: 'Annotation' };
   const context = createPromptContext([textPart('Round this edge.\n'), referencePart(file, 'file'), referencePart(reference, 'face'), annotation]);
   assert.equal(formatPromptMessage(context, { attachmentPath: part => `/tmp/${part.name}` }),
-    'Round this edge.\n\nFile: "/work/STEP/my part.step"\nReferences:\n"/work/STEP/my part.step"#o:3f2a9c1d7e5b/f:bracket.extrude1.3\nAnnotation: /tmp/part-annotation.png');
+    'Round this edge.\n\nFile: "/work/STEP/my part.step"\nReferences:\n"/work/STEP/my part.step"#bracket/f:bracket.extrude1.3\nAnnotation: /tmp/part-annotation.png');
   // A picture sent beside the text is not named in it.
   assert.equal(formatPromptMessage(createPromptContext([textPart('Why?'), referencePart(file, 'file'), annotation])), 'Why?\n\nFile: "/work/STEP/my part.step"');
 });
@@ -35,17 +35,25 @@ test('a file already saved says where, as soon as it is; one that never will be 
     'Thicker.\n\nFile: "/work/STEP/my part.step"\nViews: /tmp/p/part-1.job.json');
   assert.throws(() => validatePromptContext({ ...context, parts: [...context.parts.slice(0, 2), { ...views, path: 7 }] }), /attachment path/);
 });
-test('an .xbf is referenced in the engine\'s grammar: one line per reference, pasted back as it was copied', () => {
+test('an .xbf and a STEP are referenced in the engine\'s grammar: one line per reference, pasted back as it was copied', () => {
   // The canonical refs Copy Prompt writes (`cadgen.engine.refs`): an occurrence path, a quoted label, an element by number.
   const selectors = ['kit/hand/finger.2/face 7', '"M3, M4 screw"/e:screw.body.2', 'v1.5 bracket'];
   const resource = { kind: 'workspace-file', path: '/work/XBF/kit.xbf' };
   const lines = selectors.map(selector => formatPromptReference({ resource, target: { kind: 'cad-selector', selectors: [selector] } }));
   assert.deepEqual(lines, selectors.map(selector => `/work/XBF/kit.xbf#${selector}`));
   for (const [index, line] of lines.entries()) assert.deepEqual(parsePromptReference(line), { resource, target: { kind: 'cad-selector', selectors: [selectors[index]] } });
-  // What the engine refuses is no reference, and a STEP's selectors are still its own grammar's.
+  // A STEP's are the same grammar's: a part labelled with spaces, a face by its number.
+  const step = { kind: 'workspace-file', path: '/work/STEP/bracket.step' };
+  const face = 'L bracket 80 x 60 x 6 mm/face 4';
+  assert.equal(formatPromptReference({ resource: step, target: { kind: 'cad-selector', selectors: [face] } }), `/work/STEP/bracket.step#${face}`);
+  assert.deepEqual(parsePromptReference(`/work/STEP/bracket.step#${face}`), { resource: step, target: { kind: 'cad-selector', selectors: [face] } });
+  // What the engine refuses is no reference, and a file it does not draw is named by labels alone.
   assert.throws(() => referencePart({ resource, target: { kind: 'cad-selector', selectors: ['kit//face 1'] } }), /invalid CAD/);
+  assert.throws(() => referencePart({ resource: step, target: { kind: 'cad-selector', selectors: ['bracket/'] } }), /invalid CAD/);
   assert.equal(parsePromptReference('/work/XBF/kit.xbf#kit/'), null);
-  assert.throws(() => referencePart({ ...reference, target: { kind: 'cad-selector', selectors: ['kit/hand/finger.2/face 7'] } }), /invalid CAD/);
+  const urdf = { kind: 'workspace-file', path: '/work/arm.urdf' };
+  assert.deepEqual(parsePromptReference('/work/arm.urdf#upper_arm'), { resource: urdf, target: { kind: 'cad-selector', selectors: ['upper_arm'] } });
+  assert.throws(() => referencePart({ resource: urdf, target: { kind: 'cad-selector', selectors: ['kit/hand/finger.2/face 7'] } }), /invalid CAD/);
 });
 test('code targets preserve explicit ranges rather than borrowing the CAD fragment grammar', () => {
   const code = { resource: { kind: 'workspace-file', path: '/work/src/bracket.py' }, target: { kind: 'text-range', start: { line: 4, character: 2 }, end: { line: 6, character: 0 } } };
@@ -64,7 +72,8 @@ test('invalid bundles fail before delivery, including dangling relationships and
   assert.throws(() => createPromptContext([{ id: 'i', kind: 'attachment', name: 'a.pdf', mimeType: 'application/pdf', content: new Blob(), about: ['missing'] }]), /absent reference/);
   assert.throws(() => referencePart({ ...reference, target: { kind: 'guess' } }), /unknown reference/);
   for (const path of ['STEP/relative.step', '/work/../outside.step', 'C:\\work\\a.step']) assert.throws(() => referencePart({ ...reference, resource: { ...reference.resource, path } }), /absolute/);
-  assert.throws(() => referencePart({ ...reference, target: { kind: 'cad-selector', selectors: ['#not valid'] } }), /invalid CAD/);
+  assert.throws(() => referencePart({ ...reference, target: { kind: 'cad-selector', selectors: ['bracket//face 1'] } }), /invalid CAD/);
+  assert.throws(() => referencePart({ resource: { kind: 'workspace-file', path: '/work/arm.urdf' }, target: { kind: 'cad-selector', selectors: ['#not valid'] } }), /invalid CAD/);
 });
 test('a delivery ledger delivers each operation once, bounds work in flight, and forgets what failed', async () => {
   const ledger = createPromptDeliveryLedger({ maxPending: 2, maxRemembered: 3, busyMessage: 'busy' });

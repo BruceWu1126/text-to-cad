@@ -1,28 +1,28 @@
-// Two ref grammars. An engine document's (`.xbf`) is the engine's own, at the end of this module
-// ("The engine's grammar"). A STEP's is the one described here, until the engine's carries over.
+// Two kinds of ref. Every document the engine draws -- an `.xbf`, a STEP (`.step`, `.stp`), a
+// document the engine holds by its id -- is named in the engine's own grammar, at the end of this
+// module ("The engine's grammar"), the one `cadgen inspect` and `select` read. Any other file the
+// viewer draws (a robot description, a mesh, a drawing) names what is picked by its renderer's own
+// name for it, a plain label a selector (`robot.urdf#upper_arm`, `bracket.dxf#h2F`, `part.glb#glb:3`).
 //
-// A STEP's ref grammar, which the CAD Viewer copies for a STEP whichever renderer draws it. A ref names an
-// occurrence by its token (`o:` + 12 hex, minted from its place in the tree) and an element by the
-// occurrence's token, a slash and the element's name: its kind (`f:`, `e:`, `v:`) and its
-// derivation from the features that made it -- an atom (the n-th element of its kind a feature
-// made, `dial.make_box1.6`, or a derivation folded to a feature and a digest,
-// `dial.cut3~5d1e0c2f9a3b`) and a step per feature that made it out of another (`;M:dial.cut1`
-// modified, `;Gf:` generated from a face, `;U2:`, `;L:`, `;D2` ...):
-// `#o:4b1f9e2a7c03/f:dial.make_box1.6;M:dial.cut1`. A feature the author labelled goes by the label
-// (`f:lid.2`). An element no construction names (an imported file's) is named by its geometric
-// token, 12 hex (`f:9d2e8c1b5a70`). A part label stands in for an occurrence token (`#base`,
-// `#base/f:dial.make_box1.6`); a bare element name resolves in a document with one leaf. A name is
-// an opaque string this grammar admits: nothing here reads a derivation. Its cases are
-// cadRefs.parity.json's `selectorCases`, `inheritanceCases` and `tokenCases`.
-//
-// `<file>#<selectors>`, file half optional.
-// The prefix sits LEFT of the '#' so it can never collide with the selector grammar on the right.
-// JSON-quote paths containing whitespace or delimiters: `"my part.step"#o:4b1f9e2a7c03`.
+// `<file>#<selectors>`, file half optional, the selectors a comma list; a file's token stops at a
+// blank. The prefix sits LEFT of the '#' so it can never collide with the selectors on the right.
+// JSON-quote paths containing whitespace or delimiters: `"my robot.urdf"#base_link`.
 const CAD_TOKEN_RE = /^\s*("(?:[^"\\\r\n]|\\.)*"|[^#"\s]*)#([^\s]*)/;
-const OCCURRENCE_TOKEN_SOURCE = "o:[0-9a-f]{12}";
-// A feature is a label or `function.operationN`; segments start with a
-// letter and numbers with a digit, so the two never read as one another, and a geometric token
-// holds no dot.
+// A label: what a robot, mesh or drawing renderer names a pick by.
+const LABEL_SELECTOR_RE = /^[A-Za-z_][A-Za-z0-9_:]*$/;
+
+// An element's name, in the engine's grammar: its kind (`f:`, `e:`, `v:`) and its derivation from
+// the features that made it -- an atom (the n-th element of its kind a feature made,
+// `dial.make_box1.6`, or a derivation folded to a feature and a digest, `dial.cut3~5d1e0c2f9a3b`)
+// and a step per feature that made it out of another (`;M:dial.cut1` modified, `;Gf:` generated
+// from a face, `;U2:`, `;L:`, `;D2` ...): `f:dial.make_box1.6;M:dial.cut1`. A feature the author
+// labelled goes by the label (`f:lid.2`); an element no construction names (an imported file's) by
+// its geometric token, 12 hex (`f:9d2e8c1b5a70`). A name is an opaque string the grammar admits:
+// nothing here reads a derivation. Its cases are cadRefs.parity.json's `elementNameCases`, which
+// cadgen/engine/naming.py's `ELEMENT_NAME` reads too.
+//
+// A feature is a label or `function.operationN`; segments start with a letter and numbers with a
+// digit, so the two never read as one another, and a geometric token holds no dot.
 const SEGMENT_SOURCE = "[A-Za-z_][A-Za-z0-9_]*";
 const NUMBER_SOURCE = "[1-9][0-9]*";
 const HEX12_SOURCE = "[0-9a-f]{12}";
@@ -32,231 +32,33 @@ const STEP_SOURCE =
   `;(?:(?:(?:M|MG[fev]|G[fev]|U)(?:${NUMBER_SOURCE})?|L):${FEATURE_NAME_SOURCE}(?:\\+[fev]:${ATOM_SOURCE})*` +
   `|D${NUMBER_SOURCE})`;
 const ELEMENT_NAME_SOURCE = `[fev]:(?:${HEX12_SOURCE}|${ATOM_SOURCE}(?:${STEP_SOURCE})*)`;
-const OCCURRENCE_SELECTOR_RE = new RegExp(`^(${OCCURRENCE_TOKEN_SOURCE})$`);
-const OCCURRENCE_ELEMENT_SELECTOR_RE = new RegExp(`^(${OCCURRENCE_TOKEN_SOURCE})/(${ELEMENT_NAME_SOURCE})$`);
 const ELEMENT_SELECTOR_RE = new RegExp(`^(${ELEMENT_NAME_SOURCE})$`);
-const MATE_SELECTOR_RE = /^m\d+$/i;
 
-// A part label.
-const LABEL_SOURCE = "[A-Za-z_][A-Za-z0-9_:]*";
-const LABEL_SELECTOR_RE = new RegExp(`^(${LABEL_SOURCE})$`);
-const LABEL_ELEMENT_SELECTOR_RE = new RegExp(`^(${LABEL_SOURCE})/(${ELEMENT_NAME_SOURCE})$`);
-const OCCURRENCE_TOKEN_RE = new RegExp(`^${OCCURRENCE_TOKEN_SOURCE}$`);
+// An occurrence token (`o:` + 12 hex), as an older GLB names the nodes it places.
+const OCCURRENCE_TOKEN_RE = /^o:[0-9a-f]{12}$/;
 
-/**
- * Whether `candidate` is a ref in the grammar itself -- an occurrence token, an occurrence/element
- * pair, a bare element name or a mate -- rather than a label or an opaque string.
- */
-export function isNativeCadSelector(candidate) {
-  const parsed = parseStructuredSelector(candidate);
-  if (!parsed || parsed.label) {
-    return false;
-  }
-  return parsed.selectorType !== "opaque" || MATE_SELECTOR_RE.test(parsed.canonical);
-}
-
-/** Whether `value` is an occurrence token (`o:` + 12 hex). */
+/** Whether `value` is an occurrence token (`o:` + 12 hex): a GLB node's name for what it places. */
 export function isOccurrenceToken(value) {
   return OCCURRENCE_TOKEN_RE.test(String(value || "").trim());
 }
 
-/** Whether `value` is an element name (`f:`, `e:` or `v:` and its lineage or geometric token). */
-export function isElementName(value) {
-  return ELEMENT_SELECTOR_RE.test(String(value || "").trim());
+/**
+ * Whether `selector` is a selector of a file the engine does not draw: a label (`upper_arm`, `h2F`,
+ * `glb:3`), as its renderer names a pick.
+ */
+export function isLabelSelector(selector) {
+  return typeof selector === "string" && LABEL_SELECTOR_RE.test(selector);
 }
 
-function selectorTypeForKind(kind) {
-  if (kind === "f") {
-    return "face";
-  }
-  if (kind === "e") {
-    return "edge";
-  }
-  return "vertex";
-}
-
-/** The one composition rule: `<occurrence token>/<element name>`. */
-export function elementRef(occurrenceId, element) {
-  return `${occurrenceId}/${element}`;
-}
-
-/** `{ owner, element }` of an element ref (`o:…/f:…`, `label/f:…`), or null for anything else. */
-export function splitElementRef(selector) {
-  const text = String(selector || "").trim().replace(/^#/, "");
-  const slash = text.indexOf("/");
-  if (slash <= 0) {
-    return null;
-  }
-  const owner = text.slice(0, slash);
-  const element = text.slice(slash + 1);
-  return isElementName(element) ? { owner, element } : null;
-}
-
-function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inheritedLabel = "" } = {}) {
-  const selector = String(rawSelector || "").trim().replace(/^#/, "");
-  if (!selector) {
-    return null;
-  }
-
-  const occurrenceElementMatch = selector.match(OCCURRENCE_ELEMENT_SELECTOR_RE);
-  if (occurrenceElementMatch) {
-    const occurrenceId = occurrenceElementMatch[1];
-    const element = occurrenceElementMatch[2];
-    return {
-      selectorType: selectorTypeForKind(element[0]),
-      occurrenceId,
-      element,
-      kind: element[0],
-      canonical: elementRef(occurrenceId, element)
-    };
-  }
-
-  const occurrenceMatch = selector.match(OCCURRENCE_SELECTOR_RE);
-  if (occurrenceMatch) {
-    return {
-      selectorType: "occurrence",
-      occurrenceId: occurrenceMatch[1],
-      element: "",
-      kind: "",
-      canonical: occurrenceMatch[1]
-    };
-  }
-
-  const elementMatch = selector.match(ELEMENT_SELECTOR_RE);
-  if (elementMatch) {
-    const element = elementMatch[1];
-    const kind = element[0];
-    if (inheritedOccurrenceId) {
-      return {
-        selectorType: selectorTypeForKind(kind),
-        occurrenceId: inheritedOccurrenceId,
-        element,
-        kind,
-        canonical: elementRef(inheritedOccurrenceId, element)
-      };
-    }
-    // An inherited label carries forward exactly like an inherited occurrence token.
-    if (inheritedLabel) {
-      return {
-        selectorType: selectorTypeForKind(kind),
-        occurrenceId: "",
-        element,
-        kind,
-        label: inheritedLabel,
-        canonical: elementRef(inheritedLabel, element)
-      };
-    }
-    return {
-      selectorType: selectorTypeForKind(kind),
-      occurrenceId: "",
-      element,
-      kind,
-      canonical: element
-    };
-  }
-
-  // Label forms are tried only after every token and name form, so neither is read as a label.
-  // Mates look like labels and are excluded explicitly.
-  if (!MATE_SELECTOR_RE.test(selector)) {
-    const labelElementMatch = selector.match(LABEL_ELEMENT_SELECTOR_RE);
-    if (labelElementMatch) {
-      const label = labelElementMatch[1];
-      const element = labelElementMatch[2];
-      return {
-        selectorType: selectorTypeForKind(element[0]),
-        occurrenceId: "",
-        element,
-        kind: element[0],
-        label,
-        canonical: elementRef(label, element)
-      };
-    }
-
-    const labelMatch = selector.match(LABEL_SELECTOR_RE);
-    if (labelMatch) {
-      const label = labelMatch[1];
-      return {
-        selectorType: "label",
-        occurrenceId: "",
-        element: "",
-        kind: "",
-        label,
-        canonical: label
-      };
+// A file's selectors as a token writes them: trimmed, once each, in order.
+function labelSelectorList(selectors) {
+  const list = [];
+  for (const selector of selectors) {
+    for (const each of String(selector ?? "").split(",").map(text => text.trim())) {
+      if (each && !list.includes(each)) list.push(each);
     }
   }
-
-  return {
-    selectorType: "opaque",
-    occurrenceId: "",
-    element: "",
-    kind: "",
-    canonical: selector
-  };
-}
-
-export function parseCadRefSelector(rawSelector, options = {}) {
-  return parseStructuredSelector(rawSelector, options);
-}
-
-export function normalizeCadRefSelectors(selectors) {
-  const rawSelectors = Array.isArray(selectors)
-    ? selectors.flatMap((selector) => String(selector || "").split(","))
-    : String(selectors || "").split(",");
-  const normalizedSelectors = [];
-  let inheritedOccurrenceId = "";
-  let inheritedLabel = "";
-
-  for (const rawSelector of rawSelectors) {
-    const parsedSelector = parseStructuredSelector(rawSelector, { inheritedOccurrenceId, inheritedLabel });
-    if (!parsedSelector) {
-      continue;
-    }
-    normalizedSelectors.push(parsedSelector.canonical);
-    // Whichever naming scheme was used becomes the context for following bare elements,
-    // and clears the other one.
-    if (parsedSelector.occurrenceId) {
-      inheritedOccurrenceId = parsedSelector.occurrenceId;
-      inheritedLabel = "";
-    } else if (parsedSelector.label) {
-      inheritedLabel = parsedSelector.label;
-      inheritedOccurrenceId = "";
-    }
-  }
-
-  return normalizedSelectors;
-}
-
-export function sortCadRefSelectors(selectors) {
-  const normalizedSelectors = normalizeCadRefSelectors(selectors);
-  const uniqueSelectors = [...new Set(normalizedSelectors.filter(Boolean))];
-  const rank = {
-    occurrence: 1,
-    label: 1,
-    face: 3,
-    edge: 4,
-    vertex: 5,
-    opaque: 6
-  };
-  return uniqueSelectors
-    .map((selector, index) => ({ selector, index, parsed: parseStructuredSelector(selector) }))
-    .sort((left, right) => {
-      const leftOccurrence = left.parsed?.occurrenceId || left.parsed?.label || "";
-      const rightOccurrence = right.parsed?.occurrenceId || right.parsed?.label || "";
-      if (leftOccurrence !== rightOccurrence) {
-        return leftOccurrence.localeCompare(rightOccurrence);
-      }
-      const leftRank = rank[left.parsed?.selectorType] ?? 99;
-      const rightRank = rank[right.parsed?.selectorType] ?? 99;
-      if (leftRank !== rightRank) {
-        return leftRank - rightRank;
-      }
-      if (left.selector !== right.selector) {
-        return left.selector.localeCompare(right.selector);
-      }
-      return left.index - right.index;
-    })
-    .map((item) => item.selector);
+  return list;
 }
 
 export function parseCadRefToken(copyText) {
@@ -274,11 +76,10 @@ export function parseCadRefToken(copyText) {
   if (cadPath.startsWith('"')) {
     try { cadPath = JSON.parse(cadPath); } catch { return null; }
   }
-  const selectorText = String(match[2] || "").trim();
   return {
     token: match[0],
     cadPath,
-    selectors: normalizeCadRefSelectors(selectorText)
+    selectors: labelSelectorList([match[2] || ""])
   };
 }
 
@@ -287,7 +88,7 @@ export function buildCadRefToken({ cadPath = "", selector = "", selectors } = {}
   const given = selectors !== undefined ? selectors : selector ? [selector] : [];
   // An engine document's selectors keep their order (`select` answers one shape per selector, in
   // order), and a comma inside a quoted label never splits one.
-  const selectorList = isEngineRefFile(prefix) ? engineSelectorList(given) : sortCadRefSelectors(given);
+  const selectorList = isEngineRefFile(prefix) ? engineSelectorList(given) : labelSelectorList(given);
   // `<prefix>#` with no selectors is meaningful -- it names a whole file.
   const encodedPrefix = /[\s#"\\]/.test(prefix) ? JSON.stringify(prefix) : prefix;
   return `${encodedPrefix}#${selectorList.join(",")}`;
@@ -295,11 +96,10 @@ export function buildCadRefToken({ cadPath = "", selector = "", selectors } = {}
 
 // ---- The engine's grammar -----------------------------------------------------------------------
 //
-// An engine document (`.xbf`) is named as the engine names it, in the grammar `cadgen inspect` and
-// `select` read: cadgen/engine/refs.py's `parse`, mirrored here case for case. The `refCases` of
-// cadRefs.parity.json are asserted against both parsers, and its `spellingCases` against
-// `spellEngineRefs` here and the resolution `cadgen inspect` runs there.
-//
+// A document the engine draws (an `.xbf`, a STEP, a document by its id) is named as the engine names
+// it, in the grammar `cadgen inspect` and `select` read: cadgen/engine/refs.py's `parse`, mirrored
+// here case for case. The `refCases` of cadRefs.parity.json are asserted against both parsers, and
+// its `spellingCases` against `spellEngineRefs` here and the resolution `cadgen inspect` runs there.
 //   REF      = [FILE "#"] SELECTOR ("," SELECTOR)*     a bare ELEMENT after an owner is that owner's
 //   SELECTOR = OWNER | [OWNER "/"] ELEMENT              no OWNER: the document's root
 //   OWNER    = SEGMENT ("/" SEGMENT)*                   an occurrence's path, or its last segments
@@ -317,7 +117,7 @@ const PY_STRIP_RE = new RegExp(`^[${PY_SPACE}]+|[${PY_SPACE}]+$`, "g");
 const ENGINE_ORDINAL_RE = new RegExp(`^(face|edge|vertex)[${PY_SPACE}]*([1-9][0-9]*)$`);
 const ENGINE_INDEXED_RE = /^([\s\S]+)\.([1-9][0-9]*)$/;
 const ENGINE_NUMBER_RE = /\.([1-9][0-9]*)/y;
-const ENGINE_REF_FILE_RE = /\.xbf$/i;
+const ENGINE_REF_FILE_RE = /\.(?:xbf|step|stp)$/i;
 
 const pyStrip = text => text.replace(PY_STRIP_RE, "");
 const isBlank = character => character === " " || character === "\t";
@@ -333,9 +133,9 @@ export function isDocumentId(value) {
 }
 
 /**
- * Whether a file's refs are the engine's grammar: an `.xbf`, the engine's own document, or a document
- * the engine holds by its id (a model's). A STEP keeps its own grammar (above), whichever renderer
- * draws it.
+ * Whether a file's refs are the engine's grammar: every document the engine draws -- an `.xbf`, its
+ * own document; a STEP (`.step`, `.stp`), which it reads and serves as one; a document it holds by its
+ * id (a model's).
  */
 export function isEngineRefFile(path) {
   const text = String(path || "").trim();

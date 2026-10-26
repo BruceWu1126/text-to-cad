@@ -1,4 +1,4 @@
-import { buildCadRefToken, elementRef } from "../cadRefs.js";
+import { buildCadRefToken } from "../cadRefs.js";
 import { mergeBoundsList } from "../viewer/autoZoom.js";
 
 function isObject(value) {
@@ -238,7 +238,7 @@ function selectorForRow(selectorType, row, occurrenceId) {
   if (!element) {
     return "";
   }
-  return occurrenceId ? elementRef(occurrenceId, element) : element;
+  return occurrenceId ? `${occurrenceId}/${element}` : element;
 }
 
 // A face's, edge's or vertex's row leads with its element's name; an occurrence's `name` is
