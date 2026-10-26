@@ -62,7 +62,8 @@ class Unreadable(ValueError):
 @dataclass
 class _Written:
     signature: tuple
-    stats: dict[str, tuple | None]
+    # The xbf the model declares, if any: the path a source of its document names (``export.Source``).
+    declared: Path | None
     # The document as written, kept in memory: the next build patches it (``document.Kept``).
     kept: Any = None
     # The build closure the file holds (``previous.manifest``, as text), or None.
@@ -760,8 +761,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
         return sources[0]
 
     _outputs(plan, report, log, lambda path: document.write_bytes(path, data or b"", made_from), source, kept=True)
-    _WRITTEN[key] = _Written(signature, {str(target.path): _stat(target.path) for target in plan}, kept, tree.closure,
-                             made_from, xbf=data)
+    _WRITTEN[key] = _Written(signature, xbf, kept, tree.closure, made_from, xbf=data)
     report["id"] = model.id
     report["source"] = {"script": str(model.script), "name": model.name}
     report["key"] = model.key
@@ -814,7 +814,6 @@ def _taken_outputs(model: Any, report: dict[str, Any], log: Callable[[str], None
     data = written.xbf if written.xbf is not None else written.data or b""
     _outputs(plan, report, log, lambda path: document.write_bytes(path, data, written.tree),
              lambda: held(model.script, model.name))
-    written.stats = {str(target.path): _stat(target.path) for target in plan}
 
 
 def held(script: Path | None = None, name: str | None = None) -> Any:
@@ -826,20 +825,15 @@ def held(script: Path | None = None, name: str | None = None) -> Any:
     found = []
     for key, written in _WRITTEN.items():
         model_script, _sep, function = key.rpartition("::")
-        xbf = next((Path(target) for target in written.stats if target.endswith(".xbf")), None)
         if script is not None and (model_script != canonical(script) or (name is not None and function != name)):
             continue
-        if (written.kept is not None and written.tree is not None or written.data is not None
-                or (xbf is not None and _stat(xbf) == written.stats.get(str(xbf)))):
-            found.append((written, xbf, function))
+        found.append((written, function))  # each holds its document: built and kept, or the cache's bytes
     if len(found) != 1:
         return None
-    written, xbf, function = found[0]
+    written, function = found[0]
     if written.data is not None:
         return held_source(written.data, function)
-    if written.kept is None or written.tree is None:
-        return export.Source.read(xbf)
-    return export.Source.built(written.kept.doc, written.tree, xbf)
+    return export.Source.built(written.kept.doc, written.tree, written.declared)
 
 
 def taken(script: Path, name: str) -> bytes | None:
@@ -995,7 +989,7 @@ def _previous(model: Any, context: Any, shown: str, cache: str | None = None) ->
             return {"used": False, "reason": "its cache does not hold the closure its head shows",
                     "unreadable": True}, None
         timings["read"] = round(time.perf_counter() - keyed, 4)
-        _WRITTEN[name] = _Written(("loaded", found["key"]), {}, None, text, data=data)
+        _WRITTEN[name] = _Written(("loaded", found["key"]), None, None, text, data=data)
     else:
         # What the bodies made stays the memo's, as a replay would keep it: an edit after
         # any number of these builds replays all it leaves alone.
