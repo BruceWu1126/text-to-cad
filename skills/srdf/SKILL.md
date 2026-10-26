@@ -40,7 +40,8 @@ Do not place geometry, inertials, joint origins, link poses, mesh references, ph
 
 ## Show the model
 
-Show the user each model and file you create or change, and any they ask to see.
+Show the user each model you create or change, and any model or file they ask to see.
+A file you export is a download: give its path, do not open it.
 Snapshots and validation don't replace this. Never screenshot the viewer to confirm your
 own work; review with `cadgen snapshot`.
 
@@ -48,11 +49,12 @@ own work; review with `cadgen snapshot`.
   or the file's absolute path, and follow its description for when to call it again.
   The other tools depend on the host. A host that draws CAD cards or tabs (Claude
   Desktop, the Codex app) also has `cad_view`, which reads what the user selected, and
-  `cad_screenshot`, which shows you what they see, for when they ask about it. A text host
-  (Claude Code in a terminal, `codex exec`) draws nothing: its `cad_show` opens the
-  model's page in the user's browser and answers with the URL to give them, and it has no
-  view to read. `cad_inspect`, `cad_snapshot` and `cad_export` are on every host. Call
-  only the tools you have, and never say a card shows a model when your host drew none.
+  `cad_screenshot`, which shows you what they see, both of a card or tab that is open, for
+  when they ask about it. A text host (Claude Code in a terminal, `codex exec`) draws
+  nothing: its `cad_show` opens the model's page in the user's browser and answers with
+  the URL to give them, and it has no view to read. `cad_inspect`, `cad_snapshot` and
+  `cad_export` are on every host. Call only the tools you have, and never say a card
+  shows a model when your host drew none.
 - Otherwise give the user the page's link once: a model's page is the `view:` line its
   run prints. For a file, run the CAD Viewer, from any folder:
 
@@ -66,7 +68,8 @@ own work; review with `cadgen snapshot`.
   every later run of its model and every rewrite of its file, so share it once.
   Return that link to the user. If it fails to launch, say so.
 
-Keep the SRDF beside its uniquely matching URDF (same robot name). Review
+An `.srdf` you write is the robot's model, not an export: show it. Keep the SRDF
+beside its uniquely matching URDF (same robot name). Review
 planning groups, named states and joints; visual review does not prove planning
 correctness.
 
