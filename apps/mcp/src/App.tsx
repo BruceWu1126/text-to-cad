@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { ExternalLink, Maximize2 } from 'lucide-react';
 import { useAnalyticsConsent } from '@text-to-cad/ui/consent';
-import { useI18n, useLanguage } from '@text-to-cad/ui/i18n';
+import { translator, useI18n, useLanguage } from '@text-to-cad/ui/i18n';
 import { UpdateButton, useUpdateNotice } from '@text-to-cad/ui/update';
 import { viewerLinks } from '@text-to-cad/ui/links';
 import { Button } from '@text-to-cad/ui/primitives/button';
@@ -40,9 +40,10 @@ export function useHostContext(bridge: Pick<Bridge, 'hostContext' | 'onHostConte
 // What to do once this view's server has gone -- it answered before, and stopped: the host started
 // it, and only the host starts it again. (A chat that never carried a call is another state, with its
 // own words: `Unreachable`, `Connection.tsx`.)
+// Each said by its key in the view's language.
 export const LOST: Record<Presentation, string> = {
-  tabs: 'The CAD plugin stopped responding in this thread. Quit and reopen Codex to restart it.',
-  inline: 'The CAD plugin stopped responding. Quit and reopen this app to restart it, then ask your agent to show the model again.',
+  tabs: 'cad.lost.tabs',
+  inline: 'cad.lost.inline',
 };
 
 // Inline, a view is a card in the chat: as tall as its width suits, within what the host allows.
@@ -161,10 +162,10 @@ function OpenInBrowserButton({ open }: { open: () => void }) {
 }
 
 /** A view a newer one replaced: its last frame, and where to look now. */
-function Superseded({ still }: { still: string | null }) {
+function Superseded({ still, label }: { still: string | null; label: string }) {
   return <div className="relative flex h-full items-center justify-center bg-background" data-cad-superseded="">
     {still ? <img src={still} alt="" className="h-full w-full object-contain opacity-60" /> : null}
-    <span className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm">A newer view is below</span>
+    <span className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm">{label}</span>
   </div>;
 }
 
@@ -305,10 +306,10 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   const openInBrowser = page ? () => void openBrowserPage({ tunnel, direct: Boolean(direct), bridge, model: showingModel, page }) : null;
   const { launch } = showing;
   if (superseded) {
-    return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer}><Superseded still={still} /></Frame>;
+    return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer}><Superseded still={still} label={translator(locale)('cad.superseded')} /></Frame>;
   }
   return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer}
-    overlay={lost ? <Banner message={LOST[presentation]} /> : null}>
+    overlay={lost ? <Banner message={translator(locale)(LOST[presentation])} /> : null}>
     <ModelView launch={launch} sequence={showing.sequence} alone={alone} bridge={bridge} client={client} tunnel={tunnel}
       tabStore={tabStore} live={live} links={links} appSettings={appSettings}
       update={!updateNotice ? null : !alone ? <UpdateButton notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)} onLink={openLink} />

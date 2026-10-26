@@ -10,6 +10,7 @@ import type { Bridge } from './host/bridge';
 import { frameClipboard } from './host/clipboard';
 import type { LiveRegistry } from './host/live';
 import { createChatPromptContext, type ChatReach } from './host/prompt';
+import { translator } from '@text-to-cad/ui/i18n';
 import type { Launch } from './host/server';
 import { CardCorner } from './CardCorner';
 import type { ViewSync } from './host/sync';
@@ -96,7 +97,11 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
   showing.current = file;
   // A Quick Edit's views, annotation and pictures are made by the server, which is on this machine.
   const promptFiles = useMemo(() => createHttpPromptFiles({ origin: TUNNEL_ORIGIN, fetch: tunnel }), [tunnel]);
-  const chatContext = useMemo(() => chat.queue || chat.send ? createChatPromptContext(bridge, { reach: chat }) : null,
+  // What the chat's port says to the person, in the view's language as it is when it speaks.
+  const sayRef = useRef(translator(locale));
+  sayRef.current = translator(locale);
+  const chatContext = useMemo(() => chat.queue || chat.send
+    ? createChatPromptContext(bridge, { reach: chat, t: (key, params) => sayRef.current(key, params) }) : null,
     [chat.queue, chat.send, bridge]);
   useEffect(() => () => chatContext?.dispose(), [chatContext]);
   const promptContext = chatContext ?? unavailablePromptContext;
