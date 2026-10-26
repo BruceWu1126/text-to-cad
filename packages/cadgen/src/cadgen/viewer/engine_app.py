@@ -204,8 +204,12 @@ class EngineApp:
         self._mcp = None
         self.session_factory = session_factory
         from cadgen.analytics import Recorder
-        self.analytics = Recorder()
+        # Each sender's own recorder, so a batch says who sent it (``cadgen.analytics.PROCESSES``): the
+        # CAD app's sessions (``mcp/http.py``) are the app's, the browser viewer's page the viewer's.
+        self.analytics = Recorder(process="app")
+        self.viewer_analytics = Recorder(process="viewer")
         self.analytics.start()
+        self.viewer_analytics.start()
 
     def active(self):
         with self.lock:
@@ -222,6 +226,7 @@ class EngineApp:
         if self._mcp is not None:
             self._mcp.close()
         self.analytics.close()
+        self.viewer_analytics.close()
 
     def hold_ended(self, holder):
         """An MCP server's hold on the engine gone (``Daemon.hold``): the sessions it opened end."""
@@ -296,7 +301,7 @@ class EngineApp:
                 from .main import resolve_dist_dir
                 self._default = ViewerApp(self.server, host=self.host, port=self.server.port,
                                           dist_dir=dist or resolve_dist_dir(''))
-                self._default.analytics = self.analytics
+                self._default.analytics = self.viewer_analytics  # the browser viewer's page
                 self._default.page = True
             elif dist:
                 self._default.dist_dir = os.path.abspath(dist)
