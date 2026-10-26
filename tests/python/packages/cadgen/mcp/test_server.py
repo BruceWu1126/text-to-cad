@@ -19,6 +19,7 @@ from unittest import mock
 from urllib.parse import quote
 
 from cadgen._internal.picker import FilePicker
+from cadgen.mcp.browser import OPEN, deliver
 from cadgen.mcp.shim import initialize_params
 from cadgen.mcp.protocol import RequestContext, RpcError
 from cadgen.viewer.recents import RecentStore
@@ -95,8 +96,10 @@ class _Session(unittest.TestCase):
         page = self.tmp / "app"
         page.mkdir()
         (page / "index.html").write_text("<!doctype html><title>CAD</title>", encoding="utf-8")
-        # What the server opens in a browser, recorded and never opened: through the redirect file
-        # (``browser_open``) in this test's own engine folder, on a machine with a display.
+        # What is opened in a browser, recorded and never opened: through the redirect file
+        # (``browser_open``) in this test's own engine folder, on a machine with a display. A text
+        # host's page is opened by the stdio peer (``call`` delivers each result as it does), the
+        # card's Open in browser by the server (``browser_opener``).
         self.opened: list[str] = []
         engine = self.tmp / "opener"
         engine.mkdir(mode=0o700)
@@ -110,9 +113,15 @@ class _Session(unittest.TestCase):
         self.initialized = self.server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": self.offered,
                                                              "clientInfo": self.client}, self.launcher), None)
 
+    def record(self, target: str) -> bool:
+        self.opened.append(target)
+        return True
+
     def call(self, name: str, arguments: dict | None = None, meta: dict | None = None) -> dict:
+        """A tool's result as the host is given it: through the stdio peer, which opens what it asks."""
         context = RequestContext(1, {"threadId": "t", **(meta or {})})
-        return self.server.handle("tools/call", {"name": name, "arguments": as_page(self.server, name, arguments)}, context)
+        return deliver(self.server.handle("tools/call", {"name": name, "arguments": as_page(self.server, name, arguments)}, context),
+                       self.record)
 
     def launch(self, name: str, arguments: dict | None = None, meta: dict | None = None) -> dict:
         return self.call(name, arguments, meta)["structuredContent"]["launch"]
@@ -850,6 +859,62 @@ class TextServerTest(_Session):
                                          "bracket.stl's page is http://127.0.0.1:3245/"), shown)
         self.assertEqual(self.opened, [])
 
+    def test_the_server_asks_its_stdio_peer_to_open_the_page_and_opens_nothing_itself(self) -> None:
+        # The engine runs in the environment of whatever started it: its open could reach another
+        # person's browser, or none. Its answer names the page; the peer opens it and strips the ask.
+        import webbrowser
+
+        from cadgen.viewer import browser_open
+
+        def refuse(*_args, **_kwargs):
+            raise AssertionError("the server opened a browser")
+
+        context = RequestContext(1, {"threadId": "t"})
+        with mock.patch.object(webbrowser, "open", refuse), mock.patch.object(browser_open, "open_page", refuse):
+            raw = self.server.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}}, context)
+        link = "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"
+        self.assertEqual(raw["_meta"], {OPEN: {"url": link, "said": f"bracket.stl opened in your browser at {link}.",
+                                               "failed": "No browser can be opened from here ({reason}); "
+                                                         f"bracket.stl's page is {link}."}})
+        self.assertEqual(self.opened, [])
+        delivered = deliver(raw, self.record)
+        self.assertNotIn("_meta", delivered)
+        (target,) = self.opened
+        self.assertTrue(target.startswith("file:") and "token" not in target, target)
+        # Where the peer's open fails, its words say so in place of the claim that it opened.
+        failed = deliver(self.server.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.loose}}, context),
+                         lambda _target: False)["content"][0]["text"]
+        self.assertTrue(failed.startswith("No browser can be opened from here (no browser could be started here"), failed)
+        self.assertNotIn("opened in your browser", failed)
+
+    def test_a_client_with_no_stdio_peer_is_given_the_url_and_nothing_opens(self) -> None:
+        # A direct HTTP client: no peer said it opens a browser, so nothing does.
+        told = []
+        server = Server(page=self.server.page, recents=self.server.recents, viewer_url=self.viewer_url,
+                        browser_opened=told.append)
+        server.handle("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": self.client}, None)
+        shown = server.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}},
+                              RequestContext(1, {"threadId": "t"}))
+        self.assertNotIn("_meta", shown)
+        self.assertTrue(shown["content"][0]["text"].startswith(
+            "bracket.stl's page is http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab; nothing was opened, "
+            "as this client opens no browser.\nThis app shows no CAD view itself: give the user this URL."), shown)
+        self.assertEqual((self.opened, told), ([], []))
+
+    def test_a_peer_that_can_open_no_browser_is_asked_for_none(self) -> None:
+        from cadgen.viewer import browser_open
+
+        with mock.patch.object(browser_open, "display_refusal", return_value="this is a remote session with no display to open a browser on"):
+            server = Server(page=self.server.page, recents=self.server.recents, viewer_url=self.viewer_url)
+            server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {},
+                                                           "clientInfo": self.client}), None)
+        shown = server.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}},
+                              RequestContext(1, {"threadId": "t"}))
+        self.assertNotIn("_meta", shown)
+        self.assertTrue(shown["content"][0]["text"].startswith(
+            "No browser can be opened from here (this is a remote session with no display to open a browser on); "
+            "bracket.stl's page is http://127.0.0.1:3245/"), shown)
+
     def test_a_text_client_reaches_no_page_tool(self) -> None:
         # No page answers a card or reaches the viewer's routes here, so neither does the agent.
         for name in ("cad_sync", "cad_open"):
@@ -915,8 +980,8 @@ class CodexExecTest(_Session):
         self.assertEqual(len(self.opened), 1)
         # The next turn (`codex exec resume`, a new server process: the engine still knows the page).
         again = self.greet(None, in_browser=lambda model: model in pages)
-        shown = again.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}},
-                             RequestContext(1, {"threadId": "t", **self.EXEC}))["content"][0]["text"]
+        shown = deliver(again.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}},
+                                     RequestContext(1, {"threadId": "t", **self.EXEC})), self.record)["content"][0]["text"]
         self.assertTrue(shown.startswith("bracket.stl is already open in your browser at http://127.0.0.1:3245/"), shown)
         self.assertEqual(len(self.opened), 1)
 
@@ -924,8 +989,8 @@ class CodexExecTest(_Session):
         # codex-cli 0.153 sends no turn metadata: the launcher alone says it.
         server = self.greet(CODEX_EXEC)
         self.assertEqual([tool["name"] for tool in server.handle("tools/list", {}, None)["tools"]][:2], ["cad_show", "cad_http"])
-        shown = server.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}},
-                              RequestContext(1, {"threadId": "t"}))["content"][0]["text"]
+        shown = deliver(server.handle("tools/call", {"name": "cad_show", "arguments": {"source": self.bracket}},
+                                      RequestContext(1, {"threadId": "t"})), self.record)["content"][0]["text"]
         self.assertTrue(shown.startswith("bracket.stl opened in your browser at http://127.0.0.1:3245/"), shown)
         self.assertEqual(len(self.opened), 1)
 

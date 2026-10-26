@@ -19,6 +19,15 @@ from cadgen.viewer.engine_client import EngineClient
 from tests.python.support import engine_daemon
 
 INIT = {'protocolVersion': '2025-11-25', 'clientInfo': {'name': 'codex-mcp-client'}, 'capabilities': {}}
+TEXT = {'protocolVersion': '2025-11-25', 'clientInfo': {'name': 'some-cli'}, 'capabilities': {}}
+# A ``BROWSER`` that records each page it is given, and who gave it (its parent's pid), and opens nothing.
+RECORDER = """import json, os, sys
+from urllib.parse import unquote, urlsplit
+page = open(unquote(urlsplit(sys.argv[1]).path), encoding='utf-8').read()
+with open({record!r}, 'a', encoding='utf-8') as out:
+    out.write(json.dumps({{'who': {who!r}, 'pid': os.getppid(), 'page': page}}) + '\\n')
+sys.exit({code})
+"""
 
 
 class HttpSessionsTest(unittest.TestCase):
@@ -27,25 +36,90 @@ class HttpSessionsTest(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory(prefix='mcp-http-')
         cls.addClassCleanup(cls.tmp.cleanup)
         cls.root = Path(cls.tmp.name)
+        cls.page = cls.root / 'page'
+        cls.page.mkdir()
+        (cls.page / 'index.html').write_text('<!doctype html><title>test app</title>', encoding='utf-8')
+        # The engine's browser refuses and records any page it is given: it should be given none.
+        cls.opened = cls.root / 'opened.jsonl'
+        cls.engine_browser = cls.browser('engine', 1)
         cls.env = engine_daemon.watched({**os.environ, 'CADGEN_ENGINE_DIR': str(cls.root / 'engine'),
-                   'CADGEN_STATE_DIR': str(cls.root / 'state'), 'CADGEN_ENGINE_MESH': 'inline'}, cls.addClassCleanup)
+                   'CADGEN_STATE_DIR': str(cls.root / 'state'), 'CADGEN_ENGINE_MESH': 'inline',
+                   'CADGEN_VIEWER_DIST': str(cls.page), 'BROWSER': cls.engine_browser}, cls.addClassCleanup)
         changed = patch.dict(os.environ, cls.env)
         changed.start()
         cls.addClassCleanup(changed.stop)
         from cadgen.engine.api import stop
         cls.addClassCleanup(stop)
         cls.endpoint = EngineClient().connect()
-        cls.page = cls.root / 'page'
-        cls.page.mkdir()
-        (cls.page / 'index.html').write_text('<!doctype html><title>test app</title>', encoding='utf-8')
         cls.model = cls.root / 'part.stl'
         cls.model.write_bytes(b'solid part\nendsolid part\n')
 
-    def proxy(self):
-        proxy = Proxy()
+    @classmethod
+    def browser(cls, who, code):
+        """A ``BROWSER`` command that records each page it is given (``RECORDER``) and exits ``code``."""
+        script = cls.root / f'{who}-browser'
+        script.write_text(f'#!{sys.executable}\n' + RECORDER.format(record=str(cls.opened), who=who, code=code), encoding='utf-8')
+        script.chmod(0o755)
+        return str(script)
+
+    def proxy(self, init=INIT, **kwargs):
+        proxy = Proxy(**kwargs)
         self.addCleanup(proxy.close)
-        self.call(proxy, 'initialize', INIT)
+        self.call(proxy, 'initialize', init)
         return proxy
+
+    def recorded(self):
+        return [json.loads(line) for line in self.opened.read_text(encoding='utf-8').splitlines()] if self.opened.exists() else []
+
+    @unittest.skipIf(os.name == 'nt', 'a BROWSER command here is a script run by its #! line')
+    def test_a_text_hosts_cad_show_opens_the_browser_from_the_stdio_peer_never_the_engine(self):
+        # The engine runs in the environment of whatever started it -- here a BROWSER that refuses
+        # and records -- and the stdio peer in its host's: only the peer's BROWSER is given the page.
+        import webbrowser
+
+        engine = request({'op': 'status'})['pid']  # running, started with the engine's environment
+        before = len(self.recorded())
+        shim = {'BROWSER': self.browser('shim', 0), 'DISPLAY': ':0'}  # a display, where one is asked for
+        with patch.dict(os.environ, shim), patch.object(webbrowser, '_tryorder', None), \
+                patch.object(webbrowser, '_browsers', {}):
+            for name in ('SSH_CONNECTION', 'SSH_TTY'):
+                os.environ.pop(name, None)
+            proxy = self.proxy(TEXT)
+            model = str(self.model.resolve())
+            shown = self.tool(proxy, 'cad_show', {'source': model})
+            self.assertNotIn('_meta', shown)
+            text = shown['content'][0]['text']
+            self.assertRegex(text, r'^part\.stl opened in your browser at http://127\.0\.0\.1:\d+/[0-9a-f-]{36}\?token=')
+            # Opened once: the engine knows the page is opening, and a second show opens nothing.
+            again = self.tool(proxy, 'cad_show', {'source': model})['content'][0]['text']
+            self.assertTrue(again.startswith('part.stl is already open in your browser at '), again)
+        opened = self.recorded()[before:]
+        self.assertEqual([(row['who'], row['pid']) for row in opened], [('shim', os.getpid())])
+        self.assertNotEqual(opened[0]['pid'], engine)
+        link = text.split(' at ', 1)[1].split('.\n', 1)[0]
+        self.assertIn(f'url={link}'.replace('&', '&amp;'), opened[0]['page'])
+
+    def test_a_client_with_no_stdio_peer_is_given_the_url_and_nothing_opens(self):
+        client = EngineClient()
+        headers = {'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream'}
+
+        def post(message, **more):
+            status, replied, body = client.call('POST', '/mcp', json.dumps(message).encode('utf-8'), {**headers, **more})
+            self.assertEqual(status, 200, body)
+            return {name.lower(): value for name, value in replied.items()}, json.loads(body)['result']
+
+        replied, _ = post({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': TEXT})
+        session = {'Mcp-Session-Id': replied['mcp-session-id'], 'MCP-Protocol-Version': '2025-11-25'}
+        self.addCleanup(client.call, 'DELETE', '/mcp', headers=session)
+        model = self.root / 'unopened.stl'
+        model.write_bytes(b'solid part\nendsolid part\n')
+        before = len(self.recorded())
+        _, shown = post({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call',
+                         'params': {'name': 'cad_show', 'arguments': {'source': str(model.resolve())}}}, **session)
+        self.assertNotIn('_meta', shown)
+        self.assertRegex(shown['content'][0]['text'], r'^unopened\.stl\'s page is http://127\.0\.0\.1:\d+/\S+; nothing was '
+                                                      r'opened, as this client opens no browser\.\n')
+        self.assertEqual(self.recorded()[before:], [])
 
     @staticmethod
     def call(proxy, method, params=None):

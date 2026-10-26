@@ -33,6 +33,8 @@ Hosts present views in one of three ways, told apart at initialize (``host.py``)
   terminal, ...). ``cad_show`` opens the model's page in the CAD Viewer
   (``browser.py``), the one this machine runs, started if none is, in the person's
   browser -- unless a browser page reads that document already -- and answers with its URL.
+  The engine never opens it: the host's stdio peer does, in the agent's own environment, from
+  the request the answer carries (``browser.OPEN``); a client with no peer gets the URL alone.
 
 Codex declares nothing at initialize, headless or not: ``codex exec`` and its terminal UI greet the
 server as the Codex app does (``codex-mcp-client``) and render no app. So whether a tab opened is
@@ -287,6 +289,9 @@ class Server:
         # the engine one is opening (``Server.page_opening``): a host with no app opens each once.
         self._in_browser = in_browser
         self._browser_opened = browser_opened
+        # The stdio peer's browser (``browser.transport_browser``): it opens the page a text host's
+        # cad_show names, and says whether it can; None for a client with no such peer.
+        self._peer_browser: dict[str, Any] | None = None
         self._order = itertools.count(1)
         self._analytics = analytics
         self._app_token = secrets.token_urlsafe(32)
@@ -394,6 +399,7 @@ class Server:
         meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
         transport = meta.get("dev.texttocad/transport") if isinstance(meta.get("dev.texttocad/transport"), dict) else {}
         presentation, self.renders, why = host.presentation(client, offered, transport.get("launcher"))
+        self._peer_browser = transport.get("browser") if isinstance(transport.get("browser"), dict) else None
         self._declared = why.startswith("declared")
         self.tabs, self.text = presentation == "tabs", presentation == "text"
         if presentation == "inline":
@@ -857,10 +863,12 @@ class Server:
 
     def _show_in_browser(self, model: str) -> dict[str, Any]:
         """A host with no app: the model's page in the CAD Viewer this machine runs, started if none
-        is, opened in the person's browser unless a browser page reads that document already; the
-        answer says which, with the page's URL for the agent to give the person."""
-        from cadgen.viewer.browser_open import CannotOpen
-        from .browser import ViewerUnavailable
+        is, to be opened in the person's browser unless a browser page reads that document already;
+        the answer says which, with the page's URL for the agent to give the person. This process
+        opens nothing: it runs in the environment of whatever started the engine, not the agent's.
+        The host's stdio peer opens the page, from the request the answer carries (``browser.OPEN``,
+        ``browser.deliver``); a client with no peer is given the URL in words."""
+        from .browser import OPEN, ViewerUnavailable
 
         self._model = model
         try:
@@ -871,19 +879,25 @@ class Server:
                              "no_viewer") from failure
         self.warm()  # the browser page's first document meshes on a pool already starting
         name = os.path.basename(model)
+        cannot = f"No browser can be opened from here ({{reason}}); {name}'s page is {link}."
+        peer = self._peer_browser
+        asked = None
         if self._in_browser(model):
             said = f"{name} is already open in your browser at {link}; nothing was opened."
+        elif peer is None:
+            said = f"{name}'s page is {link}; nothing was opened, as this client opens no browser."
+        elif isinstance(peer.get("refusal"), str):
+            said = cannot.replace("{reason}", peer["refusal"])
         else:
-            try:
-                self._open_page(link)
-            except CannotOpen as failure:
-                said = f"No browser can be opened from here ({failure}); {name}'s page is {link}."
-            else:
-                self._browser_opened(model)
-                said = f"{name} opened in your browser at {link}."
+            said = f"{name} opened in your browser at {link}."
+            asked = {"url": link, "said": said, "failed": cannot}
+            self._browser_opened(model)
         # Text alone: an app that shows a result's structured content shows it in place of the text
         # (Claude Code does), and the agent would get neither this guidance nor the update line.
-        return self._told(_text(f"{said}\nThis app shows no CAD view itself: give the user this URL. {FOLLOWS}"))
+        result = self._told(_text(f"{said}\nThis app shows no CAD view itself: give the user this URL. {FOLLOWS}"))
+        if asked is not None:
+            result["_meta"] = {OPEN: asked}
+        return result
 
     def _told(self, result: dict[str, Any]) -> dict[str, Any]:
         """A text-only app has no card for the update notice (``cadgen/updates.py``): this process's

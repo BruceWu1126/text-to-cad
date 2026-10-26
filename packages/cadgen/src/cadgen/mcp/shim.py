@@ -3,7 +3,9 @@
 Only connection metadata lives here. Tools, views, pages and document state belong
 in the engine. Host capability corrections are made at this boundary: what the person
 said (``CADGEN_MCP_PRESENTATION``), and which host launched this process, read from its
-parent processes (``host.launcher``), which only this process can see.
+parent processes (``host.launcher``), which only this process can see. So is the one act a
+text host's ``cad_show`` asks of the person's machine, opening their browser: made here, in the
+environment the host gave this process, never in the engine's (``browser.deliver``).
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import sys
 import threading
 
 from cadgen.viewer.engine_client import EngineClient
+from .browser import deliver, transport_browser
 from .host import MIME, TABS_EXTENSION, UI_EXTENSION
 from .protocol import Connection, RequestContext, RpcError, claim_stdin, claim_stdout
 
@@ -26,8 +29,10 @@ LOG = logging.getLogger('cadgen.mcp')
 def initialize_params(params, launcher=None, holder=None):
     """The host's initialize as the engine is sent it: with what the person said of the host
     (``CADGEN_MCP_PRESENTATION``) as a declaration, ``launcher``, the host that started this
-    process (``host.launcher``), for the server to weigh (``host.presentation``), and ``holder``,
-    the name of this process's hold (``Holder``), whose end ends the session."""
+    process (``host.launcher``), for the server to weigh (``host.presentation``), ``holder``,
+    the name of this process's hold (``Holder``), whose end ends the session, and ``browser``:
+    that this process opens the browser a text host's ``cad_show`` asks for (``browser.deliver``),
+    and whether it can here."""
     params = copy.deepcopy(params)
     offered = params.setdefault('capabilities', {})
     extensions = offered.setdefault('extensions', {})
@@ -40,7 +45,7 @@ def initialize_params(params, launcher=None, holder=None):
         launcher = {'host': 'CADGEN_MCP_PRESENTATION=text', 'renders': False}
     params.setdefault('_meta', {})['dev.texttocad/transport'] = {
         'appDir': os.environ.get('CADGEN_MCP_APP_DIR', ''), 'cwd': os.getcwd(), 'launcher': launcher,
-        **({'holder': holder} if holder else {}),
+        'browser': transport_browser(), **({'holder': holder} if holder else {}),
     }
     return params
 
@@ -102,8 +107,9 @@ class Proxy:
     reconnect. Only a request the engine never took is sent again: one it refused for an unknown
     session, or one whose connection was refused."""
 
-    def __init__(self, client=None, holder=None, launcher=lambda: None):
+    def __init__(self, client=None, holder=None, launcher=lambda: None, opener=None):
         self.client = client or EngineClient()
+        self.opener = opener  # what opens a page's redirect file: ``webbrowser.open``, in this environment
         self.holder = holder
         self.launcher = launcher  # the host that started this process, read once (``serve``)
         self.session = None
@@ -189,7 +195,9 @@ class Proxy:
             with self.lock:
                 self.initialize = params
             return result
-        return self._post({'jsonrpc': '2.0', 'id': context.request_id, 'method': method, 'params': params})
+        result = self._post({'jsonrpc': '2.0', 'id': context.request_id, 'method': method, 'params': params})
+        # A text host's cad_show: the page the engine names is opened here, never by the engine.
+        return deliver(result, self.opener) if method == 'tools/call' else result
 
     def notify(self, method, params):
         if method == 'notifications/initialized':
