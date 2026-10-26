@@ -69,3 +69,13 @@ test("the Home is one type scale: text-ui throughout but a tile's age, and 16px 
   assert.deepEqual([...page.matchAll(/\btext-(micro|tiny|xs)\b/g)].map(([name]) => name), []);
   assert.match(page, /className="cad-library h-full overflow-y-auto text-ui"/);
 });
+
+// The logo stands on the page's gutter (docs/settings-ui.md): the navbar's 12px start and the logo
+// button's 4px padding put its mark 16px in, the Home grid's left edge, over the home and a page.
+test("the navbar's logo and the Home's grid share the 16px gutter", () => {
+  const css = readFileSync(join(root, "styles/globals.css"), "utf8");
+  assert.match(css, /\.cad-library-content \{[^}]*margin: 0; padding: 16px 16px /);
+  const navbar = readFileSync(join(root, "file-viewer/navigation/ViewerNavbar.jsx"), "utf8");
+  assert.match(navbar, /cn\(NAVBAR_ROW_CLASS, "pl-3 /);
+  assert.match(navbar, /"cad-navbar-logo justify-start px-1"/);
+});

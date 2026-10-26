@@ -41,7 +41,9 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   own bar in its place, in every host (see [Preview](#camera-animation-and-preview)). Left: the text-to-cad logo,
   named Menu, with no chevron: over the home the TEXTTOCAD
   wordmark, 20px tall (about 117px wide), and over a document the "C", 16px in the row's 24px
-  button: a plain swap between the home and a page, with no animation. The logo opens the
+  button: a plain swap between the home and a page, with no animation. Its mark's left edge is
+  the page's 16px gutter, the Home grid's left edge, over the home and over a page alike (the
+  row starts 12px in, the button's padding is 4px). The logo opens the
   **app menu** (see [Settings](#settings)) — a host with no home has it too — then, where the
   host keeps the view's own history (`history`: the CAD app's views, which no browser holds),
   **Back** and **Forward**, two arrows walking it as a browser's do, from file to file and to
@@ -94,7 +96,8 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   files are both listed; the **search**, a stock Input 24px tall and 200px wide ("Search"); and
   the **grid/list switch**, two `icon-xs` buttons, the chosen one on the `muted` fill. Then the
   documents opened or built before, pinned first, then by last activity. The home is the
-  library alone: no Open, no folder of a launch. In the grid, a **tile** is transparent on the
+  library alone: no folder of a launch. It spans the page on the navbar's 16px gutter, the
+  wordmark's left edge its own. In the grid, a **tile** is transparent on the
   page in both themes, a 1px `border`, a 12px radius and no shadow, the same under the pointer;
   columns at least 240px (four across a 1280px window), 24px apart. Its picture sits on the
   `muted` fill at 330:185, contained (its placeholder cube 24px); its caption (12px by 16px) is its kind's 16px glyph in a 24px

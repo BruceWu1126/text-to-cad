@@ -118,12 +118,13 @@
 /* The host's home (`library/`): the models opened before, to open again, on the page's own
  * colour, the navbar's. One type scale: every text is text-ui (13px) -- the heading, the type filter,
  * the search, the names, the table -- but a tile's age, text-tiny (11px) and muted; a tile's and a
- * row's glyph is 16px; the control row's controls are 24px tall. Centred, a grid of about four solid cards a row at a typical width, or a
+ * row's glyph is 16px; the control row's controls are 24px tall. Across the page on its 16px gutter, a grid of four tiles a row at 1280px, or a
  * list of rows. */
 .cad-library { width: 100%; height: 100%; background: var(--background); }
 /* Below the last row: 40px, or room to scroll it clear of a host's composer floating over the bottom
    (`--cad-host-bottom-inset`), whichever is more. Added together, a library that fits would still scroll. */
-.cad-library-content { box-sizing: border-box; width: 100%; max-width: 1128px; margin: 0 auto; padding: 16px 24px max(40px, calc(var(--cad-host-bottom-inset, 0px) + 16px)); container-type: inline-size; }
+/* The page's 16px gutter is the navbar's: the wordmark's left edge (and the C's, on a page) is the grid's. */
+.cad-library-content { box-sizing: border-box; width: 100%; margin: 0; padding: 16px 16px max(40px, calc(var(--cad-host-bottom-inset, 0px) + 16px)); container-type: inline-size; }
 /* The control row, the page's first line (Figma's Recents): every control 24px tall. At the left "Recent",
    a plain small heading (no tab: no fill, no box); at the right the type filter, the search and the
    grid/list switch, 8px apart. */

@@ -61,7 +61,7 @@ const NAV_ITEM_CLASS = "flex h-6 shrink-0 cursor-pointer items-center rounded-md
  */
 function LogoMenu({ onHome, menu, home = false }) {
   const { t } = useI18n();
-  return <AppMenu onHome={onHome} {...menu} trigger={<button type="button" aria-label={t("navbar.menu")} className={cn(NAV_ITEM_CLASS, "cad-navbar-logo justify-center px-1")}
+  return <AppMenu onHome={onHome} {...menu} trigger={<button type="button" aria-label={t("navbar.menu")} className={cn(NAV_ITEM_CLASS, "cad-navbar-logo justify-start px-1")}
     data-navbar-menu="" data-logo={home ? "wordmark" : "mark"}>
     {home ? <img src={wordmark} alt="" className="cad-navbar-wordmark" draggable={false} />
       : <img src={logo} alt="" className="cad-navbar-mark" draggable={false} />}
@@ -204,7 +204,9 @@ export function ViewerNavbar({ onHome: goHome, menu = null, history = null, file
   const usage = useControlUsage();
   const onHome = goHome ? () => { usage.used("home"); goHome(); } : goHome;
   return (
-    <header className={cn(NAVBAR_ROW_CLASS, "border-border bg-background text-foreground", className)} data-viewer-navbar="">
+    // `pl-3`: the logo's mark (its button's 4px in) stands on the page's 16px gutter, the Home's
+    // grid's left edge (`.cad-library-content`), over the home and over a page alike.
+    <header className={cn(NAVBAR_ROW_CLASS, "pl-3 border-border bg-background text-foreground", className)} data-viewer-navbar="">
       <nav aria-label={t("navbar.viewer")} className="flex min-w-0 flex-1 items-center overflow-hidden text-sm">
         {onHome || menu ? <LogoMenu onHome={onHome} menu={menu} home={!file} /> : null}
         {history ? <HistoryButtons viewHistory={history} /> : null}
