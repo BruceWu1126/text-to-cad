@@ -245,6 +245,7 @@ def kernel(say: Callable[[str], None]) -> None:
         load_kernel()
     finally:
         told.cancel()
+        told.join()  # gone before the build: a profile records every thread's calls (``profiling``)
 
 
 def kept() -> dict[str, str]:
@@ -477,6 +478,7 @@ def main() -> int:
             protocol.flush()
 
     from cadgen.engine.build import BuildError, build, made_by
+    from cadgen.engine.profiling import quiet
     from cadgen.engine.progress import Progress, building
 
     def progress(ident: Any, **where: Any) -> Progress:
@@ -492,17 +494,18 @@ def main() -> int:
             for line in asked:
                 if not line.strip():
                     continue
-                request = json.loads(line)
-                if request.get("bytes"):
-                    request["payload"] = asked.read(int(request["bytes"]))
-                if request.get("op") == "where":
-                    try:
-                        found = made_by(request["doc"], request["key"], request["kind"], int(request["ordinal"]))
-                    except Exception:  # noqa: BLE001 - a question it cannot answer is answered with nothing
-                        found = None
-                    send({"id": request.get("id"), "where": found})
-                else:
-                    requests.put(request)
+                with quiet():  # a request read while a build is profiled waits for the profile (``profiling``)
+                    request = json.loads(line)
+                    if request.get("bytes"):
+                        request["payload"] = asked.read(int(request["bytes"]))
+                    if request.get("op") == "where":
+                        try:
+                            found = made_by(request["doc"], request["key"], request["kind"], int(request["ordinal"]))
+                        except Exception:  # noqa: BLE001 - a question it cannot answer is answered with nothing
+                            found = None
+                        send({"id": request.get("id"), "where": found})
+                    else:
+                        requests.put(request)
         finally:
             requests.put(None)
 

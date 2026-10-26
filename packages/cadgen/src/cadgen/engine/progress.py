@@ -126,7 +126,9 @@ class Progress:
             pass
 
     def _flush(self) -> None:
-        with self.lock:
+        from cadgen.engine.profiling import quiet
+
+        with quiet(), self.lock:  # the timer's thread: never while a build is profiled
             self.timer = None
             if self.held and not self.closed:
                 self._send(time.monotonic())

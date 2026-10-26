@@ -2,21 +2,41 @@
 
 from __future__ import annotations
 
+import contextlib
 import cProfile
 import os
 import pstats
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 LIMIT = 20
 
+# cProfile records every thread's calls on one stack (Python 3.12+ profiles through sys.monitoring,
+# which is the interpreter's, not a thread's): a call another thread makes while a build is profiled is
+# booked against the build's frames, and a function then shows more self time than cumulative time --
+# 0.0 cumulative beside 0.12 s self, once. So while a profile records, the worker's own other threads
+# (its progress throttle, its request reader) wait at ``quiet`` before they run any Python, and the
+# kernel's load notice (``worker.kernel``) is joined before a build starts.
+_RECORDING = threading.RLock()  # a profiled build inside a profiled build (one thread) records on
+
+
+@contextlib.contextmanager
+def quiet():
+    """Around Python work a thread other than the build's does: held off while a profile records.
+    Taken before any other lock the work takes, so it never waits holding one the build needs."""
+    with _RECORDING:
+        yield
+
 
 class Profile:
     """A class context manager: enabling in a generator introduces an unmatched return.
 
     builtins=False also matters: pybind11 returns can otherwise pop Python frames
-    cProfile never pushed (Python 3.12+). Native time belongs to its Python caller.
+    cProfile never pushed (Python 3.12+). Native time belongs to its Python caller. It records
+    with the worker's other threads held at ``quiet``; a caller's own threads in an in-process
+    build are the caller's to keep still.
     """
 
     def __init__(self, *, project: Path) -> None:
@@ -26,6 +46,7 @@ class Profile:
         self.seconds = 0.0
 
     def __enter__(self) -> Profile:
+        _RECORDING.acquire()
         self.started = time.perf_counter()
         self.profiler.enable()
         return self
@@ -33,6 +54,7 @@ class Profile:
     def __exit__(self, *exc_info: Any) -> None:
         self.profiler.disable()
         self.seconds = time.perf_counter() - self.started
+        _RECORDING.release()
 
     def report(self) -> dict[str, Any]:
         rows = []

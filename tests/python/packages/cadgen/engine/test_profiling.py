@@ -46,8 +46,10 @@ class ProfilingTest(unittest.TestCase):
             self.assertLessEqual(len(rows), 20)
             self.assertEqual([row[timing] for row in rows], sorted((row[timing] for row in rows), reverse=True))
             for row in rows:
-                self.assertGreater(row["calls"], 0)
-                self.assertGreaterEqual(row["cumulative_seconds"], row["self_seconds"])
+                self.assertGreater(row["calls"], 0, row)
+                self.assertGreaterEqual(row["cumulative_seconds"], row["self_seconds"],
+                                        f"{table}: {row['function']} at {row['file']}:{row['line']}, {row['calls']} calls "
+                                        f"({row['primitive_calls']} primitive): {json.dumps(profile, indent=1)}")
         json.dumps(profile)  # the worker's result and Python's result have the same JSON surface
         return profile
 
@@ -111,6 +113,50 @@ class ProfilingTest(unittest.TestCase):
         ordinary = build_script(script, ["pin"], daemon=False, progress=False).models[0]
         self.assertNotIn("profile", ordinary)
         self.assertEqual([path.name for path in self.folder.iterdir()], ["pin.py"])
+
+
+class QuietTest(unittest.TestCase):
+    """cProfile records every thread's calls on one stack (Python 3.12+), so a call another thread
+    made while a build was profiled was booked against the build's frames: once, a row of 0.12 s
+    self time and 0.0 cumulative. The worker's other threads run their Python inside ``quiet``,
+    which waits while a profile records."""
+
+    def test_a_thread_s_work_waits_while_a_profile_records_and_none_of_it_is_in_the_profile(self) -> None:
+        import threading
+        import time
+
+        from cadgen.engine.profiling import Profile, quiet
+
+        recording = [False]
+        ran: list[bool] = []
+
+        def elsewhere() -> None:
+            ran.append(recording[0])
+
+        def other() -> None:
+            with quiet():
+                elsewhere()
+
+        def held(thread: threading.Thread) -> bool:  # the thread stands at quiet's door
+            frame = sys._current_frames().get(thread.ident)
+            while frame is not None:
+                if frame.f_code.co_name == "quiet":
+                    return True
+                frame = frame.f_back
+            return False
+
+        with Profile(project=Path(__file__).parent) as measured:
+            recording[0] = True
+            thread = threading.Thread(target=other)
+            thread.start()
+            deadline = time.monotonic() + 30
+            while not (ran or held(thread)):  # it ran, or it waits
+                self.assertLess(time.monotonic(), deadline, "the other thread got to its work")
+                time.sleep(0.005)
+            recording[0] = False
+        thread.join(30)
+        self.assertEqual(ran, [False], "the other thread's work ran once the profile had recorded, not during it")
+        self.assertNotIn("elsewhere", {row["function"] for row in measured.report()["top_self"]})
 
 
 def setUpModule() -> None:

@@ -256,10 +256,21 @@ class KernelNoticeTest(unittest.TestCase):
         def quick() -> None:
             worker._KERNEL_LOADED = True
 
+        made: list[threading.Timer] = []
+        timer = threading.Timer
+
+        def recorded(*args, **kwargs) -> threading.Timer:
+            made.append(timer(*args, **kwargs))
+            return made[-1]
+
         with mock.patch.object(worker, "_KERNEL_LOADED", False), mock.patch.object(worker, "KERNEL_PATIENCE", 30.0), \
-                mock.patch.object(worker, "load_kernel", side_effect=quick):
+                mock.patch.object(worker, "load_kernel", side_effect=quick), \
+                mock.patch.object(worker.threading, "Timer", recorded):
             worker.kernel(say)
         self.assertEqual(len(said), 1, "a load done within the patience is not said")
+        # And its timer's thread is gone when the build starts: a profiled build records every thread's
+        # calls (cadgen.engine.profiling), and a cancelled timer waking inside it corrupted its rows.
+        self.assertEqual([alive.is_alive() for alive in made], [False])
 
 
 class AdoptTest(unittest.TestCase):
