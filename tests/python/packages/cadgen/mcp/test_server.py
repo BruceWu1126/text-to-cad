@@ -584,6 +584,55 @@ class InlineServerTest(_Session):
         self.server._viewer_url = refuse
         self.assertEqual(self.http("GET", route), (503, {"error": "CAD Viewer client is not built"}))
 
+    def test_a_cards_launch_carries_its_page_and_the_engine_s_origin_without_a_call(self) -> None:
+        from cadgen.mcp.browser import ViewerUnavailable
+
+        asked = []
+
+        def page(model=None) -> str:
+            asked.append(model)
+            return "http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab?token=1.mac"
+
+        self.server._viewer_url = page
+        # Without a call: the page a text client's cad_show links, day link and all, and its origin.
+        launch = self.launch("cad_show", {"source": self.bracket})
+        self.assertEqual((launch["browser"], launch["engine"], asked),
+                         ("http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab?token=1.mac", "http://127.0.0.1:3245", [self.bracket]))
+        # The engine gives no page: the launch goes without one, and the card still mounts.
+
+        def refuse(_model=None) -> str:
+            raise ViewerUnavailable("CAD Viewer client is not built")
+
+        self.server._viewer_url = refuse
+        launch = self.launch("cad_show", {"source": self.bracket})
+        self.assertNotIn("browser", launch)
+        self.assertNotIn("engine", launch)
+        # A tab host's launches are what they were: its card always has its channel.
+        tabs = Server(page=self.server.page, recents=self.server.recents, viewer_url=page)
+        tabs.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": DECLARES_TABS,
+                                                     "clientInfo": OTHER_HOST}), None)
+        home = tabs.handle("tools/call", {"name": "cad_home", "arguments": as_page(tabs, "cad_home", {})},
+                           RequestContext(1, {"threadId": "t"}))["structuredContent"]["launch"]
+        self.assertEqual((home["page"], "browser" in home, "engine" in home), ("home", False, False))
+
+    def test_an_inline_cards_sandbox_may_fetch_the_engine_s_origin_and_a_tab_s_is_served_as_it_was(self) -> None:
+        # An inline host is asked to let the card fetch the engine; a server given no engine adds nothing.
+        uri = self.server.handle("resources/list", {}, None)["resources"][0]["uri"]
+        server = Server(page=self.server.page, recents=self.server.recents, engine_origin="http://127.0.0.1:3245")
+        server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": RENDERS_APPS,
+                                                       "clientInfo": CLAUDE}), None)
+        for listed in (server.handle("resources/list", {}, None)["resources"][0],
+                       server.handle("resources/read", {"uri": uri}, None)["contents"][0]):
+            self.assertEqual(listed["_meta"]["ui"]["csp"]["connectDomains"], ["data:", "blob:", "http://127.0.0.1:3245"])
+        self.assertEqual(self.server.handle("resources/list", {}, None)["resources"][0]["_meta"]["ui"]["csp"]["connectDomains"],
+                         ["data:", "blob:"])
+        # A host that shows tabs is served what it was, engine or not: its card always has its channel.
+        tabs = Server(page=self.server.page, recents=self.server.recents, engine_origin="http://127.0.0.1:3245")
+        tabs.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": DECLARES_TABS,
+                                                     "clientInfo": OTHER_HOST}), None)
+        self.assertEqual(tabs.handle("resources/list", {}, None)["resources"][0]["_meta"]["ui"]["csp"]["connectDomains"],
+                         ["data:", "blob:"])
+
     def test_the_cards_open_in_browser_opens_the_page_from_this_process_through_a_redirect_file(self) -> None:
         from cadgen.mcp.browser import ViewerUnavailable
         from cadgen.viewer import browser_open

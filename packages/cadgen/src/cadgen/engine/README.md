@@ -335,7 +335,10 @@ Bearer header; no URL carries it. A page URL the engine prints or opens carries 
 for a day, which a browser exchanges for a SameSite=Strict session cookie, one name on every port of
 the host, that lasts 30 days from its last use (a page load renews it, as any request does once it
 is a day old): both are the token's signatures of an expiry, checked by signing again, so no engine
-keeps a session (`viewer.engine_app`: `EngineApp.link`, `sign`, `standing`). All routes
+keeps a session (`viewer.engine_app`: `EngineApp.link`, `sign`, `standing`). A request whose
+`Authorization` Bearer is a link -- a CAD card reading the engine from its host's sandbox -- is the
+one cross-origin read answered, for the origin that sent it and with no credentials, as is its
+preflight (`EngineApp.preflight`); the cookie, a link in a URL, the token and `/mcp` never are. All routes
 retain the application's Host and cross-site mutation checks. Explicit host/port
 requests must match an existing listener. A second installed version has a different
 installation identity and therefore a different engine -- in another environment, and in the same

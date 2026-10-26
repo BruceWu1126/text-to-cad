@@ -35,10 +35,12 @@ export function useHostContext(bridge: Pick<Bridge, 'hostContext' | 'onHostConte
   return useSyncExternalStore(listener => bridge.onHostContext(listener), () => bridge.hostContext, () => bridge.hostContext);
 }
 
-// What to do once this view's server has gone: the host started it, and only the host starts it again.
-const LOST: Record<Presentation, string> = {
-  tabs: 'The CAD plugin stopped responding in this thread. Restart Codex to reconnect it.',
-  inline: 'The CAD plugin stopped responding. Restart the app to reconnect it.',
+// What to do once this view's server has gone -- it answered before, and stopped: the host started
+// it, and only the host starts it again. (A chat that never carried a call is another state, with its
+// own words: `Unreachable`, `Connection.tsx`.)
+export const LOST: Record<Presentation, string> = {
+  tabs: 'The CAD plugin stopped responding in this thread. Quit and reopen Codex to restart it.',
+  inline: 'The CAD plugin stopped responding. Quit and reopen this app to restart it, then ask your agent to show the model again.',
 };
 
 // Inline, a view is a card in the chat: as tall as its width suits, within what the host allows.
@@ -159,9 +161,12 @@ function Superseded({ still }: { still: string | null }) {
 
 /**
  * One CAD view. Which page it shows comes from its launch and from what the agent or the user
- * opens next; nothing here asks where the view is.
+ * opens next; nothing here asks where the view is. `direct`: the engine's routes reached over HTTP rather than through the host
+ * (`host/direct.ts`), where the host carries no call back (`Connection.tsx`): every viewer request
+ * goes that way, and the view makes no sync, which only the host could carry -- the agent cannot read
+ * or capture it, and the client reads its catalog again on its own.
  */
-export default function App({ bridge, server, launch: initial, presentation = 'tabs' }: { bridge: Bridge; server: Server; launch: Launch; presentation?: Presentation }) {
+export default function App({ bridge, server, launch: initial, presentation = 'tabs', direct }: { bridge: Bridge; server: Server; launch: Launch; presentation?: Presentation; direct?: typeof fetch }) {
   const surface = initial.surface || initial.page;
   // The host's file handler shows the file it opened, and only that: what the agent shows goes to
   // its thread's tab, never here (the server refuses it too).
@@ -225,8 +230,8 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   // Everything else the view asks of the server travels as viewer requests over `cad_http`: its
   // model, the library, Open, Reveal, the person's settings and the update check. The client polls
   // nothing: the sync says when the file's catalog entry moved.
-  const tunnel = useMemo(() => createTunnelFetch(server), [server]);
-  const client = useMemo(() => createTunnelClient(tunnel, { pollIntervalMs: 0 }), [tunnel]);
+  const tunnel = useMemo(() => direct ?? createTunnelFetch(server), [server, direct]);
+  const client = useMemo(() => createTunnelClient(tunnel, direct ? {} : { pollIntervalMs: 0 }), [tunnel, direct]);
   useEffect(() => () => client.dispose(), [client]);
 
   useEffect(() => {
@@ -244,7 +249,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   }, [initial.order, initial.view, live, sync]);
 
   useEffect(() => {
-    if (superseded) return;
+    if (superseded || direct) return;
     const lifetime = new AbortController();
     sync.run(lifetime.signal);
     const stop = bridge.onTeardown(() => lifetime.abort());
@@ -258,7 +263,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
     window.addEventListener('pointerdown', touched, true);
     window.addEventListener('focus', touched);
     return () => { lifetime.abort(); stop(); window.removeEventListener('pointerdown', touched, true); window.removeEventListener('focus', touched); };
-  }, [bridge, sync, superseded]);
+  }, [bridge, sync, superseded, direct]);
 
   // The usage stats cadgen sends (its telemetry), the same as the browser viewer's: nothing asks here (a
   // cadgen command says it once), and the app menu's switch changes it.

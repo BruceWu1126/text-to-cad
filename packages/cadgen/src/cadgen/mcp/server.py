@@ -256,8 +256,12 @@ def local_path(value: str, *, windows: bool = os.name == "nt") -> str:
 class Server:
     def __init__(self, *, page: AppPage | None = None, recents=None, tunnel=None, viewer_url=None, browser_opener=None,
                  sidebar_views=None, analytics=None, sync_document=lambda path: None, warm=lambda: None,
-                 in_browser=lambda model: False, browser_opened=lambda model: None) -> None:
+                 in_browser=lambda model: False, browser_opened=lambda model: None, engine_origin: str | None = None) -> None:
         self.page = page or AppPage()
+        # The engine's own origin (``http://127.0.0.1:<port>``), which an inline host is asked to let
+        # the card reach (``_resource_meta``): where the host carries no tool call back, the card
+        # reads the engine directly with its launch's day link (``_reach``).
+        self._engine_origin = engine_origin
         self.sync_document = sync_document
         self.warm = warm  # the engine's meshing pool, started when a view is launched (``Server.warm``)
         self.views = ViewRegistry()
@@ -361,15 +365,25 @@ class Server:
         if method == "tools/call":
             return self._call(params, context)
         if method == "resources/list":
-            return {"resources": [{"uri": self.page.uri, "name": "CAD", "title": TITLE, "mimeType": MIME, "_meta": RESOURCE_META}]}
+            return {"resources": [{"uri": self.page.uri, "name": "CAD", "title": TITLE, "mimeType": MIME, "_meta": self._resource_meta()}]}
         if method == "resources/templates/list":
             return {"resourceTemplates": []}
         if method == "resources/read":
             uri = params.get("uri")
             if not self.page.owns(uri):
                 raise RpcError(_RESOURCE_NOT_FOUND, f"no resource {uri}")
-            return {"contents": [{"uri": uri, "mimeType": MIME, "text": self.page.html(), "_meta": RESOURCE_META}]}
+            return {"contents": [{"uri": uri, "mimeType": MIME, "text": self.page.html(), "_meta": self._resource_meta()}]}
         raise RpcError(METHOD_NOT_FOUND, f"{method} is not supported")
+
+    def _resource_meta(self) -> dict[str, Any]:
+        """The page's sandbox: ``RESOURCE_META``, and for a host that mounts cards inline, the engine's
+        own origin among the origins the card may fetch, so a card whose host carries no tool call
+        back can read the engine directly (``apps/mcp``'s direct transport). A host that shows tabs is
+        served exactly what it was (``test_codex_contract``): its card always has its channel."""
+        if self.tabs or self.text or not self._engine_origin:
+            return RESOURCE_META
+        csp = RESOURCE_META["ui"]["csp"]
+        return {"ui": {**RESOURCE_META["ui"], "csp": {**csp, "connectDomains": [*csp["connectDomains"], self._engine_origin]}}}
 
     def _initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         from cadgen import __version__
@@ -521,6 +535,7 @@ class Server:
             if not self.text and isinstance(result.get("structuredContent", {}).get("launch"), dict):
                 # MCP result metadata is delivered to the app, never put in the model's context.
                 result.setdefault("_meta", {})[_APP_TOKEN_META] = self._app_token
+                self._reach(result["structuredContent"]["launch"])
             ok = not (isinstance(result, dict) and result.get("isError"))
             return result
         except ToolFailed as failure:
@@ -595,6 +610,28 @@ class Server:
         # Wall-clock time orders views across restarts of this process; seq breaks a tie.
         launch["order"] = {"createdAt": int(time.time() * 1000), "seq": seq}
         return launch
+
+    def _reach(self, launch: dict[str, Any]) -> None:
+        """Stamp a launch a tool hands the page with the ways to the engine that need no tool call:
+        ``browser``, the web viewer's page of what it shows (the home's with no model), the same day
+        link ``_browser_page`` gives the card and a text client's ``cad_show`` gives the agent; and
+        ``engine``, that page's origin (loopback: the engine binds nowhere else). A card whose host
+        carries no ``tools/call`` back (the Claude app's Code tab) links the page, and first tries the
+        engine directly with the link's token. A tab host's launches go without them: its card always
+        has its channel, and what Codex is served stays as it was (``test_codex_contract``). So do
+        launches where this server was given no engine (``viewer_url``), or the engine gives no page."""
+        if self._viewer_url is None or self.tabs:
+            return
+        from .browser import ViewerUnavailable
+
+        try:
+            link = self._viewer_url(launch.get("model") or None)
+        except ViewerUnavailable as failure:
+            LOG.info("the launch carries no page: %s", failure)
+            return
+        parts = urlparse(link)
+        launch["browser"] = link
+        launch["engine"] = f"{parts.scheme}://{parts.netloc}"
 
     def _model_path(self, value: Any) -> str:
         """An existing CAD file, from the absolute path a caller named; or a document the engine holds,

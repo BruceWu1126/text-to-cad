@@ -54,7 +54,14 @@ it every link and every session made before. Behind the credentials:
   page on another port of this host, cannot use it.
 - A state-changing request also needs a custom header, so a cross-site form or
   fetch cannot make one.
-- No CORS headers are sent.
+- One cross-origin case is answered, and only that one: a request whose
+  `Authorization` header carries a link within its day, and that request's
+  preflight, get CORS headers for the origin that sent it, so a CAD card whose
+  host carries none of its calls back can read the engine from its sandbox
+  (`cadgen.viewer.engine_app`). A browser never sends that header by itself, so
+  only a page already holding the link can; no credentials header is ever sent,
+  so the session cookie never rides a cross-origin read. A link in a URL, the
+  cookie, your own token and `/mcp` get no CORS headers.
 
 **The credentials are the boundary.** Whoever holds the token, a link within its
 day, or a session cookie can read any CAD file on your machine by its path, list

@@ -2,9 +2,10 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createCrashReporter, type CadPageCrash } from '@text-to-cad/core/client';
 import { version } from '../package.json';
-import App from './App';
+import Connection from './Connection';
 import Notice from './Notice';
 import { createBridge, type HostContext, type ToolResult } from './host/bridge';
+import { createChannel, declaresServerTools } from './host/channel';
 import { readPresentation } from './host/presentation';
 import { createServer, PROTOCOL, readLaunch, toolText, type Launch } from './host/server';
 import { createTunnelClient, createTunnelFetch } from './host/tunnel';
@@ -65,11 +66,14 @@ async function start() {
     }
     const token = result._meta?.['dev.texttocad/httpToken'];
     if (typeof token !== 'string' || !token) throw new Error('CAD did not receive its app capability. Close this view and open CAD again.');
-    const server = createServer(bridge, token);
+    // Whether the host carries this page's calls to CAD's server: what it declared, until a call says
+    // (`host/channel.ts`). A host that refuses them all gets the CAD Viewer's page instead.
+    const channel = createChannel(declaresServerTools(bridge.hostCapabilities));
+    const server = createServer(bridge, token, channel);
     const reporting = createTunnelClient(createTunnelFetch(server), { pollIntervalMs: 0 });
     sendCrash = crash => reporting.reportActivity({ crash });
     waiting.splice(0).forEach(sendCrash);
-    root.render(<StrictMode><App bridge={bridge} server={server} launch={launch} presentation={presentation} /></StrictMode>);
+    root.render(<StrictMode><Connection bridge={bridge} server={server} channel={channel} launch={launch} presentation={presentation} /></StrictMode>);
   } catch (error) {
     root.render(<Notice title="CAD could not open" message={error instanceof Error ? error.message : String(error)} details={`CAD ${version}`} />);
   }
