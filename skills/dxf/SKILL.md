@@ -302,7 +302,7 @@ own work; review with `cadgen snapshot`.
   run prints. For a file, run the CAD Viewer, from any folder:
 
   ```bash
-  cadgen viewer --host 127.0.0.1 --json FILE [FILE ...]
+  cadgen viewer --json FILE [FILE ...]
   ```
 
   The command ensures this installation's engine, registers each file and prints
