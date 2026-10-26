@@ -4,8 +4,6 @@
  */
 export default {
   "export.button": "내보내기",
-  "export.note": "표시 상태와 관계없이 작성된 상태의 모델을 내보냅니다.",
-  "export.noteAnimated": "표시 상태와 관계없이 작성된 상태의 모델을 내보냅니다. GLB에는 모델의 애니메이션이 포함됩니다.",
   "export.show": "내보내기 표시 ({count})",
   "export.jobs": "내보내기 작업",
   "export.toast": "내보내기 {name}",
