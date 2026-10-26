@@ -10,7 +10,7 @@
  * daemon (`daemon`), or the sender a `cadgen` command starts for what commands counted (`cli`) -- saw since
  * its last batch (`FIELDS`):
  *
- *   tool      a CAD tool's calls, and how many of them failed
+ *   tool      a CAD tool's calls, and how many of them failed (`cad_unknown`: the calls naming no tool of cadgen's)
  *   tool_failure
  *             a CAD tool's failed calls for one reason (`FAILURES`), a word cadgen chose where the call
  *             failed: never what the failure said

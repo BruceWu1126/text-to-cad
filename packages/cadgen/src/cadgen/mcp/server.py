@@ -553,6 +553,7 @@ class Server:
         name = params.get("name")
         arguments = params.get("arguments") or {}
         if not isinstance(arguments, dict):
+            self._refused(name, "bad_request")
             raise RpcError(INVALID_PARAMS, "arguments must be an object")
         # Only a tool this client was listed: text clients have no page tools.
         # Shared HTTP calls enforce their own route and consent authorization.
@@ -561,6 +562,7 @@ class Server:
         handler = ((lambda arguments, context: self._operation(name, arguments)) if name in START else
                    getattr(self, f"_tool_{name}", None)) if listed else None
         if handler is None:
+            self._refused(name, "no_view")  # a tool of cadgen's this host was not listed: a view it does not show
             raise RpcError(INVALID_PARAMS, f"unknown tool {name!r}")
         started = time.monotonic()
         ok, reason = False, "bug"  # anything a handler raises but ToolFailed is cadgen's own (``handle`` reports it)
@@ -581,6 +583,18 @@ class Server:
             self.analytics.called(name, ok, reason)
             if name not in ("cad_sync", "cad_http"):
                 LOG.info("%s %.0fms", name, (time.monotonic() - started) * 1000)
+
+    def _refused(self, name: Any, reason: str) -> None:
+        """A call answered with an error before any tool ran, counted all the same (``cadgen/analytics.py``): one
+        naming a tool of cadgen's -- in this host's catalog or another's -- as that tool's call failed for
+        ``reason``; any other as ``cad_unknown``'s (``UNKNOWN_TOOL``), for a call no tool of cadgen's could read
+        (``bad_request``): never by the name the host sent."""
+        from cadgen.analytics import UNKNOWN_TOOL
+
+        from .operations import START
+
+        own = isinstance(name, str) and (name in START or callable(getattr(type(self), f"_tool_{name}", None)))
+        self.analytics.called(name if own else UNKNOWN_TOOL, False, reason if own else "bad_request")
 
     def _arguments(self, name: str, arguments: dict[str, Any]) -> None:
         """An agent tool's arguments against the schema this client was listed: one it does not take is

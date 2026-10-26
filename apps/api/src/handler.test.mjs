@@ -79,6 +79,18 @@ test('a batch becomes one row per event, carrying its context and its own counts
   assert.deepEqual([store.rows[0].process, store.rows[0].client, store.rows[0].presentation], ['app', 'codex-mcp-client', 'tabs']);
 });
 
+test("a release's version and a development install's are both read, each stored as sent", async () => {
+  // A development install names its own (`<version>-dev.<time>`, cadgen/analytics.py: `installation_version`): a
+  // send forced from one is told apart from the release's.
+  const store = memory();
+  for (const version of ['0.8.0', '0.8.0-dev.20261026120000']) {
+    assert.equal((await send(store, 'POST', '/v1/events', { ...BATCH, version })).status, 204, version);
+  }
+  assert.deepEqual([...new Set(store.rows.map(row => row.version))], ['0.8.0', '0.8.0-dev.20261026120000']);
+  assert.equal((await send(memory(), 'POST', '/v1/events', { ...BATCH, version: `0.8.0-dev.${'1'.repeat(32)}` })).status, 400,
+    'never longer than a version needs');
+});
+
 test("the build daemon's counts are rows of their own, under the process that saw them", async () => {
   const store = memory();
   assert.equal((await send(store, 'POST', '/v1/events', DAEMON)).status, 204);
@@ -123,6 +135,12 @@ test("schema 4 says why a tool's calls failed, one row per tool and reason, by a
     { ...BATCH, schema: 4, events: [{ ...failures[0], path: 'secret.step' }] },
     { ...BATCH, schema: 4, events: [failures[0], failures[0]] }, // one tool and reason, counted once
   ]) assert.equal((await send(memory(), 'POST', '/v1/events', bad)).status, 400, JSON.stringify(bad));
+  // A call naming no tool of cadgen's is `cad_unknown`'s (cadgen/analytics.py: `UNKNOWN_TOOL`), a tool like any
+  // other: the name the host sent is never sent, so no other needs reading.
+  const unknown = [{ name: 'tool', tool: 'cad_unknown', calls: 2, errors: 2 },
+    { name: 'tool_failure', tool: 'cad_unknown', reason: 'bad_request', count: 2 }];
+  assert.equal((await send(store, 'POST', '/v1/events', { ...BATCH, schema: 4, events: unknown })).status, 204);
+  assert.deepEqual(store.rows.map(fieldsOf).slice(-2), unknown.map(({ name, ...counts }) => ({ event: name, ...counts })));
 });
 
 // Schema 5: the daemon's batch, named, with why its builds and snapshots failed.

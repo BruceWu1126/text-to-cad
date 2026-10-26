@@ -630,10 +630,10 @@ class CadApp:
     def _change_recents(self, payload) -> dict:
         """A change to the library -- ``{action, path, png?}``, a file by its absolute path, a model by
         its id (its entry's ``path``) -- answered with the library as it now is. A file opened is
-        also counted for analytics; a model's entry is the engine's, written when it builds, so only
-        when a page opened it (``open``), pinning, its picture and its deletion (``delete``: the
-        document, ``delete_document``) change it. A file's entry is removed (``remove``), its file
-        untouched."""
+        also counted for analytics, and so is a model's page, its document an ``xbf``; a model's entry
+        is the engine's, written when it builds, so only when a page opened it (``open``), pinning, its
+        picture and its deletion (``delete``: the document, ``delete_document``) change it. A file's
+        entry is removed (``remove``), its file untouched."""
         from .recents import thumbnail_png
 
         if type(payload) is not dict:
@@ -648,7 +648,9 @@ class CadApp:
             elif action == "thumbnail":
                 self.recents.thumbnail(ident, thumbnail_png(payload.get("png")))
             elif action == "open":
-                self.recents.opened(ident)
+                # The page of a document the library holds: a file shown, as a file's is (``files``).
+                if self.recents.opened(ident) is not None and self.analytics is not None:
+                    self.analytics.opened_document(ident)
             else:
                 raise ValueError(f"unknown recents action {action!r}")
             return self._recents_payload()

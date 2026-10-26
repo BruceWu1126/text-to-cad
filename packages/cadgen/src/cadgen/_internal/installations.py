@@ -207,6 +207,21 @@ def alive(record: dict) -> bool:
     return os.path.isfile(record["python"]) and os.path.isfile(record["cadgen"])
 
 
+def here(folder=None) -> dict | None:
+    """The record the ``cadgen`` command runs this installation by: one naming this environment
+    (``sys.prefix``) whose interpreter and console script are there (``alive``) -- the version it runs as
+    (``cadgen.engine.daemon.installation``) where that one is, else the one registered last. ``None`` for an
+    installation no record names."""
+    mine = [record for record in records(folder) if _same_place(record["prefix"], sys.prefix) and alive(record)]
+    if not mine:
+        return None
+    from cadgen.engine.daemon import installation
+
+    running = installation()
+    return next((record for record in mine if record["version"] == running), None) \
+        or max(mine, key=lambda record: str(record.get("registered") or ""))
+
+
 def prune(folder=None) -> list[str]:
     """Remove every record whose interpreter is gone; return their files."""
     folder = folder or state()

@@ -12,19 +12,22 @@ exits, each batch under an id of its own and stamped with the time it was made:
 - who, by random ids only: an install id made on this machine, an id for the sending process, and one
   for the batch, so a batch sent again is never counted twice;
 - what runs: which process (``app``, ``viewer``, or ``cli``: what ``cadgen`` commands and model scripts
-  counted, a batch of its own from whichever process sends it), cadgen's version, where it was
+  counted, a batch of its own from whichever process sends it), the version the installation runs as
+  (``installation_version``: a release's, or a development install's ``<version>-dev.<time>``), where it was
   installed from (its channel, ``cadgen/_internal/channel.py``: a plugin directory, the Cursor
   Marketplace, GitHub, a development install, or ``unknown``), the operating system and processor,
   and from the apps the agent app's name and version and how that app shows CAD (tabs, inline or
   text) -- or, from the browser viewer, ``cadgen-viewer`` and ``browser``; a ``cli`` batch names no app;
-- ``tool`` (the CAD app): how many times each CAD tool was called, and how many of those failed;
+- ``tool`` (the CAD app): how many times each CAD tool was called, and how many of those failed -- a call
+  naming no tool of cadgen's counted as ``cad_unknown``'s (``UNKNOWN_TOOL``), never by the name it sent;
 - ``tool_failure`` (the CAD app): how many of a tool's calls failed for each reason (``FAILURES``): one
   word cadgen chose where the call failed -- the caller named no file, or no view; a view that did not
   answer; the CAD Viewer that did not start; cadgen's own bug -- never the failure's message;
 - ``view`` (the apps): how many times a CAD view was touched by a person or switched models --
   time spent looking at a model calls no tool, and is use all the same;
 - ``files`` (the apps): how many distinct files of each format (``step``, ``stl``, ...) a CAD view
-  showed for the first time that day -- told apart here, by path, and sent as a number;
+  showed for the first time that day -- a model's page among them, its document an ``xbf`` -- told apart
+  here, by path (a document by its id), and sent as a number;
 - ``build`` (the engine's verbs): for each format and who asked (``VIAS``), how many builds and exports,
   how each ended (``OUTCOMES``: failed, lost its worker, or stopped by whoever asked), how many took their
   xbf whole without building, and how long they took;
@@ -51,7 +54,8 @@ exits, each batch under an id of its own and stamped with the time it was made:
   dependencies (a page's: its script asset), a function and a line, the person's own code a bare
   ``<user>``; a build worker that died, its exit status. Never the error's message. Each process
   reports its own (``report``, ``collect_crashes``); a command's and a worker's are kept with its counts,
-  and a page's go to the server that served it.
+  and a page's go to the server that served it -- never one in none of the page's scripts, which a script
+  the browser runs in the page threw (an extension's: ``crashOf`` in @text-to-cad/core).
 
 A command sends nothing itself. What it counts -- a build, a snapshot, a drawing, a crash -- is kept beside
 the settings for the next process that sends (``spool``): only while sharing is on, under the answer in
@@ -178,18 +182,29 @@ def notice_text() -> str:
 
 
 def off_command() -> str:
-    """``cadgen telemetry off`` as a command that runs this installation when pasted: the pinned ``uvx``
-    line the plugin's server runs (``launch.launch_command``) for an installation uvx made, which
-    that line reuses; ``cadgen`` where the ``cadgen`` on PATH is the script that runs now; else that
-    script by its path, or this interpreter with ``-m cadgen.cli``."""
+    """``cadgen telemetry off`` as a command that runs this installation when pasted, never one naming a
+    version it is not (a development wheel's is on no index): the ``cadgen`` command with the version this
+    installation is registered as (``cadgen +<version>``, ``_through_proxy``) where it is registered; else, for
+    an installation uvx made, the ``uvx`` line that makes it from what it was installed from (``_installed_from``:
+    the release's requirement, or the wheel); else ``cadgen`` where the ``cadgen`` on PATH is the script that runs
+    now, that script by its path, or this interpreter with ``-m cadgen.cli``."""
     import shlex
     import shutil
 
-    from cadgen._internal.launch import launch_command
+    from cadgen._internal.launch import LAUNCHER
 
     quote = _windows_quote if os.name == "nt" else shlex.quote
+    try:
+        proxied = _through_proxy(quote)
+    except Exception:  # noqa: BLE001 - records that cannot be read name no command: the next way does
+        LOG.debug("could not read this installation's record", exc_info=True)
+        proxied = None
+    if proxied is not None:
+        return f"{proxied} telemetry off"
     if "archive-v0" in Path(sys.prefix).parts:  # uv's cache: an installation of the exact requirement
-        return f"{launch_command('cadgen')} telemetry off"
+        source = _installed_from()
+        if source is not None:
+            return " ".join((*LAUNCHER, quote(source), "cadgen telemetry off"))
     script = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
     if script is not None and script.stem == "cadgen" and script.suffix.lower() in ("", ".exe") and script.is_file():
         found = shutil.which("cadgen")
@@ -197,6 +212,70 @@ def off_command() -> str:
             return "cadgen telemetry off"
         return f"{quote(str(script))} telemetry off"
     return f"{quote(sys.executable)} -m cadgen.cli telemetry off"
+
+
+def _through_proxy(quote: Callable[[str], str]) -> str | None:
+    """``cadgen +<version>``: the ``cadgen`` command (``cadgen._internal.installations``) running this installation
+    by the version its record names -- ``cadgen`` where that command is the one on PATH, else by its path. ``None``
+    where no record names this installation, or the command is not there."""
+    import shutil
+
+    from cadgen._internal import installations
+
+    record = installations.here()
+    proxy = installations.proxy_path()
+    if record is None or installations.proxy_status(proxy) not in (installations.OK, installations.NEWER,
+                                                                     installations.STALE):
+        return None
+    found = shutil.which("cadgen")
+    on_path = found is not None and os.path.normcase(os.path.realpath(found)) == os.path.normcase(os.path.realpath(proxy))
+    return f"{'cadgen' if on_path else quote(proxy)} +{record['version']}"
+
+
+def _installed_from() -> str | None:
+    """What uvx installed this environment from, as ``uvx --from`` takes it again: the wheel, folder or URL its
+    record of a direct install names (``direct_url.json``, PEP 610) while that is still there, else -- installed
+    from an index -- the release's requirement (``cadgen==<version>``). ``None`` when neither can be read."""
+    import sysconfig
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
+
+    site = Path(sysconfig.get_path("purelib", vars={"base": sys.prefix, "platbase": sys.prefix}))
+    try:
+        found = sorted((info.stat().st_mtime_ns, info) for info in site.glob("cadgen-*.dist-info"))
+    except OSError:
+        return None
+    if not found:
+        return None
+    info = found[-1][1]  # the last one written: the install that put cadgen there (``version.declared_version``)
+    try:
+        direct = json.loads((info / "direct_url.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return f"cadgen=={info.name[len('cadgen-'):-len('.dist-info')]}"
+    except (OSError, ValueError):
+        return None
+    url = direct.get("url") if isinstance(direct, dict) else None
+    if not isinstance(url, str) or "vcs_info" in direct:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme == "file":
+        path = url2pathname(parsed.path)  # unquoted, and a drive's ``/C:/...`` made ``C:\...``
+        return path if os.path.exists(path) else None
+    return url if parsed.scheme in ("http", "https") else None
+
+
+def installation_version() -> str:
+    """The version this installation runs as (``cadgen.engine.daemon.installation``): the one it is registered
+    as -- a development install's ``<version>-dev.<time>`` -- else its release's (``cadgen.__version__``)."""
+    try:
+        from cadgen.engine.daemon import installation
+
+        return installation()
+    except Exception:  # noqa: BLE001 - a version is only reported: nothing fails for want of one
+        LOG.debug("could not read the installation's version", exc_info=True)
+        from cadgen import __version__
+
+        return __version__
 
 
 def _windows_quote(text: str) -> str:
@@ -228,6 +307,9 @@ HANDED = 16  # the most of each kind one command's counts carry (``Recorder.take
 # drown what does. A view's own activity is noted from its sync (``viewed``) and as it adds the model
 # on screen to the library (``opened``).
 UNCOUNTED = frozenset({"cad_sync", "cad_http", "cad_capture_reply"})
+# The tool a call naming none of cadgen's tools is counted as (``cadgen.mcp.server``): the name a host sent is its
+# own string, never sent.
+UNKNOWN_TOOL = "cad_unknown"
 # A file's format, by extension: what the viewer opens (``cadgen.viewer.scanner.SOURCE_EXTENSIONS``), the
 # engine's document (``.xbf``) among them.
 FILE_KINDS = {".step": "step", ".stp": "step", ".stl": "stl", ".3mf": "3mf", ".glb": "glb", ".dxf": "dxf",
@@ -245,9 +327,11 @@ VIAS = frozenset({"script", "command"})
 OUTCOMES = frozenset({"ok", "failed", "crashed", "cancelled"})
 # Why a CAD tool's call failed, named where it failed (``cadgen.mcp.server.ToolFailed``), never read from its
 # message. The caller's: it named no file (``no_path``), one by a relative path (``relative_path``), a path with
-# no file (``no_file``) or a file CAD does not open (``not_cad``); no view, or one that is gone or shows no model
-# (``no_view``); a view that shows its host's file alone (``wrong_view``); arguments the tool could not read
-# (``bad_request``). The view's: it did not answer in time (``timeout``), answered with an error or without
+# no file (``no_file``) or a file CAD does not open (``not_cad``); no view, one that is gone or shows no model, or
+# a call to a tool of cadgen's its host was not listed -- a tab's or a view's, where the host shows none
+# (``no_view``); a view that shows its host's file alone (``wrong_view``); arguments the tool could not read, or a
+# call naming no tool of cadgen's (``bad_request``, as ``UNKNOWN_TOOL``'s). The view's: it
+# did not answer in time (``timeout``), answered with an error or without
 # an image (``view_error``), or with one too large for the host (``too_large``). The machine's: the CAD Viewer
 # did not start (``no_viewer``). cadgen's: anything else it raised (``bug``, reported as an ``exception`` too).
 # ``other``: a failure that named none of these.
@@ -1311,6 +1395,7 @@ class Recorder:
         self._context: dict[str, Any] = {"process": process if process in PROCESSES else "app", "version": "unknown",
                                          "channel": "unknown", "platform": "other"}
         self._named: str | None = None  # the channel this process was told itself (``_channel``)
+        self._installation: str | None = None  # the version the installation runs as (``_version``)
         self._tally = _Tally()
         # The batch the receiver did not take, whole, and the answer it was made under: sent again, as it is,
         # before anything newer (``flush``). One at most: what is noted meanwhile waits in the tally.
@@ -1319,7 +1404,8 @@ class Recorder:
         # yet fail with nothing left to keep it. Sent again when it was taken after all, its ids make it one.
         self._sending: tuple[dict[str, Any], Any] | None = None
         self._day = ""
-        self._shown: set[str] = set()  # the files a view showed today, by absolute path: never leaves this process
+        # The files a view showed today, by absolute path, and the documents, by id: never leaves this process.
+        self._shown: set[str] = set()
         self._basis: Any = _UNREAD  # the answer in force when what is noted now began to be noted
         self._choices = 0  # the choices made here: a batch that failed is kept only if none came since
         self._off = False  # a no this process could not keep: nothing more is sent from it
@@ -1334,12 +1420,20 @@ class Recorder:
 
     @_guarded(lambda: None)
     def _describe(self) -> None:
-        from cadgen import __version__
         from cadgen._internal.channel import named
 
         self._named = named()
-        self._context.update(version=_token(__version__, 32) or "unknown", channel=self._channel(),
-                             platform=_platform_name(), arch=_token(_platform.machine().lower(), 16))
+        self._context.update(channel=self._channel(), platform=_platform_name(),
+                             arch=_token(_platform.machine().lower(), 16))
+
+    def _version(self) -> str:
+        """The version this installation runs as (``installation_version``: a development install's
+        ``<version>-dev.<time>`` too, so what it sends is told apart from the release's), read once, as the first
+        batch is made: at start it would wake the state folder's registry, which a CAD app's initialize never
+        needs."""
+        if self._installation is None:
+            self._installation = _token(installation_version(), 32) or "unknown"
+        return self._installation
 
     def _channel(self) -> str:
         """Where this install came from: what this process was told itself, else the channel its plugin's server wrote
@@ -1436,17 +1530,28 @@ class Recorder:
         if not isinstance(path, str) or not path:
             return
         kind = FILE_KINDS.get(os.path.splitext(path)[1].lower())
-        if kind is None:
-            return
-        path, day = os.path.abspath(path), _day()  # one file, however a view spelled it
+        if kind is not None:
+            self._shown_once(os.path.abspath(path), kind)  # one file, however a view spelled it
+
+    @_guarded(lambda: None)
+    def opened_document(self, ident: Any) -> None:
+        """A model's page has its document on screen (``/<id>``): a look at a file like any other, the engine's
+        document (``xbf``), counted the first time today and told apart by its id here, never sent. Nothing is
+        built for it, nor counted as a build."""
+        if isinstance(ident, str) and ident:
+            self._shown_once(f"document:{ident}", "xbf")  # never an absolute path, which a file's key is
+
+    def _shown_once(self, key: str, kind: str) -> None:
+        """A file or a document, by ``key``, counted under ``kind`` the first time today it is shown."""
+        day = _day()
         answer = self._first_use()
         with self._lock:
             self._begin(answer)
             if day != self._day:
                 self._day, self._shown = day, set()
-            if path in self._shown or len(self._shown) >= FILES_PER_DAY:
+            if key in self._shown or len(self._shown) >= FILES_PER_DAY:
                 return
-            self._shown.add(path)
+            self._shown.add(key)
             self._tally.note("files", (kind,), {"count": 1})
 
     @_guarded(lambda: None)
@@ -1633,11 +1738,11 @@ class Recorder:
                 return None
         found = dict(UNAVAILABLE) if self._off else status(path=self.path, probe=False)
         decided = _answer((_read(settings) or {}) if found["sharing"] else {})  # which answer is in force (``_answer``)
-        where = self._channel()
+        where, version = self._channel(), self._version()
         with self._lock:
             tally, basis, choices = self._tally, self._basis, self._choices
             self._tally, self._basis = _Tally(), decided
-            context = {**self._context, "channel": where}
+            context = {**self._context, "version": version, "channel": where}
             # Noted under an earlier answer -- before a yes given in another process (this one's own clears
             # what it noted), before the person was told, or under one never read: never sent. Which answer,
             # not whether it came later: Windows' clock moves in 16 ms steps, so a yes and the batch it lands
