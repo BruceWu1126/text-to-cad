@@ -143,7 +143,10 @@ class CacheTest(unittest.TestCase):
         """An engine's environment: a folder of its own, ``state`` and ``cache``; stopped at ``cleanup``."""
         engine = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         cleanup(shutil.rmtree, engine, True)
-        env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(engine),
+        # The class engine keeps its bytecode where the engine does (the first test reads it there),
+        # whatever folder a test run shares.
+        given = {name: value for name, value in os.environ.items() if name != "PYTHONPYCACHEPREFIX"}
+        env = engine_daemon.watched({**given, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(engine),
                                      "CADGEN_STATE_DIR": str(state), "CADGEN_CACHE_DIR": str(cache),
                                      "CADGEN_ENGINE_MESH": "inline", "CADGEN_ENGINE_CACHE_IDLE": str(IDLE),
                                      **extra}, cleanup)
@@ -464,7 +467,10 @@ class CacheTest(unittest.TestCase):
         for name, ident in zip(("first", "second", "third"), idents):
             self.run_script(name)
             self.cached(ident)
-        await_(lambda: self.ask({"op": "status"})["workers"] == [], "the workers to retire")
+        # Out of memory, each read again from the cache: its worker gone and the server's copy trimmed.
+        held = lambda: [(row["state"], row.get("held")) for row in self.ask({"op": "status"})["models"]]  # noqa: E731
+        await_(lambda: self.ask({"op": "status"})["workers"] == [] and held() == [("held", "disk")] * 3,
+               "every document out of memory and held on disk alone")
         self.assertTrue(all(self.file(ident).is_file() for ident in idents), "nothing evicts a document")
         cache = self.ask({"op": "status"})["cache"]
         self.assertEqual(sorted(cache), ["bytes", "documents", "enabled", "failures", "idleSeconds", "root", "written"],
@@ -474,8 +480,6 @@ class CacheTest(unittest.TestCase):
         from cadgen.engine.cli import _bytes
 
         self.assertIn(f"cache {self.cache}: 3 documents · {_bytes(total)}, kept until deleted\n", self.cli("status").stdout)
-        self.assertEqual([(row["state"], row.get("held")) for row in self.ask({"op": "status"})["models"]],
-                         [("held", "disk")] * 3, "out of memory, each read again from the cache")
         exported = self.cli("export", idents[0], str(self.folder / "first.step"))
         self.assertEqual(exported.returncode, 0, exported.stderr)
         self.assertEqual({path: path.stat().st_mtime_ns for path in stamps}, stamps, "the rest of the folder is not ours")
