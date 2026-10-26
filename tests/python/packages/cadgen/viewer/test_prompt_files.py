@@ -15,7 +15,7 @@ import threading
 import unittest
 from pathlib import Path
 
-from cadgen.engine.snapshot import _view_of, packet_visibility, parse_annotation, parse_measurements
+from cadgen.engine.snapshot import _view_of, packet_visibility, parse_annotation
 from cadgen.viewer import handler as handler_module
 from cadgen.viewer.http_app import create_cad_app
 from cadgen.viewer.prompt_files import PromptFiles
@@ -103,28 +103,18 @@ class PromptFilesRouteTest(unittest.TestCase):
         self.assertEqual(packet_visibility(packet(ink, hid, plain)), {})
         self.assertNotIn("hidden", packet(None, plain, hid))
 
-    def test_a_prompts_measurements_are_drawn_over_every_view_its_job_renders(self) -> None:
-        mark = {"start": [0, 0, 0], "end": [10, 0, 0], "label": "10.00 mm", "color": "#d59090"}
-        _, body, _ = self.call("POST", "/__cad/prompt-files", self.request(annotation=None, measurements=[mark]))
-        packet = json.loads(json.loads(body)["inline"])
-        self.assertEqual(packet["measurements"], [mark])
-        self.assertTrue(all("measurements" not in job for job in packet["jobs"]))
-        self.assertEqual(parse_measurements(packet["measurements"]), [mark])
-
-    def test_a_drawings_view_is_its_plan_view_and_its_job_carries_ink_and_measurements(self) -> None:
-        """A DXF's Quick Edit: the window on screen as a plan-view camera, the ink on the sheet and the
-        measurements -- no 3D framing; its label, by which the ink names the view it was drawn in."""
+    def test_a_drawings_view_is_its_plan_view_and_its_job_carries_ink(self) -> None:
+        """A DXF's Quick Edit: the window on screen as a plan-view camera and the ink on the sheet -- no
+        3D framing; its label, by which the ink names the view it was drawn in."""
         drawing = self.tmp / "panel.dxf"
         drawing.write_text("0\nSECTION\n", encoding="utf-8")
         plan = {"position": [50, 30, 120], "target": [50, 30, 0], "up": [0, 1, 0], "orthographicHalfHeight": 30}
-        mark = {"start": [0, 0, 0], "end": [100, 0, 0], "label": "100.00 mm", "color": "#d59090"}
         status, body, _ = self.call("POST", "/__cad/prompt-files", {
-            "name": "panel.dxf", "input": str(drawing), "annotation": ANNOTATION, "measurements": [mark],
+            "name": "panel.dxf", "input": str(drawing), "annotation": ANNOTATION,
             "views": [{"label": "view 1", "camera": plan, "width": 1600, "height": 900}]})
         self.assertEqual(status, 200, body)
         packet = json.loads((self.files / "panel-1.snapshot.json").read_text(encoding="utf-8"))
         self.assertEqual(packet["jobs"][0]["camera"], plan)
-        self.assertEqual(parse_measurements(packet["measurements"]), [mark])
         self.assertEqual(parse_annotation(packet), ANNOTATION)
         self.assertNotIn("output", packet["jobs"][0])
         self.assertEqual(packet["jobs"][0]["outputs"], [{"path": str(self.files / "panel-1-view-1.png"), "label": "view 1",
@@ -159,25 +149,24 @@ class PromptFilesRouteTest(unittest.TestCase):
         self.assertEqual(len(list(self.files.glob("*.snapshot.json"))), 2)
 
     def test_inline_cutoff_counts_utf8_bytes_and_both_forms_are_replayable(self) -> None:
-        mark = {"start": [0, 0, 0], "end": [1, 0, 0], "label": "", "color": "#ffffff"}
-        request = self.request(annotation=None, measurements=[mark], views=[{"label": "current view", "camera": CAMERA}])
-        status, body, _ = self.call("POST", "/__cad/prompt-files", request)
-        self.assertEqual(status, 200, body)
-        base = json.loads(body)["inline"]
-        mark["label"] = "a" * (1024 - len(base.encode("utf-8")) - 2) + "é"
-        status, body, _ = self.call("POST", "/__cad/prompt-files", request)
-        inline = json.loads(body)["inline"]
+        # The view's label is said once in the packet whatever its length past the 48 characters
+        # its file name takes, so it pads the packet a byte at a time; its last, `é`, is two.
+        def post(label: str) -> dict:
+            status, body, _ = self.call("POST", "/__cad/prompt-files",
+                                        self.request(annotation=None, views=[{"label": label, "camera": CAMERA}]))
+            self.assertEqual(status, 200, body)
+            return json.loads(body)
+
+        base = post("a" * 60)["inline"]
+        label = "a" * (60 + 1024 - len(base.encode("utf-8")) - 2) + "é"
+        inline = post(label)["inline"]
         self.assertEqual(len(inline.encode("utf-8")), 1024)
         self.assertEqual(list(self.files.glob("*.json")), [])
-        self.assertEqual(_view_of(json.loads(inline), "current view").camera, CAMERA)
-        mark["label"] += "a"
-        status, body, _ = self.call("POST", "/__cad/prompt-files", request)
-        self.assertEqual(status, 200, body)
-        answer = json.loads(body)
+        self.assertEqual(_view_of(json.loads(inline), label).camera, CAMERA)
+        answer = post(label + "a")
         self.assertNotIn("inline", answer)
         saved = json.loads(Path(answer["snapshot"]).read_text(encoding="utf-8"))
-        self.assertEqual(_view_of(saved, "current view").camera, CAMERA)
-        self.assertEqual(parse_measurements(saved["measurements"])[0]["label"], mark["label"])
+        self.assertEqual(_view_of(saved, label + "a").camera, CAMERA)
 
     def test_a_packets_input_is_a_files_path_or_a_documents_id_and_never_a_script(self) -> None:
         ident = "6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab"
@@ -208,9 +197,8 @@ class PromptFilesRouteTest(unittest.TestCase):
             (self.request(views=[{"label": "a", "camera": "iso", "display": {"mode": "sketch"}}]), "no display mode"),
             (self.request(views=[{"label": "a", "camera": "iso", "display": {"hidden": "lid"}}]), "display.hidden is a list of part refs"),
             (self.request(views=[{"label": "a", "camera": "authored"}]), "the view's own camera"),
-            (self.request(measurements={}), "measurements is null or a list"),
-            # a measurement snapshot would not draw: its own check
-            (self.request(measurements=[{"start": [0, 0], "end": [1, 0, 0], "label": "", "color": "#ffffff"}]), "measurements[0].start"),
+            # Measure's measurements are the person's alone: they never travel in a prompt.
+            (self.request(measurements=[]), "unknown field(s): measurements"),
             # a file snapshot does not draw
             (self.request(input=str(self.notes)), "is no file cadgen snapshot draws"),
         ):

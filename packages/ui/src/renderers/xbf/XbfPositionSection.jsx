@@ -207,7 +207,7 @@ function PositionBody({ kinematics, values, couplings = null, preset, changed, o
         return slider(control, currentValue, change, control.label);
       })}
       {!controls.length && !coupled.length && !poseNames.length ? <FileSheetStatusText>{t("position.noControls")}</FileSheetStatusText> : null}
-      {/* What the document's mechanism cannot pose, where a STEP's sidecar would have refused the joint. */}
+      {/* What the document's mechanism cannot pose, and why. */}
       {[...unposable].map(([label, why]) => <FileSheetStatusText key={label}>{t("position.cannotPose", { name: label, reason: why })}</FileSheetStatusText>)}
       {others.map(text => <FileSheetStatusText key={text}>{text}</FileSheetStatusText>)}
     </div>

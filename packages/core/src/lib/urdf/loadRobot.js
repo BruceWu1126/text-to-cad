@@ -2,7 +2,7 @@
 // visuals to draw) and every mesh those visuals name, loaded into the once-built part list
 // its scene is made from (`robotParts.js`, then `robotScene.js`). No React and no DOM
 // beyond fetch: the viewer's robot renderer (`useRobotDocument`, which adds its progress,
-// its warm reopen and its abort) and the snapshot CLI's headless stage both load a robot
+// its warm reopen and its abort) and the parity page's headless stage both load a robot
 // through these, so they draw the same payload, fetch the same meshes and fail on the
 // same missing one. The page reads no description: URDF, SRDF and SDF are one payload.
 

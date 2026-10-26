@@ -2,7 +2,8 @@
 
 POST /__cad/prompt-files validates a snapshot packet in memory, then returns 200
 with compact inline JSON up to 1024 UTF-8 bytes, or writes one .snapshot.json and
-returns its path. Shared input, inline annotation and measurements are stored once;
+returns its path. Shared input and inline annotation are stored once (Measure's
+measurements are the person's alone: a prompt carries none);
 jobs reserve output names for an agent to render later (``cadgen snapshot --job`` draws
 every one of them; ``cadgen snapshot`` reads the packet as ``--annotation``, and ``--camera
 authored`` draws a job's view). A packet with
@@ -31,7 +32,7 @@ MAX_BODY_BYTES = 32 * 1024 * 1024
 MAX_VIEWS = 16
 # Compact UTF-8 JSON, not whitespace or a model-specific tokenizer.
 INLINE_SNAPSHOT_BYTES = 1024
-_REQUEST_KEYS = frozenset({"name", "input", "views", "annotation", "measurements", "acceptInline"})
+_REQUEST_KEYS = frozenset({"name", "input", "views", "annotation", "acceptInline"})
 _VIEW_KEYS = frozenset({"label", "camera", "display", "kinematics", "jointValues", "animation", "selection", "width", "height"})
 _ANNOTATION_KEYS = frozenset({"units", "parts", "marks"})
 # What ``cadgen snapshot`` draws, by suffix (``cadgen.engine.snapshot``): the files a packet's input may be.
@@ -82,7 +83,7 @@ class PromptFiles:
             request = json.loads(body or b"null")
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError(f"a prompt's files are requested as JSON: {error}") from None
-        name, input_path, views, annotation, measurements = _checked(request)
+        name, input_path, views, annotation = _checked(request)
         directory = self.directory
         with self._lock:
             self._count += 1
@@ -116,8 +117,6 @@ class PromptFiles:
             packet["annotation"] = annotation
             # What ``cadgen snapshot --annotation`` leaves out of the stills it draws the ink on.
             packet.update(_drawn_in(annotation, views))
-        if measurements:
-            packet["measurements"] = measurements
         _accepted(packet)
         compact = json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
         # Already-open clients expect a path. Only clients advertising inline support get JSON.
@@ -145,10 +144,10 @@ class PromptFiles:
         return data, "application/json; charset=utf-8"
 
 
-def _checked(request) -> tuple[str, str, list[dict], dict | None, list | None]:
+def _checked(request) -> tuple[str, str, list[dict], dict | None]:
     """The request's fields, each checked; ``ValueError`` names what is wrong."""
     if type(request) is not dict:
-        raise ValueError("a prompt's files are requested as an object: {name, input, views, annotation, measurements}")
+        raise ValueError("a prompt's files are requested as an object: {name, input, views, annotation}")
     unknown = sorted(set(request) - _REQUEST_KEYS)
     if unknown:
         raise ValueError(f"unknown field(s): {', '.join(unknown)}; a request has {', '.join(sorted(_REQUEST_KEYS))}")
@@ -190,11 +189,7 @@ def _checked(request) -> tuple[str, str, list[dict], dict | None, list | None]:
             raise ValueError("annotation is null or an object of units, parts and marks (a list)")
         if not all(type(mark) is dict for mark in annotation["marks"]):
             raise ValueError("annotation.marks lists objects")
-    # Measure's results: their shape is snapshot's to check, with the job (`_accepted`).
-    measurements = request.get("measurements")
-    if measurements is not None and type(measurements) is not list:
-        raise ValueError("measurements is null or a list of {start, end, label, color}")
-    return name or "", input_path, views, annotation, measurements
+    return name or "", input_path, views, annotation
 
 
 def _drawn_in(annotation: dict, views: list[dict]) -> dict:
@@ -211,9 +206,9 @@ def _drawn_in(annotation: dict, views: list[dict]) -> dict:
 
 def _accepted(packet: dict) -> None:
     """The packet as ``cadgen snapshot`` reads it, checked before anything renders: its input a
-    file the snapshot draws (or a document's id), each job's camera and display, its annotation, the parts it hides and
-    isolates and its measurements, by the snapshot's own parsers (``cadgen.engine.snapshot``). Their
-    refusal is this request's 400.
+    file the snapshot draws (or a document's id), each job's camera and display, its annotation and
+    the parts it hides and isolates, by the snapshot's own parsers (``cadgen.engine.snapshot``).
+    Their refusal is this request's 400.
     """
     from cadgen.engine.snapshot import (
         AUTHORED,
@@ -222,7 +217,6 @@ def _accepted(packet: dict) -> None:
         parse_annotation,
         parse_camera,
         parse_display,
-        parse_measurements,
     )
 
     from cadgen.engine.ids import is_id
@@ -243,6 +237,5 @@ def _accepted(packet: dict) -> None:
                 parse_display(json.dumps(job["display"]), False)
         parse_annotation(packet.get("annotation"))
         packet_visibility(packet)
-        parse_measurements(packet.get("measurements"))
     except SnapshotRefused as error:
         raise ValueError(str(error)) from None

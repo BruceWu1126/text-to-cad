@@ -22,7 +22,7 @@ export default function LoadingIndicator({ progress, operationKey = "" }) {
   const reducedMotion = useContext(ViewerHostContext)?.environment.reducedMotion === true;
   return (
     <div className="flex w-[22rem] max-w-[90vw] flex-col gap-3" role="status" aria-live="polite" data-viewer-loading="true">
-      <LoadingIcon size={80} active={!waiting} reducedMotion={reducedMotion} className="self-center" />
+      <LoadingIcon active={!waiting} reducedMotion={reducedMotion} className="self-center" />
       <div className="flex items-baseline justify-between gap-4 text-xs opacity-75">
         <span className="truncate">{waiting ? t("loading.lastStep", { label: statusLabel(progress?.label, t) || t("loading.openingModel") }) : statusLabel(progress?.label, t) || t("loading.preparingView")}</span>
         <span className="shrink-0 tabular-nums">{progress?.counts || ""}</span>

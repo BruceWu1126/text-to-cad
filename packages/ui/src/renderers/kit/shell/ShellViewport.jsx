@@ -235,7 +235,7 @@ const ShellViewport = forwardRef(function ShellViewport({
   const normalizedThemeSettings = renderState.themeSettings;
   const normalizedDisplaySettings = renderState.displaySettings;
   const photographicLighting = scenePhotographicLighting({ renderMode, renderConfiguration });
-  // The look a scene wears, resolved where the snapshot CLI resolves it (core's
+  // The look a scene wears, resolved where the parity page resolves it (core's
   // `resolveSceneSurfaceLook`). Photographic Render keeps what the file authored; the
   // Surfaces section (colour mode, style, opacity) applies in both. The look keeps its
   // identity while its VALUE holds, so a guide or a stage setting never re-dresses the scene.
@@ -1029,7 +1029,7 @@ const ShellViewport = forwardRef(function ShellViewport({
     // its declared box from its first publish may have only a corner of itself on screen yet.
     controls.maxDistance = Math.max(Math.max(radius, framingRadius) * 140, 50);
     // At rest, between gestures: on a touch page a pinch is OrbitControls' own dolly at this speed, so
-    // a commit must not leave it at a desktop wheel's (a first pinch after a load zoomed ~22x for 2x).
+    // a commit must not leave it at a mouse wheel's (a first pinch after a load zoomed ~22x for 2x).
     controls.zoomSpeed = restingZoomSpeed(prefersCoarsePointer());
 
     // The camera is framed by the pass that runs AFTER this render's lens and projection have

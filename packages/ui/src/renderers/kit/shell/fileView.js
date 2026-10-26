@@ -3,7 +3,7 @@ import { annotatePerspectiveSnapshot, clonePerspectiveSnapshot } from "@text-to-
 import { normalizePlayback } from "../tools/playbar/playbackPreferences.js";
 
 // A file's view: the one record the host keeps for the file on screen in its tab, under
-// `[root, file path, renderer id]` (`@text-to-cad/ui/tab-store`), until the tab leaves the file.
+// `[absolute file path, renderer id]` (`@text-to-cad/ui/tab-store`), until the tab leaves the file.
 // One flat, versioned object:
 //
 //   { version: 2, camera, display, preview, playback, renderer }

@@ -296,10 +296,9 @@ it, the file sidebar, Quick Edit at the top-right.
 - **Quick Edit** carries the picks and the ink; its views are the window on screen as a
   plan-view camera (`planCamera`: looking straight down, `up` +Y, `orthographicHalfHeight` the
   window's half height), each with its label, which the ink's marks name. `cadgen snapshot --job
-  PACKET` draws each view's window with the ink on the sheet, and a packet's `measurements`
-  (`PromptFiles.create` takes them) as Measure draws its dimensions; `--annotation PACKET
-  --camera authored` the view the ink was last drawn in. The viewer's own Quick Edit puts no
-  measurement in its packet: they are the person's.
+  PACKET` draws each view's window with the ink on the sheet, and `--annotation PACKET
+  --camera authored` the view the ink was last drawn in. Quick Edit puts no measurement in its
+  packet: they are the person's.
 
 - **The picture comes from the BACKEND.** `client.drawing(file)` is
   `GET /__cad/drawing` (`apps/web/docs/backend.md`), asked again while the server
@@ -1284,12 +1283,9 @@ again after the tab left it starts at the defaults.
 
 No component renders for a playing frame. While a routine plays, the animation clock calls
 the renderer's frame once per tick (`usePlaybackFrames`; the GLB renderer drives its mixer so),
-and the scrubber is the clock's only React subscriber. Because the frame runs inside
-the tick, the clock's adaptive pacing measures a frame's real cost, and only a
-run of frames that all overran slows it (`createAnimationFramePacer` in core's
-`common/animationClock.js`): a frame that misses one vsync publishes on, where
-pacing on it held the routine still for two or three frames and then moved it
-four or five.
+and the scrubber is the clock's only React subscriber. A tick is one animation frame: the
+player advances the time by what the frame took (`advanceAnimationElapsed` in core's
+`common/animationClock.js`) and draws it; nothing paces the frames.
 
 ### Pencil and Shapes
 

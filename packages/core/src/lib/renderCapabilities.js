@@ -10,29 +10,16 @@ import { RENDER_FORMAT, normalizeFormat } from "./fileFormats.js";
 // fixed twice, and one format grew a whole parallel export route to an endpoint the server
 // does not implement. Both were "this format was not on the list" bugs.
 //
-// So: a format is a ROW here plus a render backend (see viewer/docs/render-types.md).
-// Shared behaviour lives in the viewer shell and reads this table; it is never re-derived
-// from the format's identity.
+// So: a format is a ROW here plus a renderer (packages/ui/docs/render-types.md). Shared
+// behaviour reads this table; it is never re-derived from the format's identity.
 //
 // Rules for changing this file:
-// - Add a capability when the SECOND format needs it, never speculatively.
+// - Add a capability when the SECOND format needs it, never speculatively, with its reader;
+//   take a column out with its last reader. Today one column has one: `iconKind`.
 // - Capabilities are DATA. No behaviour, no imports beyond the format enum.
-// - Format-specific *content* (STEP's tree, DXF's bends) stays format-specific — the
-//   flags below decide WHICH panels mount, not what is in them.
 // - What a 3D file's tools and view offer (Measure, Clip, Explode, the display modes) is
 //   not here: each renderer offers its tools, and `viewFeaturesForKind`
 //   (`common/viewSettings.js`) is the one rule of what a file's view offers.
-
-// WHICH ASSET the viewer loads for this format. A DXF loads a DRAWING: the server's
-// flattened 2D payload, not a mesh, so every "is it loaded yet?" check has to ask about the
-// drawing. Loader implementations stay per-format; this only names which one.
-export const ASSET_KIND = Object.freeze({
-  MESH: "mesh",
-  DRAWING: "drawing",
-  ROBOT: "robot",
-  // A cadgen engine document: its structure and part buffers, read from the engine that serves it.
-  ENGINE_DOCUMENT: "engine-document"
-});
 
 // The file-list glyph. A table rather than a cascade of format tests: the icon is the most
 // purely per-format fact in the client, and it was the longest identity cascade.
@@ -46,109 +33,20 @@ export const ENTRY_ICON_KIND = Object.freeze({
   GLB_MESH: "glb-mesh"
 });
 
-// The toolbar cluster. ALL of these act on the VIEWPORT, not on the geometry, so every
-// format WITH a viewport gets every one of them — a mesh can be panned and annotated
-// exactly as a STEP assembly can. Select is the only one that needs a caveat: on a format
-// without `topology` it is inert, and stays visible so the toolbar keeps one shape rather
-// than reflowing as you move between files.
-//
-// This is the place a format DECLINES a tool, and the shell reads it through
-// `supportsTool`. DXF is the row that declines: a drawing is painted on a canvas with no
-// toolbar over it at all, so it claims none of these rather than advertising four buttons
-// that exist nowhere.
-const VIEWPORT_TOOLS = Object.freeze({
-  select: true,
-  draw: true,
-  orbit: true,
-  screenshot: true
-});
-const NO_VIEWPORT_TOOLS = Object.freeze({
-  select: false,
-  draw: false,
-  orbit: false,
-  screenshot: false
-});
-
-const MESH_CAPABILITIES = Object.freeze({
-  assetKind: ASSET_KIND.MESH,
-  iconKind: ENTRY_ICON_KIND.STL_MESH,
-  parts: false,
-  topology: false,
-  animations: false,
-  artifactManaged: false,
-});
-
-const ROBOT_CAPABILITIES = Object.freeze({
-  assetKind: ASSET_KIND.ROBOT,
-  iconKind: ENTRY_ICON_KIND.ROBOT,
-  // Its links are picked by its own renderer, not through a STEP's part table.
-  parts: false,
-  topology: false,
-  animations: false,
-  artifactManaged: false,
-});
-
-const DEFAULT_CAPABILITIES = Object.freeze({
-  assetKind: ASSET_KIND.MESH,
-  iconKind: ENTRY_ICON_KIND.STEP,
-  tools: VIEWPORT_TOOLS,
-  parts: false,
-  topology: false,
-  animations: false,
-  // Formats whose VIEWPORT CONTENT comes from a generated package, so the viewer checks
-  // freshness and may block on a build.
-  //
-  // This is a SUBSET of `owns_entry` in cadgen/viewer/artifact.py, not a mirror of it.
-  // Anything listed here and NOT owned by the server blocks forever, so a format the
-  // viewer renders from its own file must stay out of it.
-  artifactManaged: false,
-});
+const DEFAULT_CAPABILITIES = Object.freeze({ iconKind: ENTRY_ICON_KIND.STEP });
+const ROBOT_CAPABILITIES = Object.freeze({ iconKind: ENTRY_ICON_KIND.ROBOT });
 
 export const RENDER_CAPABILITIES = Object.freeze({
-  [RENDER_FORMAT.STEP]: Object.freeze({
-    ...DEFAULT_CAPABILITIES,
-    iconKind: ENTRY_ICON_KIND.STEP,
-    parts: true,
-    topology: true,
-    animations: true,
-    artifactManaged: true,
-  }),
-  [RENDER_FORMAT.STL]: Object.freeze({ ...DEFAULT_CAPABILITIES, ...MESH_CAPABILITIES }),
-  [RENDER_FORMAT.THREE_MF]: Object.freeze({
-    ...DEFAULT_CAPABILITIES,
-    ...MESH_CAPABILITIES,
-    iconKind: ENTRY_ICON_KIND.THREE_MF_MESH
-  }),
-  [RENDER_FORMAT.GLB]: Object.freeze({
-    ...DEFAULT_CAPABILITIES,
-    ...MESH_CAPABILITIES,
-    iconKind: ENTRY_ICON_KIND.GLB_MESH,
-    // Content-gated after parse: only embedded playable clips mount controls.
-    animations: true
-  }),
-  // A DXF is NOT on the 3D shell (packages/ui/src/renderers/dxf): the pane is a canvas
-  // painted from `GET /__cad/drawing`. What survives here is what the file LIST and the
-  // asset layer still ask — the icon and which asset to load — plus the claim the row
-  // has to withdraw: there is no viewport, and so no viewport tools.
-  [RENDER_FORMAT.DXF]: Object.freeze({
-    ...DEFAULT_CAPABILITIES,
-    assetKind: ASSET_KIND.DRAWING,
-    iconKind: ENTRY_ICON_KIND.DXF,
-    tools: NO_VIEWPORT_TOOLS,
-  }),
-  [RENDER_FORMAT.URDF]: Object.freeze({ ...DEFAULT_CAPABILITIES, ...ROBOT_CAPABILITIES }),
-  [RENDER_FORMAT.SRDF]: Object.freeze({ ...DEFAULT_CAPABILITIES, ...ROBOT_CAPABILITIES }),
-  [RENDER_FORMAT.SDF]: Object.freeze({ ...DEFAULT_CAPABILITIES, ...ROBOT_CAPABILITIES }),
-  // A cadgen engine document (`packages/ui/src/renderers/xbf`): B-rep parts and their placements,
-  // every face, edge and vertex named by its ordinal. Drawn from what the engine serves, never from
-  // a package the viewer builds.
-  [RENDER_FORMAT.XBF]: Object.freeze({
-    ...DEFAULT_CAPABILITIES,
-    assetKind: ASSET_KIND.ENGINE_DOCUMENT,
-    iconKind: ENTRY_ICON_KIND.STEP,
-    parts: true,
-    topology: true
-  })
+  [RENDER_FORMAT.STEP]: DEFAULT_CAPABILITIES,
+  [RENDER_FORMAT.STL]: Object.freeze({ iconKind: ENTRY_ICON_KIND.STL_MESH }),
+  [RENDER_FORMAT.THREE_MF]: Object.freeze({ iconKind: ENTRY_ICON_KIND.THREE_MF_MESH }),
+  [RENDER_FORMAT.GLB]: Object.freeze({ iconKind: ENTRY_ICON_KIND.GLB_MESH }),
+  [RENDER_FORMAT.DXF]: Object.freeze({ iconKind: ENTRY_ICON_KIND.DXF }),
+  [RENDER_FORMAT.URDF]: ROBOT_CAPABILITIES,
+  [RENDER_FORMAT.SRDF]: ROBOT_CAPABILITIES,
+  [RENDER_FORMAT.SDF]: ROBOT_CAPABILITIES,
+  // A cadgen engine document (`packages/ui/src/renderers/xbf`), which a STEP opens as: one icon.
+  [RENDER_FORMAT.XBF]: DEFAULT_CAPABILITIES
 });
 
 // Extension aliases that name the same render format.
@@ -157,36 +55,11 @@ const FORMAT_ALIASES = Object.freeze({
   gltf: RENDER_FORMAT.GLB
 });
 
-// Capabilities for a render format. An unrecognised format gets the conservative default
-// row: it renders, and every optional capability is off.
-//
-// Deliberately NOT normalizeRenderFormat(), which resolves anything unknown to STEP. That
-// is the right default when picking a loader, and exactly wrong here — it would hand an
-// unrecognised entry STEP's full capability set (parts, topology, artifact-managed
-// gating) and fail open on every one of them.
+// Capabilities for a render format. An unrecognised format gets the conservative default row.
 export function renderCapabilities(renderFormat) {
   const normalized = normalizeFormat(renderFormat);
   const resolved = FORMAT_ALIASES[normalized] || normalized;
   return RENDER_CAPABILITIES[resolved] || DEFAULT_CAPABILITIES;
-}
-
-// `renderCapabilities(f).tools[tool]`, with the lookup and the missing-tool case handled.
-export function supportsTool(renderFormat, tool) {
-  return renderCapabilities(renderFormat).tools?.[tool] === true;
-}
-
-// Reads one boolean capability. Keeps call sites free of optional chaining and makes the
-// policy ratchet's allowlist easy to describe: capability reads look like this.
-export function hasCapability(renderFormat, capability) {
-  return renderCapabilities(renderFormat)[capability] === true;
-}
-
-export function isArtifactManagedFormat(renderFormat) {
-  return renderCapabilities(renderFormat).artifactManaged === true;
-}
-
-export function assetKindForRenderFormat(renderFormat) {
-  return renderCapabilities(renderFormat).assetKind;
 }
 
 export function entryIconKindForRenderFormat(renderFormat) {

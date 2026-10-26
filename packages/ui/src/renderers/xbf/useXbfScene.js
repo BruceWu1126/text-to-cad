@@ -116,8 +116,8 @@ export function useXbfScene({ client, file }) {
             if (early > 0) await pause(early, signal);
           } catch (error) {
             if (signal.aborted || isAbortError(error)) throw error;
-            // The engine went away (its daemon idled out or was stopped): ask for it again, which
-            // starts it, and read the document from it as it has it now.
+            // The engine went away (it was stopped, or a newer installation retired it): ask for it
+            // again, which starts it, and read the document from it as it has it now.
             await pause(RETRY_MS, signal);
             served = await client.engineDocument(file, { signal, onProgress: imported });
             noticed = performance.now();

@@ -15,7 +15,6 @@ import { BASE_VIEWER_THEME } from "../lib/viewer/stageTheme.js";
 import {
   addFloor,
   applyLighting,
-  createSharedRenderOptions,
   RENDER_SCENE_SCALE,
   boundsCorners,
   boundsFromVertices,
@@ -70,20 +69,6 @@ function groundHitAtNdc(camera, x, y, groundZ, includeBehind = false) {
   const depth = -hit.clone().applyMatrix4(camera.matrixWorldInverse).z;
   return depth > 0 || includeBehind ? { hit, depth } : null;
 }
-
-test("shared render options preserve explicit caller-owned values without defaults", () => {
-  const options = createSharedRenderOptions({
-    displayMode: "wireframe",
-    background: false,
-    renderScale: 0
-  });
-
-  assert.equal(options.themeSettings, null);
-  assert.equal(options.display, null);
-  assert.equal(Object.hasOwn(options, "displayMode"), false);
-  assert.equal(options.background, false);
-  assert.equal(options.renderScale, 0);
-});
 
 test("a snapshot draws the viewer's grid for the same settings, its density included", () => {
   const bounds = { min: [0, 0, 0], max: [10, 10, 10] };

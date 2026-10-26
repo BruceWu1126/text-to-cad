@@ -9,16 +9,10 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 export interface FileEntry { path: string; name: string; kind: "file" | "directory" }
 export interface FileMetadata extends FileEntry {
   /**
-   * The on-disk file to browse from and act on (Select File, copy path, Reveal); omitted it is
-   * `path`. Null for a document with no file of its own (a model's, by its id): no Select File and no
-   * file menu.
+   * The on-disk file to browse from and act on (its Files, Copy path, Reveal); omitted it is
+   * `path`. Null for a document with no file of its own (a model's, by its id): no file menu.
    */
   navigationPath?: string | null;
-  /**
-   * A document with no file of its own: the folder it was registered from (a model's script's),
-   * where its Files tab starts.
-   */
-  folder?: string | null;
   size: number;
   extension: string;
   mime?: string;
@@ -88,7 +82,7 @@ export interface FileNavigationAction {
   active?: boolean;
   onInvoke: () => void | Promise<void>;
 }
-/** An on/off setting of the host's own, in a Settings section it names (the CAD apps' Analytics). */
+/** An on/off setting of the host's own, in a Settings section it names (the CAD apps' Telemetry). */
 export interface AppSetting {
   id: string;
   label: string;

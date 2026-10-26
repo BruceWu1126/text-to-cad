@@ -168,7 +168,7 @@ export function meshesFor(robot) {
   return meshes;
 }
 
-/** A payload with its once-built part list, as the robot renderer and the snapshot CLI load it. */
+/** A payload with its once-built part list, as the robot renderer and the parity page load it. */
 export function robotOf(robot, meshesByUrl = meshesFor(robot)) {
   return { robot, ...buildRobotParts(robot, meshesByUrl) };
 }

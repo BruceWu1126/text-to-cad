@@ -77,30 +77,6 @@ export function occurrenceSegments(partId, hierarchy = null) {
   return Array.isArray(path) ? path.map((id) => String(id || "").trim()).filter(Boolean) : [];
 }
 
-// Each leaf part's path of node ids through `root` (the assembly tree the viewer
-// renders, `meshData.assemblyRoot`): root first, the leaf itself last. The one
-// source of hierarchy for the explode; without it every part is a sibling.
-export function occurrencePathsFromAssemblyRoot(root) {
-  const paths = new Map();
-  if (!root || typeof root !== "object") {
-    return paths;
-  }
-  const visit = (node, ancestors) => {
-    const id = String(node?.id || "").trim();
-    const path = id ? [...ancestors, id] : ancestors;
-    const children = Array.isArray(node?.children) ? node.children : [];
-    if (!children.length) {
-      if (id) paths.set(id, path);
-      return;
-    }
-    for (const child of children) visit(child, path);
-  };
-  visit(root, []);
-  return paths;
-}
-
-// -- bounds helpers ---------------------------------------------------------
-
 export function boundsCenterArray(bounds, fallback = [0, 0, 0]) {
   const min = isFiniteVectorArray(bounds?.min) ? bounds.min : null;
   const max = isFiniteVectorArray(bounds?.max) ? bounds.max : null;
@@ -533,14 +509,6 @@ export function applyExplodedViewProgress(THREE, layout, progress = 1) {
   }
 }
 
-export function clearExplodedViewRecords(records = []) {
-  for (const record of Array.isArray(records) ? records : []) {
-    if (record) {
-      record.explodedViewMatrix = null;
-    }
-  }
-}
-
 // Bounds of the assembly at a given scrub progress, for auto-framing. Offsets
 // are pure translations, so each moved record's bounds just shift.
 export function explodedViewBounds(layout, fallbackBounds = null, progress = 1) {
@@ -572,9 +540,4 @@ export function explodedViewBounds(layout, fallbackBounds = null, progress = 1) 
     });
   }
   return mergeBounds(boundsList) || fallbackBounds;
-}
-
-export function easeExplodedViewProgress(value) {
-  const amount = clamp(toNumber(value), 0, 1);
-  return 1 - (1 - amount) ** 3;
 }

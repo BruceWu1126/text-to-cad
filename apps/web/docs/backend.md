@@ -192,7 +192,7 @@ fetch every read of it is made with (the CAD app's goes over its tunnel).
 | `POST /__cad/analytics/activity` | What the page did, for telemetry: `{touched: true}`, a person touched it; `{quickEdit: true}`, a Quick Edit went; `{controls: [{control, count, seconds}]}`, the view controls used (names from `cadgen.analytics.CONTROLS`); `{crash}`, the page crashed (core's `crashOf`: its type and frames, checked again by the server, never a message). Its body may run to 16 KiB. |
 | `GET`/`POST /__cad/language` | The person's language for the CAD views (`cadgen/language.py`): `{locale, inferred, choice}`; `{choice}` sets it (null is Automatic). |
 | `GET /__cad/version` | Whether a newer text-to-cad is out: the update button's `notice`, or null. |
-| `POST /__cad/prompt-files` | `{name, input, views: [{label, camera, display?, kinematics?, jointValues?, animation?, selection?, width?, height?}], annotation?, measurements?, acceptInline?}` (at most 16 views): validate a Quick Edit's packet in memory and answer `200 {ok, inline}` (compact JSON up to 1024 bytes, only with `acceptInline: true`), else `200 {ok, snapshot}` (the absolute path of the `.snapshot.json` written), or a 400. Nothing renders and no PNG is written: `cadgen snapshot --job` draws the packet later. Carries `x-cadgen-viewer`, as the GET below does. |
+| `POST /__cad/prompt-files` | `{name, input, views: [{label, camera, display?, kinematics?, jointValues?, animation?, selection?, width?, height?}], annotation?, acceptInline?}` (at most 16 views; Measure's measurements never travel in one): validate a Quick Edit's packet in memory and answer `200 {ok, inline}` (compact JSON up to 1024 bytes, only with `acceptInline: true`), else `200 {ok, snapshot}` (the absolute path of the `.snapshot.json` written), or a 400. Nothing renders and no PNG is written: `cadgen snapshot --job` draws the packet later. Carries `x-cadgen-viewer`, as the GET below does. |
 | `GET /__cad/prompt-files/<name>` | One of those JSON files, from this process's prompt-files directory only. |
 
 Every POST must send `x-cadgen-viewer: 1`. The custom header forces a browser
@@ -208,9 +208,9 @@ clipboard, pick), and its one write to the person's machine is a browser downloa
 `POST /__cad/exports` `{requestId, epoch, source: {doc, revision}, format}` queues an export
 (202) of the displayed document as its code built it
 ([the app README](../README.md#export-and-job-status)); `GET /__cad/exports` is the session's
-epoch, `GET /__cad/exports/<id>` a job's state (`?after=&wait=`), `GET /__cad/exports/<id>/file`
-the download, and `POST /__cad/exports/<id>/cancel` and `/release` end it. CLI exports remain
-outside this HTTP interface.
+epoch, `GET /__cad/exports/<id>` a job's state (`?after=&wait=`), and `GET /__cad/exports/<id>/file`
+the download, whose file goes once the browser has it whole or after ten minutes. CLI exports
+remain outside this HTTP interface.
 
 Backend tests live in `tests/python/packages/cadgen/viewer` and are run by
 `scripts/test/test-python.sh`. The web app's `npm run test` covers its JavaScript

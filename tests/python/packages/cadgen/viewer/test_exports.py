@@ -1,4 +1,4 @@
-"""Export jobs: queued cancellation, identity, retention and streaming leases, without a kernel."""
+"""Export jobs: identity, retention and streaming leases, without a kernel."""
 import json
 import tempfile
 import threading
@@ -46,18 +46,6 @@ class ExportsTest(unittest.TestCase):
                 lambda: self.jobs.jobs[ident]["state"] in ("ready", "failed", "cancelled") and not self.jobs.executing, 10))
         return self.jobs.get(ident)
 
-    def test_multiple_jobs_cancel_queue_and_running_without_publishing_partial(self):
-        first = self.jobs.create(self.request())
-        self.assertTrue(self.entered.wait(10))
-        second = self.jobs.create(self.request("two"))
-        self.assertEqual(second["state"], "queued")
-        self.assertEqual(self.jobs.cancel(second["id"])["state"], "cancelled")
-        self.assertEqual(self.jobs.cancel(first["id"])["state"], "cancelling")
-        self.finish.set()
-        self.assertEqual(self.settled(first["id"])["state"], "cancelled")
-        self.assertEqual(len(self.calls), 1)
-        self.assertEqual(list(Path(self.tmp.name).iterdir()), [])
-
     def test_idempotency_is_not_a_second_export_and_changed_request_conflicts(self):
         original = self.request()
         first = self.jobs.create(original)
@@ -70,7 +58,6 @@ class ExportsTest(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
         with patch("cadgen.viewer.exports.MAX_RETAINED_BYTES", 1):
             self.assertEqual(self.jobs.create(original)["id"], first["id"])
-        self.jobs.release(first["id"])
 
     def test_artifact_can_be_saved_twice_and_transfer_prevents_expiry_cleanup(self):
         self.finish.set()
@@ -96,23 +83,21 @@ class ExportsTest(unittest.TestCase):
         self.assertEqual(self.jobs.create(self.request())["id"], ident)
         self.assertEqual(len(self.calls), 1)
 
-    def test_a_released_or_fetched_file_is_gone_to_a_new_reader_while_an_earlier_one_finishes(self):
-        # The HTTP test once read a released export again: the download before it had sent its last
-        # byte but not yet let go of the file, so the release could not expire the job yet.
+    def test_a_fetched_file_is_gone_to_a_new_reader_while_an_earlier_one_finishes(self):
+        # The download before it had sent its last byte but not yet let go of the file, so the
+        # fetch could not expire the job yet.
         self.finish.set()
-        for name, going in (("one", lambda ident: self.jobs.release(ident)),
-                            ("two", lambda ident: self.jobs.fetched(ident))):
-            ident = self.jobs.create(self.request(name))["id"]
-            self.settled(ident)
-            with self.subTest(name), self.jobs.artifact(ident) as path:  # an earlier download, finishing
-                going(ident)
-                with self.assertRaises(ExportError) as caught:
-                    with self.jobs.artifact(ident):
-                        pass
-                self.assertEqual(caught.exception.status, 410)
-                self.assertTrue(path.exists(), "the earlier download keeps its file")
-            self.assertFalse(path.exists())
-            self.assertEqual(self.jobs.get(ident)["state"], "expired")
+        ident = self.jobs.create(self.request())["id"]
+        self.settled(ident)
+        with self.jobs.artifact(ident) as path:  # an earlier download, finishing
+            self.jobs.fetched(ident)
+            with self.assertRaises(ExportError) as caught:
+                with self.jobs.artifact(ident):
+                    pass
+            self.assertEqual(caught.exception.status, 410)
+            self.assertTrue(path.exists(), "the earlier download keeps its file")
+        self.assertFalse(path.exists())
+        self.assertEqual(self.jobs.get(ident)["state"], "expired")
 
     def download(self, ident, *, gone=False, headers=None):
         response = Mock(gone=gone)
@@ -215,7 +200,7 @@ class ExportsTest(unittest.TestCase):
             request = first if index == 0 else {**first, "requestId": f"request-{index:016d}"}
             ident = self.jobs.create(request)["id"]
             self.settled(ident)
-            self.jobs.release(ident)
+            self.jobs.fetched(ident)
         self.assertLessEqual(len(self.jobs.jobs), 128)
         with self.assertRaises(ExportError) as caught:
             self.jobs.create(first)
@@ -231,7 +216,6 @@ class ExportsTest(unittest.TestCase):
         ident = self.jobs.create({**self.request(), "epoch": response.send_json.call_args.args[1]["epoch"]})["id"]
         self.assertEqual(self.settled(ident)["state"], "ready")
         self.assertEqual(len(self.calls), 1)
-        self.jobs.release(ident)
 
     def test_stale_epoch_closed_formats_and_a_part_or_a_pose_are_refused(self):
         for change in ({"epoch": "old"}, {"format": "zip"}, {"format": []}, {"output": "/tmp/unasked"}):
@@ -252,7 +236,6 @@ class ExportsTest(unittest.TestCase):
         self.jobs.handle(SimpleNamespace(path=f"/__cad/exports/{ident}/file", method="GET", query={}), response)
         self.assertEqual(sent, [b"model"])
         self.assertIn("attachment;", dict(response.stream_file.call_args.args[3])["content-disposition"])
-        self.jobs.release(ident)
 
     def test_plain_download_names_the_file_for_every_browser(self):
         self.finish.set()
@@ -262,7 +245,6 @@ class ExportsTest(unittest.TestCase):
         response = self.download(ident)
         disposition = dict(response.stream_file.call_args.args[3])["content-disposition"]
         self.assertEqual(disposition, "attachment; filename=\"_____ v2.step\"; filename*=UTF-8''%E3%83%96%E3%83%A9%E3%82%B1%E3%83%83%E3%83%88%20v2.step")
-        self.jobs.release(ident)
 
 
 STL = b"solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid t\n"
@@ -320,7 +302,6 @@ class MeshFileExportTest(unittest.TestCase):
             _export({"source": {"path": str(self.part)}, "expected": {"version": "1-1"},
                      "destinations": [str(self.downloads / "late.glb")]}, lambda _text: None)
         self.assertFalse((self.downloads / "late.glb").exists())
-        self.jobs.release(job["id"])
 
 
 if __name__ == "__main__":

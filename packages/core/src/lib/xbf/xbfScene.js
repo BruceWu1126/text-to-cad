@@ -1,6 +1,6 @@
 // A cadgen engine document's scene (`../viewer/sceneContract.js`): the ONE builder of an
-// `.xbf`'s scene. The viewer's xbf renderer (`@text-to-cad/ui` renderers/xbf) and the snapshot
-// CLI's headless stage (`common/headlessScene.js`) both call it, so neither can draw a document
+// `.xbf`'s scene. The viewer's xbf renderer (`@text-to-cad/ui` renderers/xbf) and the parity
+// page's headless stage (`common/headlessScene.js`) both call it, so neither can draw a document
 // the other does not.
 //
 // It is drawn from what the engine serves and nothing else (`xbfDocument.js`):
@@ -39,7 +39,6 @@ import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeome
 import { resolveCadEdgeSettings } from "../../common/cadInk.js";
 import { createScreenSpaceLineSegments, topologyLineDepthBiasForWidth } from "../../common/renderEdges.js";
 import { syncMaterialClipPlanes } from "../viewer/clipPlane.js";
-import { FOCUSED_DIMMED_SURFACE_OPACITY } from "../viewer/partVisualState.js";
 import { worldUnitsPerPixelAtDistance } from "../viewer/pickingThresholds.js";
 import { scheduleRuntimeRaycastBvh } from "../viewer/raycastBvh.js";
 import { REFERENCE_HOVER_COLOR } from "../viewer/referenceGeometry.js";
@@ -58,6 +57,8 @@ export const XBF_EDGE_LINES = Object.freeze(["feature", "tangent", "seam"]);
 // edge is taken -- a press's, a resting pointer's, a touch's -- and, over a face, how near one
 // of THAT face's own edges must be to win over it (an edge the face does not own never does).
 export const XBF_PICK_PIXELS = Object.freeze({ edge: 10, edgeHover: 6, edgeTouch: 20, edgeTouchOverFace: 16 });
+// An isolated part's neighbours' surfaces: all but gone (`setFocusedParts`).
+const FOCUSED_DIMMED_SURFACE_OPACITY = 0.035;
 // The world reach of a STEP's edge raycast: the model's radius over 320, at least 0.65, never
 // wider than the pixel reach at the surface's distance; and how far behind the nearest surface
 // an edge may lie and still be picked (0.75 of that reach, at least 0.08).

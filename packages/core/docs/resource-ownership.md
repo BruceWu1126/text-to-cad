@@ -12,22 +12,16 @@ persistent cache identity or occurrence identity.**
 
 | § | Covers |
 |---|---|
-| [1](#1-shared-ownership-and-disposal) | More than one scene owner, and who disposes |
+| [1](#1-shared-ownership-and-disposal) | A scene's sibling over its source's buffers, and who disposes |
 | [2](#2-the-demand-boundary) | Raycast accelerators built only when a ray needs one |
-| [3](#3-reuse-without-changing-geometry) | Recomposition, instancing, culling, material pass keys |
+| [3](#3-reuse-without-changing-geometry) | Recomposition and instancing |
 | [4](#4-decode-workers) | The GLB and STL workers, leased by render sessions |
 
 ## 1. Shared ownership and disposal
 
-Component geometry and edge textures can have more than one scene owner; only
-the last release disposes shared GPU/BVH state.
+A buffer has one owner, the scene that built it; a sibling borrows it and frees only what
+is its own.
 
-- Full scene disposal includes host-reparented groups and records attached by
-  an interrupted reconciliation.
-- Cleanup retires completed ownership steps. A thrown disposal remains
-  retryable and cannot release another scene's share twice.
-- Failed initial construction cleans its partial scene before throwing, or
-  transfers the still-owned scene with an explicit cleanup error for retry.
 - Disposable resource admission never changes exact geometry or persistent
   cache identity.
 - A scene's sibling (`createSibling()` of `lib/render/glbScene.js`,
@@ -57,8 +51,6 @@ the last release disposes shared GPU/BVH state.
 - Failed or pending builds keep stock picking. A result must match the
   geometry's attributes, arrays, versions, groups, draw range and live
   ownership; the last geometry release cancels queued or active work.
-- A geometry's `cadBeforeRaycast` hook, where one is installed, runs before the bounds
-  test (nothing installs one today).
 
 ## 3. Reuse without changing geometry
 
@@ -70,14 +62,11 @@ whose geometry key the new version still holds, and the geometry built over it; 
 parts the edit changed are fetched and built. Nothing of that reuse enters saved geometry or
 cache identity.
 
-### Instancing, culling and material passes
+### Instancing
 
 An engine document draws one `Mesh` per instance over one shared prototype geometry
 (`lib/xbf/xbfScene.js`, `lib/render/sharedGeometry.js`), with no instanced draws of its own;
-a rebuild keeps the buffers and geometries whose keys it still holds, as above. The
-composed-package path — `lib/assembly/meshData.js`'s progressive publishes and wire-only
-products, `common/cadSurfaceInstances.js`'s instanced surface sets, aggregate frustum bounds
-and material pass keys (`scene.syncSurfaceInstances()`) — is 0.7's, reached by no product path.
+a rebuild keeps the buffers and geometries whose keys it still holds, as above.
 
 ### Revision reuse
 

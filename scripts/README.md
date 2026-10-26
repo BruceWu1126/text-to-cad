@@ -68,6 +68,11 @@ where those files ship, so these scripts are what produces them.
   directory of its own (`CADGEN_ENGINE_DIR`), and stops the daemon a file left
   there after it; run one test file through it too, rather than
   `python -m unittest`, which would build on your own daemon.
+  Each file's state, cache and `cadgen` command folders are its own too
+  (`CADGEN_STATE_DIR`, `CADGEN_CACHE_DIR`, `CADGEN_LAUNCHER_DIR`), and a document,
+  engine or installation record the run's cadgen writes in your own state folder,
+  or your `cadgen` command written, fails the run, naming the test that was running
+  (what another cadgen of yours writes there meanwhile is listed, and fails nothing).
   A file still running after 15 minutes is hung: it prints every thread's stack
   and fails.
 - `test-global.sh [PATH...]` — `tests/python/global`, the repo-wide policy

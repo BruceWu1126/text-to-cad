@@ -1,8 +1,8 @@
 /**
- * `cadgen dxf snapshot` in the page: a `GET /__cad/drawing` payload, on a 2D
- * canvas, as a PNG.
+ * A drawing job on the parity page: a `GET /__cad/drawing` payload, on a 2D
+ * canvas, as a PNG (`cadgen dxf snapshot` draws by OCCT in the engine).
  *
- * This is the CLI half of the viewer's DXF pane, and deliberately shares its
+ * This is the headless page's half of the viewer's DXF pane, and deliberately shares its
  * whole drawing path (`../lib/drawing2d`): the same fit, the same hairline rule,
  * the same default-pen resolution against the same theme pair. A drawing has
  * no scene and no lights, so nothing here renders with three.js — the

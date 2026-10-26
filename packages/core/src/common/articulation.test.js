@@ -3,19 +3,14 @@ import { test } from "node:test";
 import * as THREE from "three";
 
 import {
-  applyArticulationToEffects,
-  articulationAtRest,
   controlWriteForHandle,
   handleRowValue,
   jointDeltas,
   jointValues,
   normalizeControlValues,
   openingControlValues,
-  poseControlValues,
   rowValue
 } from "./articulation.js";
-import { applySceneState } from "./applySceneState.js";
-import { normalizeAnimationClips } from "./animationRuntime.js";
 
 // A hand-built articulation, in the shape cadgen writes (`cadgen.robot_payload`): an elbow
 // turning about z at x=10 carrying the forearm, a slider on the forearm carrying the carriage,
@@ -58,17 +53,12 @@ test("a configuration is every control: given values clamped to their limits, th
   assert.deepEqual(openingControlValues(ARTICULATION), { elbow: 0, extend: 0, "lead.turn": 0, "lead.travel": 0, curl: 0 });
   assert.deepEqual(normalizeControlValues(ARTICULATION, { elbow: 200, extend: "7", stray: 1 }),
     { elbow: 150, extend: 7, "lead.turn": 0, "lead.travel": 0, curl: 0 });
-  // A named pose is a full configuration: what it names, and every other control at rest.
-  assert.deepEqual(poseControlValues(ARTICULATION, "open"), { elbow: 40, extend: 0, "lead.turn": 0, "lead.travel": 0, curl: 0 });
-  assert.deepEqual(poseControlValues(ARTICULATION, "shut"), openingControlValues(ARTICULATION));
 });
 
 test("joint values are the rows' dot products: an own term and a coupling's add", () => {
   assert.deepEqual(jointValues(ARTICULATION, { curl: 0.5 }).elbow, { turn: 45, travel: 0 });
   assert.deepEqual(jointValues(ARTICULATION, { curl: 0.5 }).extend, { turn: 0, travel: 5 });
   assert.deepEqual(jointValues(ARTICULATION, { elbow: 10, curl: 0.5 }).elbow, { turn: 55, travel: 0 });
-  assert.equal(articulationAtRest(ARTICULATION, {}), true);
-  assert.equal(articulationAtRest(ARTICULATION, { curl: 0.001 }), false);
 });
 
 // A four-bar's crank as cadgen writes it (`cadgen.robot_payload`): no term of its own, a curve
@@ -92,8 +82,7 @@ test("a row's curve is played linearly between its keys, held beyond them, folde
     joints: [{ id: "rocker", parent: null, kind: "revolute", origin: [0.2, 0, 0], axis: [0, 0, 1], turn: { bias: 0, terms: [["rocker", 1]] } },
       { id: "crank", parent: null, kind: "revolute", origin: [0, 0, 0], axis: [0, 0, 1], turn: CRANK }], carries: {}, handles: [], poses: {}, opening: { rocker: 0 } };
   assert.deepEqual(jointValues(linkage, { rocker: 20 }).crank, { turn: 14, travel: 0 });
-  assert.equal(articulationAtRest(linkage, { rocker: 0 }), true, "the zero pose is a key at exactly zero");
-  assert.equal(articulationAtRest(linkage, { rocker: 1 }), false);
+  assert.deepEqual(jointValues(linkage, { rocker: 0 }).crank, { turn: 0, travel: 0 }, "the zero pose is a key at exactly zero");
 });
 
 test("a revolute delta turns about its own axis, not the world origin", () => {
@@ -115,17 +104,6 @@ test("a cylindrical joint turns and travels about one axis", () => {
   assert.deepEqual(through(delta, [1, 0, 0]), [0, 1, 3]);
 });
 
-test("the pose lands on the effect records of exactly the occurrences each joint carries", () => {
-  const effects = new Map();
-  assert.equal(applyArticulationToEffects(THREE, ARTICULATION, { elbow: 90 }, effects), 4);
-  assert.deepEqual([...effects.keys()].sort(), ["carriage", "forearm", "pin", "screw"]);
-  assert.deepEqual(through(effects.get("forearm").matrix, [11, 0, 0]), [10, 1, 0]);
-  assert.deepEqual(through(effects.get("carriage").matrix, [11, 0, 0]), [10, 1, 0], "the slider at rest carries the elbow alone");
-  assert.deepEqual(effects.get("screw").matrix.elements, new THREE.Matrix4().elements);
-  // At rest nothing is written: the artifact as written is q=0.
-  assert.equal(applyArticulationToEffects(THREE, ARTICULATION, {}, new Map()), 0);
-});
-
 test("a handle shows its row and back-drives the control it names, clamped to that control's limits", () => {
   const [elbow, extend, leadTurn] = ARTICULATION.handles;
   const values = { elbow: 10, curl: 0.5 };
@@ -136,30 +114,4 @@ test("a handle shows its row and back-drives the control it names, clamped to th
   assert.deepEqual(controlWriteForHandle(ARTICULATION, elbow, {}, 2000), { id: "curl", value: 1 }, "no further than the coupling goes");
   assert.deepEqual(controlWriteForHandle(ARTICULATION, elbow, {}, -5), { id: "curl", value: 0 });
   assert.deepEqual(controlWriteForHandle(ARTICULATION, leadTurn, {}, 30), { id: "lead.turn", value: 30 }, "a free row writes itself");
-});
-
-// Left slides +x at 1 mm/s.
-const SLIDE = normalizeAnimationClips({ clips: [{
-  id: "slide", label: "Slide", duration: 4, loop: true,
-  tracks: [{ targets: ["forearm"], times: [0, 4], pivot: [0, 0, 0], transform: [
-    [0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0],
-    [4, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0]
-  ] }]
-}] });
-
-test("the scene pass plays the pose, then the clip on top of it, onto the records", () => {
-  const runtime = { displayRecords: [{ partId: "forearm" }, { partId: "carriage" }, { partId: "screw" }, { partId: "pin" }] };
-  const state = applySceneState(THREE, {
-    runtime, meshData: { parts: [] },
-    pose: { articulation: ARTICULATION, values: { elbow: 90 } },
-    animation: { clip: SLIDE.slide, elapsedSec: 1.5 }
-  });
-  assert.equal(state.applied, true);
-  assert.equal(state.transformDetected, true);
-  const forearm = runtime.displayRecords[0].effectMatrix;
-  // The elbow's turn first, the clip's +1.5 mm slide in world space on top: never the reverse.
-  assert.deepEqual(through(forearm, [11, 0, 0]), [11.5, 1, 0]);
-  assert.deepEqual(through(runtime.displayRecords[1].effectMatrix, [11, 0, 0]), [10, 1, 0], "the clip never touched the carriage");
-  // Neither half with anything to say: the caller resets to rest.
-  assert.equal(applySceneState(THREE, { runtime, meshData: { parts: [] } }).applied, false);
 });

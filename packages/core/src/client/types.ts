@@ -8,8 +8,6 @@ export interface CadEntry {
   name?: string;
   /** The file to browse from; null for a document with no file of its own (a model's). */
   sourcePath?: string | null;
-  /** A model's: the folder its record registered (its script's), which its name menu's Files lists. */
-  folder?: string | null;
   kind?: string;
   format?: string;
   sourceFormat?: string;

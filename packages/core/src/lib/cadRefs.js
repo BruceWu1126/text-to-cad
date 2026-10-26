@@ -19,7 +19,7 @@ const LABEL_SELECTOR_RE = /^[A-Za-z_][A-Za-z0-9_:]*$/;
 // labelled goes by the label (`f:lid.2`); an element no construction names (an imported file's) by
 // its geometric token, 12 hex (`f:9d2e8c1b5a70`). A name is an opaque string the grammar admits:
 // nothing here reads a derivation. Its cases are cadRefs.parity.json's `elementNameCases`, which
-// cadgen/engine/naming.py's `ELEMENT_NAME` reads too.
+// cadgen/engine/kernel/trace.py's `ELEMENT_NAME` reads too.
 //
 // A feature is a label or `function.operationN`; segments start with a letter and numbers with a
 // digit, so the two never read as one another, and a geometric token holds no dot.

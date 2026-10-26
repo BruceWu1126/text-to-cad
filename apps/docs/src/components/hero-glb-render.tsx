@@ -5,7 +5,6 @@ import * as THREE from "three";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
-import { CAD_SCENE_SCALE } from "@text-to-cad/core/common/cadScene.js";
 import { renderModel } from "@text-to-cad/core/common/renderModel.js";
 import { cloneThemePresetSettings } from "@text-to-cad/core/common/themeSettings.js";
 import {
@@ -14,6 +13,7 @@ import {
   setGlbAnimationTime,
 } from "@text-to-cad/core/lib/render/glbAnimationRuntime.js";
 import { buildGlbDocumentFromBuffer, disposeGlbDocument } from "@text-to-cad/core/lib/render/glbMeshData.js";
+import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 
 // The hero plays the planetary gear as one GLB, exported from the model's document by
 // `cadgen export` (scripts/sync-hero-glb.mjs): its parts, colours and the `meshCycle` motion,
@@ -30,8 +30,8 @@ const HERO_CLIP_SPEED = 0.14;
 // cylinder, so a bore draws its rims and no lines down its wall.
 const EDGE_CREASE_DEG = 35;
 const EDGE_OPACITY = 0.84;
-// The outline around each part, as the CAD scene draws one: its back faces pushed out along their
-// normals by this share of the model's radius, in the edge colour, behind the part.
+// The outline around each part: its back faces pushed out along their normals by this share of
+// the model's radius, in the edge colour, behind the part.
 const SILHOUETTE_SCALE = 0.004;
 const SILHOUETTE_OPACITY = 0.9;
 
@@ -341,7 +341,7 @@ export function HeroGlbRender() {
           hostElement: viewportRef.current ?? canvas,
           lockedHalfHeightScale: 0.86,
           padding: 0.1,
-          scale: CAD_SCENE_SCALE.CAD,
+          scale: VIEWER_SCENE_SCALE.CAD,
           theme: buildWorkbenchTheme(scheme),
         });
         setStatus(HERO_LABEL);

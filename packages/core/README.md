@@ -37,17 +37,16 @@ protocol relationship never imports Python or discovers an interpreter.
   Authored finishes use a small fixed reflection fill in Inspect so metals
   remain legible. [inspectEnvironment.js](src/common/inspectEnvironment.js) owns
   its procedural texture; it loads no studio or external HDR asset.
-- **Resource ownership**: component geometry and edge textures can have more
-  than one scene owner; only the LAST release disposes shared GPU/BVH state,
-  and a failed construction or disposal leaves ownership charged and retryable
-  rather than released twice. Mechanism:
+- **Resource ownership**: a scene's sibling (Preview beside the editor) draws over
+  its source's buffers and frees only what is its own; the source stays their owner
+  and is disposed after its siblings. Mechanism:
   [docs/resource-ownership.md](docs/resource-ownership.md) §1.
 - **Demand boundary**: no raycast accelerator is built until a ray reaches a
   component's bounds. Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §2.
-- **Reuse never changes what is exact**: recomposition, instanced draws,
-  frustum culling and material pass keys may all reuse previous work, but
-  none may change exact geometry, persistent cache identity or occurrence
-  identity. Canonical geometry trees carry no producer selection.
+- **Reuse never changes what is exact**: recomposition and a prototype's geometry
+  shared by its instances may reuse previous work, but neither may change exact
+  geometry, persistent cache identity or occurrence identity. Canonical geometry
+  trees carry no producer selection.
   Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §3.
 - **Worker leases**: the GLB and STL decode workers are leased by render
   sessions; releasing one owner never cancels another's work, and the last
@@ -64,13 +63,13 @@ protocol relationship never imports Python or discovers an interpreter.
   saved-shape migrations. The contract and rendering mechanism:
   [docs/render-pipeline.md](docs/render-pipeline.md).
 - **Kinematics and choreography are data, independently**: the articulation
-  player (`articulation.js`) plays cadgen's articulation — controls with their
-  limits, joints with affine rows over the controls (and, where a joint follows
-  its driver nonlinearly, a curve cadgen sampled from the mechanism's closed
-  form, played by linear interpolation as a glTF sampler is), which occurrences
-  each joint carries, what a drag writes, named poses — by dot products and TRS
-  composition, into per-occurrence transforms; it mints no id, decides no
-  default or ownership, solves no mechanism, and checks nothing cadgen checked. A GLB's clips
+  player (`articulation.js`) plays a robot's articulation as cadgen resolved it —
+  controls with their limits, joints with affine rows over the controls (and, where
+  a joint follows its driver nonlinearly, a curve cadgen sampled from the
+  mechanism's closed form, played by linear interpolation as a glTF sampler is),
+  what a drag writes — by dot products into one motion per joint, which the robot's
+  scene writes as the joint node's matrix; it mints no id, decides no default or
+  ownership, solves no mechanism, and checks nothing cadgen checked. A GLB's clips
   are played as the file carries them (`lib/render/glbAnimationRuntime.js`, three's
   `AnimationMixer`), and an engine document's motions by `lib/xbf/xbfMotion.js`, whose
   `values(t)` is the engine's `mechanism.Timeline.values`: an evaluation is a pure function
@@ -123,15 +122,12 @@ src/
                    #   (a GLB, mesh, robot or engine document job through its
                    #   family builder), articulation (cadgen's articulation,
                    #   played), sceneSettings (shared CAD/Render contract),
-                   #   camera, themeSettings internals, displaySettings; cadScene
-                   #   and what hangs off it (applySceneState, recordEffects,
-                   #   cadSurfaceInstances, displayRecordTransform,
-                   #   animationRuntime's players) is 0.7's STEP package path,
-                   #   which no product path calls
+                   #   camera, themeSettings internals, displaySettings,
+                   #   animationClock (the playback transport)
   lib/             # subsystems: xbf/ (an engine document: its structure and
                    #   XBM2 part buffers, scene, look, kinematics and motions),
                    #   render/ (format mesh loaders; the GLB and mesh scene
-                   #   builders), viewer/ (exploded view, part visual state,
+                   #   builders), viewer/ (exploded view, part highlight,
                    #   the surface look, the scene contract), urdf/ (a robot
                    #   payload's meshes loaded; the robot parts and scene
                    #   builder, played by common/articulation),

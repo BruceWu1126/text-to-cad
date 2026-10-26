@@ -359,22 +359,8 @@ never comes nearer than 1/256 of the pivot's depth, so a closeup the fit cannot
 measure (the camera inside a part's own box, or a part with no bounds to
 measure) keeps its depth resolution instead of making close surfaces fight.
 Snapshots draw every preset the same way: ordinary depth, fitted to each output
-with the same inputs (its placed records, the studio floor's elevation, the
-drawn grid's span and the camera's target as pivot). A logarithmic buffer would
-also lose the instanced CAD edges, which write no logarithmic depth: under a
-perspective camera every edge failed its depth test against the surfaces.
-
-### `common/cadScene.js`
-
-`buildModel` (`common/cadScene.js`) and what hangs off it — `applySceneState.js`,
-`cadSurfaceInstances.js`, `displayRecordTransform.js`, `lib/assembly/meshData.js`,
-`animationRuntime.js`'s players, `renderMeshScene.js`'s `modelOptionsForRenderJob` and
-`stepParametersForSnapshotOutput` — were 0.7's STEP render-package path: a composed package
-of component GLBs, an `assembly.json` and a `.params.js` sidecar, drawn as records over
-instanced surfaces. No product path calls them: a STEP is an engine document, drawn by
-`createXbfScene` in the viewer and on the parity page alike, and the other families by their
-builders (above). `fitCameraToModel(THREE, camera, bounds, options)` is the one piece still
-shared, the orthographic camera framing helper interactive rendering uses.
+with the same inputs (its placed objects, the studio floor's elevation, the
+drawn grid's span and the camera's target as pivot).
 
 ### Display modes, CAD edges and geometry sharing
 
@@ -479,6 +465,10 @@ Common options:
 root from the scene, and disposes the created renderer/model unless ownership
 was explicitly retained by options.
 
+It frames the model with `fitCameraToModel(THREE, camera, bounds, options)`, the
+orthographic fit the module exports: the bounds' corners inside `padding` (0 to 0.15, as
+`framePadding` bounds a snapshot's) from `direction`.
+
 ### `common/renderMeshScene.js`
 
 Use this module for deterministic headless snapshot rendering.
@@ -486,7 +476,6 @@ Use this module for deterministic headless snapshot rendering.
 ```js
 import {
   renderJobContext,
-  modelOptionsForRenderJob,
   renderModel,
   captureModel
 } from "@text-to-cad/core/common/renderMeshScene.js";

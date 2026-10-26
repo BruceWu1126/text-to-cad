@@ -93,7 +93,6 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlparse
 
-from cadgen.engine.access import allow_origin
 from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.render.look import LOOK
 
@@ -1697,7 +1696,8 @@ class Server:
         handler.send_header("Content-Type", kind)
         handler.send_header("Content-Length", str(len(data)))
         handler.send_header("Cache-Control", "max-age=31536000, immutable" if cache else "no-store")
-        allow_origin(handler)  # a page on this machine reads documents from here directly (access.py)
+        # No Access-Control-* header: the engine's own page (``page/``) reads it from its origin, and
+        # the viewer's relay of these routes answers every other page (``cadgen.viewer.engine_app``).
         handler.end_headers()
         if handler.command != "HEAD":
             handler.wfile.write(data)

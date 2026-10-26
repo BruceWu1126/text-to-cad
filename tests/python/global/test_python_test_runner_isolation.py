@@ -1,11 +1,13 @@
 """The Python test runner (``scripts/test/unittest_files.py``): each file in an interpreter of its
-own, with an engine directory of its own, and a daemon the file left there stopped after it."""
+own, with an engine directory of its own, and a daemon the file left there stopped after it; a test
+that writes where the developer's own cadgen keeps its state fails the run, by name."""
 
 from __future__ import annotations
 
 import contextlib
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -41,10 +43,12 @@ def _stand_in(calls: list, *, child_error: Exception | None = None, leaves_a_dae
 
 class PythonTestRunnerIsolation(unittest.TestCase):
     def setUp(self) -> None:
-        # Where nothing names an engine's folder (the guard below): none, for the stand-ins here.
-        patched = mock.patch.object(runner, "default_engine_door", return_value=None)
-        patched.start()
-        self.addCleanup(patched.stop)
+        # Where nothing names an engine's folder, and the developer's own state (the guards below):
+        # none, for the stand-ins here.
+        for name, value in (("default_engine_door", None), ("person_places", ([], [], ""))):
+            patched = mock.patch.object(runner, name, return_value=value)
+            patched.start()
+            self.addCleanup(patched.stop)
 
     def test_each_file_has_an_engine_directory_of_its_own_never_the_developers(self):
         calls = []
@@ -59,9 +63,11 @@ class PythonTestRunnerIsolation(unittest.TestCase):
         self.assertNotEqual(engines[0], engines[1])
         self.assertEqual(Path(engines[0]).parent, Path(engines[1]).parent)
         self.assertFalse(Path(engines[0]).parent.exists(), "the run's folder goes with it")
-        caches = [env["CADGEN_CACHE_DIR"] for _argv, env in calls]  # never the developer's 0.7 store
-        self.assertEqual([Path(cache).parent for cache in caches], [Path(engine).parent for engine in engines])
-        self.assertNotEqual(caches[0], caches[1])
+        # Never the developer's 0.7 store, registry of documents, installations or ``cadgen`` command.
+        for name in ("CADGEN_CACHE_DIR", "CADGEN_STATE_DIR", "CADGEN_LAUNCHER_DIR"):
+            folders = [env[name] for _argv, env in calls]
+            self.assertEqual([Path(folder).parent for folder in folders], [Path(engine).parent for engine in engines])
+            self.assertNotEqual(folders[0], folders[1])
 
     def test_a_daemon_a_file_left_running_is_stopped_after_it(self):
         calls = []
@@ -101,9 +107,10 @@ class DefaultEngineGuard(unittest.TestCase):
     def run_with(self, answering: list[bool]) -> tuple[int, str, list]:
         stopped: list = []
         door = "/default/cadgen-engine/0123456789ab.door"
-        ran = lambda path, top, verbose, env: (path, 0, "Ran 1 test in 0.001s\n\nOK\n", 0.0)  # noqa: E731
+        ran = lambda path, top, verbose, env, places: (path, 0, "Ran 1 test in 0.001s\n\nOK\n", 0.0)  # noqa: E731
         said = io.StringIO()
         with mock.patch.object(runner, "default_engine_door", return_value=door), \
+                mock.patch.object(runner, "person_places", return_value=([], [], "")), \
                 mock.patch.object(runner, "engine_answers", side_effect=answering), \
                 mock.patch.object(runner, "_run_one_file", side_effect=ran), \
                 mock.patch.object(runner, "_engine_python", side_effect=lambda top, code, **env: stopped.append((code, env))), \
@@ -120,6 +127,98 @@ class DefaultEngineGuard(unittest.TestCase):
     def test_the_developer_s_own_engine_running_there_before_the_run_is_left_alone(self):
         code, said, stopped = self.run_with([True])
         self.assertEqual((code, stopped), (0, []))
+
+
+class PersonStateGuard(unittest.TestCase):
+    """A test never writes where the developer's own cadgen keeps its state: what appears there
+    during the run fails it, named with the test running then, else with the file that just ended."""
+
+    def test_a_document_a_test_registers_in_the_developer_s_state_fails_the_run_by_the_test_s_name(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            top = os.path.realpath(scratch)
+            person = Path(top, "person-state")
+            leaks = Path(top, "test_leaks_fixture.py")
+            leaks.write_text(
+                "import os, pathlib, unittest\n\n\n"
+                "class Leaks(unittest.TestCase):\n"
+                "    def test_keeps_to_its_own_state(self):\n"
+                "        pathlib.Path(os.environ['CADGEN_STATE_DIR'], 'documents', 'mine').mkdir(parents=True)\n\n"
+                "    def test_registers_a_document_in_the_developer_s(self):\n"
+                f"        pathlib.Path({str(person)!r}, 'documents', '0123abcd').mkdir(parents=True)\n",
+                encoding="utf-8",
+            )
+            report = io.StringIO()
+            with contextlib.chdir(top), mock.patch.object(runner, "default_engine_door", return_value=None), \
+                    mock.patch.object(runner, "person_places", return_value=([str(person)], [], "0123456789ab")), \
+                    mock.patch.object(runner.sys, "stderr", report):
+                code = runner.run_files([str(leaks)], top, 1, False)
+        self.assertEqual(code, 1)
+        said = report.getvalue()
+        self.assertIn(f"  {person / 'documents' / '0123abcd'}, while "
+                      f"test_leaks_fixture.Leaks.test_registers_a_document_in_the_developer_s ({leaks}) ran\n", said)
+        self.assertNotIn("mine", said, "a test's own state folder is its own")
+
+    def test_an_installation_or_the_command_written_after_a_file_fails_the_run_naming_the_file(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            person, command = Path(scratch, "state"), Path(scratch, "bin", "cadgen")
+            Path(person, "documents", "before").mkdir(parents=True)  # the developer's own, from before the run
+            command.parent.mkdir()
+            command.write_text("#!/bin/sh\n", encoding="utf-8")
+            writes: list = []
+
+            def ran(path, top, verbose, env, places):  # what a process the file left writes as it ends
+                for write in writes:
+                    write()
+                return path, 0, "Ran 1 test in 0.001s\n\nOK\n", 0.0
+
+            def run() -> tuple[int, str]:
+                said = io.StringIO()
+                with mock.patch.object(runner, "default_engine_door", return_value=None), \
+                        mock.patch.object(runner, "person_places",
+                                          return_value=([str(person)], [str(command)], "0123456789ab")), \
+                        mock.patch.object(runner, "_run_one_file", side_effect=ran), \
+                        mock.patch.object(runner.sys, "stderr", said):
+                    return runner.run_files(["leaves.py"], str(REPO_ROOT), 1, False), said.getvalue()
+
+            self.assertEqual(run()[0], 0, "nothing appeared")
+            writes += [lambda: Path(person, "installations").mkdir(),
+                       lambda: Path(person, "installations", "9.9.9.json").write_text("{}", encoding="utf-8"),
+                       lambda: command.write_text("#!/bin/sh\nexec cadgen\n", encoding="utf-8")]
+            code, said = run()
+        self.assertEqual(code, 1)
+        self.assertIn(f"  {person / 'installations' / '9.9.9.json'}, after leaves.py (running beside it: none)\n", said)
+        self.assertIn(f"  {command}, after leaves.py (running beside it: none)\n", said)
+        self.assertNotIn("before", said)
+
+    def test_what_another_cadgen_wrote_meanwhile_is_said_and_only_this_run_s_fails_it(self):
+        # A development install the developer made during the run registered itself, and its engine
+        # its port: their records name another environment. One this run's engine wrote is the run's.
+        elsewhere = os.path.abspath("/opt/another-cadgen")
+        records = {"installations/0.9.0-dev.1.json": {"prefix": elsewhere, "python": f"{elsewhere}/bin/python"},
+                   "engines/fedcba987654.json": {"port": 3249}, "documents/00ab/document.json": {"root": elsewhere},
+                   "engines/0123456789ab.json": {"port": 3249}}
+        with tempfile.TemporaryDirectory() as scratch:
+            person = Path(scratch, "state")
+
+            def ran(path, top, verbose, env, places):
+                for inside, record in records.items():
+                    Path(person, inside).parent.mkdir(parents=True, exist_ok=True)
+                    Path(person, inside).write_text(json.dumps(record), encoding="utf-8")
+                return path, 0, "Ran 1 test in 0.001s\n\nOK\n", 0.0
+
+            said = io.StringIO()
+            with mock.patch.dict(os.environ, {"CI": ""}), \
+                    mock.patch.object(runner, "default_engine_door", return_value=None), \
+                    mock.patch.object(runner, "person_places", return_value=([str(person)], [], "0123456789ab")), \
+                    mock.patch.object(runner, "_run_one_file", side_effect=ran), \
+                    mock.patch.object(runner.sys, "stderr", said):
+                code = runner.run_files(["leaves.py"], str(REPO_ROOT), 1, False)
+        tests_wrote, _, meanwhile = said.getvalue().partition("another cadgen wrote")
+        self.assertEqual(code, 1)
+        self.assertIn(str(person / "engines" / "0123456789ab.json"), tests_wrote)
+        for inside in ("installations/0.9.0-dev.1.json", "engines/fedcba987654.json", "documents/00ab"):
+            self.assertIn(f"  {person.joinpath(*inside.split('/'))}\n", meanwhile)
+            self.assertNotIn(str(person.joinpath(*inside.split("/"))), tests_wrote)
 
 
 class HangGuard(unittest.TestCase):
@@ -217,6 +316,7 @@ class HangGuard(unittest.TestCase):
             )
             report = io.StringIO()
             with contextlib.chdir(top), mock.patch.object(runner, "FILE_HANG_SECONDS", 1), \
+                    mock.patch.object(runner, "person_places", return_value=([], [], "")), \
                     mock.patch.object(runner.sys, "stderr", report):
                 code = runner.run_files([str(hung)], top, 1, False)
         self.assertEqual(code, 1)

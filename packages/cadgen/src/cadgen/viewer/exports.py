@@ -38,8 +38,6 @@ def specification(payload):
 
 
 class ExportJobs(Jobs):
-    cancel_running = True
-
     def __init__(self, server, *, run=None, clock=time.time, root=None):
         self.server, self.clock = server, clock
         super().__init__(clock=clock)
@@ -156,8 +154,8 @@ class ExportJobs(Jobs):
             if request_id in self.requests:
                 return self._submit(request_id, normalized)
             if sum(j.get("bytes", 0) for j in self.jobs.values() if j["state"] == "ready") >= MAX_RETAINED_BYTES:
-                raise ExportError("Export storage is full. Release a previous export first.", 429)
-            # A released, expired, failed or cancelled job holds no file: past the history bound
+                raise ExportError("Export storage is full. Download the exports waiting first.", 429)
+            # An expired, failed or cancelled job holds no file: past the history bound
             # it is forgotten (its request ID stays a tombstone), so the session keeps exporting.
             for ident in [i for i, j in self.jobs.items() if j["state"] in TERMINAL and not j["directory"] and not j["readers"]]:
                 if len(self.jobs) < 128:
@@ -217,16 +215,6 @@ class ExportJobs(Jobs):
                   "error", "fetched")
         return {**{k: job[k] for k in fields if k in job}, "epoch": self.epoch}
 
-    def release(self, ident):
-        with self.changed:
-            self.get(ident)
-            job = self.jobs[ident]
-            if job["state"] not in TERMINAL:
-                raise ExportError("Cancel this export before releasing it.", 409)
-            job["expiresAt"] = 0
-            self._prune()
-            return self.public(job)
-
     def get(self, ident, after=None, wait=0):
         """A job's state; asked ``after`` its sequence, the answer waits for the next change, an
         unfinished job's as a ready one's, whose file going (fetched, or past its window) is what
@@ -252,7 +240,7 @@ class ExportJobs(Jobs):
         with self.changed:
             self.get(ident)
             job = self.jobs[ident]
-            # Released, fetched whole or past its window, it is gone to a new reader at once, though
+            # Fetched whole or past its window, it is gone to a new reader at once, though
             # its file stays until an earlier download still finishing lets go of it (``_prune``).
             going = job["state"] == "ready" and (job.get("fetched") or self.clock() >= job["expiresAt"])
             if job["state"] != "ready" or going:
@@ -275,8 +263,6 @@ class ExportJobs(Jobs):
                     raise ExportError("Export request too large.", 413)
                 if tail == [""]:
                     return response.send_json(202, self.create(json.loads(request.body())))
-                if len(tail) == 2 and tail[1] in ("cancel", "release"):
-                    return response.send_json(200, getattr(self, tail[1])(tail[0]))
             elif request.method == "GET":
                 if tail == [""]:
                     # The session's epoch, which a new request names (``create``): a request a page

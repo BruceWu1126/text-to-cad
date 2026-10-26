@@ -8,22 +8,15 @@ import {
   DEFAULT_DISPLAY_SETTINGS,
   DEFAULT_EXPLODED_VIEW_SETTINGS,
   DEFAULT_PART_COLOR_SETTINGS,
-  displayModeForcesEdges,
-  displayModeShowsEdges,
-  displayModeShowsThroughEdges,
-  displayModeSurfaceOpacity,
-  displayModeUsesUnlitSurfaces,
-  displaySettingsEqual,
   normalizeDisplayEdgeSettings,
   normalizeDisplaySettings,
   normalizeExplodedViewSettings,
-  resolveDisplayMode,
   validateDisplaySettings
 } from "./displaySettings.js";
 
 test("display settings own CAD presentation fields while camera owns projection", () => {
   assert.deepEqual(normalizeDisplaySettings(), DEFAULT_DISPLAY_SETTINGS);
-  assert.equal(resolveDisplayMode({ mode: "wireframe" }), CAD_DISPLAY_MODE.WIREFRAME);
+  assert.equal(normalizeDisplaySettings({ mode: "wireframe" }).mode, CAD_DISPLAY_MODE.WIREFRAME);
   assert.throws(
     () => normalizeDisplaySettings({ projection: "perspective" }),
     /Unsupported display fields: projection/
@@ -91,27 +84,11 @@ test("display settings normalize exploded view, guides, and part colors", () => 
 
 test("display mode vocabulary is canonical", () => {
   for (const mode of Object.values(CAD_DISPLAY_MODE)) {
-    assert.equal(resolveDisplayMode({ mode }), mode);
+    assert.equal(normalizeDisplaySettings({ mode }).mode, mode);
   }
   for (const alias of ["solid", "rendered", "edges", "shaded-with-edges", "x-ray", "theme", "wire"]) {
-    assert.throws(() => resolveDisplayMode({ mode: alias }), /Unknown display mode/);
+    assert.throws(() => normalizeDisplaySettings({ mode: alias }), /Unknown display mode/);
   }
-});
-
-test("display mode policies describe edge and surface behavior", () => {
-  assert.equal(displayModeShowsEdges(CAD_DISPLAY_MODE.SHADED_EDGES), true);
-  assert.equal(displayModeForcesEdges(CAD_DISPLAY_MODE.SHADED_EDGES), true);
-  assert.equal(displayModeShowsEdges(CAD_DISPLAY_MODE.SHADED), false);
-  assert.equal(displayModeShowsEdges(CAD_DISPLAY_MODE.RENDER), false);
-  assert.equal(displayModeForcesEdges(CAD_DISPLAY_MODE.RENDER), false);
-  assert.equal(displayModeUsesUnlitSurfaces(CAD_DISPLAY_MODE.RENDER), false);
-  assert.equal(displayModeSurfaceOpacity(CAD_DISPLAY_MODE.RENDER, 0.73), 0.73);
-  assert.equal(displayModeShowsEdges(CAD_DISPLAY_MODE.WIREFRAME), true);
-  assert.equal(displayModeShowsThroughEdges(CAD_DISPLAY_MODE.HIDDEN_EDGES), true);
-  assert.equal(displayModeShowsThroughEdges(CAD_DISPLAY_MODE.TRANSPARENT), true);
-  assert.equal(displayModeUsesUnlitSurfaces(CAD_DISPLAY_MODE.UNSHADED), true);
-  assert.equal(displayModeSurfaceOpacity(CAD_DISPLAY_MODE.TRANSPARENT, 1), 0.22);
-  assert.equal(displayModeSurfaceOpacity(CAD_DISPLAY_MODE.HIDDEN_LINES_REMOVED, 1), 0.045);
 });
 
 test("render display settings share the viewer envelope and exclude camera", () => {
@@ -140,31 +117,6 @@ test("render display settings share the viewer envelope and exclude camera", () 
     /requires display\.mode 'render'/
   );
 });
-
-test("display settings compare after normalization", () => {
-  assert.equal(displaySettingsEqual(
-    { mode: "wireframe", clip: { axis: "X", at: 0.5 } },
-    { mode: CAD_DISPLAY_MODE.WIREFRAME, clip: { enabled: true, axis: "x", at: 0.5, invert: false } }
-  ), true);
-  assert.equal(displaySettingsEqual({ mode: "shaded" }, { mode: "wireframe" }), false);
-  assert.equal(displaySettingsEqual(
-    { mode: "shaded_edges", exploded: { enabled: true } },
-    { mode: "shaded_edges", exploded: { enabled: false } }
-  ), false);
-  assert.equal(displaySettingsEqual(
-    { mode: "shaded_edges", edges: { silhouette: true } },
-    { mode: "shaded_edges", edges: { silhouette: false } }
-  ), false);
-  assert.equal(displaySettingsEqual(
-    { guides: { grid: { enabled: false } } },
-    { guides: { grid: { enabled: true } } }
-  ), false);
-  assert.equal(displaySettingsEqual(
-    { partColor: { mode: "single", color: "#111111" } },
-    { partColor: { mode: "single", color: "#222222" } }
-  ), false);
-});
-
 
 test("grid color and opacity stay optional and validate at the shared display boundary", () => {
   const guides = { grid: { enabled: true, color: "#ABC", opacity: 0 } };

@@ -290,8 +290,6 @@ class Catalog(HttpLayerTestCase):
             # The row's hash is the build the engine holds: a rebuild is a new revision of the row.
             [row] = catalog()[1]["entries"]
             self.assertEqual((row["id"], row["file"], row["sourcePath"], row["hash"]), (ident, ident, None, "model:v1"))
-            # Its Files tab lists the folder its record registered: the script's, never read.
-            self.assertEqual(row["folder"], os.path.dirname(script).replace(os.sep, "/"))
             answers["model_info"] = {"model": {"source": {"name": "cube"}, "version": "v2"}}
             self.assertEqual(catalog()[1]["entries"][0]["hash"], "model:v2")
             # One it does not hold says why, in the engine's words, and its state.

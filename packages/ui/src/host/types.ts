@@ -24,7 +24,6 @@ export interface PromptFiles {
     name: string; input: string;
     views: Array<Record<string, unknown> & { label: string }>;
     annotation: Record<string, unknown> | null;
-    measurements?: Array<{ start: number[]; end: number[]; label: string; color: string }>;
   }): Promise<{ snapshot: string; inline?: never } | { inline: string; snapshot?: never }>;
   read(path: string): Promise<Blob>;
 }

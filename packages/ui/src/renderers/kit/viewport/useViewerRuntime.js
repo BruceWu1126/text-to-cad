@@ -356,10 +356,7 @@ export function useViewerRuntime({
       };
       const screenSpaceLineMaterials = new Set();
 
-      const getScreenSpaceLineMaterialCount = () => (
-        screenSpaceLineMaterials.size +
-        Number(runtimeRef.current?.cadScene?.runtime?.screenSpaceLineMaterials?.size || 0)
-      );
+      const getScreenSpaceLineMaterialCount = () => screenSpaceLineMaterials.size;
 
       // A screen-space line's `resolution` is the DRAWING BUFFER, in device
       // pixels — not the CSS size the container reports and `setSize` takes.
@@ -379,7 +376,6 @@ export function useViewerRuntime({
         for (const material of screenSpaceLineMaterials) {
           material?.resolution?.set?.(nextWidth, nextHeight);
         }
-        runtimeRef.current?.cadScene?.runtime?.syncScreenSpaceLineMaterials?.(nextWidth, nextHeight);
       };
       const syncScreenSpaceLineMaterials = () => {
         const { width: nextWidth, height: nextHeight } = lineMaterialResolution();
@@ -1019,8 +1015,8 @@ export function useViewerRuntime({
         registerScreenSpaceLineMaterial,
         unregisterScreenSpaceLineMaterial,
         // The scene sync calls this after building or updating a model so line
-        // materials created for it (the cadScene's own registry) start at the
-        // viewport's resolution rather than waiting for a resize.
+        // materials created for it start at the viewport's resolution rather than
+        // waiting for a resize.
         syncScreenSpaceLineMaterials,
         setScreenSpaceLineResolution
       };

@@ -262,7 +262,10 @@ smallest fixture needed in a fresh temporary directory, or use a tiny fixture
 committed with the tests; do not rely on existing outputs.
 Repo `tmp/` and system temporary directories are both fine. Give builds an
 engine daemon of their own (`CADGEN_ENGINE_DIR`) and clean up their processes and
-files. The shared
+files. The runner gives every test file its own state, cache and `cadgen` command
+folders, and fails the run, naming the test, when the run's cadgen writes a
+document, engine or installation record in your own state folder, or your `cadgen`
+command. The shared
 temporary-directory helper retains the Windows cleanup retries used by the suite.
 
 Keep regression tests focused on observable behavior. Reuse setup within a test

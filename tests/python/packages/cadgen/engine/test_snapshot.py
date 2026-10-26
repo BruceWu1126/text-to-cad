@@ -21,7 +21,6 @@ import urllib.request
 from pathlib import Path
 
 from cadgen.engine import build as engine_build
-from cadgen.engine.access import loopback_origin
 from cadgen.engine.render import context
 from cadgen.engine.serve import Server
 from cadgen.engine.snapshot import (SnapshotRefused, authored, parse_annotation, parse_camera, parse_display,
@@ -549,29 +548,21 @@ def _model(script: Path, name: str):
 
 
 class AccessTest(unittest.TestCase):
-    """The page that reads a document from the engine is the viewer's or the snapshot's, on this
-    machine: those origins are named as allowed readers, and no other is."""
+    """The engine's own routes answer its own page alone: its standalone page (``page/``) reads them
+    from its origin, and every other page goes through the viewer's relay of them, which keeps its
+    own law. No origin, a page on this machine's included, is named as a reader."""
 
-    def test_loopback_pages_may_read_a_served_document_and_no_other_page_may(self) -> None:
-        for origin in ("http://127.0.0.1:3245", "http://localhost", "http://[::1]:5173", "http://app.localhost:8080"):
-            self.assertTrue(loopback_origin(origin), origin)
-        for origin in ("https://example.com", "http://127.0.0.1.example.com", "null", "", None, "http://localhost:x"):
-            self.assertFalse(loopback_origin(origin), origin)
-        folder = Path(tempfile.mkdtemp(prefix="engine-access-")).resolve()
-        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
-        (folder / "peg.py").write_text(textwrap.dedent(MODEL), encoding="utf-8")
-        engine_build.build(folder / "peg.py", ["peg"], cwd=folder)
+    def test_no_page_of_another_origin_is_named_a_reader(self) -> None:
         server = Server(port=0, mesh_mode="inline")
         server.start()
         self.addCleanup(server.stop)
-        url = f"{server.url}/api/doc/{server.add(folder / 'XBF' / 'peg.xbf')}"
-
-        def allowed(origin: str) -> str | None:
-            with urllib.request.urlopen(urllib.request.Request(url, headers={"Origin": origin}), timeout=60) as answer:
-                return answer.headers.get("Access-Control-Allow-Origin")
-
-        self.assertEqual(allowed("http://127.0.0.1:3245"), "http://127.0.0.1:3245")
-        self.assertIsNone(allowed("https://example.com"))
+        for origin in ("http://127.0.0.1:3245", "http://localhost:5173", "https://example.com", "null"):
+            for path in ("/api/look", "/api/docs", "/"):
+                with self.subTest(origin=origin, path=path):
+                    request = urllib.request.Request(f"{server.url}{path}", headers={"Origin": origin})
+                    with urllib.request.urlopen(request, timeout=60) as answer:
+                        self.assertEqual(answer.status, 200)
+                        self.assertEqual([name for name in answer.headers if name.lower().startswith("access-control-")], [])
 
 
 if __name__ == "__main__":

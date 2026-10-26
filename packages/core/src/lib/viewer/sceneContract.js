@@ -1,5 +1,5 @@
 // The contract a family's scene exposes to whatever shows it: the viewer's viewport
-// (`@text-to-cad/ui` renderers/kit) and the snapshot CLI's headless stage
+// (`@text-to-cad/ui` renderers/kit) and the parity page's headless stage
 // (`common/headlessScene.js`). It is deliberately tiny, so neither reaches into a
 // scene: the host adopts `object3D`, frames `restBounds` (else `bounds`), hands over
 // the surface look it resolved, lights it with its own `rig` where it brings one, and the
@@ -36,9 +36,8 @@
  * @property {import("three").Object3D} object3D  What the host adopts under its model group.
  * @property {SceneBounds} bounds  The scene as posed now: lighting, floor and depth fit follow it.
  * @property {SceneBounds} [restBounds]  The authored placement, unmoved by any pose: what the
- *   camera frames, what 100% zoom means and what the ground is sized from. A scene that knows
- *   its whole box before all of it has arrived (a STEP package's declared `bbox`) reports that
- *   box from the start. Absent means `bounds` never moves.
+ *   camera frames, what 100% zoom means and what the ground is sized from. Absent means `bounds`
+ *   never moves.
  * @property {() => void} dispose  Release everything the scene created.
  * @property {(look: SurfaceLook) => void} [setSurfaceLook]  Wear the look the host resolved.
  *   Called on adoption and whenever it changes; a scene applies it to its own materials.

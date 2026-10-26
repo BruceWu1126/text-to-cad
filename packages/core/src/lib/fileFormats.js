@@ -21,29 +21,6 @@ export function normalizeFormat(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-export function normalizeRenderFormat(value, { defaultFormat = RENDER_FORMAT.STEP } = {}) {
-  const normalized = normalizeFormat(value || defaultFormat);
-  if (normalized === "stp") {
-    return RENDER_FORMAT.STEP;
-  }
-  if (normalized === "gltf") {
-    return RENDER_FORMAT.GLB;
-  }
-  if (
-    normalized === RENDER_FORMAT.STEP ||
-    normalized === RENDER_FORMAT.STL ||
-    normalized === RENDER_FORMAT.THREE_MF ||
-    normalized === RENDER_FORMAT.GLB ||
-    normalized === RENDER_FORMAT.DXF ||
-    normalized === RENDER_FORMAT.URDF ||
-    normalized === RENDER_FORMAT.SRDF ||
-    normalized === RENDER_FORMAT.SDF
-  ) {
-    return normalized;
-  }
-  return defaultFormat;
-}
-
 export function entryKind(entry) {
   return normalizeFormat(entry?.kind);
 }

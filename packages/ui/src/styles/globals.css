@@ -18,11 +18,12 @@
   --cad-text-ui: 0.8125rem;
 }
 
-/* A phone's view (`data-viewer-layout="mobile"`: the viewer under 720px) is read at arm's length and
- * worked with a finger, so its chrome takes one step up: type 12, 13, 14 and 15px (the platforms'
- * floor is 11pt; body text 15-17pt), rows and menu items 40px, controls 36px, and text entry at 16px,
- * under which iOS Safari zooms the page into the field. The whole page follows, so a menu, a select
- * or a hint portalled out of the viewer is the same size as the chrome it opened from. */
+/* A phone's view (`data-viewer-layout="mobile"`: the viewer under 600px, `VIEWER_MOBILE_BREAKPOINT`)
+ * is read at arm's length and worked with a finger, so its chrome takes one step up: type 12, 13, 14
+ * and 15px (the platforms' floor is 11pt; body text 15-17pt), rows and menu items 40px, controls
+ * 36px; a field keeps its text size, since the page's viewport, not a 16px font, stops a phone
+ * zooming in on it. The whole page follows, so a menu, a select or a hint portalled out of the
+ * viewer is the same size as the chrome it opened from. */
 :root:has([data-viewer-layout="mobile"]) {
   --cad-text-micro: 12px;
   --cad-text-tiny: 13px;

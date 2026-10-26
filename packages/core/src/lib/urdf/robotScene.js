@@ -34,7 +34,7 @@ import { shapeSourceColor } from "../viewer/surfaceMaterials.js";
 //
 // No React and no DOM in here: the payload and the loaded part list in, a scene
 // (`../viewer/sceneContract.js`) out, with the robot's own verbs beside the contract. The
-// ONE builder of a robot's scene: the viewer's robot renderer and the snapshot CLI's
+// ONE builder of a robot's scene: the viewer's robot renderer and the parity page's
 // headless stage both call it, and both pose it the one way it poses (`setControlValues`).
 
 const HIGHLIGHT_RENDER_ORDER = 23;

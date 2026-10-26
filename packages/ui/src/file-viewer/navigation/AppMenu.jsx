@@ -131,11 +131,11 @@ export function AppMenu({ trigger, onHome, links, appSettings = NONE, colorSchem
       <a href={href} target="_blank" rel="noreferrer" onClick={event => { if (id === "feedback") usage.used("feedback"); follow?.(event); }} data-link={id}><Icon className="size-3.5" aria-hidden="true" />{label}</a>
     </DropdownMenuItem>),
   ].filter(group => group.length);
-  // Only the version shortens to fit the line, never the rest of it.
-  const version = links?.version ? (links.release
+  // Only the version shortens to fit the line, never the rest of it, and says itself whole when it does.
+  const version = links?.version ? <TooltipHint content={`v${links.version}`} overflowOnly>{links.release
     ? <a href={links.release} target="_blank" rel="noreferrer" onClick={follow} className="min-w-0 truncate hover:text-foreground"
-      title={`v${links.version}`} data-menu-version="">v{links.version}</a>
-    : <span className="min-w-0 truncate" title={`v${links.version}`} data-menu-version="">v{links.version}</span>) : null;
+      data-menu-version="">v{links.version}</a>
+    : <span className="min-w-0 truncate" data-menu-version="">v{links.version}</span>}</TooltipHint> : null;
   const madeBy = links?.x ? <MadeBy links={links} /> : null;
   return <DropdownMenu modal={false} onOpenChange={() => setLanguageOpen(false)}>
     <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>

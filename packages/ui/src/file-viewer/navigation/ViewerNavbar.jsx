@@ -27,8 +27,8 @@ const TAB_CONTROLS = Object.freeze({ models: "models", files: "explorer" });
  * The row above a file and above the host's home in a page's chrome (`FileViewer`'s `chrome: "page"`,
  * the web viewer's): the same row whatever is open, so a person finds each control in the same place.
  * Over the home it has only the logo (its menu without Back to home), Back and Forward, the host's
- * update and its actions. A host that shows the view alone (`chrome: "bare"`: the CAD app's cards and
- * tabs) has no navbar, and Preview hides it in every host, drawing its own bar in its place.
+ * update and its actions. A host that shows the view alone (`chrome: "bare"`: the CAD app's file
+ * handler) has no navbar, and Preview hides it in every host, drawing its own bar in its place.
  *
  * Left, in this order: the text-to-cad logo (the C mark, over the home and over a document
  * alike), which opens the app's menu (`AppMenu`: Back to home

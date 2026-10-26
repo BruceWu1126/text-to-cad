@@ -55,9 +55,10 @@ def initialize_params(params, launcher=None, holder=None):
 class Holder:
     """This server's hold on the engine (``cadgen.engine.client.hold``): taken as the server starts,
     starting the engine when none runs, and kept while the host runs, so a shell the host runs in a
-    sandbox that cannot start an engine always finds one. The engine still leaves on its idle
-    timeout once the host has quit and this process with it. An engine that goes while held (``cadgen
-    stop``, a crash) is held again at the host's next request, never at once: a stop is obeyed."""
+    sandbox that cannot start an engine always finds one. Once the host has quit, and this process
+    with it, the engine runs on unheld until it is stopped or a newer installation retires it. An
+    engine that goes while held (``cadgen stop``, a crash) is held again at the host's next request,
+    never at once: a stop is obeyed."""
 
     def __init__(self, host=lambda: None):
         self.host = host  # the host this server serves, said with the hold (``host.family``)

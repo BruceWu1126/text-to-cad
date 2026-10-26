@@ -29,7 +29,7 @@ const toolControl = tool => `${toolFamily(tool)}_${tool === 'freedraw' ? 'pen' :
  * @property {import('./tools.js').AnnotationTool} tool  The drawing tool in hand: Shapes' `shape` while Shapes is the strip tool,
  *   else Pencil's `pencil`.
  * @property {import('./tools.js').PencilTool} pencil  What Pencil draws with (the pen first), kept while Shapes is up.
- * @property {import('./tools.js').ShapeTool} shape  What Shapes draws with (the line first), kept while Pencil is up.
+ * @property {import('./tools.js').ShapeTool} shape  What Shapes draws with (the rectangle first), kept while Pencil is up.
  * @property {DrawingStyle} style  What the tool in hand puts down next: its slot's colour, stroke width and placement
  *   (`surface`, the default, each point on the visible surface under it, or `plane`, each on the plane of the surface the
  *   mark starts on; off the model both carry on at that plane: `annotation3d.js`'s `projectAnnotations`).

@@ -50,7 +50,7 @@ export const SIDEBAR_SLIDE_CLASS = "transition-[translate,opacity] duration-200 
  * opens the panel on the section last open (the first, at first) and closes it; the panel's top is
  * a row of tabs, one per section with its tile's icon, and it runs down the view to its bottom
  * inset (clear of Quick Edit's peek), or as tall as the section if that is less, at a phone's own
- * width — wide enough for a joint's name beside its slider, not a desktop's size — with no grip.
+ * width — wide enough for a joint's name beside its slider, not a wide view's size — with no grip.
  *
  * It is the tools view's alone: Preview hides it (`hidden`), its sections kept mounted.
  *
@@ -132,8 +132,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     element.style.scrollPaddingBottom = `${docked}px`;
   }, []);
   useLayoutEffect(dock);
-  // Which sections are on screen, in order: the first carries the bar's own button, and one alone
-  // does not fold.
+  // Which sections are on screen, in order: the first carries the bar's own button.
   const [order, setOrder] = useState("");
   useLayoutEffect(() => {
     const ids = [...(column.current?.querySelectorAll(":scope > section:not([hidden])") ?? [])]
@@ -149,20 +148,6 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     if (column.current) observer?.observe(column.current);
     return () => { element.removeEventListener("scroll", dock); observer?.disconnect(); };
   }, [dock]);
-  // A section brought into view, its heading at the top, at once: now, or once the unfolding that
-  // goes with it has been drawn (`unfolding`).
-  const pending = useRef(null);
-  const snap = anchor => {
-    const element = scroller.current;
-    if (!element || !anchor?.isConnected) return;
-    element.scrollTop += anchor.getBoundingClientRect().top - element.getBoundingClientRect().top;
-  };
-  const reveal = useCallback((anchor, { unfolding = false } = {}) => { if (unfolding) pending.current = anchor; else snap(anchor); }, []);
-  useLayoutEffect(() => {
-    if (!pending.current) return;
-    snap(pending.current);
-    pending.current = null;
-  });
   const ids = order ? order.split(" ") : [];
   // The open section: none as a file opens, and none once the one open is gone.
   const [openId, setOpenId] = useState(null);
@@ -207,7 +192,6 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   const tabbed = phone && ids.length > 1;
   const sections = useMemo(() => ({
     sidebar: true,
-    reveal,
     openSection: shown,
     closeSection,
     // Whether a section's head carries its X: not under a phone's tabs, whose row has the panel's.
@@ -219,7 +203,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     collapsed: (id, fallback) => layout.collapsed[id] ?? fallback,
     settle,
     room: () => room.current?.clientHeight || 0,
-  }), [reveal, shown, closeSection, tabbed, register, measured.viewer, layout, settle]);
+  }), [shown, closeSection, tabbed, register, measured.viewer, layout, settle]);
   const tiles = ids.map(id => {
     const section = meta.current.get(id) || {};
     const tile = section.fit === "tree" ? { label: section.title || t("sidebar.tree"), Icon: ListTree }

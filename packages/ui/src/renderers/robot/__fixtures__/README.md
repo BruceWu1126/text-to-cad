@@ -14,7 +14,7 @@ Beside each is what cadgen resolves it to: `<name>.<kind>.robot.json` is exactly
 what `GET /__cad/robot` answers for it (`cadgen.robot_payload`), with every
 visual's mesh named by the URL the browser test's server answers; `primitives/`
 holds the meshes cadgen made for the shapes (one GLB per shape and size, named
-by its store hash); `refusals.json` holds the sentence cadgen refuses the two
+by the sha256 of its bytes); `refusals.json` holds the sentence cadgen refuses the two
 refused descriptions with. So the browser test (`RobotRenderer.browser.test.mjs`)
 and the unit tests need neither Python nor a store, and the Python suite holds
 these files current (`tests/python/packages/cadgen/test_robot_payload.py`).

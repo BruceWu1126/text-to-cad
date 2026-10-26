@@ -26,7 +26,7 @@ test('a format-blind kit module passes, including its shared-UI and core imports
 test('the kit never imports a renderer or a file-family core module', () => fixture({
   [kit('tools/a.js')]: "import x from '../../step/workbench/state.js';\n",
   [kit('tools/b.js')]: "const load = () => import('@text-to-cad/core/lib/urdf/parseUrdf.js');\n",
-  [kit('tools/c.js')]: "import { buildModel } from '@text-to-cad/core/common/cadScene.js';\n",
+  [kit('tools/c.js')]: "import { createXbfScene } from '@text-to-cad/core/lib/xbf/xbfScene.js';\n",
   [kit('tools/d.js')]: "import y from '@text-to-cad/ui/renderers/step';\n",
 }, result => {
   assert.equal(result.errors.filter(error => error.includes('imports a renderer')).length, 2);
@@ -159,7 +159,7 @@ test('a viewer renderer that builds its own scene is refused as well', () => sha
 ])));
 
 test('the snapshot entry routes families through the shared scenes and reaches for no mesh flattener', () => sharedFixture((files) => {
-  files[HEADLESS_ENTRY] = "import { buildModel } from './cadScene.js';\n";
+  files[HEADLESS_ENTRY] = "import { renderModel } from './renderMeshScene.js';\n";
   files['packages/core/src/common/renderMeshScene.js'] = "import { buildMeshDataFromGlbBuffer } from '../lib/render/glbMeshData.js';\n";
 }, result => assert.deepEqual(result.errors, [
   `${HEADLESS_ENTRY} does not route a family's job through headlessSceneFamily (${HEADLESS_SCENE})`,

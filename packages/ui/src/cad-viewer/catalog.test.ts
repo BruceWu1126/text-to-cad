@@ -49,13 +49,14 @@ test('the file menu copies a file\'s absolute path, and reveals it only where it
   expect([Object.keys(plain.perform!), plain.platform]).toEqual([['copy-path'], 'linux']);
 });
 
-test('a document the engine holds by its id alone keeps its id, is named by its model, has no file to browse, and starts its Files in its folder', async () => {
+test('a document the engine holds by its id alone keeps its id, is named by its model and has no file to browse', async () => {
   const id = '6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab';
-  const client = cadClient([{ id, file: id, name: 'bracket', sourcePath: null, folder: 'C:\\work\\parts', kind: 'xbf', bytes: 0 }]);
+  const client = cadClient([{ id, file: id, name: 'bracket', sourcePath: null, kind: 'xbf', bytes: 0 }]);
   const source = createCadFileSource(client as never);
   const options = { signal: new AbortController().signal };
-  expect(await source.stat(id, options)).toMatchObject({ path: id, name: 'bracket', navigationPath: null, folder: 'C:/work/parts', extension: 'xbf',
-    mediaType: 'cad-document' });
+  const stat = await source.stat(id, options);
+  expect(stat).toMatchObject({ path: id, name: 'bracket', navigationPath: null, extension: 'xbf', mediaType: 'cad-document' });
+  expect('folder' in stat).toBe(false);
   // No live-document collection: the home is Recents.
   expect('collections' in source).toBe(false);
 });

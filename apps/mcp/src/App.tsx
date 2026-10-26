@@ -28,7 +28,7 @@ interface Showing { launch: Launch; sequence: number }
 
 declare const __TEXT_TO_CAD_BUILD__: string | undefined;
 // Which build this page is, where it is not the release's own: vite.config.mjs names it
-// (`@text-to-cad/ui/build-id`), and the version then reads `0.7.15-dev.<build>`.
+// (`@text-to-cad/ui/build-id`), and the version then reads `<version>-dev.<build>` (`0.8.0-dev.<build>`).
 const BUILD = typeof __TEXT_TO_CAD_BUILD__ === 'string' ? __TEXT_TO_CAD_BUILD__ : '';
 
 // The host's sandbox need not be a secure context, where randomUUID is missing.

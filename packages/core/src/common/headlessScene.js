@@ -1,5 +1,5 @@
-// A GLB, an STL, a 3MF or a robot description (URDF, SRDF, SDF) on the snapshot CLI's
-// headless stage, as the SCENE ITS VIEWER RENDERER DRAWS. There is one builder per file
+// A GLB, an STL, a 3MF, a robot description (URDF, SRDF, SDF) or an engine document on the OCCT
+// parity bench's headless page, as the SCENE ITS VIEWER RENDERER DRAWS. There is one builder per file
 // family and it lives in this package so that both hosts call it: the viewer's renderers
 // (`@text-to-cad/ui` renderers/glb, mesh, robot) and this stage. A snapshot of those files
 // therefore cannot show something the viewer does not — the same loader reads the file,

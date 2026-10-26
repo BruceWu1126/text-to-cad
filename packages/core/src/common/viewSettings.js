@@ -263,20 +263,20 @@ export const XBF_VIEW_FEATURES = ALL_VIEW_FEATURES;
 export const XBF_PART_VIEW_FEATURES = STEP_PART_VIEW_FEATURES;
 
 /**
- * What a file of `kind` offers, for the viewer and a snapshot alike: a STEP everything; any other
- * 3D file (STL, 3MF, GLB, a robot) has no CAD edges, so Solid, and Parts where it has several
- * parts, objects or links (`parts`); Clip cuts whatever it draws (`lib/viewer/sceneClip.js`), and a
- * GLB of several parts explodes (`explodeParts`, `sceneExplode.js`). A drawing (DXF) no more than
- * an edgeless view: nothing in it to cut.
- * @param {string} kind  The file's extension, without the dot.
+ * What a file of `kind` offers, for the viewer and a snapshot alike: an engine document (`xbf`: an
+ * `.xbf`, or a STEP, which opens as one) everything when it has several parts and no Parts or
+ * Explode when it has one; any other 3D file (STL, 3MF, GLB, a robot) has no CAD edges, so Solid,
+ * and Parts where it has several parts, objects or links (`parts`); Clip cuts whatever it draws
+ * (`lib/viewer/sceneClip.js`), and a GLB of several parts explodes (`explodeParts`,
+ * `sceneExplode.js`). A drawing (DXF) no more than an edgeless view: nothing in it to cut.
+ * @param {string} kind  The file's render kind (`xbf` for a STEP), without a dot.
  * @param {{ parts?: number, explodeParts?: number }} [scene]
  * @returns {ViewFeatures}
  */
 export function viewFeaturesForKind(kind, { parts = 0, explodeParts = 0 } = {}) {
   const normalized = String(kind || "").trim().toLowerCase();
-  if (normalized === "step" || normalized === "stp") return ALL_VIEW_FEATURES;
   if (normalized === "dxf") return EDGELESS_VIEW_FEATURES;
-  // A cadgen engine document is offered what a STEP is: an assembly everything, a part no Parts or Explode.
+  // A cadgen engine document: an assembly everything, a part no Parts or Explode.
   if (normalized === "xbf") return parts > 1 ? XBF_VIEW_FEATURES : XBF_PART_VIEW_FEATURES;
   return {
     modes: parts > 1 ? ["solid", "parts"] : ["solid"],
