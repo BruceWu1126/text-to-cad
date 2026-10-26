@@ -109,7 +109,12 @@ class Models:
                 recorded = revision(report)
                 facts, before = self.facts(ident, report, recorded)
                 try:
-                    self.claimed(ident, source, report.get("key"))
+                    if source.get("explicit_name") is not None:
+                        from cadgen.engine.identity import claimed
+
+                        held = self.registry()
+                        if held is not None:
+                            claimed(held, source, source["explicit_name"])
                     self.record(report, recorded, facts)
                 except ValueError as error:  # a key another declaration holds: the build is refused, by name
                     report["ok"], report["error"] = False, f"{source['name']}: {error}"
@@ -168,35 +173,6 @@ class Models:
 
         return registry.current()
 
-    def claimed(self, ident: str, source: dict[str, Any], key: str | None) -> None:
-        """``key`` (the id ``ident`` its declaration gives) taken by ``source``'s declaration
-        (``script::name``); refused, naming the other, while another declaration whose script (or a
-        shape's scope) is still there holds it -- in this process's book or in the registry. A
-        declaration whose script is gone (moved) gives its key up. Nothing for a derived id: its
-        declaration is in it."""
-        if not key:
-            return
-        from cadgen.engine import registry as registering
-        from cadgen.engine.ids import canonical
-
-        mine = f"{canonical(source['script'])}::{source['name']}"
-        with self.lock:
-            row = self.records.get(ident)
-        other = None
-        if row is not None:
-            other = (row["source"]["script"], row["source"]["name"])
-        else:
-            held = self.registry()
-            record = held.get(ident) if held is not None else None
-            if record is not None and record.get("kind") in ("model", "shape"):
-                other = (str(registering.home(held, record)), record.get("entry") or "")
-        if other is None or not os.path.exists(other[0]):
-            return
-        theirs = f"{canonical(other[0])}::{other[1]}"
-        if theirs != mine:
-            raise ValueError(f"key {key!r} is claimed by {theirs}, so {mine} cannot take it: one key names one "
-                             "document; give one of them another key")
-
     def record(self, report: dict[str, Any], recorded: str, facts: dict[str, Any] | None = None) -> None:
         """The registry's record of a document a build made (``registry``), written when it changed.
         Nothing with no registry."""
@@ -223,8 +199,8 @@ class Models:
             found["created"] = found["built"]
         elif "created" in old:
             found["created"] = old["created"]
-        if report.get("key"):
-            found["key"] = report["key"]
+        if source.get("explicit_name") is not None:
+            found["line"] = source["line"]
         if facts is not None:
             found["facts"] = facts
         for key in ("opened", "pinned", "preview", "cache"):  # the home's and the cache's, kept across builds
@@ -248,7 +224,6 @@ class Models:
         if not is_id(ident):
             raise ValueError(f"{ident!r} is not a document id")
         source = {"script": scope, "name": name}
-        self.claimed(ident, source, request.get("key"))
         data = base64.b64decode(request.get("xbf") or "")
         replies: list[dict[str, Any]] = []
         self.daemon._call({"source": {"document": ident, "held": ident}, "cwd": request.get("cwd")},
@@ -289,8 +264,6 @@ class Models:
                 found["created"] = found["built"]
             elif "created" in previous:
                 found["created"] = previous["created"]
-            if request.get("key"):
-                found["key"] = request["key"]
             if program:
                 found["program"] = registering.relative(program, root)  # what its words name (``shown``)
             for key in ("opened", "pinned", "preview", "cache"):

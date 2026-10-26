@@ -6,7 +6,7 @@ loaded, on first access and never before; ``handle.export(...)`` is ``export(han
 body a child's call returns its handle too, whose ``shape`` is the result in the worker, which the
 caller composes. A shape handed over is held, cached and served as a drained document is, its page
 and its export work, its record says a program the engine did not run showed it (no command builds
-it again), ``key=`` names it, and the animations passed with it are baked into its GLB. Through a
+it again), ``name=`` names it, and the animations passed with it are baked into its GLB. Through a
 real daemon in private engine, state and cache folders."""
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from cadgen.engine.ids import derived_id, key_id, model_id  # noqa: E402
+from cadgen.engine.ids import derived_id, model_id  # noqa: E402
 from cadgen.engine.registry import Registry  # noqa: E402
 
 PARTS = """
@@ -122,7 +122,7 @@ crate = bd.Compound(children=[bd.Box(10, 10, 10), lid.moved(bd.Pos(0, 0, 6))], l
 lift = animation(crate, "lift", duration=2).translation("lid", by=(0, 0, 10), end=2)
 handle = model(crate, name="crate", animations=[lift])
 handle.export("crate.glb", "crate.step")
-tag = model(bd.Box(1, 1, 1), name="tag", key="crate-tag")
+tag = model(bd.Box(1, 1, 1), name="tag")
 print("RESULT " + json.dumps({"id": handle.id, "url": handle.url, "same": handle.shape is crate, "tag": tag.id}))
 """
 
@@ -317,7 +317,7 @@ class HandleTest(unittest.TestCase):
         project = self.project("handed", {"hand.py": HANDED})
         found = self.run_python("hand.py", cwd=project)
         ident = derived_id(project / "hand.py", "crate")
-        self.assertEqual((found["id"], found["tag"], found["same"]), (ident, key_id("crate-tag"), True))
+        self.assertEqual((found["id"], found["tag"], found["same"]), (ident, derived_id(project / "hand.py", "tag"), True))
         self.assertEqual(_served(found["url"], ident)["name"], "crate", "its page serves it")
         self.assertEqual([clip["name"] for clip in _glb_json(project / "crate.glb").get("animations") or []],
                          ["lift"], "the animations passed are baked into its GLB")

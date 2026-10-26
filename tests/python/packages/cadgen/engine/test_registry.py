@@ -4,7 +4,7 @@ that builds it again and nothing is run; a moved script's record detached, liste
 ``memory`` document with none; a shape handed over recorded with no command, never detached. And
 the declarations: a function in a saved file points; one in no file is refused, with the words
 that hand its shape over instead; ``@model`` stacked with a file decorator is refused, saying which
-to drop; a ``key=`` another declaration's record holds is refused, naming it."""
+to drop; a ``name=`` another declaration's record holds is refused, naming it."""
 
 from __future__ import annotations
 
@@ -116,8 +116,7 @@ class StoreTest(unittest.TestCase):
                     TypeError, r"^(model|xbf)\(\) got an unexpected keyword argument 'store'$"):
                 self.define(source.replace("from cadgen.engine import model", "from cadgen.engine import model, xbf")
                             .replace("@model", given), str(saved))
-        with self.assertRaisesRegex(TypeError, "no name="):
-            self.define(source.replace("@model", "@model(name='other')"), str(saved))
+        self.assertEqual(self.define(source.replace("@model", "@model(name='other')"), str(saved)).explicit_name, "other")
 
     def test_model_stacked_with_a_file_decorator_is_refused_saying_which_to_drop(self) -> None:
         folder = Path(os.path.realpath(tempfile.mkdtemp(prefix="store-")))
@@ -144,13 +143,13 @@ def cube():
     return bd.Box(3, 2, 1)
 """
 
-# Two scripts whose models claim one key.
-KEYED = """
+# Two scripts whose models claim one explicit name.
+NAMED = """
 import build123d as bd
 from cadgen import model
 
 
-@model(key="arm")
+@model(name="arm")
 def {name}():
     return bd.Box(1, 1, 1)
 
@@ -242,18 +241,18 @@ class RegistryDaemonTest(unittest.TestCase):
         RecentStore(self.state).remove(cube)
         self.assertFalse((self.state / "documents" / cube).exists())
 
-    def test_a_key_another_declaration_s_record_holds_is_refused_naming_it(self) -> None:
-        project = self.project("keyed", {"left.py": KEYED.format(name="left"), "right.py": KEYED.format(name="right")})
+    def test_a_name_another_declaration_s_record_holds_is_refused_naming_it(self) -> None:
+        project = self.project("keyed", {"left.py": NAMED.format(name="left"), "right.py": NAMED.format(name="right")})
         first = self.run_python("left.py", cwd=project)
         self.assertEqual(first.returncode, 0, first.stderr)
-        from cadgen.engine.ids import key_id
+        from cadgen.engine.ids import derived_id
 
-        record = self.records()[key_id("arm")]
-        self.assertEqual((record["key"], record["entry"]), ("arm", "left"))
+        record = self.records()[derived_id(project, "arm")]
+        self.assertEqual((record["line"], record["entry"]), (6, "left"))
         second = self.run_python("right.py", cwd=project)
         self.assertNotEqual(second.returncode, 0)
-        self.assertIn(f"key 'arm' is claimed by {project / 'left.py'}::left", second.stderr)
-        self.assertEqual(self.records()[key_id("arm")]["entry"], "left", "the record stays the first's")
+        self.assertIn(f"{project / 'left.py'}:6", second.stderr)
+        self.assertEqual(self.records()[derived_id(project, "arm")]["entry"], "left", "the record stays the first's")
         again = self.run_python("left.py", cwd=project)
         self.assertEqual(again.returncode, 0, again.stderr)
 

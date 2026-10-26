@@ -25,7 +25,7 @@ if str(SRC) not in sys.path:
 
 from cadgen.engine.addresses import document_id  # noqa: E402
 from cadgen.engine import model as declaring  # noqa: E402
-from cadgen.engine.ids import NAMESPACE, canonical, derived_id, file_id, is_id, key_id, model_id  # noqa: E402
+from cadgen.engine.ids import NAMESPACE, canonical, derived_id, file_id, is_id, model_id  # noqa: E402
 
 SCRIPT = """
 from cadgen.engine import model
@@ -82,37 +82,46 @@ class IdsTest(unittest.TestCase):
                  str(uuid.uuid5(NAMESPACE, "file\0" + canonical(self.script)))}
         self.assertFalse(older & {model_id(self.script, "part"), file_id(self.script)}, "the prefixes are gone")
 
-    def test_a_key_replaces_the_derived_id_and_names_one_declaration(self) -> None:
-        self.assertEqual(key_id("arm"), str(uuid.uuid5(NAMESPACE, "key::arm")))
-        for bad in ("", " arm", "arm\n", 7):
-            with self.subTest(key=bad), self.assertRaises(ValueError):
-                key_id(bad)  # type: ignore[arg-type]
-        # '::' separates a scope from a name: a key or a shape's name holding it could spell another's id.
-        with self.assertRaisesRegex(ValueError, "key 'arm::left' holds '::'"):
-            key_id("arm::left")
-        with self.assertRaisesRegex(ValueError, "key 'x::y' holds '::'"):
-            declaring.model(key="x::y")
-        with self.assertRaisesRegex(ValueError, "key 'x::y' holds '::'"):
-            declaring.xbf("XBF/a.xbf", key="x::y")
-        with self.assertRaisesRegex(ValueError, "name 'plate::' holds '::'"):
-            declaring.model(object(), name="plate::")  # refused before anything is made or sent
+    def test_unnamed_ids_equal_the_original_formula_over_generated_paths_and_names(self) -> None:
+        import random
+        import string
+
+        rng = random.Random(568)
+        for _ in range(300):
+            segments = ["".join(rng.choices(string.ascii_letters + " _é", k=12)) for _ in range(rng.randrange(1, 5))]
+            script = self.folder.joinpath(*segments, "parts.py")
+            function = "f_" + "".join(rng.choices(string.ascii_letters + "_0123456789", k=20))
+            self.assertEqual(model_id(script, function), str(uuid.uuid5(NAMESPACE, canonical(script) + "::" + function)))
+
+    def test_explicit_names_belong_to_folders_and_collisions_name_both_locations(self) -> None:
         import importlib.util
 
-        def load(name: str, text: str):
-            path = self.folder / f"{name}.py"
-            path.write_text(textwrap.dedent(text), encoding="utf-8")
-            spec = importlib.util.spec_from_file_location(f"ids_{name}", path)
+        def load(path: Path, function: str, decorator: str = "@model"):
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(f"from cadgen.engine import model, xbf\n{decorator}\ndef {function}():\n    return None\n")
+            spec = importlib.util.spec_from_file_location(f"ids_{path.stem}", path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            return module
+            return getattr(module, function)
 
-        self.addCleanup(declaring._KEYS.clear)
-        keyed = load("left", "from cadgen.engine import model, xbf\n\n@model(key='arm')\ndef left():\n    return None\n"
-                             "\n@xbf('XBF/r.xbf', key='rail')\ndef rail():\n    return None\n")
-        self.assertEqual((keyed.left.id, keyed.rail.id), (key_id("arm"), key_id("rail")))
-        claimed = re.escape(f"key 'arm' is claimed by two declarations, {canonical(self.folder / 'left.py')}::left")
-        with self.assertRaisesRegex(ValueError, claimed):  # a Windows path's backslashes are no pattern
-            load("right", "from cadgen.engine import model\n\n@model(key='arm')\ndef right():\n    return None\n")
+        self.addCleanup(declaring._NAMES.clear)
+        left = load(self.folder / "left.py", "left", "@model(name='arm')")
+        self.assertEqual(left.id, derived_id(self.folder, "arm"))
+        with self.assertRaises(ValueError) as collision:
+            load(self.folder / "right.py", "right", "@xbf('r.xbf', name='arm')")
+        self.assertIn(f"{self.folder / 'left.py'}:2", str(collision.exception))
+        self.assertIn(f"{self.folder / 'right.py'}:2", str(collision.exception))
+        another = load(self.folder / "other" / "right.py", "right", "@xbf('r.xbf', name='arm')")
+        self.assertNotEqual(another.id, left.id)
+        a = load(self.folder / "a.py", "duplicate")
+        b = load(self.folder / "b.py", "duplicate")
+        self.assertNotEqual(a.id, b.id)
+        for bad in ("", " arm", "arm\n", 7, "x::y"):
+            with self.subTest(name=bad), self.assertRaises(ValueError):
+                declaring.model(name=bad)
+        for decorate in (declaring.model, lambda **kw: declaring.xbf("a.xbf", **kw)):
+            with self.assertRaisesRegex(TypeError, "unexpected keyword argument 'key'"):
+                decorate(key="removed")
 
     def test_a_windows_link_to_a_missing_target_is_spelled_once(self) -> None:
         # Windows' realpath gives such a link's target as the link names it, its folders unresolved;

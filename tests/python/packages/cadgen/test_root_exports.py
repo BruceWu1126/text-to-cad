@@ -85,18 +85,18 @@ class RootExports(unittest.TestCase):
                     self.assertFalse(hasattr(cadgen, name), f"{name} is {namespace}'s, not the root's")
 
     def test_model_declares_a_function_or_hands_a_shape_over_and_a_decorator_takes_its_path(self):
-        """``model`` is one name of two forms: a decorator (``@model``, ``@model(key=)``) and the
-        shape form (``model(shape, name=, key=, animations=)``); a file decorator takes its path and its
-        key. No ``id=``: an id is derived, or a key's; no ``store=``: every document is kept alike."""
+        """``model`` is one name of two forms: a decorator (``@model``, ``@model(name=)``) and the
+        shape form (``model(shape, name=, animations=)``); a file decorator takes its path and its
+        name. No ``id=``: an id is derived; no ``store=``: every document is kept alike."""
         import inspect
 
         parameters = inspect.signature(cadgen.engine.model.model).parameters
         self.assertEqual([(name, p.kind) for name, p in parameters.items()], [
-            ("target", inspect.Parameter.POSITIONAL_ONLY), ("key", inspect.Parameter.KEYWORD_ONLY), ("name", inspect.Parameter.KEYWORD_ONLY),
+            ("target", inspect.Parameter.POSITIONAL_ONLY), ("name", inspect.Parameter.KEYWORD_ONLY),
             ("animations", inspect.Parameter.KEYWORD_ONLY)])
         for kind in ("xbf", "step", "glb", "stl", "threemf", "dxf"):
             with self.subTest(kind=kind):
-                self.assertEqual(list(inspect.signature(getattr(cadgen, kind)).parameters), ["out", "key"])
+                self.assertEqual(list(inspect.signature(getattr(cadgen, kind)).parameters), ["out", "name"])
 
     def test_a_name_the_root_never_had_is_pythons_own_error(self):
         # No backwards compatibility: a retired name is no name, and says nothing about history.
