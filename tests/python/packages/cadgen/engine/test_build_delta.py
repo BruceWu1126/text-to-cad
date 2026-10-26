@@ -175,6 +175,16 @@ class DeltaTest(unittest.TestCase):
 
 
 class RunLineTest(unittest.TestCase):
+    def test_a_declared_file_written_by_a_run_is_sized_as_export_sizes_it(self) -> None:
+        from types import SimpleNamespace
+
+        from cadgen.engine import build
+
+        heard: list[str] = []
+        target = SimpleNamespace(kind="xbf", path=Path(tempfile.gettempdir()) / "sized.xbf")
+        build._outputs([target], {}, heard.append, lambda _path: (True, 21_990), lambda: None)
+        self.assertRegex(heard[0], r"^wrote .*sized\.xbf \(21\.5 KB\) in \d+\.\d\ds$")
+
     def test_one_miss_and_one_hit_are_singular(self) -> None:
         from cadgen.engine import cli
 

@@ -795,7 +795,9 @@ def _outputs(plan: list, report: dict[str, Any], log: Callable[[str], None],
         timings[target.kind] = round(seconds, 4)
         written[str(target.path)] = {"kind": target.kind, "written": fresh, "seconds": round(seconds, 4), "bytes": size}
         if fresh or kept:
-            log(f"{'wrote' if fresh else 'kept'} {_shown(target.path, None)} ({size / 1e6:.1f} MB) in {seconds:.2f}s")
+            from cadgen.engine.cli import _bytes  # the size as every verb says one: never "0.0 MB" for a small file
+
+            log(f"{'wrote' if fresh else 'kept'} {_shown(target.path, None)} ({_bytes(size)}) in {seconds:.2f}s")
     report["files"] = {str(target.path): written[str(target.path)] for target in plan}
 
 
