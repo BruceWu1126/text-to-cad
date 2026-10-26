@@ -42,5 +42,5 @@ cadgen export "$ID" /tmp/annotations.glb            # demo, baked as a clip
 ## Not ported
 
 - `joint_playground/joint_playground.urdf`: an authored URDF of primitives, no model,
-  and no doc names it. It is kept in `unported/`, and the engine's snapshot draws it as
+  and no doc names it. It is kept in [`unported/`](unported/README.md), and the engine's snapshot draws it as
   it is (`cadgen urdf snapshot models/tests/unported/joint_playground/joint_playground.urdf out.png`).

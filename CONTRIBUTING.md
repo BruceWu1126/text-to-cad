@@ -399,7 +399,8 @@ reproduction instructions. Despite its name, that folder is never CI input;
 see [its manual-validation policy](models/tests/README.md).
 
 For manual skill prompts and model review, work inside this repository and keep
-samples and CAD/robot-description artifacts under `models/`. Create a scratch
+samples and CAD/robot-description artifacts under `models/`
+([its README](models/README.md) maps the corpus and says where a new model goes). Create a scratch
 project in the fixture bucket it belongs in: a standalone part
 goes in the `models/examples/` cad-project, an assembly gets its own group in
 `models/assemblies/` (`src/<assembly>/`), a drawing goes in `models/drawings/` —
@@ -1140,7 +1141,7 @@ npm --prefix apps/docs run check
 npm --prefix apps/api test               # api.texttocad.dev, no install needed
 ```
 
-Use `AGENTS.md` or `scripts/README.md` for path-specific validation when you are
+Use [`AGENTS.md`](AGENTS.md) or [`scripts/README.md`](scripts/README.md) for path-specific validation when you are
 working in a particular package, skill, docs site, or production-output
 path.
 
@@ -1189,3 +1190,6 @@ manual edits inside generated runtime folders.
 
 The repository carries no Git LFS and keeps every file under 5 MiB (see the
 shipping contract above), so heavyweight media never goes in the tree.
+
+A security problem is reported privately, as [SECURITY.md](SECURITY.md) says, never as an
+issue or a pull request.

@@ -100,6 +100,10 @@ src/
 dist/               generated ESM, declarations, CSS, assets and worker modules
 ```
 
+The loading icon's and the wordmarks' provenance is [src/assets/README.md](src/assets/README.md);
+the DXF and robot renderers' fixtures are described beside them
+([dxf](src/renderers/dxf/__fixtures__/README.md), [robot](src/renderers/robot/__fixtures__/README.md)).
+
 `FileViewer` has no concrete renderer imports. A registration describes matching,
 priority, asynchronous preparation, lazy component loading and disposal.
 Each app registers only the file types its source supports. A renderer's code
@@ -274,7 +278,9 @@ leaving it throws Preview's away and gives the tools view back exactly as it was
 effects in the [host contract](docs/viewer-host.md), not in renderer components.
 
 One per-file settings store serves controls, live commands and persistence.
-Presets use the canonical grouped schema; see [View presets](docs/render-mode.md).
+Presets use the canonical grouped schema; see [Display modes](docs/render-mode.md), and
+[render types](docs/render-types.md) for the rule that viewer code asks what a format can do,
+never what it is.
 Expensive changes use [staged viewport updates](docs/view-updates.md): controls
 remain authoritative, preparation is replaceable, and captures await presentation.
 The camera is part of the file's view: a refresh restores the one the file on screen

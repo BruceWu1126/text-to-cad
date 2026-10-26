@@ -226,8 +226,17 @@ registered renderers and explicit services. Viewer content is registered through
 for `.urdf`, `.srdf` and `.sdf` `@text-to-cad/ui/renderers/robot` (`CadViewer` registers all
 five with the same client and preferences, as it does for the MCP app); all loading,
 selection, panel and tool behavior is shared. Public declarations, styles and worker assets are built in that
-package. See `docs/shell.md` for the host boundary and `docs/storage.md` for
-browser persistence. CAD control guidance lives with the UI package.
+package: the root workspace builds UI's ESM, declarations, CSS and worker assets before building
+the app, with no source alias or JSX loader. Web supplies its file source (`createCadFileSource`
+from `@text-to-cad/ui/catalog`, over its CAD client), URL navigation (`onShow`, the `/<id>` path
+and history), browser persistence, the document title and appearance, the viewer's links
+(`ViewerHost.links`: its version, its build's GitHub and Discord, `src/host/viewerLinks.js`) and
+the tab's colour scheme (`colorScheme`); the navbar, the explorer, the tool strip, the file
+sidebar and Preview are the shared package's. Native file operations are host capabilities: the
+web offers Copy path and Reveal in the file manager of the machine the server runs on, and has
+no filesystem-writing or editing endpoint. The host boundary is
+[the shared host contract](../../packages/ui/docs/viewer-host.md); browser persistence is
+[docs/storage.md](docs/storage.md). CAD control guidance lives with the UI package.
 
 `vite.config.mjs` names the build, for the version the app menu shows (`__TEXT_TO_CAD_BUILD__`,
 from `@text-to-cad/ui/build-id`): none for the release's own build, whose

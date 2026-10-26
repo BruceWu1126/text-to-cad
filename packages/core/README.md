@@ -158,7 +158,9 @@ Where the mechanism is written:
 | Document | Covers |
 |---|---|
 | [docs/render-pipeline.md](docs/render-pipeline.md) | The family scene builders and the staged render (`renderModel` → `captureModel`), the unified display state, the two lighting recipes, the photographic rig, display modes and CAD edges |
-| [docs/resource-ownership.md](docs/resource-ownership.md) | Ownership and disposal, the selector/BVH demand boundary, recomposition and instancing reuse, the decode worker pool, part-store admission |
+| [docs/resource-ownership.md](docs/resource-ownership.md) | Ownership and disposal, the selector/BVH demand boundary, reuse across a rebuild, the decode worker pool |
+| [docs/workspace-resources.md](docs/workspace-resources.md) | The workspace service and resource provider: where an engine document is read, worker tickets, nested glTF reads, cache generations |
+| [src/lib/render/fixtures/README.md](src/lib/render/fixtures/README.md) | The GLB fixtures the core and UI suites open, and how each is regenerated |
 
 ## Public modules and lifetimes
 

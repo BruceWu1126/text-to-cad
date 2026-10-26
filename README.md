@@ -292,6 +292,10 @@ To find out, cadgen fetches `api.texttocad.dev/v1/versions` at most once a day:
 one anonymous request, with no ID, path or anything about you, never in CI and
 never for a copy that something else updates. `CADGEN_UPDATE_CHECK=0` turns it off.
 
+A CAD project written for cadgen 0.7 needs porting to 0.8:
+[the migration guide](docs/migrations/migrating-0.7-to-0.8.md) takes one across, step by
+step, and an agent with the CAD skill can follow it.
+
 ### Telemetry
 
 The CAD app (the plugin's `cad` server) and the browser viewer (`cadgen viewer`) send usage stats by default, with
@@ -359,4 +363,6 @@ robot description files, simulation, and local review.
 ## 🛠️ Contributing
 
 Branch from `main` and open PRs against `main`. For the local workflow, testing in
-agent apps and validation, see [CONTRIBUTING.md](CONTRIBUTING.md).
+agent apps and validation, see [CONTRIBUTING.md](CONTRIBUTING.md); an agent working in
+the repository starts at [AGENTS.md](AGENTS.md). A security problem is reported privately,
+as [SECURITY.md](SECURITY.md) says.
