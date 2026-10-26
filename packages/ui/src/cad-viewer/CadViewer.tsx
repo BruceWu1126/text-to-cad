@@ -81,6 +81,14 @@ export interface CadViewerProps<Model extends LibraryModel = LibraryModel> {
    * Back and Forward in the navbar after its logo, over every file and on the home.
    */
   history?: ViewerHistory;
+  /**
+   * The host's Full size button, where it shows the view small (inline in a conversation) and can
+   * show it full size, and its way to open what is shown in a page of its own outside the host (the
+   * CAD app's Open in browser): the navbar's host actions, Full size first and Open in browser last,
+   * over every file and on the home. Nothing where there is no navbar (`chrome: "bare"`).
+   */
+  fullSize?: ReactNode;
+  openInBrowser?: ReactNode;
   /** The chrome around the view (`FileViewerProps.chrome`): the navbar (`"page"`, the default), or the view alone (`"bare"`). */
   chrome?: "page" | "bare";
   onError?(error: Error): void;
@@ -99,7 +107,7 @@ const reportError = (error: Error) => console.error(error);
  * navigates: showing a file, or the home, is the host's `onShow`.
  */
 export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, host, tabStore, live, file, onShow, onShown,
-  library, onThumbnail, colorScheme, language, appSettings, notice, update, history, chrome, onError = reportError }: CadViewerProps<Model>) {
+  library, onThumbnail, colorScheme, language, appSettings, notice, update, fullSize, openInBrowser, history, chrome, onError = reportError }: CadViewerProps<Model>) {
   // The language the host names: the pages drawn here (the home, a file that will not open) read in it.
   const locale = host.environment.locale;
   const t = translator(locale);
@@ -213,7 +221,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   // out of sight does, which is outside it.
   return <I18nProvider locale={locale}>
     <ControlUsageProvider report={host.usage?.controls}>
-    <ExportControls service={client.exports} downloads={host.downloads} file={shown ?? path}>{({ navbar, overlay }) => <FileViewer navbarActions={navbar} overlay={overlay} file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
+    <ExportControls service={client.exports} downloads={host.downloads} file={shown ?? path}>{({ navbar, overlay }) => <FileViewer navbarActions={fullSize || openInBrowser ? <>{fullSize}{navbar}{openInBrowser}</> : navbar} overlay={overlay} file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
       colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} history={history} recent={recent} notice={notice} chrome={chrome} onError={onError} presentation={presentation} />}</ExportControls>
     </ControlUsageProvider>
     {drawing && !path ? <OffscreenPicture key={drawing.source.file} source={drawing.source} host={host} preferences={preferences} onDone={drawn} /> : null}

@@ -186,6 +186,9 @@ _APP_TOKEN_HEADER = "x-cadgen-app"
 # a host is asked to keep app-only tools from the model, and the server does not rely on it.
 _APP_TOKEN_ARGUMENT = "app"
 _APP_TOKEN_SCHEMA = {"type": "string", "description": "The view's capability, from its launch's metadata."}
+# The card's Open in browser: this process opens the web viewer's page of the document the card
+# shows (``_open_in_browser``), a route of the app's alone -- an agent's request never reaches it.
+_BROWSER_OPEN_ROUTE = "/__cad/browser/open"
 _HTTP_TOOL = {
     "name": "cad_http", "title": "CAD HTTP request", "icons": [ICON],
     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
@@ -606,15 +609,16 @@ class Server:
         return launch
 
     def _reach(self, launch: dict[str, Any]) -> None:
-        """Stamp a launch a tool hands the page with the ways to the engine that need no tool call:
+        """Stamp a launch the page is handed with the ways to the engine that need no tool call:
         ``browser``, the web viewer's page of what it shows (the home's with no model), the same day
-        link a text client's ``cad_show`` gives the agent (``_browser_url``); and
-        ``engine``, that page's origin (loopback: the engine binds nowhere else). A card whose host
-        carries no ``tools/call`` back (the Claude app's Code tab) links the page, and first tries the
-        engine directly with the link's token. A tab host's launches go without them: its card always
-        has its channel, and what Codex is served stays as it was (``test_codex_contract``). So do
-        launches where this server was given no engine (``viewer_url``), or the engine gives no page."""
-        if self._viewer_url is None or self.tabs:
+        link a text client's ``cad_show`` gives the agent (``_browser_url``), which the card's Open
+        in browser opens; and, inline, ``engine``, that page's origin (loopback: the engine binds
+        nowhere else): a card whose host carries no ``tools/call`` back (the Claude app's Code tab)
+        links the page, and first tries the engine directly with the link's token. A tab's card
+        always has its channel, so its launches carry the page alone. The file handler's carry
+        neither: it shows its file alone, with no Open in browser. Nor do launches where this server
+        was given no engine (``viewer_url``), or the engine gives no page."""
+        if self._viewer_url is None or launch.get("surface") == "file":
             return
         from .browser import ViewerUnavailable
 
@@ -623,9 +627,10 @@ class Server:
         except ViewerUnavailable as failure:
             LOG.info("the launch carries no page: %s", failure)
             return
-        parts = urlparse(link)
         launch["browser"] = link
-        launch["engine"] = f"{parts.scheme}://{parts.netloc}"
+        if not self.tabs:
+            parts = urlparse(link)
+            launch["engine"] = f"{parts.scheme}://{parts.netloc}"
 
     def _model_path(self, value: Any) -> str:
         """An existing CAD file, from the absolute path a caller named; or a document the engine holds,
@@ -785,6 +790,7 @@ class Server:
                              "shows that file alone. Call cad_show without a view to show a model in this thread's CAD tab.",
                              "wrong_view")
         launch = self._launch(model)
+        self._reach(launch)
         if isinstance(view, SidebarView):
             if view.model != model:
                 self.sidebar_views.post(view.id, {"type": "show", "launch": launch})
@@ -800,6 +806,41 @@ class Server:
         from .browser import viewer_url
 
         return (self._viewer_url or viewer_url)(model)
+
+    def _open_in_browser(self, method: str, body: bytes) -> dict[str, Any]:
+        """``POST /__cad/browser/open`` with ``{"model": <path or id> | null}``, the card's Open in
+        browser: this process opens the web viewer's page of that document (the home's with none) in
+        the person's browser, through an owner-only redirect file so the page's token is on no
+        command line (``browser_open``) -- a host may not follow a link to a loopback page, and Codex
+        does not. ``{"opened": true}``, or 503 in words where no page or no browser can be opened
+        here (no display, a remote shell), when the card opens its launch's page (``browser``)
+        through its host instead. The request names a document, never a URL."""
+        from cadgen.viewer import browser_open
+        from .browser import ViewerUnavailable
+        from .tunnel import _result
+
+        json_type = {"content-type": "application/json"}
+
+        def refused(status: int, error: str) -> dict[str, Any]:
+            return _result(status, json_type, json.dumps({"error": error}).encode("utf-8"))
+
+        if method.upper() != "POST":
+            return _result(405, {"allow": "POST"}, b"")
+        try:
+            asked = json.loads(body or b"{}")
+        except ValueError:
+            return refused(400, "the body is not JSON")
+        model = asked.get("model") if isinstance(asked, dict) else None
+        if model is not None and not isinstance(model, str):
+            return refused(400, "model is a path or a document id")
+        cannot = browser_open.display_refusal()  # said before a page is asked of the engine
+        if cannot is not None:
+            return refused(503, cannot)
+        try:
+            self._open_page(self._browser_url(model or None))
+        except (ViewerUnavailable, browser_open.CannotOpen) as failure:
+            return refused(503, str(failure))
+        return _result(200, json_type, b'{"opened":true}')
 
     def _open_page(self, url: str) -> None:
         """Open ``url`` in the person's browser through an owner-only redirect file
@@ -1025,6 +1066,10 @@ class Server:
             # A view opened in an earlier session (the engine restarted under its host) holds that one's.
             raise ToolFailed("This CAD view was opened before CAD restarted: close it and open CAD again.", "bad_request")
         method, url = str(arguments.get("method") or "GET"), str(arguments.get("url") or "")
+        from cadgen.viewer import url_norm
+
+        if app and url_norm.request_pathname(url) == _BROWSER_OPEN_ROUTE:
+            return _data(self._open_in_browser(method, body))
         reply = self.tunnel.serve(method=method, url=url, headers=headers, body=body, agent=not app)
         if app:
             return _data(reply)

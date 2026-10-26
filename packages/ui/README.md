@@ -294,7 +294,7 @@ pointer is on them or their menu is open, with no tooltip. At the right is only 
 or a file adds: the host's update button, a dismissed alert's icon and, last, the host's
 actions (the web viewer's Export); the view's own controls (a 3D view's Projection, Display and
 Preview) end its tool strip, never the navbar. A host whose own frame is its navigation shows
-the view alone (`chrome: "bare"`, the CAD app's cards and tabs), with no navbar at all. With no
+the view alone (`chrome: "bare"`, the CAD app's file handler), with no navbar at all. With no
 file a view shows the host's home, the model library, under the same navbar (its logo and menu,
 without Back to files, Back and Forward where the host keeps the view's history, and the host's
 update and actions): one control row (Recent; the type filter, the search, grid or list),

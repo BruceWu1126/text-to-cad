@@ -444,9 +444,9 @@ their documents, and serves the CAD Viewer's one page. The first run, command or
   name, or from `key=`. Nothing builds it again: run the cell again.
 - **No page sessions.** `/s/<session>/...`, `?file=` and `?doc=` links open the home.
   The home shows Recents and the folder of the most recent `cadgen viewer` launch.
-- **The CAD app** shows a model by its id or a file by its path (`cad_show`), as the
-  viewer alone: its cards and tabs have no navbar (no app menu, explorer, file menu or Open
-  in browser), Full size and the update notice at the view's top-right. Every CAD tool names
+- **The CAD app** shows a model by its id or a file by its path (`cad_show`), under the
+  navbar in its sidebar, tabs and cards (Open in browser last in it, Full size where a card can
+  go full size); *Open with CAD* shows its file alone, with no navbar. Every CAD tool names
   the model in `source` (`cad_show` and `cad_open` took `path` in 0.7).
 
 | 0.7 | 0.8 |
