@@ -3,6 +3,8 @@ import { fetchXbfElementFacts } from "@text-to-cad/core/lib/xbf/xbfDocument.js";
 import { parseXbfElementId } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 import { formatPromptReference } from "@text-to-cad/core/prompt";
 import { InfoRow, MonoValue, formatNumber } from "../kit/inspector/referenceRows.jsx";
+import { english } from "../../i18n/core.js";
+import { useI18n } from "@text-to-cad/ui/i18n";
 
 // What is selected in an engine document, as Quick Edit's chips -- as the STEP renderer's were:
 // a part or subassembly a chip of its own, its card its part count (a
@@ -23,9 +25,10 @@ const PLURAL = Object.freeze({ face: "faces", edge: "edges" });
  * A face's or an edge's key measurements, as a STEP's card reads its pick data
  * (`referenceMeasurements.js`): the diameter and radius of a round one, an edge's length (an arc's,
  * a circle's circumference) and an arc's sweep, a face's area, a torus's radii.
+ * Each row's name in `t`'s language (English unless one is given).
  * @returns {[string, number, string][]}
  */
-export function xbfMeasurementRows(kind, facts) {
+export function xbfMeasurementRows(kind, facts, t = english) {
   if (!facts) return [];
   const positive = value => (Number(value) > 0 ? Number(value) : null);
   const type = kind === "edge" ? facts.curve : facts.surface;
@@ -36,44 +39,46 @@ export function xbfMeasurementRows(kind, facts) {
   const arc = sweep !== null && sweep < 2 * Math.PI - 1e-8;
   const length = kind === "edge" ? (radius !== null && sweep !== null ? radius * sweep : positive(facts.length)) : null;
   const rows = [];
-  if (radius !== null) rows.push(["Diameter Ø", 2 * radius, "mm"], ["Radius R", radius, "mm"]);
-  if (length !== null) rows.push([arc ? "Arc length" : circular && sweep !== null ? "Circumference" : "Length", length, "mm"]);
-  if (arc) rows.push(["Sweep angle", sweep * 180 / Math.PI, "°"]);
-  if (kind === "face" && Number.isFinite(Number(facts.area))) rows.push(["Area", Number(facts.area), "mm²"]);
+  if (radius !== null) rows.push([t("measure.diameter"), 2 * radius, "mm"], [t("measure.radius"), radius, "mm"]);
+  if (length !== null) rows.push([t(arc ? "measure.arcLength" : circular && sweep !== null ? "measure.circumference" : "measure.length"), length, "mm"]);
+  if (arc) rows.push([t("measure.sweepAngle"), sweep * 180 / Math.PI, "°"]);
+  if (kind === "face" && Number.isFinite(Number(facts.area))) rows.push([t("measure.area"), Number(facts.area), "mm²"]);
   if (kind === "face" && type === "torus") {
-    if (positive(facts.majorRadius)) rows.push(["Major radius", Number(facts.majorRadius), "mm"]);
-    if (positive(facts.minorRadius)) rows.push(["Tube radius", Number(facts.minorRadius), "mm"]);
+    if (positive(facts.majorRadius)) rows.push([t("measure.majorRadius"), Number(facts.majorRadius), "mm"]);
+    if (positive(facts.minorRadius)) rows.push([t("measure.tubeRadius"), Number(facts.minorRadius), "mm"]);
   }
   return rows;
 }
 
-function MeasurementRows({ rows }) {
-  return rows.map(([label, value, unit]) => <InfoRow key={label} label={label}><MonoValue>{`${formatNumber(value)} ${unit}`}</MonoValue></InfoRow>);
+function MeasurementRows({ kind, facts }) {
+  const { t } = useI18n();
+  return xbfMeasurementRows(kind, facts, t).map(([label, value, unit]) => <InfoRow key={label} label={label}><MonoValue>{`${formatNumber(value)} ${unit}`}</MonoValue></InfoRow>);
 }
 
 /**
  * What a part or subassembly weighs, as its card says it: its parts' volumes by their materials'
  * densities in kg (`measureParts`), "no material" where none has one, and how many have none
- * where only some do.
+ * where only some do, in `t`'s language (English unless one is given).
  */
-export function xbfMassText(measured) {
+export function xbfMassText(measured, t = english) {
   if (!measured) return "";
-  if (measured.mass === null || measured.mass === undefined) return "no material";
+  if (measured.mass === null || measured.mass === undefined) return t("part.noMaterial");
   const kg = Number(measured.mass);
   const text = `${formatNumber(kg, kg >= 10 ? 2 : kg >= 0.01 ? 3 : 6)} kg`;
-  return measured.unweighed > 0 ? `${text} · ${measured.unweighed} without material` : text;
+  return measured.unweighed > 0 ? t("part.massUnweighed", { mass: text, count: measured.unweighed }) : text;
 }
 
 /** A part's or subassembly's card: how many parts (a subassembly's), its size, its volume, its mass. */
 function PartDetail({ assembly, parts, measured }) {
+  const { t } = useI18n();
   return <>
-    {assembly && parts > 0 ? <InfoRow label="Parts"><MonoValue>{formatNumber(parts, 0)}</MonoValue></InfoRow> : null}
-    {measured?.size ? <InfoRow label="Size" title="XYZ bounding size"><MonoValue>{measured.size.map(value => formatNumber(value)).join(" × ")} mm</MonoValue></InfoRow> : null}
-    {measured?.volume ? <InfoRow label="Volume" title="Approximate mesh volume">
+    {assembly && parts > 0 ? <InfoRow label={t("part.parts")}><MonoValue>{formatNumber(parts, 0)}</MonoValue></InfoRow> : null}
+    {measured?.size ? <InfoRow label={t("part.size")} title={t("part.sizeHint")}><MonoValue>{measured.size.map(value => formatNumber(value)).join(" × ")} mm</MonoValue></InfoRow> : null}
+    {measured?.volume ? <InfoRow label={t("part.volume")} title={t("part.volumeHint")}>
       <MonoValue>{formatNumber(measured.volume, measured.volume >= 100 ? 0 : 2)} mm³</MonoValue>
     </InfoRow> : null}
-    {measured?.volume ? <InfoRow label="Mass" title="Approximate mesh volume × the material's density">
-      <MonoValue>{xbfMassText(measured)}</MonoValue>
+    {measured?.volume ? <InfoRow label={t("part.mass")} title={t("part.massHint")}>
+      <MonoValue>{xbfMassText(measured, t)}</MonoValue>
     </InfoRow> : null}
   </>;
 }
@@ -207,7 +212,7 @@ function xbfSelectionChips({ scene, tree, resource, selectedIds, facts, onRemove
           return { ...shared, label: `${name} · ${chip.kind} ${element.ordinal}`,
             compact: onePart ? { kind: chip.kind, number: String(element.ordinal), words: `${chip.kind} ${element.ordinal}` }
               : { name, kind: chip.kind, number: String(element.ordinal) },
-            card: <MeasurementRows rows={xbfMeasurementRows(chip.kind, facts.get(element.id))} /> };
+            card: <MeasurementRows kind={chip.kind} facts={facts.get(element.id)} /> };
         }
         return { ...shared, label: `${name} · ${chip.members.length} ${PLURAL[chip.kind]}`,
           compact: onePart ? { kind: chip.kind, count: chip.members.length, words: `${chip.members.length} ${PLURAL[chip.kind]}` }

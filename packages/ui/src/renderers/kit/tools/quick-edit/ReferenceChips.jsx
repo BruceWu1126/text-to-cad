@@ -153,7 +153,8 @@ function useChip(chip) {
 }
 
 function RemoveButton({ chip }) {
-  return chip.onRemove ? <button type="button" className={CHIP_REMOVE_CLASS} aria-label={`Remove ${chip.label}`}
+  const { t } = useI18n();
+  return chip.onRemove ? <button type="button" className={CHIP_REMOVE_CLASS} aria-label={t("chip.remove", { name: chip.label })}
     onClick={() => { chip.onHover?.(false); chip.onRemove(); }}><X className="size-2.5" aria-hidden="true" /></button> : null;
 }
 
@@ -161,11 +162,12 @@ function RemoveButton({ chip }) {
 // what the chip does (no hint: the icon says it), the icon a tick for a moment once it has.
 function CardTitle({ chip }) {
   const flash = useCopyFlash();
+  const { t } = useI18n();
   if (!chip.copy || !flash.canCopy) return <p className="truncate px-2 pt-1.5 text-tiny text-foreground">{chip.label}</p>;
   const Icon = flash.copied ? Check : Copy;
   // Only the name and its icon are the button, tight together; the rest of the row is not.
   return <div className="flex min-w-0 px-2 pt-1.5">
-    <button type="button" aria-label={`Copy reference ${chip.label}`} data-copied={flash.copied ? "" : undefined}
+    <button type="button" aria-label={t("chip.copyReference", { name: chip.label })} data-copied={flash.copied ? "" : undefined}
       onClick={() => void copyChip(flash, chip)}
       className="group/title inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm text-left text-tiny text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/45">
       <span className="min-w-0 truncate">{chip.label}</span>
@@ -189,9 +191,10 @@ function useCardPlace() {
 // A card's ID: one monospace line, its middle cut where it is long (`elideMiddle`), the whole of it
 // its hint; a click copies the chip's whole reference, what its title copies.
 function IdRow({ chip }) {
+  const { t } = useI18n();
   const shown = elideMiddle(chip.id);
   const value = <span className="inline-block max-w-full whitespace-nowrap align-top font-mono" data-chip-id="">{shown}</span>;
-  return <InfoRow label="ID" copy={() => (typeof chip.copy === "function" ? chip.copy() : chip.copy || chip.id)}>
+  return <InfoRow label={t("chip.id")} copy={() => (typeof chip.copy === "function" ? chip.copy() : chip.copy || chip.id)}>
     {shown === chip.id ? value : <TooltipHint content={chip.id}>{value}</TooltipHint>}
   </InfoRow>;
 }
@@ -241,15 +244,16 @@ function MoreChip({ chip }) {
 
 // The rest, under one chip: a narrow list of them, each a chip in all but its look.
 function MoreChips({ chips }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const place = useCardPlace();
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
       <button type="button" className={cn(CHIP_CLASS, CHIP_LABEL_CLASS, "text-muted-foreground hover:text-foreground")}
-        data-quick-edit-ref-more="">+{chips.length} more</button>
+        data-quick-edit-ref-more="">{t("chip.more", { count: chips.length })}</button>
     </PopoverTrigger>
     <PopoverContent {...place} collisionPadding={8} className={cn(POPOVER_CLASS, "w-max min-w-28 max-w-44")}
-      onOpenAutoFocus={event => event.preventDefault()} aria-label="More references">
+      onOpenAutoFocus={event => event.preventDefault()} aria-label={t("chip.moreReferences")}>
       <ScrollArea className="min-w-0" viewportProps={{ style: LIST_STYLE }}>
         <ul className="flex flex-col p-1">
           {chips.map(chip => <MoreChip key={chip.key} chip={chip} />)}
@@ -273,7 +277,8 @@ function MoreChips({ chips }) {
  *
  * @param {{ chips: readonly ReferenceChip[], className?: string, label?: string, below?: boolean, rows?: number }} props
  */
-export default function ReferenceChips({ chips, className, label = "References", below = false, rows = 0 }) {
+export default function ReferenceChips({ chips, className, label, below = false, rows = 0 }) {
+  const { t } = useI18n();
   const box = useRef(null);
   const key = chips.map(chip => chip.key).join("\n");
   // With `rows`: how many chips fit in that many rows with "+N more" after them, for these chips.
@@ -310,7 +315,7 @@ export default function ReferenceChips({ chips, className, label = "References",
   const shown = chips.slice(0, count);
   const rest = chips.slice(shown.length);
   return <ChipsBelowContext.Provider value={below}>
-    <div ref={box} className={cn("flex min-w-0 flex-wrap gap-1", className)} aria-label={label} data-quick-edit-refs="">
+    <div ref={box} className={cn("flex min-w-0 flex-wrap gap-1", className)} aria-label={label ?? t("chip.references")} data-quick-edit-refs="">
       {shown.map(chip => <Chip key={chip.key} chip={chip} />)}
       {rest.length ? <MoreChips chips={rest} /> : null}
     </div>
