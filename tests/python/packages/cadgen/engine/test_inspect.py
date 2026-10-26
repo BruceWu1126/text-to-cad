@@ -1,6 +1,7 @@
 """``cadgen inspect DOC`` without a ref: what the document holds, on one screen, before its build
 closure -- its state, parts, bounds, volume, materials, joints, states, sequences and declared
-files -- read from the document the engine holds, and nothing built; ``--json`` the same as data."""
+files -- read from the document the engine holds, and nothing built; ``--json`` the same as data.
+A document inspected once is measured again after its next build, before it is asked for."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import shutil
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -63,6 +65,12 @@ class SummaryTest(unittest.TestCase):
     def run_(self, *args: str):
         return engine_daemon.run([sys.executable, *args], cwd=self.folder, env=self.env)
 
+    def facts(self) -> int:
+        """The bytes of the parts' facts the engine holds (``status --json``)."""
+        status = self.run_("-m", "cadgen.engine", "status", "--json")
+        self.assertEqual(status.returncode, 0, status.stderr)
+        return json.loads(status.stdout)["serving"]["memory"]["facts"]
+
     def test_a_hinge_with_one_joint_and_one_sequence_is_summarised_before_its_closure(self) -> None:
         (self.folder / "hinge.py").write_text(textwrap.dedent(HINGE), encoding="utf-8")
         built = self.run_("hinge.py")
@@ -107,6 +115,20 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual((summary["parts"], summary["volume"], summary["mass"]),
                          ({"occurrences": 2, "distinct": 2, "root": "hinge"}, 144000.0, 0.324))
         self.assertFalse((self.folder / "hinge.ran").exists(), "nothing ran the script")
+
+        # Inspected once, the hinge is measured again after its next build, before anyone asks:
+        # the longer arm's facts are in before the next inspection.
+        measured = self.facts()
+        self.assertGreater(measured, 0)
+        (self.folder / "hinge.py").write_text(textwrap.dedent(HINGE).replace("bd.Box(120, 20, 10", "bd.Box(130, 20, 10"),
+                                              encoding="utf-8")
+        built = self.run_("hinge.py")
+        self.assertEqual(built.returncode, 0, built.stderr)
+        deadline = time.monotonic() + 120
+        while self.facts() <= measured:
+            self.assertLess(time.monotonic(), deadline, "the build's parts were measured with nobody asking")
+        again = json.loads(self.run_("-m", "cadgen.engine", "inspect", ident, "--json").stdout)["summary"]
+        self.assertEqual(again["volume"], 146000.0, "the longer arm")
 
 
 class CouplingsTest(unittest.TestCase):

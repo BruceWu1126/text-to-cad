@@ -696,8 +696,7 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None, pr
     ``query="geometry"`` requires a ref, and ``query="closure"`` accepts none.
     ``query="summary"`` (``cadgen inspect DOC`` with no ref) is ``{"summary", "closure"}``:
     what the document holds at a glance (``_summary``), and its closure, as the engine holds it; of
-    a GLB, ``{"mesh"}``: its nodes, meshes and animations, from its JSON alone (``_mesh``). The one
-    inspection that takes a while is the summary's measurement, a part at a time: where it is goes,
+    a GLB, ``{"mesh"}``: its nodes, meshes and animations, from its JSON alone (``_mesh``). No form meshes anything. A part's volume and box are cached by geometry key and measured in batches. Summary measurement goes,
     frame by frame, to ``progress`` (``progress.py``: ``inspect-measure``, ``measure``, counted), as
     ``export`` takes it -- by default a bar on stderr when it is a terminal and nowhere when it is
     not, ``False`` nowhere, a callable each frame."""
@@ -713,6 +712,8 @@ def inspect(source: Any, ref: str | None = None, *, query: str | None = None, pr
 
 def _inspected(source: Any, ref: str | None, query: str | None, progress: Callable[[dict], None] | None) -> Facts | list[Facts]:
     """``inspect``, its summary's frames to ``progress`` (a callable, or None for nowhere)."""
+    from urllib.parse import quote
+
     from cadgen.engine import refs
     from cadgen.engine.cli import weighed
 
@@ -777,14 +778,15 @@ def _inspected(source: Any, ref: str | None, query: str | None, progress: Callab
             raise EngineError(f"{source} holds no build closure")
         return structure["closure"]
     found: list[Facts] = []
-    volumes: dict[str, float] = {}
-    boxes: dict[str, Any] = {}
-    for hit in refs.resolve_structure(structure, ref, path):
+    hits = refs.resolve_structure(structure, ref, path)
+    # Every part a part's or an assembly's ref weighs, measured in one read (its facts by key).
+    weighs = sorted({structure["prototypes"][node.payload["prototype"]]["key"]
+                     for hit in hits if hit.kind is None for node in hit.node.parts()})
+    measured = get("/volumes?keys=" + ",".join(quote(key, safe="") for key in weighs)) if weighs else {}
+    volumes = {key: facts["volume"] for key, facts in measured.items()}
+    boxes = {key: facts.get("box") for key, facts in measured.items()}
+    for hit in hits:
         if hit.kind is None:
-            for key in sorted({structure["prototypes"][node.payload["prototype"]]["key"] for node in hit.node.parts()}):
-                if key not in volumes:
-                    measured = get(f"/part/{key}/volume")
-                    volumes[key], boxes[key] = measured["volume"], measured.get("box")
             found.append({**weighed(structure, hit, volumes), **_placed(structure, hit, boxes)})
             continue
         prototype = structure["prototypes"][hit.node.payload["prototype"]]
@@ -889,9 +891,11 @@ def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], A
     """What a served document holds, at a glance (``cadgen inspect DOC``): its name and id; its
     state -- a model's (``live``, ``held``, ...: ``ModelDocuments.state``), where the engine holds
     it and whether its cache has it, or ``file`` for a file's document; its parts (occurrences,
-    distinct parts, the root's name); its bounds and volume, each part's (``.../volume``, measured by the engine) placed where its occurrences stand; its
-    materials and their masses, where any part has one; its joints, mechanism states, configuration
-    sequences and animations; and a model's declared files. Nothing is built."""
+    distinct parts, the root's name); its bounds and volume, each part's (``.../volumes``: the
+    engine's facts of every part, kept by geometry key and measured together) placed where its
+    occurrences stand; its materials and their masses, where any part has one; its joints,
+    mechanism states, configuration sequences and animations; and a model's declared files.
+    Nothing is built."""
     from cadgen.engine.refs import placed_facts
 
     model = None
@@ -906,14 +910,12 @@ def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], A
     else:
         state = {"state": "file", "path": str(path) if isinstance(path, Path) else structure.get("path")}
     prototypes, instances = structure.get("prototypes") or [], structure.get("instances") or []
-    measured: dict[str, dict[str, Any]] = {}
-    # Each part measured by the engine, counted as it goes (``progress.py``: ``inspect-measure``).
     from cadgen.engine.progress import Progress
 
     said = Progress(progress or (lambda _frame: None), kind="inspect-measure", job=str(structure.get("name") or ident))
     said.stage("measure", count=[0, len(prototypes)])
+    each: dict[str, dict[str, Any]] = get("/volumes") if prototypes else {}
     for index, prototype in enumerate(prototypes, 1):
-        measured[prototype["key"]] = get(f"/part/{prototype['key']}/volume")
         said.counted(index, len(prototypes), detail=str(prototype.get("name") or ""))
     said.close()
     low, high, volume = [math.inf] * 3, [-math.inf] * 3, 0.0
@@ -921,7 +923,7 @@ def _summary(structure: dict[str, Any], path: Path | str, get: Callable[[str], A
     unweighed: list[str] = []
     for instance in instances:
         prototype = prototypes[instance["prototype"]]
-        facts = measured[prototype["key"]]
+        facts = each[prototype["key"]]
         volume += facts.get("volume") or 0.0
         if facts.get("box"):
             box = placed_facts({"box": facts["box"]}, instance["matrix"])["box"]

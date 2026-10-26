@@ -112,9 +112,13 @@ class PoolTest(unittest.TestCase):
         await_(lambda: len(got) == 1, "the slot b's worker left")
         self.assertEqual(got[0][0], "c.py")
         self.assertTrue(b.stopped)
+        self.assertIsNone(pool.free_for(a), "busy, and a request waits for it")
         pool.release(a)
         await_(lambda: len(got) == 2, "a's worker, free")
         self.assertIs(got[1][1], a, "a's next build is its warm worker's")
+        self.assertIsNone(pool.free_for(a), "taken by the request that waited")
+        pool.release(a)
+        self.assertGreaterEqual(pool.free_for(a), 0.0, "free, and nothing waits for it: how long")
         again.join(5), other.join(5)
 
     def test_at_the_cap_the_least_recently_used_idle_worker_is_retired(self) -> None:

@@ -80,7 +80,7 @@ from OCP.TopoDS import TopoDS
 from OCP.TopTools import TopTools_ListOfShape
 
 __all__ = ["ANGULAR", "BOUNDARY", "DEVIATION", "FEATURE", "HEADER", "MAGIC", "Mesh", "NONMANIFOLD", "SEAM",
-           "TANGENT", "TESSELLATION", "Topology", "check", "deflection", "mesh_shape"]
+           "TANGENT", "TESSELLATION", "Topology", "check", "deflection", "measured", "mesh_shape"]
 
 
 
@@ -497,31 +497,37 @@ class Topology:
         return {"kind": "vertex", "ordinal": ordinal, "position": _point(BRep_Tool.Pnt_s(vertex)),
                 "tolerance": BRep_Tool.Tolerance_s(vertex)}
 
-    def volume(self) -> dict[str, Any]:
-        """The part's volume in cubic millimetres, of its solids (``BRepGProp``), and how many it
-        has: a part of faces or wires alone has none, and no volume to weigh. With them its box in
-        its own frame (``{"min", "max"}``, None for an empty part), which ``cadgen inspect``
-        places where each occurrence stands for the document's bounds."""
-        from OCP.Bnd import Bnd_Box
-        from OCP.BRepBndLib import BRepBndLib
-        from OCP.BRepGProp import BRepGProp
-        from OCP.GProp import GProp_GProps
-        from OCP.TopAbs import TopAbs_SOLID
-        from OCP.TopExp import TopExp
-        from OCP.TopTools import TopTools_IndexedMapOfShape
+def measured(data: Any) -> dict[str, Any]:
+    """What the kernel measures of a part as a whole, from its shape bytes (``shape_bytes``) read
+    into a fresh shape, as the mesher reads them: its volume in cubic millimetres, of its solids
+    (``BRepGProp``), and how many it has -- a part of faces or wires alone has none, and no volume to
+    weigh -- and its box in its own frame (``{"min", "max"}``, None for an empty part), which
+    ``cadgen inspect`` places where each occurrence stands for the document's bounds. A function
+    of those bytes alone, so the engine keeps it by the part's geometry key."""
+    return _whole(read_shape(data))
 
-        solids = TopTools_IndexedMapOfShape()
-        TopExp.MapShapes_s(self.shape, TopAbs_SOLID, solids)
-        total = 0.0
-        for at in range(1, solids.Extent() + 1):
-            props = GProp_GProps()
-            BRepGProp.VolumeProperties_s(solids.FindKey(at), props)
-            total += abs(props.Mass())
-        box = Bnd_Box()
-        BRepBndLib.AddOptimal_s(self.shape, box, True, False)
-        bounds = list(box.Get()) if not box.IsVoid() else None
-        return {"volume": total, "solids": solids.Extent(),
-                "box": None if bounds is None else {"min": bounds[:3], "max": bounds[3:]}}
+
+def _whole(shape: Any) -> dict[str, Any]:
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+    from OCP.TopAbs import TopAbs_SOLID
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    solids = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape, TopAbs_SOLID, solids)
+    total = 0.0
+    for at in range(1, solids.Extent() + 1):
+        props = GProp_GProps()
+        BRepGProp.VolumeProperties_s(solids.FindKey(at), props)
+        total += abs(props.Mass())
+    box = Bnd_Box()
+    BRepBndLib.AddOptimal_s(shape, box, True, False)
+    bounds = list(box.Get()) if not box.IsVoid() else None
+    return {"volume": total, "solids": solids.Extent(),
+            "box": None if bounds is None else {"min": bounds[:3], "max": bounds[3:]}}
 
 
 # --- extraction ----------------------------------------------------------------------------

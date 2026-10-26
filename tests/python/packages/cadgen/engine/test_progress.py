@@ -249,7 +249,7 @@ class EventTest(unittest.TestCase):
                      "instances": [], "kinematics": {}}
         frames: list[dict] = []
         self.enterContext(mock.patch.object(progress, "INTERVAL", 0))
-        api._summary(structure, Path("/x/kit.xbf"), lambda route: {"volume": 1.0, "box": None}, "id", frames.append)
+        api._summary(structure, Path("/x/kit.xbf"), lambda route: {key: {"volume": 1.0, "box": None} for key in ("a", "b")}, "id", frames.append)
         self.assertEqual([(frame["kind"], frame["stage"], frame["job"], frame["detail"], frame["done"], frame["total"])
                           for frame in frames],
                          [("inspect-measure", "measure", "kit", "", 0, 2), ("inspect-measure", "measure", "kit", "box", 1, 2),

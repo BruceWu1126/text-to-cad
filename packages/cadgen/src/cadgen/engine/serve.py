@@ -24,8 +24,11 @@ that feature's call, asked of the worker that built the document (``provenance``
 from a file, so a document served cold, with no live worker that built it, answers null; a file's
 answers no ``made_by``, since a file names no model, whichever model's run wrote it;
 ``GET /api/doc/<id>/part/<key>/groups`` is how a pick of one face or edge grows (each face's
-tangent group, each edge's chain: ``mesh.Topology.groups``); ``.../volume`` the part's volume
-in cubic millimetres, what its mass is weighed from (``mesh.Topology.volume``); ``POST /api/doc/<id>/mesh`` meshes every part
+tangent group, each edge's chain: ``mesh.Topology.groups``); ``.../volume`` the part's facts as a
+whole -- its volume in cubic millimetres, what its mass is weighed from, its solids and its box in
+its own frame (``mesh.measured``) -- and ``GET /api/doc/<id>/volumes[?keys=K,...]`` every part's (or
+those named), by key: each measured once and kept by its geometry key (``FactCache``), a
+document's parts measured together in batches (``Server.measure``); ``POST /api/doc/<id>/mesh`` meshes every part
 not held yet, in parallel, and answers how long that took. ``POST /api/doc/<id>/pose``
 with ``{"pose": NAME | {joint or coupling: value}}`` serves the document at that pose under an id of
 its own (``<id>~<digest>``): its structure's instances where the mechanism places them,
@@ -72,7 +75,7 @@ with the kernel's face parallelism inside its pool process. When a page asks for
 document's structure, every part not held is sent to the pool at once, so the page's part
 requests join meshes already running; an inspection's read of it, through the daemon's door
 (``Server.read``), sends nothing. The pool takes its jobs from two queues (``Mesher.run``):
-a fact someone waits on (an inspection's volumes, a picked element's facts, a pose) before
+facts (inspection measurements, picked elements, poses and post-build measurements) before
 every mesh still waiting.
 """
 
@@ -100,7 +103,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.render.look import LOOK
 
-__all__ = ["MeshCache", "NotHeld", "PARALLEL_BYTES", "Pressure", "Served", "Server", "find_three", "memory_budget"]
+__all__ = ["FactCache", "MeshCache", "NotHeld", "PARALLEL_BYTES", "Pressure", "Served", "Server", "find_three",
+           "memory_budget"]
 
 from cadgen.engine.addresses import document_id, key as document_key
 from cadgen.engine.ids import canonical, file_id, is_id
@@ -219,6 +223,78 @@ class MeshCache:
 # The process's one mesh cache: the daemon's server serves from it, and in a worker a
 # build's exports and a snapshot it draws take a part's buffer from it.
 MESHES = MeshCache()
+
+# A document's parts measured as one batch takes about this many of their shape bytes (``Server.measure``):
+# a light document is one job, a heavy one is spread over the pool (the bytes predict a part's time best).
+FACT_BYTES = 1 << 20
+# How many batches a document's facts take at most while no page has warmed the pool: each starts a
+# process, and each holds a kernel's memory for as long as the engine runs -- an inspection with no page
+# open starts these few, never the whole pool.
+FACT_PROCESSES_COLD = 2
+# How often a build's documents waiting to be measured ask whether its worker has settled (``measure_later``).
+MEASURE_POLL = 0.1
+
+
+class FactCache:
+    """What the kernel measures of each part as a whole (``mesh.measured``: its volume, how many solids
+    it has, its box in its own frame), by geometry key: plain numbers, measured once by the pool and
+    shared by every document and version that holds the part, as its tessellation is. Held under the
+    daemon's one memory budget (``size``, each entry counted as its JSON) and evicted with the
+    tessellations (``Server.trim``): it is measured again when asked."""
+
+    def __init__(self) -> None:
+        self.items: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+        self.sizes: dict[str, int] = {}
+        self.size = 0
+        self.lock = threading.Lock()
+        self.pending: dict[str, concurrent.futures.Future] = {}  # each key being measured now
+
+    def get(self, key: str) -> dict[str, Any] | None:
+        with self.lock:
+            found = self.items.get(key)
+            if found is not None:
+                self.items.move_to_end(key)
+            return found
+
+    def put(self, key: str, facts: dict[str, Any]) -> None:
+        with self.lock:
+            self._put(key, facts)
+
+    def _put(self, key: str, facts: dict[str, Any]) -> None:
+        if key in self.items:
+            self.items.move_to_end(key)
+            return
+        self.items[key] = facts
+        self.sizes[key] = len(key) + len(json.dumps(facts, separators=(",", ":")))
+        self.size += self.sizes[key]
+
+    def oldest(self) -> list[str]:
+        """The keys held, the least recently used first."""
+        with self.lock:
+            return list(self.items)
+
+    def evict(self, key: str) -> int:
+        """Forget one part's facts: the bytes they were counted as."""
+        with self.lock:
+            if self.items.pop(key, None) is None:
+                return 0
+            size = self.sizes.pop(key, 0)
+            self.size -= size
+            return size
+
+
+def _batches(parts: list[tuple[str, bytes]], most: int) -> list[list[tuple[str, bytes]]]:
+    """Parts (``(key, shape bytes)``) in batches of about ``FACT_BYTES`` each, at most ``most`` of them,
+    the largest dealt first to the lightest batch."""
+    total = sum(len(data) for _key, data in parts)
+    count = max(1, min(most, len(parts), -(-total // FACT_BYTES)))
+    batches: list[list[tuple[str, bytes]]] = [[] for _ in range(count)]
+    sizes = [0] * count
+    for key, data in sorted(parts, key=lambda part: -len(part[1])):
+        at = sizes.index(min(sizes))
+        batches[at].append((key, data))
+        sizes[at] += len(data)
+    return [batch for batch in batches if batch]
 
 
 # --- the memory budget ---------------------------------------------------------------------
@@ -429,10 +505,8 @@ def _ready() -> bool:
 
 
 MODES = ("inline", "processes")
-# The pool's queues, in the order a free process takes from them (``Mesher.run``): ``FACT``, an answer
-# someone waits on -- an inspection's volumes, a picked element's facts, a pose; ``MESH``, a part's
-# tessellation. The pool is handed one job per process at a time, so a fact waits for one job that
-# runs at most, never for the meshes queued behind it.
+# A free process takes a fact before any queued mesh, including measurements scheduled after a build.
+# At most one job per process is handed over, so facts can wait for running meshes only.
 FACT, MESH = 0, 1
 
 
@@ -455,8 +529,8 @@ class Mesher:
         self._processes: concurrent.futures.ProcessPoolExecutor | None = None
         self._warm = False  # every process started and its kernel loaded (``processes``)
         self.lock = threading.Lock()
-        # The jobs waiting for a process, by queue (``FACT``, ``MESH``), and how many the pool holds
-        # now: at most ``workers``, handed over by one dispatching thread (``_dispatch``).
+        # The jobs waiting for a process, by queue (``FACT``, ``MESH``), and how many the pool
+        # holds now: at most ``workers``, handed over by one dispatching thread (``_dispatch``).
         self._queued: dict[int, collections.deque[_Job]] = {FACT: collections.deque(), MESH: collections.deque()}
         self._running = 0
         self._wake = threading.Condition()
@@ -468,7 +542,7 @@ class Mesher:
         and a pool started then would hold ``workers`` kernels nobody asked for. ``warm`` (a mesh,
         a page's warm): every process started at once, its kernel loaded; else (a fact) a process
         starts only for a job no started one is free for, so an inspection that meshes nothing
-        starts the few its jobs take."""
+        starts the few its batches take."""
         with self.lock:
             if self._processes is not None and getattr(self._processes, "_broken", False):
                 self._processes.shutdown(wait=False, cancel_futures=True)  # a child died; rebuild on next use
@@ -485,6 +559,12 @@ class Mesher:
                     self._processes.submit(_ready)
             return self._processes
 
+    @property
+    def warm(self) -> bool:
+        """Whether every process of the pool was started (a mesh or a page's warm asked for them)."""
+        with self.lock:
+            return self._processes is not None and self._warm
+
     def submit(self, data: bytes, mode: str | None = None) -> concurrent.futures.Future:
         """One part meshed from its ``shape_bytes``: a future of its buffer, its unmeshed
         faces and the seconds it took. On the pool, after every fact waiting (``MESH``)."""
@@ -494,8 +574,8 @@ class Mesher:
         return self._inline.submit(_timed, data, True)
 
     def run(self, fn: Callable, *args: Any, priority: int = FACT) -> concurrent.futures.Future:
-        """``fn(*args)`` in a pool process, in its queue (``FACT``, ``MESH``): a future of what it
-        returns. Cancelled while it waits, it never runs."""
+        """``fn(*args)`` in a pool process, in its queue (``FACT``, ``MESH``): a future of
+        what it returns. Cancelled while it waits, it never runs."""
         job = _Job(fn, args, priority)
         with self._wake:
             if self._stopped:
@@ -509,8 +589,8 @@ class Mesher:
         return job.future
 
     def _dispatch(self) -> None:
-        """Hands the next job (``FACT`` first, then ``MESH``) to the pool whenever it holds fewer
-        than ``workers``."""
+        """Hands the next job (``FACT`` first, then ``MESH``) to the pool whenever it
+        holds fewer than ``workers``."""
         while True:
             with self._wake:
                 while not self._stopped and (self._running >= self.workers
@@ -604,9 +684,17 @@ class _RemoteTopology:
         self.mesher, self.key, self.data = mesher, key, data
 
     def __getattr__(self, method: str):
-        if method not in {"face", "edge", "vertex", "groups", "volume"}:
+        if method not in {"face", "edge", "vertex", "groups"}:
             raise AttributeError(method)
         return lambda *args: self.mesher.run(_topology_fact, self.key, self.data, method, args, priority=FACT).result()
+
+
+def _measured(batch: list[tuple[str, bytes]]) -> list[tuple[str, dict[str, Any]]]:
+    """A batch of parts, each measured as a whole from its shape bytes (``mesh.measured``): a pool
+    process's job, one per batch of a document's parts (``Server.measure``)."""
+    from cadgen.engine.mesh import measured
+
+    return [(key, measured(data)) for key, data in batch]
 
 
 def _pose_structure(structure: dict, pose: Any) -> dict:
@@ -809,6 +897,10 @@ class Server:
         # The daemon's server and a worker's snapshot serve from the process's one cache
         # (``MESHES``); a server of its own (a test's) holds its own.
         self.cache = cache if cache is not None else MeshCache()
+        # Each part's facts as a whole, by its key (``measure``): the server's own, under its budget;
+        # and the model documents waiting to be measured after their build (``measure_later``).
+        self.facts = FactCache()
+        self.measuring: set[str] = set()
         # The one memory budget (bytes) over the documents and the tessellations held, or None:
         # a server of its own (a worker's snapshot, a test's) keeps the cache's own cap.
         self.budget = budget
@@ -1073,19 +1165,21 @@ class Server:
             return found
 
     def memory(self) -> dict[str, Any]:
-        """What the budget counts: the documents' bytes, the tessellations' and the budget's."""
+        """What the budget counts: the documents' bytes, the tessellations', the parts' facts' and the
+        budget's."""
         with self.load_lock:
             documents = sum(doc.size for doc in self.served.values())
-        return {"budget": self.budget, "documents": documents, "meshes": self.cache.size,
+        return {"budget": self.budget, "documents": documents, "meshes": self.cache.size, "facts": self.facts.size,
                 "evictions": self.evictions}
 
     # --- the memory budget -------------------------------------------------------------
 
     def holding(self) -> int:
-        """The bytes held under the budget: every served document's and every tessellation's."""
+        """The bytes held under the budget: every served document's, every tessellation's and every
+        part's facts'."""
         with self.load_lock:
             documents = sum(doc.size for doc in self.served.values())
-        return documents + self.cache.size
+        return documents + self.cache.size + self.facts.size
 
     def _grown(self, spare: str | None = None) -> None:
         """Something was put: past the budget, what is held is evicted (``trim``), never ``spare``
@@ -1095,8 +1189,9 @@ class Server:
 
     def trim(self, target: int, spare: str | None = None) -> list[str]:
         """Evict from memory until what is held is ``target`` bytes or less (the engine's **Document
-        lifetime**): tessellations first, least recently used first, then documents, least recently
-        used first -- never a document a page watches, nor its tessellations, nor ``spare``. Every
+        lifetime**): tessellations first, least recently used first, then the parts' facts, then
+        documents, least recently used first -- never a document a page watches, nor its
+        tessellations or facts, nor ``spare``. Every
         document is read again from where it is kept (a file from its file, a model's from the
         engine's cache, which is handed its bytes as it leaves: ``leaving``). The ids evicted."""
         evicted: list[str] = []
@@ -1114,6 +1209,11 @@ class Server:
                     break
                 if key not in spared:
                     total -= self.cache.evict(key)
+            for key in self.facts.oldest():
+                if total <= target:
+                    break
+                if key not in spared:
+                    total -= self.facts.evict(key)
             with self.load_lock:
                 order = sorted((ident for ident in self.served if ident not in kept),
                                key=lambda ident: self.used.get(ident, 0))
@@ -1516,6 +1616,135 @@ class Server:
                 self.topologies.popitem(last=False)
         return found
 
+    # --- the parts' facts --------------------------------------------------------------
+
+    def measure(self, doc: Served, keys: Any = None, *, wait: bool = True) -> dict[str, Any]:
+        """Each part's facts as a whole (``mesh.measured``: its volume, solids and box in its own
+        frame), by its key: of ``keys`` of ``doc``, else of every part it holds. From the memo by
+        geometry key (``facts``); a part no one measures yet is measured now, the document's together
+        in batches of about ``FACT_BYTES`` of shape bytes (``_batches``; at most ``FACT_PROCESSES_COLD``
+        of them while no page has warmed the pool) -- each a job in the pool's
+        facts queue, ahead of every mesh, or in this process for a server of its
+        own -- and each part once, however many ask. ``wait``: answered once every one is in;
+        else with those held now. A part the
+        document does not hold is a ``KeyError``."""
+        wanted = list(dict.fromkeys(doc.shapes if keys is None else keys))
+        unknown = [key for key in wanted if key not in doc.shapes]
+        if unknown:
+            raise KeyError(f"no part {unknown[0]}")
+        found: dict[str, Any] = {}
+        waiting: dict[str, concurrent.futures.Future] = {}
+        fresh: list[str] = []
+        with self.facts.lock:
+            for key in wanted:
+                held = self.facts.items.get(key)
+                if held is not None:
+                    self.facts.items.move_to_end(key)
+                    found[key] = held
+                    continue
+                measuring = self.facts.pending.get(key)
+                if measuring is None:
+                    measuring = self.facts.pending[key] = concurrent.futures.Future()
+                    fresh.append(key)
+                waiting[key] = measuring
+        if fresh:
+            self._measure(doc, fresh)
+        if not wait:
+            return found
+        for key, measuring in waiting.items():
+            found[key] = measuring.result()
+        return {key: found[key] for key in wanted}
+
+    def _measure(self, doc: Served, keys: list[str]) -> None:
+        """Parts ``keys`` of ``doc``, which this call alone measures (``measure``): each one's future
+        settled with its facts, or with why it could not be."""
+        try:
+            parts = [(key, self.shape_of(doc, key)) for key in keys]
+        except BaseException as error:  # noqa: BLE001 - a part with no shape: every asker hears why
+            self._measured(keys, None, error)
+            return
+        if not self.isolated:
+            from cadgen.engine.mesh import measured
+
+            for key, data in parts:
+                try:
+                    facts = measured(data)
+                except BaseException as error:  # noqa: BLE001 - the kernel's refusal is the asker's answer
+                    self._measured([key], None, error)
+                    continue
+                self._measured([key], [(key, facts)])
+            return
+        spread = self.mesher.workers if self.mesher.warm else min(self.mesher.workers, FACT_PROCESSES_COLD)
+        for batch in _batches(parts, spread):
+            batch_keys = [key for key, _data in batch]
+            future = self.mesher.run(_measured, batch, priority=FACT)
+
+            def settle(done: concurrent.futures.Future, batch_keys: list[str] = batch_keys) -> None:
+                if done.cancelled():
+                    self._measured(batch_keys, None, concurrent.futures.CancelledError())
+                elif done.exception() is not None:
+                    self._measured(batch_keys, None, done.exception())
+                else:
+                    self._measured(batch_keys, done.result())
+
+            future.add_done_callback(settle)
+
+    def _measured(self, keys: list[str], found: list[tuple[str, dict[str, Any]]] | None,
+                  error: BaseException | None = None) -> None:
+        """A batch measured (``found``), or not (``error``): held by key, and every asker answered."""
+        facts = dict(found or [])
+        with self.facts.lock:
+            settled = [(key, self.facts.pending.pop(key, None)) for key in keys]
+            if error is None:
+                for key in keys:
+                    self.facts._put(key, facts[key])
+        for key, measuring in settled:
+            if measuring is None:
+                continue
+            if error is None:
+                measuring.set_result(facts[key])
+            else:
+                measuring.set_exception(error)
+        self._grown()
+
+    def measure_later(self, idents: list[str], settled: Callable[[], bool] | None = None) -> threading.Thread | None:
+        """Model documents a build just registered (their ids), measured before anyone asks: each one
+        read at its new version off the build's thread (``document``: the read its page's next look
+        makes), and its parts not measured yet sent to the pool's facts queue, ahead of queued meshes
+        (``measure``). It waits first until ``settled`` says so (the daemon's: the
+        build's worker free a moment, no request waiting for it), so the read never delays the next
+        build of a program calling its models one after another. A document already waiting
+        here is measured once, at the version it has then. The thread that reads and measures them,
+        or None when there are none."""
+        with self.load_lock:
+            known = [ident for ident in dict.fromkeys(idents) if ident in self.model_loaders
+                     and ident not in self.measuring]
+            self.measuring.update(known)
+        if not known or self.stopping.is_set():
+            with self.load_lock:
+                self.measuring.difference_update(known)
+            return None
+
+        def measure() -> None:
+            try:
+                while settled is not None and not settled():
+                    if self.stopping.wait(MEASURE_POLL):
+                        return
+                for ident in known:
+                    with self.load_lock:
+                        self.measuring.discard(ident)  # a build from now on waits for its own turn
+                    try:
+                        self.measure(self.document(ident), wait=False)
+                    except Exception:  # noqa: BLE001 - what is not measured now is measured when asked
+                        continue
+            finally:
+                with self.load_lock:
+                    self.measuring.difference_update(known)
+
+        thread = threading.Thread(target=measure, name="cadgen-measure-later", daemon=True)
+        thread.start()
+        return thread
+
     # --- meshing ---------------------------------------------------------------------
 
     def _submit(self, key: str, data: bytes, mode: str | None) -> concurrent.futures.Future:
@@ -1644,6 +1873,13 @@ class Server:
                     return self.json(handler, {**found, "tessellation": TESSELLATION})
                 if len(parts) == 4 and parts[3] == "pose" and method == "POST":
                     return self.pose(handler, doc)
+                if len(parts) == 4 and parts[3] == "volumes":
+                    # Each part's facts as a whole, by key: every part's, or the ``keys`` named.
+                    given = (query.get("keys") or [""])[0]
+                    keys = [key for key in given.split(",") if key] if given else None
+                    if keys is not None and any(key not in doc.shapes for key in keys):
+                        return self.error(handler, 404, "no such part")
+                    return self.json(handler, self.measure(doc, keys))
                 if len(parts) >= 5 and parts[3] == "part":
                     key = parts[4]
                     if key not in doc.shapes:
@@ -1655,7 +1891,7 @@ class Server:
                     if len(parts) == 6 and parts[5] == "groups":
                         return self.json(handler, self.topology(key, self.shape_of(doc, key)).groups())
                     if len(parts) == 6 and parts[5] == "volume":
-                        return self.json(handler, self.topology(key, self.shape_of(doc, key)).volume())
+                        return self.json(handler, self.measure(doc, [key])[key])
                 if len(parts) == 4 and parts[3] == "mesh" and method == "POST":
                     mode = (query.get("mode") or [None])[0]
                     if mode is not None and mode not in MODES:

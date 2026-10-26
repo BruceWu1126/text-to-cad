@@ -111,6 +111,11 @@ PROTOCOL = 3  # 3: the door (named pipes) in place of the Unix socket
 WINDOWS = os.name == "nt"
 # The retirements ``status`` lists, the latest first.
 RETIRED_KEPT = 12
+# How long a build's worker is free, with no request waiting for it, before the documents the build
+# made are read and measured for the inspection after it (``serve.Server.measure_later``): a program
+# calling its models one after another sends its next build within milliseconds of an answer, so
+# its run never waits on that read. The worker's own collection waits as long (``worker.COLLECT_IDLE``).
+MEASURE_IDLE = 0.5
 # What a worker's environment must share with a request's for the request to use it: what shapes
 # the import system of the interpreter it started (the interpreter itself is the daemon's). A run
 # adopts the rest of its caller's environment (``worker.adopt``), so a caller whose PATH changes
@@ -927,6 +932,14 @@ class Pool:
             else:
                 self._stop(held)
         return chosen
+
+    def free_for(self, worker: Any) -> float | None:
+        """How long ``worker`` has been free with no request waiting for it, in seconds; None while a
+        request holds it or waits for it."""
+        with self.lock:
+            if worker.leased or any(ticket.key == worker.key and not ticket.granted for ticket in self.queue):
+                return None
+            return time.monotonic() - worker.used
 
     def holds(self, worker: Any) -> bool:
         """Whether ``worker`` is live in the pool: neither retired nor gone."""
@@ -1754,6 +1767,11 @@ class Daemon:
                         for path in [*outcomes, *self.models.paths(worker, frame.get("job"))]}
         if outcomes:
             server.built(outcomes)
+        if not verb:
+            # Each document the build made: its parts measured once its
+            # worker has settled, so an inspection after the edit finds them (``serve.Server.measure_later``).
+            server.measure_later([ident for ident, failed in outcomes.items() if failed is None],
+                                 settled=lambda: (self.pool.free_for(worker) or 0.0) >= MEASURE_IDLE)
 
     @staticmethod
     def _where(error: Exception, worker: Worker | None) -> str:

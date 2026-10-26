@@ -1,8 +1,8 @@
 """Serving a document: its structure, one plain buffer per part in the wire format, the
 same buffer whichever way it is meshed, a document read again after another process
 rebuilt it, a model's declared xbf served as a file following its bytes alone, and the cap on
-the buffers held; an inspection's read, which meshes nothing; the pool's queue for facts, ahead of
-its meshes."""
+the buffers held; an inspection's read, which meshes nothing; each part's facts, measured once by
+its key, in batches, on the pool's queue for facts."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ import numpy as np
 
 from cadgen.engine import build as engine_build
 from cadgen.engine import mesh, serve
-from cadgen.engine.serve import FACT, MESH, Server
+from cadgen.engine.serve import FACT, FACT_BYTES, MESH, Server
 
 MODEL = """
 import build123d as bd
@@ -436,14 +436,23 @@ def registered(server: Server, parts: dict[str, bytes], version: int = 1) -> lis
     return asked
 
 
+def kernel_facts(data: bytes) -> dict:
+    """What the kernel's measure stands in for here: a part's facts made of its bytes alone."""
+    return {"volume": float(len(data)), "solids": 1, "box": {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, float(len(data))]}}
+
+
 class InspectionReadTest(unittest.TestCase):
     """What ``cadgen inspect`` reads through the engine's door (``Server.read``): a structure that
-    sends no part to the mesher."""
+    sends no part to the mesher, and each part's facts measured once by its geometry key -- an edit
+    measures only the parts whose key is new -- and, for a document read before, measured after its
+    next build before anyone asks."""
 
     def setUp(self) -> None:
         self.server = Server(port=0, mesh_mode="inline")
         self.server.start()
         self.addCleanup(self.server.stop)
+        self.kernel = mock.patch("cadgen.engine.mesh.measured", side_effect=kernel_facts).start()
+        self.addCleanup(mock.patch.stopall)
 
     def read(self, route: str):
         status, body = self.server.read(f"/api/doc/{PLATE}{route}")
@@ -454,17 +463,115 @@ class InspectionReadTest(unittest.TestCase):
         registered(self.server, {"k1": b"one", "k2": b"two"})
         with mock.patch.object(self.server, "_submit") as meshing:
             self.assertEqual([p["key"] for p in self.read("")["prototypes"]], ["k1", "k2"])
+            self.assertEqual(sorted(self.read("/volumes")), ["k1", "k2"])
             meshing.assert_not_called()
             with urllib.request.urlopen(f"{self.server.url}/api/doc/{PLATE}", timeout=60) as page:
                 self.assertEqual(page.status, 200)
         self.assertEqual(sorted(call.args[0] for call in meshing.call_args_list), ["k1", "k2"], "pages still prefetch")
 
+    def test_a_part_is_measured_once_by_its_key_and_an_edit_measures_only_the_new_one(self) -> None:
+        registered(self.server, {"k1": b"one", "k2": b"three"})
+        self.assertEqual(self.read("/volumes"), {"k1": kernel_facts(b"one"), "k2": kernel_facts(b"three")})
+        self.assertEqual(self.read("/volumes?keys=k2"), {"k2": kernel_facts(b"three")})
+        self.assertEqual(self.read("/part/k1/volume"), kernel_facts(b"one"))
+        self.assertEqual(self.kernel.call_count, 2, "each part measured once, however often it is asked")
+        registered(self.server, {"k1": b"one", "k3": b"seven"}, version=2)  # the next build: k2 became k3
+        self.assertEqual(sorted(self.read("/volumes")), ["k1", "k3"])
+        self.assertEqual([call.args[0] for call in self.kernel.call_args_list], [b"one", b"three", b"seven"])
+        refused = self.server.read(f"/api/doc/{PLATE}/volumes?keys=k1,nope")
+        self.assertEqual(refused[0], 404)
+        held = self.server.holding()
+        self.server.facts.put("k9", kernel_facts(b"nine"))
+        self.assertGreater(self.server.holding(), held, "the facts are held under the budget")
+        self.server.trim(0)
+        self.assertEqual((self.server.facts.size, self.server.facts.get("k1")), (0, None), "and evicted under it")
+
+    def test_a_new_document_is_measured_after_build_and_an_edit_reuses_unchanged_keys(self) -> None:
+        asked = registered(self.server, {"k1": b"one"})
+        later = self.server.measure_later([PLATE])
+        later.join(60)
+        self.assertEqual((asked, self.kernel.call_count), ([1], 1), "measured before the first inspection")
+        asked = registered(self.server, {"k1": b"one", "k2": b"three"}, version=2)
+        later = self.server.measure_later([PLATE])
+        later.join(60)
+        self.assertEqual(asked, [2], "read at its new version, once")
+        self.assertEqual([call.args[0] for call in self.kernel.call_args_list], [b"one", b"three"], "k2 alone, at once")
+        self.assertEqual(sorted(self.read("/volumes")), ["k1", "k2"])
+        self.assertEqual(self.kernel.call_count, 2, "the inspection after the build finds both measured")
+
+    def test_a_build_s_documents_wait_for_its_worker_to_settle_and_are_measured_once(self) -> None:
+        # A program calls its models one after another: what its builds made is read once the worker
+        # settles (the daemon's word), never between two of its builds.
+        registered(self.server, {"k1": b"one"})
+        self.read("")
+        asked = registered(self.server, {"k1": b"one", "k2": b"three"}, version=2)
+        settled = threading.Event()
+        later = self.server.measure_later([PLATE], settled=settled.is_set)
+        self.assertIsNone(self.server.measure_later([PLATE], settled=settled.is_set), "one waits for it already")
+        self.assertEqual(asked, [], "nothing is read while the worker has not settled")
+        settled.set()
+        later.join(60)
+        self.assertEqual((asked, self.kernel.call_count), ([2], 2))
+
+
+class PoolFactsTest(unittest.TestCase):
+    """The daemon's server measures a document's parts on its pool, in batches of about
+    ``FACT_BYTES`` -- spread over the pool a page warmed, else over ``FACT_PROCESSES_COLD`` -- in the
+    facts queue; a part asked while its batch waits is not measured again."""
+
+    def setUp(self) -> None:
+        self.server = Server(port=0, isolated=True)
+        self.addCleanup(self.server.stop)
+        self.server.mesher.workers = 4  # the fake pool's capacity, independent of the test host
+        self.batches: list[tuple] = []
+
+        def run(fn, *args, priority):
+            future: concurrent.futures.Future = concurrent.futures.Future()
+            self.batches.append((fn, args[0], priority, future))
+            return future
+
+        self.run = mock.patch.object(self.server.mesher, "run", side_effect=run).start()
+        self.addCleanup(mock.patch.stopall)
+
+    def test_a_pending_batch_is_shared_and_each_key_is_measured_once(self) -> None:
+        registered(self.server, {"big": b"b" * (2 * FACT_BYTES), "mid": b"m" * FACT_BYTES, "small": b"s" * 10})
+        doc = self.server.document(PLATE)
+        self.assertEqual(self.server.measure(doc, wait=False), {}, "nothing measured yet")
+        # No page warmed the pool: the batches start two processes at most, never the whole pool.
+        self.assertEqual([(fn, priority) for fn, _batch, priority, _future in self.batches],
+                         [(serve._measured, FACT)] * serve.FACT_PROCESSES_COLD)
+        self.assertEqual(sorted(key for _fn, batch, _p, _f in self.batches for key, _data in batch), ["big", "mid", "small"])
+        answers: list = []
+        asking = threading.Thread(target=lambda: answers.append(self.server.measure(doc)))
+        asking.start()
+        self.assertEqual(self.server.measure(doc, wait=False), {}, "pending work is shared")
+        self.assertEqual(len(self.batches), serve.FACT_PROCESSES_COLD)
+        for _fn, batch, _priority, future in self.batches:  # the pool answers each batch
+            future.set_result([(key, kernel_facts(data)) for key, data in batch])
+        asking.join(30)
+        self.assertEqual(answers, [{key: kernel_facts(data) for key, data in doc.shapes.items()}])
+        self.assertEqual(self.server.measure(doc, ["small"]), {"small": kernel_facts(b"s" * 10)})
+        self.assertEqual(len(self.batches), serve.FACT_PROCESSES_COLD)
+        # A pool a page warmed takes them spread over all its processes.
+        registered(self.server, {"a": b"a" * FACT_BYTES, "b": b"b" * FACT_BYTES, "c": b"c" * FACT_BYTES}, version=2)
+        with mock.patch.object(type(self.server.mesher), "warm", new_callable=mock.PropertyMock, return_value=True):
+            self.server.measure(self.server.document(PLATE), wait=False)
+        self.assertEqual([len(batch) for _fn, batch, _p, _f in self.batches[serve.FACT_PROCESSES_COLD:]], [1, 1, 1])
+
+    def test_a_document_s_parts_are_dealt_into_batches_of_about_fact_bytes(self) -> None:
+        parts = [("a", b"x" * (3 * FACT_BYTES)), ("b", b"x" * FACT_BYTES), ("c", b"x" * FACT_BYTES), ("d", b"x" * 10)]
+        self.assertEqual([[key for key, _data in batch] for batch in serve._batches(parts, 8)], [["a"], ["b"], ["c"], ["d"]])
+        self.assertEqual([[key for key, _data in batch] for batch in serve._batches(parts, 2)], [["a"], ["b", "c", "d"]])
+        light = [(f"p{at}", b"x" * 100) for at in range(30)]
+        self.assertEqual(len(serve._batches(light, 8)), 1, "a light document is one job")
+
 
 class PoolQueueTest(unittest.TestCase):
-    """The pool's queues: a fact someone waits on goes before every mesh still waiting, and the pool
-    is handed one job per process at a time."""
+    """The pool's queues: a fact someone waits on goes before every mesh still waiting, measurements after a
+    build use the same priority, and the pool is handed one
+    job per process at a time."""
 
-    def test_a_fact_waits_for_the_running_job_alone(self) -> None:
+    def test_facts_wait_for_running_jobs_only_and_precede_every_queued_mesh(self) -> None:
         handed: list[tuple[str, concurrent.futures.Future]] = []
         changed = threading.Condition()
 
@@ -492,13 +599,13 @@ class PoolQueueTest(unittest.TestCase):
             running = mesher.run("mesh 1", priority=MESH)
             handed_by(1)  # the one process is busy: everything after waits in its queue
             jobs = {name: mesher.run(name, priority=priority) for name, priority in
-                    (("mesh 2", MESH), ("mesh 3", MESH), ("fact 1", FACT))}
-            for done in range(1, 4):
+                    (("mesh 2", MESH), ("mesh 3", MESH), ("fact 1", FACT), ("fact 2", FACT))}
+            for done in range(1, 5):
                 handed[done - 1][1].set_result(done)
                 handed_by(done + 1)
-            handed[3][1].set_result(4)
-        self.assertEqual([name for name, _future in handed], ["mesh 1", "fact 1", "mesh 2", "mesh 3"])
-        self.assertEqual((running.result(1), jobs["fact 1"].result(1), jobs["mesh 3"].result(1)), (1, 2, 4))
+            handed[4][1].set_result(5)
+        self.assertEqual([name for name, _future in handed], ["mesh 1", "fact 1", "fact 2", "mesh 2", "mesh 3"])
+        self.assertEqual((running.result(1), jobs["fact 1"].result(1), jobs["mesh 3"].result(1)), (1, 2, 5))
 
 
 class MeshCacheTest(unittest.TestCase):
