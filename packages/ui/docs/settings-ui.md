@@ -1009,8 +1009,8 @@ to the browser (**Exported part.step**, gone after Sonner's default), or its err
 engine's one-line reason, kept until its dismiss, the one button a toast has. No other action
 earns a toast. Export is an icon button at
 the navbar's right end, named on hover as the view controls are, never in the tool strip.
-It opens a dropdown as the file's ⋯ does, on Display's surface and in its type, Display's
-width (`export/ExportControls.tsx`): the formats the file's kind writes, plain items, known
+It opens a dropdown as the file's ⋯ does, on Display's surface and in its type, as wide as its
+items (shadcn's 8rem least), aligned to the button's end (`export/ExportControls.tsx`): the formats the file's kind writes, plain items, known
 from the kind and the scene the view already holds, so nothing loads before it shows
 (`export/formats.ts`: a STEP's, an xbf's and a held model's STEP, STL, 3MF, GLB and XBF, and
 DXF where the view draws it flat on z=0, an xbf's XBF its own bytes; a GLB's, an STL's or a

@@ -170,7 +170,7 @@ export function ExportControls({ service, downloads, file, children }: {
     </TooltipHint>
     {/* Closes with no exit animation, so a quick second press always reaches the button. */}
     <DropdownMenuContent align="end" sideOffset={6} collisionPadding={8} aria-label={label}
-      className={cn(FLOATING_SURFACE_CLASS, 'w-44 data-[state=closed]:animate-none!')}>
+      className={cn(FLOATING_SURFACE_CLASS, 'data-[state=closed]:animate-none!')}>
       {choices.map(choice => <DropdownMenuItem key={choice.format} onSelect={() => begin(choice)} data-export-format={choice.format}>{choice.label}</DropdownMenuItem>)}
     </DropdownMenuContent>
   </DropdownMenu> : null;

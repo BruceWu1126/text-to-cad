@@ -82,6 +82,9 @@ it('the menu is the formats the file\'s kind writes and nothing else, there at o
     expect(within(menu()!).queryByRole('button')).toBeNull();
     expect(within(menu()!).queryByRole('combobox')).toBeNull();
     expect(within(menu()!).queryByRole('separator')).toBeNull();
+    // As wide as its items, shadcn's least: no width of its own.
+    expect(menu()!.className).toMatch(/(?:^|\s)min-w-\[8rem\](?:\s|$)/);
+    expect(menu()!.className).not.toMatch(/(?:^|\s)w-/);
     expect([service.epoch, service.create].map(call => call.mock.calls.length)).toEqual([0, 0]);
     unmount();
   }
