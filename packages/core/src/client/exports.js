@@ -37,8 +37,6 @@ export function createExportService({ origin = '', fetch: fetchImpl = globalThis
     epoch: async signal => (await json('', undefined, signal)).epoch,
     create: (request, signal) => json('', request, signal),
     status: (id, sequence, signal) => json('/' + encodeURIComponent(id) + (sequence === undefined ? '' : `?after=${sequence}&wait=25`), undefined, signal),
-    cancel: id => json('/' + encodeURIComponent(id) + '/cancel', {}),
-    release: id => json('/' + encodeURIComponent(id) + '/release', {}),
     // A plain same-origin URL: the page's session cookie authenticates it, so no token rides in it.
     fileUrl: id => url('/' + encodeURIComponent(id) + '/file'),
   };

@@ -261,8 +261,6 @@ export interface ExportService {
   epoch(signal?: AbortSignal): Promise<string>;
   create(request: ExportRequest, signal?: AbortSignal): Promise<ExportJob>;
   status(id: string, sequence?: number, signal?: AbortSignal): Promise<ExportJob>;
-  cancel(id: string): Promise<ExportJob>;
-  release(id: string): Promise<ExportJob>;
   /** Where the browser downloads a ready job's file: the session's own origin, never a token. */
   fileUrl(id: string): string;
 }

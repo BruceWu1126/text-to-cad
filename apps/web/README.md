@@ -182,35 +182,33 @@ XBF is its own bytes), and DXF where the view draws it flat on z=0; on a GLB, ST
 bytes on screen, to the other two mesh kinds and nothing else; a file changed since is refused.
 Source and outputs stay separate.
 
-Choosing a format submits the job at once; nothing is asked first, and what the server
-refuses is said in its toast. When the file is
-ready the page hands it to the browser as a plain download (`src/host/downloads.ts`: a
-same-origin link with `download`), once, in every browser: where it goes is the browser's
-own setting (its folder, or its Save dialog for a person who asked for one). The link's
-URL carries no token: the session cookie authenticates it, as it does every request the
-page makes.
+Exports work as a browser's downloads do. Choosing a format submits the job at once; nothing
+is asked first. When the file is ready the page hands it to the browser as a plain download
+(`src/host/downloads.ts`: a same-origin link with `download`), once, in every browser: where
+it goes is the browser's own setting (its download bubble and folder, or its Save dialog for a
+person who asked for one), and the page never claims it was saved. The link's URL carries no
+token: the session cookie authenticates it, as it does every request the page makes.
 
-Multiple exports queue independently, each with a persistent toast at the top-right
-under the navbar (on a phone, at the view's bottom) and its own **Cancel**. A queued cancellation is immediate; an
-in-flight kernel operation finishes before its output is discarded. **Download again**
-fetches the same artifact while it is kept; once it is gone the button is **Export again**,
-which runs the same export anew. Closing a toast only hides it, and **Export → Show exports**
-restores it.
+Each export has one single-line toast (Sonner, bottom right; bottom centre on a phone's view):
+a spinner while it is queued or running, and while a dropped connection is asked again,
+**Exporting part.step…**; then a check once the file is handed to the browser, **Exported part.step**,
+which goes by itself; or the engine's one-line reason, which stays until dismissed. Exports
+run independently; choosing a format again starts another.
 
 The queue accepts up to 16 unfinished jobs per viewer session, executes them in order,
 and retains at most 4 GiB of completed downloads. An artifact is deleted as soon as the
 browser has fetched it whole (the server saw its GET end; a range or a broken transfer keeps
-it), ten minutes after completion if nobody fetched it, on **Remove**, or when the engine
+it), ten minutes after completion if nobody fetched it, when its job is released, or when the engine
 stops; an active transfer holds its file until it finishes. Job records last as long as the
 engine serving the page, the page session (up to 128 records), with bounded
 request-ID tombstones for the session so an expired request cannot regenerate a file.
 Private temporary folders left by a crash are reaped after a day by the next export.
 There is no durable job registry; a server restart ends these jobs.
 
-Reload restores the page's export records from this tab's session storage and reconnects
-with the same request IDs; a file already handed to the browser is not downloaded again
-by itself. Each request names the session's epoch, read as its export starts, so a server
-restarted since refuses it rather than running it again. Client transport is `@text-to-cad/core/client`'s `ExportService`, shared UI is
+Reload picks up the exports still under way from this tab's session storage and reconnects
+with the same request IDs; an export leaves it once its file is handed to the browser or it
+fails. Each request names the session's epoch, read as its export starts, so a server
+restarted since refuses it rather than running it again, and its toast says so. Client transport is `@text-to-cad/core/client`'s `ExportService`, shared UI is
 `packages/ui/src/export`, and `src/host/downloads.ts` owns the browser effect.
 
 ## Shared interface
