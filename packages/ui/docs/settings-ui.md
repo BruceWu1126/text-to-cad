@@ -87,7 +87,7 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   the page, after Figma's Recents, with no hero (no wordmark, tagline or links: GitHub and
   Discord are the app menu's, X its footer's "Made by"; no light/dark button: Theme is the
   menu's). It starts with **one control row**, every control 24px tall in `text-tiny`: at the
-  left **Recent**, a static tab (the only list) on the `muted` fill at weight 600; at the right,
+  left **Recent**, a plain small heading (`text-ui`, weight 500, no fill or padding box: no tab); at the right,
   8px apart, the **type filter**, a stock DropdownMenu whose ghost `xs` trigger names what it
   shows ("All ▾") and whose radio items are All, Models and Files, there only where models and
   files are both listed; the **search**, a stock Input 24px tall and 200px wide ("Search"); and

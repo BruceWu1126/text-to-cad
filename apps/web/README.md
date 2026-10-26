@@ -354,7 +354,7 @@ No snapshot is written while drawing or typing, and no image is rendered.
 
 The bare URL is the home: the library every CAD view shares (`@text-to-cad/ui/library`),
 and nothing else, laid out after Figma's Recents. It starts with one control row of 24px
-controls: "Recent" at the left as a static tab, and at the right the type filter, a dropdown
+controls: "Recent" at the left as a plain small heading, and at the right the type filter, a dropdown
 ("All ▾": All, Models, Files) where both kinds are listed, the search and the grid/list
 switch. The grid's tiles are transparent with a 1px border, at least 240px wide (four across
 a 1280px window): a picture on the muted fill, then the kind's glyph (a model's cube, a
