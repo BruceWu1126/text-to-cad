@@ -275,9 +275,11 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
     plain link to a new window. With no page in the launch it says "Ask your agent to open
     the model in the CAD Viewer instead." and links nothing.
   - **The plugin stopped.** Calls came back, then four syncs in a row failed: the banner over
-    the view says what to do in that host: "The CAD plugin stopped responding in this
+    the view says what to do in that host, naming it as it named itself at `ui/initialize`
+    (`hostInfo.name`, mapped in `host/hostName.ts`: Codex, Claude, Cursor, Gemini...; "this app" for
+    one it cannot name): "The CAD plugin stopped responding in this
     thread. Quit and reopen Codex to restart it." in a tab, "The CAD plugin stopped
-    responding. Quit and reopen this app to restart it, then ask your agent to show the model
+    responding. Quit and reopen Codex to restart it, then ask your agent to show the model
     again." inline.
   - **The engine refused or failed.** Its own one-line reason, where the viewer shows a
     request's failure. A call that got no reply fails in words of ours ("This chat cannot

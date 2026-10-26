@@ -288,6 +288,42 @@ class ServedStepTest(unittest.TestCase):
         rewritten = self.server.wait(ident, touched.version, 60)
         self.assertNotEqual(rewritten.structure["read"]["process"], served.structure["read"]["process"])
 
+    def test_a_steps_import_says_its_stages_while_it_runs_and_nothing_once_it_is_in(self) -> None:
+        from cadgen.engine import serve
+        from cadgen.engine.addresses import document_id
+
+        ident = document_id(self.step)
+        heard: list[dict] = []
+        done = threading.Event()
+
+        def listen() -> None:  # what a page polling the version route would hear, as it moves
+            while not done.is_set():
+                frame = self.server.build_of(ident)["building"]
+                if frame is not None and (not heard or heard[-1] != frame):
+                    heard.append(frame)
+                done.wait(0.01)
+
+        listener = threading.Thread(target=listen, daemon=True)
+        listener.start()
+        try:
+            self.assertEqual(self.server.add(self.step), ident)
+        finally:
+            done.set()
+            listener.join()
+        self.assertTrue(heard, "the import said where it was")
+        self.assertEqual([(frame["phase"], frame["label"], frame["model"]) for frame in heard[:1]],
+                         [("import", "Importing model", "shelf.step")])
+        self.assertTrue(heard[0]["detail"].startswith("reading shelf.step ("), heard[0])
+        self.assertEqual((heard[0]["determinate"], heard[0]["total"]), (False, None))
+        after = self.server.build_of(ident)
+        self.assertEqual((after["building"], after["failed"]), (None, None), "nothing once the document is in")
+        self.assertGreaterEqual(after["progress"], 2, "each stage, and the end, moved the count")
+        # The reader counts the parts it collects (the counts the server turns into frames).
+        counts = self.folder / "counts.json"
+        read = serve._read_foreign(str(self.step), "0" * 40, str(counts))
+        self.assertEqual(json.loads(counts.read_text(encoding="utf-8")), {"done": len(read["shapes"]), "total": len(read["shapes"])})
+        self.assertEqual(serve._import_counts(str(self.folder / "none.json")), None)
+
     def test_a_step_that_will_not_read_keeps_the_version_served_until_it_changes(self) -> None:
         ident = self.server.add(self.step)
         served = self.server.document(ident)

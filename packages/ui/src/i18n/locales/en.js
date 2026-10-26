@@ -122,9 +122,11 @@ export default {
   "home.kindAria": "Show {kind}",
   "home.columnName": "Name",
   "home.columnUpdated": "Updated",
-  "home.columnOpened": "Opened",
+  "home.columnCreated": "Created",
   "home.openingAria": "Opening {name}",
   "home.ageNow": "now",
+  "home.ageEdited": "Edited {age}",
+  "home.ageViewed": "Viewed {age}",
   "home.ageMinutes": "{n}m ago",
   "home.ageHours": "{n}h ago",
   "home.ageDays": "{n}d ago",
@@ -195,7 +197,6 @@ export default {
   "projection.perspective": "Perspective",
 
   // The view cube's corner button: the fit F makes.
-  "viewCube.fit": "Fit",
 
   // Preview: its tile, its corner controls and its settings panel.
   "preview.label": "Preview",
@@ -692,8 +693,9 @@ export default {
   "cad.unreachable.askModel": "This chat can't connect the CAD viewer to its engine. Ask your agent to open the model in the CAD Viewer instead.",
   "cad.unreachable.askViewer": "This chat can't connect the CAD viewer to its engine. Ask your agent to open the CAD Viewer instead.",
   "cad.openInViewer": "Open in CAD Viewer",
-  "cad.lost.tabs": "The CAD plugin stopped responding in this thread. Quit and reopen this app to restart it.",
-  "cad.lost.inline": "The CAD plugin stopped responding. Quit and reopen this app to restart it, then ask your agent to show the model again.",
+  "cad.lost.tabs": "The CAD plugin stopped responding in this thread. Quit and reopen {host} to restart it.",
+  "cad.lost.inline": "The CAD plugin stopped responding. Quit and reopen {host} to restart it, then ask your agent to show the model again.",
+  "cad.lost.thisApp": "this app",
   "cad.superseded": "A newer view is below",
   "cad.stopped.title": "CAD stopped",
   "cad.stopped.message": "Something went wrong in this view. Close the tab and open CAD again.",

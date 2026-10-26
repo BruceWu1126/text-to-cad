@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, expect, it, vi } from 'vitest';
 // The built module: its Settings is the renderer kit's, whose JSX lives in .js files this runner does not compile.
 import { ModelLibrary } from '../../dist/library/ModelLibrary.js';
-import { ageLabel, lastActivity } from '../../dist/lib/age.js';
+import { activityLabel, ageLabel, lastActivity } from '../../dist/lib/age.js';
 import { ControlUsageProvider } from '../../dist/usage/controls.js';
 import type { LibraryModel, ModelLibrarySource } from './ModelLibrary.js';
 
@@ -10,7 +10,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const NOW = Date.UTC(2026, 8, 30, 12);
 const model = (name: string, extra: Partial<LibraryModel> = {}): LibraryModel =>
-  ({ path: `/work/parts/${name}`, name, folder: '/work/parts', opened: 1, updated: Date.now() / 1000 - 16 * 3600, pinned: false, missing: false, thumbnail: null, pictured: null, ...extra });
+  ({ path: `/work/parts/${name}`, name, folder: '/work/parts', opened: 1, updated: Date.now() / 1000 - 16 * 3600, created: null, pinned: false, missing: false, thumbnail: null, pictured: null, ...extra });
 
 function library(models: LibraryModel[], extra: Partial<ModelLibrarySource> = {}): ModelLibrarySource {
   return {
@@ -130,7 +130,7 @@ it('names a card by its file and how long ago it was last active, and switches b
   const layouts: string[] = [];
   const { rerender } = render(<ModelLibrary library={library([model('bracket.step')])} layout="grid" onLayoutChange={layout => layouts.push(layout)} />);
   const card = await screen.findByRole('button', { name: 'Open bracket.step' });
-  expect(card.textContent).toMatch(/^bracket\.step16h ago$/);
+  expect(card.textContent).toMatch(/^bracket\.stepEdited 16h ago$/);
   expect(card.textContent).not.toContain('/work');
   expect(screen.getByRole('button', { name: 'Grid' }).getAttribute('aria-pressed')).toBe('true');
   fireEvent.click(screen.getByRole('button', { name: 'List' }));
@@ -142,28 +142,29 @@ it('names a card by its file and how long ago it was last active, and switches b
   expect(screen.getByRole('button', { name: 'Actions for bracket.step' })).toBeTruthy();
 });
 
-it('lists rows under a Name, Updated and Opened header: each its glyph and name, then both ages with no verb, its pin and ⋯ at its end', async () => {
+it('lists rows under a Name, Updated and Created header: each its glyph and name, then both ages with no verb, its pin and ⋯ at its end', async () => {
   const hour = 3600, now = Date.now() / 1000;
   const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
   render(<ModelLibrary library={library([
-    model('plate.step', { opened: now - 5 * hour, updated: now - 30 * hour }),
-    model('arm', { path: id, kind: 'model', script: '/work/parts/arm.py', opened: null, updated: now - 2 * hour }),
-    model('gone.step', { missing: true, updated: null, opened: now - 3 * 86400 }),
+    model('plate.step', { opened: now - 5 * hour, updated: now - 30 * hour, created: now - 3 * 86400 }),
+    model('arm', { path: id, kind: 'model', script: '/work/parts/arm.py', opened: null, updated: now - 2 * hour, created: now - 2 * hour }),
+    model('gone.step', { missing: true, updated: null, opened: now - 3 * 86400, created: null }),
   ])} layout="list" onLayoutChange={() => {}} />);
   await screen.findByRole('button', { name: 'Open plate.step' });
   const list = screen.getByRole('list', { name: 'Files' });
   // The header row is the columns' labels, for the eye: each row names itself.
   const header = list.previousElementSibling!;
-  expect([header.getAttribute('aria-hidden'), [...header.children].map(cell => cell.textContent)]).toEqual(['true', ['Name', 'Updated', 'Opened']]);
+  expect([header.getAttribute('aria-hidden'), [...header.children].map(cell => cell.textContent)]).toEqual(['true', ['Name', 'Updated', 'Created']]);
   const cells = (name: string) => {
     const row = screen.getByRole('button', { name: `Open ${name}` });
     return [row.querySelector('[data-glyph]')?.getAttribute('data-glyph') ?? null, row.querySelector('.cad-library-label')?.textContent,
       ...[...row.querySelectorAll('[data-column]')].map(cell => [cell.getAttribute('data-column'), cell.textContent])];
   };
-  expect(cells('plate.step')).toEqual(['file', 'plate.step', ['updated', '1d ago'], ['opened', '5h ago']]);
-  // A model no page has opened has an empty Opened; a file that is gone says so where its time on disk was.
-  expect(cells('arm')).toEqual(['model', 'arm', ['updated', '2h ago'], ['opened', '']]);
-  expect(cells('gone.step')).toEqual(['file', 'gone.step', ['updated', 'File unavailable'], ['opened', '3d ago']]);
+  expect(cells('plate.step')).toEqual(['file', 'plate.step', ['updated', '1d ago'], ['created', '3d ago']]);
+  // A model's Created is its first run's; a record from before the time was kept has an empty Created,
+  // and a file that is gone says so where its time on disk was.
+  expect(cells('arm')).toEqual(['model', 'arm', ['updated', '2h ago'], ['created', '2h ago']]);
+  expect(cells('gone.step')).toEqual(['file', 'gone.step', ['updated', 'File unavailable'], ['created', '']]);
   // No picture in a row; its pin and ⋯ follow its button, at its end.
   expect(list.querySelector('.cad-library-thumbnail')).toBeNull();
   const row = within(list).getAllByRole('listitem')[0];
@@ -338,15 +339,26 @@ it('dates a row by its last activity, the later of when it was opened and update
   expect(lastActivity({ opened: null, updated: null })).toBeNull();
 });
 
-it('shows a model by its run and a file by its opening, whichever came last', async () => {
+it("says a tile's last activity with its verb: Edited for a change after the last opening, Viewed for an opening after the last change", () => {
+  const at = (seconds: number) => NOW / 1000 - seconds;
+  expect(activityLabel({ opened: at(16 * 60), updated: at(2 * 60) }, NOW)).toBe('Edited 2m ago');
+  expect(activityLabel({ opened: at(16 * 60), updated: at(3 * 86400) }, NOW)).toBe('Viewed 16m ago');
+  expect(activityLabel({ opened: null, updated: at(20) }, NOW)).toBe('Edited now');
+  expect(activityLabel({ opened: at(20), updated: null }, NOW)).toBe('Viewed now');
+  // The page opened what was just built: one time, an edit.
+  expect(activityLabel({ opened: at(60), updated: at(60) }, NOW)).toBe('Edited 1m ago');
+  expect(activityLabel({ opened: null, updated: null }, NOW)).toBe('');
+});
+
+it('shows a model by its run and a file by its opening, whichever came last, each with its verb', async () => {
   const hour = 3600, now = Date.now() / 1000;
   const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
   render(<ModelLibrary library={library([
     model('arm', { path: id, kind: 'model', opened: null, updated: now - 2 * hour }),
     model('plate.step', { opened: now - 5 * hour, updated: now - 30 * hour }),
   ])} />);
-  expect((await screen.findByRole('button', { name: 'Open arm' })).textContent).toBe('arm2h ago');
-  expect(screen.getByRole('button', { name: 'Open plate.step' }).textContent).toBe('plate.step5h ago');
+  expect((await screen.findByRole('button', { name: 'Open arm' })).textContent).toBe('armEdited 2h ago');
+  expect(screen.getByRole('button', { name: 'Open plate.step' }).textContent).toBe('plate.stepViewed 5h ago');
 });
 
 it('shows why an open failed where the library shows it', async () => {

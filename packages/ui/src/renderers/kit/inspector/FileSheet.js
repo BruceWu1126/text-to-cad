@@ -344,9 +344,10 @@ export function FileSheetValueField({ label, value }) {
   );
 }
 
-export function FileSheetFieldGrid({ columns = 2, children, className }) {
+export function FileSheetFieldGrid({ columns = 2, children, className, ...props }) {
   return (
     <div
+      {...props}
       className={cn("grid gap-1 px-2", className)}
       style={{ gridTemplateColumns: typeof columns === "number" ? `repeat(${columns}, minmax(0, 1fr))` : columns }}
     >

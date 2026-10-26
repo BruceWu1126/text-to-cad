@@ -2,8 +2,6 @@ import React from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ViewPlaneControl from '../../../../dist/renderers/kit/camera/ViewPlaneControl.js';
-import { ControlUsageProvider } from '../../../../dist/usage/controls.js';
-import { I18nProvider } from '../../../../dist/i18n/index.js';
 import { VIEW_PLANE_FACES, createViewPlaneOrientationStore } from './viewportCameraKit.js';
 
 beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }));
@@ -122,40 +120,4 @@ it('keeps every axis label inside its own box, however the cube is turned, so a 
       for (const value of [Number(label.getAttribute('x')), Number(label.getAttribute('y'))]) expect(value >= 6 && value <= 94, `${axis}: ${value}`).toBe(true);
     }
   }
-});
-
-// Fit, in the cube's top-right corner: the fit F makes, counted as F's is (`fit`), sized in the
-// cube's own box and named in the view's language.
-it('offers Fit in its corner when given the fit, which a press runs and counts as fit, and a disabled cube keeps idle', async () => {
-  const fitView = vi.fn();
-  const reports: { control: string; count: number }[][] = [];
-  const view = render(<ControlUsageProvider report={counts => reports.push(counts)}><ViewPlaneControl showViewPlane meshData={{}} viewPlaneFaces={VIEW_PLANE_FACES}
-    orientation={createViewPlaneOrientationStore(ISO)} viewPlaneOffsetRight={16} viewPlaneSize="6rem" activateViewPlaneFace={() => {}} fitView={fitView} /></ControlUsageProvider>);
-  const fit = screen.getByRole('button', { name: 'Fit' });
-  expect([fit.getAttribute('aria-keyshortcuts'), fit.style.width, fit.style.height]).toEqual(['F', '20%', '20%']);
-  expect(fit.parentElement?.style.width).toBe('6rem');
-  expect(fit.querySelector('svg')).toBeTruthy();
-  fireEvent.pointerDown(fit, { button: 0 });
-  fireEvent.click(fit);
-  expect(fitView).toHaveBeenCalledTimes(1);
-  view.unmount();
-  expect(reports.flat().filter(({ control }) => control === 'fit').map(({ count }) => count)).toEqual([1]);
-  // Disabled, as the cube is while a load holds it: shown, idle.
-  cube({ disabled: true, fitView });
-  const idle = screen.getByRole('button', { name: 'Fit' });
-  expect([idle.getAttribute('aria-disabled'), idle.getAttribute('tabindex')]).toEqual(['true', '-1']);
-  fireEvent.click(idle);
-  expect(fitView).toHaveBeenCalledTimes(1);
-});
-it('has no Fit without the fit to run, nor without its cube', () => {
-  cube();
-  expect(screen.queryByRole('button', { name: 'Fit' })).toBeNull();
-  cleanup();
-  cube({ showViewPlane: false, viewPlaneHeader: <div>Camera header</div>, fitView: vi.fn() });
-  expect(screen.queryByRole('button', { name: 'Fit' })).toBeNull();
-});
-it('names Fit in the view\'s language', () => {
-  render(<I18nProvider locale="ja"><ViewPlaneControl showViewPlane meshData={{}} viewPlaneFaces={VIEW_PLANE_FACES}
-    orientation={createViewPlaneOrientationStore(ISO)} viewPlaneOffsetRight={16} activateViewPlaneFace={() => {}} fitView={() => {}} /></I18nProvider>);
-  expect(screen.getByRole('button', { name: 'フィット' })).toBeTruthy();
 });

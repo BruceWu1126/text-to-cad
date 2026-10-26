@@ -39,12 +39,9 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   chrome (`chrome: "page"`: the web viewer's, and the CAD app's sidebar, tabs and cards), never in a
   host that shows the view alone (`chrome: "bare"`, the CAD app's file handler: below), and never in Preview, which draws its
   own bar in its place, in every host (see [Preview](#camera-animation-and-preview)). Left: the text-to-cad logo,
-  named Menu, with no chevron: over the home the TEXTTOCAD
-  wordmark and over a document the "C", both 16px tall (one baseline and cap height: only the
-  width changes, the wordmark about 94px wide), in one box in the row's 24px button: going
-  between the home and a page the two crossfade in 150ms while the box's width follows, cut
-  straight under `prefers-reduced-motion` or the host's `reducedMotion`. Its mark's left edge is
-  the page's 16px gutter, the Home grid's left edge, over the home and over a page alike (the
+  named Menu, with no chevron: the "C" mark, 16px, in the row's 24px button, the same over the
+  home and over a document (no wordmark, and nothing that changes between the two). Its left edge
+  is the page's 16px gutter, over the home and over a page alike (the
   row starts 12px in, the button's padding is 4px). The logo opens the
   **app menu** (see [Settings](#settings)) — a host with no home has it too — then, where the
   host keeps the view's own history (`history`: the CAD app's views, which no browser holds),
@@ -60,7 +57,7 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   is the file menu: Copy path, and Reveal in Finder / Show in Explorer / Show in file
   manager, each only where the host can do it, and no ⋯ where it can do none. The name has
   no right-click menu and there are no crumbs. The left's controls sit edge to edge, spaced
-  by their own padding alone: the logo's 24px button (the C; the wordmark's is about 102px), Back, Forward and the ⋯ in 20px ones,
+  by their own padding alone: the logo's 24px button, Back, Forward and the ⋯ in 20px ones,
   and the name 4px in from its edges, so about 7px separate one glyph from the next. Right, only what a host or a file adds: first, the
   update — a blue download button, there only when the host
   found a newer release, whose menu says the step to it, how this host updates and what
@@ -88,11 +85,12 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   buttons, sizes and places as over a file. Under it,
   the page, after Figma's Recents, with no hero (no wordmark, tagline or links: GitHub and
   Discord are the app menu's, X its footer's "Made by"; no light/dark button: Theme is the
-  menu's). The Home is **one type scale**: every text `text-ui` (13px) — the heading, the
-  type filter, the search, the names, the table — but a tile's age, `text-tiny` (11px) and
+  menu's). The Home is **one type scale**: every text `text-ui` (13px) — the
+  type filter, the search, the names, the table — but the heading, **Recent**, the one larger text
+  (17px, weight 600), and a tile's age, `text-tiny` (11px) and
   muted; a tile's and a row's glyph is 16px (`src/designSystem.test.js` holds it). It starts
   with **one control row**, every control 24px tall with 13px text: at the
-  left **Recent**, a plain small heading (`text-ui`, weight 500, no fill or padding box: no tab); at the right,
+  left **Recent**, a plain heading on the row's 24px line (no fill or padding box: no tab); at the right,
   8px apart, the **type filter**, a stock DropdownMenu whose ghost `xs` trigger names what it
   shows ("All ▾") and whose radio items are All, Models and Files, there only where models and
   files are both listed; the **search**, a stock Input 24px tall and 200px wide ("Search"); and
@@ -101,15 +99,17 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   `xs` button (24px) with the folder icon and "Open", which opens the desktop's own chooser
   (`POST /__cad/pick`) and shows the file picked. Then the
   documents opened or built before, pinned first, then by last activity. The home is the
-  library and Open alone: no folder of a launch. It spans the page on the navbar's 16px gutter, the
-  wordmark's left edge its own. In the grid, a **tile** is transparent on the
+  library and Open alone: no folder of a launch. It is a **centred column**, 1128px wide at most,
+  on 24px gutters of its own (not the navbar's 16px, which the logo keeps), 44px under the navbar,
+  its control row 20px over the tiles: a library page's generous spacing. In the grid, a **tile** is transparent on the
   page in both themes, a 1px `border`, a 12px radius and no shadow, the same under the pointer;
-  columns at least 240px (four across a 1280px window), 24px apart. Its picture sits on the
-  `muted` fill at 330:185, contained (its placeholder cube 24px); its caption (12px by 16px) is its kind's 16px glyph in a 24px
-  column, then its name (`text-ui`, weight 500) over its last activity with no verb ("2h ago",
-  `text-tiny`, muted). In the list, a **table**, one type in every cell (`text-ui`, 13px): a
-  32px header row of muted labels (Name, Updated, Opened) over 40px rows, each its glyph and
-  name, then its `updated` and `opened` ages, muted, in two 160px columns (Opened dropped under a 560px page), transparent with the
+  columns at least 280px (three across the full column, two at a narrower window), 24px apart. Its picture sits on the
+  `muted` fill at 330:185, contained (its placeholder cube 24px); its caption is compact (8px by 12px): its kind's 16px glyph in a 20px
+  column, 8px before its name (`text-ui`, weight 500) over its last activity with its verb
+  ("Edited 2m ago" for a change after the last opening, "Viewed 16m ago" for an opening after the
+  last change; `lib/age.ts`, `text-tiny`, muted). In the list, a **table**, one type in every cell (`text-ui`, 13px): a
+  32px header row of muted labels (Name, Updated, Created) over 40px rows, each its glyph and
+  name, then its `updated` and `created` ages with no verb, muted, in two 160px columns (Created dropped under a 560px page), transparent with the
   hover fill. Each has a **pin** toggle and **one ⋯ menu** (a stock DropdownMenu), shown on hover
   or focus, at a tile's picture's top-right (Figma's star) or a row's end; a pinned one keeps its
   filled pin at rest. The menu holds Open, a file's Copy path and Reveal where the host can, Pin or
@@ -219,12 +219,8 @@ is `chrome`: the navbar (`"page"`, the default) or the view alone (`"bare"`).
   file handler's corner: Full size and its update). The rest of the right side of the view is clear.
 - **View cube** at bottom-right, 2px from the right and 8px off the bottom so the axes
   drawn in its lower corner never touch the edge (`VIEWPORT_CUBE_BOTTOM`), in a 6rem area:
-  enlarged face/edge/corner hit areas and neutral hover and XYZ guides. In the area's top-right
-  corner, which the guides (drawn from the cube's negative corner) never reach, is **Fit**
-  (lucide `Scan`, hinted "Fit F" above it): the fit F makes, counted as F's (`fit`). It is
-  measured in the cube's own box, a fifth of its side (19px at 6rem), its glyph 70% of that, in
-  the ink of the cube's home corner dot, lighting as a face does when hovered; it comes and goes
-  with the cube. A host whose own
+  enlarged face/edge/corner hit areas and neutral hover and XYZ guides. It carries no button:
+  the fit is **F**'s (and the context menu's Zoom to fit), the orientation the cube's. A host whose own
   control floats over that corner lifts it clear with `--cad-viewport-corner-bottom`, the
   room that control takes from the bottom edge. A host can instead anchor it at bottom-left
   with `--cad-viewport-corner-left: 2px` and `--cad-viewport-corner-right: auto`.
@@ -622,7 +618,10 @@ text, and iOS Safari zooming into any field under 16px): type 12, 13, 14 and 15p
 `text-tiny`, `text-xs` and `text-ui`; text entry at the panel's own size (the page's viewport,
 not a 16px font, stops a phone zooming in on a field); menu, select and tree rows 36-40px; the
 navbar, and Preview's bar in its place, a 48px row of 36px controls; the strip and the sub-toolbars 36px tiles (the strip one row,
-**More tools** holding what does not fit; the drawing tools' row the same single row, wrapping where it must).
+**More tools** holding what does not fit; the drawing tools' row the same single row, wrapping where it must — Shapes' does
+at 375px, its style group under its tools, and a row that wrapped draws no rule between its groups, the line
+break parting them, `SubToolbar`'s `data-wrapped`). An SDF's counts are two tiles a row in a phone's panel (three on a desktop), so
+their labels read whole.
 The scale is set once, in `globals.css`, for the whole page while a phone's view is on it, so a
 portalled menu, select or hint is the same size as the chrome it opened from. There is no view
 cube; the file sidebar is one tile at the strip's left, its sections tabs of one panel; and
@@ -951,7 +950,7 @@ across the cube, a double-click's Look at, Zoom to selection, or a camera handed
 changed fits the camera again, the fit F makes, animated as F's is, along the direction the
 view looks; a rebuild with the same box changes nothing. The first touch makes the camera the
 person's for the page's life, and a rebuild then keeps it exactly, its pose and its zoom, as
-desktop CAD does. A fit hands it back: **F**, the cube's Fit, Zoom to Fit or the live
+desktop CAD does. A fit hands it back: **F**, Zoom to Fit or the live
 `resetCamera` leaves the camera untouched again. A resize keeps its own rule (opening's refit
 while it settles, the model's apparent size after). The state is the page's: a reload restores
 the saved view, and a camera restored is the person's, so it is touched until they fit; a file
@@ -1092,7 +1091,7 @@ chat's frame), so its tool keys work with no press in it first (`file-viewer/tak
   field or Preview, take a tool up as a design or CAD tool's do: **V** Select, **M** Measure;
   **P** the Pen, **⇧P** the Highlighter, **E** the Eraser; **R** the Rectangle, **L** the Line,
   **⇧L** the Arrow, **O** the Ellipse, **T** Text (each taking up Pencil or Shapes with that
-  tool in hand); and **F** frames the model (Zoom to fit, the view cube's Fit). A tool already in hand stays so.
+  tool in hand); and **F** frames the model (Zoom to fit: the key is the only button it has). A tool already in hand stays so.
   Each key shows after its name in its button's tooltip ("Measure M", muted), and Pencil's and
   Shapes' tooltips name what they draw with now ("Rectangle R").
 
@@ -1105,8 +1104,8 @@ strip's buttons (Display and Preview among them; a tool with a key shows it afte
 muted), the drawing row's tools (each with its key), the navbar's right-hand controls (the
 update, an alert's icon, the host's actions: the CAD app's Full size and Open in browser among them), Preview's bar (Preview
 settings, Exit preview) and the
-Animation section's Reset and the view cube's Fit ("Fit F") are hinted by name — the strip's and
-Fit's hints above their buttons, the others' below; there is no hint on the navbar's left (the logo,
+Animation section's Reset are hinted by name — the strip's hints above their buttons, the
+others' below; there is no hint on the navbar's left (the logo,
 the file's name and the ⋯ say what they are), on Display's settings button, Playback settings, an X,
 the transport (play, pause, the scrubber), the drawing row's settings or labelled text
 buttons (Quick Edit's alone say what they do). A disabled, selected or expanded control has none; pressing or leaving cancels a

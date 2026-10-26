@@ -367,24 +367,26 @@ No snapshot is written while drawing or typing, and no image is rendered.
 ### The home
 
 The bare URL is the home: the library every CAD view shares (`@text-to-cad/ui/library`),
-and nothing else, laid out after Figma's Recents. It starts with one control row of 24px
-controls: "Recent" at the left as a plain small heading, and at the right the type filter, a dropdown
+and nothing else, laid out after Figma's Recents in a centred column (1128px at most, on 24px
+gutters, 44px under the navbar). It starts with one control row of 24px
+controls: "Recent" at the left, a 17px heading on the row's line, and at the right the type filter, a dropdown
 ("All ▾": All, Models, Files) where both kinds are listed, the search, the grid/list
 switch and, where the server's computer has a file chooser (`pick` in its info), **Open**,
 which opens the desktop's own chooser (`POST /__cad/pick`, `cadgen._internal.picker`) and shows
-the file picked. The grid's tiles are transparent with a 1px border, at least 240px wide (four across
-a 1280px window): a picture on the muted fill, then the kind's glyph (a model's cube, a
-file's plain file outline, whatever its kind) beside its name over its last activity with no verb ("now", "5m ago", "2h
-ago", "3d ago", then the short date). The list is a table: Name, Updated and Opened over 40px
-rows, each a document's glyph and name and its two ages. Every model is a tile and a row of
+the file picked. The grid's tiles are transparent with a 1px border, at least 280px wide (three across
+the full column): a picture on the muted fill, then, in a compact caption, the kind's glyph (a model's cube, a
+file's plain file outline, whatever its kind) beside its name over its last activity with its verb ("Edited now",
+"Viewed 5m ago", "Edited 2h ago", "Viewed 3d ago", then the short date: Edited when it changed after it was last
+opened, Viewed when it was opened after it last changed). The list is a table: Name, Updated and Created over 40px
+rows, each a document's glyph and name and those two ages with no verb. Every model is a tile and a row of
 its own, nothing folded, and none is tied to the script it was built from: a model shows its
 name, its glyph and its age. The pin and the ⋯ appear on hover (at a tile's picture's corner, at a row's end); a
 pinned one keeps its pin. The ⋯ menu holds Open, a file's Copy path and Reveal (a model has
 neither), Pin or Unpin, and Delete, which asks first: a model's "Delete bracket?" removes the engine's record and its saved build, its
 script and exported files kept, and no other model with it; a file's "Delete bracket.step from the viewer?" removes the
 engine's record of the file alone. From a file, Back to home in
-the menu the navbar's C logo opens leads back to it. The home has the same navbar, its logo
-the TEXTTOCAD wordmark rather than the C (both 16px tall, crossfading in 150ms), the same menu (without Back to home, and with GitHub, Discord and X as
+the menu the navbar's C logo opens leads back to it. The home has the same navbar, the same C
+logo (one 16px mark on every page) and the same menu (without Back to home, and with GitHub, Discord and X as
 over a file) at the left and
 the update button at the right while a newer text-to-cad is out. The home is a step of
 the browser's history, as a file is: the browser's Back and Forward walk between them (the
@@ -401,8 +403,10 @@ spelling of one file is one row. A model (a document with no file of its own) ha
 its Files lists the folder the explorer was last in this tab, else the person's home folder
 (`home` in the server's info); a file's its own folder.
 
-The home reads the library over `GET /__cad/recents`, each row with two times, `updated` (a
-file's time on disk, a model's run) and `opened` (when a page last opened it), ordered pinned
+The home reads the library over `GET /__cad/recents`, each row with three times, `updated` (a
+file's time on disk, a model's run), `opened` (when a page last opened it) and `created` (when the
+engine first made its record: a model's first run, a file's first open; null for a record from before
+it was kept), ordered pinned
 first, then by the later of the two; it pins, unpins, removes a file's record (`remove`) and
 deletes a model's document (`delete`) over `POST /__cad/recents`, and draws each card's picture
 from `GET /__cad/thumbnail`. A model's script is never read for any of it. The document on
@@ -460,7 +464,7 @@ and the web stay consistent without host-specific copies of those controls.
 
 The Viewer has the one navbar every app shares (see
 [the host contract](../../packages/ui/docs/viewer-host.md#host-chrome-slots)): at the
-left the logo (the TEXTTOCAD wordmark on the home, the C over a file), which opens the app menu, then the open file's name (no glyph),
+left the logo (the C mark, on the home and over a file alike), which opens the app menu, then the open file's name (no glyph),
 which opens the name menu (Models and Files), with its ⋯; at the right the blue update button, while a newer text-to-cad
 is out, and Export over a file that writes formats. The app menu holds Back to home (the home), the
 person's settings (Language — Automatic or a named language —, Telemetry, Theme), Send feedback (a new issue titled "Feedback: "),

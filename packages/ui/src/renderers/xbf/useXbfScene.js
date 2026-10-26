@@ -5,6 +5,12 @@ import { loadXbfDocument, waitForXbfVersion } from "@text-to-cad/core/lib/xbf/xb
 import { createXbfScene } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 
 const SERVING = Object.freeze({ phase: "read", label: "Opening document", done: 0, total: 0, determinate: false });
+// A STEP opened as a file is imported first: the engine's reader parses it, then collects its parts
+// (`cadgen.engine.serve`), and says so in frames the page hears (`engineDocument`'s `onProgress`).
+const IMPORTING = Object.freeze({ phase: "import", label: "Importing model", done: 0, total: 0, determinate: false });
+
+/** What the page says of a document before the engine has said anything: a STEP's is an import, any other document's a read. */
+export const openingProgress = file => (/\.(step|stp)$/i.test(String(file || "").split(/[?#]/)[0]) ? IMPORTING : SERVING);
 // How long a page waits before asking an engine that stopped answering again.
 const RETRY_MS = 1000;
 // The least time from one ask for the next version to the next: the viewer holds an ask about this
@@ -47,7 +53,7 @@ const pause = (ms, signal) => new Promise((resolve, reject) => {
 export const goneFromEngine = error => Number(error?.status) === 404;
 
 export function useXbfScene({ client, file }) {
-  const [state, setState] = useState({ scene: null, document: null, revision: "", busy: true, progress: SERVING, error: null, empty: false, update: null,
+  const [state, setState] = useState({ scene: null, document: null, revision: "", busy: true, progress: openingProgress(file), error: null, empty: false, update: null,
     building: null, failed: null });
   const held = useRef({ scene: null, document: null });
   const adopt = (scene, document) => {
@@ -62,12 +68,15 @@ export function useXbfScene({ client, file }) {
     if (!file) return undefined;
     const controller = new AbortController();
     const { signal } = controller;
-    setState(current => ({ ...current, busy: true, progress: current.scene ? current.progress : SERVING, error: null, building: null, failed: null }));
+    setState(current => ({ ...current, busy: true, progress: current.scene ? current.progress : openingProgress(file), error: null, building: null, failed: null }));
+    // The engine's word on its import of the file, while the page has nothing on screen: each frame
+    // is the loading line (a STEP's reader parsing it, then its parts collected, counted).
+    const imported = frame => { if (!held.current.scene) setState(current => ({ ...current, progress: frame })); };
     (async () => {
       if (typeof client?.engineDocument !== "function") {
         throw new Error("This viewer cannot open a cadgen engine document: its host serves no engine.");
       }
-      let served = await client.engineDocument(file, { signal });
+      let served = await client.engineDocument(file, { signal, onProgress: imported });
       let previous = held.current.document;
       let noticed = null;
       // The document's build as last heard, and its count (the engine's, which moves with each stage
@@ -110,7 +119,7 @@ export function useXbfScene({ client, file }) {
             // The engine went away (its daemon idled out or was stopped): ask for it again, which
             // starts it, and read the document from it as it has it now.
             await pause(RETRY_MS, signal);
-            served = await client.engineDocument(file, { signal });
+            served = await client.engineDocument(file, { signal, onProgress: imported });
             noticed = performance.now();
             // An engine started afresh has heard of no build: its count starts again.
             counted = 0;

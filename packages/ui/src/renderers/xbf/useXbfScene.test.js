@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { goneFromEngine } from "./useXbfScene.js";
+import { goneFromEngine, openingProgress } from "./useXbfScene.js";
+
+test("a STEP opened as a file says Importing model from the start; any other document is a read", () => {
+  for (const file of ["/work/tom.step", "/work/TOM.STP", "/work/tom.step?v=2"]) {
+    assert.deepEqual(openingProgress(file), { phase: "import", label: "Importing model", done: 0, total: 0, determinate: false });
+  }
+  for (const file of ["/work/juno.xbf", "8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12", ""]) {
+    assert.deepEqual(openingProgress(file), { phase: "read", label: "Opening document", done: 0, total: 0, determinate: false });
+  }
+});
 
 test("only a document the engine no longer holds is opened again: not a lost connection, not a refusal", () => {
   assert.equal(goneFromEngine(Object.assign(new Error("the document's version: the engine answered 404"), { status: 404 })), true);

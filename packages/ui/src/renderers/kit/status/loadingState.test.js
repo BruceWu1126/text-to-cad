@@ -48,6 +48,12 @@ test("a loader names its STAGE in `phase`; its own label never has to be recogni
 });
 
 test("a file being imported reads as importing, and a cold open's meshing as meshing", () => {
+  // The engine's own frames of a STEP's import (`cadgen.engine.serve.Server.importing`): the reader
+  // parsing the file, its detail the file and its size, then its parts collected, counted.
+  assert.deepEqual(loadingProgress({ phase: "import", label: "Importing model", detail: "reading tom.step (48.2 MB)", done: 0, total: null, determinate: false }),
+    { label: "Importing model", detail: "reading tom.step (48.2 MB)", counts: "", percent: null, connectionLost: null });
+  assert.deepEqual(loadingProgress({ phase: "import", label: "Importing model", detail: "collecting parts", done: 120, total: 628, determinate: true }),
+    { label: "Importing model", detail: "collecting parts", counts: "120/628", percent: 19, connectionLost: null });
   // The import's build, as cadgen labels its phases: reading the file, collecting its parts
   // (counted), storing them.
   assert.equal(loadingProgress({ phase: "compile" }).label, "Importing model");

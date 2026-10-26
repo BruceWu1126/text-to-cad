@@ -41,6 +41,8 @@ export interface CadRecent {
   opened: number | null;
   /** When it last changed: a file's time on disk (null once it is gone), a model's run. */
   updated: number | null;
+  /** When its record was first made: a model's first run, a file's first open; null for a record from before the engine kept it. */
+  created: number | null;
   pinned: boolean; missing: boolean;
   /** The picture's name, for `thumbnail()`, and when it was taken. */
   thumbnail: string | null; pictured: number | null;
@@ -215,7 +217,8 @@ export interface CadWorkspaceService {
    * through this server (`lib/xbf/xbfDocument.js`), once the engine holds it. A host without an
    * engine leaves it out, and the xbf renderer says it cannot open the file.
    */
-  engineDocument?(file: string, options?: CadRequestOptions): Promise<CadEngineDocument>;
+  /** `onProgress` hears each frame of the engine's import of the file while it reads it (a STEP's), as the build frames are shaped. */
+  engineDocument?(file: string, options?: CadRequestOptions & { onProgress?(frame: Record<string, unknown>): void }): Promise<CadEngineDocument>;
   /** Whether the engine holds a read of the document now (`GET /__cad/xbf?held=1`), asked without starting one. */
   engineHolds?(file: string, options?: CadRequestOptions): Promise<boolean>;
   readonly resources: CadResourceProvider;

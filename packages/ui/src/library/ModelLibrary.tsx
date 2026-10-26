@@ -12,7 +12,7 @@ import { entryMenu } from "../file-viewer/navigation/entry-menu.js";
 import type { EntryAction } from "../file-viewer/navigation/index.js";
 import type { FileActions } from "../file-viewer/types.js";
 import { useControlUsage } from "../usage/controls.js";
-import { ageLabel, lastActivity } from "../lib/age.js";
+import { activityLabel, ageLabel } from "../lib/age.js";
 
 /** A model someone opened: kept by the host, which also says where it is shown from. */
 export interface LibraryModel {
@@ -25,6 +25,8 @@ export interface LibraryModel {
   opened: number | null;
   /** When it last changed, in seconds: a file's time on disk (null once it is gone), a model's run. */
   updated: number | null;
+  /** When its record was first made, in seconds: a model's first run, a file's first open; null for a record from before it was kept. */
+  created: number | null;
   pinned: boolean;
   /** Gone from where it was: listed, but not openable. */
   missing: boolean;
@@ -125,11 +127,11 @@ function Thumbnail<Model extends LibraryModel>({ item, load, seen, opening = fal
   </span>;
 }
 
-/** The list's header row: Name, Updated, Opened, over the columns its rows draw (a label each, for the eye: a row names itself). */
+/** The list's header row: Name, Updated, Created, over the columns its rows draw (a label each, for the eye: a row names itself). */
 function Columns() {
   const { t } = useI18n();
   return <div className="cad-library-columns" aria-hidden="true">
-    <span>{t("home.columnName")}</span><span data-column="updated">{t("home.columnUpdated")}</span><span data-column="opened">{t("home.columnOpened")}</span>
+    <span>{t("home.columnName")}</span><span data-column="updated">{t("home.columnUpdated")}</span><span data-column="created">{t("home.columnCreated")}</span>
   </div>;
 }
 
@@ -152,11 +154,13 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
 /**
  * The host's home: the models opened before, from every view, to open again. The viewer's navbar
  * is over it (its logo's app menu, the host's update and Full size, as over a file); the host's
- * links are that menu's. The page starts with its control row, one line of 24px controls: at the
- * left "Recent", a plain small heading; at the right the type filter ("All ▾": All, Models, Files),
+ * links are that menu's. The page is a centred column (1128px at most, on its own 24px gutters). It
+ * starts with its control row, one line of 24px controls: at the
+ * left "Recent", the page's heading (the Home's one larger text); at the right the type filter ("All ▾": All, Models, Files),
  * there where models and files are both listed, the search, the grid/list switch and, where the host
  * has a chooser, Open, all there with no models yet too. Then the documents, pinned first, as cards (a picture over the kind's
- * glyph, the name and how long ago it was last opened or updated, with no verb) or as rows, every
+ * glyph, the name and its last activity with its verb: "Edited 2m ago", "Viewed 16m ago") or as rows
+ * (Name, Updated, Created), every
  * model a card and a row of its own: its name, its glyph and its age, never where it was built
  * from. Each card has one ⋯ menu: Open, a file's Copy path and Reveal where the host can (a model
  * has neither), Pin or Unpin, then Delete, which asks first (an AlertDialog saying what
@@ -310,17 +314,18 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
     </AlertDialogContent>
   </AlertDialog>;
   const age = (seconds: number | null) => ageLabel(seconds, now, t, locale);
-  const status = (item: Model) => item.missing ? t("home.fileUnavailable") : age(lastActivity(item));
+  // A tile's line: its last activity with its verb, Edited or Viewed, whichever came last.
+  const status = (item: Model) => item.missing ? t("home.fileUnavailable") : activityLabel(item, now, t, locale);
   // A row's glyph is its spinner while it is being opened: a row has no picture to show it over.
   const name = (item: Model, busy = false) => <span className="cad-library-name">
     {busy ? <Spinner className="cad-library-glyph" aria-label={t("home.openingAria", { name: item.name })} />
       : <DocumentGlyph model={deletes(item)} path={item.path} className="cad-library-glyph" />}
     <span className="cad-library-label">{item.name}</span>
   </span>;
-  // A row's two times, each in its column, with no verb: when it last changed, and when a page last opened it.
+  // A row's two times, each in its column, with no verb: when it last changed, and when its record was first made.
   const dates = (item: Model) => <>
     <span className="cad-library-status" data-column="updated">{item.missing ? t("home.fileUnavailable") : age(item.updated)}</span>
-    <span className="cad-library-status" data-column="opened">{age(item.opened)}</span>
+    <span className="cad-library-status" data-column="created">{age(item.created)}</span>
   </>;
   const models = layout === "list"
     ? <div className="cad-library-table"><Columns /><ul className="cad-library-list" aria-label={t("home.filesAria")}>{shown.map(item => <li key={item.path} className="cad-library-row" data-missing={item.missing || undefined} data-opening={opening === item.path || undefined}>

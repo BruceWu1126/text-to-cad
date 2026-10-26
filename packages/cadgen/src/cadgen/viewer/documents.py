@@ -15,6 +15,8 @@ from .scanner import node_basename
 ENGINE_DOCUMENTS = (".xbf", ".step", ".stp")
 SERVE_HOLD_SECONDS = 2.0
 FINISHED_SECONDS = 30.0
+# How often a held request looks for the import's frame to have moved.
+IMPORT_POLL_SECONDS = 0.25
 
 
 def engine_document_path(file_ref):
@@ -66,14 +68,33 @@ class EngineDocuments:
     # --- the serve -------------------------------------------------------------------------
 
     def response(self, file_ref) -> tuple[int, dict]:
-        """``(status, body)``: ``{"doc", "url"}`` at 200, 202 while the engine reads the file, or
-        the engine's refusal at 400. ``ValueError`` for a request that names no engine document."""
+        """``(status, body)``: ``{"doc", "url"}`` at 200; 202 while the engine reads the file,
+        ``{"state": "reading", "retryMs", "building"}``, ``building`` the last frame of the file's
+        import where the engine has one (``serve.Server.importing``: a STEP's reader parsing it, then
+        collecting its parts, counted), else null; or the engine's refusal at 400. A request is held
+        up to ``hold_seconds``, or until the import's frame moves, so a page asking again shows each
+        frame as it comes. ``ValueError`` for a request that names no engine document."""
         path = engine_document_path(file_ref)
         ident = document_id(path)
         serve = self._joined(ident) or self._started(ident, path)
-        if serve.done.wait(self.hold_seconds):
-            return serve.status, serve.body
-        return 202, {"state": "reading", "retryMs": self.retry_ms}
+        heard = self._progress(ident)
+        left = self.hold_seconds
+        while True:
+            slice_ = min(IMPORT_POLL_SECONDS, max(0.0, left))
+            if serve.done.wait(slice_):
+                return serve.status, serve.body
+            left -= slice_
+            if left <= 0 or self._progress(ident) != heard:
+                break
+        return 202, {"state": "reading", "retryMs": self.retry_ms, "building": self._building(ident)}
+
+    def _progress(self, ident: str) -> int:
+        """The count the engine moves with each frame of the document's import (``build_of``)."""
+        return int(self.server.build_of(ident)["progress"]) if self.server is not None else 0
+
+    def _building(self, ident: str) -> dict | None:
+        """The last frame of the document's import, or None."""
+        return self.server.build_of(ident)["building"] if self.server is not None else None
 
     def held(self, file_ref) -> dict:
         """``{"held": bool}``: whether the engine serves the document now (its daemon lists it),

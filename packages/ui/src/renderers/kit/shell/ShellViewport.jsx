@@ -375,9 +375,6 @@ const ShellViewport = forwardRef(function ShellViewport({
     cameraMovedRef.current?.();
   }, []);
 
-  // The cube's Fit: the fit F makes (`resetZoom`), animated.
-  const fitFromViewCube = useCallback(() => resetZoomAndPan({ animate: true }), [resetZoomAndPan]);
-
   const hasViewportContent = Boolean(scene);
   const annotationOverlayActive = annotationEnabled && hasViewportContent;
   // The annotation's ink in the model (`tools/annotate/annotation3d.js`), from every angle, Annotate up or not: each
@@ -1241,7 +1238,6 @@ const ShellViewport = forwardRef(function ShellViewport({
         viewerTheme={viewerTheme}
         activateViewPlaneFace={activateViewPlaneFace}
         orbitViewCube={orbitFromViewCube}
-        fitView={fitFromViewCube}
       />
       </div>}
       <ViewportError message={error} />
