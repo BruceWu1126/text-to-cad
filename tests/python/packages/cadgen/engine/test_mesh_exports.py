@@ -316,11 +316,13 @@ class ItStaysOffTheKernel(unittest.TestCase):
                 "for source, targets in (('cube.stl', ('a.3mf', 'a.glb')), ('parts.glb', ('b.stl', 'b.3mf')),\n"
                 "                        ('kit.3mf', ('c.stl', 'c.glb'))):\n"
                 "    export(folder / source, *(folder / target for target in targets), daemon=False)\n"
-                "print(','.join(name for name in ('OCP', 'build123d', 'ezdxf') if name in sys.modules))\n")
+                "print('loaded: ' + ','.join(name for name in ('OCP', 'build123d', 'ezdxf') if name in sys.modules))\n")
         done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120,
                               env={**os.environ, "PYTHONPATH": str(SRC)})
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout.strip(), "", "a mesh conversion must not wake the kernel")
+        # The program's own exports say each file they wrote; the last line is what was loaded.
+        self.assertEqual(done.stdout.splitlines()[-1], "loaded: ", "a mesh conversion must not wake the kernel")
+        self.assertEqual(len([line for line in done.stdout.splitlines() if line.startswith("wrote ")]), 6)
         self.assertEqual(sorted(path.name for path in folder.iterdir()),
                          ["a.3mf", "a.glb", "b.3mf", "b.stl", "c.glb", "c.stl", "cube.stl", "kit.3mf", "parts.glb"])
 

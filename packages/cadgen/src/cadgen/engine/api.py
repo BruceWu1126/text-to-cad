@@ -198,7 +198,7 @@ class Document:
     def export(self, *destinations: Any) -> list[Written]:
         """``export(handle, *destinations)``: the document written to each destination."""
         self._outside("export")
-        return export(self, *destinations)
+        return _said(_exporting(self, destinations), destinations)
 
     def snapshot(self, out: Any, *, display: Any = None, camera: Any = None, grid: bool = False,
                  preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
@@ -454,7 +454,27 @@ def export(source: Any, *destinations: Any,
     with no CAD kernel loaded (a mesh has no B-rep: no xbf, STEP or DXF is made from one). Several
     destinations read the document once. The file holds what the code built: no option selects a part or a state
     (``README``, the law of options). ``daemon=False`` does it in this process, cold. A GLB
-    carries every configuration sequence the document defines, as a clip."""
+    carries every configuration sequence the document defines, as a clip. A call the program's own
+    code makes (``python exports.py``) says each file, as ``cadgen export`` does."""
+    return _said(_exporting(source, destinations, log, daemon, progress), destinations)
+
+
+def _said(written: list[Written], destinations: tuple) -> list[Written]:
+    """``written``, a line said of each file when the call is the program's own (the first frame
+    outside this module, past the verb's observer, is ``__main__``'s), as a model call's report is
+    said (``Model.__call__``)."""
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_globals.get("__name__") == __name__:
+        frame = frame.f_back
+    if frame is not None and frame.f_globals.get("__name__") == "__main__":
+        from cadgen.engine.cli import said_written
+
+        said_written(written, destinations)
+    return written
+
+
+def _exporting(source: Any, destinations: tuple, log: Callable[[str], None] | None = None, daemon: bool = True,
+               progress: Callable[[dict], None] | None = None) -> list[Written]:
     from cadgen.engine.export import ExportRefused, kind_of
 
     if not destinations:

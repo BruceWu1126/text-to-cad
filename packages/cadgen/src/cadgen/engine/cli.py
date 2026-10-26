@@ -393,12 +393,18 @@ def _export(args: argparse.Namespace, prog: str) -> int:
                           "files": [{"path": str(row.path), "kind": row.kind, "bytes": row.bytes, "seconds": row.seconds,
                                      "written": row.written} for row in written]}))
         return 0
+    said_written(written, args.destinations)
+    return 0
+
+
+def said_written(written: Any, given: Any) -> None:
+    """A line on stdout per file an export wrote or found holding its bytes already, each named as
+    ``given`` names it: ``cadgen export``'s, and a program's own ``export()`` call's."""
     for row in written:
         if row.written:
-            print(f"wrote {_given(row.path, args.destinations)} ({_bytes(row.bytes)}) in {row.seconds:.2f}s")
+            print(f"wrote {_given(row.path, given)} ({_bytes(row.bytes)}) in {row.seconds:.2f}s")
         else:
-            print(f"unchanged {_given(row.path, args.destinations)} ({_bytes(row.bytes)}): it holds these bytes already")
-    return 0
+            print(f"unchanged {_given(row.path, given)} ({_bytes(row.bytes)}): it holds these bytes already")
 
 
 def _serve(args: argparse.Namespace, prog: str) -> int:
@@ -499,12 +505,6 @@ def _number(value: float) -> str:
     return f"{value:.4g}" if abs(value) < 1000 else f"{value:,.0f}"
 
 
-def summary_text(summary: dict[str, Any]) -> str:
-    """``cadgen inspect DOC``'s first screen (``api._summary``): a line per fact the document
-    holds, its lists one item per line under it; a fact it has none of says so."""
-    import time
-
-    lines = [f"{summary['name']}  {summary['id']}"]
 # Precision::Confusion: a joint value below it is the kernel's zero, and reads as one.
 _KERNEL_ZERO = 1e-7
 
@@ -526,6 +526,12 @@ def _joint_value(value: Any) -> str:
     return "0" if text in ("-0", "") else text
 
 
+def summary_text(summary: dict[str, Any]) -> str:
+    """``cadgen inspect DOC``'s first screen (``api._summary``): a line per fact the document
+    holds, its lists one item per line under it; a fact it has none of says so."""
+    import time
+
+    lines = [f"{summary['name']}  {summary['id']}"]
     state = summary["state"]
     if state["state"] == "file":
         said = f"file {state.get('path')}"

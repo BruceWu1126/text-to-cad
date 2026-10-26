@@ -406,6 +406,23 @@ class HandleTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(json.loads(done.stdout.rsplit("RESULT ", 1)[1]), 7.0)
 
+    def test_an_export_a_program_makes_says_each_file_it_wrote_as_the_export_verb_does(self) -> None:
+        project = self.project("exports", {"parts.py": PARTS, "exports.py": """
+            import cadgen
+            import parts
+
+            handle = parts.base()
+            handle.export("out/a.step", "out/a.stl")
+            cadgen.export(handle, "out/a.step")
+        """})
+        done = engine_daemon.run([sys.executable, "exports.py"], cwd=project, env=self.env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        said = [line for line in done.stdout.splitlines() if line.startswith(("wrote ", "unchanged "))]
+        self.assertEqual([line.split(" (")[0] for line in said],
+                         ["wrote out/a.step", "wrote out/a.stl", "unchanged out/a.step"], done.stdout)
+        self.assertRegex(said[0], r"^wrote out/a\.step \(\d+(\.\d)? [KM]?B\) in \d+\.\d\ds$")
+
+
 UNREACHED = """
 import sys
 
