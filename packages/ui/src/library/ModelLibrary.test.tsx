@@ -154,7 +154,7 @@ it('lists rows under a Name, Updated and Opened header: each its glyph and name,
   expect(within(row).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Open plate.step', 'Pin', 'Actions for plate.step']);
 });
 
-it('gives each card one menu: Open, Copy path and Reveal where the host can, Pin, then Delete', async () => {
+it('gives each card one menu: Open, a file\'s Copy path and Reveal where the host can, Pin, then Delete; a model has no path to offer', async () => {
   const id = '8c1f5a0e-1d3b-5d6e-9a7f-2b4c6d8e0f12';
   const copied: string[] = [], revealed: string[] = [];
   const fileActions = { platform: 'darwin' as const, perform: { 'copy-path': ({ path }: { path: string }) => { copied.push(path); }, reveal: ({ path }: { path: string }) => { revealed.push(path); } } };
@@ -165,14 +165,15 @@ it('gives each card one menu: Open, Copy path and Reveal where the host can, Pin
     await screen.findByRole('button', { name: `Open ${name}` });
     return menu(name);
   };
-  let open = await shown('arm');
+  let open = await shown('bracket.step');
   expect(items(open)).toEqual(['Open', 'Copy path', 'Reveal in Finder', 'Pin', 'Delete']);
   // Delete is the last, after a rule, and destructive.
   expect(open.querySelector('[role=separator]')?.nextElementSibling?.textContent).toBe('Delete');
   expect(within(open).getByRole('menuitem', { name: 'Delete' }).getAttribute('data-variant')).toBe('destructive');
-  // A model's path is its script's.
   await act(async () => { fireEvent.click(within(open).getByRole('menuitem', { name: 'Copy path' })); });
-  expect(copied).toEqual(['/work/parts/arm.py']);
+  expect(copied).toEqual(['/work/parts/bracket.step']);
+  // A model is no file: it is not tied to the script it was built from.
+  expect(items(await shown('arm'))).toEqual(['Open', 'Pin', 'Delete']);
   open = await shown('bracket.step');
   await act(async () => { fireEvent.click(within(open).getByRole('menuitem', { name: 'Reveal in Finder' })); });
   expect(revealed).toEqual(['/work/parts/bracket.step']);

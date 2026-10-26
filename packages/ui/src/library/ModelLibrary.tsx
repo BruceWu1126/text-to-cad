@@ -38,8 +38,6 @@ export interface LibraryModel {
    * not say), which a row removes from the list, the file untouched.
    */
   kind?: "file" | "model" | "shape";
-  /** A model's or a shape's: the script its run registered (a shape's home), its card's Copy path and Reveal. A script that declares several models is that many cards, each its own. */
-  script?: string | null;
 }
 
 /** Whether a row deletes the model (a document built from code) rather than removing a file from the list. */
@@ -60,9 +58,9 @@ export interface ModelLibrarySource<Model extends LibraryModel = LibraryModel> {
 export const wantsPicture = (model: LibraryModel) => !model.missing && (!model.thumbnail
   || (model.updated !== null && model.pictured !== null && model.updated > model.pictured));
 
-/** Whether every word of `query` is in the model's name or where it is (a file's path, a model's script). */
+/** Whether every word of `query` is in its name, or a file's path: a model is known by its name alone. */
 const matches = (item: LibraryModel, words: readonly string[]) => {
-  const text = `${item.name}\n${item.path}\n${item.script ?? ""}`.toLowerCase();
+  const text = (deletes(item) ? item.name : `${item.name}\n${item.path}`).toLowerCase();
   return words.every(word => text.includes(word));
 };
 const wordsOf = (query: string) => query.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -151,8 +149,9 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
  * there where models and files are both listed, the search and the grid/list switch, both there
  * with no models yet too. Then the documents, pinned first, as cards (a picture over the kind's
  * glyph, the name and how long ago it was last opened or updated, with no verb) or as rows, every
- * model a card and a row of its own (a script that declares several is that many). Each card has one ⋯ menu: Open, Copy path and
- * Reveal where the host can, Pin or Unpin, then Delete, which asks first (an AlertDialog saying what
+ * model a card and a row of its own: its name, its glyph and its age, never where it was built
+ * from. Each card has one ⋯ menu: Open, a file's Copy path and Reveal where the host can (a model
+ * has neither), Pin or Unpin, then Delete, which asks first (an AlertDialog saying what
  * goes and what stays on disk) and takes the card off the list at once; a pinned card shows its pin. It is the
  * library alone: nothing opens a file from here but its cards. It is drawn on the navbar's colour.
  *
@@ -164,7 +163,7 @@ function Placeholders({ layout }: { layout: LibraryLayout }) {
  */
 export function ModelLibrary<Model extends LibraryModel>({ library, layout = "grid", onLayoutChange, picture, fileActions }: {
   library: ModelLibrarySource<Model>;
-  /** What the host can do with a file on disk (Copy path, Reveal): each card's menu offers it. */
+  /** What the host can do with a file on disk (Copy path, Reveal): each file's menu offers it. */
   fileActions?: FileActions;
   /** Grid or list; the host keeps the choice (the tab's settings). */
   layout?: LibraryLayout;
@@ -254,15 +253,13 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
   // The type filter is there only where there is something to tell apart: models and files both listed.
   const kinds = all.some(deletes) && all.some(item => !deletes(item));
   const now = Date.now();
-  // What the host can do with a document on disk (the file, a model's script): the file menu's items.
+  // What the host can do with a file on disk: a file's menu items. A model is no file: it has none.
   const fileItems = entryMenu(fileActions?.platform ?? "linux", new Set(Object.keys(fileActions?.perform ?? {}) as EntryAction[]), t);
   const perform = (action: EntryAction, item: Model) => {
-    const path = deletes(item) ? item.script : item.path;
-    if (!path) return;
     usage.used(action === "reveal" ? "home_reveal" : "home_copy_path");
-    void Promise.resolve(fileActions?.perform?.[action]?.({ path, kind: "file" })).catch(fail);
+    void Promise.resolve(fileActions?.perform?.[action]?.({ path: item.path, kind: "file" })).catch(fail);
   };
-  // A card's pin and its one menu (Open, what the host can do with it on disk, Pin or Unpin, then
+  // A card's pin and its one menu (Open, what the host can do with a file on disk, Pin or Unpin, then
   // Delete), there while the pointer is on the card (Figma's star): the pin toggles, and a pinned
   // card shows it, filled, whatever the pointer does.
   // Pin or Unpin, from the card's pin or its menu: counted alike.
@@ -276,7 +273,7 @@ export function ModelLibrary<Model extends LibraryModel>({ library, layout = "gr
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-40">
         <DropdownMenuItem disabled={item.missing} onSelect={() => open(item)}>{t("home.menuOpen")}</DropdownMenuItem>
-        {(deletes(item) ? item.script : item.path) ? fileItems.map(entry => <DropdownMenuItem key={entry.action} onSelect={() => perform(entry.action, item)}>{entry.label}</DropdownMenuItem>) : null}
+        {!deletes(item) ? fileItems.map(entry => <DropdownMenuItem key={entry.action} onSelect={() => perform(entry.action, item)}>{entry.label}</DropdownMenuItem>) : null}
         <DropdownMenuItem onSelect={() => pin(item)}>{t(item.pinned ? "home.unpin" : "home.pin")}</DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(item)}>{t("home.delete")}</DropdownMenuItem>
