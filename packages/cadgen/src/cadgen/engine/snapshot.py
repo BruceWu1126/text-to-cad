@@ -1135,8 +1135,9 @@ def _run_held(args: argparse.Namespace, prog: str) -> int:
     if args.json:
         print(json.dumps(drawn.report))
     else:
-        print(f"wrote {_given(drawn.path, args.out)} ({drawn.width}x{drawn.height}) in "
-              f"{drawn.report['timings']['totalMs'] / 1000:.2f}s")
+        report = drawn.report  # said as a file's and a job's picture are: its size, its display, Preview
+        print(f"wrote {_given(drawn.path, args.out)} ({drawn.width}x{drawn.height}, {report['displayMode']}"
+              f"{', preview' if report.get('preview') else ''}) in {report['timings']['totalMs'] / 1000:.2f}s")
     return 0
 
 
