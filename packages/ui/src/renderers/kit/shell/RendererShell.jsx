@@ -7,7 +7,7 @@ import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { NAVBAR_CONTROL_CLASS } from "../../../lib/navbarRow.js";
 import { cn } from "@text-to-cad/ui/utils";
 import { useI18n } from "@text-to-cad/ui/i18n";
-import PreviewChrome from "../tools/PreviewChrome.jsx";
+import PreviewChrome, { usePreviewIdle } from "../tools/PreviewChrome.jsx";
 import { useViewerMobile } from "../../../file-viewer/responsive.js";
 import ViewerAlertCard, { alertDismissible, useAlertDismissal } from "../status/ViewerAlertCard.jsx";
 import { modelUpdateStatus, ViewPreviewLabel, ViewUpdateStatus } from "../status/ViewUpdateStatus.jsx";
@@ -329,6 +329,8 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   const previewName = view.file?.name || String(view.file?.path ?? "").split("/").pop() || "";
   // While Preview is up the host's chrome steps aside (FileViewer's navbar): said as it opens, and as
   // it closes or the view goes.
+  // Preview's bar and its playbar, shown and gone together while the pointer rests; its settings open hold them.
+  const previewIdle = usePreviewIdle(frame.hostElement, previewing, previewPanelOpen);
   const onPreviewChange = view.onPreviewChange;
   useEffect(() => {
     if (!previewing || !onPreviewChange) return undefined;
@@ -579,15 +581,15 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                   file's name, and at its right its settings (a toggle, the panel docked under it at the
                   view's right edge: Orbit, Render's own), closed as it opens, and the way out. The same in
                   every host. A file with routines has its playbar under the model; there is no sidebar. */}
-              <PreviewChrome active={previewing} name={previewName}
+              <PreviewChrome active={previewing} name={previewName} idle={previewIdle} panelOpen={previewPanelOpen}
                 controls={<>
                   <BarControl label={t("preview.settings")} active={previewPanelOpen} disabled={shell.idle}
                     onClick={() => { if (!previewPanelOpen) controls.used("preview_settings"); setPreviewPanelOpen(open => !open); }} data-preview-settings=""><SlidersHorizontal className="size-3.5" aria-hidden="true" /></BarControl>
                   <BarControl label={t("preview.exit")} onClick={leavePreview}><X className="size-3.5" aria-hidden="true" /></BarControl>
                 </>}
-                panel={previewPanelOpen ? <PreviewSettings orbit={orbitPlaying} onOrbitChange={shell.setOrbiting}
+                panel={<PreviewSettings orbit={orbitPlaying} onOrbitChange={shell.setOrbiting}
                   speed={frame.previewOrbitSpeed || 1} onSpeedChange={frame.setPreviewOrbitSpeed}
-                  onClose={() => setPreviewPanelOpen(false)} render={frame.previewSettings} /> : null}>
+                  onClose={() => setPreviewPanelOpen(false)} render={frame.previewSettings} />}>
 
               {/* The file explorer floats over the top-left corner, above the sidebar, which stays drawn under it. */}
               {toolsHidden ? null : <div className="group/tool-stack pointer-events-none absolute z-20 flex flex-col items-center gap-2" style={besideSidebarTile ? TOOLBAR_POSITION_PHONE_SIDEBAR : TOOLBAR_POSITION}
@@ -639,7 +641,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
 
               {/* Preview's playbar, for a file with routines: its own routine, under the model. */}
               {previewing && hasAnimation ? <PreviewPlaybar key={frame.modelKey} runtime={playbackRuntime} disabled={viewerLoading || !scene}
-                autoplay={shell.autoplay} onAutoplayChange={shell.setAutoplay} /> : null}
+                autoplay={shell.autoplay} onAutoplayChange={shell.setAutoplay} shown={previewIdle.shown} hold={previewIdle.hold("playbar")} /> : null}
 
               {/* Preview coming together underneath: the view as it was, held, until the picture is ready. */}
               <div aria-hidden={!previewCovered} data-preview-cover={previewCovered ? "" : undefined}

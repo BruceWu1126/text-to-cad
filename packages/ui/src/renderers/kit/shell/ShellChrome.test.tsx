@@ -39,6 +39,8 @@ import { TOOL_PANEL_WIDTH } from '../../../../dist/renderers/kit/tools/toolStack
 import { FILE_SIDEBAR_SURFACE_CLASS, FLOATING_CHROME_SURFACE_CLASS, FLOATING_SURFACE_CLASS } from '../../../../dist/lib/floatingSurface.js';
 import { SolidModeIcon } from '../../../../dist/renderers/kit/view-settings/DisplayModeOptions.js';
 import { ControlUsageProvider } from '../../../../dist/usage/controls.js';
+import { SIDEBAR_SLIDE_CLASS } from '../../../../dist/renderers/kit/tools/FileSidebar.js';
+import { createAnimationClock } from '../../../../dist/renderers/kit/tools/playbar/animationClock.js';
 
 // jsdom lays nothing out, so the few sizes the chrome reads are given: a viewer 1280 × 800 whose
 // stack column (under the strip) and the sidebar panel's room (under its tiles) are each 600px
@@ -77,10 +79,10 @@ function tabSettings(initial: object = {}) {
   return store;
 }
 type Settings = ReturnType<typeof tabSettings>;
-function frame({ name = 'panel.harness', preferences = tabSettings(), state = undefined as unknown, mobile = false, onStateChange = (_: unknown) => {}, appearance = { colorScheme: 'light' } as object, notice = null as React.ReactNode, viewer = false,
+function frame({ name = 'panel.harness', preferences = tabSettings(), state = undefined as unknown, mobile = false, onStateChange = (_: unknown) => {}, appearance = { colorScheme: 'light' } as object, notice = null as React.ReactNode, viewer = false, data = {} as object,
   usage = null as ((counts: { control: string; count: number; seconds: number }[]) => void) | null } = {}) {
   const props = { source: { id: 'one' }, file: { path: `/models/${name}`, name, kind: 'file' }, document: null, notice,
-    onReady() {}, onOpenFile() {}, appearance, state, onStateChange, reload() {}, data: { services: { preferences } } };
+    onReady() {}, onOpenFile() {}, appearance, state, onStateChange, reload() {}, data: { services: { preferences }, ...data } };
   // `viewer`: inside a viewer's element, as FileViewer draws it, where the viewer's keys are its own.
   const element = () => {
     const shell = <ViewerHostContext.Provider value={testHost()}><ViewerMobileContext.Provider value={mobile}>
@@ -562,15 +564,23 @@ it("Preview is covered from the press until its picture has converged, then show
   }
 });
 
-it("Preview's bar is its name and its two controls alone; it goes after two seconds without the pointer moving, comes back as it moves or a tap lands, and stays while its settings are open", async () => {
+it("Preview's bar is its name and its two controls alone; it and the playbar go together after two seconds without the pointer moving, come back as it moves or a tap lands, and stay while its settings are open", async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
   try {
-    frame({ notice: <p>Host notice</p> });
+    const played: string[] = [];
+    const routine = { clips: [{ id: 'spin' }], clock: createAnimationClock(), onRelease() {}, onPlayToggle: () => played.push('toggle') };
+    frame({ notice: <p>Host notice</p>, data: { previewAnimation: routine } });
     const wait = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     await wait(100);
     expect(inPreview()).toBe(true);
-    const hidden = () => previewBar()!.hasAttribute('data-hidden');
+    // The bar and the playbar, hidden or shown: always together.
+    const playbar = () => document.querySelector<HTMLElement>('[data-preview-playbar]')!;
+    const hidden = () => {
+      const both = [previewBar()!.hasAttribute('data-hidden'), playbar().hasAttribute('data-hidden')];
+      expect(both[0]).toBe(both[1]);
+      return both[0];
+    };
     // The name as words, and the two controls: nothing else in it, and the host's notice is the tools view's.
     expect([previewBar()!.querySelector('[data-preview-name]')!.textContent, cornerButtons(), previewBar()!.querySelectorAll('a, input, [role=menu]').length])
       .toEqual(['panel.harness', ['Preview settings', 'Exit preview'], 0]);
@@ -580,7 +590,9 @@ it("Preview's bar is its name and its two controls alone; it goes after two seco
     expect(hidden()).toBe(false);
     await wait(100);
     expect(hidden()).toBe(true);
-    expect(previewBar()!.className).toMatch(/\bopacity-0\b/);
+    expect([previewBar()!.className, playbar().className]).toEqual([expect.stringMatching(/\bopacity-0\b/), expect.stringMatching(/\bopacity-0\b/)]);
+    // Hidden, the playbar's routine is as it was: nothing played or stopped it.
+    expect(played).toEqual([]);
     // The pointer moving anywhere over the view brings it back, and the count starts again.
     const view = document.querySelector('[data-slot="cad-file-view"]')!;
     fireEvent.pointerMove(view);
@@ -598,9 +610,18 @@ it("Preview's bar is its name and its two controls alone; it goes after two seco
     fireEvent.click(within(previewBar()!).getByRole('button', { name: 'Preview settings' }));
     await wait(2000);
     expect(hidden()).toBe(true);
-    // Keyboard focus on one of its controls brings it back.
+    // Keyboard focus on one of its controls brings it back, the playbar's as well as the bar's.
     act(() => { within(previewBar()!).getByRole('button', { name: 'Exit preview' }).focus(); });
     expect(hidden()).toBe(false);
+    await wait(5000);
+    expect(hidden()).toBe(false);
+    act(() => { within(previewBar()!).getByRole('button', { name: 'Exit preview' }).blur(); });
+    await wait(2000);
+    expect(hidden()).toBe(true);
+    act(() => { within(playbar()).getByRole('button', { name: /^Play / }).focus(); });
+    expect(hidden()).toBe(false);
+    // The pointer resting on the playbar holds both.
+    fireEvent.pointerOver(playbar());
     await wait(5000);
     expect(hidden()).toBe(false);
     fireEvent.click(within(previewBar()!).getByRole('button', { name: 'Exit preview' }));
@@ -608,6 +629,33 @@ it("Preview's bar is its name and its two controls alone; it goes after two seco
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("Preview settings is pressed while its panel is open and a second press closes it; the panel slides in and out from the view's right edge as the file sidebar's does", async () => {
+  const user = userEvent.setup();
+  frame();
+  await enterPreview(user);
+  const button = () => within(previewBar()!).getByRole('button', { name: 'Preview settings' });
+  const panel = () => document.querySelector<HTMLElement>('[data-preview-panel]')!;
+  // Closed: off the edge, out of reach and out of the accessibility tree; the button not pressed.
+  expect([button().getAttribute('aria-pressed'), previewSettings(), panel().hasAttribute('inert'), panel().className]).toEqual(
+    ['false', null, true, expect.stringContaining('translate-x-[calc(100%+1rem)]')]);
+  // The file sidebar's own slide, on both.
+  expect([panel().className, bar().className]).toEqual([expect.stringContaining(SIDEBAR_SLIDE_CLASS), expect.stringContaining(SIDEBAR_SLIDE_CLASS)]);
+  await user.click(button());
+  expect([button().getAttribute('aria-pressed'), previewSettings() !== null, panel().hasAttribute('data-open')]).toEqual(['true', true, true]);
+  expect(panel().className).not.toContain('translate-x-[calc(100%+1rem)]');
+  await user.click(button());
+  expect([button().getAttribute('aria-pressed'), previewSettings(), panel().hasAttribute('data-open')]).toEqual(['false', null, false]);
+  // Its own X closes it too, and the button is no longer pressed.
+  await user.click(button());
+  await user.click(within(previewSettings()!).getByRole('button', { name: 'Close preview settings' }));
+  expect([button().getAttribute('aria-pressed'), previewSettings()]).toEqual(['false', null]);
+  // Left open, Preview's exit takes it away; back in Preview it is closed.
+  await user.click(button());
+  await user.click(within(previewBar()!).getByRole('button', { name: 'Exit preview' }));
+  await enterPreview(user);
+  expect([button().getAttribute('aria-pressed'), previewSettings()]).toEqual(['false', null]);
 });
 
 it("under a FileViewer the navbar steps aside for Preview's bar, and is back as Preview closes", async () => {
