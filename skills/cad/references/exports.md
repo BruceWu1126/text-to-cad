@@ -44,6 +44,14 @@ written as one object (`{"ok": true, "source", "files": [{"path", "kind", "bytes
 An export takes a document and its destinations, and nothing else. What a file shows is
 the model's business: a different file is a different model.
 
+A written file is a detached copy, whether `cadgen export`, `exports.py` or a file
+decorator (`@step`, `@glb`, ...) wrote it: nothing ties it to the model, nothing reruns
+it, and a viewer page of it follows the file's bytes on disk, never the model. It
+changes only when it is written again. Give the person its path; open it only when they
+ask to see it ([Show the model](../SKILL.md#show-the-model)). In the viewer an export is
+a browser download: the person picks a format under Export, the engine prepares the file
+and the browser saves it.
+
 ## Standing deliverables: `exports.py`
 
 A project whose files are delivered again after each change (a print set, a STEP for a

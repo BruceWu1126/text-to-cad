@@ -20,7 +20,7 @@ Two layers, each true to its format:
 - **A configuration sequence** (`cadgen.ap242`'s `configuration_sequence`, a motion on
   the page) is the mechanism's: joint values over time, kept in the document as STEP
   AP242's configuration sequence. Every GLB of the model carries it as a clip, and the
-  page's Motion tool plays it. A robot's gait, a door's opening, an engine's running
+  page's Motion section plays it. A robot's gait, a door's opening, an engine's running
   belong here.
 - **An animation** (`cadgen.gltf`'s `animation`) is the GLB's: glTF channels
   (translation, rotation, scale) on the parts a GLB places, and the mechanism's forward
@@ -132,8 +132,8 @@ Each of these fails the run, by name:
 
 ## Reviewing
 
-Export the GLB and open it in the CAD Viewer ([Show the model](../SKILL.md#show-the-model)):
-its Animation section lists the motions and the animations, and plays, pauses, scrubs
+Export the GLB and give the person its path; when they ask to see it, open it in the CAD
+Viewer ([Show the model](../SKILL.md#show-the-model)). Its Animation section lists the motions and the animations, and plays, pauses, scrubs
 and loops them, at a chosen speed. While one plays, it owns the parts' places; putting
 it down puts them back at rest. A snapshot shows the model as built: it never plays an
 animation.
